@@ -14,6 +14,8 @@
   import TopBar from './lib/layout/TopBar.svelte';
   import { numericParam, ordinalParam, type RoutePattern } from './lib/router';
   import { navigate, router, startRouter } from './lib/router.svelte';
+  import Calendar from './lib/routes/Calendar.svelte';
+  import History from './lib/routes/History.svelte';
   import FirstRun from './lib/routes/FirstRun.svelte';
   import MovieDetail from './lib/routes/MovieDetail.svelte';
   import Movies from './lib/routes/Movies.svelte';
@@ -23,6 +25,7 @@
   import ScanReview from './lib/routes/ScanReview.svelte';
   import Series from './lib/routes/Series.svelte';
   import SeriesDetail from './lib/routes/SeriesDetail.svelte';
+  import Wanted from './lib/routes/Wanted.svelte';
   import SettingsScreen from './lib/routes/Settings.svelte';
   import { system } from './lib/state/system.svelte';
 
@@ -36,6 +39,9 @@
     '/series/:id/search/:season': 'Interactive Search',
     '/series/:id/search/:season/:episode': 'Interactive Search',
     '/queue': 'Queue',
+    '/wanted': 'Wanted',
+    '/calendar': 'Calendar',
+    '/history': 'History',
     '/scan-review': 'Scan Review',
     '/settings': 'Settings',
   };
@@ -137,6 +143,12 @@
           {/key}
         {:else if match.pattern === '/queue'}
           <Queue />
+        {:else if match.pattern === '/wanted'}
+          <Wanted />
+        {:else if match.pattern === '/calendar'}
+          <Calendar />
+        {:else if match.pattern === '/history'}
+          <History />
         {:else if match.pattern === '/scan-review'}
           <ScanReview />
         {:else if match.pattern === '/settings'}

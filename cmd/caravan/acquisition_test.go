@@ -101,3 +101,26 @@ func TestEngineProviderCloseWithoutEngine(t *testing.T) {
 		t.Errorf("Close with no engine = %v, want nil", err)
 	}
 }
+
+func TestEngineOptionsReadsSettings(t *testing.T) {
+	opts, err := engineOptions(map[string]string{
+		store.SettingEngineListenPort:     "51413",
+		store.SettingEngineMaxConnections: "12",
+		store.SettingEngineMaxDownKBps:    "4096",
+		store.SettingEngineMaxUpKBps:      "512",
+		store.SettingEngineSeedRatio:      "1.5",
+		store.SettingEngineSeedDays:       "7",
+	}, true, nil)
+	if err != nil {
+		t.Fatalf("engineOptions: %v", err)
+	}
+	if opts.ListenPort != 51413 || opts.MaxConnections != 12 {
+		t.Fatalf("connection settings = port %d, max %d, want 51413 and 12", opts.ListenPort, opts.MaxConnections)
+	}
+	if opts.MaxDownKBps != 4096 || opts.MaxUpKBps != 512 {
+		t.Fatalf("rate settings = %d/%d, want 4096/512", opts.MaxDownKBps, opts.MaxUpKBps)
+	}
+	if opts.SeedRatio != 1.5 || opts.SeedDays != 7 || !opts.Paused {
+		t.Fatalf("seeding settings = ratio %v days %d paused %t", opts.SeedRatio, opts.SeedDays, opts.Paused)
+	}
+}

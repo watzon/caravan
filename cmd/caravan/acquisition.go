@@ -2,8 +2,11 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -129,12 +132,18 @@ func (p *engineProvider) Engine() core.Engine {
 	if root == "" {
 		return nil
 	}
-
-	engine, err := download.NewEmbedded(root, download.EmbeddedOpts{
-		Paused: p.paused,
-		Store:  downloadPersistence{st: p.adapter.st},
-		Logger: p.log,
-	})
+	settings, err := p.adapter.st.AllSettings(ctx)
+	if err != nil {
+		p.reportLocked("read engine settings", err)
+		return nil
+	}
+	opts, err := engineOptions(settings, p.paused, p.log)
+	if err != nil {
+		p.reportLocked("read engine settings", err)
+		return nil
+	}
+	opts.Store = downloadPersistence{st: p.adapter.st}
+	engine, err := download.NewEmbedded(root, opts)
 	if err != nil {
 		p.reportLocked("start download engine", err)
 		return nil
@@ -167,6 +176,99 @@ func (p *engineProvider) Close() error {
 	engine := p.engine
 	p.engine = nil
 	return engine.Close()
+}
+
+// ApplyEngineSettings updates rates and seeding targets on an existing engine.
+// Listen port and connection count are ClientConfig fields, so they apply when
+// the next engine starts rather than disrupting active peer connections.
+func (p *engineProvider) ApplyEngineSettings(ctx context.Context, settings map[string]string) error {
+	opts, err := engineOptions(settings, p.paused, p.log)
+	if err != nil {
+		return err
+	}
+	p.mu.Lock()
+	engine := p.engine
+	p.mu.Unlock()
+	if engine == nil {
+		return nil
+	}
+	if err := engine.SetGlobalRates(ctx, opts.MaxDownKBps, opts.MaxUpKBps); err != nil {
+		return err
+	}
+	return engine.SetSeedingTargets(opts.SeedRatio, opts.SeedDays)
+}
+
+func engineOptions(settings map[string]string, paused bool, log *slog.Logger) (download.EmbeddedOpts, error) {
+	listenPort, err := engineSettingInt(settings, store.SettingEngineListenPort)
+	if err != nil {
+		return download.EmbeddedOpts{}, err
+	}
+	maxConnections, err := engineSettingInt(settings, store.SettingEngineMaxConnections)
+	if err != nil {
+		return download.EmbeddedOpts{}, err
+	}
+	maxDownKBps, err := engineSettingInt64(settings, store.SettingEngineMaxDownKBps)
+	if err != nil {
+		return download.EmbeddedOpts{}, err
+	}
+	maxUpKBps, err := engineSettingInt64(settings, store.SettingEngineMaxUpKBps)
+	if err != nil {
+		return download.EmbeddedOpts{}, err
+	}
+	seedRatio, err := engineSettingFloat(settings, store.SettingEngineSeedRatio)
+	if err != nil {
+		return download.EmbeddedOpts{}, err
+	}
+	seedDays, err := engineSettingInt(settings, store.SettingEngineSeedDays)
+	if err != nil {
+		return download.EmbeddedOpts{}, err
+	}
+	return download.EmbeddedOpts{
+		ListenPort:     listenPort,
+		MaxConnections: maxConnections,
+		MaxDownKBps:    maxDownKBps,
+		MaxUpKBps:      maxUpKBps,
+		SeedRatio:      seedRatio,
+		SeedDays:       seedDays,
+		Paused:         paused,
+		Logger:         log,
+	}, nil
+}
+
+func engineSettingInt(settings map[string]string, key string) (int, error) {
+	value := strings.TrimSpace(settings[key])
+	if value == "" {
+		return 0, nil
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("invalid %s", key)
+	}
+	return n, nil
+}
+
+func engineSettingInt64(settings map[string]string, key string) (int64, error) {
+	value := strings.TrimSpace(settings[key])
+	if value == "" {
+		return 0, nil
+	}
+	n, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("invalid %s", key)
+	}
+	return n, nil
+}
+
+func engineSettingFloat(settings map[string]string, key string) (float64, error) {
+	value := strings.TrimSpace(settings[key])
+	if value == "" {
+		return 0, nil
+	}
+	n, err := strconv.ParseFloat(value, 64)
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("invalid %s", key)
+	}
+	return n, nil
 }
 
 // await blocks until an engine exists, returning nil if ctx is done first.

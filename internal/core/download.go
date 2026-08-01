@@ -96,6 +96,7 @@ type Engine interface {
 	// resume after a restart.
 	Close() error
 }
+
 // EngineInsight is an optional extension for engines that can report
 // torrent-specific diagnostic information. External clients in phase 6 may
 // omit it without losing the core queue contract.
@@ -136,7 +137,6 @@ type DownloadInsight struct {
 	Trackers     []TrackerInsight `json:"trackers"`
 	Availability float64          `json:"availability"`
 }
-
 
 // Download is the persisted record of a download (the `downloads` table): the
 // half of a download that has to survive a restart, as opposed to the live

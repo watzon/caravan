@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/time/rate"
+
 	"github.com/anacrolix/torrent"
 	"github.com/anacrolix/torrent/bencode"
 	"github.com/anacrolix/torrent/metainfo"
@@ -798,6 +800,50 @@ func TestTransferFromLocalSeeder(t *testing.T) {
 	}
 	if _, err := os.Stat(onDisk); !os.IsNotExist(err) {
 		t.Fatalf("Remove(deleteData) left %s: %v", onDisk, err)
+	}
+}
+
+func TestShouldStopSeeding(t *testing.T) {
+	started := time.Date(2026, time.August, 1, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name        string
+		ratio       float64
+		now         time.Time
+		targetRatio float64
+		targetDays  int
+		want        bool
+	}{
+		{name: "no targets", ratio: 4, now: started.Add(10 * 24 * time.Hour), want: false},
+		{name: "ratio reached", ratio: 1.5, now: started, targetRatio: 1.5, want: true},
+		{name: "ratio below target", ratio: 1.49, now: started, targetRatio: 1.5, want: false},
+		{name: "days reached", now: started.Add(2 * 24 * time.Hour), targetDays: 2, want: true},
+		{name: "days below target", now: started.Add(48*time.Hour - time.Second), targetDays: 2, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldStopSeeding(tt.ratio, started, tt.now, tt.targetRatio, tt.targetDays); got != tt.want {
+				t.Fatalf("shouldStopSeeding() = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSetGlobalRatesUpdatesLiveLimiters(t *testing.T) {
+	engine := newTestEngine(t, t.TempDir(), testOpts(newMemStore()))
+	if err := engine.SetGlobalRates(context.Background(), 2048, 512); err != nil {
+		t.Fatalf("SetGlobalRates: %v", err)
+	}
+	if got := engine.downLimiter.Limit(); got != rate.Limit(2048*1024) {
+		t.Fatalf("download limiter = %v B/s, want %d", got, 2048*1024)
+	}
+	if got := engine.upLimiter.Limit(); got != rate.Limit(512*1024) {
+		t.Fatalf("upload limiter = %v B/s, want %d", got, 512*1024)
+	}
+	if err := engine.SetGlobalRates(context.Background(), 0, 0); err != nil {
+		t.Fatalf("SetGlobalRates unlimited: %v", err)
+	}
+	if engine.downLimiter.Limit() != rate.Inf || engine.upLimiter.Limit() != rate.Inf {
+		t.Fatal("zero global rates did not restore unlimited transfer")
 	}
 }
 

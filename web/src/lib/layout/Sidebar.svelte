@@ -25,9 +25,14 @@
   const LIBRARY: NavItem[] = [
     { href: '/movies', label: 'Movies', icon: 'film' },
     { href: '/series', label: 'Series', icon: 'tv' },
+    { href: '/wanted', label: 'Wanted', icon: 'search' },
+    { href: '/calendar', label: 'Calendar', icon: 'inbox' },
   ];
 
-  const ACTIVITY: NavItem[] = [{ href: '/queue', label: 'Queue', icon: 'download' }];
+  const ACTIVITY: NavItem[] = [
+    { href: '/queue', label: 'Queue', icon: 'download' },
+    { href: '/history', label: 'History', icon: 'pulse' },
+  ];
 
   const MANAGE: NavItem[] = [
     { href: '/scan-review', label: 'Scan Review', icon: 'inbox' },
@@ -113,7 +118,7 @@
           {/if}
           <Icon name={item.icon} />
           <span class="flex-1">{item.label}</span>
-          {#if downloads.activeCount > 0}
+          {#if item.href === '/queue' && downloads.activeCount > 0}
             <span
               class="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-xs font-semibold text-ink-inverse"
               aria-label="{downloads.activeCount} active downloads">

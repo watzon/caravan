@@ -61,6 +61,9 @@ const partFileSuffix = ".part"
 // a couple of seconds is under a UI refresh and far above sqlite's cost.
 const defaultPollInterval = 2 * time.Second
 
+// maxSeedDays keeps conversion to time.Duration safe in the polling loop.
+const maxSeedDays = int((1<<63 - 1) / (24 * time.Hour))
+
 // Persistence is the seam through which the engine remembers its downloads
 // across restarts. The store implements it; the engine only knows this much.
 //
@@ -188,6 +191,14 @@ func NewEmbedded(dataDir string, opts EmbeddedOpts) (*Embedded, error) {
 	if strings.TrimSpace(dataDir) == "" {
 		return nil, errors.New("download: storage root must not be empty")
 	}
+	if opts.ListenPort < 0 || opts.ListenPort > 65535 {
+		return nil, errors.New("download: listen port must be between 0 and 65535")
+	}
+	if opts.MaxConnections < 0 || opts.MaxDownKBps < 0 || opts.MaxUpKBps < 0 ||
+		opts.MaxDownKBps > (1<<63-1)/1024 || opts.MaxUpKBps > (1<<63-1)/1024 ||
+		opts.SeedRatio < 0 || opts.SeedDays < 0 || opts.SeedDays > maxSeedDays {
+		return nil, errors.New("download: engine limits must not be negative or overflow")
+	}
 	root, err := filepath.Abs(dataDir)
 	if err != nil {
 		return nil, fmt.Errorf("download: resolve storage root %s: %w", dataDir, err)
@@ -212,6 +223,15 @@ func NewEmbedded(dataDir string, opts EmbeddedOpts) (*Embedded, error) {
 	cfg.NoDHT = opts.DisableDHT
 	cfg.DisablePEX = opts.DisablePEX
 	cfg.DisableTrackers = opts.DisableTrackers
+	// Keep concrete limiter instances even when unlimited. anacrolix retains
+	// these pointers in the client, letting SetLimit update the live budget.
+	downLimiter := rate.NewLimiter(kbpsLimit(opts.MaxDownKBps), 1<<20)
+	upLimiter := rate.NewLimiter(kbpsLimit(opts.MaxUpKBps), 1<<20)
+	cfg.DownloadRateLimiter = downLimiter
+	cfg.UploadRateLimiter = upLimiter
+	if opts.MaxConnections > 0 {
+		cfg.EstablishedConnsPerTorrent = opts.MaxConnections
+	}
 	// Seeding is free here: an imported file is a hardlink to this data
 	// (SPEC §5.1), so the copy exists either way until the user removes it.
 	cfg.Seed = true
@@ -227,15 +247,20 @@ func NewEmbedded(dataDir string, opts EmbeddedOpts) (*Embedded, error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	e := &Embedded{
-		client:     client,
-		incomplete: incomplete,
-		opts:       opts,
-		http:       httpClient,
-		logger:     logger,
-		ctx:        ctx,
-		cancel:     cancel,
-		done:       make(chan struct{}),
-		items:      make(map[core.DownloadID]*item),
+		client:         client,
+		incomplete:     incomplete,
+		opts:           opts,
+		http:           httpClient,
+		logger:         logger,
+		downLimiter:    downLimiter,
+		upLimiter:      upLimiter,
+		maxConnections: cfg.EstablishedConnsPerTorrent,
+		seedRatio:      opts.SeedRatio,
+		seedDays:       opts.SeedDays,
+		ctx:            ctx,
+		cancel:         cancel,
+		done:           make(chan struct{}),
+		items:          make(map[core.DownloadID]*item),
 	}
 
 	if err := e.restore(ctx); err != nil {
@@ -329,7 +354,8 @@ func (e *Embedded) add(ctx context.Context, spec *torrent.TorrentSpec, rec core.
 			// has to order downloads it has not persisted yet.
 			rec.CreatedAt = time.Now()
 		}
-		it = &item{t: t, rec: rec}
+		it = &item{t: t, rec: rec, maxConns: e.connectionLimit(rec)}
+		t.SetMaxEstablishedConns(it.maxConns)
 		e.items[id] = it
 		t.SetOnWriteChunkError(func(err error) { e.fail(id, err) })
 	}
@@ -425,6 +451,140 @@ func (e *Embedded) List(ctx context.Context) ([]core.DownloadStatus, error) {
 		return out[i].ID < out[j].ID
 	})
 	return out, nil
+}
+
+// Insight reports the information anacrolix exposes without tracker scraping.
+// Tracker counts therefore stay zero, and availability is the number of peer
+// piece copies divided by the torrent's piece count.
+func (e *Embedded) Insight(ctx context.Context, id core.DownloadID) (*core.DownloadInsight, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	it, ok := e.items[id]
+	if !ok {
+		return nil, fmt.Errorf("download: insight %q: %w", id, ErrNotFound)
+	}
+
+	peerConns := it.t.PeerConns()
+	insight := &core.DownloadInsight{
+		Peers:    make([]core.PeerInsight, 0, len(peerConns)),
+		Trackers: []core.TrackerInsight{},
+	}
+	totalPieces := 0
+	if info := it.t.Info(); info != nil {
+		totalPieces = info.NumPieces()
+	}
+	var availablePieces uint64
+	for _, peer := range peerConns {
+		stats := peer.Stats()
+		client, _ := peer.PeerClientName.Load().(string)
+		progress := 0.0
+		pieces := peer.PeerPieces().GetCardinality()
+		if totalPieces > 0 {
+			progress = float64(pieces) / float64(totalPieces)
+			availablePieces += pieces
+		}
+		insight.Peers = append(insight.Peers, core.PeerInsight{
+			Addr:     peer.RemoteAddr.String(),
+			Client:   client,
+			Progress: progress,
+			DownRate: int64(stats.DownloadRate),
+			UpRate:   int64(stats.LastWriteUploadRate),
+		})
+	}
+	sort.Slice(insight.Peers, func(i, j int) bool {
+		return insight.Peers[i].Addr < insight.Peers[j].Addr
+	})
+	if totalPieces > 0 {
+		insight.Availability = float64(availablePieces) / float64(totalPieces)
+	}
+
+	meta := it.t.Metainfo()
+	status := "unknown"
+	if len(peerConns) > 0 || it.t.Info() != nil {
+		status = "working"
+	}
+	for _, url := range meta.UpvertedAnnounceList().DistinctValues() {
+		insight.Trackers = append(insight.Trackers, core.TrackerInsight{
+			URL:    url,
+			Status: status,
+		})
+	}
+	return insight, nil
+}
+
+// SetGlobalRates updates the token budgets shared by every connected peer.
+// anacrolix v1.61.0 retains ClientConfig limiter pointers after construction,
+// so mutating the existing limiters changes live traffic without reconnecting.
+func (e *Embedded) SetGlobalRates(ctx context.Context, downKbps, upKbps int64) error {
+	if downKbps < 0 || upKbps < 0 ||
+		downKbps > (1<<63-1)/1024 || upKbps > (1<<63-1)/1024 {
+		return errors.New("download: global rates must not be negative or overflow")
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return ErrClosed
+	}
+	now := time.Now()
+	e.downLimiter.SetLimitAt(now, kbpsLimit(downKbps))
+	e.upLimiter.SetLimitAt(now, kbpsLimit(upKbps))
+	return nil
+}
+
+// SetDownloadRates stores one torrent's requested limits. anacrolix v1.61.0
+// has client-wide limiters only, not torrent-level limiters. A non-zero
+// override therefore reduces this torrent to one connection, which constrains
+// its opportunity to consume bandwidth but cannot guarantee a byte rate.
+func (e *Embedded) SetDownloadRates(ctx context.Context, id core.DownloadID, downKbps, upKbps int64) error {
+	if downKbps < 0 || upKbps < 0 ||
+		downKbps > (1<<63-1)/1024 || upKbps > (1<<63-1)/1024 {
+		return errors.New("download: per-download rates must not be negative or overflow")
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return ErrClosed
+	}
+	it, ok := e.items[id]
+	if !ok {
+		return fmt.Errorf("download: set rates %q: %w", id, ErrNotFound)
+	}
+	it.rec.MaxDownRate = downKbps * 1024
+	it.rec.MaxUpRate = upKbps * 1024
+	it.maxConns = e.connectionLimit(it.rec)
+	if !it.paused {
+		it.t.SetMaxEstablishedConns(it.maxConns)
+	}
+	return nil
+}
+
+// SetSeedingTargets applies global stopping targets to future poll samples.
+func (e *Embedded) SetSeedingTargets(ratio float64, days int) error {
+	if ratio < 0 || days < 0 || days > maxSeedDays {
+		return errors.New("download: seeding targets must not be negative or overflow")
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return ErrClosed
+	}
+	e.seedRatio = ratio
+	e.seedDays = days
+	return nil
+}
+
+func kbpsLimit(kbps int64) rate.Limit {
+	if kbps == 0 {
+		return rate.Inf
+	}
+	return rate.Limit(kbps * 1024)
+}
+
+func (e *Embedded) connectionLimit(rec core.Download) int {
+	if rec.MaxDownRate != 0 || rec.MaxUpRate != 0 {
+		return 1
+	}
+	return e.maxConnections
 }
 
 // Pause stops transferring without discarding progress. See core.Engine.
@@ -652,6 +812,17 @@ func (e *Embedded) sample() []core.Download {
 		it.sample(now)
 		before := it.rec
 		after := e.refreshLocked(it)
+		if after.State == core.DownloadSeeding {
+			if it.seedingStarted.IsZero() {
+				it.seedingStarted = now
+			}
+			if shouldStopSeeding(e.statusLocked(it).Ratio, it.seedingStarted, now, e.seedRatio, e.seedDays) {
+				pauseItem(it)
+				after = e.refreshLocked(it)
+			}
+		} else if after.State != core.DownloadCompleted {
+			it.seedingStarted = time.Time{}
+		}
 		if durableChanged(before, after) {
 			changed = append(changed, after)
 		}
@@ -672,6 +843,15 @@ func (it *item) sample(now time.Time) {
 	if it.paused {
 		it.downRate, it.upRate = 0, 0
 	}
+}
+
+// shouldStopSeeding applies the global stop policy to a torrent already in the
+// seeding state. Either configured target is sufficient to stop uploading.
+func shouldStopSeeding(ratio float64, started, now time.Time, targetRatio float64, targetDays int) bool {
+	if targetRatio > 0 && ratio >= targetRatio {
+		return true
+	}
+	return targetDays > 0 && !started.IsZero() && now.Sub(started) >= time.Duration(targetDays)*24*time.Hour
 }
 
 // durableChanged reports whether anything worth a write changed. Rates and ETA

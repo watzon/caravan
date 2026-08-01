@@ -1,0 +1,143 @@
+package api
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"testing"
+
+	"github.com/watzon/caravan/internal/core"
+	"github.com/watzon/caravan/internal/download"
+)
+
+type insightEngine struct {
+	*stubEngine
+	insight    core.DownloadInsight
+	insightErr error
+}
+
+func (e *insightEngine) Insight(ctx context.Context, id core.DownloadID) (*core.DownloadInsight, error) {
+	if e.insightErr != nil {
+		return nil, e.insightErr
+	}
+	return &e.insight, nil
+}
+
+type rateEngine struct {
+	*stubEngine
+	downKbps int64
+	upKbps   int64
+	err      error
+}
+
+func (e *rateEngine) SetGlobalRates(ctx context.Context, downKbps, upKbps int64) error {
+	return e.err
+}
+
+func (e *rateEngine) SetDownloadRates(ctx context.Context, id core.DownloadID, downKbps, upKbps int64) error {
+	if e.err != nil {
+		return e.err
+	}
+	e.downKbps = downKbps
+	e.upKbps = upKbps
+	return nil
+}
+
+type settingsEngineProvider struct {
+	*stubEngineProvider
+	settings map[string]string
+}
+
+func (p *settingsEngineProvider) ApplyEngineSettings(ctx context.Context, settings map[string]string) error {
+	p.settings = make(map[string]string, len(settings))
+	for key, value := range settings {
+		p.settings[key] = value
+	}
+	return nil
+}
+
+func TestDownloadInsight(t *testing.T) {
+	t.Run("returns insight shape", func(t *testing.T) {
+		engine := &insightEngine{
+			stubEngine: &stubEngine{},
+			insight: core.DownloadInsight{
+				Peers:        []core.PeerInsight{{Addr: "127.0.0.1:51413", Client: "Test", Progress: 0.5, DownRate: 12, UpRate: 3}},
+				Trackers:     []core.TrackerInsight{{URL: "https://tracker.example/announce", Status: "working"}},
+				Availability: 1.25,
+			},
+		}
+		h, _, _ := newTestServer(t, WithEngine(&stubEngineProvider{engine: engine}))
+
+		rec := do(t, h, http.MethodGet, "/api/v1/downloads/hash/insight", "")
+		wantStatus(t, rec, http.StatusOK)
+		var body struct {
+			Insight core.DownloadInsight `json:"insight"`
+		}
+		decodeBody(t, rec, &body)
+		if len(body.Insight.Peers) != 1 || body.Insight.Peers[0].Addr != "127.0.0.1:51413" {
+			t.Fatalf("peers = %#v, want insight peer", body.Insight.Peers)
+		}
+		if len(body.Insight.Trackers) != 1 || body.Insight.Trackers[0].Status != "working" {
+			t.Fatalf("trackers = %#v, want working tracker", body.Insight.Trackers)
+		}
+		if body.Insight.Availability != 1.25 {
+			t.Fatalf("availability = %v, want 1.25", body.Insight.Availability)
+		}
+	})
+
+	t.Run("returns 503 without engine", func(t *testing.T) {
+		h, _, _ := newTestServer(t)
+		rec := do(t, h, http.MethodGet, "/api/v1/downloads/hash/insight", "")
+		wantStatus(t, rec, http.StatusServiceUnavailable)
+		wantErrorBody(t, rec)
+	})
+
+	t.Run("returns 404 for unknown engine download", func(t *testing.T) {
+		engine := &insightEngine{stubEngine: &stubEngine{}, insightErr: download.ErrNotFound}
+		h, _, _ := newTestServer(t, WithEngine(&stubEngineProvider{engine: engine}))
+		rec := do(t, h, http.MethodGet, "/api/v1/downloads/missing/insight", "")
+		wantStatus(t, rec, http.StatusNotFound)
+		wantErrorBody(t, rec)
+	})
+}
+
+func TestSetDownloadLimitsPersistsAndApplies(t *testing.T) {
+	engine := &rateEngine{stubEngine: &stubEngine{}}
+	h, st, _ := newTestServer(t, WithEngine(&stubEngineProvider{engine: engine}))
+	row := &core.Download{Engine: "stub", EngineID: "hash", Title: "Example"}
+	if err := st.UpsertDownload(context.Background(), row); err != nil {
+		t.Fatalf("UpsertDownload: %v", err)
+	}
+
+	rec := do(t, h, http.MethodPut, "/api/v1/downloads/hash/limits", `{"max_down_kbps":512,"max_up_kbps":64}`)
+	wantStatus(t, rec, http.StatusNoContent)
+	if engine.downKbps != 512 || engine.upKbps != 64 {
+		t.Fatalf("engine limits = %d/%d KB/s, want 512/64", engine.downKbps, engine.upKbps)
+	}
+	stored, err := st.GetDownloadByEngineID(context.Background(), "hash")
+	if err != nil {
+		t.Fatalf("GetDownloadByEngineID: %v", err)
+	}
+	if stored.MaxDownRate != 512*1024 || stored.MaxUpRate != 64*1024 {
+		t.Fatalf("stored rates = %d/%d B/s, want %d/%d", stored.MaxDownRate, stored.MaxUpRate, 512*1024, 64*1024)
+	}
+}
+
+func TestDownloadInsightEngineErrorIsNotNotFound(t *testing.T) {
+	engine := &insightEngine{stubEngine: &stubEngine{}, insightErr: errors.New("connection failed")}
+	h, _, _ := newTestServer(t, WithEngine(&stubEngineProvider{engine: engine}))
+	rec := do(t, h, http.MethodGet, "/api/v1/downloads/hash/insight", "")
+	wantStatus(t, rec, http.StatusBadGateway)
+	wantErrorBody(t, rec)
+}
+
+func TestPutSettingsAppliesEngineSettings(t *testing.T) {
+	provider := &settingsEngineProvider{stubEngineProvider: &stubEngineProvider{engine: &stubEngine{}}}
+	h, _, _ := newTestServer(t, WithEngine(provider))
+
+	rec := do(t, h, http.MethodPut, "/api/v1/settings", `{"engine_max_down_kbps":"2048","engine_seed_ratio":"1.25"}`)
+	wantStatus(t, rec, http.StatusOK)
+	if provider.settings["engine_max_down_kbps"] != "2048" || provider.settings["engine_seed_ratio"] != "1.25" {
+		t.Fatalf("applied settings = %#v, want updated engine settings", provider.settings)
+	}
+}

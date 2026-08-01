@@ -21,11 +21,11 @@ type downloadJSON struct {
 	Name   string `json:"name"`
 	State  string `json:"state"`
 	// Progress is completion in [0,1].
-	Progress  float64 `json:"progress"`
-	BytesDone int64   `json:"bytes_done"`
-	Size      int64   `json:"size"`
-	DownRate  int64   `json:"down_rate"`
-	UpRate    int64   `json:"up_rate"`
+	Progress    float64 `json:"progress"`
+	BytesDone   int64   `json:"bytes_done"`
+	Size        int64   `json:"size"`
+	DownRate    int64   `json:"down_rate"`
+	UpRate      int64   `json:"up_rate"`
 	MaxDownRate int64   `json:"max_down_rate"`
 	MaxUpRate   int64   `json:"max_up_rate"`
 	// ETASeconds is -1 when unknown, including for a row the engine is not
@@ -92,21 +92,21 @@ func (s *server) handleListDownloads(w http.ResponseWriter, r *http.Request) {
 
 func storedDownloadDTO(d core.Download) downloadJSON {
 	return downloadJSON{
-		ID:         string(d.EngineID),
-		GrabID:     d.GrabID,
-		Engine:     d.Engine,
-		Name:       d.Title,
-		State:      string(d.State),
-		Progress:   d.Progress,
-		BytesDone:  d.BytesDone,
-		Size:       d.Size,
+		ID:          string(d.EngineID),
+		GrabID:      d.GrabID,
+		Engine:      d.Engine,
+		Name:        d.Title,
+		State:       string(d.State),
+		Progress:    d.Progress,
+		BytesDone:   d.BytesDone,
+		Size:        d.Size,
 		MaxDownRate: d.MaxDownRate,
 		MaxUpRate:   d.MaxUpRate,
-		ETASeconds: -1,
-		SavePath:   d.SavePath,
-		Error:      d.Error,
-		CreatedAt:  jsonTime(d.CreatedAt),
-		UpdatedAt:  jsonTime(d.UpdatedAt),
+		ETASeconds:  -1,
+		SavePath:    d.SavePath,
+		Error:       d.Error,
+		CreatedAt:   jsonTime(d.CreatedAt),
+		UpdatedAt:   jsonTime(d.UpdatedAt),
 	}
 }
 

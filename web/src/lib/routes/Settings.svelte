@@ -15,15 +15,17 @@
   import LoadError from '../components/LoadError.svelte';
   import Skeleton from '../components/Skeleton.svelte';
   import TextInput from '../components/TextInput.svelte';
+  import QualityProfiles from '../components/QualityProfiles.svelte';
   import { UNKNOWN } from '../format';
   import { pushToast } from '../state/toast.svelte';
   import { system } from '../state/system.svelte';
 
-  type Tab = 'general' | 'indexers' | 'storage';
+  type Tab = 'general' | 'indexers' | 'quality-profiles' | 'storage';
 
   const TABS: { key: Tab; label: string }[] = [
     { key: 'general', label: 'General' },
     { key: 'indexers', label: 'Indexers' },
+    { key: 'quality-profiles', label: 'Quality profiles' },
     { key: 'storage', label: 'Storage' },
   ];
 
@@ -87,7 +89,7 @@
   let status = $derived(system.status);
 </script>
 
-<div class="flex flex-col gap-6 {tab === 'indexers' ? 'max-w-5xl' : 'max-w-3xl'}">
+<div class="flex flex-col gap-6 {tab === 'indexers' || tab === 'quality-profiles' ? 'max-w-5xl' : 'max-w-3xl'}">
   <div class="flex gap-2 border-b border-border" role="tablist" aria-label="Settings sections">
     {#each TABS as item (item.key)}
       <button
@@ -104,9 +106,11 @@
     {/each}
   </div>
 
-  <!-- Indexers own their fetch, so they render whether or not /settings loaded. -->
+  <!-- Indexers and quality profiles own their fetches, so they render whether or not /settings loaded. -->
   {#if tab === 'indexers'}
     <IndexerSettings />
+  {:else if tab === 'quality-profiles'}
+    <QualityProfiles />
   {:else if error}
     <LoadError message={error} onretry={load} />
   {:else if loading && settings === null}
