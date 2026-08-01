@@ -9,6 +9,7 @@
   import { api, errorText } from '../api/client';
   import type { Episode, Season, Series } from '../api/types';
   import Badge from '../components/Badge.svelte';
+  import Button from '../components/Button.svelte';
   import EmptyState from '../components/EmptyState.svelte';
   import Icon from '../components/Icon.svelte';
   import LoadError from '../components/LoadError.svelte';
@@ -181,6 +182,15 @@
                 </Badge>
               </button>
 
+              <Button
+                variant="secondary"
+                size="sm"
+                href="/series/{current.id}/search/{season.season_number}"
+                title={`Search for a ${seasonLabel(season.season_number)} pack`}>
+                <Icon name="search" size={14} />
+                Search
+              </Button>
+
               <Toggle
                 checked={season.monitored}
                 label={`Monitor ${seasonLabel(season.season_number)}`}
@@ -200,7 +210,7 @@
                 </p>
               {:else}
                 <div class="overflow-x-auto">
-                  <table class="w-full min-w-[720px] border-collapse text-sm">
+                  <table class="w-full min-w-[800px] border-collapse text-sm">
                     <thead>
                       <tr class="bg-surface text-left">
                         <th class="micro-label px-3 py-2 font-semibold">Episode</th>
@@ -210,6 +220,7 @@
                         <th class="micro-label px-3 py-2 font-semibold">Quality</th>
                         <th class="micro-label px-3 py-2 text-right font-semibold">Size</th>
                         <th class="micro-label px-3 py-2 text-right font-semibold">Monitored</th>
+                        <th class="micro-label px-3 py-2 text-right font-semibold">Search</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -250,6 +261,20 @@
                                     () => api.setEpisodeMonitored(episode.id, next),
                                     'Could not update the episode',
                                   )} />
+                            </div>
+                          </td>
+                          <td class="px-3 py-2">
+                            <div class="flex justify-end">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                href="/series/{current.id}/search/{episode.season_number}/{episode.episode_number}"
+                                title={`Search for ${episodeCode(episode.season_number, episode.episode_number)}`}>
+                                <Icon name="search" size={14} />
+                                <span class="sr-only">
+                                  Search for {episodeCode(episode.season_number, episode.episode_number)}
+                                </span>
+                              </Button>
                             </div>
                           </td>
                         </tr>

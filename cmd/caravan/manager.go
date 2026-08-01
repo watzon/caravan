@@ -52,14 +52,29 @@ func newLibraryAdapter(st *store.Store, fallbackRoot string, log *slog.Logger) *
 
 // current builds a library.Manager from the settings in force right now.
 func (a *libraryAdapter) current(ctx context.Context) (*library.Manager, error) {
-	root, err := a.setting(ctx, store.SettingStorageRoot)
+	root, err := a.StorageRoot(ctx)
 	if err != nil {
 		return nil, err
+	}
+	return library.NewManager(a.st, a.metadata(ctx), root), nil
+}
+
+// StorageRoot is the storage root in force right now: the settings table's
+// value, or the bootstrap config's until the table has one. It returns the
+// empty string when neither has been configured — a first run, before the
+// setup screen has been through (SPEC §10.1).
+//
+// The download engine resolves its data directory through here too, so the
+// library and the queue can never disagree about where the storage root is.
+func (a *libraryAdapter) StorageRoot(ctx context.Context) (string, error) {
+	root, err := a.setting(ctx, store.SettingStorageRoot)
+	if err != nil {
+		return "", err
 	}
 	if root == "" {
 		root = a.fallbackRoot
 	}
-	return library.NewManager(a.st, a.metadata(ctx), root), nil
+	return root, nil
 }
 
 // setting reads one setting, treating "never set" as the empty string.

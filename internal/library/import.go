@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/watzon/caravan/internal/core"
 )
@@ -20,9 +21,21 @@ type ImportResult struct {
 	Warnings []string
 }
 
+// dispositionFor decides what happens to a parked file's original copy once it
+// is organized. A file already inside the library is being moved into place and
+// must not leave its old name behind for the next scan to rediscover; a file
+// outside it was parked by the import pipeline and still belongs to a download
+// engine that may be seeding it (SPEC §5.1, §13), so it is linked, not moved.
+func dispositionFor(rel string) sourceDisposition {
+	if rel == LibraryDir || strings.HasPrefix(rel, LibraryDir+"/") {
+		return consumeSource
+	}
+	return keepSource
+}
+
 // ImportUnmatched resolves a parked file into the library against a
 // user-chosen provider id (SPEC §10.1, §13: the scan-review screen's "this is
-// actually X" action).
+// actually X" action, and the stuck-import queue's).
 //
 // mediaType is MediaTypeMovie or MediaTypeSeries. The parked file's parsed
 // season and episode numbers are reused as-is — the user is correcting *what*
@@ -62,7 +75,7 @@ func (m *Manager) ImportUnmatched(ctx context.Context, unmatchedID, tmdbID int64
 		if meta == nil {
 			return nil, fmt.Errorf("library: movie %d not found", tmdbID)
 		}
-		res.Path, res.MovieID, err = m.importMovie(ctx, meta, u.Path, info.Size(), u.Parsed, warn)
+		res.Path, res.MovieID, err = m.importMovie(ctx, meta, u.Path, info.Size(), u.Parsed, warn, dispositionFor(u.Path))
 		if err != nil {
 			return nil, err
 		}
@@ -78,7 +91,7 @@ func (m *Manager) ImportUnmatched(ctx context.Context, unmatchedID, tmdbID int64
 		if meta == nil {
 			return nil, fmt.Errorf("library: series %d not found", tmdbID)
 		}
-		res.Path, res.SeriesID, err = m.importEpisode(ctx, meta, u.Path, info.Size(), u.Parsed, warn)
+		res.Path, res.SeriesID, err = m.importEpisode(ctx, meta, u.Path, info.Size(), u.Parsed, warn, dispositionFor(u.Path))
 		if err != nil {
 			return nil, err
 		}

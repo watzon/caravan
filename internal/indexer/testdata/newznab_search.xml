@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:newznab="http://www.newznab.com/DTD/2010/feeds/attributes/">
+  <channel>
+    <atom:link href="https://usenet.example/api" rel="self" type="application/rss+xml" />
+    <title>Example Usenet</title>
+    <description>Example Usenet Newznab feed</description>
+    <link>https://usenet.example/</link>
+    <language>en-gb</language>
+    <newznab:response offset="0" total="2" />
+    <item>
+      <title>Arrival.2016.1080p.BluRay.x264-DRONES</title>
+      <guid isPermaLink="true">https://usenet.example/details/3f8ac1</guid>
+      <link>https://usenet.example/getnzb/3f8ac1.nzb&amp;i=1&amp;r=REDACTED</link>
+      <pubDate>Tue, 15 Nov 2016 21:33:00 +0000</pubDate>
+      <category>Movies &gt; HD</category>
+      <description>Arrival.2016.1080p.BluRay.x264-DRONES</description>
+      <enclosure url="https://usenet.example/getnzb/3f8ac1.nzb&amp;i=1&amp;r=REDACTED" length="9663676416" type="application/x-nzb" />
+      <newznab:attr name="category" value="2040" />
+      <newznab:attr name="size" value="9663676416" />
+      <newznab:attr name="grabs" value="118" />
+      <newznab:attr name="usenetdate" value="Tue, 15 Nov 2016 20:12:00 +0000" />
+    </item>
+    <item>
+      <title>Chernobyl.S01E03.720p.WEB.h264-MEMENTO</title>
+      <guid isPermaLink="false">chernobyl-s01e03-720p</guid>
+      <link>https://usenet.example/getnzb/b21c99.nzb&amp;i=1&amp;r=REDACTED</link>
+      <pubDate>not a date at all</pubDate>
+      <enclosure url="https://usenet.example/getnzb/b21c99.nzb&amp;i=1&amp;r=REDACTED" length="1610612736" type="application/x-nzb" />
+      <newznab:attr name="category" value="5030" />
+      <newznab:attr name="usenetdate" value="Mon, 13 May 2019 02:00:00 +0000" />
+    </item>
+    <item>
+      <!-- no enclosure at all: the protocol can only come from the indexer type -->
+      <title>Severance.S02E05.1080p.ATVP.WEB-DL.DDP5.1.Atmos.H.264-FLUX</title>
+      <guid isPermaLink="false">severance-s02e05-1080p</guid>
+      <link>https://usenet.example/getnzb/77de12.nzb&amp;i=1&amp;r=REDACTED</link>
+      <pubDate>Fri, 07 Feb 2025 10:00:00 +0000</pubDate>
+      <size>2147483648</size>
+      <newznab:attr name="category" value="5040" />
+    </item>
+  </channel>
+</rss>

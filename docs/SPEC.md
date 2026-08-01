@@ -316,10 +316,11 @@ POST      /library/rescan
 GET       /search?q=                # metadata search
 GET       /calendar?start=&end=     # combined movie/episode calendar
 GET       /calendar.ics             # iCal feed (API-key auth)
-GET/POST  /wanted/{id}/releases     # interactive release picker
-POST      /wanted/{id}/grab
-GET/POST  /indexers                 # config + test
-GET/POST  /downloads                # queue
+GET       /library/movies/{id}/releases   # interactive release picker
+POST      /library/movies/{id}/grab       # (same pair on /library/series/{id} with ?season=&episode=)
+GET/POST  /indexers                 # config; POST /indexers/{id}/test
+GET       /downloads                # queue; POST /downloads/{id}/pause|resume
+DELETE    /downloads/{id}?deleteData=true|false
 GET/POST  /import/queue             # stuck imports + manual match
 GET/POST  /profiles/quality
 GET/POST  /handoff/jellyfin         # config + test + scan trigger

@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:torznab="http://torznab.com/schemas/2015/feed">
+  <channel>
+    <atom:link href="https://tracker.example/api" rel="self" type="application/rss+xml" />
+    <title>Example Tracker</title>
+    <description>Example Tracker Torznab feed</description>
+    <link>https://tracker.example/</link>
+    <language>en-US</language>
+    <category>search</category>
+    <item>
+      <title>Blade Runner 2049 2017 1080p BluRay x264-SPARKS</title>
+      <guid>https://tracker.example/details/9f1c2b</guid>
+      <comments>https://tracker.example/details/9f1c2b#comments</comments>
+      <pubDate>Mon, 02 Jan 2017 15:04:05 -0700</pubDate>
+      <size>12884901888</size>
+      <link>https://tracker.example/download/9f1c2b.torrent?apikey=REDACTED</link>
+      <enclosure url="https://tracker.example/download/9f1c2b.torrent?apikey=REDACTED" length="12884901888" type="application/x-bittorrent" />
+      <torznab:attr name="category" value="2040" />
+      <torznab:attr name="seeders" value="42" />
+      <torznab:attr name="peers" value="55" />
+      <torznab:attr name="infohash" value="7A1B2C3D4E5F60718293A4B5C6D7E8F901234567" />
+      <torznab:attr name="magneturl" value="magnet:?xt=urn:btih:7a1b2c3d4e5f60718293a4b5c6d7e8f901234567&amp;dn=Blade.Runner.2049" />
+      <torznab:attr name="downloadvolumefactor" value="0" />
+      <torznab:attr name="uploadvolumefactor" value="1" />
+    </item>
+    <item>
+      <title>The.Expanse.S04E01.2160p.WEB-DL.DDP5.1.HDR.x265-NTb</title>
+      <guid isPermaLink="false">expanse-s04e01-2160p</guid>
+      <pubDate>Fri, 13 Dec 2019 08:01:00 +0000</pubDate>
+      <link>magnet:?xt=urn:btih:aaaabbbbccccddddeeeeffff00001111222233334&amp;dn=The.Expanse.S04E01</link>
+      <torznab:attr name="category" value="5045" />
+      <torznab:attr name="size" value="5368709120" />
+      <torznab:attr name="seeders" value="7" />
+      <torznab:attr name="leechers" value="3" />
+      <torznab:attr name="magneturl" value="magnet:?xt=urn:btih:aaaabbbbccccddddeeeeffff00001111222233334&amp;dn=The.Expanse.S04E01" />
+    </item>
+    <item>
+      <!-- magnet-only listing: no guid, no link, no enclosure -->
+      <title>Dune.Part.Two.2024.2160p.WEB-DL.DDP5.1.Atmos.DV.HDR.H.265-FLUX</title>
+      <pubDate>Tue, 16 Apr 2024 04:20:00 +0000</pubDate>
+      <torznab:attr name="category" value="2045" />
+      <torznab:attr name="magneturl" value="magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&amp;dn=Dune.Part.Two.2024" />
+      <torznab:attr name="seeders" value="300" />
+      <torznab:attr name="peers" value="300" />
+    </item>
+  </channel>
+</rss>

@@ -2,6 +2,12 @@
 // it finds against a metadata provider, reconciling the database against the
 // filesystem, and organizing files into the Jellyfin layout (SPEC §5.1, §6).
 //
+// The import pipeline lives here too (ImportDownload, RunWatcher) rather than
+// in a package of its own, because importing a finished download *is* the
+// organize path with a grab in front of it: everything the pipeline does is a
+// store call or one of the reconcile helpers below. It reaches the download
+// engine only through core.Engine, so it never depends on which engine ran.
+//
 // Path model (SPEC §1.2 pillar 3): every path this package stores is relative
 // to the storage root and uses forward slashes, so a database written on Linux
 // resolves on Windows. Absolute paths exist only inside this package, at the

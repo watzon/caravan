@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { ROUTES, matchPath, matchRoutes, normalizePath, numericParam } from './router';
+import {
+  ROUTES,
+  matchPath,
+  matchRoutes,
+  normalizePath,
+  numericParam,
+  ordinalParam,
+} from './router';
 
 describe('normalizePath', () => {
   const cases: [string, string][] = [
@@ -58,6 +65,43 @@ describe('matchRoutes', () => {
 
   it('returns null for an unknown path', () => {
     expect(matchRoutes(ROUTES, '/calendar')).toBeNull();
+  });
+
+  it('resolves the movie release picker without shadowing the detail route', () => {
+    expect(matchRoutes(ROUTES, '/movies/42')?.pattern).toBe('/movies/:id');
+    expect(matchRoutes(ROUTES, '/movies/42/search')).toEqual({
+      pattern: '/movies/:id/search',
+      params: { id: '42' },
+    });
+  });
+
+  it('resolves season and episode pickers', () => {
+    expect(matchRoutes(ROUTES, '/series/7/search/2')).toEqual({
+      pattern: '/series/:id/search/:season',
+      params: { id: '7', season: '2' },
+    });
+    expect(matchRoutes(ROUTES, '/series/7/search/2/5')).toEqual({
+      pattern: '/series/:id/search/:season/:episode',
+      params: { id: '7', season: '2', episode: '5' },
+    });
+  });
+
+  it('resolves the queue', () => {
+    expect(matchRoutes(ROUTES, '/queue')?.pattern).toBe('/queue');
+  });
+});
+
+describe('ordinalParam', () => {
+  it('accepts zero, because season 0 is Specials', () => {
+    expect(ordinalParam({ season: '0' }, 'season')).toBe(0);
+    expect(ordinalParam({ season: '12' }, 'season')).toBe(12);
+  });
+
+  it('answers -1 for anything unparseable, never 0', () => {
+    expect(ordinalParam({ season: 'abc' }, 'season')).toBe(-1);
+    expect(ordinalParam({ season: '-1' }, 'season')).toBe(-1);
+    expect(ordinalParam({ season: '1.5' }, 'season')).toBe(-1);
+    expect(ordinalParam({}, 'season')).toBe(-1);
   });
 });
 

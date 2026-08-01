@@ -12,12 +12,14 @@
   import Toasts from './lib/components/Toasts.svelte';
   import Sidebar from './lib/layout/Sidebar.svelte';
   import TopBar from './lib/layout/TopBar.svelte';
-  import { numericParam, type RoutePattern } from './lib/router';
+  import { numericParam, ordinalParam, type RoutePattern } from './lib/router';
   import { navigate, router, startRouter } from './lib/router.svelte';
   import FirstRun from './lib/routes/FirstRun.svelte';
   import MovieDetail from './lib/routes/MovieDetail.svelte';
   import Movies from './lib/routes/Movies.svelte';
   import NotFound from './lib/routes/NotFound.svelte';
+  import Queue from './lib/routes/Queue.svelte';
+  import ReleaseSearch from './lib/routes/ReleaseSearch.svelte';
   import ScanReview from './lib/routes/ScanReview.svelte';
   import Series from './lib/routes/Series.svelte';
   import SeriesDetail from './lib/routes/SeriesDetail.svelte';
@@ -28,8 +30,12 @@
     '/first-run': 'Welcome',
     '/movies': 'Movies',
     '/movies/:id': 'Movies',
+    '/movies/:id/search': 'Interactive Search',
     '/series': 'Series',
     '/series/:id': 'Series',
+    '/series/:id/search/:season': 'Interactive Search',
+    '/series/:id/search/:season/:episode': 'Interactive Search',
+    '/queue': 'Queue',
     '/scan-review': 'Scan Review',
     '/settings': 'Settings',
   };
@@ -104,12 +110,33 @@
           {#key match.params.id}
             <MovieDetail id={numericParam(match.params, 'id')} />
           {/key}
+        {:else if match.pattern === '/movies/:id/search'}
+          {#key router.path}
+            <ReleaseSearch kind="movie" id={numericParam(match.params, 'id')} />
+          {/key}
         {:else if match.pattern === '/series'}
           <Series onadd={() => (addOpen = true)} />
         {:else if match.pattern === '/series/:id'}
           {#key match.params.id}
             <SeriesDetail id={numericParam(match.params, 'id')} />
           {/key}
+        {:else if match.pattern === '/series/:id/search/:season'}
+          {#key router.path}
+            <ReleaseSearch
+              kind="series"
+              id={numericParam(match.params, 'id')}
+              season={ordinalParam(match.params, 'season')} />
+          {/key}
+        {:else if match.pattern === '/series/:id/search/:season/:episode'}
+          {#key router.path}
+            <ReleaseSearch
+              kind="series"
+              id={numericParam(match.params, 'id')}
+              season={ordinalParam(match.params, 'season')}
+              episode={ordinalParam(match.params, 'episode')} />
+          {/key}
+        {:else if match.pattern === '/queue'}
+          <Queue />
         {:else if match.pattern === '/scan-review'}
           <ScanReview />
         {:else if match.pattern === '/settings'}

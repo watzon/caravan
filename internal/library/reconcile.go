@@ -19,12 +19,13 @@ type warnf func(format string, args ...any)
 // importMovie organizes a movie file and reconciles the database against it.
 // rel is the file's current storage-root-relative path; the returned path is
 // where it ended up, which differs from rel whenever the file was not already
-// correctly named.
-func (m *Manager) importMovie(ctx context.Context, meta *core.MovieMeta, rel string, size int64, p core.ParsedRelease, warn warnf) (string, int64, error) {
+// correctly named. disp says whether rel survives the move (see
+// sourceDisposition): a scan consumes its source, an import keeps it.
+func (m *Manager) importMovie(ctx context.Context, meta *core.MovieMeta, rel string, size int64, p core.ParsedRelease, warn warnf, disp sourceDisposition) (string, int64, error) {
 	dir := movieDir(meta.Title, meta.Year)
 	dst := path.Join(dir, movieFileName(meta.Title, meta.Year, p.Edition, path.Ext(rel)))
 
-	finalRel, err := m.placeFile(rel, dst)
+	finalRel, err := m.placeFile(rel, dst, disp)
 	if err != nil {
 		return "", 0, err
 	}
@@ -58,7 +59,7 @@ func (m *Manager) importMovie(ctx context.Context, meta *core.MovieMeta, rel str
 // importEpisode organizes an episode file and reconciles the database against
 // it, including the series' full season/episode tree so the library view and
 // the calendar have something to show for episodes that are not on disk yet.
-func (m *Manager) importEpisode(ctx context.Context, meta *core.SeriesMeta, rel string, size int64, p core.ParsedRelease, warn warnf) (string, int64, error) {
+func (m *Manager) importEpisode(ctx context.Context, meta *core.SeriesMeta, rel string, size int64, p core.ParsedRelease, warn warnf, disp sourceDisposition) (string, int64, error) {
 	if len(p.Episodes) == 0 {
 		return "", 0, fmt.Errorf("library: %s has no episode number", rel)
 	}
@@ -67,7 +68,7 @@ func (m *Manager) importEpisode(ctx context.Context, meta *core.SeriesMeta, rel 
 	dst := path.Join(dir, seasonFolderName(p.Season),
 		episodeFileName(meta.Title, meta.Year, p.Season, p.Episodes, episodeTitles(meta, p), path.Ext(rel)))
 
-	finalRel, err := m.placeFile(rel, dst)
+	finalRel, err := m.placeFile(rel, dst, disp)
 	if err != nil {
 		return "", 0, err
 	}

@@ -213,3 +213,107 @@ export interface MatchRequest {
   type: 'movie' | 'series';
   tmdb_id: number;
 }
+
+/* ---------------------------------------------------------------------------
+ * Phase 2 — search & download (SPEC §5.1, §9, §11).
+ * ------------------------------------------------------------------------- */
+
+/** internal/core.IndexerType* — both dialects, one client. */
+export type IndexerType = 'torznab' | 'newznab';
+
+/**
+ * internal/core.IndexerConfig. `api_key` round-trips: the server returns what
+ * it stores, so an edit that leaves the field untouched keeps the credential.
+ */
+export interface Indexer {
+  id: number;
+  name: string;
+  url: string;
+  api_key: string;
+  type: IndexerType;
+  /** Indexer-side category ids; empty means "let the caller decide". */
+  categories: number[];
+  enabled: boolean;
+}
+
+/** Body for POST /indexers and PUT /indexers/{id} — everything but the id. */
+export type IndexerInput = Omit<Indexer, 'id'>;
+
+/** internal/core.Protocol* — decides which engine a grab is routed to. */
+export type Protocol = 'torrent' | 'usenet';
+
+/**
+ * internal/core.Release — one indexer search result, already parsed.
+ *
+ * Everything except `id`/`indexer_id` is the indexer's claim, not a fact, which
+ * is why the picker shows the parse next to the raw title rather than instead
+ * of it.
+ */
+export interface Release {
+  /** `releases` row id; 0 for a result that was not cached. */
+  id: number;
+  indexer_id: number;
+  /** Display name of the indexer, denormalized so deletions do not blank it. */
+  indexer: string;
+  title: string;
+  guid: string;
+  download_url: string;
+  info_hash: string;
+  protocol: Protocol;
+  size: number;
+  seeders: number;
+  leechers: number;
+  published_at: string;
+  parsed: ParsedRelease;
+}
+
+/**
+ * Body for POST /library/movies/{id}/grab and /library/series/{id}/grab.
+ *
+ * The release is identified by its cached row id: the search that produced it
+ * wrote it to the `releases` seen-cache, so the server does not have to trust a
+ * client-supplied download URL. Season/episode targeting mirrors
+ * internal/core.AddOpts.
+ */
+export interface GrabRequest {
+  release_id: number;
+  /** Season number for a season-pack grab. */
+  season?: number;
+  /** `episodes.id` values the grab is expected to satisfy. */
+  episode_ids?: number[];
+}
+
+/** internal/core.DownloadState — the vocabulary the queue colours by. */
+export type DownloadState =
+  | 'queued'
+  | 'downloading'
+  | 'seeding'
+  | 'completed'
+  | 'failed'
+  | 'paused';
+
+/** internal/core.DownloadStatus — a live snapshot, not a persisted row. */
+export interface DownloadStatus {
+  /** Engine-native handle (an info hash for the embedded engine). */
+  id: string;
+  state: DownloadState;
+  name: string;
+  /** Completion in [0,1]. */
+  progress: number;
+  bytes_done: number;
+  /** 0 until a magnet's metadata arrives. */
+  size: number;
+  down_rate: number;
+  up_rate: number;
+  /** -1 when unknown. */
+  eta_seconds: number;
+  ratio: number;
+  save_path: string;
+  error: string;
+  /**
+   * Which backend holds this download (internal/core.Download.Engine). Phase 2
+   * ships one engine, so the server may omit it; the queue falls back to
+   * "embedded" rather than showing a blank badge.
+   */
+  engine?: string;
+}

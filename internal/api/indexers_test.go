@@ -1,0 +1,193 @@
+package api
+
+import (
+	"context"
+	"net/http"
+	"strings"
+	"testing"
+
+	"github.com/watzon/caravan/internal/core"
+)
+
+func TestIndexerCRUD(t *testing.T) {
+	h, st, _, _ := newAcquisitionServer(t)
+	ctx := context.Background()
+
+	rec := do(t, h, http.MethodGet, "/api/v1/indexers", "")
+	wantStatus(t, rec, http.StatusOK)
+	var list struct {
+		Indexers []indexerJSON `json:"indexers"`
+	}
+	decodeBody(t, rec, &list)
+	if len(list.Indexers) != 0 {
+		t.Fatalf("indexers = %v, want none on a fresh database", list.Indexers)
+	}
+
+	rec = do(t, h, http.MethodPost, "/api/v1/indexers",
+		`{"name":"nyaa","url":"https://nyaa.example/api/","api_key":"k","type":"torznab","categories":[5000]}`)
+	wantStatus(t, rec, http.StatusCreated)
+	var created indexerJSON
+	decodeBody(t, rec, &created)
+	if created.ID == 0 {
+		t.Fatalf("created indexer = %+v, want an assigned id", created)
+	}
+	if created.URL != "https://nyaa.example/api" {
+		t.Fatalf("url = %q, want the trailing slash trimmed", created.URL)
+	}
+	if !created.Enabled {
+		t.Fatalf("enabled = false, want an omitted flag to mean enabled")
+	}
+	if created.APIKey != "k" || created.Type != core.IndexerTypeTorznab || len(created.Categories) != 1 {
+		t.Fatalf("created indexer = %+v, want the submitted configuration", created)
+	}
+
+	rec = do(t, h, http.MethodGet, "/api/v1/indexers", "")
+	wantStatus(t, rec, http.StatusOK)
+	decodeBody(t, rec, &list)
+	if len(list.Indexers) != 1 || list.Indexers[0].Name != "nyaa" {
+		t.Fatalf("indexers = %+v, want the one just created", list.Indexers)
+	}
+
+	rec = do(t, h, http.MethodPut, "/api/v1/indexers/"+itoa(created.ID),
+		`{"name":"nyaa","url":"https://nyaa.example/api","api_key":"k2","type":"newznab","enabled":false}`)
+	wantStatus(t, rec, http.StatusOK)
+	var updated indexerJSON
+	decodeBody(t, rec, &updated)
+	if updated.ID != created.ID || updated.APIKey != "k2" || updated.Type != core.IndexerTypeNewznab || updated.Enabled {
+		t.Fatalf("updated indexer = %+v, want the replacement configuration", updated)
+	}
+
+	// A disabled indexer keeps its configuration but drops out of search.
+	enabled, err := st.ListEnabledIndexers(ctx)
+	if err != nil {
+		t.Fatalf("ListEnabledIndexers: %v", err)
+	}
+	if len(enabled) != 0 {
+		t.Fatalf("enabled indexers = %+v, want none", enabled)
+	}
+
+	rec = do(t, h, http.MethodDelete, "/api/v1/indexers/"+itoa(created.ID), "")
+	wantStatus(t, rec, http.StatusNoContent)
+
+	all, err := st.ListIndexers(ctx)
+	if err != nil {
+		t.Fatalf("ListIndexers: %v", err)
+	}
+	if len(all) != 0 {
+		t.Fatalf("indexers = %+v, want the row deleted", all)
+	}
+}
+
+func TestIndexerRequestsAreValidated(t *testing.T) {
+	h, st, _, _ := newAcquisitionServer(t)
+
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"no name", `{"url":"https://a.example","type":"torznab"}`},
+		{"blank name", `{"name":"  ","url":"https://a.example","type":"torznab"}`},
+		{"no url", `{"name":"a","type":"torznab"}`},
+		{"url without scheme", `{"name":"a","url":"a.example","type":"torznab"}`},
+		{"url with wrong scheme", `{"name":"a","url":"ftp://a.example","type":"torznab"}`},
+		{"unknown type", `{"name":"a","url":"https://a.example","type":"rss"}`},
+		{"missing type", `{"name":"a","url":"https://a.example"}`},
+		{"negative category", `{"name":"a","url":"https://a.example","type":"torznab","categories":[-1]}`},
+		{"malformed json", `{`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := do(t, h, http.MethodPost, "/api/v1/indexers", tt.body)
+			wantStatus(t, rec, http.StatusBadRequest)
+			wantErrorBody(t, rec)
+		})
+	}
+
+	// Nothing was written by any of the rejected requests.
+	all, err := st.ListIndexers(context.Background())
+	if err != nil {
+		t.Fatalf("ListIndexers: %v", err)
+	}
+	if len(all) != 0 {
+		t.Fatalf("indexers = %+v, want no writes from rejected requests", all)
+	}
+}
+
+// A duplicate name is a user mistake, not a server failure: indexers.name is
+// unique, and without the pre-check the collision would surface as a 500.
+func TestCreateIndexerRejectsDuplicateName(t *testing.T) {
+	h, _, _, _ := newAcquisitionServer(t)
+
+	body := `{"name":"dupe","url":"https://a.example","type":"torznab"}`
+	rec := do(t, h, http.MethodPost, "/api/v1/indexers", body)
+	wantStatus(t, rec, http.StatusCreated)
+
+	rec = do(t, h, http.MethodPost, "/api/v1/indexers", body)
+	wantStatus(t, rec, http.StatusConflict)
+	wantErrorBody(t, rec)
+}
+
+func TestIndexerEndpointsReportMissingRows(t *testing.T) {
+	h, _, _, _ := newAcquisitionServer(t)
+
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		body   string
+		want   int
+	}{
+		{"update missing", http.MethodPut, "/api/v1/indexers/99", `{"name":"a","url":"https://a.example","type":"torznab"}`, http.StatusNotFound},
+		{"delete missing", http.MethodDelete, "/api/v1/indexers/99", "", http.StatusNotFound},
+		{"test missing", http.MethodPost, "/api/v1/indexers/99/test", "", http.StatusNotFound},
+		{"bad id", http.MethodDelete, "/api/v1/indexers/nope", "", http.StatusBadRequest},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := do(t, h, tt.method, tt.path, tt.body)
+			wantStatus(t, rec, tt.want)
+			wantErrorBody(t, rec)
+		})
+	}
+}
+
+func TestIndexerTest(t *testing.T) {
+	h, st, _, fake := newAcquisitionServer(t)
+
+	good := addIndexer(t, st, fake, "good")
+	broken := addIndexer(t, st, fake, "broken")
+	fake.breaks("broken")
+
+	rec := do(t, h, http.MethodPost, "/api/v1/indexers/"+itoa(good.ID)+"/test", "")
+	wantStatus(t, rec, http.StatusOK)
+	var body map[string]string
+	decodeBody(t, rec, &body)
+	if body["status"] != "ok" {
+		t.Fatalf("body = %v, want status ok", body)
+	}
+
+	rec = do(t, h, http.MethodPost, "/api/v1/indexers/"+itoa(broken.ID)+"/test", "")
+	wantStatus(t, rec, http.StatusBadGateway)
+	var failure errorResponse
+	decodeBody(t, rec, &failure)
+	// The indexer's own message has to survive: "it did not work" without a
+	// reason cannot be acted on.
+	if failure.Error == "" || !strings.Contains(failure.Error, "401") {
+		t.Fatalf("error = %q, want the indexer's own failure in it", failure.Error)
+	}
+}
+
+// Without a client factory the endpoint has to say the feature is not
+// configured rather than pretend the indexer failed.
+func TestIndexerTestWithoutClientFactory(t *testing.T) {
+	h, st, _ := newTestServer(t)
+
+	cfg := core.IndexerConfig{Name: "a", URL: "https://a.example", Type: core.IndexerTypeTorznab, Enabled: true}
+	if err := st.UpsertIndexer(context.Background(), &cfg); err != nil {
+		t.Fatalf("UpsertIndexer: %v", err)
+	}
+
+	rec := do(t, h, http.MethodPost, "/api/v1/indexers/"+itoa(cfg.ID)+"/test", "")
+	wantStatus(t, rec, http.StatusServiceUnavailable)
+	wantErrorBody(t, rec)
+}

@@ -68,7 +68,7 @@ func TestPlaceFileAvoidsCollisions(t *testing.T) {
 	h.writeVideo("library/Movies/second.mkv", "second")
 
 	dst := "library/Movies/Movie (2000)/Movie (2000).mkv"
-	got, err := h.mgr.placeFile("library/Movies/first.mkv", dst)
+	got, err := h.mgr.placeFile("library/Movies/first.mkv", dst, consumeSource)
 	if err != nil {
 		t.Fatalf("placeFile: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestPlaceFileAvoidsCollisions(t *testing.T) {
 		t.Fatalf("first placement = %q, want %q", got, dst)
 	}
 
-	got, err = h.mgr.placeFile("library/Movies/second.mkv", dst)
+	got, err = h.mgr.placeFile("library/Movies/second.mkv", dst, consumeSource)
 	if err != nil {
 		t.Fatalf("placeFile: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestPlaceFileIsANoOpWhenAlreadyInPlace(t *testing.T) {
 		t.Fatal("placeFile tried to transfer a file that was already in place")
 		return nil
 	}
-	got, err := h.mgr.placeFile(rel, rel)
+	got, err := h.mgr.placeFile(rel, rel, consumeSource)
 	if err != nil {
 		t.Fatalf("placeFile: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestCopyThenReplace(t *testing.T) {
 		t.Fatalf("mkdir: %v", err)
 	}
 
-	if err := copyThenReplace(src, dst); err != nil {
+	if err := copyThenReplace(src, dst, consumeSource); err != nil {
 		t.Fatalf("copyThenReplace: %v", err)
 	}
 	got, err := os.ReadFile(dst)

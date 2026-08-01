@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:torznab="http://torznab.com/schemas/2015/feed">
+  <channel>
+    <title>Sloppy Tracker</title>
+    <item>
+      <!-- no title: nothing to parse, nothing to show -->
+      <guid>https://sloppy.example/details/1</guid>
+      <link>https://sloppy.example/download/1.torrent</link>
+      <torznab:attr name="seeders" value="9" />
+    </item>
+    <item>
+      <title>   </title>
+      <link>https://sloppy.example/download/2.torrent</link>
+    </item>
+    <item>
+      <!-- no link, no enclosure, no magnet: unusable -->
+      <title>Some.Movie.2019.1080p.WEB-DL.x264-NOLINK</title>
+      <guid>https://sloppy.example/details/3</guid>
+      <size>1234</size>
+    </item>
+    <item>
+      <title>Junk.Numbers.2021.1080p.BluRay.x264-GARBAGE</title>
+      <guid>https://sloppy.example/details/4</guid>
+      <link>https://sloppy.example/download/4.torrent</link>
+      <pubDate>yesterday-ish</pubDate>
+      <size>not-a-number</size>
+      <enclosure url="" length="also-not-a-number" type="" />
+      <torznab:attr name="seeders" value="lots" />
+      <torznab:attr name="peers" value="-5" />
+      <torznab:attr value="nameless" />
+      <torznab:attr name="infohash" value="" />
+      <torznab:attr name="seeders" value="999" />
+    </item>
+    <item>
+      <title>Good.Release.2020.720p.BluRay.x264-FINE</title>
+      <guid>https://sloppy.example/details/5</guid>
+      <link>https://sloppy.example/download/5.torrent</link>
+      <pubDate>Sat, 01 Feb 2020 10:00:00 +0000</pubDate>
+      <size>3221225472</size>
+      <torznab:attr name="seeders" value="11" />
+      <torznab:attr name="peers" value="20" />
+    </item>
+  </channel>
+</rss>

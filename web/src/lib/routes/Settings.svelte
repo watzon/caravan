@@ -1,7 +1,7 @@
 <script lang="ts">
   /**
-   * Settings — General and Storage only in phase 1. Indexers, quality profiles
-   * and download clients arrive with phases 2-3, so their tabs do not exist yet
+   * Settings — General, Indexers and Storage. Quality profiles and external
+   * download clients arrive with phases 3 and 6, so their tabs do not exist yet
    * rather than existing and doing nothing.
    */
   import { onMount } from 'svelte';
@@ -11,6 +11,7 @@
   import Button from '../components/Button.svelte';
   import Field from '../components/Field.svelte';
   import Icon from '../components/Icon.svelte';
+  import IndexerSettings from '../components/IndexerSettings.svelte';
   import LoadError from '../components/LoadError.svelte';
   import Skeleton from '../components/Skeleton.svelte';
   import TextInput from '../components/TextInput.svelte';
@@ -18,10 +19,11 @@
   import { pushToast } from '../state/toast.svelte';
   import { system } from '../state/system.svelte';
 
-  type Tab = 'general' | 'storage';
+  type Tab = 'general' | 'indexers' | 'storage';
 
   const TABS: { key: Tab; label: string }[] = [
     { key: 'general', label: 'General' },
+    { key: 'indexers', label: 'Indexers' },
     { key: 'storage', label: 'Storage' },
   ];
 
@@ -85,7 +87,7 @@
   let status = $derived(system.status);
 </script>
 
-<div class="flex max-w-3xl flex-col gap-6">
+<div class="flex flex-col gap-6 {tab === 'indexers' ? 'max-w-5xl' : 'max-w-3xl'}">
   <div class="flex gap-2 border-b border-border" role="tablist" aria-label="Settings sections">
     {#each TABS as item (item.key)}
       <button
@@ -102,7 +104,10 @@
     {/each}
   </div>
 
-  {#if error}
+  <!-- Indexers own their fetch, so they render whether or not /settings loaded. -->
+  {#if tab === 'indexers'}
+    <IndexerSettings />
+  {:else if error}
     <LoadError message={error} onretry={load} />
   {:else if loading && settings === null}
     <div class="flex flex-col gap-4">

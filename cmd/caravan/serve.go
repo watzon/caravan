@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -64,14 +65,45 @@ func runServe(args []string) error {
 	slog.SetDefault(logger)
 	api.Version = version
 
+	// The signal context is the process's shutdown signal: the HTTP server and
+	// the import watcher both stop on it, so a Ctrl-C drains requests and the
+	// watcher together rather than killing one out from under the other.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	mgr := newLibraryAdapter(st, cfg.StorageRoot, logger)
+	engines := newEngineProvider(mgr, cfg.Portable, logger)
+	// Closed before the store (deferred later, so it runs first): the engine
+	// flushes the queue's state through the store on the way out.
+	defer func() {
+		if err := engines.Close(); err != nil {
+			logger.Error("closing download engine", "error", err)
+		}
+	}()
+
+	var watcher sync.WaitGroup
+	watcher.Add(1)
+	go func() {
+		defer watcher.Done()
+		runImportWatcher(ctx, engines, mgr, logger)
+	}()
+
 	srv := &http.Server{
-		Addr:              cfg.Listen,
-		Handler:           api.NewServer(st, mgr, web.DistFS()),
+		Addr: cfg.Listen,
+		Handler: api.NewServer(st, mgr, web.DistFS(),
+			api.WithEngine(engines),
+			api.WithIndexerClients(newIndexerFactory())),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	return serveUntilSignal(srv, logger, cfg)
+	err = serveUntilSignal(ctx, srv, logger, cfg)
+
+	// Explicit rather than left to the deferred stop: when the server failed to
+	// listen at all, nothing has cancelled ctx and the watcher would never
+	// return.
+	stop()
+	watcher.Wait()
+	return err
 }
 
 // seedSettings reconciles the settings table with the bootstrap config
@@ -102,11 +134,9 @@ func seedSettings(ctx context.Context, st *store.Store, cfg *config.Config) erro
 	return st.SetSetting(ctx, store.SettingStorageRoot, cfg.StorageRoot)
 }
 
-// serveUntilSignal runs srv until SIGINT or SIGTERM, then drains it.
-func serveUntilSignal(srv *http.Server, logger *slog.Logger, cfg *config.Config) error {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
+// serveUntilSignal runs srv until ctx is done — the signal context from
+// runServe — then drains it.
+func serveUntilSignal(ctx context.Context, srv *http.Server, logger *slog.Logger, cfg *config.Config) error {
 	errCh := make(chan error, 1)
 	go func() {
 		logger.Info("listening", "addr", cfg.Listen, "portable", cfg.Portable)

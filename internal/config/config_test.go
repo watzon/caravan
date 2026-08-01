@@ -7,17 +7,41 @@ import (
 )
 
 func TestLoadMissingFileUsesDefaults(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "absent.yaml")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "absent.yaml")
 
 	cfg, err := Load(path)
 	if err != nil {
 		t.Fatalf("Load(%q) on a missing file: %v", path, err)
 	}
-	if want := Default(); *cfg != want {
-		t.Errorf("Load = %+v, want defaults %+v", *cfg, want)
+	want := Default()
+	// ConfigDir is anchored at the requested path, not at Default's ".".
+	want.ConfigDir = dir
+	if *cfg != want {
+		t.Errorf("Load = %+v, want %+v", *cfg, want)
 	}
 	if cfg.Listen != DefaultListen {
 		t.Errorf("Listen = %q, want %q", cfg.Listen, DefaultListen)
+	}
+}
+
+// A zero-config first run must still keep its database next to the config file
+// it was pointed at. Anchoring ConfigDir at the working directory instead
+// scatters caravan.db wherever the process happened to be launched from, and
+// silently uses a different database when the launch directory changes.
+func TestLoadMissingFileAnchorsConfigDirAtRequestedPath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "caravan.yaml")
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load(%q): %v", path, err)
+	}
+	if cfg.ConfigDir != dir {
+		t.Errorf("ConfigDir = %q, want %q", cfg.ConfigDir, dir)
+	}
+	if want := filepath.Join(dir, DatabaseFile); cfg.DatabasePath() != want {
+		t.Errorf("DatabasePath = %q, want %q", cfg.DatabasePath(), want)
 	}
 }
 

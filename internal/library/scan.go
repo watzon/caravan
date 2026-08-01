@@ -32,6 +32,14 @@ var videoExts = map[string]bool{
 	".ogv":  true,
 }
 
+// isVideo reports whether a bare filename is a media file Caravan handles.
+//
+// Dotfiles are excluded even when they carry a video extension: macOS
+// AppleDouble sidecars ("._Movie.mkv") look like video and are not.
+func isVideo(name string) bool {
+	return !strings.HasPrefix(name, ".") && videoExts[strings.ToLower(filepath.Ext(name))]
+}
+
 // Park reasons, surfaced verbatim in the scan-review screen (SPEC §10.1).
 const (
 	reasonNoProvider   = "no metadata provider configured"
@@ -128,9 +136,7 @@ func (m *Manager) Scan(ctx context.Context) (*ScanResult, error) {
 			}
 			return nil
 		}
-		// Dotfiles include macOS AppleDouble sidecars ("._Movie.mkv"), which
-		// carry a video extension but no video.
-		if strings.HasPrefix(name, ".") || !videoExts[strings.ToLower(filepath.Ext(name))] {
+		if !isVideo(name) {
 			return nil
 		}
 
@@ -249,7 +255,7 @@ func (m *Manager) matchAndImportMovie(ctx context.Context, rel string, size int6
 	}
 
 	meta := results[idx]
-	finalRel, _, err := m.importMovie(ctx, &meta, rel, size, p, res.addErr)
+	finalRel, _, err := m.importMovie(ctx, &meta, rel, size, p, res.addErr, consumeSource)
 	return finalRel, err
 }
 
@@ -286,7 +292,7 @@ func (m *Manager) matchAndImportEpisode(ctx context.Context, rel string, size in
 		return "", nil
 	}
 
-	finalRel, _, err := m.importEpisode(ctx, full, rel, size, p, res.addErr)
+	finalRel, _, err := m.importEpisode(ctx, full, rel, size, p, res.addErr, consumeSource)
 	return finalRel, err
 }
 
@@ -311,8 +317,17 @@ func (m *Manager) reconcileRemovals(ctx context.Context, res *ScanResult, before
 		res.Removed++
 	}
 
+	// The review queue is cleared by absence from disk rather than by absence
+	// from this walk, because not every parked file is under the library: the
+	// import pipeline parks finished downloads it could not reconcile, and
+	// those live wherever the download engine put them (SPEC §5.1). Dropping
+	// them for not turning up in a library walk would make the stuck-import
+	// queue disappear on the next rescan.
 	for _, u := range beforeUnmatched {
 		if seenUnmatched[u.Path] || seenFiles[u.Path] {
+			continue
+		}
+		if _, err := os.Stat(m.abs(u.Path)); err == nil {
 			continue
 		}
 		if err := m.store.DeleteUnmatchedFileByPath(ctx, u.Path); err != nil {

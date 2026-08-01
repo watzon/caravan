@@ -1,12 +1,13 @@
 <script lang="ts">
   /**
    * DESIGN.md §5: fixed 240px sidebar on --color-surface with a hairline right
-   * border. Nav is phase-gated — Wanted, Calendar, Activity and Convert appear
-   * as phases 2-4 ship, so they are not rendered here.
+   * border. Nav is phase-gated — Wanted, Calendar and Convert appear as phases
+   * 3-4 ship, so they are not rendered here.
    *
    * The persistent bottom slot holds system status (disk free, engine health).
    */
   import { isActive } from '../router.svelte';
+  import { BADGE_POLL_MS, downloads } from '../state/downloads.svelte';
   import { system } from '../state/system.svelte';
   import { formatBytes } from '../format';
   import Icon, { type IconName } from '../components/Icon.svelte';
@@ -26,10 +27,16 @@
     { href: '/series', label: 'Series', icon: 'tv' },
   ];
 
+  const ACTIVITY: NavItem[] = [{ href: '/queue', label: 'Queue', icon: 'download' }];
+
   const MANAGE: NavItem[] = [
     { href: '/scan-review', label: 'Scan Review', icon: 'inbox' },
     { href: '/settings', label: 'Settings', icon: 'settings' },
   ];
+
+  // The badge is the only reason the shell polls downloads, so it does so
+  // lazily; the queue screen subscribes at its own faster rate while open.
+  $effect(() => downloads.subscribe(BADGE_POLL_MS));
 
   let status = $derived(system.status);
 
@@ -84,6 +91,33 @@
           {/if}
           <Icon name={item.icon} />
           <span>{item.label}</span>
+        </a>
+      {/each}
+    </div>
+
+    <div class="flex flex-col gap-1">
+      <p class="micro-label px-2 pb-1">Activity</p>
+      {#each ACTIVITY as item (item.href)}
+        {@const active = isActive(item.href)}
+        <a
+          href={item.href}
+          aria-current={active ? 'page' : undefined}
+          class="relative flex items-center gap-3 rounded-md py-2 pl-4 pr-3 text-base transition-colors duration-150 ease-out
+                 {active
+            ? 'bg-accent-tint text-accent-text'
+            : 'text-ink-secondary hover:bg-raised hover:text-ink'}">
+          {#if active}
+            <span class="absolute left-0 top-1 h-[calc(100%-8px)] w-0.5 rounded-full bg-accent"></span>
+          {/if}
+          <Icon name={item.icon} />
+          <span class="flex-1">{item.label}</span>
+          {#if downloads.activeCount > 0}
+            <span
+              class="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-xs font-semibold text-ink-inverse"
+              aria-label="{downloads.activeCount} active downloads">
+              {downloads.activeCount}
+            </span>
+          {/if}
         </a>
       {/each}
     </div>

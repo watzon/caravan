@@ -3,8 +3,10 @@
 //
 // Phase 1 scope (PLAN phase 1, task 8): settings, system status, the library
 // (movies and series), rescan, metadata search, the scan-review/import queue,
-// and the activity feed. There is no authentication yet — SPEC §11 puts the
-// optional password and API key in phase 5.
+// and the activity feed. Phase 2 adds acquisition (PLAN phase 2, tasks 1, 2 and
+// 4): indexer configuration, the interactive release picker, grabs, and the
+// download queue. There is no authentication yet — SPEC §11 puts the optional
+// password and API key in phase 5.
 //
 // Every failure answers with the same envelope, {"error": "..."}, including
 // the routing failures the standard ServeMux would otherwise answer in plain
@@ -38,6 +40,12 @@ type server struct {
 	dist fs.FS
 	log  *slog.Logger
 
+	// engine and indexers are the phase-2 acquisition dependencies, supplied
+	// through options. Either may be nil, in which case the endpoints that
+	// need it answer 503 rather than the server refusing to start.
+	engine   EngineProvider
+	indexers IndexerFactory
+
 	// scanning is the single-flight guard for POST /library/rescan. A scan
 	// walks the whole storage root and reconciles the database; running two
 	// at once would have them fight over the same rows.
@@ -50,8 +58,16 @@ type server struct {
 //
 // dist may be nil, in which case only the API is served; this is what a test
 // or a headless deployment wants.
-func NewServer(st *store.Store, mgr Manager, dist fs.FS) http.Handler {
+//
+// The acquisition endpoints need a download engine and an indexer client
+// factory, supplied with WithEngine and WithIndexerClients. They are options
+// rather than parameters because they are configuration-dependent: a server
+// with neither still serves the library.
+func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Handler {
 	s := &server{st: st, mgr: mgr, dist: dist, log: slog.Default()}
+	for _, opt := range opts {
+		opt(s)
+	}
 
 	// Registered without the /api/v1 prefix and mounted below, so the prefix
 	// lives in exactly one place.
@@ -73,7 +89,27 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS) http.Handler {
 	api.HandleFunc("PATCH /library/episodes/{id}", s.handlePatchEpisode)
 	api.HandleFunc("POST /library/rescan", s.handleRescan)
 
+	// The interactive picker and its grab (SPEC §9 step 4). The series pair
+	// takes ?season= and ?episode= to narrow the search from the whole series
+	// down to one episode.
+	api.HandleFunc("GET /library/movies/{id}/releases", s.handleMovieReleases)
+	api.HandleFunc("POST /library/movies/{id}/grab", s.handleMovieGrab)
+	api.HandleFunc("GET /library/series/{id}/releases", s.handleSeriesReleases)
+	api.HandleFunc("POST /library/series/{id}/grab", s.handleSeriesGrab)
+
 	api.HandleFunc("GET /search", s.handleSearch)
+
+	api.HandleFunc("GET /indexers", s.handleListIndexers)
+	api.HandleFunc("POST /indexers", s.handleCreateIndexer)
+	api.HandleFunc("PUT /indexers/{id}", s.handleUpdateIndexer)
+	api.HandleFunc("DELETE /indexers/{id}", s.handleDeleteIndexer)
+	api.HandleFunc("POST /indexers/{id}/test", s.handleTestIndexer)
+
+	// Queue ids are the engine's own handles, not library ids.
+	api.HandleFunc("GET /downloads", s.handleListDownloads)
+	api.HandleFunc("POST /downloads/{id}/pause", s.handlePauseDownload)
+	api.HandleFunc("POST /downloads/{id}/resume", s.handleResumeDownload)
+	api.HandleFunc("DELETE /downloads/{id}", s.handleDeleteDownload)
 
 	// Artwork the organizer wrote into the storage root, addressed by the same
 	// relative path the library rows carry.

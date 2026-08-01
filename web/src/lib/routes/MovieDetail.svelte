@@ -101,11 +101,17 @@
               {/if}
             </p>
           </div>
-          <Toggle
-            checked={movie.monitored}
-            label="Monitored"
-            disabled={savingMonitored}
-            onchange={setMonitored} />
+          <div class="flex items-center gap-3">
+            <Button variant="primary" size="sm" href="/movies/{movie.id}/search">
+              <Icon name="search" size={14} />
+              Search
+            </Button>
+            <Toggle
+              checked={movie.monitored}
+              label="Monitored"
+              disabled={savingMonitored}
+              onchange={setMonitored} />
+          </div>
         </div>
 
         <p class="max-w-3xl text-md text-ink-secondary">

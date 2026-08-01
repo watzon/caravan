@@ -28,8 +28,8 @@ const DatabaseFile = "caravan.db"
 // Config is the bootstrap configuration.
 type Config struct {
 	// ConfigDir is where Caravan keeps its own state: the sqlite database,
-	// logs, and caches. Defaults to the directory holding the config file, or
-	// the working directory when there is no config file.
+	// logs, and caches. Defaults to the directory of the config file path that
+	// was asked for, whether or not that file exists.
 	ConfigDir string `yaml:"config_dir"`
 
 	// Listen is the HTTP listen address, host:port. Portable mode should bind
@@ -53,7 +53,9 @@ type Config struct {
 // Valid log levels, in increasing severity.
 var logLevels = []string{"debug", "info", "warn", "error"}
 
-// Default returns the configuration used when no file is present.
+// Default returns the baseline configuration every load starts from. Its
+// ConfigDir is the working directory; Load replaces that with the directory of
+// the config path it was given.
 func Default() Config {
 	return Config{
 		ConfigDir: ".",
@@ -70,11 +72,13 @@ func Default() Config {
 // is reported.
 //
 // Values absent from the file fall back to Default. ConfigDir additionally
-// falls back to the directory containing path, so `caravan serve --config
-// /srv/caravan/caravan.yaml` keeps its database next to its config.
-// The CARAVAN_CONFIG_DIR environment variable overrides both.
+// falls back to the directory containing path — the path that was *asked* for,
+// so `caravan serve --config /srv/caravan/caravan.yaml` keeps its database next
+// to its config whether or not that config file exists yet. The
+// CARAVAN_CONFIG_DIR environment variable overrides both.
 func Load(path string) (*Config, error) {
 	cfg := Default()
+	cfg.ConfigDir = filepath.Dir(path)
 
 	data, err := os.ReadFile(path)
 	switch {
@@ -87,11 +91,11 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("config: parse %s: %w", path, err)
 		}
 		cfg = merge(cfg, file)
-		if file.ConfigDir == "" {
-			cfg.ConfigDir = filepath.Dir(path)
-		}
 	case errors.Is(err, os.ErrNotExist):
-		// Zero-config start: keep the defaults.
+		// Zero-config start: keep the defaults, still anchored at the
+		// requested path's directory. Anchoring at the working directory
+		// instead would scatter a first run's database wherever it happened
+		// to be launched from.
 	default:
 		return nil, fmt.Errorf("config: read %s: %w", path, err)
 	}

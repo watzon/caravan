@@ -19,14 +19,32 @@ func osLink(oldname, newname string) error { return os.Link(oldname, newname) }
 // spinning.
 const maxCollisionSuffix = 999
 
-// placeFile moves the file at srcRel to dstRel, both storage-root-relative,
-// and returns the path it actually landed on.
+// sourceDisposition says what happens to the source file once the destination
+// exists. It is a named type rather than a bare bool so the call sites read as
+// the decision they are.
+type sourceDisposition bool
+
+const (
+	// consumeSource leaves nothing at the source path. This is what organizing
+	// the library itself wants: the file is already in the library and its old,
+	// unorganized name must not survive for the next scan to rediscover.
+	consumeSource sourceDisposition = false
+	// keepSource leaves the source where it is. This is what importing a
+	// finished download wants: the data belongs to the download engine, which
+	// is still seeding it (SPEC §5.1), and removing a download must never cost
+	// media (SPEC §13).
+	keepSource sourceDisposition = true
+)
+
+// placeFile puts the file at srcRel at dstRel, both storage-root-relative, and
+// returns the path it actually landed on. disp decides whether srcRel survives.
 //
 // The destination is collision-safe: if a *different* file already occupies
 // dstRel, a " (1)", " (2)", … suffix is appended before the extension. If
 // dstRel already is the source file — the common case on a rescan of an
-// already-organized library — nothing is touched.
-func (m *Manager) placeFile(srcRel, dstRel string) (string, error) {
+// already-organized library, and on a re-run of an already-imported download,
+// where the destination is a hardlink of the source — nothing is touched.
+func (m *Manager) placeFile(srcRel, dstRel string, disp sourceDisposition) (string, error) {
 	srcAbs := m.abs(srcRel)
 	dstAbs := m.abs(dstRel)
 
@@ -43,7 +61,7 @@ func (m *Manager) placeFile(srcRel, dstRel string) (string, error) {
 		return "", err
 	}
 	if !same {
-		if err := m.transfer(srcAbs, finalAbs); err != nil {
+		if err := m.transfer(srcAbs, finalAbs, disp); err != nil {
 			return "", err
 		}
 	}
@@ -75,33 +93,40 @@ func uniqueDest(dst string, src fs.FileInfo) (string, bool, error) {
 	return "", false, fmt.Errorf("library: no free filename for %s after %d attempts", dst, maxCollisionSuffix)
 }
 
-// transfer puts src at dst, both absolute, leaving nothing behind at src.
+// transfer puts src at dst, both absolute.
 //
 // Hardlinking is tried first: it is instant, costs no extra space, and is what
-// the phase-2 import pipeline needs so a seeding torrent keeps its copy
-// (SPEC §5.1). The source link is then removed so a rescan cannot rediscover
-// the original, unorganized name. Where hardlinks are unavailable — exFAT has
-// none (SPEC §3), and the source may live on another device — it falls back to
-// rename, and finally to a copy into a temporary file that is renamed into
-// place, which is the only option across filesystems.
-func (m *Manager) transfer(src, dst string) error {
+// the import pipeline needs so a seeding torrent keeps its copy (SPEC §5.1).
+// Where hardlinks are unavailable — exFAT has none (SPEC §3), and the source
+// may live on another device — a consuming transfer falls back to rename, and
+// anything left falls back to a copy into a temporary file that is renamed
+// into place, which is the only option across filesystems.
+//
+// Rename is deliberately not a fallback for a keepSource transfer: it would
+// leave nothing at src, which is precisely what that disposition forbids.
+func (m *Manager) transfer(src, dst string, disp sourceDisposition) error {
 	if err := m.link(src, dst); err == nil {
+		if disp == keepSource {
+			return nil
+		}
 		if err := os.Remove(src); err != nil {
 			return fmt.Errorf("library: remove %s after hardlink: %w", src, err)
 		}
 		return nil
 	}
-	if err := os.Rename(src, dst); err == nil {
-		return nil
+	if disp == consumeSource {
+		if err := os.Rename(src, dst); err == nil {
+			return nil
+		}
 	}
-	return copyThenReplace(src, dst)
+	return copyThenReplace(src, dst, disp)
 }
 
 // copyThenReplace copies src into a temporary file beside dst, renames it into
-// place, and only then removes src. The rename is what makes the destination
-// atomic: a crash mid-copy leaves a stray temp file, never a truncated media
-// file the user would have to notice.
-func copyThenReplace(src, dst string) error {
+// place, and only then removes src (unless disp keeps it). The rename is what
+// makes the destination atomic: a crash mid-copy leaves a stray temp file,
+// never a truncated media file the user would have to notice.
+func copyThenReplace(src, dst string, disp sourceDisposition) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return fmt.Errorf("library: open %s: %w", src, err)
@@ -131,6 +156,9 @@ func copyThenReplace(src, dst string) error {
 	}
 	if err := os.Rename(tmpName, dst); err != nil {
 		return fmt.Errorf("library: rename %s to %s: %w", tmpName, dst, err)
+	}
+	if disp == keepSource {
+		return nil
 	}
 	if err := os.Remove(src); err != nil {
 		return fmt.Errorf("library: remove %s after copy: %w", src, err)

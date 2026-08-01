@@ -78,3 +78,55 @@ export function formatConfidence(confidence: number): string {
   if (!Number.isFinite(confidence)) return UNKNOWN;
   return `${Math.round(Math.max(0, Math.min(1, confidence)) * 100)}%`;
 }
+
+const MINUTE_S = 60;
+const HOUR_S = 60 * MINUTE_S;
+const DAY_S = 24 * HOUR_S;
+
+/**
+ * How long ago a release was published, in the one unit that matters at that
+ * scale — the release picker's AGE column is a glance, not a timestamp.
+ * Anything in the future (an indexer with a skewed clock) reads as "now".
+ */
+export function formatAge(value: string | null | undefined, now: number = Date.now()): string {
+  if (!value) return UNKNOWN;
+  const ms = Date.parse(value);
+  if (Number.isNaN(ms)) return UNKNOWN;
+
+  const seconds = Math.max(0, Math.round((now - ms) / 1000));
+  if (seconds < HOUR_S) return `${Math.max(1, Math.floor(seconds / MINUTE_S))}m`;
+  if (seconds < DAY_S) return `${Math.floor(seconds / HOUR_S)}h`;
+  const days = Math.floor(seconds / DAY_S);
+  if (days < 30) return `${days}d`;
+  if (days < 365) return `${Math.floor(days / 30)}mo`;
+  return `${Math.floor(days / 365)}y`;
+}
+
+/**
+ * Transfer rate. A rate of zero is real (a queued or paused download moves no
+ * bytes) but renders as the unknown placeholder rather than "0 B/s", which
+ * reads as broken.
+ */
+export function formatRate(bytesPerSecond: number): string {
+  if (!Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) return UNKNOWN;
+  return `${formatBytes(bytesPerSecond)}/s`;
+}
+
+/**
+ * Coarse duration for queue ETAs. Engines report -1 for "unknown" and can
+ * report absurd values for a stalled torrent, so anything past a year is
+ * unknown too — an honest dash beats a confident lie.
+ */
+export function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0 || seconds > 365 * DAY_S) return UNKNOWN;
+  if (seconds < MINUTE_S) return `${Math.round(seconds)}s`;
+  if (seconds < HOUR_S) return `${Math.floor(seconds / MINUTE_S)}m`;
+  if (seconds < DAY_S) {
+    const hours = Math.floor(seconds / HOUR_S);
+    const minutes = Math.floor((seconds % HOUR_S) / MINUTE_S);
+    return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
+  }
+  const days = Math.floor(seconds / DAY_S);
+  const hours = Math.floor((seconds % DAY_S) / HOUR_S);
+  return hours === 0 ? `${days}d` : `${days}d ${hours}h`;
+}

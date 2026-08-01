@@ -2,9 +2,12 @@ import { describe, expect, it } from 'vitest';
 import {
   UNKNOWN,
   episodeCode,
+  formatAge,
   formatBytes,
   formatConfidence,
   formatDate,
+  formatDuration,
+  formatRate,
   isFuture,
   seasonLabel,
   titleWithYear,
@@ -99,5 +102,76 @@ describe('labels', () => {
     expect(formatConfidence(0.734)).toBe('73%');
     expect(formatConfidence(1.5)).toBe('100%');
     expect(formatConfidence(-1)).toBe('0%');
+  });
+});
+
+describe('formatAge', () => {
+  const now = Date.parse('2026-07-31T12:00:00Z');
+  const ago = (ms: number) => new Date(now - ms).toISOString();
+
+  const cases: [string, string][] = [
+    [ago(30 * 1000), '1m'],
+    [ago(45 * 60 * 1000), '45m'],
+    [ago(5 * 60 * 60 * 1000), '5h'],
+    [ago(3 * 24 * 60 * 60 * 1000), '3d'],
+    [ago(60 * 24 * 60 * 60 * 1000), '2mo'],
+    [ago(800 * 24 * 60 * 60 * 1000), '2y'],
+  ];
+
+  for (const [input, want] of cases) {
+    it(`renders ${input} as ${want}`, () => {
+      expect(formatAge(input, now)).toBe(want);
+    });
+  }
+
+  it('reads a skewed indexer clock as brand new rather than negative', () => {
+    expect(formatAge(new Date(now + 60_000).toISOString(), now)).toBe('1m');
+  });
+
+  it('treats unset and unparseable dates as unknown', () => {
+    expect(formatAge('', now)).toBe(UNKNOWN);
+    expect(formatAge(null, now)).toBe(UNKNOWN);
+    expect(formatAge('not a date', now)).toBe(UNKNOWN);
+  });
+});
+
+describe('formatRate', () => {
+  it('renders a live rate per second', () => {
+    expect(formatRate(1024)).toBe('1 KB/s');
+    expect(formatRate(1.5 * 1024 * 1024)).toBe('1.5 MB/s');
+  });
+
+  it('renders no movement as unknown rather than 0 B/s', () => {
+    expect(formatRate(0)).toBe(UNKNOWN);
+    expect(formatRate(-1)).toBe(UNKNOWN);
+    expect(formatRate(Number.NaN)).toBe(UNKNOWN);
+  });
+});
+
+describe('formatDuration', () => {
+  const cases: [number, string][] = [
+    [0, '0s'],
+    [45, '45s'],
+    [90, '1m'],
+    [3600, '1h'],
+    [3600 + 5 * 60, '1h 5m'],
+    [2 * 86400, '2d'],
+    [2 * 86400 + 3600 * 3, '2d 3h'],
+  ];
+
+  for (const [input, want] of cases) {
+    it(`renders ${input}s as ${want}`, () => {
+      expect(formatDuration(input)).toBe(want);
+    });
+  }
+
+  it('reads the engine unknown sentinel as unknown', () => {
+    // internal/core.DownloadStatus.ETASeconds is -1 when the engine cannot say.
+    expect(formatDuration(-1)).toBe(UNKNOWN);
+  });
+
+  it('refuses to render a stalled torrent absurd ETA', () => {
+    expect(formatDuration(400 * 86400)).toBe(UNKNOWN);
+    expect(formatDuration(Number.POSITIVE_INFINITY)).toBe(UNKNOWN);
   });
 });

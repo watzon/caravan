@@ -7,8 +7,13 @@
 
 import type {
   AddItemRequest,
+  DownloadStatus,
+  GrabRequest,
+  Indexer,
+  IndexerInput,
   MatchRequest,
   Movie,
+  Release,
   ScanSummary,
   SearchResults,
   Series,
@@ -52,6 +57,19 @@ export const endpoints = {
   search: () => `${API_BASE}/search`,
   image: (relPath: string) =>
     `${API_BASE}/images/${relPath.split('/').map(encodeURIComponent).join('/')}`,
+
+  // Phase 2 — search & download (SPEC §5.1, §9, §11).
+  indexers: () => `${API_BASE}/indexers`,
+  indexer: (id: number) => `${API_BASE}/indexers/${id}`,
+  indexerTest: (id: number) => `${API_BASE}/indexers/${id}/test`,
+  movieReleases: (id: number) => `${API_BASE}/library/movies/${id}/releases`,
+  movieGrab: (id: number) => `${API_BASE}/library/movies/${id}/grab`,
+  seriesReleases: (id: number) => `${API_BASE}/library/series/${id}/releases`,
+  seriesGrab: (id: number) => `${API_BASE}/library/series/${id}/grab`,
+  downloads: () => `${API_BASE}/downloads`,
+  downloadPause: (id: string) => `${API_BASE}/downloads/${encodeURIComponent(id)}/pause`,
+  downloadResume: (id: string) => `${API_BASE}/downloads/${encodeURIComponent(id)}/resume`,
+  download: (id: string) => `${API_BASE}/downloads/${encodeURIComponent(id)}`,
 } as const;
 
 interface RequestOptions {
@@ -255,4 +273,81 @@ export const api = {
 
   search: (q: string, kind: 'movie' | 'series' | 'all' = 'all', signal?: AbortSignal) =>
     request<SearchResults>(endpoints.search(), { query: { q, type: kind }, signal }),
+
+  /* ------------------------------------------------------------------------
+   * Phase 2 — search & download.
+   * --------------------------------------------------------------------- */
+
+  listIndexers: (signal?: AbortSignal) =>
+    listOf<Indexer>(endpoints.indexers(), 'indexers', signal),
+
+  addIndexer: (body: IndexerInput) =>
+    request<Indexer>(endpoints.indexers(), { method: 'POST', body }),
+
+  updateIndexer: (id: number, body: IndexerInput) =>
+    request<Indexer>(endpoints.indexer(id), { method: 'PUT', body }),
+
+  deleteIndexer: (id: number) =>
+    request<void>(endpoints.indexer(id), { method: 'DELETE' }),
+
+  /**
+   * Ask the server to talk to the indexer. Success is any 2xx — the body is
+   * whatever the handler feels like saying — and a failure arrives as an
+   * ApiError carrying the indexer's own complaint.
+   */
+  testIndexer: (id: number) =>
+    request<void>(endpoints.indexerTest(id), { method: 'POST' }),
+
+  /**
+   * Interactive search (SPEC §9 step 4). The server fans out across enabled
+   * indexers, so this is slow by nature; callers pass a signal and show
+   * skeleton rows.
+   */
+  movieReleases: (id: number, signal?: AbortSignal) =>
+    listOf<Release>(endpoints.movieReleases(id), 'releases', signal),
+
+  /**
+   * Episode and season search. `season`/`episode` are numbers as they appear on
+   * screen, because they are what the query sent to the indexer is built from;
+   * the grab that follows targets episodes by id.
+   */
+  seriesReleases: (
+    id: number,
+    opts: { season?: number; episode?: number } = {},
+    signal?: AbortSignal,
+  ) =>
+    listOf<Release>(
+      withQuery(endpoints.seriesReleases(id), {
+        season: opts.season,
+        episode: opts.episode,
+      }),
+      'releases',
+      signal,
+    ),
+
+  grabForMovie: (id: number, body: GrabRequest) =>
+    request<void>(endpoints.movieGrab(id), { method: 'POST', body }),
+
+  grabForSeries: (id: number, body: GrabRequest) =>
+    request<void>(endpoints.seriesGrab(id), { method: 'POST', body }),
+
+  listDownloads: (signal?: AbortSignal) =>
+    listOf<DownloadStatus>(endpoints.downloads(), 'downloads', signal),
+
+  pauseDownload: (id: string) =>
+    request<void>(endpoints.downloadPause(id), { method: 'POST' }),
+
+  resumeDownload: (id: string) =>
+    request<void>(endpoints.downloadResume(id), { method: 'POST' }),
+
+  /**
+   * Remove a download. `deleteData` false leaves the payload on disk, which is
+   * the safe default everywhere in the UI: an imported file is a hardlink away
+   * from this data (SPEC §13).
+   */
+  removeDownload: (id: string, deleteData: boolean) =>
+    request<void>(endpoints.download(id), {
+      method: 'DELETE',
+      query: { deleteData: deleteData ? 'true' : 'false' },
+    }),
 };

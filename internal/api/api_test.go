@@ -130,8 +130,10 @@ func testDist() fstest.MapFS {
 	}
 }
 
-// newTestServer builds a handler over a real store in a temp directory.
-func newTestServer(t *testing.T) (http.Handler, *store.Store, *stubManager) {
+// newTestServer builds a handler over a real store in a temp directory. Extra
+// options are passed through, which is how the acquisition tests attach a stub
+// engine and indexer factory.
+func newTestServer(t *testing.T, opts ...Option) (http.Handler, *store.Store, *stubManager) {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "caravan.db"))
 	if err != nil {
@@ -140,7 +142,7 @@ func newTestServer(t *testing.T) (http.Handler, *store.Store, *stubManager) {
 	t.Cleanup(func() { st.Close() })
 
 	mgr := &stubManager{st: st}
-	return NewServer(st, mgr, testDist()), st, mgr
+	return NewServer(st, mgr, testDist(), opts...), st, mgr
 }
 
 // do issues a request against h. body may be empty.
