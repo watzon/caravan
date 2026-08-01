@@ -201,6 +201,13 @@ export type Settings = Record<string, string>;
 export const SETTING_STORAGE_ROOT = 'storage_root';
 export const SETTING_TMDB_API_KEY = 'tmdb_api_key';
 
+export const SETTING_ENGINE_LISTEN_PORT = 'engine_listen_port';
+export const SETTING_ENGINE_MAX_CONNECTIONS = 'engine_max_connections';
+export const SETTING_ENGINE_MAX_DOWN_KBPS = 'engine_max_down_kbps';
+export const SETTING_ENGINE_MAX_UP_KBPS = 'engine_max_up_kbps';
+export const SETTING_ENGINE_SEED_RATIO = 'engine_seed_ratio';
+export const SETTING_ENGINE_SEED_DAYS = 'engine_seed_days';
+
 /**
  * What the library holds once a scan has finished (see `api.awaitScan`).
  *
@@ -331,12 +338,36 @@ export interface DownloadStatus {
   ratio: number;
   save_path: string;
   error: string;
+  max_down_rate?: number;
+  max_up_rate?: number;
   /**
    * Which backend holds this download (internal/core.Download.Engine). Phase 2
    * ships one engine, so the server may omit it; the queue falls back to
    * "embedded" rather than showing a blank badge.
    */
   engine?: string;
+}
+
+/** Torrent-specific diagnostics from GET /downloads/{id}/insight. */
+export interface DownloadInsight {
+  peers: DownloadPeer[];
+  trackers: DownloadTracker[];
+  availability: number;
+}
+
+export interface DownloadPeer {
+  addr: string;
+  client: string;
+  progress: number;
+  down_rate: number;
+  up_rate: number;
+}
+
+export interface DownloadTracker {
+  url: string;
+  status: string;
+  seeders: number;
+  leechers: number;
 }
 
 /* ---------------------------------------------------------------------------

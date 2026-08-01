@@ -9,6 +9,7 @@ import type {
   ActivityEvent,
   AddItemRequest,
   CalendarEntry,
+  DownloadInsight,
   DownloadStatus,
   GrabRequest,
   Indexer,
@@ -78,6 +79,8 @@ export const endpoints = {
   downloadPause: (id: string) => `${API_BASE}/downloads/${encodeURIComponent(id)}/pause`,
   downloadResume: (id: string) => `${API_BASE}/downloads/${encodeURIComponent(id)}/resume`,
   download: (id: string) => `${API_BASE}/downloads/${encodeURIComponent(id)}`,
+  downloadInsight: (id: string) => `${API_BASE}/downloads/${encodeURIComponent(id)}/insight`,
+  downloadLimits: (id: string) => `${API_BASE}/downloads/${encodeURIComponent(id)}/limits`,
   wanted: () => `${API_BASE}/wanted`,
   events: () => `${API_BASE}/events`,
   jobs: () => `${API_BASE}/jobs`,
@@ -377,6 +380,17 @@ export const api = {
     request<void>(endpoints.download(id), {
       method: 'DELETE',
       query: { deleteData: deleteData ? 'true' : 'false' },
+    }),
+
+  downloadInsight: (id: string, signal?: AbortSignal) =>
+    request<{ insight: DownloadInsight }>(endpoints.downloadInsight(id), { signal }).then(
+      (payload) => payload.insight,
+    ),
+
+  setDownloadLimits: (id: string, maxDownKbps: number, maxUpKbps: number) =>
+    request<void>(endpoints.downloadLimits(id), {
+      method: 'PUT',
+      body: { max_down_kbps: maxDownKbps, max_up_kbps: maxUpKbps },
     }),
   wanted: (signal?: AbortSignal) =>
     request<WantedLists>(endpoints.wanted(), { signal }).then((payload) => ({

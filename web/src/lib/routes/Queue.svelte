@@ -16,7 +16,7 @@
   import LoadError from '../components/LoadError.svelte';
   import Modal from '../components/Modal.svelte';
   import ProgressBar from '../components/ProgressBar.svelte';
-  import Skeleton from '../components/Skeleton.svelte';
+  import QueueDetailDrawer from '../components/QueueDetailDrawer.svelte';
   import {
     UNKNOWN,
     formatBytes,
@@ -32,8 +32,16 @@
   let busyID = $state<string | null>(null);
   let removing = $state<DownloadStatus | null>(null);
   let removeData = $state(false);
+  let detail = $state<DownloadStatus | null>(null);
 
-  // Polling is scoped to this screen's lifetime — the store stops when the last
+
+  function openRemoveFromDetail(deleteData: boolean) {
+    if (!detail) return;
+    removing = detail;
+    removeData = deleteData;
+  }
+
+  // Polling is scoped to this screen's lifetime - the store stops when the last
   // subscriber leaves, so navigating away costs nothing.
   $effect(() => downloads.subscribe(QUEUE_POLL_MS));
 
@@ -68,6 +76,7 @@
       await api.removeDownload(target.id, deleteData);
       downloads.forget(target.id);
       removing = null;
+      detail = null;
       pushToast(
         deleteData ? 'Removed, and its data deleted.' : 'Removed. The data is still on disk.',
         'neutral',
@@ -115,8 +124,13 @@
       {#each rows as download (download.id)}
         {@const meta = downloadStateMeta(download.state)}
         {@const paused = download.state === 'paused'}
-        <li class="flex flex-col gap-3 rounded-md border border-border bg-surface px-3 py-3">
-          <div class="flex flex-wrap items-center gap-3">
+        <li class="relative flex flex-col gap-3 rounded-md border border-border bg-surface px-3 py-3 transition-colors duration-150 hover:border-border-strong">
+          <button
+            type="button"
+            class="absolute inset-0 rounded-md focus:outline-none focus:ring-2 focus:ring-accent"
+            aria-label="Open details for {download.name}"
+            onclick={() => (detail = download)}></button>
+          <div class="relative z-10 flex pointer-events-none flex-wrap items-center gap-3">
             <span class="size-2 shrink-0 rounded-full {TONE_DOT[meta.tone]}" aria-hidden="true"></span>
             <span class="min-w-0 flex-1 font-mono text-ink" title={download.name}>
               {truncateMiddle(download.name || UNKNOWN, 64)}
@@ -126,14 +140,16 @@
               {engineLabel(download)}
             </Badge>
 
-            <div class="flex shrink-0 items-center gap-2">
+            <div class="pointer-events-auto flex shrink-0 items-center gap-2">
               {#if paused}
                 <Button
                   variant="secondary"
                   size="sm"
                   disabled={busyID === download.id}
-                  onclick={() =>
-                    act(download, () => api.resumeDownload(download.id), 'Resumed.')}>
+                  onclick={(event) => {
+                    event.stopPropagation();
+                    void act(download, () => api.resumeDownload(download.id), 'Resumed.');
+                  }}>
                   <Icon name="play" size={14} />
                   Resume
                 </Button>
@@ -142,7 +158,10 @@
                   variant="secondary"
                   size="sm"
                   disabled={busyID === download.id || !meta.active}
-                  onclick={() => act(download, () => api.pauseDownload(download.id), 'Paused.')}>
+                  onclick={(event) => {
+                    event.stopPropagation();
+                    void act(download, () => api.pauseDownload(download.id), 'Paused.');
+                  }}>
                   <Icon name="pause" size={14} />
                   Pause
                 </Button>
@@ -151,7 +170,10 @@
                 variant="ghost"
                 size="sm"
                 disabled={busyID === download.id}
-                onclick={() => openRemove(download)}>
+                onclick={(event) => {
+                  event.stopPropagation();
+                  openRemove(download);
+                }}>
                 <Icon name="trash" size={14} />
                 <span class="sr-only">Remove {download.name}</span>
               </Button>
@@ -189,13 +211,24 @@
   {/if}
 </div>
 
+{#if detail}
+  <QueueDetailDrawer
+    download={detail}
+    busy={busyID === detail.id}
+    onclose={() => (detail = null)}
+    onpause={() => void act(detail, () => api.pauseDownload(detail.id), 'Paused.')}
+    onresume={() => void act(detail, () => api.resumeDownload(detail.id), 'Resumed.')}
+    onremove={openRemoveFromDetail}
+    onlimitsapplied={() => downloads.refresh()} />
+{/if}
+
 {#if removing}
   {@const target = removing}
   <Modal title="Remove from the queue" width="max-w-lg" onclose={() => (removing = null)}>
     <div class="flex flex-col gap-4 p-4">
       <p class="font-mono text-sm text-ink">{truncateMiddle(target.name || UNKNOWN, 72)}</p>
       <p class="text-base text-ink-secondary">
-        Removing stops the download. Its data stays on disk unless you say otherwise — an
+        Removing stops the download. Its data stays on disk unless you say otherwise - an
         already-imported file is a hardlink away from this data, so deleting it can cost you
         media.
       </p>

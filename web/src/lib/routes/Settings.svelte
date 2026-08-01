@@ -1,9 +1,5 @@
 <script lang="ts">
-  /**
-   * Settings — General, Indexers and Storage. Quality profiles and external
-   * download clients arrive with phases 3 and 6, so their tabs do not exist yet
-   * rather than existing and doing nothing.
-   */
+  /** Settings for general configuration, indexers, engine defaults, profiles and storage. */
   import { onMount } from 'svelte';
   import { api, errorText } from '../api/client';
   import { SETTING_STORAGE_ROOT, SETTING_TMDB_API_KEY, type Settings } from '../api/types';
@@ -11,6 +7,7 @@
   import Button from '../components/Button.svelte';
   import Field from '../components/Field.svelte';
   import Icon from '../components/Icon.svelte';
+  import EngineSettings from '../components/EngineSettings.svelte';
   import IndexerSettings from '../components/IndexerSettings.svelte';
   import LoadError from '../components/LoadError.svelte';
   import Skeleton from '../components/Skeleton.svelte';
@@ -20,11 +17,12 @@
   import { pushToast } from '../state/toast.svelte';
   import { system } from '../state/system.svelte';
 
-  type Tab = 'general' | 'indexers' | 'quality-profiles' | 'storage';
+  type Tab = 'general' | 'indexers' | 'engine' | 'quality-profiles' | 'storage';
 
   const TABS: { key: Tab; label: string }[] = [
     { key: 'general', label: 'General' },
     { key: 'indexers', label: 'Indexers' },
+    { key: 'engine', label: 'Engine' },
     { key: 'quality-profiles', label: 'Quality profiles' },
     { key: 'storage', label: 'Storage' },
   ];
@@ -56,14 +54,16 @@
 
   onMount(load);
 
-  async function save(patch: Settings, note: string) {
+  async function save(patch: Settings, note: string): Promise<boolean> {
     saving = true;
     try {
       settings = await api.putSettings(patch);
       await system.refresh();
       pushToast(note, 'success');
+      return true;
     } catch (err) {
       pushToast(errorText(err), 'danger');
+      return false;
     } finally {
       saving = false;
     }
@@ -119,6 +119,11 @@
       <Skeleton class="h-9 w-full" />
       <Skeleton class="h-8 w-24" />
     </div>
+  {:else if tab === 'engine' && settings}
+    <EngineSettings
+      {settings}
+      {saving}
+      onsave={(patch) => save(patch, 'Engine settings saved.')} />
   {:else if tab === 'general'}
     <section class="flex flex-col gap-6">
       <Field
@@ -165,7 +170,7 @@
       <Field
         label="Storage root"
         for="settings-storage-root"
-        help="Every path in the database is relative to this folder, so re-pointing is instant and safe — the files stay where they are.">
+        help="Every path in the database is relative to this folder, so re-pointing is instant and safe - the files stay where they are.">
         <TextInput id="settings-storage-root" bind:value={storageRoot} mono placeholder="/data" />
       </Field>
 
