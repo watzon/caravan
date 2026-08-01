@@ -41,6 +41,18 @@
   let upKbps = $state('');
   let limitsForDownload = $state<string | null>(null);
   let applying = $state(false);
+  let dialog = $state<HTMLElement | null>(null);
+
+  $effect(() => {
+    const previous = document.activeElement as HTMLElement | null;
+    dialog?.focus();
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = '';
+      previous?.focus?.();
+    };
+  });
+
 
 
   $effect(() => {
@@ -123,10 +135,12 @@
     onclick={onclose}></button>
 
   <div
+    bind:this={dialog}
     class="relative flex h-full w-full max-w-[440px] flex-col border-l border-border-strong bg-surface shadow-2xl"
     role="dialog"
     aria-modal="true"
-    aria-label="Download details">
+    aria-label="Download details"
+    tabindex="-1">
     <header class="flex items-start gap-3 border-b border-border px-5 py-4">
       <div class="min-w-0 flex-1">
         <div class="flex items-center gap-2">

@@ -17,6 +17,7 @@
   import Modal from '../components/Modal.svelte';
   import ProgressBar from '../components/ProgressBar.svelte';
   import QueueDetailDrawer from '../components/QueueDetailDrawer.svelte';
+  import Skeleton from '../components/Skeleton.svelte';
   import {
     UNKNOWN,
     formatBytes,
