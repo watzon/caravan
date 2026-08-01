@@ -81,6 +81,7 @@ Six phases. Each absorbs one hat of the existing *arr ecosystem and ends with a 
 7. **Season pack handling:** a single download satisfying many episodes imports as multiple linked files.
 8. **Job scheduler hardening:** backoff, lease reclaim, visible job/activity feed in the UI.
 9. **Combined calendar:** `/calendar` API merging episode air dates and movie release dates; month + agenda views, entries status-colored with the standard vocabulary; `/calendar.ics` iCal feed (API-key auth) for external calendar apps.
+10. **Torrent controls & insight (design first):** the embedded engine grows the controls a standalone client has — global/per-torrent rate limits, seeding targets (ratio + time), connection/port settings — and per-download insight (peers, trackers, availability). Gate: a UI/UX design pass in Paper before any implementation; the queue's minimal v1 shape is deliberate until then.
 
 ### Acceptance criteria
 

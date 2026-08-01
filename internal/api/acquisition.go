@@ -29,6 +29,14 @@ type EngineProvider interface {
 	Name() string
 }
 
+// HealthReporter is an optional EngineProvider extension for providers that
+// can distinguish "not built yet" from "tried and failed" — the system panel
+// shows the difference.
+type HealthReporter interface {
+	// Health returns "ok", "unconfigured", or "error".
+	Health() string
+}
+
 // IndexerClient is the slice of internal/indexer the HTTP layer uses. It is
 // declared here, as an interface, for the same reason Manager is: this package
 // compiles and tests without the network half of the application.
@@ -64,14 +72,6 @@ func WithEngine(p EngineProvider) Option {
 func WithIndexerClients(f IndexerFactory) Option {
 	return func(s *server) { s.indexers = f }
 }
-
-// Torznab/Newznab top-level categories (SPEC §5.1). They are the fallback for
-// an indexer that carries no category configuration of its own: searching
-// every category would drown a movie picker in TV results and vice versa.
-const (
-	categoryMovies = 2000
-	categoryTV     = 5000
-)
 
 // Engine-side categories a grab is labelled with, for users who sort their
 // download client by label.

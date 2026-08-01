@@ -364,12 +364,43 @@ func TestSystemStatus(t *testing.T) {
 		SchemaVersion: got.SchemaVersion,
 		Scanning:      false,
 		Counts:        statusCounts{Movies: 1, Series: 1, MediaFiles: 1, Unmatched: 1},
+		// "/data" does not exist on the test machine, so the disk stays
+		// unknown (zeros); no engine provider is wired, so unconfigured.
+		DiskFreeBytes:  0,
+		DiskTotalBytes: 0,
+		EngineHealth:   "unconfigured",
 	}
 	if got != want {
 		t.Fatalf("status = %+v, want %+v", got, want)
 	}
 	if got.SchemaVersion < 1 {
 		t.Fatalf("schema_version = %d, want >= 1", got.SchemaVersion)
+	}
+}
+
+// The system panel's numbers: a real storage root reports its filesystem, and
+// a wired engine provider reports healthy.
+func TestSystemStatusReportsDiskAndEngine(t *testing.T) {
+	h, st, _, _ := newAcquisitionServer(t)
+
+	root := t.TempDir()
+	if err := st.SetSetting(context.Background(), store.SettingStorageRoot, root); err != nil {
+		t.Fatalf("SetSetting: %v", err)
+	}
+
+	rec := do(t, h, http.MethodGet, "/api/v1/system/status", "")
+	wantStatus(t, rec, http.StatusOK)
+	var got statusResponse
+	decodeBody(t, rec, &got)
+
+	if got.EngineHealth != "ok" {
+		t.Fatalf("engine_health = %q, want ok with a wired engine", got.EngineHealth)
+	}
+	if got.DiskTotalBytes <= 0 || got.DiskFreeBytes <= 0 {
+		t.Fatalf("disk = %d/%d, want real numbers for an existing root", got.DiskFreeBytes, got.DiskTotalBytes)
+	}
+	if got.DiskFreeBytes > got.DiskTotalBytes {
+		t.Fatalf("disk free %d exceeds total %d", got.DiskFreeBytes, got.DiskTotalBytes)
 	}
 }
 

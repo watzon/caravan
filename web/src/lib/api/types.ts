@@ -51,6 +51,8 @@ export interface Movie {
   overview: string;
   path: string;
   poster_path: string;
+  /** Provider poster URL — the artwork before a local poster exists. */
+  poster_url: string;
   monitored: boolean;
   quality_profile_id: number;
   release_date: string;
@@ -100,6 +102,8 @@ export interface Series {
   status: string;
   path: string;
   poster_path: string;
+  /** Provider poster URL — the artwork before a local poster exists. */
+  poster_url: string;
   monitored: boolean;
   quality_profile_id: number;
   first_aired: string;
@@ -181,6 +185,13 @@ export interface SystemStatus {
   /** True while a library scan is running. */
   scanning: boolean;
   counts: StatusCounts;
+  /** Filesystem holding the storage root; both 0 when unknown or no root. */
+  disk_free_bytes: number;
+  disk_total_bytes: number;
+  /** "ok" | "unconfigured" | "error" ("degraded" arrives with external clients). */
+  engine_health: string;
+  /** Portable mode: the previous session did not shut down cleanly (phase 5). */
+  dirty?: boolean;
 }
 
 /** GET/PUT /settings — the settings table is a flat key/value store (SPEC §7). */
@@ -231,7 +242,7 @@ export interface Indexer {
   url: string;
   api_key: string;
   type: IndexerType;
-  /** Indexer-side category ids; empty means "let the caller decide". */
+  /** Indexer-side category ids; exactly these are searched, empty = unfiltered. */
   categories: number[];
   enabled: boolean;
 }

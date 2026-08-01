@@ -51,6 +51,14 @@ func TestAddMovieCreatesTheRowWithoutTouchingDisk(t *testing.T) {
 	if stored.ID != mv.ID {
 		t.Fatalf("stored id = %d, want %d", stored.ID, mv.ID)
 	}
+	// No local poster can exist yet, so the provider URL is the only artwork
+	// the UI has — losing it is a poster-less library entry until import.
+	if stored.PosterPath != "" {
+		t.Fatalf("poster path = %q, want empty before anything is on disk", stored.PosterPath)
+	}
+	if stored.PosterURL != h.posterURL {
+		t.Fatalf("poster url = %q, want the provider's %q", stored.PosterURL, h.posterURL)
+	}
 }
 
 func TestAddMovieAgainKeepsUserIntent(t *testing.T) {

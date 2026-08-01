@@ -17,6 +17,9 @@ const STATUS: SystemStatus = {
   schema_version: 1,
   scanning: false,
   counts: { movies: 1, series: 0, media_files: 1, unmatched: 0 },
+  disk_free_bytes: 500 * 1024 ** 3,
+  disk_total_bytes: 1024 ** 4,
+  engine_health: 'ok',
 };
 
 const MOVIE: Movie = {
@@ -29,6 +32,7 @@ const MOVIE: Movie = {
   overview: '',
   path: 'Movies/Big Buck Bunny (2008)',
   poster_path: '',
+  poster_url: '',
   monitored: true,
   quality_profile_id: 0,
   release_date: '2008-05-20',

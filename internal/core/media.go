@@ -25,6 +25,10 @@ type Movie struct {
 	// PosterPath is the stored poster, relative to the storage root. Empty
 	// when no poster has been written yet.
 	PosterPath string
+	// PosterURL is the provider's poster, an absolute URL. It is what the UI
+	// shows while PosterPath is still empty — an added movie has no folder on
+	// disk, so it cannot have a local poster yet.
+	PosterURL string
 	// Monitored controls whether Caravan keeps searching for this movie.
 	Monitored bool
 	// QualityProfileID references quality_profiles.id; 0 means "use the
@@ -53,6 +57,9 @@ type Series struct {
 	Path string
 	// PosterPath is the stored poster, relative to the storage root.
 	PosterPath string
+	// PosterURL is the provider's poster, an absolute URL (see
+	// Movie.PosterURL).
+	PosterURL string
 	// Monitored is the series-level flag. SPEC §7: seasons and episodes carry
 	// their own flags; setting this one cascades as a bulk update, not a lock.
 	Monitored bool

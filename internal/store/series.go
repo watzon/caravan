@@ -10,7 +10,7 @@ import (
 )
 
 const seriesColumns = `id, tmdb_id, tvdb_id, imdb_id, title, sort_title, year, overview,
-	status, path, poster_path, monitored, quality_profile_id, first_aired, added_at, updated_at`
+	status, path, poster_path, poster_url, monitored, quality_profile_id, first_aired, added_at, updated_at`
 
 // UpsertSeries inserts or updates sr and writes back the assigned ID.
 // Identity is sr.ID when set, otherwise sr.TMDBID.
@@ -37,11 +37,11 @@ func (s *Store) UpsertSeries(ctx context.Context, sr *core.Series) error {
 	if sr.ID != 0 {
 		res, err := s.db.ExecContext(ctx, `
 			UPDATE series SET tmdb_id = ?, tvdb_id = ?, imdb_id = ?, title = ?, sort_title = ?,
-				year = ?, overview = ?, status = ?, path = ?, poster_path = ?, monitored = ?,
-				quality_profile_id = ?, first_aired = ?, added_at = ?, updated_at = ?
+				year = ?, overview = ?, status = ?, path = ?, poster_path = ?, poster_url = ?,
+				monitored = ?, quality_profile_id = ?, first_aired = ?, added_at = ?, updated_at = ?
 			WHERE id = ?`,
 			sr.TMDBID, sr.TVDBID, sr.IMDBID, sr.Title, sr.SortTitle, sr.Year, sr.Overview,
-			sr.Status, sr.Path, sr.PosterPath, sr.Monitored, sr.QualityProfileID,
+			sr.Status, sr.Path, sr.PosterPath, sr.PosterURL, sr.Monitored, sr.QualityProfileID,
 			formatTime(sr.FirstAired), formatTime(sr.AddedAt), formatTime(sr.UpdatedAt), sr.ID)
 		if err != nil {
 			return fmt.Errorf("store: update series %d: %w", sr.ID, err)
@@ -58,10 +58,11 @@ func (s *Store) UpsertSeries(ctx context.Context, sr *core.Series) error {
 
 	res, err := s.db.ExecContext(ctx, `
 		INSERT INTO series (tmdb_id, tvdb_id, imdb_id, title, sort_title, year, overview,
-			status, path, poster_path, monitored, quality_profile_id, first_aired, added_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			status, path, poster_path, poster_url, monitored, quality_profile_id, first_aired,
+			added_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		sr.TMDBID, sr.TVDBID, sr.IMDBID, sr.Title, sr.SortTitle, sr.Year, sr.Overview,
-		sr.Status, sr.Path, sr.PosterPath, sr.Monitored, sr.QualityProfileID,
+		sr.Status, sr.Path, sr.PosterPath, sr.PosterURL, sr.Monitored, sr.QualityProfileID,
 		formatTime(sr.FirstAired), formatTime(sr.AddedAt), formatTime(sr.UpdatedAt))
 	if err != nil {
 		return fmt.Errorf("store: insert series %q: %w", sr.Title, err)
@@ -139,8 +140,8 @@ func scanSeries(sc scanner) (*core.Series, error) {
 		updatedAt  string
 	)
 	err := sc.Scan(&sr.ID, &sr.TMDBID, &sr.TVDBID, &sr.IMDBID, &sr.Title, &sr.SortTitle, &sr.Year,
-		&sr.Overview, &sr.Status, &sr.Path, &sr.PosterPath, &sr.Monitored, &sr.QualityProfileID,
-		&firstAired, &addedAt, &updatedAt)
+		&sr.Overview, &sr.Status, &sr.Path, &sr.PosterPath, &sr.PosterURL, &sr.Monitored,
+		&sr.QualityProfileID, &firstAired, &addedAt, &updatedAt)
 	if err != nil {
 		return nil, err
 	}

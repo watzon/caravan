@@ -26,6 +26,7 @@ type movieJSON struct {
 	Overview         string `json:"overview"`
 	Path             string `json:"path"`
 	PosterPath       string `json:"poster_path"`
+	PosterURL        string `json:"poster_url"`
 	Monitored        bool   `json:"monitored"`
 	QualityProfileID int64  `json:"quality_profile_id"`
 	ReleaseDate      string `json:"release_date"`
@@ -49,6 +50,7 @@ type seriesJSON struct {
 	Status           string `json:"status"`
 	Path             string `json:"path"`
 	PosterPath       string `json:"poster_path"`
+	PosterURL        string `json:"poster_url"`
 	Monitored        bool   `json:"monitored"`
 	QualityProfileID int64  `json:"quality_profile_id"`
 	FirstAired       string `json:"first_aired"`
@@ -118,6 +120,7 @@ func movieDTO(m core.Movie) movieJSON {
 		Overview:         m.Overview,
 		Path:             m.Path,
 		PosterPath:       m.PosterPath,
+		PosterURL:        m.PosterURL,
 		Monitored:        m.Monitored,
 		QualityProfileID: m.QualityProfileID,
 		ReleaseDate:      jsonTime(m.ReleaseDate),
@@ -139,6 +142,7 @@ func seriesDTO(sr core.Series) seriesJSON {
 		Status:           sr.Status,
 		Path:             sr.Path,
 		PosterPath:       sr.PosterPath,
+		PosterURL:        sr.PosterURL,
 		Monitored:        sr.Monitored,
 		QualityProfileID: sr.QualityProfileID,
 		FirstAired:       jsonTime(sr.FirstAired),

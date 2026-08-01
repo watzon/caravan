@@ -353,8 +353,8 @@
         label="Categories"
         for={treeUsable ? undefined : 'indexer-categories'}
         help={treeUsable
-          ? 'Pick what Caravan searches on this indexer. Nothing selected means Caravan chooses per search.'
-          : 'Load the list from the indexer, or enter category ids by hand. Empty means Caravan chooses per search.'}>
+          ? 'Caravan searches only the selected categories. Nothing selected searches everything.'
+          : 'Load the list from the indexer, or enter category ids by hand. Empty searches everything.'}>
         <div class="flex flex-col gap-2">
           {#if treeUsable && categoryTree}
             <CategoryPicker

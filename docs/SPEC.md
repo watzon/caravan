@@ -181,6 +181,8 @@ flowchart LR
 
 **Download Manager.** Queue, priorities, categories, seeding limits. Engine interface:
 
+> **Planned — torrent controls & insight (design gate first).** The v1 queue is deliberately minimal: progress, pause/resume, remove. A later iteration gives the embedded engine the controls users expect from a standalone client — global and per-torrent rate limits, seeding targets (ratio and time), connection/port settings — and per-download insight: peer and tracker lists, per-peer rates, availability. Needs a UI/UX design pass before implementation (queue detail drawer vs. dedicated download page); tracked in PLAN phase 3.
+
 ```go
 type Engine interface {
     Add(ctx context.Context, r Release, opts AddOpts) (DownloadID, error)

@@ -53,7 +53,9 @@
     if (s.dirty) return { tone: 'danger', label: 'Dirty shutdown' };
     if (s.engine_health === 'ok') return { tone: 'success', label: 'Healthy' };
     if (s.engine_health === 'degraded') return { tone: 'warning', label: 'Degraded' };
-    return { tone: 'danger', label: s.engine_health || 'Unknown' };
+    if (s.engine_health === 'error') return { tone: 'danger', label: 'Engine error' };
+    // "unconfigured": no storage root yet, so no engine — a setup state, not a failure.
+    return { tone: 'neutral', label: 'Not set up' };
   });
 </script>
 
@@ -155,7 +157,7 @@
           <Icon name="disk" size={14} />
           <span class="flex-1 text-sm">Disk free</span>
           <span class="font-mono text-xs text-ink">
-            {status ? formatBytes(status.disk_free_bytes) : '—'}
+            {status && status.disk_total_bytes > 0 ? formatBytes(status.disk_free_bytes) : '—'}
           </span>
         </div>
         <ProgressBar

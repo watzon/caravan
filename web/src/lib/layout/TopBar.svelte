@@ -20,7 +20,9 @@
     if (s.dirty) return { tone: 'danger', label: 'Dirty shutdown' };
     if (s.engine_health === 'ok') return { tone: 'success', label: 'Healthy' };
     if (s.engine_health === 'degraded') return { tone: 'warning', label: 'Degraded' };
-    return { tone: 'danger', label: s.engine_health || 'Unknown' };
+    if (s.engine_health === 'error') return { tone: 'danger', label: 'Engine error' };
+    // "unconfigured": no storage root yet, so no engine — a setup state, not a failure.
+    return { tone: 'neutral', label: 'Not set up' };
   });
 
   const isMac =

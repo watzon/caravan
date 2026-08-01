@@ -93,7 +93,7 @@
     {@const current = series}
     <div class="flex flex-col gap-6 md:flex-row">
       <div class="w-40 shrink-0 md:w-52">
-        <Poster path={current.poster_path} alt={current.title} fallbackIcon="tv" />
+        <Poster path={current.poster_path || current.poster_url} alt={current.title} fallbackIcon="tv" />
       </div>
 
       <div class="flex min-w-0 flex-1 flex-col gap-4">

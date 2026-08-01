@@ -10,7 +10,7 @@ import (
 )
 
 const movieColumns = `id, tmdb_id, imdb_id, title, sort_title, year, overview,
-	path, poster_path, monitored, quality_profile_id, release_date, added_at, updated_at`
+	path, poster_path, poster_url, monitored, quality_profile_id, release_date, added_at, updated_at`
 
 // UpsertMovie inserts or updates m and writes back the assigned ID.
 //
@@ -39,12 +39,12 @@ func (s *Store) UpsertMovie(ctx context.Context, m *core.Movie) error {
 	if m.ID != 0 {
 		res, err := s.db.ExecContext(ctx, `
 			UPDATE movies SET tmdb_id = ?, imdb_id = ?, title = ?, sort_title = ?, year = ?,
-				overview = ?, path = ?, poster_path = ?, monitored = ?, quality_profile_id = ?,
-				release_date = ?, added_at = ?, updated_at = ?
+				overview = ?, path = ?, poster_path = ?, poster_url = ?, monitored = ?,
+				quality_profile_id = ?, release_date = ?, added_at = ?, updated_at = ?
 			WHERE id = ?`,
 			m.TMDBID, m.IMDBID, m.Title, m.SortTitle, m.Year, m.Overview, m.Path, m.PosterPath,
-			m.Monitored, m.QualityProfileID, formatTime(m.ReleaseDate), formatTime(m.AddedAt),
-			formatTime(m.UpdatedAt), m.ID)
+			m.PosterURL, m.Monitored, m.QualityProfileID, formatTime(m.ReleaseDate),
+			formatTime(m.AddedAt), formatTime(m.UpdatedAt), m.ID)
 		if err != nil {
 			return fmt.Errorf("store: update movie %d: %w", m.ID, err)
 		}
@@ -60,10 +60,10 @@ func (s *Store) UpsertMovie(ctx context.Context, m *core.Movie) error {
 
 	res, err := s.db.ExecContext(ctx, `
 		INSERT INTO movies (tmdb_id, imdb_id, title, sort_title, year, overview, path,
-			poster_path, monitored, quality_profile_id, release_date, added_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			poster_path, poster_url, monitored, quality_profile_id, release_date, added_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		m.TMDBID, m.IMDBID, m.Title, m.SortTitle, m.Year, m.Overview, m.Path, m.PosterPath,
-		m.Monitored, m.QualityProfileID, formatTime(m.ReleaseDate), formatTime(m.AddedAt),
+		m.PosterURL, m.Monitored, m.QualityProfileID, formatTime(m.ReleaseDate), formatTime(m.AddedAt),
 		formatTime(m.UpdatedAt))
 	if err != nil {
 		return fmt.Errorf("store: insert movie %q: %w", m.Title, err)
@@ -147,7 +147,8 @@ func scanMovie(sc scanner) (*core.Movie, error) {
 		updatedAt   string
 	)
 	err := sc.Scan(&m.ID, &m.TMDBID, &m.IMDBID, &m.Title, &m.SortTitle, &m.Year, &m.Overview,
-		&m.Path, &m.PosterPath, &m.Monitored, &m.QualityProfileID, &releaseDate, &addedAt, &updatedAt)
+		&m.Path, &m.PosterPath, &m.PosterURL, &m.Monitored, &m.QualityProfileID, &releaseDate,
+		&addedAt, &updatedAt)
 	if err != nil {
 		return nil, err
 	}

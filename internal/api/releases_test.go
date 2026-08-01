@@ -140,20 +140,23 @@ func TestMovieReleasesFanOutMergesSortsAndCaches(t *testing.T) {
 		}
 	}
 
-	// Every enabled indexer was asked, with the movie category as the fallback.
+	// Every enabled indexer was asked. These carry no category configuration,
+	// so the search goes out unfiltered — never a guessed default, which
+	// silently returns nothing from indexers that do not expand parent
+	// categories.
 	searches := fake.recorded()
 	if len(searches) != 3 {
 		t.Fatalf("searches = %+v, want one per enabled indexer", searches)
 	}
 	for _, s := range searches {
-		if s.query != "Big Buck Bunny 2008" || s.cats != "2000" {
-			t.Fatalf("search = %+v, want the movie query and category 2000", s)
+		if s.query != "Big Buck Bunny 2008" || s.cats != "" {
+			t.Fatalf("search = %+v, want the movie query and no category filter", s)
 		}
 	}
 }
 
-// An indexer that carries its own categories is searched with those, not with
-// the endpoint's fallback.
+// An indexer that carries its own categories is searched with exactly those,
+// on every search type.
 func TestReleaseSearchUsesConfiguredCategories(t *testing.T) {
 	h, st, _, fake := newAcquisitionServer(t)
 	m := addMovie(t, st, "Big Buck Bunny", 2008)
@@ -188,8 +191,8 @@ func TestSeriesReleasesNarrowsQueryAndFlags(t *testing.T) {
 	if body.Query != "Planet Earth II S01E02" {
 		t.Fatalf("query = %q, want the SxxEyy form", body.Query)
 	}
-	if searches := fake.recorded(); len(searches) != 1 || searches[0].cats != "5000" {
-		t.Fatalf("searches = %+v, want the TV category", searches)
+	if searches := fake.recorded(); len(searches) != 1 || searches[0].cats != "" {
+		t.Fatalf("searches = %+v, want no category filter on an unconfigured indexer", searches)
 	}
 
 	flags := map[string][]string{}

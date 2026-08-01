@@ -33,7 +33,7 @@
   <div class="flex flex-wrap items-center gap-2">
     <p class="text-sm text-ink-secondary">
       {selected.length === 0
-        ? 'Nothing selected — Caravan picks a sensible default per search.'
+        ? 'Nothing selected — every category is searched.'
         : `${selected.length} ${selected.length === 1 ? 'category' : 'categories'} selected.`}
     </p>
     <div class="ml-auto flex gap-1">

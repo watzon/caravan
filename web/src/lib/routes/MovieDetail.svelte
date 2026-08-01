@@ -82,7 +82,7 @@
     {@const file = movie.file}
     <div class="flex flex-col gap-6 md:flex-row">
       <div class="w-40 shrink-0 md:w-52">
-        <Poster path={movie.poster_path} alt={movie.title} />
+        <Poster path={movie.poster_path || movie.poster_url} alt={movie.title} />
       </div>
 
       <div class="flex min-w-0 flex-1 flex-col gap-4">

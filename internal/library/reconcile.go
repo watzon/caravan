@@ -175,6 +175,7 @@ func (m *Manager) upsertMovieRow(ctx context.Context, meta *core.MovieMeta, dir,
 		Overview:    meta.Overview,
 		Path:        dir,
 		PosterPath:  posterRel,
+		PosterURL:   meta.PosterURL,
 		Monitored:   true,
 		ReleaseDate: meta.ReleaseDate,
 	}
@@ -215,6 +216,7 @@ func (m *Manager) upsertSeriesRow(ctx context.Context, meta *core.SeriesMeta, di
 		Status:     meta.Status,
 		Path:       dir,
 		PosterPath: posterRel,
+		PosterURL:  meta.PosterURL,
 		Monitored:  true,
 		FirstAired: meta.FirstAirDate,
 	}

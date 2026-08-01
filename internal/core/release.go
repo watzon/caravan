@@ -25,8 +25,9 @@ type IndexerConfig struct {
 	APIKey string
 	// Type is one of the IndexerType* constants.
 	Type string
-	// Categories are the indexer category ids to search by default. Empty
-	// means "let the caller decide".
+	// Categories are the indexer category ids every search sends — exactly
+	// these, never an inferred default. Empty searches the indexer
+	// unfiltered.
 	Categories []int
 	// Enabled excludes the indexer from search fan-out when false, without
 	// losing its configuration.

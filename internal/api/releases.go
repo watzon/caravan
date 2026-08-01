@@ -101,7 +101,7 @@ func (s *server) handleMovieReleases(w http.ResponseWriter, r *http.Request) {
 	if m.Year > 0 {
 		query = fmt.Sprintf("%s %d", m.Title, m.Year)
 	}
-	s.serveReleases(w, r, query, categoryMovies, func(rel core.Release) []string {
+	s.serveReleases(w, r, query, func(rel core.Release) []string {
 		return movieReleaseFlags(rel, *m)
 	})
 }
@@ -130,14 +130,14 @@ func (s *server) handleSeriesReleases(w http.ResponseWriter, r *http.Request) {
 	case season >= 0:
 		query = fmt.Sprintf("%s S%02d", sr.Title, season)
 	}
-	s.serveReleases(w, r, query, categoryTV, func(rel core.Release) []string {
+	s.serveReleases(w, r, query, func(rel core.Release) []string {
 		return seriesReleaseFlags(rel, season, episode)
 	})
 }
 
 // serveReleases runs one interactive search and writes the picker payload:
 // fan out, merge, cache, flag, sort.
-func (s *server) serveReleases(w http.ResponseWriter, r *http.Request, query string, fallbackCategory int, flags func(core.Release) []string) {
+func (s *server) serveReleases(w http.ResponseWriter, r *http.Request, query string, flags func(core.Release) []string) {
 	newClient, ok := s.requireIndexerClients(w)
 	if !ok {
 		return
@@ -151,7 +151,7 @@ func (s *server) serveReleases(w http.ResponseWriter, r *http.Request, query str
 
 	ctx, cancel := context.WithTimeout(r.Context(), releaseSearchTimeout)
 	defer cancel()
-	releases, failures := searchIndexers(ctx, newClient, indexers, query, fallbackCategory)
+	releases, failures := searchIndexers(ctx, newClient, indexers, query)
 
 	out := releasesResponse{Query: query, Releases: make([]releaseJSON, 0, len(releases)), Errors: failures}
 	for _, rel := range releases {
@@ -182,15 +182,15 @@ type indexerSearch struct {
 // run in parallel; the results are collected in the configured order rather
 // than the order they arrive, so the same set of answers always merges the same
 // way. A failing indexer costs its own results and nothing else.
-func searchIndexers(ctx context.Context, newClient IndexerFactory, indexers []core.IndexerConfig, query string, fallbackCategory int) ([]core.Release, []indexerErrorJSON) {
+func searchIndexers(ctx context.Context, newClient IndexerFactory, indexers []core.IndexerConfig, query string) ([]core.Release, []indexerErrorJSON) {
 	results := make(chan indexerSearch, len(indexers))
 	for _, cfg := range indexers {
 		go func() {
-			categories := cfg.Categories
-			if len(categories) == 0 {
-				categories = []int{fallbackCategory}
-			}
-			releases, err := newClient(cfg).Search(ctx, query, categories)
+			// Exactly the configured categories, nothing inferred: an empty
+			// configuration searches the indexer unfiltered. Guessing a
+			// per-media-type default here silently returned nothing from
+			// indexers that do not expand parent categories.
+			releases, err := newClient(cfg).Search(ctx, query, cfg.Categories)
 			results <- indexerSearch{cfg: cfg, releases: releases, err: err}
 		}()
 	}

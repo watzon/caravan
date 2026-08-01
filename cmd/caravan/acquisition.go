@@ -93,6 +93,22 @@ func newEngineProvider(adapter *libraryAdapter, paused bool, log *slog.Logger) *
 // Name identifies the backend on the download rows this engine creates.
 func (p *engineProvider) Name() string { return download.EngineName }
 
+// Health implements api.HealthReporter for the system panel: "ok" once the
+// engine runs, "error" when building it failed, "unconfigured" before a
+// storage root exists to build it under.
+func (p *engineProvider) Health() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	switch {
+	case p.engine != nil:
+		return "ok"
+	case p.lastErr != "":
+		return "error"
+	default:
+		return "unconfigured"
+	}
+}
+
 // Engine returns the download engine, or nil when there is no storage root to
 // build one under or building one failed. Callers treat nil as "not
 // configured" and answer 503; a failure is therefore logged here, since it is

@@ -88,6 +88,14 @@ type statusResponse struct {
 	SchemaVersion int          `json:"schema_version"`
 	Scanning      bool         `json:"scanning"`
 	Counts        statusCounts `json:"counts"`
+	// DiskFreeBytes and DiskTotalBytes describe the filesystem holding the
+	// storage root. Both zero when no root is set or the filesystem cannot be
+	// asked — the UI renders that as "unknown", never as "full".
+	DiskFreeBytes  int64 `json:"disk_free_bytes"`
+	DiskTotalBytes int64 `json:"disk_total_bytes"`
+	// EngineHealth is the download engine's state: "ok", "unconfigured" (no
+	// storage root yet, so no engine), or "error" (it failed to start).
+	EngineHealth string `json:"engine_health"`
 }
 
 type statusCounts struct {
@@ -149,6 +157,15 @@ func (s *server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var diskFree, diskTotal int64
+	if root != "" {
+		if free, total, err := diskUsage(root); err == nil {
+			diskFree, diskTotal = free, total
+		}
+		// A failure stays zeros: the storage root being unreadable is the
+		// scanner's error to raise loudly, not the status endpoint's.
+	}
+
 	writeJSON(w, http.StatusOK, statusResponse{
 		Version:       Version,
 		Mode:          mode,
@@ -161,5 +178,24 @@ func (s *server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 			MediaFiles: len(files),
 			Unmatched:  len(unmatched),
 		},
+		DiskFreeBytes:  diskFree,
+		DiskTotalBytes: diskTotal,
+		EngineHealth:   s.engineHealth(),
 	})
+}
+
+// engineHealth is what the system panel renders next to "Engine". A provider
+// that can tell a failed engine from an unbuilt one implements HealthReporter;
+// otherwise health is derived from whether an engine exists at all.
+func (s *server) engineHealth() string {
+	if s.engine == nil {
+		return "unconfigured"
+	}
+	if hr, ok := s.engine.(HealthReporter); ok {
+		return hr.Health()
+	}
+	if s.engine.Engine() == nil {
+		return "unconfigured"
+	}
+	return "ok"
 }
