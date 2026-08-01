@@ -64,7 +64,7 @@ describe('matchRoutes', () => {
   });
 
   it('returns null for an unknown path', () => {
-    expect(matchRoutes(ROUTES, '/calendar')).toBeNull();
+    expect(matchRoutes(ROUTES, '/definitely-not-a-route')).toBeNull();
   });
 
   it('resolves the movie release picker without shadowing the detail route', () => {
