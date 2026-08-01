@@ -76,6 +76,42 @@ func (s *Store) GetGrabByDownloadID(ctx context.Context, engineID core.DownloadI
 	return g, nil
 }
 
+// ActiveGrabForMovie returns the in-flight automatic or interactive grab for
+// movieID. A failed download does not block a retry, but a grab whose engine
+// has not persisted its first status snapshot yet still does: delivery is
+// at-least-once, so treating that short gap as idle would duplicate a download.
+func (s *Store) ActiveGrabForMovie(ctx context.Context, movieID int64) (*core.Grab, bool, error) {
+	return s.activeGrab(ctx, "movie_id = ?", movieID)
+}
+
+// ActiveGrabForEpisode returns the in-flight automatic or interactive grab
+// containing episodeID. Episode ids are JSON in the history table, so SQLite's
+// json_each keeps this query precise without a lossy string match.
+func (s *Store) ActiveGrabForEpisode(ctx context.Context, episodeID int64) (*core.Grab, bool, error) {
+	return s.activeGrab(ctx, "EXISTS (SELECT 1 FROM json_each(grabs.episode_ids) WHERE value = ?)", episodeID)
+}
+
+func (s *Store) activeGrab(ctx context.Context, target string, arg int64) (*core.Grab, bool, error) {
+	row := s.db.QueryRowContext(ctx, "SELECT "+grabColumns+`
+		FROM grabs
+		WHERE status = ?
+			AND (`+target+`)
+			AND NOT EXISTS (
+				SELECT 1 FROM downloads
+				WHERE downloads.grab_id = grabs.id AND downloads.state = ?
+			)
+		ORDER BY id DESC
+		LIMIT 1`, core.GrabStatusGrabbed, arg, core.DownloadFailed)
+	g, err := scanGrab(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("store: find active grab: %w", err)
+	}
+	return g, true, nil
+}
+
 // ListGrabs returns the most recent grabs, newest first. A limit of zero or
 // less returns every grab. Ordering is by id for the same reason as events:
 // ids are monotonic where a timestamp can tie.

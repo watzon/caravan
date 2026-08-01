@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/watzon/caravan/internal/api"
+	"github.com/watzon/caravan/internal/automation"
 	"github.com/watzon/caravan/internal/config"
 	"github.com/watzon/caravan/internal/store"
 	"github.com/watzon/caravan/web"
@@ -81,18 +82,28 @@ func runServe(args []string) error {
 		}
 	}()
 
+	indexers := newIndexerFactory()
+	if err := automation.Bootstrap(ctx, st); err != nil {
+		return err
+	}
+	runner := automation.NewRunner(st, indexers, engines.await)
+
 	var watcher sync.WaitGroup
-	watcher.Add(1)
+	watcher.Add(2)
 	go func() {
 		defer watcher.Done()
 		runImportWatcher(ctx, engines, mgr, logger)
+	}()
+	go func() {
+		defer watcher.Done()
+		runner.Run(ctx)
 	}()
 
 	srv := &http.Server{
 		Addr: cfg.Listen,
 		Handler: api.NewServer(st, mgr, web.DistFS(),
 			api.WithEngine(engines),
-			api.WithIndexerClients(newIndexerFactory())),
+			api.WithIndexerClients(indexers)),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -107,7 +118,7 @@ func runServe(args []string) error {
 }
 
 // seedSettings reconciles the settings table with the bootstrap config
-// (SPEC §10 — the file is bootstrap, the table is runtime config).
+// (SPEC §10 - the file is bootstrap, the table is runtime config).
 //
 // The deployment mode is a fact about how this process was launched, so it is
 // written every start. The storage root is only seeded when the table has none:
@@ -134,8 +145,8 @@ func seedSettings(ctx context.Context, st *store.Store, cfg *config.Config) erro
 	return st.SetSetting(ctx, store.SettingStorageRoot, cfg.StorageRoot)
 }
 
-// serveUntilSignal runs srv until ctx is done — the signal context from
-// runServe — then drains it.
+// serveUntilSignal runs srv until ctx is done - the signal context from
+// runServe - then drains it.
 func serveUntilSignal(ctx context.Context, srv *http.Server, logger *slog.Logger, cfg *config.Config) error {
 	errCh := make(chan error, 1)
 	go func() {

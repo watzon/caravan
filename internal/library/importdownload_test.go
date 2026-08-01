@@ -186,6 +186,10 @@ func TestImportDownloadIsIdempotent(t *testing.T) {
 	if err := h.mgr.ImportDownload(ctx, dl, grab); err != nil {
 		t.Fatalf("first ImportDownload: %v", err)
 	}
+	original, err := h.st.GetMediaFileByPath(ctx, organizedRel)
+	if err != nil {
+		t.Fatalf("GetMediaFileByPath before re-import: %v", err)
+	}
 	// Re-run past the grab-status short circuit as well, so this proves the
 	// file-level idempotency and not only the cheap guard in front of it.
 	if err := h.st.SetGrabStatus(ctx, grab.GrabID, core.GrabStatusGrabbed, ""); err != nil {
@@ -203,12 +207,137 @@ func TestImportDownloadIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListMediaFilesForMovie: %v", err)
 	}
-	if len(files) != 1 || files[0].Path != organizedRel {
-		t.Fatalf("movie files = %+v, want exactly one row at %s", files, organizedRel)
+	if len(files) != 1 || files[0].ID != original.ID || files[0].Path != organizedRel {
+		t.Fatalf("movie files = %+v, want the original row at %s", files, organizedRel)
+	}
+	if !h.exists(organizedRel) {
+		t.Errorf("re-import removed the existing library file at %s", organizedRel)
 	}
 	if !h.exists(movieDownloadFile) {
 		t.Errorf("download data disappeared across the re-import")
 	}
+}
+
+func TestImportDownloadReplacesMovieAfterVerification(t *testing.T) {
+	h := newHarness(t)
+	mv := addMovieItem(h)
+	ctx := context.Background()
+
+	oldParse := movieParse("Big Buck Bunny", 2008)
+	oldParse.Quality = core.Quality720p
+	h.parser[filepath.Base(movieDownloadFile)] = oldParse
+	oldGrab := h.grabFor(core.GrabInfo{MovieID: mv.ID})
+	if err := h.mgr.ImportDownload(ctx, movieDownload(h, "old movie bytes"), oldGrab); err != nil {
+		t.Fatalf("old ImportDownload: %v", err)
+	}
+
+	const upgradeFile = "incomplete/Big.Buck.Bunny.2008.1080p/Big.Buck.Bunny.2008.1080p.mkv"
+	h.parser[filepath.Base(upgradeFile)] = movieParse("Big Buck Bunny", 2008)
+	h.writeVideo(upgradeFile, "new movie bytes")
+	upgradeGrab := h.grabFor(core.GrabInfo{MovieID: mv.ID, ReleaseTitle: "Big Buck Bunny 1080p"})
+	if err := h.mgr.ImportDownload(ctx, core.DownloadStatus{ID: "upgrade", State: core.DownloadSeeding, SavePath: upgradeFile}, upgradeGrab); err != nil {
+		t.Fatalf("upgrade ImportDownload: %v", err)
+	}
+
+	const replacement = "library/Movies/Big Buck Bunny (2008)/Big Buck Bunny (2008) (1).mkv"
+	if h.exists(organizedRel) {
+		t.Errorf("superseded movie remains at %s", organizedRel)
+	}
+	if got := h.read(replacement); got != "new movie bytes" {
+		t.Errorf("replacement content = %q, want new movie bytes", got)
+	}
+	files, err := h.st.ListMediaFilesForMovie(ctx, mv.ID)
+	if err != nil {
+		t.Fatalf("ListMediaFilesForMovie: %v", err)
+	}
+	if len(files) != 1 || files[0].Path != replacement || files[0].Quality != core.Quality1080p {
+		t.Fatalf("movie files = %+v, want one 1080p replacement at %s", files, replacement)
+	}
+	if !eventMessageContains(h.events(), "Upgraded Big Buck Bunny (2008) to 1080p (was 720p)") {
+		t.Errorf("events = %+v, want an upgrade record", h.events())
+	}
+}
+
+func TestImportDownloadKeepsMovieWhenReplacementCannotBeVerified(t *testing.T) {
+	h := newHarness(t)
+	mv := addMovieItem(h)
+	ctx := context.Background()
+
+	oldParse := movieParse("Big Buck Bunny", 2008)
+	oldParse.Quality = core.Quality720p
+	h.parser[filepath.Base(movieDownloadFile)] = oldParse
+	if err := h.mgr.ImportDownload(ctx, movieDownload(h, "old movie bytes"), h.grabFor(core.GrabInfo{MovieID: mv.ID})); err != nil {
+		t.Fatalf("old ImportDownload: %v", err)
+	}
+
+	const upgradeFile = "incomplete/Big.Buck.Bunny.2008.1080p/Big.Buck.Bunny.2008.1080p.mkv"
+	h.parser[filepath.Base(upgradeFile)] = movieParse("Big Buck Bunny", 2008)
+	h.writeVideo(upgradeFile, "new movie bytes")
+	h.mgr.link = func(_ string, dst string) error {
+		return os.WriteFile(dst, []byte("short"), 0o644)
+	}
+	err := h.mgr.ImportDownload(ctx, core.DownloadStatus{ID: "broken-upgrade", State: core.DownloadSeeding, SavePath: upgradeFile}, h.grabFor(core.GrabInfo{MovieID: mv.ID}))
+	if err == nil || !strings.Contains(err.Error(), "verify imported file") {
+		t.Fatalf("broken upgrade error = %v, want verification failure", err)
+	}
+
+	if got := h.read(organizedRel); got != "old movie bytes" {
+		t.Errorf("old movie content = %q, want it retained after verification failure", got)
+	}
+	files, err := h.st.ListMediaFilesForMovie(ctx, mv.ID)
+	if err != nil {
+		t.Fatalf("ListMediaFilesForMovie: %v", err)
+	}
+	if len(files) != 2 || !mediaFilePathExists(files, organizedRel) {
+		t.Fatalf("movie files = %+v, want the old row retained until verification succeeds", files)
+	}
+}
+
+func TestImportDownloadReplacesMovieWithDowngrade(t *testing.T) {
+	h := newHarness(t)
+	mv := addMovieItem(h)
+	ctx := context.Background()
+
+	if err := h.mgr.ImportDownload(ctx, movieDownload(h, "old movie bytes"), h.grabFor(core.GrabInfo{MovieID: mv.ID})); err != nil {
+		t.Fatalf("old ImportDownload: %v", err)
+	}
+	const downgradeFile = "incomplete/Big.Buck.Bunny.2008.720p/Big.Buck.Bunny.2008.720p.mkv"
+	downgradeParse := movieParse("Big Buck Bunny", 2008)
+	downgradeParse.Quality = core.Quality720p
+	h.parser[filepath.Base(downgradeFile)] = downgradeParse
+	h.writeVideo(downgradeFile, "downgraded movie bytes")
+	if err := h.mgr.ImportDownload(ctx, core.DownloadStatus{ID: "downgrade", State: core.DownloadSeeding, SavePath: downgradeFile}, h.grabFor(core.GrabInfo{MovieID: mv.ID})); err != nil {
+		t.Fatalf("downgrade ImportDownload: %v", err)
+	}
+
+	if !eventMessageContains(h.events(), "Replaced Big Buck Bunny (2008) with 720p (was 1080p; same or lower quality)") {
+		t.Errorf("events = %+v, want an honest downgrade record", h.events())
+	}
+	files, err := h.st.ListMediaFilesForMovie(ctx, mv.ID)
+	if err != nil {
+		t.Fatalf("ListMediaFilesForMovie: %v", err)
+	}
+	if len(files) != 1 || files[0].Quality != core.Quality720p {
+		t.Fatalf("movie files = %+v, want one downgraded replacement", files)
+	}
+}
+
+func eventMessageContains(events []core.Event, want string) bool {
+	for _, event := range events {
+		if strings.Contains(event.Message, want) {
+			return true
+		}
+	}
+	return false
+}
+
+func mediaFilePathExists(files []core.MediaFile, want string) bool {
+	for _, file := range files {
+		if file.Path == want {
+			return true
+		}
+	}
+	return false
 }
 
 // TestImportDownloadSkipsAnAlreadyImportedGrab is the cheap half of the same
@@ -335,9 +464,51 @@ func TestImportDownloadPicksTheFeature(t *testing.T) {
 	}
 }
 
-// TestImportDownloadSeasonPack: one download, many episodes — each imported
-// and linked on its own, with the files the grab did not ask for parked
-// instead of taking the rest down with them.
+// TestImportDownloadReplacesEpisodeFile proves an episode import removes the
+// prior file only after its replacement has a verified media row and link.
+func TestImportDownloadReplacesEpisodeFile(t *testing.T) {
+	h := newHarness(t)
+	sr := addSeriesItem(h)
+	ctx := context.Background()
+	episode := episodeID(h, sr.ID, 1, 1)
+
+	const oldFile = "incomplete/Planet.Earth.II.S01E01.720p/Planet.Earth.II.S01E01.720p.mkv"
+	oldParse := episodeParse("Planet Earth II", 1, 1)
+	oldParse.Quality = core.Quality720p
+	h.parser[filepath.Base(oldFile)] = oldParse
+	h.writeVideo(oldFile, "old episode bytes")
+	if err := h.mgr.ImportDownload(ctx, core.DownloadStatus{ID: "old-episode", State: core.DownloadSeeding, SavePath: oldFile}, h.grabFor(core.GrabInfo{SeriesID: sr.ID, SeasonNum: 1, EpisodeIDs: []int64{episode}})); err != nil {
+		t.Fatalf("old ImportDownload: %v", err)
+	}
+
+	const newFile = "incomplete/Planet.Earth.II.S01E01.1080p/Planet.Earth.II.S01E01.1080p.mkv"
+	h.parser[filepath.Base(newFile)] = episodeParse("Planet Earth II", 1, 1)
+	h.writeVideo(newFile, "new episode bytes")
+	if err := h.mgr.ImportDownload(ctx, core.DownloadStatus{ID: "new-episode", State: core.DownloadSeeding, SavePath: newFile}, h.grabFor(core.GrabInfo{SeriesID: sr.ID, SeasonNum: 1, EpisodeIDs: []int64{episode}})); err != nil {
+		t.Fatalf("new ImportDownload: %v", err)
+	}
+
+	const (
+		oldOrganized = "library/TV/Planet Earth II (2016)/Season 01/Planet Earth II (2016) - S01E01 - Islands.mkv"
+		replacement  = "library/TV/Planet Earth II (2016)/Season 01/Planet Earth II (2016) - S01E01 - Islands (1).mkv"
+	)
+	if h.exists(oldOrganized) {
+		t.Errorf("superseded episode remains at %s", oldOrganized)
+	}
+	linked, err := h.st.ListMediaFilesForEpisode(ctx, episode)
+	if err != nil {
+		t.Fatalf("ListMediaFilesForEpisode: %v", err)
+	}
+	if len(linked) != 1 || linked[0].Path != replacement || linked[0].Quality != core.Quality1080p {
+		t.Fatalf("episode files = %+v, want the 1080p replacement at %s", linked, replacement)
+	}
+	if !eventMessageContains(h.events(), "Upgraded file for Planet Earth II S01E01 to 1080p (was 720p)") {
+		t.Errorf("events = %+v, want an episode upgrade record", h.events())
+	}
+}
+
+// TestImportDownloadSeasonPack proves a directory can carry several episodes:
+// each matching file imports independently, while unrelated files park.
 func TestImportDownloadSeasonPack(t *testing.T) {
 	h := newHarness(t)
 	sr := addSeriesItem(h)
@@ -411,6 +582,52 @@ func TestImportDownloadSeasonPack(t *testing.T) {
 	// Two files landed, so the grab did its job even though two others parked.
 	if got := h.grabStatus(grab.GrabID); got != core.GrabStatusImported {
 		t.Errorf("grab status = %q, want %q", got, core.GrabStatusImported)
+	}
+}
+
+func TestImportDownloadSeasonPackLinksMultiEpisodeFileToEveryEpisode(t *testing.T) {
+	h := newHarness(t)
+	meta := seedSeries(h)
+	meta.Seasons[0].Episodes = meta.Seasons[0].Episodes[:2]
+	h.provider.seriesByID[meta.TMDBID] = meta
+	sr, err := h.mgr.AddSeries(context.Background(), meta.TMDBID)
+	if err != nil {
+		t.Fatalf("AddSeries: %v", err)
+	}
+
+	const file = "incomplete/Planet.Earth.II.S01.1080p/Planet.Earth.II.S01E01E02.1080p.mkv"
+	h.parser[filepath.Base(file)] = episodeParse("Planet Earth II", 1, 1, 2)
+	h.writeVideo(file, "combined episode bytes")
+	grab := h.grabFor(core.GrabInfo{
+		SeriesID:     sr.ID,
+		SeasonNum:    1,
+		EpisodeIDs:   []int64{episodeID(h, sr.ID, 1, 1), episodeID(h, sr.ID, 1, 2)},
+		ReleaseTitle: "Planet Earth II season 1",
+	})
+	if err := h.mgr.ImportDownload(context.Background(), core.DownloadStatus{ID: "multi-episode", State: core.DownloadSeeding, SavePath: file}, grab); err != nil {
+		t.Fatalf("ImportDownload: %v", err)
+	}
+
+	const organized = "library/TV/Planet Earth II (2016)/Season 01/Planet Earth II (2016) - S01E01-E02 - Islands + Mountains.mkv"
+	files, err := h.st.ListMediaFiles(context.Background())
+	if err != nil {
+		t.Fatalf("ListMediaFiles: %v", err)
+	}
+	if len(files) != 1 || files[0].Path != organized {
+		t.Fatalf("media files = %+v, want one shared row at %s", files, organized)
+	}
+	for _, number := range []int{1, 2} {
+		episode, err := h.st.GetEpisodeByNumber(context.Background(), sr.ID, 1, number)
+		if err != nil {
+			t.Fatalf("GetEpisodeByNumber(%d): %v", number, err)
+		}
+		linked, err := h.st.ListMediaFilesForEpisode(context.Background(), episode.ID)
+		if err != nil {
+			t.Fatalf("ListMediaFilesForEpisode(%d): %v", number, err)
+		}
+		if len(linked) != 1 || linked[0].ID != files[0].ID {
+			t.Errorf("S01E%02d links = %+v, want the shared media row", number, linked)
+		}
 	}
 }
 

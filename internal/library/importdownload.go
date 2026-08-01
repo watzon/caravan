@@ -13,6 +13,7 @@ import (
 
 	"github.com/watzon/caravan/internal/core"
 	"github.com/watzon/caravan/internal/store"
+	"github.com/watzon/caravan/internal/wanted"
 )
 
 // ReasonImport is the park reason for a finished download's file the import
@@ -148,12 +149,24 @@ func (m *Manager) importDownloadedMovie(ctx context.Context, files []downloadedF
 		return 0, 1, nil
 	}
 
+	existing, err := m.store.ListMediaFilesForMovie(ctx, grab.MovieID)
+	if err != nil {
+		return 0, 0, err
+	}
+
 	var warnings []string
 	warn := func(format string, args ...any) {
 		warnings = append(warnings, fmt.Sprintf(format, args...))
 	}
 	rel, movieID, err := m.importMovie(ctx, meta, file.rel, file.size, p, warn, keepSource)
 	if err != nil {
+		return 0, 0, err
+	}
+	newFile, err := m.verifyMovieImport(ctx, rel, file.size, movieID)
+	if err != nil {
+		return 0, 0, err
+	}
+	if err := m.replaceMovieFiles(ctx, meta, file.rel, existing, newFile, grab, movieID); err != nil {
 		return 0, 0, err
 	}
 	if err := m.recordImport(ctx, rel, grab, movieID, 0, warnings); err != nil {
@@ -192,6 +205,11 @@ func (m *Manager) importDownloadedEpisodes(ctx context.Context, files []download
 			continue
 		}
 
+		existing, err := m.existingEpisodeFiles(ctx, grab, p)
+		if err != nil {
+			return imported, parked, err
+		}
+
 		var warnings []string
 		warn := func(format string, args ...any) {
 			warnings = append(warnings, fmt.Sprintf(format, args...))
@@ -200,12 +218,212 @@ func (m *Manager) importDownloadedEpisodes(ctx context.Context, files []download
 		if err != nil {
 			return imported, parked, err
 		}
+		newFile, err := m.verifyEpisodeImport(ctx, rel, file.size, seriesID, p)
+		if err != nil {
+			return imported, parked, err
+		}
+		if err := m.replaceEpisodeFiles(ctx, meta, file.rel, existing, newFile, grab, seriesID, p); err != nil {
+			return imported, parked, err
+		}
 		if err := m.recordImport(ctx, rel, grab, 0, seriesID, warnings); err != nil {
 			return imported, parked, err
 		}
 		imported++
 	}
 	return imported, parked, nil
+}
+
+// existingEpisodeFiles returns the files currently linked to the exact
+// episodes a parsed release covers. The lookup happens before placement so an
+// import can replace those files only after its own row and links exist.
+func (m *Manager) existingEpisodeFiles(ctx context.Context, grab core.GrabInfo, p core.ParsedRelease) ([]core.MediaFile, error) {
+	filesByID := make(map[int64]core.MediaFile)
+	for _, id := range grab.EpisodeIDs {
+		episode, err := m.store.GetEpisode(ctx, id)
+		if errors.Is(err, store.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if episode.SeasonNumber != p.Season || !containsEpisode(p.Episodes, episode.EpisodeNumber) {
+			continue
+		}
+		files, err := m.store.ListMediaFilesForEpisode(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		for _, file := range files {
+			filesByID[file.ID] = file
+		}
+	}
+
+	out := make([]core.MediaFile, 0, len(filesByID))
+	for _, file := range filesByID {
+		out = append(out, file)
+	}
+	return out, nil
+}
+
+func containsEpisode(episodes []int, want int) bool {
+	for _, episode := range episodes {
+		if episode == want {
+			return true
+		}
+	}
+	return false
+}
+
+// verifyImportedFile confirms that the filesystem and media_files row agree
+// before an import removes any earlier file. The store is a cache, but it must
+// describe the verified destination before it can safely supersede an old row.
+func (m *Manager) verifyImportedFile(ctx context.Context, rel string, expectedSize int64) (*core.MediaFile, error) {
+	info, err := os.Stat(m.abs(rel))
+	if err != nil {
+		return nil, fmt.Errorf("library: verify imported file %s: %w", rel, err)
+	}
+	if info.Size() != expectedSize {
+		return nil, fmt.Errorf("library: verify imported file %s: size %d, want %d", rel, info.Size(), expectedSize)
+	}
+	file, err := m.store.GetMediaFileByPath(ctx, rel)
+	if err != nil {
+		return nil, err
+	}
+	if file.Size != expectedSize {
+		return nil, fmt.Errorf("library: verify media file %s: size %d, want %d", rel, file.Size, expectedSize)
+	}
+	return file, nil
+}
+
+// verifyMovieImport confirms the verified media row belongs to the grabbed
+// movie, not merely to the path that happened to receive the file.
+func (m *Manager) verifyMovieImport(ctx context.Context, rel string, expectedSize, movieID int64) (*core.MediaFile, error) {
+	file, err := m.verifyImportedFile(ctx, rel, expectedSize)
+	if err != nil {
+		return nil, err
+	}
+	if file.MovieID != movieID {
+		return nil, fmt.Errorf("library: verify media file %s belongs to movie %d, want %d", rel, file.MovieID, movieID)
+	}
+	return file, nil
+}
+
+// verifyEpisodeImport also confirms every covered episode points to the new
+// media row. A multi-episode file is one row with several links, so checking
+// only the path would permit a partially linked season-pack import.
+func (m *Manager) verifyEpisodeImport(ctx context.Context, rel string, expectedSize, seriesID int64, p core.ParsedRelease) (*core.MediaFile, error) {
+	file, err := m.verifyImportedFile(ctx, rel, expectedSize)
+	if err != nil {
+		return nil, err
+	}
+	for _, number := range p.Episodes {
+		episode, err := m.store.GetEpisodeByNumber(ctx, seriesID, p.Season, number)
+		if err != nil {
+			return nil, err
+		}
+		files, err := m.store.ListMediaFilesForEpisode(ctx, episode.ID)
+		if err != nil {
+			return nil, err
+		}
+		if !containsMediaFile(files, file.ID) {
+			return nil, fmt.Errorf("library: verify episode S%02dE%02d links to %s", p.Season, number, rel)
+		}
+	}
+	return file, nil
+}
+
+func containsMediaFile(files []core.MediaFile, want int64) bool {
+	for _, file := range files {
+		if file.ID == want {
+			return true
+		}
+	}
+	return false
+}
+
+// replaceMovieFiles removes each prior movie file only after the replacement
+// is verified, and writes an explicit history record for the quality decision.
+func (m *Manager) replaceMovieFiles(ctx context.Context, meta *core.MovieMeta, sourceRel string, existing []core.MediaFile, newFile *core.MediaFile, grab core.GrabInfo, movieID int64) error {
+	label := meta.Title
+	if meta.Year > 0 {
+		label = fmt.Sprintf("%s (%d)", meta.Title, meta.Year)
+	}
+	return m.removeSupersededFiles(ctx, sourceRel, existing, newFile, func(old core.MediaFile) *core.Event {
+		return replacementEvent(label, old.Quality, newFile.Quality, grab, movieID, 0)
+	})
+}
+
+// replaceEpisodeFiles is the episode counterpart of replaceMovieFiles. Every
+// file covered by a multi-episode release is handled once, even though it can
+// have appeared in the old-file lookup for several episode links.
+func (m *Manager) replaceEpisodeFiles(ctx context.Context, meta *core.SeriesMeta, sourceRel string, existing []core.MediaFile, newFile *core.MediaFile, grab core.GrabInfo, seriesID int64, p core.ParsedRelease) error {
+	label := fmt.Sprintf("%s %s", meta.Title, episodeTag(p.Season, p.Episodes))
+	return m.removeSupersededFiles(ctx, sourceRel, existing, newFile, func(old core.MediaFile) *core.Event {
+		return replacementEvent("file for "+label, old.Quality, newFile.Quality, grab, 0, seriesID)
+	})
+}
+
+// removeSupersededFiles makes replacement idempotent. In particular, a
+// redelivered import sees its source hardlinked to the existing library file
+// and must not delete the row that describes that file.
+func (m *Manager) removeSupersededFiles(ctx context.Context, sourceRel string, existing []core.MediaFile, newFile *core.MediaFile, eventFor func(core.MediaFile) *core.Event) error {
+	seen := make(map[int64]bool)
+	for _, old := range existing {
+		if seen[old.ID] {
+			continue
+		}
+		seen[old.ID] = true
+		same, err := m.sameImportedFile(sourceRel, old, *newFile)
+		if err != nil {
+			return err
+		}
+		if same {
+			continue
+		}
+		if err := os.Remove(m.abs(old.Path)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("library: remove superseded file %s: %w", old.Path, err)
+		}
+		if err := m.store.DeleteMediaFileByPath(ctx, old.Path); err != nil {
+			return err
+		}
+		if err := m.store.InsertEvent(ctx, eventFor(old)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *Manager) sameImportedFile(sourceRel string, old, new core.MediaFile) (bool, error) {
+	if old.ID == new.ID || old.Path == new.Path {
+		return true, nil
+	}
+	source, err := os.Stat(m.abs(sourceRel))
+	if err != nil {
+		return false, fmt.Errorf("library: stat import source %s: %w", sourceRel, err)
+	}
+	oldInfo, err := os.Stat(m.abs(old.Path))
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("library: stat existing library file %s: %w", old.Path, err)
+	}
+	return os.SameFile(source, oldInfo), nil
+}
+
+func replacementEvent(target, oldQuality, newQuality string, grab core.GrabInfo, movieID, seriesID int64) *core.Event {
+	message := fmt.Sprintf("Replaced %s with %s (was %s; same or lower quality)", target, newQuality, oldQuality)
+	if wanted.IsUpgrade(newQuality, oldQuality) {
+		message = fmt.Sprintf("Upgraded %s to %s (was %s)", target, newQuality, oldQuality)
+	}
+	return &core.Event{
+		Level:    core.EventLevelInfo,
+		Category: EventCategoryImport,
+		Message:  message,
+		Detail:   grabLabel(grab),
+		MovieID:  movieID,
+		SeriesID: seriesID,
+	}
 }
 
 // movieMeta resolves the provider metadata for a grabbed movie.
