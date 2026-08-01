@@ -127,6 +127,9 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("POST /downloads/{id}/pause", s.handlePauseDownload)
 	api.HandleFunc("POST /downloads/{id}/resume", s.handleResumeDownload)
 	api.HandleFunc("DELETE /downloads/{id}", s.handleDeleteDownload)
+	// Per-download insight and rate limits (PLAN phase 3, task 10).
+	api.HandleFunc("GET /downloads/{id}/insight", s.handleDownloadInsight)
+	api.HandleFunc("PUT /downloads/{id}/limits", s.handleSetDownloadLimits)
 
 	// Artwork the organizer wrote into the storage root, addressed by the same
 	// relative path the library rows carry.
