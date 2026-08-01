@@ -17,6 +17,7 @@
       '<path d="M22 12H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/><path d="M6 16h.01M10 16h.01"/>',
     pulse: '<path d="M22 12h-4l-3 9L9 3l-3 9H2"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
+    minus: '<path d="M5 12h14"/>',
     check: '<path d="M20 6 9 17l-5-5"/>',
     close: '<path d="M18 6 6 18M6 6l12 12"/>',
     chevronDown: '<path d="m6 9 6 6 6-6"/>',

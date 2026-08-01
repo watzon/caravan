@@ -147,21 +147,40 @@ func (c *Client) SearchTV(ctx context.Context, q string, season, episode int, ca
 // so it must fail loudly on bad credentials rather than reporting a healthy
 // indexer that returns nothing.
 func (c *Client) Test(ctx context.Context) error {
+	_, err := c.caps(ctx)
+	return err
+}
+
+// Categories returns the category tree the indexer advertises in its
+// capabilities document, for the settings UI to offer as a picker. An indexer
+// that advertises none returns an empty tree, not an error — the picker falls
+// back to manual entry.
+func (c *Client) Categories(ctx context.Context) ([]core.IndexerCategory, error) {
+	caps, err := c.caps(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return categoryTree(caps.Categories), nil
+}
+
+// caps fetches and validates the capabilities document, shared by Test and
+// Categories.
+func (c *Client) caps(ctx context.Context) (*capsDoc, error) {
 	body, err := c.fetch(ctx, url.Values{"t": {"caps"}})
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	var caps capsDoc
 	if err := decodeDoc(body, "caps", &caps); err != nil {
-		return fmt.Errorf("indexer %s: %w: caps: %v", c.cfg.Name, ErrBadResponse, err)
+		return nil, fmt.Errorf("indexer %s: %w: caps: %v", c.cfg.Name, ErrBadResponse, err)
 	}
 	// A caps document with no search modes at all is not an indexer Caravan
 	// can use, whatever else it claims to be.
 	if len(caps.Searching.Modes) == 0 {
-		return fmt.Errorf("indexer %s: %w: caps advertises no search modes", c.cfg.Name, ErrBadResponse)
+		return nil, fmt.Errorf("indexer %s: %w: caps advertises no search modes", c.cfg.Name, ErrBadResponse)
 	}
-	return nil
+	return &caps, nil
 }
 
 // search issues one query and converts the feed into releases.

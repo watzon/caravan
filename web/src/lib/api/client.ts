@@ -10,6 +10,7 @@ import type {
   DownloadStatus,
   GrabRequest,
   Indexer,
+  IndexerCategory,
   IndexerInput,
   MatchRequest,
   Movie,
@@ -62,6 +63,7 @@ export const endpoints = {
   indexers: () => `${API_BASE}/indexers`,
   indexer: (id: number) => `${API_BASE}/indexers/${id}`,
   indexerTest: (id: number) => `${API_BASE}/indexers/${id}/test`,
+  indexerCategories: () => `${API_BASE}/indexers/categories`,
   movieReleases: (id: number) => `${API_BASE}/library/movies/${id}/releases`,
   movieGrab: (id: number) => `${API_BASE}/library/movies/${id}/grab`,
   seriesReleases: (id: number) => `${API_BASE}/library/series/${id}/releases`,
@@ -297,6 +299,18 @@ export const api = {
    */
   testIndexer: (id: number) =>
     request<void>(endpoints.indexerTest(id), { method: 'POST' }),
+
+  /**
+   * Fetch the category tree an indexer advertises. Takes the form's current
+   * values rather than a stored id so the picker works while the indexer is
+   * still being typed in, before it is saved.
+   */
+  indexerCategories: (body: Pick<IndexerInput, 'url' | 'api_key' | 'type'>, signal?: AbortSignal) =>
+    request<{ categories: IndexerCategory[] }>(endpoints.indexerCategories(), {
+      method: 'POST',
+      body,
+      signal,
+    }).then((payload) => payload?.categories ?? []),
 
   /**
    * Interactive search (SPEC §9 step 4). The server fans out across enabled

@@ -9,7 +9,7 @@
    */
   import { onMount } from 'svelte';
   import { api, errorText } from '../api/client';
-  import type { Indexer, IndexerInput, IndexerType } from '../api/types';
+  import type { Indexer, IndexerCategory, IndexerInput, IndexerType } from '../api/types';
   import {
     INDEXER_TYPES,
     formatCategories,
@@ -19,6 +19,7 @@
   import { pushToast } from '../state/toast.svelte';
   import Badge from './Badge.svelte';
   import Button from './Button.svelte';
+  import CategoryPicker from './CategoryPicker.svelte';
   import EmptyState from './EmptyState.svelte';
   import Field from './Field.svelte';
   import Icon from './Icon.svelte';
@@ -51,6 +52,56 @@
   let categories = $state('');
   let enabled = $state(true);
 
+  /**
+   * The category tree the indexer advertises (null = not loaded), and the ids
+   * picked from it. While the tree is unloaded — or the indexer advertises
+   * none — the free-text `categories` field above stays the editing surface,
+   * so a save never depends on the indexer being reachable.
+   */
+  let categoryTree = $state<IndexerCategory[] | null>(null);
+  let selectedCategories = $state<number[]>([]);
+  let categoriesLoading = $state(false);
+  let categoriesError = $state<string | null>(null);
+  let categoriesAbort: AbortController | null = null;
+
+  let treeUsable = $derived(categoryTree !== null && categoryTree.length > 0);
+
+  function resetCategoryPicker() {
+    categoriesAbort?.abort();
+    categoriesAbort = null;
+    categoryTree = null;
+    selectedCategories = [];
+    categoriesLoading = false;
+    categoriesError = null;
+  }
+
+  async function loadCategories() {
+    categoriesAbort?.abort();
+    const ac = new AbortController();
+    categoriesAbort = ac;
+    categoriesLoading = true;
+    categoriesError = null;
+    // Whatever was typed by hand carries into the picker as the selection.
+    if (categoryTree === null) selectedCategories = parseCategories(categories);
+
+    try {
+      const tree = await api.indexerCategories(
+        { url: url.trim(), api_key: apiKey.trim(), type },
+        ac.signal,
+      );
+      if (categoriesAbort !== ac) return;
+      categoryTree = tree;
+      if (tree.length === 0) {
+        categoriesError = 'This indexer advertises no categories — enter ids by hand.';
+      }
+    } catch (err) {
+      if (categoriesAbort !== ac) return;
+      categoriesError = errorText(err);
+    } finally {
+      if (categoriesAbort === ac) categoriesLoading = false;
+    }
+  }
+
   async function load() {
     loading = true;
     try {
@@ -74,6 +125,7 @@
     apiKey = '';
     categories = '';
     enabled = true;
+    resetCategoryPicker();
   }
 
   function openEdit(indexer: Indexer) {
@@ -85,11 +137,16 @@
     apiKey = indexer.api_key;
     categories = formatCategories(indexer.categories);
     enabled = indexer.enabled;
+    resetCategoryPicker();
+    selectedCategories = indexer.categories;
+    // Best effort: a failure leaves the free-text field as the editor.
+    void loadCategories();
   }
 
   function closeForm() {
     editingID = null;
     formError = null;
+    resetCategoryPicker();
   }
 
   async function save() {
@@ -104,7 +161,7 @@
       type,
       url: url.trim(),
       api_key: apiKey.trim(),
-      categories: parseCategories(categories),
+      categories: treeUsable ? selectedCategories : parseCategories(categories),
       enabled,
     };
 
@@ -294,9 +351,37 @@
 
       <Field
         label="Categories"
-        for="indexer-categories"
-        help="Indexer category ids to search, comma separated. Leave empty to let Caravan choose per search.">
-        <TextInput id="indexer-categories" bind:value={categories} mono placeholder="2000, 5000" />
+        for={treeUsable ? undefined : 'indexer-categories'}
+        help={treeUsable
+          ? 'Pick what Caravan searches on this indexer. Nothing selected means Caravan chooses per search.'
+          : 'Load the list from the indexer, or enter category ids by hand. Empty means Caravan chooses per search.'}>
+        <div class="flex flex-col gap-2">
+          {#if treeUsable && categoryTree}
+            <CategoryPicker
+              tree={categoryTree}
+              selected={selectedCategories}
+              onchange={(ids) => (selectedCategories = ids)} />
+          {:else}
+            <TextInput id="indexer-categories" bind:value={categories} mono placeholder="2000, 5000" />
+          {/if}
+          <div class="flex flex-wrap items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={categoriesLoading || url.trim() === ''}
+              onclick={loadCategories}>
+              <Icon name="refresh" size={14} />
+              {categoriesLoading
+                ? 'Loading…'
+                : treeUsable
+                  ? 'Reload from indexer'
+                  : 'Load from indexer'}
+            </Button>
+            {#if categoriesError}
+              <p class="text-sm text-danger">{categoriesError}</p>
+            {/if}
+          </div>
+        </div>
       </Field>
 
       <Toggle

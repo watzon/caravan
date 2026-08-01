@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -468,6 +469,64 @@ func TestTestAcceptsBothCapsFlavors(t *testing.T) {
 				t.Errorf("caps request = t=%q apikey=%q, want t=caps with the configured key", got.Get("t"), got.Get("apikey"))
 			}
 		})
+	}
+}
+
+func TestCategoriesParsesAdvertisedTree(t *testing.T) {
+	c, s := newStub(t, torznabCfg(), map[string]response{"caps": ok(t, "torznab_caps.xml")})
+
+	got, err := c.Categories(context.Background())
+	if err != nil {
+		t.Fatalf("Categories: %v", err)
+	}
+	want := []core.IndexerCategory{
+		{ID: 2000, Name: "Movies", Subcats: []core.IndexerCategory{
+			{ID: 2040, Name: "Movies/HD", Subcats: []core.IndexerCategory{}},
+			{ID: 2045, Name: "Movies/UHD", Subcats: []core.IndexerCategory{}},
+		}},
+		{ID: 5000, Name: "TV", Subcats: []core.IndexerCategory{
+			{ID: 5040, Name: "TV/HD", Subcats: []core.IndexerCategory{}},
+			{ID: 5045, Name: "TV/UHD", Subcats: []core.IndexerCategory{}},
+		}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Categories = %+v, want %+v", got, want)
+	}
+	if got := s.seen()[0]; got.Get("t") != "caps" {
+		t.Errorf("request t = %q, want caps", got.Get("t"))
+	}
+}
+
+// TestCategoriesDropsUnusableNodes feeds a caps document with the id shapes
+// real indexers publish — flat lists, non-numeric ids, zero, padding — and
+// asserts only offerable nodes survive. A node without a numeric id takes its
+// subtree with it: an id is the one thing a selection can store.
+func TestCategoriesDropsUnusableNodes(t *testing.T) {
+	c, _ := newStub(t, torznabCfg(), map[string]response{"caps": ok(t, "caps_messy_categories.xml")})
+
+	got, err := c.Categories(context.Background())
+	if err != nil {
+		t.Fatalf("Categories: %v", err)
+	}
+	want := []core.IndexerCategory{
+		{ID: 5070, Name: "Anime", Subcats: []core.IndexerCategory{}},
+		{ID: 2020, Name: "Anime Movies", Subcats: []core.IndexerCategory{}},
+		{ID: 8010, Name: "Padded", Subcats: []core.IndexerCategory{
+			{ID: 8020, Name: "Good child", Subcats: []core.IndexerCategory{}},
+		}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Categories = %+v, want %+v", got, want)
+	}
+}
+
+func TestCategoriesRejectsUnusableCaps(t *testing.T) {
+	c, _ := newStub(t, torznabCfg(), map[string]response{
+		"caps": {status: http.StatusOK, body: readFixture(nil, "caps_no_modes.xml")},
+	})
+
+	if _, err := c.Categories(context.Background()); !errors.Is(err, ErrBadResponse) {
+		t.Fatalf("Categories error = %v, want ErrBadResponse", err)
 	}
 }
 

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"testing"
@@ -175,6 +176,65 @@ func TestIndexerTest(t *testing.T) {
 	if failure.Error == "" || !strings.Contains(failure.Error, "401") {
 		t.Fatalf("error = %q, want the indexer's own failure in it", failure.Error)
 	}
+}
+
+// TestIndexerCategories drives the endpoint the settings picker is built on:
+// the configuration arrives in the body, unsaved, because the form needs the
+// tree before the indexer exists to have an id.
+func TestIndexerCategories(t *testing.T) {
+	h, _, _, fake := newAcquisitionServer(t)
+
+	fake.servesCategories("anime",
+		core.IndexerCategory{ID: 5070, Name: "Anime", Subcats: []core.IndexerCategory{}},
+		core.IndexerCategory{ID: 2020, Name: "Anime Movies", Subcats: []core.IndexerCategory{}},
+	)
+
+	body := fmt.Sprintf(`{"url":%q,"type":"torznab","api_key":"k"}`, fake.url("anime"))
+	rec := do(t, h, http.MethodPost, "/api/v1/indexers/categories", body)
+	wantStatus(t, rec, http.StatusOK)
+	var got struct {
+		Categories []core.IndexerCategory `json:"categories"`
+	}
+	decodeBody(t, rec, &got)
+	if len(got.Categories) != 2 || got.Categories[0].ID != 5070 || got.Categories[1].ID != 2020 {
+		t.Fatalf("categories = %+v, want the advertised tree", got.Categories)
+	}
+
+	// An indexer advertising no categories is an empty list, never null: the
+	// picker distinguishes "none advertised" from "request failed".
+	fake.servesCategories("bare")
+	body = fmt.Sprintf(`{"url":%q,"type":"torznab"}`, fake.url("bare"))
+	rec = do(t, h, http.MethodPost, "/api/v1/indexers/categories", body)
+	wantStatus(t, rec, http.StatusOK)
+	if s := rec.Body.String(); !strings.Contains(s, `"categories":[]`) {
+		t.Fatalf("body = %s, want an empty categories array", s)
+	}
+
+	// The indexer's own failure must survive to the response, as on /test.
+	fake.breaks("anime")
+	body = fmt.Sprintf(`{"url":%q,"type":"torznab"}`, fake.url("anime"))
+	rec = do(t, h, http.MethodPost, "/api/v1/indexers/categories", body)
+	wantStatus(t, rec, http.StatusBadGateway)
+	var failure errorResponse
+	decodeBody(t, rec, &failure)
+	if !strings.Contains(failure.Error, "401") {
+		t.Fatalf("error = %q, want the indexer's own failure in it", failure.Error)
+	}
+
+	// A body that cannot configure a client is the user's mistake, not a
+	// gateway failure.
+	rec = do(t, h, http.MethodPost, "/api/v1/indexers/categories", `{"url":"","type":"torznab"}`)
+	wantStatus(t, rec, http.StatusBadRequest)
+	wantErrorBody(t, rec)
+}
+
+func TestIndexerCategoriesWithoutClientFactory(t *testing.T) {
+	h, _, _ := newTestServer(t)
+
+	rec := do(t, h, http.MethodPost, "/api/v1/indexers/categories",
+		`{"url":"https://a.example","type":"torznab"}`)
+	wantStatus(t, rec, http.StatusServiceUnavailable)
+	wantErrorBody(t, rec)
 }
 
 // Without a client factory the endpoint has to say the feature is not

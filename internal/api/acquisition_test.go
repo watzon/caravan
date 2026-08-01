@@ -140,10 +140,11 @@ func (p *stubEngineProvider) Name() string { return "stub" }
 type fakeIndexer struct {
 	server *httptest.Server
 
-	mu        sync.Mutex
-	responses map[string][]core.Release
-	broken    map[string]bool
-	searches  []fakeSearch
+	mu         sync.Mutex
+	responses  map[string][]core.Release
+	categories map[string][]core.IndexerCategory
+	broken     map[string]bool
+	searches   []fakeSearch
 }
 
 // fakeSearch is one recorded query, so a test can assert what the handler
@@ -157,8 +158,9 @@ type fakeSearch struct {
 func newFakeIndexer(t *testing.T) *fakeIndexer {
 	t.Helper()
 	f := &fakeIndexer{
-		responses: map[string][]core.Release{},
-		broken:    map[string]bool{},
+		responses:  map[string][]core.Release{},
+		categories: map[string][]core.IndexerCategory{},
+		broken:     map[string]bool{},
 	}
 
 	mux := http.NewServeMux()
@@ -179,6 +181,18 @@ func newFakeIndexer(t *testing.T) *fakeIndexer {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(releases)
+	})
+	mux.HandleFunc("GET /{name}/categories", func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("name")
+		f.mu.Lock()
+		broken := f.broken[name]
+		cats := f.categories[name]
+		f.mu.Unlock()
+		if broken {
+			http.Error(w, "bad api key", http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(cats)
 	})
 	mux.HandleFunc("GET /{name}/test", func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
@@ -204,6 +218,12 @@ func (f *fakeIndexer) serve(name string, releases ...core.Release) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.responses[name] = releases
+}
+
+func (f *fakeIndexer) servesCategories(name string, cats ...core.IndexerCategory) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.categories[name] = cats
 }
 
 func (f *fakeIndexer) breaks(name string) {
@@ -263,6 +283,22 @@ func (c *fakeIndexerClient) Test(ctx context.Context) error {
 		return fmt.Errorf("test: unexpected status %d", res.StatusCode)
 	}
 	return nil
+}
+
+func (c *fakeIndexerClient) Categories(ctx context.Context) ([]core.IndexerCategory, error) {
+	res, err := c.get(ctx, c.cfg.URL+"/categories")
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("categories: unexpected status %d", res.StatusCode)
+	}
+	var cats []core.IndexerCategory
+	if err := json.NewDecoder(res.Body).Decode(&cats); err != nil {
+		return nil, fmt.Errorf("categories: decode: %w", err)
+	}
+	return cats, nil
 }
 
 func (c *fakeIndexerClient) get(ctx context.Context, target string) (*http.Response, error) {

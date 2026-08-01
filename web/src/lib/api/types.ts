@@ -239,6 +239,16 @@ export interface Indexer {
 /** Body for POST /indexers and PUT /indexers/{id} — everything but the id. */
 export type IndexerInput = Omit<Indexer, 'id'>;
 
+/**
+ * One node of the category tree an indexer advertises in its capabilities
+ * document (POST /indexers/categories). Mirrors internal/core.IndexerCategory.
+ */
+export interface IndexerCategory {
+  id: number;
+  name: string;
+  subcats: IndexerCategory[];
+}
+
 /** internal/core.Protocol* — decides which engine a grab is routed to. */
 export type Protocol = 'torrent' | 'usenet';
 

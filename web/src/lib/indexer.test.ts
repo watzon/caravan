@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { formatCategories, parseCategories, validateIndexer } from './indexer';
+import type { IndexerCategory } from './api/types';
+import {
+  allCategoryIds,
+  formatCategories,
+  parseCategories,
+  selectionState,
+  toggleCategory,
+  unknownCategoryIds,
+  validateIndexer,
+} from './indexer';
 
 describe('parseCategories', () => {
   it('reads the comma-separated form indexers document', () => {
@@ -56,5 +65,84 @@ describe('validateIndexer', () => {
 
   it('rejects a URL without a scheme, which fetches as a relative path', () => {
     expect(validateIndexer({ name: 'Jackett', url: '127.0.0.1:9117' })).toMatch(/http/i);
+  });
+});
+
+/* ----------------------------------------------------------------------------
+ * Category-tree selection (CategoryPicker).
+ * ------------------------------------------------------------------------- */
+
+/** The shape a Torznab caps document advertises: parents with one subcat level. */
+const MOVIES: IndexerCategory = {
+  id: 2000,
+  name: 'Movies',
+  subcats: [
+    { id: 2040, name: 'Movies/HD', subcats: [] },
+    { id: 2045, name: 'Movies/UHD', subcats: [] },
+  ],
+};
+const ANIME: IndexerCategory = { id: 5070, name: 'Anime', subcats: [] };
+const TREE = [MOVIES, ANIME];
+
+describe('allCategoryIds', () => {
+  it('flattens parents and children in document order', () => {
+    expect(allCategoryIds(TREE)).toEqual([2000, 2040, 2045, 5070]);
+  });
+
+  it('reads an empty tree as no ids', () => {
+    expect(allCategoryIds([])).toEqual([]);
+  });
+});
+
+describe('selectionState', () => {
+  it('is none when nothing in the subtree is selected', () => {
+    expect(selectionState(MOVIES, new Set([5070]))).toBe('none');
+  });
+
+  it('is some when only part of the subtree is selected', () => {
+    expect(selectionState(MOVIES, new Set([2040]))).toBe('some');
+    expect(selectionState(MOVIES, new Set([2000]))).toBe('some');
+  });
+
+  it('is all only when the node and every descendant are selected', () => {
+    expect(selectionState(MOVIES, new Set([2000, 2040, 2045]))).toBe('all');
+    expect(selectionState(ANIME, new Set([5070]))).toBe('all');
+  });
+});
+
+describe('toggleCategory', () => {
+  it('checking a parent selects the whole subtree explicitly', () => {
+    // Explicit ids matter: indexers are not required to expand 2000 into its
+    // children server-side (AnimeTosho does not).
+    expect([...toggleCategory(MOVIES, new Set())].sort()).toEqual([2000, 2040, 2045]);
+  });
+
+  it('unchecking a fully selected parent clears the subtree', () => {
+    expect([...toggleCategory(MOVIES, new Set([2000, 2040, 2045, 5070]))]).toEqual([5070]);
+  });
+
+  it('checking a partially selected parent completes the subtree, not inverts it', () => {
+    expect([...toggleCategory(MOVIES, new Set([2040]))].sort()).toEqual([2000, 2040, 2045]);
+  });
+
+  it('toggles a leaf alone', () => {
+    expect([...toggleCategory(ANIME, new Set())]).toEqual([5070]);
+    expect([...toggleCategory(ANIME, new Set([5070]))]).toEqual([]);
+  });
+
+  it('never mutates the selection it was given', () => {
+    const selected = new Set([2040]);
+    toggleCategory(MOVIES, selected);
+    expect([...selected]).toEqual([2040]);
+  });
+});
+
+describe('unknownCategoryIds', () => {
+  it('surfaces manually configured ids the indexer does not advertise', () => {
+    expect(unknownCategoryIds(new Set([2000, 9090, 8010]), TREE)).toEqual([8010, 9090]);
+  });
+
+  it('is empty when every selected id is advertised', () => {
+    expect(unknownCategoryIds(new Set([2000, 5070]), TREE)).toEqual([]);
   });
 });

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<caps>
+  <server title="Anime Example" />
+  <limits max="200" default="75" />
+  <searching>
+    <search available="yes" supportedParams="q" />
+    <tv-search available="no" />
+    <movie-search available="no" />
+  </searching>
+  <categories>
+    <category id="5070" name="Anime" />
+    <category id="2020" name="Anime Movies" />
+    <category id="custom" name="No numeric id">
+      <subcat id="9010" name="Orphaned child" />
+    </category>
+    <category id="0" name="Zero id" />
+    <category id=" 8010 " name=" Padded ">
+      <subcat id="x" name="Bad child" />
+      <subcat id="8020" name="Good child" />
+    </category>
+  </categories>
+</caps>

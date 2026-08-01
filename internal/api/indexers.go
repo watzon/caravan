@@ -216,6 +216,41 @@ func (s *server) handleTestIndexer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// handleIndexerCategories fetches the category tree an indexer advertises.
+// The configuration comes from the body rather than a stored row because the
+// settings form needs the tree while the user is still typing — before the
+// indexer exists to have an id.
+func (s *server) handleIndexerCategories(w http.ResponseWriter, r *http.Request) {
+	newClient, ok := s.requireIndexerClients(w)
+	if !ok {
+		return
+	}
+
+	var body indexerRequest
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	// The name only labels error messages here; the form may not have one yet.
+	if strings.TrimSpace(body.Name) == "" {
+		body.Name = "indexer"
+	}
+	cfg, problem := body.config()
+	if problem != "" {
+		writeError(w, http.StatusBadRequest, problem)
+		return
+	}
+
+	categories, err := newClient(cfg).Categories(r.Context())
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "fetch categories failed: "+err.Error())
+		return
+	}
+	if categories == nil {
+		categories = []core.IndexerCategory{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"categories": categories})
+}
+
 // indexerNameFree reports whether name is available, writing a 409 when it is
 // not. indexers.name is unique, so without this check a duplicate name — a
 // plain user mistake — would surface as a 500.

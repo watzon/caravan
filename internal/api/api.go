@@ -104,6 +104,7 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("PUT /indexers/{id}", s.handleUpdateIndexer)
 	api.HandleFunc("DELETE /indexers/{id}", s.handleDeleteIndexer)
 	api.HandleFunc("POST /indexers/{id}/test", s.handleTestIndexer)
+	api.HandleFunc("POST /indexers/categories", s.handleIndexerCategories)
 
 	// Queue ids are the engine's own handles, not library ids.
 	api.HandleFunc("GET /downloads", s.handleListDownloads)

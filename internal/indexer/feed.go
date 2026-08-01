@@ -41,15 +41,44 @@ type feedAttr struct {
 	Value string `xml:"value,attr"`
 }
 
-// capsDoc is the t=caps response. Only the search modes are read: they are what
-// proves the endpoint is an indexer API rather than a login page that happened
-// to return XML.
+// capsDoc is the t=caps response. The search modes prove the endpoint is an
+// indexer API rather than a login page that happened to return XML; the
+// category tree is what the settings UI offers as a picker.
 type capsDoc struct {
 	Searching struct {
 		Modes []struct {
 			Available string `xml:"available,attr"`
 		} `xml:",any"`
 	} `xml:"searching"`
+	Categories []capsCategory `xml:"categories>category"`
+}
+
+// capsCategory is one advertised category. Subcategories nest exactly one
+// level in the Newznab spec (`<category><subcat/></category>`).
+type capsCategory struct {
+	ID      string         `xml:"id,attr"`
+	Name    string         `xml:"name,attr"`
+	Subcats []capsCategory `xml:"subcat"`
+}
+
+// categoryTree converts advertised categories into the shape the API serves,
+// preserving the indexer's order. A node whose id is not a positive integer is
+// dropped with its subtree: the id is what searches send and the configuration
+// stores, so a label alone is not offerable.
+func categoryTree(cats []capsCategory) []core.IndexerCategory {
+	out := make([]core.IndexerCategory, 0, len(cats))
+	for _, cat := range cats {
+		id, err := strconv.Atoi(strings.TrimSpace(cat.ID))
+		if err != nil || id <= 0 {
+			continue
+		}
+		out = append(out, core.IndexerCategory{
+			ID:      id,
+			Name:    strings.TrimSpace(cat.Name),
+			Subcats: categoryTree(cat.Subcats),
+		})
+	}
+	return out
 }
 
 // errorDoc is the <error code="" description=""/> failure document.

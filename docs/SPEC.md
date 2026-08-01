@@ -319,6 +319,7 @@ GET       /calendar.ics             # iCal feed (API-key auth)
 GET       /library/movies/{id}/releases   # interactive release picker
 POST      /library/movies/{id}/grab       # (same pair on /library/series/{id} with ?season=&episode=)
 GET/POST  /indexers                 # config; POST /indexers/{id}/test
+POST      /indexers/categories      # caps category tree for the settings picker (body: url/type/api_key)
 GET       /downloads                # queue; POST /downloads/{id}/pause|resume
 DELETE    /downloads/{id}?deleteData=true|false
 GET/POST  /import/queue             # stuck imports + manual match

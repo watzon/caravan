@@ -38,6 +38,9 @@ type IndexerClient interface {
 	Search(ctx context.Context, q string, cats []int) ([]core.Release, error)
 	// Test verifies the indexer answers with the configured credentials.
 	Test(ctx context.Context) error
+	// Categories returns the category tree the indexer advertises, for the
+	// settings picker.
+	Categories(ctx context.Context) ([]core.IndexerCategory, error)
 }
 
 // IndexerFactory builds a client for a stored indexer configuration. The

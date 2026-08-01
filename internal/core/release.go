@@ -33,6 +33,15 @@ type IndexerConfig struct {
 	Enabled bool
 }
 
+// IndexerCategory is one node of the category tree an indexer advertises in
+// its capabilities document. The tree is what the settings UI renders as a
+// picker; the ids are what IndexerConfig.Categories stores.
+type IndexerCategory struct {
+	ID      int               `json:"id"`
+	Name    string            `json:"name"`
+	Subcats []IndexerCategory `json:"subcats"`
+}
+
 // Release protocols. The protocol decides which engine a grab is routed to
 // (SPEC §5.1).
 const (
