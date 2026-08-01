@@ -201,9 +201,12 @@ describe('App shell', () => {
     expect(host.textContent).toContain('Big.Buck.Bunny');
     expect(host.textContent).toContain('Downloading');
     expect(host.textContent).toContain('Paused');
-    // A paused row offers Resume, an active one offers Pause.
-    expect(host.textContent).toContain('Resume');
-    expect(host.textContent).toContain('Pause');
+    // The toggle is icon-only: the label lives in the tooltip and the
+    // sr-only text, and it flips between Pause and Resume with the state.
+    expect(host.querySelector('[title="Resume download"]')).not.toBeNull();
+    expect(host.querySelector('[title="Pause download"]')).not.toBeNull();
+    expect(host.textContent).toContain('Resume download');
+    expect(host.textContent).toContain('Pause download');
     expect(host.querySelectorAll('[role="progressbar"]').length).toBeGreaterThanOrEqual(2);
     expect(host.textContent).not.toContain('The queue is empty');
   });

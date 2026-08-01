@@ -820,7 +820,9 @@ func (e *Embedded) sample() []core.Download {
 				pauseItem(it)
 				after = e.refreshLocked(it)
 			}
-		} else if after.State != core.DownloadCompleted {
+		} else if after.State != core.DownloadPaused {
+			// The seeding clock survives a pause (target-met or user-requested),
+			// so a resume continues timing rather than restarting it.
 			it.seedingStarted = time.Time{}
 		}
 		if durableChanged(before, after) {
@@ -942,12 +944,11 @@ func (e *Embedded) statusLocked(it *item) core.DownloadStatus {
 		// A failure outranks everything else: a download that died mid-transfer
 		// must not read as merely paused.
 		st.State = core.DownloadFailed
-	case it.paused && complete:
-		// Done and not transferring. This is the only way to reach "completed":
-		// while running, a finished torrent seeds.
-		st.State = core.DownloadCompleted
-		st.ETASeconds = 0
 	case it.paused:
+		// Paused is always resumable, seeding included: a paused seeder must
+		// not collapse into "completed", a state the queue cannot unpause
+		// (it reads as terminal). Complete or not, the user asked it to stop
+		// and can ask it to start again.
 		st.State = core.DownloadPaused
 	case complete:
 		// A complete torrent keeps uploading (cfg.Seed), so "seeding" is the

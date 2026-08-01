@@ -767,12 +767,12 @@ func TestTransferFromLocalSeeder(t *testing.T) {
 		t.Fatalf("persisted progress = %v (%d bytes), want 1 (%d bytes)", rec.Progress, rec.BytesDone, payloadSize)
 	}
 
-	// Pausing a finished torrent stops the seeding, which is the one way a
-	// download reaches "completed" rather than "seeding".
+	// Pausing a finished torrent stops the seeding. The state stays resumable:
+	// paused, not completed, so the queue can offer to start it again.
 	if err := e.Pause(ctx, id); err != nil {
 		t.Fatalf("Pause: %v", err)
 	}
-	if paused := waitState(t, e, id, core.DownloadCompleted); paused.BytesDone != int64(payloadSize) {
+	if paused := waitState(t, e, id, core.DownloadPaused); paused.BytesDone != int64(payloadSize) {
 		t.Fatalf("BytesDone after Pause = %d, want %d", paused.BytesDone, payloadSize)
 	}
 	if err := e.Resume(ctx, id); err != nil {

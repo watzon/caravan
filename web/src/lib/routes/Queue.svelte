@@ -125,6 +125,14 @@
       {#each rows as download (download.id)}
         {@const meta = downloadStateMeta(download.state)}
         {@const paused = download.state === 'paused'}
+        {@const seedingContext = download.state === 'seeding' || (paused && download.progress >= 1)}
+        {@const pauseLabel = paused
+          ? seedingContext
+            ? 'Resume seeding'
+            : 'Resume download'
+          : seedingContext
+            ? 'Pause seeding'
+            : 'Pause download'}
         <li class="relative flex flex-col gap-3 rounded-md border border-border bg-surface px-3 py-3 transition-colors duration-150 hover:border-border-strong">
           <button
             type="button"
@@ -142,29 +150,25 @@
             </Badge>
 
             <div class="pointer-events-auto flex shrink-0 items-center gap-2">
-              {#if paused}
+              {#if meta.active || paused}
                 <Button
-                  variant="secondary"
+                  variant="ghost"
                   size="sm"
+                  title={pauseLabel}
                   disabled={busyID === download.id}
                   onclick={(event) => {
                     event.stopPropagation();
-                    void act(download, () => api.resumeDownload(download.id), 'Resumed.');
+                    void act(
+                      download,
+                      () =>
+                        paused
+                          ? api.resumeDownload(download.id)
+                          : api.pauseDownload(download.id),
+                      paused ? 'Resumed.' : 'Paused.',
+                    );
                   }}>
-                  <Icon name="play" size={14} />
-                  Resume
-                </Button>
-              {:else}
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={busyID === download.id || !meta.active}
-                  onclick={(event) => {
-                    event.stopPropagation();
-                    void act(download, () => api.pauseDownload(download.id), 'Paused.');
-                  }}>
-                  <Icon name="pause" size={14} />
-                  Pause
+                  <Icon name={paused ? 'play' : 'pause'} size={14} />
+                  <span class="sr-only">{pauseLabel}</span>
                 </Button>
               {/if}
               <Button
