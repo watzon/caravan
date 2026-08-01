@@ -27,6 +27,7 @@
   } from '../format';
   import { downloadStateMeta, engineLabel, sortDownloads } from '../download';
   import { QUEUE_POLL_MS, downloads } from '../state/downloads.svelte';
+  import { page } from '../state/page.svelte';
   import { pushToast } from '../state/toast.svelte';
   import { TONE_DOT } from '../status';
 
@@ -90,6 +91,19 @@
   }
 
   let rows = $derived(sortDownloads(downloads.items ?? []));
+
+  // The shared TopBar renders the page's subtitle: what the queue is doing,
+  // in the same vocabulary the Paper queue header uses.
+  $effect(() => {
+    const items = downloads.items;
+    if (!items) {
+      page.subtitle = null;
+      return;
+    }
+    const failed = items.filter((item) => item.state === 'failed').length;
+    page.subtitle = `${downloads.activeCount} active${failed ? ` · ${failed} failed` : ''}`;
+    return () => (page.subtitle = null);
+  });
 </script>
 
 <div class="flex flex-col gap-6">
@@ -99,7 +113,6 @@
       automatically.
     </p>
     <div class="ml-auto flex items-center gap-2">
-      <span class="text-sm text-ink-secondary">{downloads.activeCount} active</span>
       <Button variant="secondary" onclick={() => downloads.refresh()}>
         <Icon name="refresh" size={14} />
         Refresh

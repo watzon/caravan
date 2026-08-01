@@ -1,17 +1,22 @@
 <script lang="ts">
-  /** DESIGN.md §5: page title left, global search (⌘K) and system health right. */
-  import type { Snippet } from 'svelte';
+  /**
+   * The one page-title area every route shares (DESIGN.md §5): title left,
+   * optional subtitle beside it, page actions, then global search (⌘K) and
+   * system health right. Paper's headers have no bottom border, and the bar
+   * must never shrink: it is a flex item above a scrolling column, so
+   * shrink-0 is what keeps tall pages from squishing it.
+   */
   import Icon from '../components/Icon.svelte';
+  import { page } from '../state/page.svelte';
   import { system } from '../state/system.svelte';
   import { TONE_DOT, type Tone } from '../status';
 
   interface Props {
     title: string;
     onsearch: () => void;
-    actions?: Snippet;
   }
 
-  let { title, onsearch, actions }: Props = $props();
+  let { title, onsearch }: Props = $props();
 
   let health = $derived.by((): { tone: Tone; label: string } => {
     if (system.error) return { tone: 'danger', label: 'Server unreachable' };
@@ -30,13 +35,19 @@
 </script>
 
 <header
-  class="sticky top-0 z-30 flex h-16 items-center gap-4 border-b border-border bg-bg/95 px-6 backdrop-blur">
-  <h1 class="flex-1 truncate font-display text-xl font-semibold tracking-tight text-ink">
+  class="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-4 bg-bg/95 px-6 backdrop-blur">
+  <h1 class="truncate font-display text-xl font-semibold tracking-tight text-ink">
     {title}
   </h1>
 
-  {#if actions}
-    {@render actions()}
+  {#if page.subtitle}
+    <span class="truncate text-sm text-ink-secondary">{page.subtitle}</span>
+  {/if}
+
+  <div class="flex-1"></div>
+
+  {#if page.actions}
+    {@render page.actions()}
   {/if}
 
   <button

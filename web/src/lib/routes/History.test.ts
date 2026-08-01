@@ -53,7 +53,7 @@ describe('History', () => {
     await settle();
 
     const jobsTab = [...host.querySelectorAll('[role="tab"]')].find(
-      (tab) => tab.textContent === 'Jobs',
+      (tab) => tab.textContent?.trim() === 'Jobs',
     ) as HTMLButtonElement | undefined;
     expect(jobsTab).toBeDefined();
     jobsTab!.click();

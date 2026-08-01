@@ -10,6 +10,7 @@
   import Skeleton from '../components/Skeleton.svelte';
   import { episodeCode } from '../format';
   import { TONE_DOT, TONE_TEXT, TONE_TINT, type Tone } from '../status';
+  import { page } from '../state/page.svelte';
   import { pushToast } from '../state/toast.svelte';
 
   type View = 'month' | 'agenda';
@@ -135,6 +136,12 @@
       pushToast('Could not copy the calendar feed URL.', 'danger');
     }
   }
+  // The view toggle and feed button are page actions: the shared TopBar
+  // renders them on the title row while this screen is on top.
+  $effect(() => {
+    page.actions = headerActions;
+    return () => (page.actions = null);
+  });
 </script>
 
 <div class="flex max-w-[1360px] flex-col gap-5">
@@ -151,26 +158,13 @@
       </Button>
       <Button variant="secondary" size="sm" onclick={() => (month = todayMonth())}>Today</Button>
     </div>
-
-    <div class="ml-auto flex flex-wrap items-center gap-2">
-      <div class="flex rounded-md border border-border bg-surface p-0.5" role="group" aria-label="Calendar view">
-        <button type="button" aria-pressed={view === 'month'} onclick={() => (view = 'month')} class="rounded-sm px-2 py-1 text-sm {view === 'month' ? 'bg-raised text-ink' : 'text-ink-secondary hover:text-ink'}">Month</button>
-        <button type="button" aria-pressed={view === 'agenda'} onclick={() => (view = 'agenda')} class="rounded-sm px-2 py-1 text-sm {view === 'agenda' ? 'bg-raised text-ink' : 'text-ink-secondary hover:text-ink'}">Agenda</button>
-      </div>
-      <Button variant="secondary" onclick={openFeed}>
-        <Icon name="link" size={14} />
-        iCal feed
-      </Button>
-    </div>
   </div>
 
   <div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-ink-secondary" aria-label="Calendar status legend">
     {#each Object.entries(STATUS) as [status, meta] (status)}
       <span class="inline-flex items-center gap-2"><span class="size-2 rounded-full {TONE_DOT[meta.tone]}"></span>{meta.label}</span>
     {/each}
-  </div>
-
-  {#if error && entries === null}
+  </div>  {#if error && entries === null}
     <LoadError message={error} onretry={() => load(rangeStart, rangeEnd)} />
   {:else if loading && entries === null}
     <Skeleton class="h-[620px] w-full rounded-md" />
@@ -254,3 +248,14 @@
     {/snippet}
   </Modal>
 {/if}
+
+{#snippet headerActions()}
+  <div class="flex rounded-md border border-border bg-surface p-0.5" role="group" aria-label="Calendar view">
+    <button type="button" aria-pressed={view === 'month'} onclick={() => (view = 'month')} class="rounded-sm px-2 py-1 text-sm {view === 'month' ? 'bg-raised text-ink' : 'text-ink-secondary hover:text-ink'}">Month</button>
+    <button type="button" aria-pressed={view === 'agenda'} onclick={() => (view = 'agenda')} class="rounded-sm px-2 py-1 text-sm {view === 'agenda' ? 'bg-raised text-ink' : 'text-ink-secondary hover:text-ink'}">Agenda</button>
+  </div>
+  <Button variant="secondary" onclick={openFeed}>
+    <Icon name="link" size={14} />
+    iCal feed
+  </Button>
+{/snippet}

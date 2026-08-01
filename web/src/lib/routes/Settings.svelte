@@ -10,6 +10,7 @@
   import EngineSettings from '../components/EngineSettings.svelte';
   import IndexerSettings from '../components/IndexerSettings.svelte';
   import LoadError from '../components/LoadError.svelte';
+  import PageTabs from '../components/PageTabs.svelte';
   import Skeleton from '../components/Skeleton.svelte';
   import TextInput from '../components/TextInput.svelte';
   import QualityProfiles from '../components/QualityProfiles.svelte';
@@ -90,21 +91,11 @@
 </script>
 
 <div class="flex flex-col gap-6 {tab === 'indexers' || tab === 'quality-profiles' ? 'max-w-5xl' : 'max-w-3xl'}">
-  <div class="flex gap-2 border-b border-border" role="tablist" aria-label="Settings sections">
-    {#each TABS as item (item.key)}
-      <button
-        type="button"
-        role="tab"
-        aria-selected={tab === item.key}
-        onclick={() => (tab = item.key)}
-        class="-mb-px border-b-2 px-3 py-2 text-base transition-colors duration-150 ease-out
-               {tab === item.key
-          ? 'border-accent text-accent-text'
-          : 'border-transparent text-ink-secondary hover:text-ink'}">
-        {item.label}
-      </button>
-    {/each}
-  </div>
+  <PageTabs
+    tabs={TABS}
+    active={tab}
+    onchange={(key) => (tab = key)}
+    ariaLabel="Settings sections" />
 
   <!-- Indexers and quality profiles own their fetches, so they render whether or not /settings loaded. -->
   {#if tab === 'indexers'}

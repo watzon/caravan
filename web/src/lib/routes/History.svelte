@@ -6,11 +6,17 @@
   import Button from '../components/Button.svelte';
   import EmptyState from '../components/EmptyState.svelte';
   import LoadError from '../components/LoadError.svelte';
+  import PageTabs from '../components/PageTabs.svelte';
   import Skeleton from '../components/Skeleton.svelte';
   import { formatAge } from '../format';
   import { TONE_DOT, type Tone } from '../status';
 
   type Tab = 'events' | 'jobs';
+
+  const TABS: { key: Tab; label: string }[] = [
+    { key: 'events', label: 'Events' },
+    { key: 'jobs', label: 'Jobs' },
+  ];
 
   const EVENT_TONE: Record<EventLevel, Tone> = {
     info: 'info',
@@ -78,10 +84,17 @@
 </script>
 
 <div class="flex max-w-4xl flex-col gap-6">
-  <div class="flex items-center gap-2 border-b border-border" role="tablist" aria-label="Activity feed">
-    <button type="button" role="tab" aria-selected={tab === 'events'} onclick={() => (tab = 'events')} class="-mb-px border-b-2 px-3 py-2 text-base {tab === 'events' ? 'border-accent text-accent-text' : 'border-transparent text-ink-secondary hover:text-ink'}">Events</button>
-    <button type="button" role="tab" aria-selected={tab === 'jobs'} onclick={() => (tab = 'jobs')} class="-mb-px border-b-2 px-3 py-2 text-base {tab === 'jobs' ? 'border-accent text-accent-text' : 'border-transparent text-ink-secondary hover:text-ink'}">Jobs</button>
-    <Button class="ml-auto" variant="secondary" size="sm" onclick={() => tab === 'events' ? loadEvents() : loadJobs()}>Refresh</Button>
+  <div class="flex items-center gap-2">
+    <div class="flex-1">
+      <PageTabs
+        tabs={TABS}
+        active={tab}
+        onchange={(key) => (tab = key)}
+        ariaLabel="Activity feed" />
+    </div>
+    <Button variant="secondary" size="sm" onclick={() => (tab === 'events' ? loadEvents() : loadJobs())}>
+      Refresh
+    </Button>
   </div>
 
   {#if tab === 'events'}

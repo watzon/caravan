@@ -6,6 +6,7 @@
   import Button from '../components/Button.svelte';
   import EmptyState from '../components/EmptyState.svelte';
   import LoadError from '../components/LoadError.svelte';
+  import PageTabs from '../components/PageTabs.svelte';
   import Poster from '../components/Poster.svelte';
   import Skeleton from '../components/Skeleton.svelte';
   import { episodeCode, formatDate, titleWithYear } from '../format';
@@ -40,6 +41,16 @@
   let episodes = $derived((wanted?.episodes ?? []).filter((item) => item.reason === tab));
   let count = $derived(movies.length + episodes.length);
 
+  let tabs = $derived(
+    TABS.map((item) => ({
+      ...item,
+      count: wanted
+        ? wanted.movies.filter((movie) => movie.reason === item.key).length +
+          wanted.episodes.filter((episode) => episode.reason === item.key).length
+        : null,
+    })),
+  );
+
   function detail(item: WantedMovie | WantedEpisode): string {
     if (item.reason === 'below_cutoff') {
       return `${item.file_quality || 'Unknown quality'} on disk, cutoff 1080p`;
@@ -57,23 +68,11 @@
 </script>
 
 <div class="flex max-w-5xl flex-col gap-6">
-  <div class="flex gap-2 border-b border-border" role="tablist" aria-label="Wanted filter">
-    {#each TABS as item (item.key)}
-      {@const itemCount = (wanted?.movies ?? []).filter((movie) => movie.reason === item.key).length
-        + (wanted?.episodes ?? []).filter((episode) => episode.reason === item.key).length}
-      <button
-        type="button"
-        role="tab"
-        aria-selected={tab === item.key}
-        onclick={() => (tab = item.key)}
-        class="-mb-px inline-flex items-center gap-2 border-b-2 px-3 py-2 text-base transition-colors duration-150 ease-out {tab === item.key
-          ? 'border-accent text-accent-text'
-          : 'border-transparent text-ink-secondary hover:text-ink'}">
-        <span>{item.label}</span>
-        <span class="font-mono text-xs text-ink-muted">{itemCount}</span>
-      </button>
-    {/each}
-  </div>
+  <PageTabs
+    {tabs}
+    active={tab}
+    onchange={(key) => (tab = key)}
+    ariaLabel="Wanted filter" />
 
   {#if error && wanted === null}
     <LoadError message={error} onretry={load} />
