@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:newznab="http://www.newznab.com/DTD/2010/feeds/attributes/" xmlns:torznab="http://torznab.com/schemas/2015/feed">
+  <channel>
+    <title>Anime Example</title>
+    <!-- The AnimeTosho shape: one item, a .torrent AND an .nzb enclosure, and
+         the RSS <link> is an HTML detail page, not a file. -->
+    <item>
+      <title>Spirited Away (2001) [1080p x265 HEVC 10bit BluRay Dual Audio AAC 5.1] [Prof]</title>
+      <link>https://anime.example/view/spirited-away.n1176208</link>
+      <guid isPermaLink="true">https://anime.example/view/a318704</guid>
+      <pubDate>Sat, 14 Sep 2019 00:46:01 +0000</pubDate>
+      <category>Anime</category>
+      <enclosure url="https://storage.anime.example/torrent/b51bc8aa/Spirited%20Away.torrent" type="application/x-bittorrent" length="0"/>
+      <enclosure url="https://storage.anime.example/nzbs/0004dcf0/Spirited%20Away.nzb" type="application/x-nzb" length="0"/>
+      <torznab:attr name="size" value="7445746063"/>
+      <torznab:attr name="infohash" value="B51BC8AA3D4D351DE583ECF83E6F7638420970EF"/>
+      <torznab:attr name="magneturl" value="magnet:?xt=urn:btih:WUN4RKR5JU2R3ZMD5T4D433WHBBAS4HP&amp;dn=Spirited%20Away"/>
+      <torznab:attr name="seeders" value="107"/>
+      <torznab:attr name="peers" value="116"/>
+    </item>
+    <!-- Same dual-enclosure shape but nzb first, to pin type-matching rather
+         than first-wins. No infohash/magnet attrs: the enclosure types are the
+         only protocol evidence. -->
+    <item>
+      <title>Example Show S01E02 720p WEB x264-GRP</title>
+      <link>https://anime.example/view/example-show.n42</link>
+      <guid isPermaLink="true">https://anime.example/view/a42</guid>
+      <pubDate>Sat, 14 Sep 2019 01:00:00 +0000</pubDate>
+      <enclosure url="https://storage.anime.example/nzbs/42/Example.Show.nzb" type="application/x-nzb" length="0"/>
+      <enclosure url="https://storage.anime.example/torrent/42/Example.Show.torrent" type="application/x-bittorrent" length="734003200"/>
+    </item>
+  </channel>
+</rss>

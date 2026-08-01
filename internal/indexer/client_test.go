@@ -254,6 +254,46 @@ func TestSearchNewznabParsesItems(t *testing.T) {
 	}
 }
 
+// TestSearchPicksEnclosureMatchingProtocol is the AnimeTosho regression: items
+// carrying a .torrent and an .nzb enclosure side by side. encoding/xml keeps
+// only the last repeated element in a non-slice field, so before enclosures
+// became a slice every such release downloaded from the .nzb URL — and the
+// torrent engine choked on XML ("bencode: unknown value type '<'").
+func TestSearchPicksEnclosureMatchingProtocol(t *testing.T) {
+	c, _ := newStub(t, torznabCfg(), map[string]response{"search": ok(t, "torznab_search_dual_enclosure.xml")})
+
+	rels, err := c.Search(context.Background(), "spirited away", nil)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(rels) != 2 {
+		t.Fatalf("got %d releases, want 2", len(rels))
+	}
+
+	got := rels[0]
+	if got.Protocol != core.ProtocolTorrent {
+		t.Errorf("Protocol = %q, want %q (infohash attr present)", got.Protocol, core.ProtocolTorrent)
+	}
+	if want := "https://storage.anime.example/torrent/b51bc8aa/Spirited%20Away.torrent"; got.DownloadURL != want {
+		t.Errorf("DownloadURL = %q, want the .torrent enclosure %q", got.DownloadURL, want)
+	}
+	if got.Size != 7445746063 {
+		t.Errorf("Size = %d, want the size attr 7445746063", got.Size)
+	}
+
+	// nzb listed first: the type match must win, not document order.
+	got = rels[1]
+	if got.Protocol != core.ProtocolTorrent {
+		t.Errorf("Protocol = %q, want %q (a torrent enclosure is present)", got.Protocol, core.ProtocolTorrent)
+	}
+	if want := "https://storage.anime.example/torrent/42/Example.Show.torrent"; got.DownloadURL != want {
+		t.Errorf("DownloadURL = %q, want the .torrent enclosure %q", got.DownloadURL, want)
+	}
+	if got.Size != 734003200 {
+		t.Errorf("Size = %d, want the torrent enclosure length 734003200", got.Size)
+	}
+}
+
 func TestSearchDefaultsProtocolToTorrentForTorznab(t *testing.T) {
 	// The malformed fixture's surviving items have no enclosure type and no
 	// torrent attrs, which leaves the indexer type as the only signal.

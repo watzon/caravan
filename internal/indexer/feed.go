@@ -22,17 +22,23 @@ type feedDoc struct {
 
 // feedItem is one search result as published.
 type feedItem struct {
-	Title     string `xml:"title"`
-	GUID      string `xml:"guid"`
-	Link      string `xml:"link"`
-	PubDate   string `xml:"pubDate"`
-	Size      string `xml:"size"`
-	Enclosure struct {
-		URL    string `xml:"url,attr"`
-		Length string `xml:"length,attr"`
-		Type   string `xml:"type,attr"`
-	} `xml:"enclosure"`
-	Attrs []feedAttr `xml:"attr"`
+	Title      string          `xml:"title"`
+	GUID       string          `xml:"guid"`
+	Link       string          `xml:"link"`
+	PubDate    string          `xml:"pubDate"`
+	Size       string          `xml:"size"`
+	Enclosures []feedEnclosure `xml:"enclosure"`
+	Attrs      []feedAttr      `xml:"attr"`
+}
+
+// feedEnclosure is one download link. A slice, not a struct: items can carry
+// several — AnimeTosho publishes a .torrent and an .nzb enclosure on the same
+// item — and a single field would silently keep only the last one
+// (encoding/xml overwrites on repeat), handing a torrent grab the .nzb URL.
+type feedEnclosure struct {
+	URL    string `xml:"url,attr"`
+	Length string `xml:"length,attr"`
+	Type   string `xml:"type,attr"`
 }
 
 // feedAttr is a torznab:attr / newznab:attr name-value pair.
@@ -122,7 +128,8 @@ func (c *Client) release(it feedItem) (core.Release, bool) {
 
 	attrs := attrMap(it.Attrs)
 
-	downloadURL := firstNonEmpty(strings.TrimSpace(it.Enclosure.URL), strings.TrimSpace(it.Link), attrs["magneturl"])
+	protocol := c.protocol(it, attrs)
+	downloadURL := pickDownloadURL(it, attrs, protocol)
 	if downloadURL == "" {
 		return core.Release{}, false
 	}
@@ -150,7 +157,7 @@ func (c *Client) release(it feedItem) (core.Release, bool) {
 		GUID:        guid,
 		DownloadURL: downloadURL,
 		InfoHash:    strings.ToLower(strings.TrimSpace(attrs["infohash"])),
-		Protocol:    c.protocol(it, attrs),
+		Protocol:    protocol,
 		Size:        size(it, attrs),
 		Seeders:     seeders,
 		Leechers:    leechers,
@@ -167,10 +174,12 @@ func (c *Client) protocol(it feedItem, attrs map[string]string) string {
 	switch {
 	case attrs["infohash"] != "" || attrs["magneturl"] != "":
 		return core.ProtocolTorrent
-	case strings.Contains(it.Enclosure.Type, "nzb"):
-		return core.ProtocolUsenet
-	case strings.Contains(it.Enclosure.Type, "bittorrent"):
+	// Torrent evidence outranks nzb evidence when an item carries both kinds
+	// of enclosure: the embedded engine can act on a torrent today.
+	case enclosureByType(it.Enclosures, "bittorrent") != "":
 		return core.ProtocolTorrent
+	case enclosureByType(it.Enclosures, "nzb") != "":
+		return core.ProtocolUsenet
 	case c.cfg.Type == core.IndexerTypeNewznab:
 		return core.ProtocolUsenet
 	default:
@@ -178,10 +187,51 @@ func (c *Client) protocol(it feedItem, attrs map[string]string) string {
 	}
 }
 
+// pickDownloadURL picks where a release downloads from, preferring the source
+// that matches its protocol. The pick has to be type-aware: handing a torrent
+// grab an item's .nzb enclosure fetches XML and dies at bencode parsing.
+func pickDownloadURL(it feedItem, attrs map[string]string, protocol string) string {
+	want := "bittorrent"
+	if protocol == core.ProtocolUsenet {
+		want = "nzb"
+	}
+	if u := enclosureByType(it.Enclosures, want); u != "" {
+		return u
+	}
+	// A magnet is a complete torrent source; the item link is a web page as
+	// often as a file, so it stays last.
+	if protocol == core.ProtocolTorrent {
+		if u := strings.TrimSpace(attrs["magneturl"]); u != "" {
+			return u
+		}
+	}
+	for _, enc := range it.Enclosures {
+		if u := strings.TrimSpace(enc.URL); u != "" {
+			return u
+		}
+	}
+	return firstNonEmpty(strings.TrimSpace(it.Link), strings.TrimSpace(attrs["magneturl"]))
+}
+
+// enclosureByType returns the first enclosure whose MIME type contains kind,
+// or "".
+func enclosureByType(encs []feedEnclosure, kind string) string {
+	for _, enc := range encs {
+		if strings.Contains(enc.Type, kind) && strings.TrimSpace(enc.URL) != "" {
+			return strings.TrimSpace(enc.URL)
+		}
+	}
+	return ""
+}
+
 // size reads the release size from wherever this indexer put it. 0 means the
 // indexer did not say, which is a fact the scorer has to handle anyway.
 func size(it feedItem, attrs map[string]string) int64 {
-	for _, s := range []string{it.Size, it.Enclosure.Length, attrs["size"]} {
+	candidates := []string{it.Size, attrs["size"]}
+	for _, enc := range it.Enclosures {
+		candidates = append(candidates, enc.Length)
+	}
+	for _, s := range candidates {
 		if n, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64); err == nil && n > 0 {
 			return n
 		}

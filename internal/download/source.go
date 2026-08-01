@@ -46,14 +46,26 @@ func (e *Embedded) torrentSpec(ctx context.Context, r core.Release) (*torrent.To
 
 	case strings.HasPrefix(lower, "http://"), strings.HasPrefix(lower, "https://"):
 		mi, err := e.fetchMetainfo(ctx, url)
-		if err != nil {
-			return nil, fmt.Errorf("download: fetch torrent for %q: %w", r.Title, err)
+		if err == nil {
+			spec, err := torrent.TorrentSpecFromMetaInfoErr(mi)
+			if err != nil {
+				return nil, fmt.Errorf("download: read torrent for %q: %w", r.Title, err)
+			}
+			return spec, nil
 		}
-		spec, err := torrent.TorrentSpecFromMetaInfoErr(mi)
-		if err != nil {
-			return nil, fmt.Errorf("download: read torrent for %q: %w", r.Title, err)
+		// A dead or lying .torrent URL (an indexer serving an HTML error page
+		// with a 200, a stale storage link) does not have to kill the grab
+		// when the release also names its info hash: the swarm can supply the
+		// metadata. Slower start, but a download instead of an error.
+		if hash, herr := parseInfoHash(r.InfoHash); herr == nil {
+			e.logger.Warn("torrent fetch failed, falling back to the info hash",
+				"title", r.Title, "url", url, "error", err)
+			return &torrent.TorrentSpec{
+				AddTorrentOpts: torrent.AddTorrentOpts{InfoHash: hash},
+				DisplayName:    r.Title,
+			}, nil
 		}
-		return spec, nil
+		return nil, fmt.Errorf("download: fetch torrent for %q: %w", r.Title, err)
 	}
 
 	// Neither: the only thing left that identifies a torrent is an info hash,

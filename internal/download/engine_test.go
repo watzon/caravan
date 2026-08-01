@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
@@ -221,12 +222,18 @@ func TestAddAcceptsEveryReleaseShape(t *testing.T) {
 	hash := mi.HashInfoBytes()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/ok.torrent" {
+		switch r.URL.Path {
+		case "/ok.torrent":
+			if err := mi.Write(w); err != nil {
+				t.Errorf("serve metainfo: %v", err)
+			}
+		case "/lying.torrent":
+			// A 200 that is not a torrent — an indexer's HTML error page, or
+			// an nzb where a .torrent was promised (the AnimeTosho incident).
+			w.Header().Set("Content-Type", "text/html")
+			_, _ = io.WriteString(w, "<html><body>not found</body></html>")
+		default:
 			http.NotFound(w, r)
-			return
-		}
-		if err := mi.Write(w); err != nil {
-			t.Errorf("serve metainfo: %v", err)
 		}
 	}))
 	defer srv.Close()
@@ -260,12 +267,32 @@ func TestAddAcceptsEveryReleaseShape(t *testing.T) {
 			wantID:  core.DownloadID(hash.HexString()),
 		},
 		{
+			name: "non-torrent body falls back to the info hash",
+			release: core.Release{
+				Title:       "Lying URL Release",
+				Protocol:    core.ProtocolTorrent,
+				DownloadURL: srv.URL + "/lying.torrent",
+				InfoHash:    hash.HexString(),
+			},
+			wantID: core.DownloadID(hash.HexString()),
+		},
+		{
+			name: "dead url falls back to the info hash",
+			release: core.Release{
+				Title:       "Dead URL Release",
+				Protocol:    core.ProtocolTorrent,
+				DownloadURL: srv.URL + "/missing.torrent",
+				InfoHash:    hash.HexString(),
+			},
+			wantID: core.DownloadID(hash.HexString()),
+		},
+		{
 			name:    "usenet release",
 			release: core.Release{Title: "Usenet Release", Protocol: core.ProtocolUsenet, DownloadURL: srv.URL + "/ok.nzb"},
 			wantErr: true,
 		},
 		{
-			name:    "missing torrent file",
+			name:    "missing torrent file without a hash to fall back on",
 			release: core.Release{Title: "Gone", Protocol: core.ProtocolTorrent, DownloadURL: srv.URL + "/missing.torrent"},
 			wantErr: true,
 		},
