@@ -1,0 +1,39 @@
+{
+  "_id": "5759db2f9251414055000345",
+  "air_date": "2008-01-20",
+  "episodes": [
+    {
+      "air_date": "2008-01-20",
+      "episode_number": 1,
+      "id": 62085,
+      "name": "Pilot",
+      "overview": "When an unassuming high school chemistry teacher discovers he has a rare form of lung cancer, he decides to team up with a former student and create a top of the line crystal meth in a used RV.",
+      "production_code": "",
+      "runtime": 58,
+      "season_number": 1,
+      "show_id": 1396,
+      "still_path": "/ydlY3iPfeOAvu8gVqrxPoMvzNCn.jpg",
+      "vote_average": 8.3,
+      "vote_count": 240
+    },
+    {
+      "air_date": "2008-01-27",
+      "episode_number": 2,
+      "id": 62086,
+      "name": "Cat's in the Bag...",
+      "overview": "Walt and Jesse attempt to tie up loose ends.",
+      "production_code": "",
+      "runtime": 48,
+      "season_number": 1,
+      "show_id": 1396,
+      "still_path": "/tjDNvbokPLtEnpFyFPyXMOd5Zbp.jpg",
+      "vote_average": 8.1,
+      "vote_count": 154
+    }
+  ],
+  "id": 3572,
+  "name": "Season 1",
+  "overview": "High school chemistry teacher Walter White's life is suddenly transformed by a dire medical diagnosis.",
+  "poster_path": "/1BP4xYv9ZG4ZVHkL7ocOziBbSYH.jpg",
+  "season_number": 1
+}

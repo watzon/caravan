@@ -1,0 +1,128 @@
+package library
+
+import (
+	"fmt"
+	"path"
+	"path/filepath"
+	"regexp"
+	"strings"
+)
+
+// cleanRoot normalizes the storage root once, at construction, so every
+// later join is predictable.
+func cleanRoot(root string) string {
+	if root == "" {
+		return "."
+	}
+	return filepath.Clean(root)
+}
+
+// abs resolves a storage-root-relative path to an OS path. This and rel are
+// the only two places the relative/absolute boundary is crossed.
+func (m *Manager) abs(rel string) string {
+	return filepath.Join(m.root, filepath.FromSlash(rel))
+}
+
+// rel is abs' inverse: an OS path under the root becomes a slash-separated
+// storage-root-relative path.
+func (m *Manager) rel(abs string) (string, error) {
+	r, err := filepath.Rel(m.root, abs)
+	if err != nil {
+		return "", fmt.Errorf("library: %s is not under storage root %s: %w", abs, m.root, err)
+	}
+	return filepath.ToSlash(r), nil
+}
+
+// illegalChars are the characters no path component may contain. The set is
+// the union of the Windows-reserved characters and control characters, which
+// also covers exFAT — the portable-mode filesystem (SPEC §3).
+var illegalChars = regexp.MustCompile(`[<>:"/\\|?*\x00-\x1f]`)
+
+// sanitize makes s safe to use as a single path component on every supported
+// platform: illegal characters are dropped, runs of whitespace collapse, and
+// trailing dots and spaces go (Windows silently strips them, which would make
+// the name Caravan wrote differ from the name on disk).
+func sanitize(s string) string {
+	s = illegalChars.ReplaceAllString(s, "")
+	s = strings.Join(strings.Fields(s), " ")
+	s = strings.TrimRight(s, " .")
+	if s == "" {
+		return "Unknown"
+	}
+	return s
+}
+
+// titleYear renders the "Title (Year)" stem shared by folder and file names.
+// A missing year degrades to the bare title rather than "(0)".
+func titleYear(title string, year int) string {
+	t := sanitize(title)
+	if year <= 0 {
+		return t
+	}
+	return fmt.Sprintf("%s (%d)", t, year)
+}
+
+// movieFolderName is the per-movie folder: "Big Buck Bunny (2008)".
+func movieFolderName(title string, year int) string { return titleYear(title, year) }
+
+// movieFileName is the movie file: "Big Buck Bunny (2008).mkv", with any
+// edition appended Jellyfin-style — "Blade Runner (1982) - Director's Cut.mkv"
+// (SPEC §7: editions are free text rendered into the filename, with no
+// per-edition duplicate handling in v1).
+func movieFileName(title string, year int, edition, ext string) string {
+	name := titleYear(title, year)
+	if e := sanitize(edition); edition != "" && e != "Unknown" {
+		name += " - " + e
+	}
+	return name + ext
+}
+
+// seriesFolderName is the per-series folder: "Planet Earth II (2016)".
+func seriesFolderName(title string, year int) string { return titleYear(title, year) }
+
+// seasonFolderName is "Season 01". Specials are season 0 and therefore
+// "Season 00", following the TMDB/Jellyfin convention SPEC §7 picked.
+func seasonFolderName(season int) string {
+	return fmt.Sprintf("Season %02d", season)
+}
+
+// episodeFileName is
+// "Planet Earth II (2016) - S01E01 - Islands.mkv". A multi-episode file
+// collapses its range Jellyfin-style ("S01E01-E02") and joins the episode
+// titles, because one file legitimately covers several episodes (SPEC §7).
+func episodeFileName(title string, year, season int, episodes []int, episodeTitle, ext string) string {
+	name := titleYear(title, year) + " - " + episodeTag(season, episodes)
+	if t := sanitize(episodeTitle); episodeTitle != "" && t != "Unknown" {
+		name += " - " + t
+	}
+	return name + ext
+}
+
+// episodeTag renders "S01E01" or "S01E01-E02" for a multi-episode file.
+func episodeTag(season int, episodes []int) string {
+	if len(episodes) == 0 {
+		return fmt.Sprintf("S%02d", season)
+	}
+	tag := fmt.Sprintf("S%02dE%02d", season, episodes[0])
+	for _, e := range episodes[1:] {
+		tag += fmt.Sprintf("-E%02d", e)
+	}
+	return tag
+}
+
+// movieDir returns a movie folder's storage-root-relative path.
+func movieDir(title string, year int) string {
+	return path.Join(LibraryDir, MoviesDir, movieFolderName(title, year))
+}
+
+// seriesDir returns a series folder's storage-root-relative path.
+func seriesDir(title string, year int) string {
+	return path.Join(LibraryDir, TVDir, seriesFolderName(title, year))
+}
+
+// sortTitle is the case-folded, article-stripped title the store orders by.
+var leadingArticle = regexp.MustCompile(`^(?i)(the|a|an)\s+`)
+
+func sortTitle(title string) string {
+	return strings.ToLower(strings.TrimSpace(leadingArticle.ReplaceAllString(strings.TrimSpace(title), "")))
+}

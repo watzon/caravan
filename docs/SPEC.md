@@ -1,6 +1,6 @@
 # Caravan: Technical Specification
 
-**Status:** Draft v0.1
+**Status:** Draft v0.2
 **Date:** 2026-07-31
 **Author:** watzon + assistant
 
@@ -136,7 +136,7 @@ Verified constraints, from the spec research:
 |---|---|---|
 | Language | Go | Static cross-compiled binaries are the entire ballgame for portable mode |
 | Database | sqlite via modernc.org/sqlite | Pure Go, no CGO, WAL mode, single-file state |
-| Web UI | Svelte (or React) SPA, embedded via `go:embed` | Zero-install UI, served by the binary |
+| Web UI | Svelte SPA (Vite build), embedded via `go:embed` | Zero-install UI, smallest bundle inside the binary |
 | Torrent engine | anacrolix/torrent | Mature, in-process, Go-native |
 | UPnP/DLNA | huin/goupnp + custom DMS | SSDP advertise + content directory for TV/network clients |
 | Remux/transcode | External ffmpeg (optional, detected at runtime) | Convert-for-TV queue; absent ffmpeg degrades gracefully |
@@ -172,6 +172,8 @@ flowchart LR
 **Library & Metadata.** Movies and series model. Matching against TMDB/TVDB. Library scan reconciles DB with filesystem (the rescan that makes the DB disposable). Season/episode model, monitored/unmonitored flags.
 
 **Wanted & Search.** The wanted list (movies, series, seasons, episodes), automatic backlog search, RSS sync from indexers, and interactive search with a release picker. Interactive picker is a first-class screen, not a debug tool: it is the graceful degradation path when automatic parsing is uncertain.
+
+**Calendar.** One combined calendar for episode air dates and movie release dates (digital/physical) — a single view where Sonarr and Radarr each need their own. Entries are status-colored with the same vocabulary as everywhere else (downloaded, downloading, missing, unaired). Month and agenda views, plus an iCal feed (`/calendar.ics`) for external calendar apps.
 
 **Release Parser & Quality Profiles.** Scene-name parsing (title, year, season/episode, quality, source, codec, group, PROPER/REPACK). Quality ladder with upgrade-until-cutoff per item. Scope explicitly excludes anime absolute numbering and custom formats in v1.
 
@@ -243,6 +245,17 @@ Everything path-like is relative to the storage root.
 
 Recovery contract: `media_files`, `movies`, `series` are reconstructable from a library rescan + metadata providers. `grabs`/`events` are history and may be lost without functional damage.
 
+**Migrations.** Embedded, sequential, forward-only SQL migrations run at startup; the applied version is tracked in the DB. The disposable-cache pillar makes a botched upgrade survivable (worst case: delete DB, rescan), but migrations are the normal path — never "delete and rescan" as a release strategy.
+
+**Job queue semantics.** `jobs` is a durable at-least-once queue: a worker claims a job with a lease, failures retry with exponential backoff, and expired leases are reclaimed at startup after a crash. Consequently every job type (search, import, conversion, scan) must be idempotent.
+
+**Model edge cases (decided for v1):**
+
+- **Multi-episode files** (`S01E01E02`): one `media_files` row linked to N episodes through a join table.
+- **Specials:** Season 00, following TMDB/Jellyfin convention.
+- **Movie editions** ("Director's Cut", "Extended"): parsed into a free-text edition field and rendered into the filename Jellyfin-style; no per-edition duplicate handling in v1.
+- **Monitored semantics:** series, seasons, and episodes each carry their own flag. Setting the flag at a higher level cascades down as a bulk update, not a lock — individual children can still be toggled afterward.
+
 ---
 
 ## 8. TV compatibility and the Convert-for-TV queue
@@ -279,6 +292,14 @@ Bootstrap config (`caravan.yaml`): config dir, listen address/port (default `867
 
 Disk-to-server migration is therefore: copy or move the drive contents, re-point the root, rescan. No export/import ceremony.
 
+### 10.1 First run
+
+1. Pick the storage root (pre-filled: `/data` in Docker, the drive root in portable mode).
+2. Optionally point Caravan at existing media; a library scan is queued immediately.
+3. Scan review screen: confidently matched items land in the library; everything else parks in an unmatched queue showing the parser's best guess, with manual metadata search to resolve.
+
+Everything else ships with defaults; there is no further wizard.
+
 ---
 
 ## 11. API surface (REST, `/api/v1`)
@@ -293,6 +314,8 @@ GET/POST  /library/movies           # list / add
 GET/POST  /library/series
 POST      /library/rescan
 GET       /search?q=                # metadata search
+GET       /calendar?start=&end=     # combined movie/episode calendar
+GET       /calendar.ics             # iCal feed (API-key auth)
 GET/POST  /wanted/{id}/releases     # interactive release picker
 POST      /wanted/{id}/grab
 GET/POST  /indexers                 # config + test
@@ -330,21 +353,34 @@ Auth: single-user. Password optional, session cookie, API key for external tools
 
 ---
 
-## 14. Milestones
+## 14. Phases
 
-- **M0: Scaffold.** Go module, config, sqlite, embedded SPA skeleton, `serve` command, storage-root abstraction, library rescan.
-- **M1: Library + metadata.** TMDB matching, manual import of existing files, NFO writing, library UI.
-- **M2: Indexers + embedded torrent.** Torznab client, interactive search + picker, anacrolix engine, download queue.
-- **M3: Automation.** Quality profiles, backlog + RSS, automatic grab, upgrade-until-cutoff, import pipeline with hardlinks.
-- **M4: Handoff.** Jellyfin scan trigger, DLNA server, TV profiles + Convert-for-TV.
-- **M5: Deployment.** Docker image + compose, `prepare` command, launchers, portable integrity flow.
-- **M6: External clients.** qBittorrent, SABnzbd, NZBGet engines.
+Development is organized into phases, each absorbing one hat of the existing ecosystem and each ending with something usable and testable on its own. The bare-binary mode is the development target from day one; Docker and portable packaging are hardened in phase 5. Detailed task breakdowns and acceptance criteria live in `docs/PLAN.md`.
+
+| Phase | Ecosystem hat | Deliverable |
+|---|---|---|
+| 1 — Library manager | Library half of Sonarr/Radarr (tinyMediaManager/FileBot) | Scan existing media, TMDB match, rename to Jellyfin conventions, NFO/poster writing, library UI, rebuildable DB |
+| 2 — Search & download | Prowlarr + qBittorrent | Indexer config → interactive search → grab → embedded torrent → auto-import into library |
+| 3 — Automation | The Sonarr/Radarr brain | Wanted list, quality profiles, RSS + backlog search, automatic grab, upgrade-until-cutoff, stuck-import queue, combined calendar |
+| 4 — Playback handoff | — | Jellyfin scan trigger, DLNA server, TV profiles, Convert-for-TV queue |
+| 5 — Deployment | — (Caravan's differentiator) | Docker image + compose, `prepare` command, launchers, portable dirty-eject integrity flow |
+| 6 — External clients | Download-client bridges | qBittorrent, SABnzbd, NZBGet engine implementations |
 
 Post-v1 candidates: embedded Usenet engine, custom formats, anime numbering, multi-user/request management, music (Lidarr-shaped), mobile app.
 
 ---
 
-## 15. Non-goals (v1)
+## 15. Testing strategy
+
+- **Release parser:** table-driven corpus of real-world scene names versioned in-repo; every parser bug fix adds a corpus entry. Sonarr/Radarr behavior is the reference, but their GPL code and fixtures are not copied.
+- **Import pipeline:** integration tests against temp directories covering hardlink vs move, cross-device fallback, name collisions, and a simulated no-hardlink filesystem (the exFAT case).
+- **Indexer + metadata clients:** tested against recorded HTTP fixtures — no live API calls in CI. A fake Torznab server backs search/grab flow tests.
+- **End-to-end smoke:** launch the real binary against a scratch directory and drive the REST API through a scripted scenario (add movie → fake indexer → fake download data → verify final library layout). Runs on Linux, macOS, and Windows in CI.
+- **Cross-compilation:** CI builds every release target on every commit so portability never regresses silently.
+
+---
+
+## 16. Non-goals (v1)
 
 - Media playback or transcoding-on-serve. Players are external.
 - Music, books, comics, anime-specific numbering.
@@ -355,10 +391,10 @@ Post-v1 candidates: embedded Usenet engine, custom formats, anime numbering, mul
 
 ---
 
-## 16. Open questions
+## 17. Open questions
 
-1. UI framework: Svelte vs React. Lean Svelte for bundle size inside `go:embed`.
-2. RSS polling vs indexer-native push for backlog discovery. Polling is simpler and universal.
-3. Whether `prepare` should also offer to reformat a drive to exFAT+GPT (destructive; default no, require explicit flag).
-4. DLNA transcoding: explicitly out, but DLNA clients vary wildly in codec support; document recommended clients.
-5. Seeding policy defaults in portable mode beyond "paused": auto-resume with a big warning, or manual only.
+1. Whether `prepare` should also offer to reformat a drive to exFAT+GPT (destructive; default no, require explicit flag).
+2. DLNA transcoding: explicitly out, but DLNA clients vary wildly in codec support; document recommended clients.
+3. Seeding policy defaults in portable mode beyond "paused": auto-resume with a big warning, or manual only.
+
+**Resolved:** UI framework → Svelte (bundle size inside `go:embed`). Backlog discovery → RSS polling (simpler, universal across indexers).

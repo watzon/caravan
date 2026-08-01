@@ -1,0 +1,12 @@
+# sqlite database and its WAL/SHM sidecars
+caravan.db*
+
+# built binary (the module is also named caravan, so anchor to the repo root)
+/caravan
+
+# web toolchain — web/dist is deliberately NOT ignored: it is embedded via
+# go:embed and a placeholder must exist for `go build` to work.
+web/node_modules/
+
+# macOS
+.DS_Store
