@@ -23,9 +23,11 @@ const (
 // key-value table, so without an allowlist a buggy client could quietly fill
 // it with keys nothing reads.
 var writableSettings = map[string]bool{
-	store.SettingStorageRoot: true,
-	store.SettingTMDBAPIKey:  true,
-	SettingMode:              true,
+	store.SettingStorageRoot:            true,
+	store.SettingTMDBAPIKey:             true,
+	store.SettingRSSSyncIntervalMinutes: true,
+	store.SettingBacklogIntervalMinutes: true,
+	SettingMode:                         true,
 }
 
 // handleGetSettings returns every setting as a flat object.

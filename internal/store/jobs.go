@@ -175,6 +175,50 @@ func (s *Store) ReclaimExpired(ctx context.Context) (int, error) {
 	return int(n), nil
 }
 
+// ListJobs returns the most recent jobs, newest first, for the activity
+// feed (PLAN phase 3, task 8). A limit of zero or less returns every job.
+func (s *Store) ListJobs(ctx context.Context, limit int) ([]core.Job, error) {
+	query := "SELECT " + jobColumns + " FROM jobs ORDER BY id DESC"
+	if limit > 0 {
+		query += fmt.Sprintf(" LIMIT %d", limit)
+	}
+	rows, err := s.db.QueryContext(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("store: list jobs: %w", err)
+	}
+	defer rows.Close()
+
+	out := []core.Job{}
+	for rows.Next() {
+		j, err := scanJob(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: scan job: %w", err)
+		}
+		out = append(out, *j)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list jobs: %w", err)
+	}
+	return out, nil
+}
+
+// HasOpenJob reports whether a job of the given kind and payload is already
+// pending or running. Recurring jobs (RSS sync, backlog sweeps) use it to
+// stay singletons: a redelivered tick enqueues nothing when the work is
+// already queued, which is what keeps a restart from stacking duplicates
+// (PLAN phase 3, task 5).
+func (s *Store) HasOpenJob(ctx context.Context, kind, payload string) (bool, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM jobs
+		WHERE kind = ? AND payload = ? AND state IN (?, ?)`,
+		kind, payload, core.JobStatePending, core.JobStateRunning).Scan(&n)
+	if err != nil {
+		return false, fmt.Errorf("store: has open %s job: %w", kind, err)
+	}
+	return n > 0, nil
+}
+
 // GetJob returns the job with the given id, or ErrNotFound.
 func (s *Store) GetJob(ctx context.Context, id int64) (*core.Job, error) {
 	row := s.db.QueryRowContext(ctx, "SELECT "+jobColumns+" FROM jobs WHERE id = ?", id)

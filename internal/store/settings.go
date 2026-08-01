@@ -18,6 +18,16 @@ const (
 	SettingStorageRoot = "storage_root"
 	// SettingTMDBAPIKey is the metadata provider credential.
 	SettingTMDBAPIKey = "tmdb_api_key"
+	// SettingAPIKey is Caravan's own API credential, used by endpoints an
+	// external app subscribes to (the iCal feed, PLAN phase 3 task 9). It is
+	// generated from the settings screen, never hand-written.
+	SettingAPIKey = "api_key"
+	// SettingRSSSyncIntervalMinutes is how often enabled indexers are polled
+	// for new releases (PLAN phase 3, task 4).
+	SettingRSSSyncIntervalMinutes = "rss_sync_interval_minutes"
+	// SettingBacklogIntervalMinutes is how often the wanted list is swept for
+	// items that need a backlog search (PLAN phase 3, task 4).
+	SettingBacklogIntervalMinutes = "backlog_interval_minutes"
 )
 
 // GetSetting returns the value for key, or ErrNotFound when the key has never

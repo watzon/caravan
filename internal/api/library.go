@@ -432,6 +432,12 @@ func (s *server) handlePatchSeries(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreError(w, "update series", err)
 		return
 	}
+	// SPEC §7: the series flag cascades down to every season and episode as a
+	// bulk update. Children can be toggled back individually afterwards.
+	if err := s.st.CascadeSeriesMonitored(ctx, id, *body.Monitored); err != nil {
+		s.writeStoreError(w, "cascade monitored flag", err)
+		return
+	}
 
 	dto, err := s.seriesDetail(ctx, id)
 	if err != nil {
@@ -441,9 +447,9 @@ func (s *server) handlePatchSeries(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, dto)
 }
 
-// handlePatchSeason updates one season's monitored flag. SPEC §7's downward
-// cascade is a phase-3 bulk operation (PLAN phase 3, task 2); phase 1 sets the
-// one flag the user actually clicked.
+// handlePatchSeason updates one season's monitored flag and cascades it to
+// the season's episodes (SPEC §7, PLAN phase 3 task 2: a bulk update, not a
+// lock, so individual episodes can be toggled back afterwards).
 func (s *server) handlePatchSeason(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -476,6 +482,10 @@ func (s *server) handlePatchSeason(w http.ResponseWriter, r *http.Request) {
 		season.Monitored = *body.Monitored
 		if err := s.st.UpsertSeason(ctx, &season); err != nil {
 			s.writeStoreError(w, "update season", err)
+			return
+		}
+		if err := s.st.CascadeSeasonMonitored(ctx, id, number, *body.Monitored); err != nil {
+			s.writeStoreError(w, "cascade monitored flag", err)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)

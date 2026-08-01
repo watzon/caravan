@@ -74,7 +74,23 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api := http.NewServeMux()
 	api.HandleFunc("GET /settings", s.handleGetSettings)
 	api.HandleFunc("PUT /settings", s.handlePutSettings)
+	api.HandleFunc("POST /settings/apikey", s.handleGenerateAPIKey)
 	api.HandleFunc("GET /system/status", s.handleSystemStatus)
+
+	// Quality profiles (PLAN phase 3, task 1) and the wanted list they drive
+	// (task 2).
+	api.HandleFunc("GET /quality-profiles", s.handleListQualityProfiles)
+	api.HandleFunc("POST /quality-profiles", s.handleCreateQualityProfile)
+	api.HandleFunc("PUT /quality-profiles/{id}", s.handleUpdateQualityProfile)
+	api.HandleFunc("DELETE /quality-profiles/{id}", s.handleDeleteQualityProfile)
+	api.HandleFunc("GET /wanted", s.handleWanted)
+
+	// The combined calendar and its iCal feed (PLAN phase 3, task 9).
+	api.HandleFunc("GET /calendar", s.handleCalendar)
+	api.HandleFunc("GET /calendar.ics", s.handleCalendarICS)
+
+	// The job queue's activity feed (PLAN phase 3, task 8).
+	api.HandleFunc("GET /jobs", s.handleListJobs)
 
 	api.HandleFunc("GET /library/movies", s.handleListMovies)
 	api.HandleFunc("POST /library/movies", s.handleAddMovie)

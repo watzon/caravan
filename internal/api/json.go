@@ -76,6 +76,16 @@ func pathID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	return id, true
 }
 
+// jsonDate renders just the day of a timestamp, for air dates and release
+// dates where the time of day is noise. The zero time becomes the empty
+// string.
+func jsonDate(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format("2006-01-02")
+}
+
 // jsonTime renders a timestamp for the API. The zero time becomes the empty
 // string, matching how the store distinguishes "unset" from "the epoch".
 func jsonTime(t time.Time) string {

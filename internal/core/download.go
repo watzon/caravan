@@ -150,6 +150,11 @@ const (
 	GrabStatusGrabbed  = "grabbed"
 	GrabStatusImported = "imported"
 	GrabStatusFailed   = "failed"
+	// GrabStatusRejected marks a decision-log row rather than a grab: an
+	// automatic search evaluated this release for the item and skipped it,
+	// and Reason says why (PLAN phase 3, task 3). The row exists so "why was
+	// this skipped" is answerable from the grabs history.
+	GrabStatusRejected = "rejected"
 )
 
 // Grab is one entry in the grab history (the `grabs` table): which release was

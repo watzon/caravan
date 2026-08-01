@@ -16,6 +16,82 @@ const DefaultQualityProfileName = "Standard"
 
 const qualityProfileColumns = `id, name, cutoff, items, upgrade_allowed, created_at, updated_at`
 
+// CreateQualityProfile inserts p and writes back the assigned ID. The name
+// must be unique; a duplicate is a store error the API layer turns into a 409.
+func (s *Store) CreateQualityProfile(ctx context.Context, p *core.QualityProfile) error {
+	items, err := json.Marshal(p.Items)
+	if err != nil {
+		return fmt.Errorf("store: encode items of profile %q: %w", p.Name, err)
+	}
+	ts := formatTime(now())
+	res, err := s.db.ExecContext(ctx, `
+		INSERT INTO quality_profiles (name, cutoff, items, upgrade_allowed, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		p.Name, p.Cutoff, string(items), p.UpgradeAllowed, ts, ts)
+	if err != nil {
+		return fmt.Errorf("store: create quality profile %q: %w", p.Name, err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return fmt.Errorf("store: create quality profile %q: %w", p.Name, err)
+	}
+	p.ID = id
+	return nil
+}
+
+// UpdateQualityProfile rewrites the mutable fields of an existing profile.
+// Updating an absent profile is ErrNotFound.
+func (s *Store) UpdateQualityProfile(ctx context.Context, p *core.QualityProfile) error {
+	items, err := json.Marshal(p.Items)
+	if err != nil {
+		return fmt.Errorf("store: encode items of profile %q: %w", p.Name, err)
+	}
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE quality_profiles SET name = ?, cutoff = ?, items = ?, upgrade_allowed = ?, updated_at = ?
+		WHERE id = ?`,
+		p.Name, p.Cutoff, string(items), p.UpgradeAllowed, formatTime(now()), p.ID)
+	if err != nil {
+		return fmt.Errorf("store: update quality profile %d: %w", p.ID, err)
+	}
+	return affectedOne(res, "quality profile", p.ID)
+}
+
+// DeleteQualityProfile removes a profile. Items assigned to it keep their
+// dangling profile id and fall back to the default (see ResolveQualityProfile):
+// quality_profile_id is a soft reference precisely so deleting a profile can
+// never orphan a library item (0001's schema note).
+func (s *Store) DeleteQualityProfile(ctx context.Context, id int64) error {
+	res, err := s.db.ExecContext(ctx, "DELETE FROM quality_profiles WHERE id = ?", id)
+	if err != nil {
+		return fmt.Errorf("store: delete quality profile %d: %w", id, err)
+	}
+	return affectedOne(res, "quality profile", id)
+}
+
+// ResolveQualityProfile returns the effective profile for an item: the named
+// one when id is positive and exists, the default (oldest) profile otherwise.
+// A library item with quality_profile_id 0, or one pointing at a deleted
+// profile, must never be profile-less: the default is the safety net.
+func (s *Store) ResolveQualityProfile(ctx context.Context, id int64) (*core.QualityProfile, error) {
+	if id > 0 {
+		p, err := s.GetQualityProfile(ctx, id)
+		if err == nil {
+			return p, nil
+		}
+		if !errors.Is(err, ErrNotFound) {
+			return nil, err
+		}
+	}
+	profiles, err := s.ListQualityProfiles(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(profiles) == 0 {
+		return nil, fmt.Errorf("store: no quality profiles: %w", ErrNotFound)
+	}
+	return &profiles[0], nil
+}
+
 // GetQualityProfile returns the profile with the given id, or ErrNotFound.
 func (s *Store) GetQualityProfile(ctx context.Context, id int64) (*core.QualityProfile, error) {
 	row := s.db.QueryRowContext(ctx, "SELECT "+qualityProfileColumns+" FROM quality_profiles WHERE id = ?", id)

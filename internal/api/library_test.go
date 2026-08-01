@@ -345,14 +345,15 @@ func TestPatchSeasonAndEpisodeMonitored(t *testing.T) {
 	if seasons[0].Monitored {
 		t.Fatal("season is still monitored, want false")
 	}
-	// SPEC §7 makes the cascade a bulk update rather than a lock, and phase 1
-	// does not cascade at all: the episode keeps its own flag.
+	// SPEC §7 makes the cascade a bulk update rather than a lock: the season
+	// toggle pushes its flag down to the episode, and the episode can still be
+	// toggled back on its own afterwards.
 	child, err := st.GetEpisode(ctx, ep.ID)
 	if err != nil {
 		t.Fatalf("GetEpisode: %v", err)
 	}
-	if !child.Monitored {
-		t.Fatal("episode lost its flag to the season update, want it untouched")
+	if child.Monitored {
+		t.Fatal("episode did not inherit the season's unmonitored cascade")
 	}
 
 	rec = do(t, h, http.MethodPatch, "/api/v1/library/episodes/"+itoa(ep.ID), `{"monitored":false}`)

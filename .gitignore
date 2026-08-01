@@ -13,3 +13,9 @@ web/node_modules/
 
 # macOS
 .DS_Store
+
+# Agents
+.claude
+.agents
+.omp
+.codex

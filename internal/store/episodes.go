@@ -226,6 +226,33 @@ func (s *Store) EpisodeCountsBySeries(ctx context.Context) (map[int64]EpisodeCou
 	return out, nil
 }
 
+// CascadeSeriesMonitored bulk-updates the monitored flag of every season and
+// episode of a series (SPEC §7). The cascade is a bulk update, not a lock:
+// after it lands, each child flag stands alone and can be toggled back
+// individually.
+func (s *Store) CascadeSeriesMonitored(ctx context.Context, seriesID int64, monitored bool) error {
+	if _, err := s.db.ExecContext(ctx,
+		"UPDATE seasons SET monitored = ? WHERE series_id = ?", monitored, seriesID); err != nil {
+		return fmt.Errorf("store: cascade monitored to seasons of series %d: %w", seriesID, err)
+	}
+	if _, err := s.db.ExecContext(ctx,
+		"UPDATE episodes SET monitored = ? WHERE series_id = ?", monitored, seriesID); err != nil {
+		return fmt.Errorf("store: cascade monitored to episodes of series %d: %w", seriesID, err)
+	}
+	return nil
+}
+
+// CascadeSeasonMonitored bulk-updates the monitored flag of every episode in
+// one season. See CascadeSeriesMonitored.
+func (s *Store) CascadeSeasonMonitored(ctx context.Context, seriesID int64, seasonNumber int, monitored bool) error {
+	if _, err := s.db.ExecContext(ctx,
+		"UPDATE episodes SET monitored = ? WHERE series_id = ? AND season_number = ?",
+		monitored, seriesID, seasonNumber); err != nil {
+		return fmt.Errorf("store: cascade monitored to season %d of series %d: %w", seasonNumber, seriesID, err)
+	}
+	return nil
+}
+
 // DeleteEpisode removes the episode and, by cascade, its episode-file links.
 func (s *Store) DeleteEpisode(ctx context.Context, id int64) error {
 	if _, err := s.db.ExecContext(ctx, "DELETE FROM episodes WHERE id = ?", id); err != nil {
