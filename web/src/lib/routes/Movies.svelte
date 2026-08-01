@@ -124,7 +124,8 @@
           href={`/movies/${movie.id}`}
           title={movie.title}
           year={movie.year}
-          posterPath={movie.poster_path || movie.poster_url}
+          posterPath={movie.poster_path}
+          posterUrl={movie.poster_url}
           status={movieStatus(movie)}
           quality={movie.file?.quality && movie.file.quality !== 'unknown'
             ? movie.file.quality

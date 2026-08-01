@@ -16,6 +16,8 @@
     title: string;
     year: number;
     posterPath: string | null | undefined;
+    /** Provider artwork URL used when the local poster fails to load. */
+    posterUrl?: string | null;
     status: StatusKey;
     /** Quality of the owned file, or a short summary line ("6 / 10 episodes"). */
     quality?: string | null;
@@ -23,8 +25,17 @@
     fallbackIcon?: IconName;
   }
 
-  let { href, title, year, posterPath, status, quality, note, fallbackIcon = 'film' }: Props =
-    $props();
+  let {
+    href,
+    title,
+    year,
+    posterPath,
+    posterUrl = undefined,
+    status,
+    quality,
+    note,
+    fallbackIcon = 'film',
+  }: Props = $props();
 </script>
 
 <a
@@ -34,7 +45,7 @@
   <div
     class="relative rounded-md ring-1 ring-transparent transition-[box-shadow] duration-150 ease-out
            group-hover:ring-border-strong group-focus-visible:ring-accent">
-    <Poster path={posterPath} alt="" {fallbackIcon} />
+    <Poster path={posterPath} fallback={posterUrl} alt="" {fallbackIcon} />
 
     <span class="absolute left-2 top-2 rounded-full bg-bg/70 p-1.5">
       <StatusDot {status} showLabel={false} />

@@ -98,7 +98,7 @@
           <ul class="overflow-hidden rounded-md border border-border bg-surface">
             {#each movies as movie (movie.id)}
               <li class="flex min-w-0 items-center gap-3 border-b border-border px-3 py-2 last:border-b-0">
-                <Poster path={movie.poster_path || movie.poster_url} alt={movie.title} class="h-[54px] w-[36px] shrink-0" />
+                <Poster path={movie.poster_path} fallback={movie.poster_url} alt={movie.title} class="h-[54px] w-[36px] shrink-0" />
                 <div class="min-w-0 flex-1">
                   <p class="truncate font-medium text-ink">{titleWithYear(movie.title, movie.year)}</p>
                   <p class="mt-0.5 truncate text-sm text-ink-secondary">{detail(movie)}</p>

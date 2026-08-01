@@ -130,7 +130,8 @@
           href={`/series/${item.id}`}
           title={item.title}
           year={item.year}
-          posterPath={item.poster_path || item.poster_url}
+          posterPath={item.poster_path}
+          posterUrl={item.poster_url}
           status={seriesStatus(item)}
           note={episodeNote(item)}
           fallbackIcon="tv" />

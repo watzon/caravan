@@ -88,8 +88,11 @@ func (m *Manager) Scan(ctx context.Context) (*ScanResult, error) {
 	info, err := os.Stat(libAbs)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		// Nothing to scan is a normal first-run state, not an error.
-		return res, nil
+		// No library directory on disk. That is the normal first-run state,
+		// but it is also the state after the library tree was removed, so the
+		// walk is skipped while the removal/artwork reconciliation below
+		// still runs: rows pointing at vanished files must not linger.
+		info = nil
 	case err != nil:
 		return nil, fmt.Errorf("library: stat %s: %w", libAbs, err)
 	case !info.IsDir():
@@ -115,7 +118,9 @@ func (m *Manager) Scan(ctx context.Context) (*ScanResult, error) {
 	seenFiles := map[string]bool{}
 	seenUnmatched := map[string]bool{}
 
-	walkErr := filepath.WalkDir(libAbs, func(p string, d fs.DirEntry, err error) error {
+	var walkErr error
+	if info != nil {
+		walkErr = filepath.WalkDir(libAbs, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			res.addErr("walk %s: %v", p, err)
 			if d != nil && d.IsDir() {
@@ -153,10 +158,11 @@ func (m *Manager) Scan(ctx context.Context) (*ScanResult, error) {
 			return nil
 		}
 
-		res.Scanned++
-		m.scanFile(ctx, rel, fi.Size(), res, known, seenFiles, seenUnmatched)
-		return nil
-	})
+			res.Scanned++
+			m.scanFile(ctx, rel, fi.Size(), res, known, seenFiles, seenUnmatched)
+			return nil
+		})
+	}
 	if walkErr != nil {
 		return nil, fmt.Errorf("library: scan %s: %w", libAbs, walkErr)
 	}
@@ -164,7 +170,54 @@ func (m *Manager) Scan(ctx context.Context) (*ScanResult, error) {
 	if err := m.reconcileRemovals(ctx, res, before, beforeUnmatched, seenFiles, seenUnmatched); err != nil {
 		return nil, err
 	}
+	if err := m.healStaleArtwork(ctx, res); err != nil {
+		return nil, err
+	}
 	return res, nil
+}
+
+// healStaleArtwork clears poster references whose files are no longer on
+// disk. The UI prefers a local poster over the provider URL it would
+// otherwise show, so a poster_path that 404s is strictly worse than none:
+// clearing it lets the interface fall back to the provider artwork until a
+// future import writes a real file. It never touches artwork that exists.
+func (m *Manager) healStaleArtwork(ctx context.Context, res *ScanResult) error {
+	movies, err := m.store.ListMovies(ctx)
+	if err != nil {
+		return err
+	}
+	for _, mv := range movies {
+		if mv.PosterPath == "" || fileExists(m.abs(mv.PosterPath)) {
+			continue
+		}
+		mv.PosterPath = ""
+		if err := m.store.UpsertMovie(ctx, &mv); err != nil {
+			res.addErr("clear stale poster of %s: %v", mv.Title, err)
+		}
+	}
+
+	series, err := m.store.ListSeries(ctx)
+	if err != nil {
+		return err
+	}
+	for _, sr := range series {
+		if sr.PosterPath == "" || fileExists(m.abs(sr.PosterPath)) {
+			continue
+		}
+		sr.PosterPath = ""
+		if err := m.store.UpsertSeries(ctx, &sr); err != nil {
+			res.addErr("clear stale poster of %s: %v", sr.Title, err)
+		}
+	}
+	return nil
+}
+
+// fileExists reports whether p is present on disk. Any stat error other than
+// a clear not-exist counts as present: an unreadable filesystem is not
+// evidence the file is gone.
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return !errors.Is(err, fs.ErrNotExist)
 }
 
 // scanFile matches and reconciles one video file. It never returns an error:

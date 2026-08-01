@@ -518,6 +518,85 @@ func TestScanRemovesRowsForDeletedFiles(t *testing.T) {
 	}
 }
 
+func TestScanHealsRowsWhenLibraryTreeIsGone(t *testing.T) {
+	h := newHarness(t)
+	seedMovie(h)
+	h.writeVideo(rawMovieRel, "movie bytes")
+	h.scan()
+
+	// The whole library tree disappearing (a deleted folder, an unmounted
+	// drive) must reconcile exactly like per-file deletions: no walk, but the
+	// rows pointing at vanished files are removed and stale artwork is
+	// cleared.
+	if err := os.RemoveAll(filepath.Join(h.root, "library")); err != nil {
+		t.Fatalf("remove library tree: %v", err)
+	}
+
+	res := h.scan()
+	if res.Scanned != 0 || res.Removed != 1 {
+		t.Fatalf("unexpected result: %+v", res)
+	}
+
+	ctx := context.Background()
+	files, err := h.st.ListMediaFiles(ctx)
+	if err != nil {
+		t.Fatalf("ListMediaFiles: %v", err)
+	}
+	if len(files) != 0 {
+		t.Fatalf("media files = %+v, want none after the tree vanished", files)
+	}
+	movies, err := h.st.ListMovies(ctx)
+	if err != nil {
+		t.Fatalf("ListMovies: %v", err)
+	}
+	if len(movies) != 1 {
+		t.Fatalf("got %d movies, want the row to survive", len(movies))
+	}
+	if movies[0].PosterPath != "" {
+		t.Fatalf("poster path = %q, want cleared for missing artwork", movies[0].PosterPath)
+	}
+	if movies[0].PosterURL == "" {
+		t.Fatal("poster url must survive: it is the fallback once the local poster is gone")
+	}
+}
+
+func TestScanRestoresPosterWhenOnlyArtworkIsMissing(t *testing.T) {
+	h := newHarness(t)
+	seedMovie(h)
+	h.writeVideo(rawMovieRel, "movie bytes")
+	h.scan()
+
+	if err := os.Remove(filepath.Join(h.root, filepath.FromSlash(movieDirRel+"/"+PosterName))); err != nil {
+		t.Fatalf("remove poster: %v", err)
+	}
+	// The media file is still here, so the scan re-imports it and
+	// ensurePoster re-downloads the missing artwork alongside it.
+	before := h.posterHits
+	h.scan()
+
+	if h.posterHits != before+1 {
+		t.Fatalf("poster hits = %d, want %d (one re-fetch)", h.posterHits, before+1)
+	}
+	if !h.exists(movieDirRel + "/" + PosterName) {
+		t.Fatal("poster file was not restored")
+	}
+	ctx := context.Background()
+	movies, err := h.st.ListMovies(ctx)
+	if err != nil {
+		t.Fatalf("ListMovies: %v", err)
+	}
+	if want := movieDirRel + "/" + PosterName; movies[0].PosterPath != want {
+		t.Fatalf("poster path = %q, want %q", movies[0].PosterPath, want)
+	}
+	files, err := h.st.ListMediaFiles(ctx)
+	if err != nil {
+		t.Fatalf("ListMediaFiles: %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("media files = %+v, want the video row untouched", files)
+	}
+}
+
 func TestScanClearsStaleUnmatchedEntries(t *testing.T) {
 	h := newHarness(t)
 	rel := "library/Movies/mystery.mkv"
