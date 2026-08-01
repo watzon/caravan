@@ -26,6 +26,8 @@ type downloadJSON struct {
 	Size      int64   `json:"size"`
 	DownRate  int64   `json:"down_rate"`
 	UpRate    int64   `json:"up_rate"`
+	MaxDownRate int64   `json:"max_down_rate"`
+	MaxUpRate   int64   `json:"max_up_rate"`
 	// ETASeconds is -1 when unknown, including for a row the engine is not
 	// currently reporting on.
 	ETASeconds int64   `json:"eta_seconds"`
@@ -98,6 +100,8 @@ func storedDownloadDTO(d core.Download) downloadJSON {
 		Progress:   d.Progress,
 		BytesDone:  d.BytesDone,
 		Size:       d.Size,
+		MaxDownRate: d.MaxDownRate,
+		MaxUpRate:   d.MaxUpRate,
 		ETASeconds: -1,
 		SavePath:   d.SavePath,
 		Error:      d.Error,

@@ -338,3 +338,100 @@ export interface DownloadStatus {
    */
   engine?: string;
 }
+
+/* ---------------------------------------------------------------------------
+ * Phase 3 - acquisition visibility, calendar and quality profiles.
+ * ------------------------------------------------------------------------- */
+
+export type WantedReason = 'missing' | 'below_cutoff';
+
+export interface WantedMovie {
+  id: number;
+  title: string;
+  year: number;
+  poster_path: string;
+  poster_url: string;
+  reason: WantedReason;
+  file_quality: string;
+}
+
+export interface WantedEpisode {
+  id: number;
+  series_id: number;
+  series_title: string;
+  season_number: number;
+  episode_number: number;
+  title: string;
+  air_date: string;
+  reason: WantedReason;
+  file_quality: string;
+}
+
+export interface WantedLists {
+  movies: WantedMovie[];
+  episodes: WantedEpisode[];
+}
+
+export type EventLevel = 'info' | 'warn' | 'error';
+
+export interface ActivityEvent {
+  id: number;
+  level: EventLevel;
+  category: string;
+  message: string;
+  detail: string;
+  movie_id: number;
+  series_id: number;
+  created_at: string;
+}
+
+export type JobState = 'pending' | 'running' | 'done' | 'failed';
+
+export interface Job {
+  id: number;
+  kind: 'rss_sync' | 'backlog_sweep' | 'search_movie' | 'search_episode';
+  payload: string;
+  state: JobState;
+  attempts: number;
+  run_after: string;
+  lease_expires_at: string;
+  last_error: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type CalendarStatus = 'downloaded' | 'downloading' | 'missing' | 'unaired';
+
+export interface CalendarEntry {
+  kind: 'episode' | 'movie';
+  date: string;
+  title: string;
+  series_id?: number;
+  movie_id?: number;
+  season_number?: number;
+  episode_number?: number;
+  episode_title?: string;
+  monitored: boolean;
+  has_file: boolean;
+  status: CalendarStatus;
+}
+
+export const QUALITY_LADDER = ['2160p', '1080p', '720p', '480p'] as const;
+export type Quality = (typeof QUALITY_LADDER)[number];
+
+export interface QualityProfile {
+  id: number;
+  name: string;
+  cutoff: Quality;
+  items: Quality[];
+  upgrade_allowed: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface QualityProfileInput {
+  name: string;
+  cutoff: Quality;
+  items: Quality[];
+  upgrade_allowed: boolean;
+}

@@ -28,6 +28,20 @@ const (
 	// SettingBacklogIntervalMinutes is how often the wanted list is swept for
 	// items that need a backlog search (PLAN phase 3, task 4).
 	SettingBacklogIntervalMinutes = "backlog_interval_minutes"
+	// SettingEngineListenPort is the port the embedded engine binds. Zero lets
+	// the torrent library choose its default.
+	SettingEngineListenPort = "engine_listen_port"
+	// SettingEngineMaxConnections is the per-torrent connection cap. Zero uses
+	// the torrent library default.
+	SettingEngineMaxConnections = "engine_max_connections"
+	// SettingEngineMaxDownKBps and SettingEngineMaxUpKBps are global rate
+	// limits in KB/s. Zero means unlimited.
+	SettingEngineMaxDownKBps = "engine_max_down_kbps"
+	SettingEngineMaxUpKBps   = "engine_max_up_kbps"
+	// SettingEngineSeedRatio and SettingEngineSeedDays stop seeding once either
+	// configured target is reached. Zero disables that target.
+	SettingEngineSeedRatio = "engine_seed_ratio"
+	SettingEngineSeedDays  = "engine_seed_days"
 )
 
 // GetSetting returns the value for key, or ErrNotFound when the key has never

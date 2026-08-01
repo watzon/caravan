@@ -261,20 +261,51 @@ func (s *server) movieDetail(ctx context.Context, id int64) (movieJSON, error) {
 	return dto, nil
 }
 
-// handlePatchMovie updates the mutable fields of a movie. Only the monitored
-// flag is mutable in phase 1 — everything else is provider metadata, refreshed
-// by a scan rather than edited by hand.
+// itemPatchRequest is the body of the movie and series PATCH endpoints. Both
+// fields are optional pointers so "absent" and "set to the zero value" are
+// distinguishable: quality_profile_id 0 explicitly re-assigns the default
+// profile. A PATCH that names no field is a client bug worth reporting.
+type itemPatchRequest struct {
+	Monitored        *bool  `json:"monitored"`
+	QualityProfileID *int64 `json:"quality_profile_id"`
+}
+
+// applyItemPatch validates the patch against the store and reports whether it
+// named at least one field. A nonexistent profile is a 400, not a 404: the
+// error is in the request, not in the addressed item.
+func (s *server) applyItemPatch(w http.ResponseWriter, r *http.Request, body itemPatchRequest, apply func(monitored *bool, profileID int64)) bool {
+	if body.Monitored == nil && body.QualityProfileID == nil {
+		writeError(w, http.StatusBadRequest, "monitored or quality_profile_id is required")
+		return false
+	}
+	profileID := int64(-1)
+	if body.QualityProfileID != nil {
+		profileID = *body.QualityProfileID
+		if profileID < 0 {
+			writeError(w, http.StatusBadRequest, "invalid quality_profile_id")
+			return false
+		}
+		if profileID > 0 {
+			if _, err := s.st.GetQualityProfile(r.Context(), profileID); err != nil {
+				writeError(w, http.StatusBadRequest, "unknown quality_profile_id")
+				return false
+			}
+		}
+	}
+	apply(body.Monitored, profileID)
+	return true
+}
+
+// handlePatchMovie updates the mutable fields of a movie: the monitored flag
+// and the quality profile assignment (PLAN phase 3, task 1). Everything else
+// is provider metadata, refreshed by a scan rather than edited by hand.
 func (s *server) handlePatchMovie(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
 		return
 	}
-	var body monitorRequest
+	var body itemPatchRequest
 	if !decodeJSON(w, r, &body) {
-		return
-	}
-	if body.Monitored == nil {
-		writeError(w, http.StatusBadRequest, "monitored is required")
 		return
 	}
 	ctx := r.Context()
@@ -284,7 +315,16 @@ func (s *server) handlePatchMovie(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreError(w, "get movie", err)
 		return
 	}
-	m.Monitored = *body.Monitored
+	if !s.applyItemPatch(w, r, body, func(monitored *bool, profileID int64) {
+		if monitored != nil {
+			m.Monitored = *monitored
+		}
+		if profileID >= 0 {
+			m.QualityProfileID = profileID
+		}
+	}) {
+		return
+	}
 	if err := s.st.UpsertMovie(ctx, m); err != nil {
 		s.writeStoreError(w, "update movie", err)
 		return
@@ -412,12 +452,8 @@ func (s *server) handlePatchSeries(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var body monitorRequest
+	var body itemPatchRequest
 	if !decodeJSON(w, r, &body) {
-		return
-	}
-	if body.Monitored == nil {
-		writeError(w, http.StatusBadRequest, "monitored is required")
 		return
 	}
 	ctx := r.Context()
@@ -427,16 +463,29 @@ func (s *server) handlePatchSeries(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreError(w, "get series", err)
 		return
 	}
-	sr.Monitored = *body.Monitored
+	cascade := false
+	if !s.applyItemPatch(w, r, body, func(monitored *bool, profileID int64) {
+		if monitored != nil {
+			sr.Monitored = *monitored
+			cascade = true
+		}
+		if profileID >= 0 {
+			sr.QualityProfileID = profileID
+		}
+	}) {
+		return
+	}
 	if err := s.st.UpsertSeries(ctx, sr); err != nil {
 		s.writeStoreError(w, "update series", err)
 		return
 	}
 	// SPEC §7: the series flag cascades down to every season and episode as a
 	// bulk update. Children can be toggled back individually afterwards.
-	if err := s.st.CascadeSeriesMonitored(ctx, id, *body.Monitored); err != nil {
-		s.writeStoreError(w, "cascade monitored flag", err)
-		return
+	if cascade {
+		if err := s.st.CascadeSeriesMonitored(ctx, id, sr.Monitored); err != nil {
+			s.writeStoreError(w, "cascade monitored flag", err)
+			return
+		}
 	}
 
 	dto, err := s.seriesDetail(ctx, id)

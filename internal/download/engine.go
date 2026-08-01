@@ -22,6 +22,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/time/rate"
+
 	"github.com/anacrolix/torrent"
 
 	"github.com/watzon/caravan/internal/core"
@@ -78,6 +80,17 @@ type Persistence interface {
 type EmbeddedOpts struct {
 	// ListenPort is the TCP/uTP port the client binds. Zero picks one.
 	ListenPort int
+	// MaxConnections caps established peers per torrent. Zero uses anacrolix's
+	// default. It is a construction-time setting.
+	MaxConnections int
+	// MaxDownKBps and MaxUpKBps are global client limits in KB/s. Zero is
+	// unlimited and can be changed while the engine is running.
+	MaxDownKBps int64
+	MaxUpKBps   int64
+	// SeedRatio and SeedDays stop a completed torrent once either non-zero
+	// target is met.
+	SeedRatio float64
+	SeedDays  int
 	// DisableDHT and DisablePEX turn off peer discovery. SPEC §12 makes both
 	// user-configurable rather than assumed.
 	DisableDHT bool
@@ -113,6 +126,15 @@ type Embedded struct {
 	opts       EmbeddedOpts
 	http       *http.Client
 	logger     *slog.Logger
+	// The client reads these limiter instances directly, so changing their
+	// limits updates the live global transfer budget without rebuilding peers.
+	downLimiter *rate.Limiter
+	upLimiter   *rate.Limiter
+	// maxConnections is the configured per-torrent ceiling. It is fixed for a
+	// client lifetime because anacrolix exposes it through ClientConfig only.
+	maxConnections int
+	seedRatio      float64
+	seedDays       int
 
 	// ctx is cancelled by Close. It bounds the poller and the per-download
 	// goroutines that wait for metadata.
@@ -148,10 +170,17 @@ type item struct {
 	lastWritten int64
 	downRate    int64
 	upRate      int64
+	// seedingStarted is the first poll that observed this torrent seeding. It
+	// deliberately lives with the running item: the engine's transfer ratio is
+	// session-scoped too, so neither target can be faithfully continued after a
+	// restart.
+	seedingStarted time.Time
 }
 
 // Embedded implements the engine interface every download backend speaks.
 var _ core.Engine = (*Embedded)(nil)
+var _ core.EngineInsight = (*Embedded)(nil)
+var _ core.EngineRateLimits = (*Embedded)(nil)
 
 // NewEmbedded starts the embedded torrent client, writing in-progress data
 // under dataDir/IncompleteDir, and re-adds whatever opts.Store remembers.

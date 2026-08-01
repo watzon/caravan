@@ -88,6 +88,52 @@ func TestResolveQualityProfileFallsBackToDefault(t *testing.T) {
 	}
 }
 
+func TestPatchItemAssignsQualityProfile(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	ctx := context.Background()
+
+	m := &core.Movie{TMDBID: 5, Title: "Profile Me", Monitored: true}
+	if err := st.UpsertMovie(ctx, m); err != nil {
+		t.Fatalf("UpsertMovie: %v", err)
+	}
+	p := core.QualityProfile{Name: "UHD", Cutoff: "2160p", Items: []string{"2160p"}, UpgradeAllowed: true}
+	if err := st.CreateQualityProfile(ctx, &p); err != nil {
+		t.Fatalf("CreateQualityProfile: %v", err)
+	}
+
+	// Assignment by id.
+	rec := do(t, h, http.MethodPatch, "/api/v1/library/movies/"+itoa(m.ID),
+		`{"quality_profile_id": `+itoa(p.ID)+`}`)
+	wantStatus(t, rec, http.StatusOK)
+	got, err := st.GetMovie(ctx, m.ID)
+	if err != nil {
+		t.Fatalf("GetMovie: %v", err)
+	}
+	if got.QualityProfileID != p.ID {
+		t.Fatalf("profile = %d, want %d", got.QualityProfileID, p.ID)
+	}
+	// Monitored must be untouched by a profile-only patch.
+	if !got.Monitored {
+		t.Fatal("profile-only patch flipped monitored")
+	}
+
+	// 0 re-assigns the default.
+	rec = do(t, h, http.MethodPatch, "/api/v1/library/movies/"+itoa(m.ID), `{"quality_profile_id": 0}`)
+	wantStatus(t, rec, http.StatusOK)
+	got, _ = st.GetMovie(ctx, m.ID)
+	if got.QualityProfileID != 0 {
+		t.Fatalf("profile = %d, want 0 (default)", got.QualityProfileID)
+	}
+
+	// An unknown profile is a client error, not a 404.
+	rec = do(t, h, http.MethodPatch, "/api/v1/library/movies/"+itoa(m.ID), `{"quality_profile_id": 999}`)
+	wantStatus(t, rec, http.StatusBadRequest)
+
+	// An empty patch is still rejected.
+	rec = do(t, h, http.MethodPatch, "/api/v1/library/movies/"+itoa(m.ID), `{}`)
+	wantStatus(t, rec, http.StatusBadRequest)
+}
+
 func TestWantedList(t *testing.T) {
 	h, st, _ := newTestServer(t)
 	ctx := context.Background()

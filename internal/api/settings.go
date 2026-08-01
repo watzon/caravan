@@ -1,9 +1,13 @@
 package api
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
+	"strings"
 
 	"github.com/watzon/caravan/internal/store"
 )
@@ -27,7 +31,19 @@ var writableSettings = map[string]bool{
 	store.SettingTMDBAPIKey:             true,
 	store.SettingRSSSyncIntervalMinutes: true,
 	store.SettingBacklogIntervalMinutes: true,
+	store.SettingEngineListenPort:       true,
+	store.SettingEngineMaxConnections:   true,
+	store.SettingEngineMaxDownKBps:      true,
+	store.SettingEngineMaxUpKBps:        true,
+	store.SettingEngineSeedRatio:        true,
+	store.SettingEngineSeedDays:         true,
 	SettingMode:                         true,
+}
+
+// engineSettingsApplier is implemented by providers that can apply the live
+// subset of engine settings after the settings row has been committed.
+type engineSettingsApplier interface {
+	ApplyEngineSettings(context.Context, map[string]string) error
 }
 
 // handleGetSettings returns every setting as a flat object.
@@ -61,6 +77,11 @@ func (s *server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := validateEngineSettings(body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
 	// Sorted so a partial failure is at least deterministic.
 	keys := make([]string, 0, len(body))
 	for key := range body {
@@ -79,7 +100,41 @@ func (s *server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreError(w, "read settings", err)
 		return
 	}
+	if applier, ok := s.engine.(engineSettingsApplier); ok {
+		if err := applier.ApplyEngineSettings(r.Context(), settings); err != nil {
+			s.writeEngineError(w, "apply engine settings", err)
+			return
+		}
+	}
 	writeJSON(w, http.StatusOK, settings)
+}
+
+func validateEngineSettings(settings map[string]string) error {
+	for key, value := range settings {
+		switch key {
+		case store.SettingEngineListenPort:
+			port, err := strconv.Atoi(strings.TrimSpace(value))
+			if err != nil || port < 0 || port > 65535 {
+				return fmt.Errorf("invalid %s", key)
+			}
+		case store.SettingEngineMaxConnections, store.SettingEngineSeedDays:
+			n, err := strconv.Atoi(strings.TrimSpace(value))
+			if err != nil || n < 0 {
+				return fmt.Errorf("invalid %s", key)
+			}
+		case store.SettingEngineMaxDownKBps, store.SettingEngineMaxUpKBps:
+			n, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+			if err != nil || n < 0 {
+				return fmt.Errorf("invalid %s", key)
+			}
+		case store.SettingEngineSeedRatio:
+			ratio, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
+			if err != nil || ratio < 0 {
+				return fmt.Errorf("invalid %s", key)
+			}
+		}
+	}
+	return nil
 }
 
 // statusResponse is the payload of GET /system/status.

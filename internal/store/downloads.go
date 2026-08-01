@@ -10,7 +10,7 @@ import (
 )
 
 const downloadColumns = `id, grab_id, engine, engine_id, title, state, progress,
-	bytes_done, size, output_path, error, created_at, updated_at`
+	bytes_done, size, max_down_rate, max_up_rate, output_path, error, created_at, updated_at`
 
 // UpsertDownload inserts or updates d and writes back the assigned ID.
 //
@@ -35,17 +35,19 @@ func (s *Store) UpsertDownload(ctx context.Context, d *core.Download) error {
 
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO downloads (grab_id, engine, engine_id, title, state, progress,
-			bytes_done, size, output_path, error, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			bytes_done, size, max_down_rate, max_up_rate, output_path, error, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (engine_id) DO UPDATE SET
 			grab_id = CASE WHEN excluded.grab_id = 0 THEN downloads.grab_id ELSE excluded.grab_id END,
 			engine = excluded.engine, title = excluded.title,
 			state = excluded.state, progress = excluded.progress,
 			bytes_done = excluded.bytes_done, size = excluded.size,
+			max_down_rate = excluded.max_down_rate, max_up_rate = excluded.max_up_rate,
 			output_path = excluded.output_path, error = excluded.error,
 			updated_at = excluded.updated_at`,
 		d.GrabID, d.Engine, string(d.EngineID), d.Title, string(d.State), d.Progress,
-		d.BytesDone, d.Size, d.SavePath, d.Error, formatTime(d.CreatedAt), formatTime(d.UpdatedAt))
+		d.BytesDone, d.Size, d.MaxDownRate, d.MaxUpRate, d.SavePath, d.Error,
+		formatTime(d.CreatedAt), formatTime(d.UpdatedAt))
 	if err != nil {
 		return fmt.Errorf("store: upsert download %q: %w", d.EngineID, err)
 	}
@@ -125,7 +127,7 @@ func scanDownload(sc scanner) (*core.Download, error) {
 		updatedAt string
 	)
 	err := sc.Scan(&d.ID, &d.GrabID, &d.Engine, &engineID, &d.Title, &state, &d.Progress,
-		&d.BytesDone, &d.Size, &d.SavePath, &d.Error, &createdAt, &updatedAt)
+		&d.BytesDone, &d.Size, &d.MaxDownRate, &d.MaxUpRate, &d.SavePath, &d.Error, &createdAt, &updatedAt)
 	if err != nil {
 		return nil, err
 	}

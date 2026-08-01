@@ -6,14 +6,19 @@
  */
 
 import type {
+  ActivityEvent,
   AddItemRequest,
+  CalendarEntry,
   DownloadStatus,
   GrabRequest,
   Indexer,
   IndexerCategory,
   IndexerInput,
+  Job,
   MatchRequest,
   Movie,
+  QualityProfile,
+  QualityProfileInput,
   Release,
   ScanSummary,
   SearchResults,
@@ -21,6 +26,7 @@ import type {
   Settings,
   SystemStatus,
   UnmatchedFile,
+  WantedLists,
 } from './types';
 
 export const API_BASE = '/api/v1';
@@ -72,6 +78,14 @@ export const endpoints = {
   downloadPause: (id: string) => `${API_BASE}/downloads/${encodeURIComponent(id)}/pause`,
   downloadResume: (id: string) => `${API_BASE}/downloads/${encodeURIComponent(id)}/resume`,
   download: (id: string) => `${API_BASE}/downloads/${encodeURIComponent(id)}`,
+  wanted: () => `${API_BASE}/wanted`,
+  events: () => `${API_BASE}/events`,
+  jobs: () => `${API_BASE}/jobs`,
+  calendar: () => `${API_BASE}/calendar`,
+  calendarFeed: (apiKey: string) => `${API_BASE}/calendar.ics?apikey=${encodeURIComponent(apiKey)}`,
+  regenerateAPIKey: () => `${API_BASE}/settings/apikey`,
+  qualityProfiles: () => `${API_BASE}/quality-profiles`,
+  qualityProfile: (id: number) => `${API_BASE}/quality-profiles/${id}`,
 } as const;
 
 interface RequestOptions {
@@ -364,4 +378,38 @@ export const api = {
       method: 'DELETE',
       query: { deleteData: deleteData ? 'true' : 'false' },
     }),
+  wanted: (signal?: AbortSignal) =>
+    request<WantedLists>(endpoints.wanted(), { signal }).then((payload) => ({
+      movies: payload?.movies ?? [],
+      episodes: payload?.episodes ?? [],
+    })),
+
+  listEvents: (limit = 100, signal?: AbortSignal) =>
+    request<{ events: ActivityEvent[] }>(endpoints.events(), { query: { limit }, signal })
+      .then((payload) => payload?.events ?? []),
+
+  listJobs: (limit = 100, signal?: AbortSignal) =>
+    request<{ jobs: Job[] }>(endpoints.jobs(), { query: { limit }, signal })
+      .then((payload) => payload?.jobs ?? []),
+
+  calendar: (start: string, end: string, signal?: AbortSignal) =>
+    request<{ entries: CalendarEntry[] }>(endpoints.calendar(), {
+      query: { start, end },
+      signal,
+    }).then((payload) => payload?.entries ?? []),
+
+  regenerateAPIKey: () =>
+    request<{ api_key: string }>(endpoints.regenerateAPIKey(), { method: 'POST' }),
+
+  listQualityProfiles: (signal?: AbortSignal) =>
+    listOf<QualityProfile>(endpoints.qualityProfiles(), 'profiles', signal),
+
+  addQualityProfile: (body: QualityProfileInput) =>
+    request<QualityProfile>(endpoints.qualityProfiles(), { method: 'POST', body }),
+
+  updateQualityProfile: (id: number, body: QualityProfileInput) =>
+    request<QualityProfile>(endpoints.qualityProfile(id), { method: 'PUT', body }),
+
+  deleteQualityProfile: (id: number) =>
+    request<void>(endpoints.qualityProfile(id), { method: 'DELETE' }),
 };

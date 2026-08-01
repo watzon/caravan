@@ -96,6 +96,47 @@ type Engine interface {
 	// resume after a restart.
 	Close() error
 }
+// EngineInsight is an optional extension for engines that can report
+// torrent-specific diagnostic information. External clients in phase 6 may
+// omit it without losing the core queue contract.
+type EngineInsight interface {
+	Insight(ctx context.Context, id DownloadID) (*DownloadInsight, error)
+}
+
+// EngineRateLimits is an optional extension for engines that support live
+// global and per-download transfer limits. Values are KB/s; zero means
+// unlimited globally and inherit the global limit per download.
+type EngineRateLimits interface {
+	SetGlobalRates(ctx context.Context, downKbps, upKbps int64) error
+	SetDownloadRates(ctx context.Context, id DownloadID, downKbps, upKbps int64) error
+}
+
+// PeerInsight is the observable state of one connected peer.
+type PeerInsight struct {
+	Addr     string  `json:"addr"`
+	Client   string  `json:"client"`
+	Progress float64 `json:"progress"`
+	DownRate int64   `json:"down_rate"`
+	UpRate   int64   `json:"up_rate"`
+}
+
+// TrackerInsight is a configured tracker. Seeder and leecher counts are zero
+// when the engine has not scraped the tracker.
+type TrackerInsight struct {
+	URL      string `json:"url"`
+	Status   string `json:"status"`
+	Seeders  int    `json:"seeders"`
+	Leechers int    `json:"leechers"`
+}
+
+// DownloadInsight is the torrent-specific detail surfaced by the queue drawer.
+// Availability is the aggregate peer piece availability divided by piece count.
+type DownloadInsight struct {
+	Peers        []PeerInsight    `json:"peers"`
+	Trackers     []TrackerInsight `json:"trackers"`
+	Availability float64          `json:"availability"`
+}
+
 
 // Download is the persisted record of a download (the `downloads` table): the
 // half of a download that has to survive a restart, as opposed to the live
@@ -118,6 +159,10 @@ type Download struct {
 	// BytesDone and Size mirror DownloadStatus as of UpdatedAt.
 	BytesDone int64
 	Size      int64
+	// MaxDownRate and MaxUpRate are per-download byte-per-second overrides.
+	// Zero inherits the engine-wide limits.
+	MaxDownRate int64
+	MaxUpRate   int64
 	// SavePath is where the data landed, relative to the storage root.
 	SavePath string
 	// Error is the last failure message, empty when healthy.
