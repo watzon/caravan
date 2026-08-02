@@ -121,42 +121,42 @@ func (m *Manager) Scan(ctx context.Context) (*ScanResult, error) {
 	var walkErr error
 	if info != nil {
 		walkErr = filepath.WalkDir(libAbs, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			res.addErr("walk %s: %v", p, err)
-			if d != nil && d.IsDir() {
-				return fs.SkipDir
+			if err != nil {
+				res.addErr("walk %s: %v", p, err)
+				if d != nil && d.IsDir() {
+					return fs.SkipDir
+				}
+				return nil
 			}
-			return nil
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-
-		name := d.Name()
-		if d.IsDir() {
-			// Hidden directories are tooling, not media: .Trashes, .Spotlight,
-			// @eaDir-style sidecars all start with a dot.
-			if p != libAbs && strings.HasPrefix(name, ".") {
-				return fs.SkipDir
+			if err := ctx.Err(); err != nil {
+				return err
 			}
-			return nil
-		}
-		if !isVideo(name) {
-			return nil
-		}
 
-		relOS, err := filepath.Rel(libAbs, p)
-		if err != nil {
-			res.addErr("relative path for %s: %v", p, err)
-			return nil
-		}
-		rel := path.Join(LibraryDir, filepath.ToSlash(relOS))
+			name := d.Name()
+			if d.IsDir() {
+				// Hidden directories are tooling, not media: .Trashes, .Spotlight,
+				// @eaDir-style sidecars all start with a dot.
+				if p != libAbs && strings.HasPrefix(name, ".") {
+					return fs.SkipDir
+				}
+				return nil
+			}
+			if !isVideo(name) {
+				return nil
+			}
 
-		fi, err := d.Info()
-		if err != nil {
-			res.addErr("stat %s: %v", rel, err)
-			return nil
-		}
+			relOS, err := filepath.Rel(libAbs, p)
+			if err != nil {
+				res.addErr("relative path for %s: %v", p, err)
+				return nil
+			}
+			rel := path.Join(LibraryDir, filepath.ToSlash(relOS))
+
+			fi, err := d.Info()
+			if err != nil {
+				res.addErr("stat %s: %v", rel, err)
+				return nil
+			}
 
 			res.Scanned++
 			m.scanFile(ctx, rel, fi.Size(), res, known, seenFiles, seenUnmatched)
