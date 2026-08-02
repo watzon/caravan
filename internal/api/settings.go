@@ -12,6 +12,7 @@ import (
 	"github.com/watzon/caravan/internal/clients"
 	"github.com/watzon/caravan/internal/core"
 	"github.com/watzon/caravan/internal/store"
+	"github.com/watzon/caravan/internal/wanted"
 )
 
 // SettingMode records the deployment mode (SPEC §2) so GET /system/status can
@@ -340,6 +341,11 @@ type statusCounts struct {
 	Series     int `json:"series"`
 	MediaFiles int `json:"media_files"`
 	Unmatched  int `json:"unmatched"`
+	// Wanted is the monitored-but-missing backlog (movies plus episodes),
+	// the same list GET /wanted renders.
+	Wanted int `json:"wanted"`
+	// Converting is the open convert-for-TV queue: queued plus running.
+	Converting int `json:"converting"`
 }
 
 // handleSystemStatus reports what the UI needs to render the shell: build
@@ -393,6 +399,22 @@ func (s *server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreError(w, "count unmatched files", err)
 		return
 	}
+	wantedLists, err := wanted.Compute(ctx, s.st)
+	if err != nil {
+		s.writeStoreError(w, "compute wanted list", err)
+		return
+	}
+	conversions, err := s.st.ListConversions(ctx, 0)
+	if err != nil {
+		s.writeStoreError(w, "count conversions", err)
+		return
+	}
+	converting := 0
+	for _, c := range conversions {
+		if core.ConversionOpen(c.Status) {
+			converting++
+		}
+	}
 
 	passwordHash, err := s.passwordHash(ctx)
 	if err != nil {
@@ -420,6 +442,8 @@ func (s *server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 			Series:     len(series),
 			MediaFiles: len(files),
 			Unmatched:  len(unmatched),
+			Wanted:     len(wantedLists.Movies) + len(wantedLists.Episodes),
+			Converting: converting,
 		},
 		DiskFreeBytes:            diskFree,
 		DiskTotalBytes:           diskTotal,
