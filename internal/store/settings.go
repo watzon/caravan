@@ -66,6 +66,14 @@ const (
 	SettingDLNAEnabled      = "dlna_enabled"
 	SettingDLNAFriendlyName = "dlna_friendly_name"
 	SettingDLNAUUID         = "dlna_uuid"
+	// SettingPasswordHash is the optional single-user password, stored as an
+	// argon2id PHC string (SPEC §11, PLAN phase 5 task 5). The key being absent
+	// or empty is what "no password" means: Caravan on a trusted LAN is allowed
+	// to have no login at all. It is the one setting GET /settings never
+	// returns (SPEC §12 — credentials never leave the server), and it is not in
+	// the PUT /settings allowlist: it is written only by POST /settings/password,
+	// which never sees a plaintext value leave this process.
+	SettingPasswordHash = "password_hash"
 )
 
 // GetSetting returns the value for key, or ErrNotFound when the key has never

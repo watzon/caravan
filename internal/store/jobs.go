@@ -186,6 +186,35 @@ func (s *Store) ReclaimExpired(ctx context.Context) (int, error) {
 	return int(n), nil
 }
 
+// ReclaimRunning returns every running job to the pending pool, whatever its
+// lease says, and reports how many it moved.
+//
+// It is startup-only, and correct only there: exactly one Caravan process owns
+// a storage root at a time (internal/integrity holds the lock that enforces
+// it), so a job still marked running when a process starts can only have been
+// left by one that died. ReclaimExpired cannot do this job — a dedicated worker
+// takes a twelve-hour lease, so a storage migration or a transcode killed five
+// minutes in would sit in running, unclaimable, for the rest of the day. For a
+// migration that is the whole library reading as missing until the lease runs
+// out, with no way to fix it from the UI.
+//
+// Attempts are not incremented, for the same reason ReclaimExpired does not:
+// the worker went away, which says nothing about the job.
+func (s *Store) ReclaimRunning(ctx context.Context) (int, error) {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE jobs SET state = ?, lease_expires_at = '', updated_at = ?
+		WHERE state = ?`,
+		core.JobStatePending, formatTime(now()), core.JobStateRunning)
+	if err != nil {
+		return 0, fmt.Errorf("store: reclaim running jobs: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("store: reclaim running jobs: %w", err)
+	}
+	return int(n), nil
+}
+
 // ListJobs returns the most recent jobs, newest first, for the activity
 // feed (PLAN phase 3, task 8). A limit of zero or less returns every job.
 func (s *Store) ListJobs(ctx context.Context, limit int) ([]core.Job, error) {

@@ -1,0 +1,39 @@
+# Keep the build context to the source tree. Anything derived is rebuilt
+# inside the Dockerfile, so an image is a function of the source and not of
+# whatever happens to be lying around in a working copy.
+
+.git
+.gitignore
+.github
+
+# Per-install runtime state. Copying a developer's database into an image
+# would ship their library — and their API keys — to anyone who pulls it.
+caravan.db
+caravan.db-shm
+caravan.db-wal
+caravan.state
+caravan.yaml
+
+# Air's build directory, which also holds the dev storage root (tmp/media).
+tmp/
+/caravan
+
+# Rebuilt by the node stage. Excluding the committed web/dist is what stops a
+# stale bundle from being embedded when someone forgot to rebuild it.
+web/node_modules/
+web/dist/
+
+# Docs and deployment files: not inputs to the binary.
+docs/
+compose.yaml
+Dockerfile
+.dockerignore
+README.md
+justfile
+.air.toml
+
+.DS_Store
+.claude
+.agents
+.omp
+.codex

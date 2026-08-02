@@ -274,3 +274,58 @@ func TestReclaimExpiredLeases(t *testing.T) {
 		t.Errorf("ReclaimExpired = %d, want 0 (lease still valid)", n)
 	}
 }
+
+// A dedicated worker takes a twelve-hour lease (automation.dedicatedJobLease),
+// because the kinds that get their own worker are the ones that run for hours.
+// A crash five minutes into one therefore leaves a row in `running` with a
+// lease nothing will reclaim until tomorrow, and the dedicated worker only ever
+// claims `pending` — so a storage migration killed mid-move stayed stuck with
+// the library's files split across two roots and no way to fix it from the UI.
+//
+// Startup is the one moment where "running" can only mean "left by a process
+// that died": exactly one Caravan owns a storage root at a time.
+func TestReclaimRunningUnsticksALongLeaseLeftByACrash(t *testing.T) {
+	ctx := context.Background()
+	st, _ := openTemp(t)
+
+	j := core.Job{Kind: "storage_migrate"}
+	if err := st.EnqueueJob(ctx, &j); err != nil {
+		t.Fatalf("EnqueueJob: %v", err)
+	}
+	if _, err := st.ClaimJob(ctx, []string{"storage_migrate"}, 12*time.Hour); err != nil {
+		t.Fatalf("ClaimJob: %v", err)
+	}
+
+	// The periodic sweep cannot help: the lease is good for another 12 hours.
+	if n, err := st.ReclaimExpired(ctx); err != nil {
+		t.Fatalf("ReclaimExpired: %v", err)
+	} else if n != 0 {
+		t.Fatalf("ReclaimExpired = %d, want 0 — the lease has not expired", n)
+	}
+	if stuck, err := st.ClaimJob(ctx, []string{"storage_migrate"}, time.Minute); err != nil {
+		t.Fatalf("ClaimJob: %v", err)
+	} else if stuck != nil {
+		t.Fatalf("ClaimJob = job %d before the startup sweep; the fixture is wrong", stuck.ID)
+	}
+
+	n, err := st.ReclaimRunning(ctx)
+	if err != nil {
+		t.Fatalf("ReclaimRunning: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("ReclaimRunning = %d, want 1", n)
+	}
+
+	reclaimed, err := st.ClaimJob(ctx, []string{"storage_migrate"}, time.Minute)
+	if err != nil {
+		t.Fatalf("ClaimJob after the startup sweep: %v", err)
+	}
+	if reclaimed == nil || reclaimed.ID != j.ID {
+		t.Fatalf("ClaimJob after the startup sweep = %v, want job %d", reclaimed, j.ID)
+	}
+	// The worker went away; that says nothing about the job, so the retry
+	// budget is untouched.
+	if reclaimed.Attempts != 0 {
+		t.Errorf("Attempts after reclaim = %d, want 0", reclaimed.Attempts)
+	}
+}

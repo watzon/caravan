@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -102,7 +103,19 @@ func NewRunner(st *store.Store, indexers api.IndexerFactory, engine EngineGetter
 // Bootstrap enqueues the two recurring roots when they are not already pending
 // or running. Repeating this at every process start is safe and prevents a
 // restart from depending on an old timer surviving shutdown.
+//
+// It also hands back every lease the previous process died holding. That has to
+// happen here, once, at startup: the periodic sweep can only take leases that
+// have expired, and a dedicated worker's lease runs for twelve hours
+// (dedicatedJobLease), so a storage migration killed five minutes in would
+// otherwise be unclaimable for the rest of the day — with the library's files
+// half-moved and no way to fix it from the UI.
 func Bootstrap(ctx context.Context, st *store.Store) error {
+	if n, err := st.ReclaimRunning(ctx); err != nil {
+		return err
+	} else if n > 0 {
+		slog.Warn("jobs left running by a previous process were returned to the queue", "jobs", n)
+	}
 	for _, kind := range []string{jobRSSSync, jobBacklogSweep} {
 		open, err := st.HasOpenJob(ctx, kind, "{}")
 		if err != nil {

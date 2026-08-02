@@ -4,7 +4,6 @@
    * scan. There is no further wizard — everything else ships with defaults.
    */
   import { api, errorText } from '../api/client';
-  import { SETTING_STORAGE_ROOT } from '../api/types';
   import Button from '../components/Button.svelte';
   import Field from '../components/Field.svelte';
   import Icon from '../components/Icon.svelte';
@@ -30,7 +29,11 @@
     saving = true;
     error = null;
     try {
-      await api.putSettings({ [SETTING_STORAGE_ROOT]: value });
+      // The repoint endpoint rather than a plain settings write: the storage
+      // root is the one setting with rules attached — absolute, existing, a
+      // folder — and typing a path that does not exist is exactly the mistake
+      // a first run makes. PUT /settings enforces none of them.
+      await api.repointStorageRoot(value);
       await system.refresh();
 
       if (scanNow) {

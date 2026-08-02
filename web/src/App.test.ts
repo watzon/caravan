@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import App from './App.svelte';
 import { navigate } from './lib/router.svelte';
+import { shutdown } from './lib/state/shutdown.svelte';
 import type { DownloadStatus, Movie, Release, SystemStatus } from './lib/api/types';
 
 const STATUS: SystemStatus = {
@@ -138,6 +139,10 @@ let app: Record<string, unknown>;
 
 beforeEach(() => {
   window.history.replaceState({}, '', '/movies');
+  // A module singleton, and one test drives it to its terminal state.
+  shutdown.phase = 'idle';
+  shutdown.confirming = false;
+  shutdown.error = null;
   // jsdom has no layout, so scrollTo is unimplemented; the router calls it.
   window.scrollTo = () => {};
   vi.stubGlobal(
@@ -286,6 +291,80 @@ describe('App shell', () => {
     expect(
       [...host.querySelectorAll('span')].filter((n) => n.textContent?.trim() === 'NEEDS CONVERT'),
     ).toHaveLength(1);
+  });
+
+  it('offers recovery and safe shutdown after a portable dirty eject', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/system/status')) {
+          return jsonResponse({ ...STATUS, mode: 'portable', dirty: true });
+        }
+        if (url.endsWith('/downloads')) return jsonResponse({ downloads: [] });
+        if (url.endsWith('/library/movies')) return jsonResponse({ movies: [MOVIE] });
+        throw new Error(`unexpected fetch: ${url}`);
+      }),
+    );
+
+    app = mount(App, { target: host });
+    await settle();
+
+    // The recovery banner is up, with the way out on it (SPEC §13).
+    expect(host.textContent).toContain('Last shutdown was not clean');
+    expect(host.textContent).toContain('Verify & rescan');
+    // And portable mode gets the eject control the drive needs (SPEC §2.3).
+    expect(host.textContent).toContain('Shut down safely');
+  });
+
+  it('replaces the shell with "safe to eject" once the server has stopped', async () => {
+    // The 202 only means the teardown started; the process keeps answering
+    // while it flushes the engine and checkpoints the WAL, and the eject
+    // promise waits for the listener to actually go away.
+    let listening = true;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith('/system/shutdown')) {
+          return new Response(JSON.stringify({ status: 'shutting down' }), {
+            status: 202,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        if (url.endsWith('/system/status')) {
+          if (!listening) throw new TypeError('Failed to fetch');
+          return jsonResponse({ ...STATUS, mode: 'portable' });
+        }
+        if (url.endsWith('/downloads')) return jsonResponse({ downloads: [] });
+        if (url.endsWith('/library/movies')) return jsonResponse({ movies: [MOVIE] });
+        throw new Error(`unexpected fetch: ${url} ${init?.method ?? 'GET'}`);
+      }),
+    );
+
+    app = mount(App, { target: host });
+    await settle();
+
+    const label = (text: string) =>
+      [...host.querySelectorAll('button')].find((b) => b.textContent?.trim() === text);
+
+    label('Shut down safely')!.click();
+    await settle();
+    label('Shut down')!.click();
+    await settle();
+
+    // Still writing: the shell stays up rather than inviting an eject.
+    expect(host.textContent).not.toContain('Safe to eject');
+
+    listening = false;
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    await settle();
+
+    expect(host.textContent).toContain('Safe to eject');
+    // The shell is gone with it, which is what stops the polls that would
+    // otherwise hammer a server that no longer answers.
+    expect(host.querySelector('a[href="/movies"]')).toBeNull();
+    expect(host.textContent).not.toContain('CARAVAN');
   });
 
   it('sends the user to first run when there is no storage root', async () => {

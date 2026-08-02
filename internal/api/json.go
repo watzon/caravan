@@ -53,6 +53,12 @@ func (s *server) writeStoreError(w http.ResponseWriter, msg string, err error) {
 // decodeJSON reads a JSON request body into dst. It writes a 400 and returns
 // false when the body is missing or malformed.
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	// See formContentTypes: a body sent under an HTML-form encoding is never a
+	// legitimate API call and is how a cross-site form smuggles JSON in.
+	if formEncoded(r) {
+		writeError(w, http.StatusUnsupportedMediaType, "request body must be JSON")
+		return false
+	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes))
 	if err := dec.Decode(dst); err != nil {
 		if errors.Is(err, io.EOF) {

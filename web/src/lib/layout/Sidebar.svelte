@@ -7,11 +7,13 @@
    * The persistent bottom slot holds system status (disk free, engine health).
    */
   import { isActive } from '../router.svelte';
+  import { auth } from '../state/auth.svelte';
   import { BADGE_POLL_MS, downloads } from '../state/downloads.svelte';
   import { system } from '../state/system.svelte';
   import { formatBytes } from '../format';
   import Icon, { type IconName } from '../components/Icon.svelte';
   import ProgressBar from '../components/ProgressBar.svelte';
+  import SafeShutdown from '../components/SafeShutdown.svelte';
   import Skeleton from '../components/Skeleton.svelte';
   import type { Tone } from '../status';
   import { TONE_DOT } from '../status';
@@ -182,6 +184,26 @@
         <p class="truncate font-mono text-xs text-ink-muted" title={status.storage_root}>
           {status.mode || 'binary'} · {status.storage_root || 'no storage root'}
         </p>
+      {/if}
+
+      <!-- Portable mode only: a drive that gets unplugged needs a way to be
+           told first (SPEC §2.3). A server install is stopped by whatever
+           started it. -->
+      {#if status?.mode === 'portable'}
+        <SafeShutdown />
+      {/if}
+
+      <!-- Only meaningful when a password is set; without one there is no
+           session to end (SPEC §11). -->
+      {#if status?.password_set}
+        <button
+          type="button"
+          class="flex items-center gap-2 rounded-md py-1 text-sm text-ink-secondary transition-colors duration-150 ease-out hover:text-ink disabled:opacity-50"
+          disabled={auth.busy}
+          onclick={() => auth.logout()}>
+          <Icon name="back" size={14} />
+          <span>{auth.busy ? 'Signing out…' : 'Sign out'}</span>
+        </button>
       {/if}
     {/if}
   </div>

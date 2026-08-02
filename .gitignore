@@ -1,6 +1,9 @@
 # sqlite database and its WAL/SHM sidecars
 caravan.db*
 
+# clean-shutdown marker (SPEC §2.3) — per-install runtime state
+caravan.state
+
 # built binary (the module is also named caravan, so anchor to the repo root)
 /caravan
 

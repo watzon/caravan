@@ -80,6 +80,8 @@ jobs:
           - goos: windows
             goarch: amd64
           - goos: darwin
+            goarch: amd64
+          - goos: darwin
             goarch: arm64
     steps:
       - uses: actions/checkout@v4
@@ -96,3 +98,21 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: go build ./...
+
+  docker:
+    name: Docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The image is the Docker deployment mode (SPEC §2.1). Building it here
+      # is what keeps the three-stage Dockerfile honest: it rebuilds the SPA
+      # and the binary from source, so a break shows up on the commit that
+      # caused it rather than the first time somebody runs `docker compose up`.
+      - name: build image
+        run: docker build --build-arg VERSION=ci -t caravan:ci .
+
+      # The image is useless if the binary inside it cannot start, and a
+      # static-linking or base-image mistake shows up exactly here.
+      - name: binary runs in the image
+        run: docker run --rm caravan:ci version

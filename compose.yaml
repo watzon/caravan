@@ -1,0 +1,63 @@
+# Caravan — Docker Compose deployment (SPEC §2.1).
+#
+# Quickstart:
+#   mkdir -p config data
+#   docker compose up -d
+#   open http://localhost:8677  → pick /data as the storage root, set a password
+#
+# Read docs/docker.md before changing the volumes. The single /data mount is
+# load-bearing, not a simplification.
+
+services:
+  caravan:
+    image: caravan:latest
+    # Builds from this checkout on first `up`. Delete this block and pin a
+    # published tag once you are pulling images instead of building them.
+    build:
+      context: .
+    container_name: caravan
+    restart: unless-stopped
+
+    ports:
+      - "8677:8677"
+
+    volumes:
+      # Caravan's own state: the sqlite database, the clean-shutdown marker,
+      # and an optional caravan.yaml. Small; back this up.
+      - ./config:/config
+
+      # EVERYTHING ELSE, ON ONE MOUNT. Downloads land in /data/incomplete and
+      # imports hardlink into /data/library, and a hardlink cannot cross a
+      # filesystem. Two mounts here — the classic *arr layout — silently turns
+      # every import into a full copy, doubles disk use, and breaks seeding.
+      #
+      # Point this at your media filesystem, e.g. /mnt/media:/data. Whatever
+      # you choose must be ONE line.
+      - ./data:/data
+
+    environment:
+      # Container-local clock, for the calendar and for log timestamps.
+      TZ: ${TZ:-UTC}
+      # /config, /data and 0.0.0.0:8677 are baked into the image. Uncomment to
+      # override; an empty value reads as unset and falls back to the config
+      # file, or to Caravan's own default.
+      # CARAVAN_LISTEN: 0.0.0.0:8677
+      #
+      # The image seeds /data as the storage root, so there is no first-run
+      # screen to pick one on. The first start that seeds it also queues a
+      # library scan, so media already sitting under the mount is picked up
+      # without anybody having to find Settings -> Storage -> Rescan.
+      #
+      # Blank this to get the first-run screen instead.
+      # CARAVAN_STORAGE_ROOT: ""
+
+    # Caravan runs as uid/gid 1000 in the image. If your media directory is
+    # owned by another user, set CARAVAN_UID / CARAVAN_GID in a .env file
+    # rather than chown-ing your library — no PUID/PGID entrypoint shim, just
+    # the user the container runs as.
+    user: "${CARAVAN_UID:-1000}:${CARAVAN_GID:-1000}"
+
+    # A clean stop checkpoints the write-ahead log and flushes the download
+    # queue's state (SPEC §2.3). Compose's 10s default can land SIGKILL in the
+    # middle of that; the HTTP drain alone is allowed 10s.
+    stop_grace_period: 60s

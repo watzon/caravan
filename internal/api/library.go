@@ -668,21 +668,54 @@ func episodesOf(byNumber map[int][]episodeJSON, number int) []episodeJSON {
 // Progress is observable through GET /events and the scanning flag on
 // GET /system/status.
 func (s *server) handleRescan(w http.ResponseWriter, r *http.Request) {
-	if !s.scanning.CompareAndSwap(false, true) {
+	if !s.noOpenMigration(w, r, scanBlockedByMigration) {
+		return
+	}
+	if !s.startScan() {
 		writeError(w, http.StatusConflict, "scan already running")
 		return
 	}
+	writeJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
+}
 
+// WithStartupScan queues a library scan as the server is built.
+//
+// It is how SPEC §10.1's second first-run step — "point Caravan at existing
+// media, with a library scan queued immediately" — reaches the deployments that
+// never see the first-run screen. Docker sets CARAVAN_STORAGE_ROOT=/data and a
+// prepared drive's config says ".", so in both the root exists before the SPA
+// ever loads and it routes straight past first run. Without this, a user whose
+// /data already held media landed on an empty library with nothing scanned
+// until they found Settings → Storage → Rescan for themselves.
+//
+// The serving process sets it only on the start that first wrote the root, so
+// it is a first run in the sense that matters and not a scan on every boot. It
+// goes through startScan rather than the manager directly, so the single-flight
+// guard and the scanning flag on GET /system/status describe it like any other
+// scan.
+func WithStartupScan(scan bool) Option {
+	return func(s *server) { s.startupScan = scan }
+}
+
+// startScan launches a background library scan, reporting false when one was
+// already running.
+//
+// It is the single entry point to the scanning flag: POST /library/rescan turns
+// a false into a 409, while the dirty-eject recovery (POST /system/verify)
+// treats it as "already being done".
+func (s *server) startScan() bool {
+	if !s.scanning.CompareAndSwap(false, true) {
+		return false
+	}
 	go func() {
 		defer s.scanning.Store(false)
 		// The scan outlives its request, so it must not inherit the request's
-		// context — that gets cancelled the moment this handler returns.
+		// context — that gets cancelled the moment the handler returns.
 		if err := s.mgr.Scan(context.Background()); err != nil {
 			s.log.Error("library scan failed", "error", err)
 		}
 	}()
-
-	writeJSON(w, http.StatusAccepted, map[string]string{"status": "started"})
+	return true
 }
 
 // writeManagerError maps a library-manager failure to a status. A missing

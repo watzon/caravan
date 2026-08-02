@@ -41,7 +41,37 @@ func (s *Service) Handler() http.Handler {
 	// A GET pattern also matches HEAD, which is how several renderers probe a
 	// file's length and range support before they start playing it.
 	mux.HandleFunc("GET "+MountPath+"/media/{name}", s.handleMedia)
-	return mux
+	return s.whenEnabled(mux)
+}
+
+// whenEnabled makes the whole DLNA surface disappear while the feature is
+// switched off.
+//
+// This mount sits outside the API's password gate, because a television cannot
+// log in. That exemption is only defensible for a feature the owner asked for:
+// with dlna_enabled=false they have said the library is not to be served to the
+// LAN, and without this check any device could still POST a ContentDirectory
+// Browse to /dlna/control/cds, walk the container tree and GET every media file
+// with no credential at all — past a password that was protecting only the JSON
+// API.
+//
+// The settings are read per request rather than cached, so the toggle takes
+// effect on the next request exactly as it does for SSDP (see Reload).
+func (s *Service) whenEnabled(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cfg, err := s.Config(r.Context())
+		if err != nil {
+			s.log.Error("dlna: read settings", "error", err)
+			http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		if !cfg.Enabled {
+			// 404, not 403: a disabled media server is one that is not here.
+			http.NotFound(w, r)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // origin is the scheme and authority the client used to reach us, which every

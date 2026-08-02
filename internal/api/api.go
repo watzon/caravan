@@ -5,8 +5,10 @@
 // (movies and series), rescan, metadata search, the scan-review/import queue,
 // and the activity feed. Phase 2 adds acquisition (PLAN phase 2, tasks 1, 2 and
 // 4): indexer configuration, the interactive release picker, grabs, and the
-// download queue. There is no authentication yet — SPEC §11 puts the optional
-// password and API key in phase 5.
+// download queue. Phase 5 adds the optional single-user password, its session
+// cookie and the API key (SPEC §11): with no password set every route behaves
+// as it always did, and with one set /api/v1 needs a session or the API key —
+// see auth.go for the deliberate exemptions.
 //
 // Every failure answers with the same envelope, {"error": "..."}, including
 // the routing failures the standard ServeMux would otherwise answer in plain
@@ -59,6 +61,33 @@ type server struct {
 	// walks the whole storage root and reconciles the database; running two
 	// at once would have them fight over the same rows.
 	scanning atomic.Bool
+
+	// startupScan queues one scan as the server is built; see WithStartupScan.
+	startupScan bool
+
+	// sessions holds the live logins and sessionTTL is how long a new one
+	// lasts (SPEC §11). Both are inert until a password is set.
+	sessions   *sessionStore
+	sessionTTL time.Duration
+
+	// logins bounds POST /auth/login, the one gated route an unauthenticated
+	// caller reaches and the only one that runs a 19 MiB key derivation.
+	logins *loginGuard
+
+	// listenAddr is the address the process bound, supplied by the serving
+	// process with WithListenAddr. It is reported through GET /system/status so
+	// the UI can nag about listening on every interface without a password.
+	listenAddr string
+
+	// dirty says the previous session ended without a clean shutdown
+	// (SPEC §2.3). It is atomic because POST /system/verify clears it from one
+	// request while the status endpoint and the queue read it from others.
+	dirty atomic.Bool
+
+	// shutdown is the orderly-stop trigger POST /system/shutdown pulls, wired
+	// by the serving process to the same cancel a signal uses. Nil means this
+	// process cannot stop itself, which the endpoint reports rather than fakes.
+	shutdown func()
 }
 
 // NewServer builds the HTTP handler: the JSON API under /api/v1 and the SPA
@@ -73,7 +102,15 @@ type server struct {
 // rather than parameters because they are configuration-dependent: a server
 // with neither still serves the library.
 func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Handler {
-	s := &server{st: st, mgr: mgr, dist: dist, log: slog.Default()}
+	s := &server{
+		st:         st,
+		mgr:        mgr,
+		dist:       dist,
+		log:        slog.Default(),
+		sessions:   newSessionStore(),
+		sessionTTL: defaultSessionTTL,
+		logins:     newLoginGuard(),
+	}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -85,6 +122,26 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("PUT /settings", s.handlePutSettings)
 	api.HandleFunc("POST /settings/apikey", s.handleGenerateAPIKey)
 	api.HandleFunc("GET /system/status", s.handleSystemStatus)
+
+	// The portable integrity flow (SPEC §2.3, §13). Both are deliberately
+	// inside the auth gate: stopping the server and clearing the dirty flag
+	// are the last two things an unauthenticated visitor should be able to do.
+	api.HandleFunc("POST /system/shutdown", s.handleShutdown)
+	api.HandleFunc("POST /system/verify", s.handleVerify)
+
+	// Moving the storage root (SPEC §10, PLAN phase 5 task 4). Re-pointing is
+	// synchronous because it is one settings write; migrating answers 202 and
+	// the progress endpoint is polled, because it moves the library.
+	api.HandleFunc("POST /system/storage-root/repoint", s.handleRepointStorageRoot)
+	api.HandleFunc("POST /system/storage-root/migrate", s.handleMigrateStorageRoot)
+	api.HandleFunc("GET /system/storage-root/migration", s.handleStorageMigration)
+
+	// The optional single-user password and its session (SPEC §11, PLAN phase 5
+	// task 5). Login and logout are exempt from the gate below; setting the
+	// password is not, so changing it always needs the current session.
+	api.HandleFunc("POST /auth/login", s.handleLogin)
+	api.HandleFunc("POST /auth/logout", s.handleLogout)
+	api.HandleFunc("POST /settings/password", s.handleSetPassword)
 
 	// Quality profiles (PLAN phase 3, task 1) and the wanted list they drive
 	// (task 2).
@@ -175,7 +232,17 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("GET /events", s.handleEvents)
 
 	root := http.NewServeMux()
-	root.Handle("/api/v1/", http.StripPrefix("/api/v1", jsonErrors(api)))
+	// requireAuth wraps the JSON API and nothing else: the SPA (whose login
+	// screen has to load) and the DLNA surface (whose clients are televisions)
+	// are outside this subtree, so they need no exemption list of their own.
+	// It sits inside StripPrefix so its exemptions are written against the same
+	// paths the routing table uses.
+	//
+	// requireSameOrigin wraps the gate rather than sitting inside it: the
+	// cross-site defence has to hold in the passwordless default, where
+	// requireAuth lets everything through (see origin.go).
+	root.Handle("/api/v1/", http.StripPrefix("/api/v1",
+		jsonErrors(requireSameOrigin(s.requireAuth(api)))))
 	// The DLNA protocol surface sits outside /api/v1 and outside the JSON error
 	// envelope: its URLs are the ones SSDP advertises and its clients are
 	// televisions, which speak SOAP and expect SOAP faults.
@@ -187,6 +254,11 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 		writeError(w, http.StatusNotFound, "not found")
 	})
 	root.HandleFunc("/", s.handleSPA)
+
+	// Last, so nothing is scanned by a server that failed to build.
+	if s.startupScan {
+		s.startScan()
+	}
 
 	return logRequests(s.log, root)
 }

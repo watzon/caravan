@@ -276,19 +276,19 @@ func TestSettingsRoundTrip(t *testing.T) {
 		t.Fatalf("settings = %v, want empty on a fresh database", settings)
 	}
 
-	rec = do(t, h, http.MethodPut, "/api/v1/settings", `{"storage_root":"/data","tmdb_api_key":"k"}`)
+	rec = do(t, h, http.MethodPut, "/api/v1/settings", `{"tmdb_api_key":"k","rss_sync_interval_minutes":"20"}`)
 	wantStatus(t, rec, http.StatusOK)
 	decodeBody(t, rec, &settings)
-	if settings[store.SettingStorageRoot] != "/data" || settings[store.SettingTMDBAPIKey] != "k" {
+	if settings[store.SettingTMDBAPIKey] != "k" || settings[store.SettingRSSSyncIntervalMinutes] != "20" {
 		t.Fatalf("settings = %v, want the values just written", settings)
 	}
 
 	// A partial update leaves untouched keys alone.
-	rec = do(t, h, http.MethodPut, "/api/v1/settings", `{"storage_root":"/mnt/media"}`)
+	rec = do(t, h, http.MethodPut, "/api/v1/settings", `{"rss_sync_interval_minutes":"45"}`)
 	wantStatus(t, rec, http.StatusOK)
 	decodeBody(t, rec, &settings)
-	if settings[store.SettingStorageRoot] != "/mnt/media" {
-		t.Fatalf("storage_root = %q, want %q", settings[store.SettingStorageRoot], "/mnt/media")
+	if settings[store.SettingRSSSyncIntervalMinutes] != "45" {
+		t.Fatalf("rss_sync_interval_minutes = %q, want %q", settings[store.SettingRSSSyncIntervalMinutes], "45")
 	}
 	if settings[store.SettingTMDBAPIKey] != "k" {
 		t.Fatalf("tmdb_api_key = %q, want it preserved", settings[store.SettingTMDBAPIKey])

@@ -103,7 +103,7 @@ Launchers resolve their own directory, pick the binary for the current OS/arch, 
 **Portable-mode integrity rules** (exFAT has no journal, so this is the existential risk):
 
 - The UI has a prominent **Shut down safely** button. It stops the download engine, runs `PRAGMA wal_checkpoint(TRUNCATE)`, closes the DB, flushes, and exits. Launchers then prompt the user to eject.
-- On startup, caravan checks a clean-shutdown flag in the DB and the sqlite WAL state. After a dirty shutdown it offers a filesystem check (`fsck.exfat` / `chkdsk`) and a library rescan before resuming downloads.
+- On startup, caravan checks a clean-shutdown marker kept in a `caravan.state` sidecar file next to the database — not a row inside it, since the DB is a deletable cache (§7) and a flag deleted with it could never report a dirty eject. After a dirty shutdown it offers a filesystem check (`fsck.exfat` / `chkdsk`, printed for the user to run — caravan never runs fsck itself) and a `POST /system/verify` (`PRAGMA integrity_check` + library rescan) before resuming downloads.
 - Seeding is paused by default in portable mode; a drive that may be unplugged should not have open file handles it cannot protect.
 
 ### 2.4 Mode comparison
@@ -312,6 +312,7 @@ Resource-oriented, consumed by the embedded SPA. Outline:
 GET/PUT   /settings
 GET       /system/status            # mode, storage root, engine health, dirty flag
 POST      /system/shutdown          # safe shutdown (portable mode)
+POST      /system/verify            # dirty-eject recovery: integrity check + rescan, clears the dirty flag
 GET/POST  /library/movies           # list / add
 GET/POST  /library/series
 POST      /library/rescan

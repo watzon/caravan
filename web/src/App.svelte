@@ -9,6 +9,7 @@
   import { onMount } from 'svelte';
   import AddItemModal from './lib/components/AddItemModal.svelte';
   import Banner from './lib/components/Banner.svelte';
+  import DirtyRecovery from './lib/components/DirtyRecovery.svelte';
   import Toasts from './lib/components/Toasts.svelte';
   import Sidebar from './lib/layout/Sidebar.svelte';
   import TopBar from './lib/layout/TopBar.svelte';
@@ -18,16 +19,21 @@
   import Convert from './lib/routes/Convert.svelte';
   import History from './lib/routes/History.svelte';
   import FirstRun from './lib/routes/FirstRun.svelte';
+  import Login from './lib/routes/Login.svelte';
   import MovieDetail from './lib/routes/MovieDetail.svelte';
   import Movies from './lib/routes/Movies.svelte';
   import NotFound from './lib/routes/NotFound.svelte';
   import Queue from './lib/routes/Queue.svelte';
   import ReleaseSearch from './lib/routes/ReleaseSearch.svelte';
+  import SafeToEject from './lib/routes/SafeToEject.svelte';
   import ScanReview from './lib/routes/ScanReview.svelte';
   import Series from './lib/routes/Series.svelte';
   import SeriesDetail from './lib/routes/SeriesDetail.svelte';
   import Wanted from './lib/routes/Wanted.svelte';
   import SettingsScreen from './lib/routes/Settings.svelte';
+  import Button from './lib/components/Button.svelte';
+  import { auth } from './lib/state/auth.svelte';
+  import { shutdown } from './lib/state/shutdown.svelte';
   import { system } from './lib/state/system.svelte';
 
   const TITLES: Record<RoutePattern, string> = {
@@ -50,6 +56,39 @@
 
   let addOpen = $state(false);
 
+  /**
+   * The "no password on a public bind" nag (SPEC §11). Dismissing it is
+   * per-session on purpose: it is a real risk, so it comes back on the next
+   * visit, but it must not nag on every navigation of the session you already
+   * decided about.
+   */
+  const NAG_KEY = 'caravan.public-bind-nag-dismissed';
+  let nagDismissed = $state(readNagDismissed());
+
+  function readNagDismissed(): boolean {
+    try {
+      return window.sessionStorage.getItem(NAG_KEY) === '1';
+    } catch {
+      // Private mode, or storage disabled: nagging every load is the safe side.
+      return false;
+    }
+  }
+
+  function dismissNag() {
+    nagDismissed = true;
+    try {
+      window.sessionStorage.setItem(NAG_KEY, '1');
+    } catch {
+      // The in-memory flag is enough for this session.
+    }
+  }
+
+  let showBindNag = $derived(
+    !nagDismissed &&
+      system.status?.listening_publicly === true &&
+      system.status?.password_set !== true,
+  );
+
   onMount(() => {
     const stop = startRouter();
     system.refresh();
@@ -59,6 +98,9 @@
   // Route gate: no storage root means first run, and once there is one the
   // first-run screen is no longer reachable (SPEC §10.1).
   $effect(() => {
+    // A missing session says nothing about setup state: the login screen owns
+    // the whole viewport until it is resolved.
+    if (auth.required) return;
     if (system.loading) return;
     if (system.needsSetup) {
       if (router.path !== '/first-run') navigate('/first-run', { replace: true });
@@ -86,7 +128,14 @@
   <title>{document_title}</title>
 </svelte:head>
 
-{#if router.path === '/first-run'}
+{#if shutdown.phase === 'stopped'}
+  <!-- Terminal, and first: the server is gone, so every other screen would
+       only be rendering stale data behind failing polls (SPEC §2.3). Unmounting
+       the shell is also what stops those polls. -->
+  <SafeToEject />
+{:else if auth.required}
+  <Login />
+{:else if router.path === '/first-run'}
   <FirstRun />
 {:else}
   <div class="flex h-full">
@@ -103,11 +152,19 @@
             title="Caravan server unreachable"
             message={system.error} />
         {:else if system.status?.dirty}
+          <DirtyRecovery />
+        {/if}
+
+        {#if showBindNag}
           <Banner
-            tone="danger"
+            tone="warning"
             icon="warning"
-            title="Last shutdown was not clean"
-            message="Caravan detected an unsafe shutdown. Verify the filesystem and run a library scan before trusting the database." />
+            title="Listening on every interface without a password"
+            message="Anyone on this network can reach Caravan and change its settings. Set a password under Settings → Security.">
+            {#snippet action()}
+              <Button variant="secondary" size="sm" onclick={dismissNag}>Dismiss</Button>
+            {/snippet}
+          </Banner>
         {/if}
 
         {#if !match}

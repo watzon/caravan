@@ -8,6 +8,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -89,6 +90,42 @@ func (s *Store) DB() *sql.DB {
 func (s *Store) Checkpoint() error {
 	if _, err := s.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)"); err != nil {
 		return fmt.Errorf("store: wal checkpoint: %w", err)
+	}
+	return nil
+}
+
+// IntegrityCheck runs sqlite's own consistency check over the whole database
+// and reports the first problem it finds.
+//
+// The dirty-eject recovery flow (SPEC §13) runs this before letting downloads
+// resume: a database that came back from a yanked drive with torn pages must
+// not be written to. It is deliberately the full check rather than
+// quick_check — a portable library is small, and the cheap check skips exactly
+// the index corruption a half-written page produces.
+func (s *Store) IntegrityCheck(ctx context.Context) error {
+	rows, err := s.db.QueryContext(ctx, "PRAGMA integrity_check")
+	if err != nil {
+		return fmt.Errorf("store: integrity check: %w", err)
+	}
+	defer rows.Close()
+
+	// A healthy database answers with the single row "ok"; a damaged one
+	// answers with up to 100 rows describing the damage.
+	problems := []string{}
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			return fmt.Errorf("store: integrity check: %w", err)
+		}
+		if line != "ok" {
+			problems = append(problems, line)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("store: integrity check: %w", err)
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("store: integrity check: %s", strings.Join(problems, "; "))
 	}
 	return nil
 }

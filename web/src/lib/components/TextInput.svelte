@@ -7,6 +7,8 @@
     placeholder?: string;
     autofocus?: boolean;
     disabled?: boolean;
+    /** Displayed and selectable, but not editable - for generated values. */
+    readonly?: boolean;
     mono?: boolean;
     ariaLabel?: string;
     oninput?: (event: Event) => void;
@@ -21,6 +23,7 @@
     placeholder,
     autofocus = false,
     disabled = false,
+    readonly = false,
     mono = false,
     ariaLabel,
     oninput,
@@ -35,6 +38,7 @@
   {type}
   {placeholder}
   {disabled}
+  {readonly}
   {autofocus}
   aria-label={ariaLabel}
   bind:value

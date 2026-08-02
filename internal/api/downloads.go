@@ -135,6 +135,17 @@ func (s *server) handlePauseDownload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleResumeDownload(w http.ResponseWriter, r *http.Request) {
+	// The teeth of the dirty-eject flow (SPEC §13): after an unclean shutdown
+	// every download comes back paused, and it stays that way until
+	// POST /system/verify has proved the database. Writing torrent pieces onto
+	// a filesystem nobody has checked is how a dirty eject turns into a corrupt
+	// library. Pausing, deleting and listing all stay available — this is the
+	// one direction that adds writes.
+	if s.dirty.Load() {
+		writeError(w, http.StatusConflict,
+			"verify the library after the unclean shutdown before resuming downloads")
+		return
+	}
 	s.controlDownload(w, r, "resume download", func(engine core.Engine, id core.DownloadID) error {
 		return engine.Resume(r.Context(), id)
 	})

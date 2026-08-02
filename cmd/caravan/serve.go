@@ -18,8 +18,11 @@ import (
 	"github.com/watzon/caravan/internal/automation"
 	"github.com/watzon/caravan/internal/config"
 	"github.com/watzon/caravan/internal/convert"
+	"github.com/watzon/caravan/internal/core"
 	"github.com/watzon/caravan/internal/dlna"
+	"github.com/watzon/caravan/internal/integrity"
 	"github.com/watzon/caravan/internal/jellyfin"
+	"github.com/watzon/caravan/internal/relocate"
 	"github.com/watzon/caravan/internal/store"
 	"github.com/watzon/caravan/web"
 )
@@ -50,11 +53,70 @@ func runServe(args []string) error {
 		return fmt.Errorf("create config dir %s: %w", cfg.ConfigDir, err)
 	}
 
+	// The clean-shutdown marker (SPEC §2.3) is claimed before the database is
+	// opened, because "did the last session end properly?" has to be answered
+	// while the answer is still on disk — opening the database is already a
+	// write. Its deferred release is registered first so it runs last: the
+	// marker may only say "clean" once everything below has been torn down.
+	marker := integrity.NewMarker(cfg.StatePath())
+	dirty, err := marker.Begin()
+	if errors.Is(err, integrity.ErrLocked) {
+		// A second launcher double-click, most often. Serving anyway would open
+		// the same database from two processes and let whichever exited first
+		// declare the drive clean while the other was still writing.
+		return fmt.Errorf("another Caravan is already using %s; stop it before starting a second one", cfg.ConfigDir)
+	}
+	if err != nil {
+		// A marker that cannot be read or written is not a reason to refuse to
+		// start; Begin already reported the conservative answer.
+		logger.Warn("clean-shutdown marker unavailable, assuming an unclean shutdown",
+			"path", marker.Path(), "error", err)
+	}
+	// Only a start that got as far as opening the database may declare a clean
+	// shutdown. If the database is *why* this start failed — the likeliest way a
+	// dirty eject shows itself — releasing the marker would erase the evidence
+	// and the next start would offer no recovery at all.
+	storeOpen := false
+	// flushed is what the marker actually vouches for. The checkpoint and the
+	// close below feed their verdict into it, because a drive that returned an
+	// error on either is precisely the drive whose next start must offer
+	// recovery — even though the marker's own tiny write may still succeed.
+	flushed := true
+	defer func() {
+		if !storeOpen {
+			return
+		}
+		if !flushed {
+			logger.Error("leaving the shutdown marked unclean: the database did not flush",
+				"marker", marker.Path())
+			return
+		}
+		if err := marker.Finish(); err != nil {
+			logger.Error("writing the clean-shutdown marker", "error", err)
+		}
+	}()
+
 	st, err := store.Open(cfg.DatabasePath())
 	if err != nil {
 		return err
 	}
-	defer st.Close()
+	storeOpen = true
+	defer func() {
+		if err := st.Close(); err != nil {
+			logger.Error("closing the database", "error", err)
+			flushed = false
+		}
+	}()
+	// Registered after the close above, so it runs immediately before it: the
+	// write-ahead log is folded into the database file while the handle that
+	// owns it is still open. Without this an ejected drive carries a database
+	// whose last minutes live in a -wal file (SPEC §2.3).
+	defer func() {
+		if err := st.Checkpoint(); err != nil {
+			logger.Error("checkpointing the write-ahead log", "error", err)
+			flushed = false
+		}
+	}()
 
 	schemaVersion, err := st.SchemaVersion()
 	if err != nil {
@@ -64,8 +126,28 @@ func runServe(args []string) error {
 		"path", cfg.DatabasePath(),
 		"schema_version", schemaVersion)
 
-	if err := seedSettings(context.Background(), st, cfg); err != nil {
+	seededRoot, err := seedSettings(context.Background(), st, cfg)
+	if err != nil {
 		return err
+	}
+
+	// Only portable mode acts on a dirty start: the recovery flow is about a
+	// drive somebody pulled, and a server install that was killed by its
+	// service manager has neither the drive nor the user to prompt. The marker
+	// itself is kept identically in both modes, so the fact is always recorded
+	// even where nothing is done with it.
+	portableDirty := dirty && cfg.Portable
+	if dirty {
+		logger.Warn("previous session did not shut down cleanly",
+			"marker", marker.Path(), "recovery_offered", portableDirty)
+		if err := st.InsertEvent(context.Background(), &core.Event{
+			Level:    core.EventLevelWarn,
+			Category: api.EventCategorySystem,
+			Message:  "Caravan did not shut down cleanly",
+			Detail:   "Check the drive's filesystem, then verify and rescan the library before resuming downloads.",
+		}); err != nil {
+			logger.Error("recording the unclean shutdown", "error", err)
+		}
 	}
 
 	slog.SetDefault(logger)
@@ -119,11 +201,19 @@ func runServe(args []string) error {
 		}
 	}()
 
+	// Moving the storage root (SPEC §10). Re-pointing is a settings write the
+	// API does itself; migrating moves the library, so it is a durable job. It
+	// is handed the engine getter rather than an engine because it has to pause
+	// the queue for the duration, and the engine may not exist yet.
+	relocator := relocate.New(st, engines.Engine, logger)
+
 	// Conversions get a worker of their own: a two-hour transcode on the shared
 	// worker would hold up the Jellyfin handoff, the RSS sync and every
-	// monitored search for as long as it ran.
+	// monitored search for as long as it ran. A storage migration is the same
+	// shape of work — hours of it — for the same reason.
 	runner := automation.NewRunner(st, indexers, engines.await,
 		automation.WithDedicatedWorker(convert.JobKind, converter.Handle),
+		automation.WithDedicatedWorker(relocate.JobKind, relocator.Handle),
 		automation.WithHandler(jellyfin.JobKind, handoff.Handle))
 
 	var watcher sync.WaitGroup
@@ -143,7 +233,20 @@ func runServe(args []string) error {
 			api.WithEngine(engines),
 			api.WithIndexerClients(indexers),
 			api.WithConverter(converter),
-			api.WithDLNA(dlnaServer)),
+			api.WithDLNA(dlnaServer),
+			// So GET /system/status can tell the UI whether this process is
+			// reachable from other machines, which is half of the
+			// "no password on a public bind" nag (SPEC §11).
+			api.WithListenAddr(cfg.Listen),
+			// The portable integrity flow (SPEC §2.3, §13). The stop trigger is
+			// literally the signal context's cancel, so POST /system/shutdown
+			// and a Ctrl-C run the same teardown and both end in a clean marker.
+			api.WithDirtyStart(portableDirty),
+			api.WithShutdown(stop),
+			// SPEC §10.1's second first-run step, for the two modes that never
+			// see the first-run screen because they brought a storage root with
+			// them. Only on the start that actually wrote it.
+			api.WithStartupScan(seededRoot)),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -186,25 +289,31 @@ func listenPort(addr string, logger *slog.Logger) int {
 // written every start. The storage root is only seeded when the table has none:
 // after first run, or after a re-point from the settings screen, the table's
 // value is the authoritative one and the file must not override it.
-func seedSettings(ctx context.Context, st *store.Store, cfg *config.Config) error {
+//
+// It reports whether it just seeded the root, which is the closest thing Docker
+// and the portable drive have to a first run - see api.WithStartupScan.
+func seedSettings(ctx context.Context, st *store.Store, cfg *config.Config) (bool, error) {
 	mode := api.ModeServer
 	if cfg.Portable {
 		mode = api.ModePortable
 	}
 	if err := st.SetSetting(ctx, api.SettingMode, mode); err != nil {
-		return err
+		return false, err
 	}
 
 	if cfg.StorageRoot == "" {
-		return nil
+		return false, nil
 	}
 	switch _, err := st.GetSetting(ctx, store.SettingStorageRoot); {
 	case err == nil:
-		return nil
+		return false, nil
 	case !errors.Is(err, store.ErrNotFound):
-		return err
+		return false, err
 	}
-	return st.SetSetting(ctx, store.SettingStorageRoot, cfg.StorageRoot)
+	if err := st.SetSetting(ctx, store.SettingStorageRoot, cfg.StorageRoot); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // serveUntilSignal runs srv until ctx is done - the signal context from

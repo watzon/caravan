@@ -8,6 +8,7 @@
 import type {
   ActivityEvent,
   AddItemRequest,
+  AuthState,
   CalendarEntry,
   Conversion,
   DownloadInsight,
@@ -25,13 +26,17 @@ import type {
   QualityProfile,
   QualityProfileInput,
   Release,
+  RepointResult,
   ScanSummary,
   SearchResults,
   Series,
   Settings,
+  StorageMigration,
+  StorageMigrationStatus,
   SystemStatus,
   TVProfile,
   UnmatchedFile,
+  VerifyResult,
   WantedLists,
 } from './types';
 
@@ -53,6 +58,14 @@ export class ApiError extends Error {
 /** Every endpoint the phase-1 SPA uses, in one place. */
 export const endpoints = {
   systemStatus: () => `${API_BASE}/system/status`,
+  // Phase 5 — the portable integrity flow (SPEC §2.3, §13).
+  systemShutdown: () => `${API_BASE}/system/shutdown`,
+  systemVerify: () => `${API_BASE}/system/verify`,
+  // Phase 5 — moving the storage root (SPEC §10). Re-pointing answers
+  // synchronously; migrating answers 202 and the progress endpoint is polled.
+  storageRootRepoint: () => `${API_BASE}/system/storage-root/repoint`,
+  storageRootMigrate: () => `${API_BASE}/system/storage-root/migrate`,
+  storageMigration: () => `${API_BASE}/system/storage-root/migration`,
   settings: () => `${API_BASE}/settings`,
   movies: () => `${API_BASE}/library/movies`,
   movie: (id: number) => `${API_BASE}/library/movies/${id}`,
@@ -92,6 +105,12 @@ export const endpoints = {
   calendar: () => `${API_BASE}/calendar`,
   calendarFeed: (apiKey: string) => `${API_BASE}/calendar.ics?apikey=${encodeURIComponent(apiKey)}`,
   regenerateAPIKey: () => `${API_BASE}/settings/apikey`,
+
+  // Phase 5 — the optional single-user password (SPEC §11). The session lives
+  // in an HttpOnly cookie, so no token is ever handled here.
+  login: () => `${API_BASE}/auth/login`,
+  logout: () => `${API_BASE}/auth/logout`,
+  password: () => `${API_BASE}/settings/password`,
   tvProfiles: () => `${API_BASE}/tv-profiles`,
 
   // Phase 4 — the built-in DLNA media server (SPEC §5.1). Read-only: the
@@ -109,6 +128,19 @@ export const endpoints = {
   qualityProfiles: () => `${API_BASE}/quality-profiles`,
   qualityProfile: (id: number) => `${API_BASE}/quality-profiles/${id}`,
 } as const;
+
+/**
+ * Told when the server answers 401 to anything other than the login itself.
+ *
+ * The auth state registers here rather than being imported, so this module
+ * keeps its one-way dependency: state imports the client, never the reverse.
+ */
+let unauthorizedHandler: (() => void) | null = null;
+
+/** Register the 401 handler. Passing null clears it (used by tests). */
+export function onUnauthorized(handler: (() => void) | null): void {
+  unauthorizedHandler = handler;
+}
 
 interface RequestOptions {
   method?: string;
@@ -154,6 +186,13 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   const payload = await readBody(res);
 
   if (!res.ok) {
+    // A 401 means the session is missing or expired: the whole SPA has to go
+    // back to the login screen, so it is handled once here rather than by
+    // every caller. The login endpoint is excluded — a rejected password is a
+    // form error, not a lost session.
+    if (res.status === 401 && !path.startsWith(endpoints.login())) {
+      unauthorizedHandler?.();
+    }
     throw new ApiError(errorMessage(payload, res), res.status, payload);
   }
   return payload as T;
@@ -228,6 +267,41 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 export const api = {
   systemStatus: (signal?: AbortSignal) =>
     request<SystemStatus>(endpoints.systemStatus(), { signal }),
+
+  /**
+   * Stop the server so the drive can be ejected (SPEC §2.3). It answers 202 and
+   * then tears itself down, so this call succeeding means the shutdown started
+   * — and the very next request to this origin is expected to fail.
+   */
+  shutdown: () => request<{ status: string }>(endpoints.systemShutdown(), { method: 'POST' }),
+
+  /**
+   * The dirty-eject recovery action (SPEC §13): check the database, rescan the
+   * library, and clear the dirty flag that is holding downloads paused. It
+   * throws when the database fails its check, in which case the flag stays set.
+   */
+  verifyIntegrity: () => request<VerifyResult>(endpoints.systemVerify(), { method: 'POST' }),
+
+  /**
+   * Re-point the storage root (SPEC §10): change where Caravan looks without
+   * moving a byte. Every stored path is relative, so this is one settings
+   * write. `warnings` is advisory — a root with no library in it is a fresh
+   * drive, which is allowed.
+   */
+  repointStorageRoot: (root: string) =>
+    request<RepointResult>(endpoints.storageRootRepoint(), { method: 'POST', body: { root } }),
+
+  /**
+   * Move the library and incomplete folders to a new root. It answers with the
+   * queued migration; the work happens on a durable job, so the browser can be
+   * closed and the progress polled again later.
+   */
+  migrateStorageRoot: (root: string) =>
+    request<StorageMigration>(endpoints.storageRootMigrate(), { method: 'POST', body: { root } }),
+
+  /** The most recent storage migration, or null when none has ever run. */
+  storageMigration: (signal?: AbortSignal) =>
+    request<StorageMigrationStatus>(endpoints.storageMigration(), { signal }),
 
   getSettings: (signal?: AbortSignal) =>
     request<Settings>(endpoints.settings(), { signal }),
@@ -491,6 +565,29 @@ export const api = {
 
   regenerateAPIKey: () =>
     request<{ api_key: string }>(endpoints.regenerateAPIKey(), { method: 'POST' }),
+
+  /* ------------------------------------------------------------------------
+   * Phase 5 — the optional single-user password (SPEC §11).
+   *
+   * The session is an HttpOnly cookie the browser attaches on its own, so
+   * nothing here reads or stores a token; a 401 from any other call is what
+   * tells the SPA the session is gone.
+   * --------------------------------------------------------------------- */
+
+  login: (password: string) =>
+    request<AuthState>(endpoints.login(), { method: 'POST', body: { password } }),
+
+  logout: () => request<void>(endpoints.logout(), { method: 'POST' }),
+
+  /**
+   * Set, change or clear the password. An empty `newPassword` clears it;
+   * `currentPassword` is required whenever one is already set.
+   */
+  setPassword: (currentPassword: string, newPassword: string) =>
+    request<AuthState>(endpoints.password(), {
+      method: 'POST',
+      body: { current_password: currentPassword, new_password: newPassword },
+    }),
 
   listQualityProfiles: (signal?: AbortSignal) =>
     listOf<QualityProfile>(endpoints.qualityProfiles(), 'profiles', signal),

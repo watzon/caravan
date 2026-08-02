@@ -2,8 +2,7 @@
   /** Settings for general configuration, indexers, engine defaults, profiles and storage. */
   import { onMount } from 'svelte';
   import { api, errorText } from '../api/client';
-  import { SETTING_STORAGE_ROOT, SETTING_TMDB_API_KEY, type Settings } from '../api/types';
-  import Banner from '../components/Banner.svelte';
+  import { SETTING_TMDB_API_KEY, type Settings } from '../api/types';
   import Button from '../components/Button.svelte';
   import Field from '../components/Field.svelte';
   import Icon from '../components/Icon.svelte';
@@ -16,6 +15,8 @@
   import Skeleton from '../components/Skeleton.svelte';
   import TextInput from '../components/TextInput.svelte';
   import QualityProfiles from '../components/QualityProfiles.svelte';
+  import SecuritySettings from '../components/SecuritySettings.svelte';
+  import StorageSettings from '../components/StorageSettings.svelte';
   import TVProfileSettings from '../components/TVProfileSettings.svelte';
   import { UNKNOWN } from '../format';
   import { pushToast } from '../state/toast.svelte';
@@ -29,6 +30,7 @@
     | 'tv-profile'
     | 'dlna'
     | 'jellyfin'
+    | 'security'
     | 'storage';
 
   const TABS: { key: Tab; label: string }[] = [
@@ -39,6 +41,7 @@
     { key: 'tv-profile', label: 'TV profile' },
     { key: 'dlna', label: 'DLNA' },
     { key: 'jellyfin', label: 'Jellyfin' },
+    { key: 'security', label: 'Security' },
     { key: 'storage', label: 'Storage' },
   ];
 
@@ -47,10 +50,8 @@
   let loading = $state(true);
   let error = $state<string | null>(null);
   let saving = $state(false);
-  let scanning = $state(false);
 
   let tmdbKey = $state('');
-  let storageRoot = $state('');
 
   async function load() {
     loading = true;
@@ -58,7 +59,6 @@
       const loaded = await api.getSettings();
       settings = loaded;
       tmdbKey = loaded[SETTING_TMDB_API_KEY] ?? '';
-      storageRoot = loaded[SETTING_STORAGE_ROOT] ?? '';
       error = null;
     } catch (err) {
       error = errorText(err);
@@ -81,23 +81,6 @@
       return false;
     } finally {
       saving = false;
-    }
-  }
-
-  async function rescan() {
-    scanning = true;
-    try {
-      await api.rescan();
-      const summary = await api.awaitScan();
-      await system.refresh();
-      pushToast(
-        `Scan finished: ${summary.media_files} files in the library, ${summary.unmatched} unmatched.`,
-        summary.unmatched > 0 ? 'warning' : 'success',
-      );
-    } catch (err) {
-      pushToast(errorText(err), 'danger');
-    } finally {
-      scanning = false;
     }
   }
 
@@ -126,6 +109,8 @@
       <Skeleton class="h-9 w-full" />
       <Skeleton class="h-8 w-24" />
     </div>
+  {:else if tab === 'security' && settings}
+    <SecuritySettings {settings} />
   {:else if tab === 'dlna' && settings}
     <DlnaSettings
       {settings}
@@ -182,35 +167,9 @@
         </div>
       </dl>
     </section>
-  {:else}
-    <section class="flex flex-col gap-6">
-      <Field
-        label="Storage root"
-        for="settings-storage-root"
-        help="Every path in the database is relative to this folder, so re-pointing is instant and safe - the files stay where they are.">
-        <TextInput id="settings-storage-root" bind:value={storageRoot} mono placeholder="/data" />
-      </Field>
-
-      <div class="flex flex-wrap gap-2">
-        <Button
-          variant="primary"
-          disabled={saving || storageRoot.trim() === ''}
-          onclick={() =>
-            save({ [SETTING_STORAGE_ROOT]: storageRoot.trim() }, 'Storage root re-pointed.')}>
-          <Icon name="check" size={14} />
-          {saving ? 'Saving…' : 'Re-point'}
-        </Button>
-        <Button variant="secondary" disabled={scanning} onclick={rescan}>
-          <Icon name="refresh" size={14} />
-          {scanning ? 'Scanning…' : 'Rescan library'}
-        </Button>
-      </div>
-
-      <Banner
-        tone="info"
-        icon="warning"
-        title="Moving files is a later phase"
-        message="Re-pointing changes where Caravan looks; it never moves media. The migrate operation that relocates the library arrives with the deployment phase." />
-    </section>
+  {:else if settings}
+    <!-- Storage owns two operations with very different consequences, so it
+         owns its own component and its own migration polling. -->
+    <StorageSettings {settings} />
   {/if}
 </div>

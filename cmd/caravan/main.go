@@ -16,8 +16,9 @@ var version = "dev"
 const usage = `caravan - self-hosted media manager
 
 Usage:
-  caravan serve [flags]   Run the server
-  caravan version         Print the version
+  caravan serve [flags]         Run the server
+  caravan prepare <drive>       Scaffold a portable drive
+  caravan version               Print the version
 
 Run "caravan <command> -h" for the flags of a command.
 `
@@ -40,6 +41,8 @@ func run(args []string) error {
 	switch args[0] {
 	case "serve":
 		return runServe(args[1:])
+	case "prepare":
+		return runPrepare(args[1:])
 	case "version":
 		fmt.Println("caravan", version)
 		return nil

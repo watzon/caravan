@@ -3,9 +3,7 @@ package api
 import (
 	"context"
 	"crypto/rand"
-	"crypto/subtle"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -62,13 +60,17 @@ func (s *server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 
 // handleCalendarICS is the API-key-protected iCal feed for external calendar
 // apps. Its wider fixed range avoids making a subscriber negotiate UI filters.
+//
+// It carries its own check because it is exempt from the password gate: a
+// calendar app subscribes to a URL and cannot hold a session cookie, so the API
+// key is the only credential it can present (SPEC §11).
 func (s *server) handleCalendarICS(w http.ResponseWriter, r *http.Request) {
-	apiKey, err := s.st.GetSetting(r.Context(), store.SettingAPIKey)
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
+	authorized, err := s.calendarKeyAuthenticated(r)
+	if err != nil {
 		s.writeStoreError(w, "read api key", err)
 		return
 	}
-	if apiKey == "" || subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("apikey")), []byte(apiKey)) != 1 {
+	if !authorized {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}

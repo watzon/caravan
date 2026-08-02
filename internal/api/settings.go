@@ -27,8 +27,13 @@ const (
 // writableSettings is the allowlist PUT /settings accepts. Settings are a
 // key-value table, so without an allowlist a buggy client could quietly fill
 // it with keys nothing reads.
+//
+// store.SettingStorageRoot is deliberately absent. It is the one setting with
+// rules attached — it must be absolute, it must name a folder that exists, and
+// it must not change while a migration owns both roots — and a generic
+// key-value PUT enforces none of them. POST /system/storage-root/repoint is the
+// only way in (SPEC §10); see internal/api/storage.go.
 var writableSettings = map[string]bool{
-	store.SettingStorageRoot:            true,
 	store.SettingTMDBAPIKey:             true,
 	store.SettingRSSSyncIntervalMinutes: true,
 	store.SettingBacklogIntervalMinutes: true,
@@ -50,9 +55,34 @@ type engineSettingsApplier interface {
 	ApplyEngineSettings(context.Context, map[string]string) error
 }
 
-// handleGetSettings returns every setting as a flat object.
+// hiddenSettings never leave the server. The password hash is not a value the
+// UI has any use for, and a credential the API hands back is a credential that
+// ends up in a browser cache, a screenshot or a bug report (SPEC §12).
+//
+// The other secrets in this table (the TMDB and Jellyfin keys) are values the
+// user typed into a form and has to be able to see and correct, so they stay.
+var hiddenSettings = map[string]bool{
+	store.SettingPasswordHash: true,
+}
+
+// visibleSettings is every setting a client is allowed to read. It is the only
+// path from the settings table to a response body, so a key added to
+// hiddenSettings is hidden everywhere at once.
+func (s *server) visibleSettings(ctx context.Context) (map[string]string, error) {
+	settings, err := s.st.AllSettings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for key := range hiddenSettings {
+		delete(settings, key)
+	}
+	return settings, nil
+}
+
+// handleGetSettings returns every setting as a flat object, minus the ones that
+// are never readable.
 func (s *server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
-	settings, err := s.st.AllSettings(r.Context())
+	settings, err := s.visibleSettings(r.Context())
 	if err != nil {
 		s.writeStoreError(w, "read settings", err)
 		return
@@ -107,7 +137,7 @@ func (s *server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	settings, err := s.st.AllSettings(r.Context())
+	settings, err := s.visibleSettings(r.Context())
 	if err != nil {
 		s.writeStoreError(w, "read settings", err)
 		return
@@ -218,6 +248,16 @@ type statusResponse struct {
 	// False hides the whole convert-for-TV affordance and degrades the
 	// TV-incompatible warning to informational (SPEC §8).
 	FFmpegAvailable bool `json:"ffmpeg_available"`
+	// PasswordSet and ListeningPublicly are the two halves of the nag in
+	// SPEC §11: a server reachable from other machines with no password on it.
+	// Neither is a credential — the hash itself never leaves the server.
+	PasswordSet       bool `json:"password_set"`
+	ListeningPublicly bool `json:"listening_publicly"`
+	// Dirty says the previous session ended without a clean shutdown — a pulled
+	// drive, a power cut, a kill -9 (SPEC §2.3). It stays true until
+	// POST /system/verify passes, and while it is true downloads refuse to
+	// resume. Only portable mode ever sets it.
+	Dirty bool `json:"dirty"`
 }
 
 type statusCounts struct {
@@ -279,6 +319,12 @@ func (s *server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	passwordHash, err := s.passwordHash(ctx)
+	if err != nil {
+		s.writeStoreError(w, "read password", err)
+		return
+	}
+
 	var diskFree, diskTotal int64
 	if root != "" {
 		if free, total, err := diskUsage(root); err == nil {
@@ -300,10 +346,13 @@ func (s *server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 			MediaFiles: len(files),
 			Unmatched:  len(unmatched),
 		},
-		DiskFreeBytes:   diskFree,
-		DiskTotalBytes:  diskTotal,
-		EngineHealth:    s.engineHealth(),
-		FFmpegAvailable: s.ffmpegAvailable(),
+		DiskFreeBytes:     diskFree,
+		DiskTotalBytes:    diskTotal,
+		EngineHealth:      s.engineHealth(),
+		FFmpegAvailable:   s.ffmpegAvailable(),
+		PasswordSet:       passwordHash != "",
+		ListeningPublicly: listeningPublicly(s.listenAddr),
+		Dirty:             s.dirty.Load(),
 	})
 }
 

@@ -14,7 +14,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -535,9 +534,7 @@ func (p *caravanProcess) stop(t *testing.T) {
 	}
 	p.stopped = true
 
-	if err := syscall.Kill(syscall.Getpid(), syscall.SIGTERM); err != nil {
-		t.Fatalf("signal caravan: %v", err)
-	}
+	signalSelfTerm(t)
 	select {
 	case err := <-p.errCh:
 		if err != nil {
@@ -799,9 +796,7 @@ func TestBinaryBootsAndResumesDownloads(t *testing.T) {
 
 	// A clean SIGTERM must exit zero: the engine and the watcher both stop on
 	// the same signal the server does.
-	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
-		t.Fatalf("signal caravan: %v", err)
-	}
+	signalProcessTerm(t, cmd.Process)
 	waited := make(chan error, 1)
 	go func() { waited <- cmd.Wait() }()
 	select {

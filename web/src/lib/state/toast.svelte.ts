@@ -29,3 +29,12 @@ export function pushToast(message: string, tone: Tone = 'neutral'): number {
 export function dismissToast(id: number): void {
   items = items.filter((t) => t.id !== id);
 }
+
+/**
+ * Drop every toast. Used when the session expires: a lost session fails every
+ * in-flight request at once, and a stack of "unauthorized" toasts on top of the
+ * login screen is noise, not feedback.
+ */
+export function clearToasts(): void {
+  items = [];
+}

@@ -129,8 +129,8 @@ Six phases. Each absorbs one hat of the existing *arr ecosystem and ends with a 
 
 ### Acceptance criteria
 
-- `docker compose up` on a clean host yields a working instance with hardlink imports.
-- `prepare` on a real exFAT drive produces a layout that launches via the click-launcher on at least two OSes, and the drive's library plays in a TV's USB browser.
+- `docker compose up` on a clean host yields a working instance with hardlink imports. *(Manual procedure: `docs/docker.md` § Verification status.)*
+- `prepare` on a real exFAT drive produces a layout that launches via the click-launcher on at least two OSes, and the drive's library plays in a TV's USB browser. *(Manual procedure: `docs/portable.md` § Verification status — hardware, per-step pass criteria, and where to record the result.)*
 - A simulated dirty eject is detected on next start; recovery flow completes and downloads stay paused until the DB verifies.
 - Disk-to-server migration = copy files, re-point root, rescan — with history intact.
 
