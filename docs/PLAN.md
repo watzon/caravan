@@ -3,7 +3,9 @@
 **Status:** v1.0 (companion to `SPEC.md` Draft v0.2)
 **Date:** 2026-07-31
 
-Six phases. Each absorbs one hat of the existing *arr ecosystem and ends with a deliverable a real user can run and test — no phase ends in scaffolding-only limbo.
+Seven phases. Each absorbs one hat of the existing *arr ecosystem and ends with a deliverable a real user can run and test — no phase ends in scaffolding-only limbo.
+
+A standing principle sharpened after phase 6: **Caravan is completely standalone; external clients are explicitly optional.** The embedded engines (torrent since phase 2, Usenet in phase 7) are the defaults, and nothing in the UI or docs may imply an external client is required for any workflow.
 
 ## Standing rules (all phases)
 
@@ -156,9 +158,35 @@ Six phases. Each absorbs one hat of the existing *arr ecosystem and ends with a 
 
 ---
 
+## Phase 7 — Embedded Usenet engine
+
+**Hat:** the SABnzbd/NZBGet role itself — natively, in-process.
+**Deliverable:** with nothing but a news-server account configured, a Newznab grab downloads over NNTP, repairs with par2, extracts, and auto-imports — no external client anywhere. This completes the standalone story: one binary now covers both protocols end to end, and phase 6's bridges become a pure preference.
+
+### Tasks
+
+1. **News-server config:** `usenet_servers` table — host, port, TLS, credentials, max connections, priority (backup servers fill missing articles); CRUD + test connection in API and UI, mirroring the download-clients pattern. Distinct from `download_clients`: these are article sources for the embedded engine, not engines.
+2. **NNTP client:** connection pool per server (capped, reused), AUTHINFO, TLS, BODY-by-message-id fetches, retry/backoff, failover to lower-priority servers for missing articles; fixture-tested against a fake NNTP server.
+3. **NZB download pipeline:** NZB parse (files/segments), segment scheduler, yEnc decode with CRC verification, assembly into `incomplete/` — resume-after-restart via persisted segment state (never redownload completed segments), disk-space preflight.
+4. **Verify & repair:** par2 parse + verify; Reed-Solomon repair when blocks allow; unrepairable downloads fail visibly with the block deficit as the reason, never silently.
+5. **Extraction:** rar (pure-Go rardecode) and zip archives extracted in place, archives + par2 files cleaned after a verified extract; obfuscated inner filenames handed to the existing parser/import flow as-is (the stuck-import queue is the designed fallback).
+6. **Engine integration:** the whole pipeline behind the existing `Engine` interface as `embedded-usenet`; selectable as the usenet default in phase 6's routing (and the default default when no external usenet client is configured); queue UI shows the phase (downloading/repairing/extracting) with progress; import runs through the same pipeline as every other engine.
+7. **Test corpus:** fixture NZBs + yEnc articles + par2 sets, including corrupted-segment, missing-article, and unrepairable cases; fake NNTP server joins the fake Torznab server in the e2e suite.
+
+### Acceptance criteria
+
+- With only a news server configured — zero external clients — a Newznab grab completes, repairs, extracts, and lands renamed in the library automatically.
+- A download with corrupt/missing segments repairs via par2 and imports; an unrepairable one fails with a visible, specific reason.
+- Restarting mid-download resumes without refetching completed segments.
+- A rar'd release extracts, imports, and leaves no archive debris in the library.
+- Nothing in the UI presents external clients as required; a fresh install reaches both torrent and usenet downloads without configuring any.
+
+---
+
 ## Risks and long poles
 
 - **The release parser is the long pole.** It gates phase 1 matching quality and phase 3 automation quality. Mitigation: the corpus starts in phase 1 and grows forever; the interactive picker and unmatched queue are the designed graceful-degradation paths.
 - **anacrolix/torrent quirks** (resume data, exFAT-friendly file handling, seeding lifecycle) deserve an early spike in phase 2 before UI work builds on it.
 - **DLNA client variance** is unbounded; scope phase 4 to browse+serve with documented reference clients, not per-TV workarounds.
 - **exFAT integrity** can't be fully simulated in CI; phase 5 needs a manual test matrix with a physical drive and at least one real TV.
+- **par2 and yEnc correctness are phase 7's long pole.** Repair math that is subtly wrong corrupts media silently; the fixture corpus (including deliberately damaged sets cross-checked against a reference par2 implementation) must exist before the repair code, and CRC failures always prefer "fail loudly" over "best effort".

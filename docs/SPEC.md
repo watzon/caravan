@@ -8,7 +8,7 @@
 
 ## 1. Vision
 
-Caravan is an all-in-one, self-hosted media acquisition and library management system. One binary, one database, one storage root. It searches for movies and TV shows, manages a wanted list, fetches releases through torrents (embedded) and Usenet (external clients), imports and renames files into a clean library, and hands playback off to whatever the user already likes: Jellyfin, DLNA clients, or a TV's own USB browser.
+Caravan is an all-in-one, self-hosted media acquisition and library management system. One binary, one database, one storage root. It searches for movies and TV shows, manages a wanted list, fetches releases through torrents and Usenet with embedded engines (external clients optional), imports and renames files into a clean library, and hands playback off to whatever the user already likes: Jellyfin, DLNA clients, or a TV's own USB browser.
 
 Caravan is explicitly **not** a media player. Playback is shelled out. Caravan owns everything upstream of "press play."
 
@@ -192,7 +192,7 @@ type Engine interface {
 }
 ```
 
-Implementations: embedded torrent (default), qBittorrent API, SABnzbd API, NZBGet API. Embedded Usenet (native yEnc/par2/NZB) is a post-v1 milestone (§14).
+Implementations: embedded torrent (default), qBittorrent API, SABnzbd API, NZBGet API, and embedded Usenet (native NNTP/yEnc/par2, phase 7). The embedded engines are the defaults for their protocols; external clients are explicitly optional bridges, never a requirement (§14).
 
 **Import Pipeline.** Completed download → parse → match against wanted/library → rename per naming template → hardlink (same filesystem) or move → write NFO + poster → mark imported → trigger playback handoff. Hardlink preserves seeding; move used when linking is impossible. Failures surface as a visible "stuck imports" queue with manual match override, never silent drops.
 
@@ -370,8 +370,9 @@ Development is organized into phases, each absorbing one hat of the existing eco
 | 4 — Playback handoff | — | Jellyfin scan trigger, DLNA server, TV profiles, Convert-for-TV queue |
 | 5 — Deployment | — (Caravan's differentiator) | Docker image + compose, `prepare` command, launchers, portable dirty-eject integrity flow |
 | 6 — External clients | Download-client bridges | qBittorrent, SABnzbd, NZBGet engine implementations |
+| 7 — Embedded Usenet | SABnzbd/NZBGet natively | NNTP client, NZB/yEnc pipeline, par2 repair, extraction — standalone Usenet with no external client |
 
-Post-v1 candidates: embedded Usenet engine, custom formats, anime numbering, multi-user/request management, music (Lidarr-shaped), mobile app.
+Post-v1 candidates: custom formats, anime numbering, multi-user/request management, music (Lidarr-shaped), mobile app.
 
 ---
 
@@ -391,7 +392,6 @@ Post-v1 candidates: embedded Usenet engine, custom formats, anime numbering, mul
 - Music, books, comics, anime-specific numbering.
 - Custom formats (Sonarr-style scoring DSL).
 - Multi-user, request approval workflows.
-- Embedded Usenet downloading.
 - Acting as an indexer or tracker.
 
 ---
