@@ -38,10 +38,21 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("GET "+MountPath+"/cms.xml", staticXML(connectionManagerSCPD))
 	mux.HandleFunc("POST "+MountPath+"/control/cds", s.handleContentDirectory)
 	mux.HandleFunc("POST "+MountPath+"/control/cms", s.handleConnectionManager)
+	// GENA eventing (events.go). Both services' evented variables are static
+	// while the server runs, but the subscription handshake itself is what
+	// several clients require before they will browse at all.
+	mux.HandleFunc("SUBSCRIBE "+contentDirectoryEventURL, func(w http.ResponseWriter, r *http.Request) {
+		s.handleSubscribe(w, r, "cds")
+	})
+	mux.HandleFunc("SUBSCRIBE "+connectionManagerEventURL, func(w http.ResponseWriter, r *http.Request) {
+		s.handleSubscribe(w, r, "cms")
+	})
+	mux.HandleFunc("UNSUBSCRIBE "+contentDirectoryEventURL, s.handleUnsubscribe)
+	mux.HandleFunc("UNSUBSCRIBE "+connectionManagerEventURL, s.handleUnsubscribe)
 	// A GET pattern also matches HEAD, which is how several renderers probe a
 	// file's length and range support before they start playing it.
 	mux.HandleFunc("GET "+MountPath+"/media/{name}", s.handleMedia)
-	return s.whenEnabled(mux)
+	return s.whenEnabled(s.withTrace(mux))
 }
 
 // whenEnabled makes the whole DLNA surface disappear while the feature is
@@ -121,9 +132,7 @@ func (s *Service) handleContentDirectory(w http.ResponseWriter, r *http.Request)
 	case "Browse":
 		s.handleBrowse(w, r, service)
 	case "GetSearchCapabilities":
-		// Empty means "this server cannot be searched on any property", which
-		// is the honest pairing with Search returning 720.
-		writeSOAPResponse(w, service, action, []soapArg{{Name: "SearchCaps", Value: ""}})
+		writeSOAPResponse(w, service, action, []soapArg{{Name: "SearchCaps", Value: searchCaps}})
 	case "GetSortCapabilities":
 		// Empty means "results come back in the server's order". Caravan's
 		// order — sort title, then season and episode — is already the one a
@@ -133,7 +142,7 @@ func (s *Service) handleContentDirectory(w http.ResponseWriter, r *http.Request)
 	case "GetSystemUpdateID":
 		writeSOAPResponse(w, service, action, []soapArg{{Name: "Id", Value: systemUpdateID}})
 	case "Search":
-		writeSOAPFault(w, errUnsupportedSearch, "search is not supported")
+		s.handleSearch(w, r, service)
 	default:
 		writeSOAPFault(w, errInvalidArgs, "unsupported action "+action)
 	}
@@ -182,6 +191,48 @@ func (s *Service) handleBrowse(w http.ResponseWriter, r *http.Request, service s
 	}
 
 	writeSOAPResponse(w, service, "Browse", []soapArg{
+		{Name: "Result", Value: encoded},
+		{Name: "NumberReturned", Value: strconv.Itoa(page.count())},
+		{Name: "TotalMatches", Value: strconv.Itoa(total)},
+		{Name: "UpdateID", Value: systemUpdateID},
+	})
+}
+
+// handleSearch answers the Search action (search.go): the filtered flattening
+// of the subtree under ContainerID, paged exactly like Browse.
+func (s *Service) handleSearch(w http.ResponseWriter, r *http.Request, service string) {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxSOAPBody))
+	if err != nil {
+		writeSOAPFault(w, errInvalidArgs, "unreadable request body")
+		return
+	}
+	args, err := decodeSearch(body)
+	if err != nil {
+		writeSOAPFault(w, errInvalidArgs, "invalid Search arguments")
+		return
+	}
+
+	didl, err := s.search(r.Context(), origin(r), args.ContainerID, args.SearchCriteria)
+	if errors.Is(err, errNoObject) {
+		writeSOAPFault(w, errNoSuchObject, "no such container")
+		return
+	}
+	if err != nil {
+		s.log.Error("dlna: search failed", "container", args.ContainerID, "error", err)
+		writeSOAPFault(w, errActionFailed, "search failed")
+		return
+	}
+
+	total := didl.count()
+	page := didl.slice(args.StartingIndex, args.RequestedCount)
+	encoded, err := page.encode()
+	if err != nil {
+		s.log.Error("dlna: encode search result", "container", args.ContainerID, "error", err)
+		writeSOAPFault(w, errActionFailed, "search failed")
+		return
+	}
+
+	writeSOAPResponse(w, service, "Search", []soapArg{
 		{Name: "Result", Value: encoded},
 		{Name: "NumberReturned", Value: strconv.Itoa(page.count())},
 		{Name: "TotalMatches", Value: strconv.Itoa(total)},

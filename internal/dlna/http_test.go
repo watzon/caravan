@@ -283,7 +283,7 @@ func TestBrowsePaging(t *testing.T) {
 	if resp.NumberReturned != 1 {
 		t.Fatalf("NumberReturned = %d, want 1", resp.NumberReturned)
 	}
-	if len(didl.Items) != 1 || didl.Items[0].Title != "S01E02 - Mountains" {
+	if len(didl.Items) != 1 || didl.Items[0].Title != "Planet Earth II (2016) - S01E02 - Mountains" {
 		t.Fatalf("page = %+v, want the second episode", didl.Items)
 	}
 }
@@ -318,15 +318,74 @@ func TestBrowseUnknownObjectIsSOAPError701(t *testing.T) {
 	}
 }
 
-// Search is optional in ContentDirectory:1 and this server does not implement
-// it. 720 is the "cannot process" fault the spec reserves for exactly that,
-// and it pairs with the empty SearchCapabilities below.
-func TestSearchIsNotImplemented(t *testing.T) {
-	svc, _, _ := newTestService(t)
+// TestBrowseResponseUsesOnlyNamedEntities pins the wire format to what the
+// hand-rolled unescapers in TV apps can read: the five named XML entities and
+// nothing numeric. Infuse on tvOS rendered every listing as an empty folder
+// until the &#34;s were gone, while VLC's real parser never noticed — which
+// is exactly why this is a byte-level assertion and not a round-trip through
+// encoding/xml.
+func TestBrowseResponseUsesOnlyNamedEntities(t *testing.T) {
+	svc, st, _ := newTestService(t)
+	seedLibrary(t, st)
 
-	rec := soapPost(t, svc.Handler(), MountPath+"/control/cds", contentDirectoryType+"#Search", "")
-	if code := faultOf(t, rec); code != errUnsupportedSearch {
-		t.Fatalf("errorCode = %q, want %q", code, errUnsupportedSearch)
+	rec := soapPost(t, svc.Handler(), MountPath+"/control/cds", contentDirectoryType+"#Browse",
+		browseBody(rootID, browseDirectChildren, 0, 0))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Browse = %d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, ref := range []string{"&#34;", "&#39;", "&#x22;", "&#x27;"} {
+		if strings.Contains(body, ref) {
+			t.Fatalf("response carries numeric character reference %s:\n%s", ref, body)
+		}
+	}
+
+	// A five-entity unescaper — all a typical TV app ships — must recover a
+	// parseable DIDL document from the Result.
+	naive := strings.NewReplacer("&lt;", "<", "&gt;", ">", "&quot;", `"`, "&apos;", "'", "&amp;", "&")
+	var resp struct {
+		Result string `xml:"Body>BrowseResponse>Result"`
+	}
+	if err := xml.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode SOAP response: %v", err)
+	}
+	raw := rec.Body.String()
+	start := strings.Index(raw, "<Result>") + len("<Result>")
+	end := strings.Index(raw, "</Result>")
+	didlText := naive.Replace(raw[start:end])
+	var didl didlProbe
+	if err := xml.Unmarshal([]byte(didlText), &didl); err != nil {
+		t.Fatalf("a five-entity unescape did not yield parseable DIDL: %v\n%s", err, didlText)
+	}
+	if len(didl.Containers) != 2 {
+		t.Fatalf("naive client sees %d containers, want 2", len(didl.Containers))
+	}
+}
+
+// TestEpisodeTitleApostropheTravelsAsNamedEntity: titles like "I'm Yani" must
+// reach a naive client intact, not as a literal "&#39;".
+func TestEpisodeTitleApostropheTravelsAsNamedEntity(t *testing.T) {
+	d := newDIDL()
+	d.Items = []didlItem{{
+		ID: "e:1:1", ParentID: "s:1:1", Restricted: 1,
+		Title: `I'm "Yani" <Neko> & Co`, Class: classVideoItem,
+	}}
+	encoded, err := d.encode()
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	for _, ref := range []string{"&#34;", "&#39;"} {
+		if strings.Contains(encoded, ref) {
+			t.Fatalf("DIDL carries numeric reference %s:\n%s", ref, encoded)
+		}
+	}
+	naive := strings.NewReplacer("&lt;", "<", "&gt;", ">", "&quot;", `"`, "&apos;", "'", "&amp;", "&")
+	var probe didlProbe
+	if err := xml.Unmarshal([]byte(encoded), &probe); err != nil {
+		t.Fatalf("parse DIDL: %v\n%s", err, encoded)
+	}
+	if want := `I'm "Yani" <Neko> & Co`; len(probe.Items) != 1 || naive.Replace(probe.Items[0].Title) != want {
+		t.Fatalf("title = %+v, want %q recoverable", probe.Items, want)
 	}
 }
 
@@ -339,7 +398,7 @@ func TestContentDirectoryStubs(t *testing.T) {
 		field  string
 		want   string
 	}{
-		{action: "GetSearchCapabilities", field: "SearchCaps", want: ""},
+		{action: "GetSearchCapabilities", field: "SearchCaps", want: searchCaps},
 		{action: "GetSortCapabilities", field: "SortCaps", want: ""},
 		{action: "GetSystemUpdateID", field: "Id", want: systemUpdateID},
 	}

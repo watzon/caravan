@@ -142,12 +142,20 @@ func (d *didlLite) count() int { return len(d.Containers) + len(d.Items) }
 // encode renders the document. The result is embedded, XML-escaped, inside the
 // SOAP response's Result element — DIDL-Lite travels as a string, not as
 // nested XML.
+//
+// Go's marshaller writes quotes and apostrophes as numeric character
+// references (&#34;, &#39;). Legal XML — but the DIDL string is re-parsed by
+// whatever unescaper a TV app ships, and the hand-rolled ones only know the
+// five named entities. A title like "I'm Yani" must therefore travel as
+// &apos;, or that client reads garbage and renders an empty folder.
+var namedEntities = strings.NewReplacer("&#34;", "&quot;", "&#39;", "&apos;")
+
 func (d *didlLite) encode() (string, error) {
 	out, err := xml.Marshal(d)
 	if err != nil {
 		return "", fmt.Errorf("dlna: encode didl-lite: %w", err)
 	}
-	return string(out), nil
+	return namedEntities.Replace(string(out)), nil
 }
 
 // slice applies Browse's StartingIndex and RequestedCount across the document,

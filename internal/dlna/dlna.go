@@ -95,6 +95,10 @@ type Service struct {
 	// disagree about who this device is.
 	uuid    string
 	lastErr string
+	// subs is the GENA subscriber registry (events.go), created lazily.
+	subs *subscribers
+	// tr is the request-trace ring (trace.go), created lazily.
+	tr *trace
 }
 
 // New builds the service. It does no I/O and starts nothing: advertising begins
@@ -143,7 +147,7 @@ func (s *Service) Reload(ctx context.Context) {
 		s.lastErr = "no listen port to advertise"
 		s.log.Warn("dlna: not advertising", "error", s.lastErr)
 	default:
-		adv, err := startAdvertiser(cfg.UUID, s.port, s.log)
+		adv, err := startAdvertiser(cfg.UUID, s.port, s.log, s.traceSSDP)
 		if err != nil {
 			s.lastErr = err.Error()
 			s.log.Warn("dlna: not advertising", "error", err)

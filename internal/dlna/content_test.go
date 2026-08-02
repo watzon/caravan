@@ -268,7 +268,14 @@ func TestBrowseTVDownToEpisodes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("children(season 1): %v", err)
 	}
-	want := []string{"S01E01 - Islands", "S01E02 - Mountains", "S01E03 - Jungles"}
+	// The series name leads: metadata-fetching clients (Infuse folder
+	// browsing) parse the item title for it, and "S01E01 - …" alone is
+	// unmatchable against a provider.
+	want := []string{
+		"Planet Earth II (2016) - S01E01 - Islands",
+		"Planet Earth II (2016) - S01E02 - Mountains",
+		"Planet Earth II (2016) - S01E03 - Jungles",
+	}
 	got := itemTitles(episodes)
 	if len(got) != len(want) {
 		t.Fatalf("season 1 items = %v, want %v", got, want)

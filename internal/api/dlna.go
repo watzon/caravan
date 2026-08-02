@@ -22,6 +22,9 @@ type DLNAService interface {
 	Status(ctx context.Context) (dlna.Status, error)
 	// Reload re-reads the settings and starts or stops advertising to match.
 	Reload(ctx context.Context)
+	// Recent is the request trace: what DLNA clients actually asked, oldest
+	// first. TVs fail silently, and this is the observability for that.
+	Recent() []dlna.TraceEntry
 }
 
 // dlnaMountPrefix is where the protocol surface hangs off the root mux. The
@@ -47,6 +50,9 @@ type dlnaJSON struct {
 	Advertising bool `json:"advertising"`
 	// Error is why advertising is off despite being enabled. Empty otherwise.
 	Error string `json:"error"`
+	// Recent is the request trace, oldest first — what clients actually
+	// asked. The way to debug a TV that shows an empty shelf.
+	Recent []dlna.TraceEntry `json:"recent"`
 }
 
 // handleDLNAStatus reports the media server's state.
@@ -73,5 +79,6 @@ func (s *server) handleDLNAStatus(w http.ResponseWriter, r *http.Request) {
 		UUID:         status.UUID,
 		Advertising:  status.Advertising,
 		Error:        status.Error,
+		Recent:       s.dlna.Recent(),
 	})
 }

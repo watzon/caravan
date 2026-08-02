@@ -22,11 +22,10 @@ const (
 // X_DLNADOC is what marks the device as a DLNA Digital Media Server rather than
 // a bare UPnP MediaServer. Several televisions only list devices that carry it.
 //
-// The eventSubURL elements are present and empty on purpose. This server
-// implements no GENA eventing, and the element is required by the schema; an
-// empty value is the conventional way to say "do not subscribe", whereas
-// omitting it makes the description invalid and pointing it somewhere would
-// promise events that never arrive.
+// The eventSubURL elements point at the GENA endpoints in events.go. Both
+// services carry evented state variables, and clients exist that SUBSCRIBE
+// before browsing and treat a failed subscription as a dead service — an
+// empty eventSubURL rendered exactly as "device found, library empty".
 func deviceDescription(friendlyName, uuid string) string {
 	var b strings.Builder
 	b.WriteString(xml.Header)
@@ -47,28 +46,27 @@ func deviceDescription(friendlyName, uuid string) string {
 	b.WriteString(`<dlna:X_DLNADOC xmlns:dlna="urn:schemas-dlna-org:device-1-0">DMS-1.50</dlna:X_DLNADOC>`)
 	b.WriteString(`<serviceList>`)
 	b.WriteString(service(contentDirectoryType, "urn:upnp-org:serviceId:ContentDirectory",
-		contentDirectorySCPDURL, contentDirectoryControlURL))
+		contentDirectorySCPDURL, contentDirectoryControlURL, contentDirectoryEventURL))
 	b.WriteString(service(connectionManagerType, "urn:upnp-org:serviceId:ConnectionManager",
-		connectionManagerSCPDURL, connectionManagerControlURL))
+		connectionManagerSCPDURL, connectionManagerControlURL, connectionManagerEventURL))
 	b.WriteString(`</serviceList>`)
 	b.WriteString(`</device></root>`)
 	return b.String()
 }
 
-func service(serviceType, serviceID, scpdURL, controlURL string) string {
+func service(serviceType, serviceID, scpdURL, controlURL, eventSubURL string) string {
 	return `<service>` +
 		`<serviceType>` + serviceType + `</serviceType>` +
 		`<serviceId>` + serviceID + `</serviceId>` +
 		`<SCPDURL>` + scpdURL + `</SCPDURL>` +
 		`<controlURL>` + controlURL + `</controlURL>` +
-		`<eventSubURL></eventSubURL>` +
+		`<eventSubURL>` + eventSubURL + `</eventSubURL>` +
 		`</service>`
 }
 
 // contentDirectorySCPD describes the ContentDirectory actions this server
-// implements. It lists exactly what is implemented — Search is absent, because
-// a client that reads the description will not call an action that is not
-// declared, which is a better outcome than the 720 fault it would otherwise get.
+// implements — including Search (search.go), which library-style clients use
+// to enumerate a server in one sweep instead of walking Browse.
 const contentDirectorySCPD = xml.Header + `<scpd xmlns="urn:schemas-upnp-org:service-1-0">
 <specVersion><major>1</major><minor>0</minor></specVersion>
 <actionList>
@@ -93,9 +91,22 @@ const contentDirectorySCPD = xml.Header + `<scpd xmlns="urn:schemas-upnp-org:ser
 <argument><name>TotalMatches</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_Count</relatedStateVariable></argument>
 <argument><name>UpdateID</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_UpdateID</relatedStateVariable></argument>
 </argumentList></action>
+<action><name>Search</name><argumentList>
+<argument><name>ContainerID</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_ObjectID</relatedStateVariable></argument>
+<argument><name>SearchCriteria</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_SearchCriteria</relatedStateVariable></argument>
+<argument><name>Filter</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_Filter</relatedStateVariable></argument>
+<argument><name>StartingIndex</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_Index</relatedStateVariable></argument>
+<argument><name>RequestedCount</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_Count</relatedStateVariable></argument>
+<argument><name>SortCriteria</name><direction>in</direction><relatedStateVariable>A_ARG_TYPE_SortCriteria</relatedStateVariable></argument>
+<argument><name>Result</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_Result</relatedStateVariable></argument>
+<argument><name>NumberReturned</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_Count</relatedStateVariable></argument>
+<argument><name>TotalMatches</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_Count</relatedStateVariable></argument>
+<argument><name>UpdateID</name><direction>out</direction><relatedStateVariable>A_ARG_TYPE_UpdateID</relatedStateVariable></argument>
+</argumentList></action>
 </actionList>
 <serviceStateTable>
 <stateVariable sendEvents="no"><name>A_ARG_TYPE_ObjectID</name><dataType>string</dataType></stateVariable>
+<stateVariable sendEvents="no"><name>A_ARG_TYPE_SearchCriteria</name><dataType>string</dataType></stateVariable>
 <stateVariable sendEvents="no"><name>A_ARG_TYPE_Result</name><dataType>string</dataType></stateVariable>
 <stateVariable sendEvents="no"><name>A_ARG_TYPE_BrowseFlag</name><dataType>string</dataType>
 <allowedValueList><allowedValue>BrowseMetadata</allowedValue><allowedValue>BrowseDirectChildren</allowedValue></allowedValueList>

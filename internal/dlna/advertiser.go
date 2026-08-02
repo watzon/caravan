@@ -20,6 +20,9 @@ type advertiser struct {
 	uuid string
 	port int
 	log  *slog.Logger
+	// trace records discovery traffic for GET /api/v1/dlna (trace.go). Never
+	// nil; startAdvertiser substitutes a no-op.
+	trace func(remote, detail string)
 
 	group *net.UDPAddr
 	// listener receives multicast traffic: other devices' notifications and
@@ -38,7 +41,10 @@ type advertiser struct {
 // here is a working-but-unadvertised server, never a dead one: hosts without
 // multicast (a container on a bridge network, a VPN-only interface) are
 // expected, and the caller logs and carries on.
-func startAdvertiser(uuid string, port int, log *slog.Logger) (*advertiser, error) {
+func startAdvertiser(uuid string, port int, log *slog.Logger, trace func(remote, detail string)) (*advertiser, error) {
+	if trace == nil {
+		trace = func(string, string) {}
+	}
 	group, err := net.ResolveUDPAddr("udp4", ssdpAddr)
 	if err != nil {
 		return nil, fmt.Errorf("dlna: resolve ssdp group: %w", err)
@@ -54,7 +60,7 @@ func startAdvertiser(uuid string, port int, log *slog.Logger) (*advertiser, erro
 	}
 
 	a := &advertiser{
-		uuid: uuid, port: port, log: log,
+		uuid: uuid, port: port, log: log, trace: trace,
 		group: group, listener: listener, sender: sender,
 		stop: make(chan struct{}),
 	}
@@ -144,6 +150,7 @@ func (a *advertiser) serveSearches() {
 			continue
 		}
 		targets := matchSearchTargets(req.ST, a.uuid)
+		a.trace(from.String(), fmt.Sprintf("M-SEARCH %s → %d targets", req.ST, len(targets)))
 		if len(targets) == 0 {
 			continue
 		}

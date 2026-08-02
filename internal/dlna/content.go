@@ -300,7 +300,7 @@ func (s *Service) episodeChildren(ctx context.Context, u urls, seriesID int64, s
 
 func episodeItem(u urls, sr *core.Series, e core.Episode, f core.MediaFile) didlItem {
 	return item(episodeObjectID(e.ID, f.ID), seasonObjectID(sr.ID, e.SeasonNumber),
-		episodeTitle(sr.Title, e), u.art(sr.PosterPath), u, f)
+		episodeTitle(sr, e), u.art(sr.PosterPath), u, f)
 }
 
 func (s *Service) seriesMetadata(ctx context.Context, u urls, objectID string) (*didlContainer, error) {
@@ -458,12 +458,16 @@ func seasonTitle(season core.Season) string {
 	return fmt.Sprintf("Season %d", season.Number)
 }
 
-// episodeTitle is what shows on the remote: the code first, so a list sorts and
-// reads correctly even on a renderer that truncates long titles.
-func episodeTitle(seriesTitle string, e core.Episode) string {
-	code := fmt.Sprintf("S%02dE%02d", e.SeasonNumber, e.EpisodeNumber)
+// episodeTitle names an episode item the way the library names its file:
+// series first, then the code, then the episode's own title. The series name
+// is not decoration — clients that fetch their own metadata (Infuse's folder
+// browsing, for one) parse the item title for it, and a bare "S01E01 - …" is
+// unmatchable. Within a season folder everything shares the prefix, so lists
+// still sort by the code.
+func episodeTitle(sr *core.Series, e core.Episode) string {
+	label := fmt.Sprintf("%s - S%02dE%02d", titleWithYear(sr.Title, sr.Year), e.SeasonNumber, e.EpisodeNumber)
 	if e.Title != "" {
-		return fmt.Sprintf("%s - %s", code, e.Title)
+		label += " - " + e.Title
 	}
-	return fmt.Sprintf("%s - %s", code, seriesTitle)
+	return label
 }

@@ -12,10 +12,6 @@ const (
 	// errNoSuchObject is the answer to a browse of an object id that no longer
 	// resolves — a client's cached id after a rescan, typically.
 	errNoSuchObject = "701"
-	// errUnsupportedSearch is what Search returns. Search is optional in
-	// ContentDirectory:1, and a server that advertises no search capabilities
-	// and then rejects search is consistent; one that fakes it is not.
-	errUnsupportedSearch = "720"
 	// errInvalidArgs is the generic SOAP argument fault.
 	errInvalidArgs = "402"
 	// errActionFailed is the catch-all for a failure on our side.
@@ -99,6 +95,43 @@ func decodeBrowse(body []byte) (browseArgs, error) {
 	return args, nil
 }
 
+// searchArgs is the Search action's input. Filter and SortCriteria are read
+// past like Browse's: results come back whole-object in server order.
+type searchArgs struct {
+	ContainerID    string
+	SearchCriteria string
+	StartingIndex  int
+	RequestedCount int
+}
+
+// decodeSearch reads a Search request body, with the same local-name-only
+// namespace tolerance as decodeBrowse.
+func decodeSearch(body []byte) (searchArgs, error) {
+	var envelope struct {
+		XMLName xml.Name `xml:"Envelope"`
+		Search  struct {
+			ContainerID    string `xml:"ContainerID"`
+			SearchCriteria string `xml:"SearchCriteria"`
+			StartingIndex  int    `xml:"StartingIndex"`
+			RequestedCount int    `xml:"RequestedCount"`
+		} `xml:"Body>Search"`
+	}
+	if err := xml.Unmarshal(body, &envelope); err != nil {
+		return searchArgs{}, fmt.Errorf("dlna: decode search: %w", err)
+	}
+
+	args := searchArgs{
+		ContainerID:    strings.TrimSpace(envelope.Search.ContainerID),
+		SearchCriteria: envelope.Search.SearchCriteria,
+		StartingIndex:  envelope.Search.StartingIndex,
+		RequestedCount: envelope.Search.RequestedCount,
+	}
+	if args.ContainerID == "" {
+		args.ContainerID = rootID
+	}
+	return args, nil
+}
+
 // soapArg is one named output value of an action response, in the order the
 // service description declares it. Order is part of the contract: SOAP
 // responses are sequences, not maps.
@@ -106,6 +139,14 @@ type soapArg struct {
 	Name  string
 	Value string
 }
+
+// elementContent escapes a value for XML element content the way every DLNA
+// server on the wire does: the three characters that need it, nothing else.
+// xml.EscapeText would also turn quotes into numeric character references
+// (&#34;), which is legal XML that the hand-rolled unescapers embedded in TV
+// apps do not know — they read the whole Result as garbage and render an
+// empty folder. Infuse on tvOS is a documented-by-experiment example.
+var elementContent = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
 
 // writeSOAPResponse writes a successful action response.
 func writeSOAPResponse(w http.ResponseWriter, service, action string, args []soapArg) {
@@ -115,7 +156,7 @@ func writeSOAPResponse(w http.ResponseWriter, service, action string, args []soa
 	fmt.Fprintf(&b, `<u:%sResponse xmlns:u="%s">`, action, service)
 	for _, a := range args {
 		fmt.Fprintf(&b, "<%s>", a.Name)
-		_ = xml.EscapeText(&b, []byte(a.Value))
+		_, _ = elementContent.WriteString(&b, a.Value)
 		fmt.Fprintf(&b, "</%s>", a.Name)
 	}
 	fmt.Fprintf(&b, "</u:%sResponse></s:Body></s:Envelope>", action)
@@ -137,7 +178,7 @@ func writeSOAPFault(w http.ResponseWriter, code, description string) {
 	b.WriteString(`<faultcode>s:Client</faultcode><faultstring>UPnPError</faultstring>`)
 	fmt.Fprintf(&b, `<detail><UPnPError xmlns="%s"><errorCode>%s</errorCode><errorDescription>`,
 		upnpControlNS, code)
-	_ = xml.EscapeText(&b, []byte(description))
+	_, _ = elementContent.WriteString(&b, description)
 	b.WriteString(`</errorDescription></UPnPError></detail></s:Fault></s:Body></s:Envelope>`)
 
 	w.Header().Set("Content-Type", contentTypeSOAP)

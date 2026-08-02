@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"reflect"
 	"sync/atomic"
 	"testing"
 
@@ -28,6 +29,8 @@ func (s *stubDLNA) Status(context.Context) (dlna.Status, error) { return s.statu
 
 func (s *stubDLNA) Reload(context.Context) { s.reloads.Add(1) }
 
+func (s *stubDLNA) Recent() []dlna.TraceEntry { return nil }
+
 func TestDLNAStatus(t *testing.T) {
 	stub := &stubDLNA{status: dlna.Status{
 		Config:      dlna.Config{Enabled: true, FriendlyName: "Den TV", UUID: "abc"},
@@ -40,7 +43,8 @@ func TestDLNAStatus(t *testing.T) {
 	var got dlnaJSON
 	decodeBody(t, rec, &got)
 	want := dlnaJSON{Enabled: true, FriendlyName: "Den TV", UUID: "abc", Advertising: true}
-	if got != want {
+	got.Recent = nil // the trace is additive detail; the identity fields are the assertion
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v, want %+v", got, want)
 	}
 }
@@ -75,7 +79,7 @@ func TestDLNAStatusWithoutTheService(t *testing.T) {
 	wantStatus(t, rec, 200)
 	var got dlnaJSON
 	decodeBody(t, rec, &got)
-	if got != (dlnaJSON{}) {
+	if !reflect.DeepEqual(got, dlnaJSON{}) {
 		t.Fatalf("got %+v, want the zero status", got)
 	}
 }
