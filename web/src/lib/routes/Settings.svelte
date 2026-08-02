@@ -42,8 +42,9 @@
     title: string;
     /** One plain-language sentence under the pane title. */
     blurb: string;
-    /** List-heavy panes get the wider column. */
-    wide?: boolean;
+    /** Pure-form panes keep a narrow column; card and list panes fill
+     * the content column, as the Paper mocks have it. */
+    narrow?: boolean;
   }
 
   /**
@@ -57,6 +58,7 @@
       items: [
         {
           key: 'metadata',
+          narrow: true,
           label: 'Metadata',
           title: 'Metadata',
           blurb: 'TMDB supplies titles, artwork and episode data. The key lives in the database, never in logs.',
@@ -66,10 +68,10 @@
           label: 'Quality profiles',
           title: 'Quality profiles',
           blurb: 'What to grab and when to upgrade: the scoring rules search runs releases through.',
-          wide: true,
         },
         {
           key: 'storage',
+          narrow: true,
           label: 'Storage',
           title: 'Storage',
           blurb: 'The storage root — where the library, downloads and database live.',
@@ -84,14 +86,12 @@
           label: 'Indexers',
           title: 'Indexers',
           blurb: 'Torznab and Newznab sources. Point Prowlarr here, or add indexers directly.',
-          wide: true,
         },
         {
           key: 'downloads',
           label: 'Downloads',
           title: 'Downloads',
           blurb: 'What actually pulls a release down. Both engines are built in; external clients are optional.',
-          wide: true,
         },
       ],
     },
@@ -111,6 +111,7 @@
       items: [
         {
           key: 'security',
+          narrow: true,
           label: 'Security',
           title: 'Security',
           blurb: 'Password and sessions for this Caravan, and what it is running.',
@@ -241,7 +242,7 @@
     {/each}
   </nav>
 
-  <div class="flex min-w-0 flex-1 flex-col gap-5 {def.wide ? 'max-w-5xl' : 'max-w-3xl'}">
+  <div class="flex min-w-0 flex-1 flex-col gap-5 {def.narrow ? 'max-w-3xl' : ''}">
     <header class="flex flex-col gap-1 border-b border-border pb-4">
       <h3 class="text-md font-semibold text-ink">{def.title}</h3>
       <p class="text-sm text-ink-secondary">{def.blurb}</p>
