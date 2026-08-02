@@ -135,10 +135,7 @@ function type(selector: string, value: string) {
 
 async function openStorageTab() {
   await system.refresh();
-  app = mount(Settings, { target: host });
-  await settle();
-  button('Storage').click();
-  flushSync();
+  app = mount(Settings, { target: host, props: { section: 'storage' } });
   await settle();
 }
 
@@ -284,9 +281,6 @@ describe('Storage settings', () => {
 async function openStorageTabAgain() {
   unmount(app);
   await system.refresh();
-  app = mount(Settings, { target: host });
-  await settle();
-  button('Storage').click();
-  flushSync();
+  app = mount(Settings, { target: host, props: { section: 'storage' } });
   await settle();
 }

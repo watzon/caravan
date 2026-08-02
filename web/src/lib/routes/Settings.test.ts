@@ -55,6 +55,43 @@ function button(label: string) {
   return found!;
 }
 
+describe('Settings rail', () => {
+  function stubFetch() {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/settings')) return jsonResponse(ENGINE_SETTINGS);
+      if (url.endsWith('/system/status')) return jsonResponse(SYSTEM_STATUS);
+      throw new Error(`unexpected fetch: ${url}`);
+    }));
+  }
+
+  it('groups the sections and links each as a route', async () => {
+    stubFetch();
+    app = mount(Settings, { target: host, props: { section: 'dlna' } });
+    await settle();
+
+    for (const group of ['Library', 'Acquisition', 'Playback', 'System']) {
+      expect(host.textContent).toContain(group);
+    }
+    const hrefs = [...host.querySelectorAll('nav a')].map((a) => a.getAttribute('href'));
+    expect(hrefs).toContain('/settings/indexers');
+    expect(hrefs).toContain('/settings/security');
+    const active = host.querySelector('nav a[aria-current="page"]');
+    expect(active?.getAttribute('href')).toBe('/settings/dlna');
+  });
+
+  it('lands unknown and absent sections on Metadata', async () => {
+    stubFetch();
+    app = mount(Settings, { target: host, props: { section: 'not-a-section' } });
+    await settle();
+
+    expect(host.querySelector('#tmdb-key')).not.toBeNull();
+    expect(host.querySelector('nav a[aria-current="page"]')?.getAttribute('href')).toBe(
+      '/settings/metadata',
+    );
+  });
+});
+
 describe('Settings engine tab', () => {
   it('loads and saves all six engine settings', async () => {
     let savedPatch: Record<string, string> | null = null;
@@ -71,10 +108,8 @@ describe('Settings engine tab', () => {
       throw new Error(`unexpected fetch: ${url}`);
     }));
 
-    app = mount(Settings, { target: host });
+    app = mount(Settings, { target: host, props: { section: 'engine' } });
     await settle();
-    button('Engine').click();
-    flushSync();
 
     expect((host.querySelector('#engine-listen-port') as HTMLInputElement).value).toBe('51413');
     expect((host.querySelector('#engine-max-connections') as HTMLInputElement).value).toBe('80');

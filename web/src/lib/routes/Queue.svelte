@@ -25,7 +25,13 @@
     formatRate,
     truncateMiddle,
   } from '../format';
-  import { downloadPhaseLabel, downloadStateMeta, engineLabel, sortDownloads } from '../download';
+  import {
+    downloadPhaseLabel,
+    downloadStateMeta,
+    engineLabel,
+    isFinishedDownload,
+    sortDownloads,
+  } from '../download';
   import { QUEUE_POLL_MS, downloads } from '../state/downloads.svelte';
   import { page } from '../state/page.svelte';
   import { pushToast } from '../state/toast.svelte';
@@ -90,7 +96,25 @@
     }
   }
 
-  let rows = $derived(sortDownloads(downloads.items ?? []));
+  /**
+   * The default view hides finished work: completed imports and torrents that
+   * finished downloading and sit paused. They are history, and burying the
+   * one active download under twenty done ones is how a stalled queue goes
+   * unnoticed. Done and All stay one click away.
+   */
+  type QueueView = 'active' | 'done' | 'all';
+  let view = $state<QueueView>('active');
+
+  let all = $derived(sortDownloads(downloads.items ?? []));
+  let doneRows = $derived(all.filter(isFinishedDownload));
+  let activeRows = $derived(all.filter((d) => !isFinishedDownload(d)));
+  let rows = $derived(view === 'all' ? all : view === 'done' ? doneRows : activeRows);
+
+  let views = $derived<{ key: QueueView; label: string; count: number }[]>([
+    { key: 'active', label: 'Active', count: activeRows.length },
+    { key: 'done', label: 'Done', count: doneRows.length },
+    { key: 'all', label: 'All', count: all.length },
+  ]);
 
   // The shared TopBar renders the page's subtitle: what the queue is doing,
   // in the same vocabulary the Paper queue header uses.
@@ -108,10 +132,22 @@
 
 <div class="flex flex-col gap-6">
   <div class="flex flex-wrap items-center gap-3">
-    <p class="text-base text-ink-secondary">
-      What the download engine is doing right now. Completed items move into the library
-      automatically.
-    </p>
+    <div class="flex flex-wrap items-center gap-2" role="group" aria-label="Filter queue">
+      {#each views as tab (tab.key)}
+        {@const selected = view === tab.key}
+        <button
+          type="button"
+          aria-pressed={selected}
+          onclick={() => (view = tab.key)}
+          class="inline-flex h-7 items-center gap-2 rounded-full border px-3 text-sm transition-colors duration-150 ease-out
+                 {selected
+            ? 'border-accent bg-accent-tint text-accent-text'
+            : 'border-border bg-surface text-ink-secondary hover:bg-raised hover:text-ink'}">
+          <span>{tab.label}</span>
+          <span class="font-mono text-xs text-ink-muted">{tab.count}</span>
+        </button>
+      {/each}
+    </div>
     <div class="ml-auto flex items-center gap-2">
       <Button variant="secondary" onclick={() => downloads.refresh()}>
         <Icon name="refresh" size={14} />
@@ -128,11 +164,22 @@
         <Skeleton class="h-20 w-full rounded-md" />
       {/each}
     </div>
-  {:else if rows.length === 0}
+  {:else if all.length === 0}
     <EmptyState
       icon="download"
       title="The queue is empty"
       message="Nothing is downloading. Open a movie or episode and run an interactive search to grab a release." />
+  {:else if rows.length === 0}
+    <EmptyState
+      icon="download"
+      title={view === 'done' ? 'Nothing finished yet' : 'Nothing active'}
+      message={view === 'done'
+        ? 'No download has completed yet. Finished items land here once they import.'
+        : `Everything in the queue is finished. ${doneRows.length} item${doneRows.length === 1 ? '' : 's'} under Done.`}>
+      {#snippet action()}
+        <Button variant="secondary" onclick={() => (view = 'all')}>Show all</Button>
+      {/snippet}
+    </EmptyState>
   {:else}
     <ul class="flex flex-col gap-2">
       {#each rows as download (download.id)}

@@ -19,6 +19,8 @@
   import StatusDot from '../components/StatusDot.svelte';
   import Toggle from '../components/Toggle.svelte';
   import { UNKNOWN, episodeCode, formatBytes, formatDate, seasonLabel } from '../format';
+  import MetadataLinks from '../components/MetadataLinks.svelte';
+  import { episodeLink, seriesLinks } from '../metadataLinks';
   import { pushToast } from '../state/toast.svelte';
   import { episodeStatus, seriesStatus } from '../status';
   import { compatBadge } from '../tvcompat';
@@ -113,6 +115,9 @@
                 <span>{current.status}</span>
               {/if}
             </p>
+            <div class="mt-2">
+              <MetadataLinks links={seriesLinks(current)} />
+            </div>
           </div>
           <Toggle
             checked={current.monitored}
@@ -227,13 +232,28 @@
                     </thead>
                     <tbody>
                       {#each episodes as episode (episode.id)}
+                        {@const tmdbPage = episodeLink(
+                          current.tmdb_id,
+                          episode.season_number,
+                          episode.episode_number,
+                        )}
                         <tr
                           class="h-10 border-t border-border transition-colors duration-150 hover:bg-raised">
                           <td class="px-3 py-2 font-mono text-ink-secondary">
                             {episodeCode(episode.season_number, episode.episode_number)}
                           </td>
                           <td class="max-w-[280px] truncate px-3 py-2 text-ink" title={episode.title}>
-                            {episode.title || UNKNOWN}
+                            {#if tmdbPage}
+                              <a
+                                href={tmdbPage}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                class="underline-offset-2 transition-colors duration-150 hover:text-accent-text hover:underline">
+                                {episode.title || UNKNOWN}
+                              </a>
+                            {:else}
+                              {episode.title || UNKNOWN}
+                            {/if}
                           </td>
                           <td class="px-3 py-2 text-ink-secondary">
                             {formatDate(episode.air_date)}

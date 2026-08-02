@@ -53,9 +53,16 @@
     '/history': 'History',
     '/scan-review': 'Scan Review',
     '/settings': 'Settings',
+    '/settings/:section': 'Settings',
   };
 
   let addOpen = $state(false);
+  let addKind = $state<'movie' | 'series'>('movie');
+
+  function openAdd(kind: 'movie' | 'series' = 'movie') {
+    addKind = kind;
+    addOpen = true;
+  }
 
   /**
    * The "no password on a public bind" nag (SPEC §11). Dismissing it is
@@ -119,7 +126,7 @@
   function onKeydown(event: KeyboardEvent) {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
       event.preventDefault();
-      addOpen = true;
+      openAdd();
     }
   }
 
@@ -147,7 +154,7 @@
     <Sidebar />
 
     <div class="flex min-w-0 flex-1 flex-col overflow-y-auto">
-      <TopBar {title} onsearch={() => (addOpen = true)} />
+      <TopBar {title} onsearch={() => openAdd()} />
 
       <main class="flex flex-1 flex-col gap-4 px-6 py-6">
         {#if system.error}
@@ -185,7 +192,7 @@
         {#if !match}
           <NotFound />
         {:else if match.pattern === '/movies'}
-          <Movies onadd={() => (addOpen = true)} />
+          <Movies onadd={() => openAdd('movie')} />
         {:else if match.pattern === '/movies/:id'}
           {#key match.params.id}
             <MovieDetail id={numericParam(match.params, 'id')} />
@@ -195,7 +202,7 @@
             <ReleaseSearch kind="movie" id={numericParam(match.params, 'id')} />
           {/key}
         {:else if match.pattern === '/series'}
-          <Series onadd={() => (addOpen = true)} />
+          <Series onadd={() => openAdd('series')} />
         {:else if match.pattern === '/series/:id'}
           {#key match.params.id}
             <SeriesDetail id={numericParam(match.params, 'id')} />
@@ -227,8 +234,8 @@
           <History />
         {:else if match.pattern === '/scan-review'}
           <ScanReview />
-        {:else if match.pattern === '/settings'}
-          <SettingsScreen />
+        {:else if match.pattern === '/settings' || match.pattern === '/settings/:section'}
+          <SettingsScreen section={match.params.section ?? ''} />
         {/if}
       </main>
     </div>
@@ -236,7 +243,7 @@
 {/if}
 
 {#if addOpen}
-  <AddItemModal onclose={() => (addOpen = false)} />
+  <AddItemModal initialKind={addKind} onclose={() => (addOpen = false)} />
 {/if}
 
 <Toasts />

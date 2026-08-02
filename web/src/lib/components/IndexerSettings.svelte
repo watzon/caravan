@@ -217,9 +217,6 @@
 
 <section class="flex flex-col gap-4">
   <div class="flex flex-wrap items-center gap-3">
-    <p class="text-base text-ink-secondary">
-      Search sources. Caravan ships with none: every indexer here is one you added.
-    </p>
     <div class="ml-auto flex items-center gap-2">
       <Button variant="secondary" onclick={load}>
         <Icon name="refresh" size={14} />

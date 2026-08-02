@@ -247,10 +247,6 @@
 
 <section class="flex flex-col gap-4">
   <div class="flex flex-wrap items-center gap-3">
-    <p class="text-base text-ink-secondary">
-      External download clients. With none configured, Caravan's built-in engine handles
-      torrents on its own.
-    </p>
     <div class="ml-auto flex items-center gap-2">
       <Button variant="secondary" onclick={load}>
         <Icon name="refresh" size={14} />

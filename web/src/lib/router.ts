@@ -28,6 +28,7 @@ export const ROUTES = [
   '/history',
   '/scan-review',
   '/settings',
+  '/settings/:section',
 ] as const;
 
 export type RoutePattern = (typeof ROUTES)[number];

@@ -98,12 +98,6 @@
 </script>
 
 <section class="flex flex-col gap-6">
-  <p class="text-base text-ink-secondary">
-    Caravan already writes the library in Jellyfin's folder layout with NFOs and posters. Turn this
-    on and every import also tells Jellyfin to rescan, so new media shows up without waiting for its
-    own schedule.
-  </p>
-
   {#if error}
     <LoadError message={error} onretry={load} />
   {:else if loading && loaded === null}

@@ -46,7 +46,46 @@
   // lazily; the queue screen subscribes at its own faster rate while open.
   $effect(() => downloads.subscribe(BADGE_POLL_MS));
 
+  // The nav counts come from system status, which is otherwise only fetched
+  // on mount and after setting changes. A lazy poll keeps them honest without
+  // making the shell chatty.
+  const COUNT_POLL_MS = 60_000;
+  $effect(() => {
+    const timer = setInterval(() => void system.refresh(), COUNT_POLL_MS);
+    return () => clearInterval(timer);
+  });
+
   let status = $derived(system.status);
+
+  /**
+   * What each nav item counts, and how loudly (DESIGN.md §5/§6: colored text,
+   * never solid fills).
+   *
+   * "quiet" is inventory (library sizes) — information, not a summons.
+   * "accent" is work in flight, "warning" is a backlog waiting on the user.
+   * Zeros render nothing: a row of grey 0s is noise.
+   */
+  type NavBadge = { count: number; kind: 'quiet' | 'accent' | 'warning' };
+  function navBadge(href: string): NavBadge | null {
+    const counts = status?.counts;
+    const quiet = (count?: number): NavBadge | null => (count ? { count, kind: 'quiet' } : null);
+    switch (href) {
+      case '/movies':
+        return quiet(counts?.movies);
+      case '/series':
+        return quiet(counts?.series);
+      case '/wanted':
+        return counts?.wanted ? { count: counts.wanted, kind: 'warning' } : null;
+      case '/queue':
+        return downloads.activeCount > 0 ? { count: downloads.activeCount, kind: 'accent' } : null;
+      case '/convert':
+        return quiet(counts?.converting);
+      case '/scan-review':
+        return counts?.unmatched ? { count: counts.unmatched, kind: 'warning' } : null;
+      default:
+        return null;
+    }
+  }
 
   let usedFraction = $derived.by(() => {
     const s = status;
@@ -55,12 +94,12 @@
   });
 
   let health = $derived.by((): { tone: Tone; label: string } => {
-    if (system.error) return { tone: 'danger', label: 'Unreachable' };
+    if (system.error) return { tone: 'danger', label: 'Server unreachable' };
     const s = status;
     if (!s) return { tone: 'neutral', label: 'Checking…' };
     if (s.dirty) return { tone: 'danger', label: 'Dirty shutdown' };
-    if (s.engine_health === 'ok') return { tone: 'success', label: 'Healthy' };
-    if (s.engine_health === 'degraded') return { tone: 'warning', label: 'Degraded' };
+    if (s.engine_health === 'ok') return { tone: 'success', label: 'All systems healthy' };
+    if (s.engine_health === 'degraded') return { tone: 'warning', label: 'Engine degraded' };
     if (s.engine_health === 'error') return { tone: 'danger', label: 'Engine error' };
     // "unconfigured": no storage root yet, so no engine — a setup state, not a failure.
     return { tone: 'neutral', label: 'Not set up' };
@@ -71,10 +110,10 @@
   class="flex w-60 shrink-0 flex-col border-r border-border bg-surface"
   aria-label="Primary navigation">
   <a href="/movies" class="flex items-center gap-3 px-4 py-6 focus:outline-none">
-    <span
-      class="flex size-8 items-center justify-center rounded-md bg-accent text-ink-inverse"
-      aria-hidden="true">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <!-- The mark is the accent itself, not inverse-on-a-fill (the Paper mock,
+         and §6's "never solid fills"). -->
+    <span class="text-accent" aria-hidden="true">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M3 17h18" />
         <path d="M5 17V9l4-4h7a3 3 0 0 1 3 3v9" />
         <circle cx="8" cy="19" r="2" />
@@ -85,87 +124,85 @@
   </a>
 
   <nav class="flex flex-1 flex-col gap-6 overflow-y-auto px-2">
+    {#snippet navLink(item: NavItem)}
+      {@const active = isActive(item.href)}
+      {@const badge = navBadge(item.href)}
+      <!-- The accent is the box's own left border, so it wraps the rounded
+           corners (the Paper mock). Inactive rows carry it transparent to
+           keep every row's text on the same x. -->
+      <a
+        href={item.href}
+        aria-current={active ? 'page' : undefined}
+        class="flex items-center gap-3 rounded-md border-l-2 py-2 pl-4 pr-3 text-base transition-colors duration-150 ease-out
+               {active
+          ? 'border-l-accent bg-accent-tint text-accent-text'
+          : 'border-l-transparent text-ink-secondary hover:bg-raised hover:text-ink'}">
+        <Icon name={item.icon} />
+        <span class="flex-1">{item.label}</span>
+        {#if badge}
+          <!-- Plain colored text, never a solid fill (DESIGN.md §6). On the
+               active row even a quiet count takes the rust, like the mock. -->
+          <span
+            class="text-sm font-medium tabular-nums
+                   {badge.kind === 'accent'
+              ? 'text-accent-text'
+              : badge.kind === 'warning'
+                ? 'text-warning'
+                : active
+                  ? 'text-accent-text'
+                  : 'text-ink-muted'}"
+            aria-label={`${badge.count} ${
+              badge.kind === 'accent' ? 'active in' : badge.kind === 'warning' ? 'waiting in' : 'in'
+            } ${item.label}`}>
+            {badge.count}
+          </span>
+        {/if}
+      </a>
+    {/snippet}
+
     <div class="flex flex-col gap-1">
       <p class="micro-label px-2 pb-1">Library</p>
       {#each LIBRARY as item (item.href)}
-        {@const active = isActive(item.href)}
-        <a
-          href={item.href}
-          aria-current={active ? 'page' : undefined}
-          class="relative flex items-center gap-3 rounded-md py-2 pl-4 pr-3 text-base transition-colors duration-150 ease-out
-                 {active
-            ? 'bg-accent-tint text-accent-text'
-            : 'text-ink-secondary hover:bg-raised hover:text-ink'}">
-          {#if active}
-            <span class="absolute left-0 top-1 h-[calc(100%-8px)] w-0.5 rounded-full bg-accent"></span>
-          {/if}
-          <Icon name={item.icon} />
-          <span>{item.label}</span>
-        </a>
+        {@render navLink(item)}
       {/each}
     </div>
 
     <div class="flex flex-col gap-1">
       <p class="micro-label px-2 pb-1">Activity</p>
       {#each ACTIVITY as item (item.href)}
-        {@const active = isActive(item.href)}
-        <a
-          href={item.href}
-          aria-current={active ? 'page' : undefined}
-          class="relative flex items-center gap-3 rounded-md py-2 pl-4 pr-3 text-base transition-colors duration-150 ease-out
-                 {active
-            ? 'bg-accent-tint text-accent-text'
-            : 'text-ink-secondary hover:bg-raised hover:text-ink'}">
-          {#if active}
-            <span class="absolute left-0 top-1 h-[calc(100%-8px)] w-0.5 rounded-full bg-accent"></span>
-          {/if}
-          <Icon name={item.icon} />
-          <span class="flex-1">{item.label}</span>
-          {#if item.href === '/queue' && downloads.activeCount > 0}
-            <span
-              class="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-accent px-1.5 text-xs font-semibold text-ink-inverse"
-              aria-label="{downloads.activeCount} active downloads">
-              {downloads.activeCount}
-            </span>
-          {/if}
-        </a>
+        {@render navLink(item)}
       {/each}
     </div>
 
     <div class="flex flex-col gap-1">
       <p class="micro-label px-2 pb-1">Manage</p>
       {#each MANAGE as item (item.href)}
-        {@const active = isActive(item.href)}
-        <a
-          href={item.href}
-          aria-current={active ? 'page' : undefined}
-          class="relative flex items-center gap-3 rounded-md py-2 pl-4 pr-3 text-base transition-colors duration-150 ease-out
-                 {active
-            ? 'bg-accent-tint text-accent-text'
-            : 'text-ink-secondary hover:bg-raised hover:text-ink'}">
-          {#if active}
-            <span class="absolute left-0 top-1 h-[calc(100%-8px)] w-0.5 rounded-full bg-accent"></span>
-          {/if}
-          <Icon name={item.icon} />
-          <span>{item.label}</span>
-        </a>
+        {@render navLink(item)}
       {/each}
     </div>
   </nav>
 
   <div class="m-2 flex flex-col gap-3 rounded-md border border-border bg-raised p-3">
-    <p class="micro-label">System</p>
-
     {#if system.loading && !status}
       <Skeleton class="h-3 w-full" />
       <Skeleton class="h-3 w-2/3" />
     {:else}
+      <div class="flex items-center gap-2">
+        <span class="size-2 shrink-0 rounded-full {TONE_DOT[health.tone]}"></span>
+        <span class="text-sm text-ink">{health.label}</span>
+      </div>
+
       <div class="flex flex-col gap-2">
-        <div class="flex items-center gap-2 text-ink-secondary">
-          <Icon name="disk" size={14} />
-          <span class="flex-1 text-sm">Disk free</span>
-          <span class="font-mono text-xs text-ink">
-            {status && status.disk_total_bytes > 0 ? formatBytes(status.disk_free_bytes) : '—'}
+        <div class="flex items-center gap-2">
+          <span
+            class="min-w-0 flex-1 truncate font-mono text-xs text-ink-muted"
+            title={status?.storage_root}>
+            {status?.storage_root || 'no storage root'}
+          </span>
+          <span class="shrink-0 font-mono text-xs text-ink-secondary">
+            {status && status.disk_total_bytes > 0
+              ? `${formatBytes(status.disk_free_bytes)} free`
+              : '—'}
           </span>
         </div>
         <ProgressBar
@@ -173,18 +210,6 @@
           tone={usedFraction > 0.9 ? 'danger' : usedFraction > 0.75 ? 'warning' : 'accent'}
           label="Disk used" />
       </div>
-
-      <div class="flex items-center gap-2">
-        <span class="size-2 shrink-0 rounded-full {TONE_DOT[health.tone]}"></span>
-        <span class="flex-1 text-sm text-ink-secondary">Engine</span>
-        <span class="text-sm text-ink">{health.label}</span>
-      </div>
-
-      {#if status}
-        <p class="truncate font-mono text-xs text-ink-muted" title={status.storage_root}>
-          {status.mode || 'binary'} · {status.storage_root || 'no storage root'}
-        </p>
-      {/if}
 
       <!-- Portable mode only: a drive that gets unplugged needs a way to be
            told first (SPEC §2.3). A server install is stopped by whatever

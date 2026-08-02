@@ -94,10 +94,8 @@ async function openSecurityTab() {
   // The shell fetches status before any screen mounts; this section reads
   // password_set from it.
   await system.refresh();
-  app = mount(Settings, { target: host });
+  app = mount(Settings, { target: host, props: { section: 'security' } });
   await settle();
-  button('Security').click();
-  flushSync();
 }
 
 describe('Security settings', () => {

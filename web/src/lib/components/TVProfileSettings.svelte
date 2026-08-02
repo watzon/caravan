@@ -64,11 +64,6 @@
 </script>
 
 <section class="flex flex-col gap-6">
-  <p class="text-base text-ink-secondary">
-    What the TV on the other end of this library can decode. Caravan uses it to warn you — before
-    you grab — that a release will not play natively. It never hides or refuses a release.
-  </p>
-
   {#if error}
     <LoadError message={error} onretry={load} />
   {:else if loading && profiles === null}

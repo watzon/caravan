@@ -87,6 +87,17 @@ export function countActiveDownloads(downloads: readonly DownloadStatus[]): numb
   return downloads.filter(isActiveDownload).length;
 }
 
+/**
+ * A download nothing more will happen to without user input: imported and
+ * completed, or a torrent that finished its download and sits paused rather
+ * than seeding. The queue's default view hides these — they are history, not
+ * work — while a mid-download pause stays visible because it is waiting on
+ * the user. Seeding stays visible too: the engine is still doing something.
+ */
+export function isFinishedDownload(status: DownloadStatus): boolean {
+  return status.state === 'completed' || (status.state === 'paused' && status.progress >= 1);
+}
+
 /** The built-in torrent engine, and the answer when a row names no backend. */
 export const DEFAULT_ENGINE = 'embedded';
 

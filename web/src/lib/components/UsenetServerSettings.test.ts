@@ -130,12 +130,13 @@ describe('UsenetServerSettings', () => {
   });
 
   // The copy rule: these are the built-in engine's own article sources. A user
-  // must never read this screen as "you also need an external client".
-  it('presents servers as the built-in engine reading articles itself', async () => {
+  // must never read this screen as "you also need an external client". The
+  // positive framing lives in the Settings pane blurb; the component's job is
+  // to never contradict it.
+  it('never implies an external client is needed', async () => {
     app = mount(UsenetServerSettings, { target: host });
     await settle();
 
-    expect(host.textContent).toContain("built-in engine");
     expect(host.textContent).not.toMatch(/SABnzbd|NZBGet|download client/i);
   });
 

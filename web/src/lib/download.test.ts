@@ -7,6 +7,7 @@ import {
   downloadStateMeta,
   engineLabel,
   isActiveDownload,
+  isFinishedDownload,
   sortDownloads,
   unreachableClientBanner,
 } from './download';
@@ -65,6 +66,22 @@ describe('isActiveDownload', () => {
     expect(isActiveDownload(download({ state: 'paused' }))).toBe(false);
     expect(isActiveDownload(download({ state: 'completed' }))).toBe(false);
     expect(isActiveDownload(download({ state: 'failed' }))).toBe(false);
+  });
+});
+
+describe('isFinishedDownload', () => {
+  it('treats completed and paused-after-finishing as done', () => {
+    expect(isFinishedDownload(download({ state: 'completed', progress: 1 }))).toBe(true);
+    // A torrent that finished its download and sits parked instead of seeding.
+    expect(isFinishedDownload(download({ state: 'paused', progress: 1 }))).toBe(true);
+  });
+
+  it('keeps everything that still needs the engine or the user visible', () => {
+    expect(isFinishedDownload(download({ state: 'paused', progress: 0.4 }))).toBe(false);
+    expect(isFinishedDownload(download({ state: 'seeding', progress: 1 }))).toBe(false);
+    expect(isFinishedDownload(download({ state: 'downloading', progress: 0.9 }))).toBe(false);
+    expect(isFinishedDownload(download({ state: 'failed', progress: 1 }))).toBe(false);
+    expect(isFinishedDownload(download({ state: 'queued', progress: 0 }))).toBe(false);
   });
 });
 

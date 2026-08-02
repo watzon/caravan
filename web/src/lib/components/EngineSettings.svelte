@@ -65,10 +65,6 @@
 </script>
 
 <section class="flex flex-col gap-7">
-  <p class="text-base text-ink-secondary">
-    The embedded BitTorrent engine. These defaults apply to every download; a download can override its own limits from the queue.
-  </p>
-
   <div class="flex flex-col gap-4">
     <h2 class="micro-label">Connection</h2>
     <Field label="Listen port" for="engine-listen-port" help="TCP and UDP. Forward this port for best swarm health.">

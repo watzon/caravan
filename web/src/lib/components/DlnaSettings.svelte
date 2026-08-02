@@ -80,13 +80,6 @@
 </script>
 
 <section class="flex flex-col gap-6">
-  <p class="text-base text-ink-secondary">
-    Caravan advertises the library on your local network as a DLNA media server, so a smart TV or
-    console can browse it and play files directly — no app, no account. Files are served exactly as
-    they are on disk; nothing is transcoded on the fly. If a TV cannot play something, convert it
-    once from the Convert queue.
-  </p>
-
   {#if error}
     <LoadError message={error} onretry={load} />
   {:else if loading && status === null}

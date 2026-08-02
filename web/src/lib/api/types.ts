@@ -197,6 +197,10 @@ export interface StatusCounts {
   series: number;
   media_files: number;
   unmatched: number;
+  /** Monitored-but-missing backlog — the GET /wanted list's size. */
+  wanted?: number;
+  /** Open convert-for-TV queue: queued plus running. */
+  converting?: number;
 }
 
 /**

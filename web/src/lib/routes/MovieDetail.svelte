@@ -14,6 +14,8 @@
   import StatusDot from '../components/StatusDot.svelte';
   import Toggle from '../components/Toggle.svelte';
   import { UNKNOWN, formatBytes, formatDate, truncateMiddle } from '../format';
+  import MetadataLinks from '../components/MetadataLinks.svelte';
+  import { movieLinks } from '../metadataLinks';
   import { pushToast } from '../state/toast.svelte';
   import { movieStatus } from '../status';
   import { compatBadge } from '../tvcompat';
@@ -102,6 +104,9 @@
                 <span>Released {formatDate(movie.release_date)}</span>
               {/if}
             </p>
+            <div class="mt-2">
+              <MetadataLinks links={movieLinks(movie)} />
+            </div>
           </div>
           <div class="flex items-center gap-3">
             <Button variant="primary" size="sm" href="/movies/{movie.id}/search">

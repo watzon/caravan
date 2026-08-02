@@ -199,7 +199,17 @@ describe('App shell', () => {
     // One downloading, one paused: a paused download waits on the user, so the
     // badge counts one (see isActiveDownload).
     expect(queueLink?.textContent).toContain('1');
-    expect(host.querySelector('[aria-label="1 active downloads"]')).not.toBeNull();
+    expect(host.querySelector('[aria-label="1 active in Queue"]')).not.toBeNull();
+  });
+
+  it('badges the library nav items with their counts', async () => {
+    app = mount(App, { target: host });
+    await settle();
+
+    // The status fixture reports one movie and zero series: a zero renders
+    // nothing rather than a grey 0.
+    expect(host.querySelector('[aria-label="1 in Movies"]')).not.toBeNull();
+    expect(host.querySelector('[aria-label*="in Series"]')).toBeNull();
   });
 
   it('renders the queue screen with its rows and controls', async () => {

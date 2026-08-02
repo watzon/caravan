@@ -22,6 +22,8 @@
     onclose: () => void;
     /** Restrict the picker to one kind (scan review knows what it parsed). */
     kind?: 'movie' | 'series' | null;
+    /** Which tab starts selected when both kinds are available. */
+    initialKind?: 'movie' | 'series';
     /** Prefill for the manual-match flow. */
     initialQuery?: string;
     title?: string;
@@ -35,6 +37,7 @@
   let {
     onclose,
     kind: fixedKind = null,
+    initialKind = 'movie',
     initialQuery = '',
     title = 'Add to library',
     onpick,
@@ -46,7 +49,7 @@
   // Both props seed local state once: the modal is remounted per use, so
   // reading them untracked is the intent, not an oversight.
   let query = $state(untrack(() => initialQuery));
-  let kind = $state<'movie' | 'series'>(untrack(() => fixedKind) ?? 'movie');
+  let kind = $state<'movie' | 'series'>(untrack(() => fixedKind ?? initialKind));
   let results = $state<SearchResults>({ movies: [], series: [] });
   let loading = $state(false);
   let error = $state<string | null>(null);
