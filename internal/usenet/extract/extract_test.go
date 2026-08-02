@@ -331,6 +331,42 @@ func TestExtractRARMultiVolume(t *testing.T) {
 	}
 }
 
+// TestExtractRARMixedWidthVolumeNames covers a real posting habit: volumes
+// named part01…part09, then part010 — the poster appended an unpadded counter
+// to "part0". The successor name rardecode infers ("part02.rar") does not
+// exist under that spelling, and the set must still extract, because the part
+// number is the volume's identity, not its width.
+func TestExtractRARMixedWidthVolumeNames(t *testing.T) {
+	dir, m := stageFixture(t, "multi-new")
+	fix := m["multi-new"]
+
+	renames := map[string]string{
+		"multi.part02.rar": "multi.part002.rar",
+		"multi.part03.rar": "multi.part0003.rar",
+	}
+	for from, to := range renames {
+		if err := os.Rename(filepath.Join(dir, from), filepath.Join(dir, to)); err != nil {
+			t.Fatalf("rename %s: %v", from, err)
+		}
+	}
+
+	res, err := Extract(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	assertFixtureFiles(t, dir, fix.Files)
+
+	want := []string{"multi.part01.rar", "multi.part002.rar", "multi.part0003.rar"}
+	if !reflect.DeepEqual(res.Archives, want) {
+		t.Errorf("Archives = %v, want %v", res.Archives, want)
+	}
+	for _, v := range want {
+		if _, err := os.Stat(filepath.Join(dir, v)); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("volume %s survived a verified extract", v)
+		}
+	}
+}
+
 func TestExtractRARFailuresLeaveDirectoryUntouched(t *testing.T) {
 	tests := []struct {
 		name    string

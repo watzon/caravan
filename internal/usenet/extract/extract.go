@@ -176,7 +176,7 @@ func Extract(ctx context.Context, dir string) (*Result, error) {
 		case KindZip:
 			files, err = extractZip(ctx, first, archive, staging)
 		case KindRAR:
-			files, err = extractRAR(ctx, first, archive, staging)
+			files, err = extractRAR(ctx, first, archive, staging, newVolumeFS(dir, s.Volumes))
 		default:
 			err = &Error{Archive: archive, Err: fmt.Errorf("extract: unknown archive kind %d", s.Kind)}
 		}
