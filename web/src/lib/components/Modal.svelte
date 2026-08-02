@@ -26,9 +26,13 @@
   $effect(() => {
     const previous = document.activeElement as HTMLElement | null;
     dialog?.focus();
+    // Restore rather than clear on close: a confirm opened from inside an
+    // editor stacks two modals, and clearing would unlock page scroll while
+    // the editor underneath is still open.
+    const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
-      document.body.style.overflow = '';
+      document.body.style.overflow = previousOverflow;
       previous?.focus?.();
     };
   });
