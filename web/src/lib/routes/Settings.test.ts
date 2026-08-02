@@ -55,29 +55,48 @@ function button(label: string) {
   return found!;
 }
 
-describe('Settings rail', () => {
-  function stubFetch() {
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      if (url.endsWith('/settings')) return jsonResponse(ENGINE_SETTINGS);
-      if (url.endsWith('/system/status')) return jsonResponse(SYSTEM_STATUS);
-      throw new Error(`unexpected fetch: ${url}`);
-    }));
-  }
+/** Everything the merged Downloads and Playback panes ask for on mount. */
+function stubFetch() {
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith('/settings')) return jsonResponse(ENGINE_SETTINGS);
+    if (url.endsWith('/system/status')) return jsonResponse(SYSTEM_STATUS);
+    if (url.endsWith('/indexers')) return jsonResponse({ indexers: [] });
+    if (url.endsWith('/usenet-servers')) return jsonResponse({ usenet_servers: [] });
+    if (url.endsWith('/download-clients/types')) return jsonResponse({ types: [] });
+    if (url.endsWith('/download-clients')) return jsonResponse({ download_clients: [] });
+    if (url.endsWith('/dlna')) {
+      return jsonResponse({ enabled: true, friendly_name: 'Caravan', advertising: true, uuid: 'u' });
+    }
+    if (url.endsWith('/handoff/jellyfin')) {
+      return jsonResponse({ url: '', api_key: '', enabled: false });
+    }
+    if (url.endsWith('/tv-profiles')) return jsonResponse({ tv_profiles: [] });
+    throw new Error(`unexpected fetch: ${url}`);
+  }));
+}
 
-  it('groups the sections and links each as a route', async () => {
+describe('Settings rail', () => {
+  it('groups the seven sections and links each as a route', async () => {
     stubFetch();
-    app = mount(Settings, { target: host, props: { section: 'dlna' } });
+    app = mount(Settings, { target: host, props: { section: 'playback' } });
     await settle();
 
     for (const group of ['Library', 'Acquisition', 'Playback', 'System']) {
       expect(host.textContent).toContain(group);
     }
     const hrefs = [...host.querySelectorAll('nav a')].map((a) => a.getAttribute('href'));
-    expect(hrefs).toContain('/settings/indexers');
-    expect(hrefs).toContain('/settings/security');
+    expect(hrefs).toEqual([
+      '/settings/metadata',
+      '/settings/quality-profiles',
+      '/settings/storage',
+      '/settings/indexers',
+      '/settings/downloads',
+      '/settings/playback',
+      '/settings/security',
+    ]);
     const active = host.querySelector('nav a[aria-current="page"]');
-    expect(active?.getAttribute('href')).toBe('/settings/dlna');
+    expect(active?.getAttribute('href')).toBe('/settings/playback');
   });
 
   it('lands unknown and absent sections on Metadata', async () => {
@@ -89,6 +108,48 @@ describe('Settings rail', () => {
     expect(host.querySelector('nav a[aria-current="page"]')?.getAttribute('href')).toBe(
       '/settings/metadata',
     );
+  });
+
+  // The eleven-section rail is gone, but its links are in browser histories and
+  // bookmarks. Each one still has to land on the pane that absorbed it.
+  it('resolves the retired slugs onto the pane that absorbed them', async () => {
+    stubFetch();
+    app = mount(Settings, { target: host, props: { section: 'engine' } });
+    await settle();
+
+    expect(host.querySelector('#engine-listen-port')).not.toBeNull();
+    expect(host.querySelector('nav a[aria-current="page"]')?.getAttribute('href')).toBe(
+      '/settings/downloads',
+    );
+  });
+
+  it('resolves a retired playback slug onto the Playback pane', async () => {
+    stubFetch();
+    app = mount(Settings, { target: host, props: { section: 'dlna' } });
+    await settle();
+
+    expect(host.querySelector('#dlna-friendly-name')).not.toBeNull();
+    expect(host.querySelector('#jellyfin-url')).not.toBeNull();
+    expect(host.querySelector('nav a[aria-current="page"]')?.getAttribute('href')).toBe(
+      '/settings/playback',
+    );
+  });
+});
+
+describe('Settings downloads pane', () => {
+  // The order is the product's message: the built-ins work before anything
+  // external is configured, so they are read first.
+  it('renders the engine, news server and external client cards in that order', async () => {
+    stubFetch();
+    app = mount(Settings, { target: host, props: { section: 'downloads' } });
+    await settle();
+
+    const titles = [...host.querySelectorAll('h3')].map((h) => h.textContent?.trim());
+    expect(titles).toContain('Torrent engine');
+    expect(titles).toContain('Usenet servers');
+    expect(titles).toContain('External clients');
+    expect(titles.indexOf('Torrent engine')).toBeLessThan(titles.indexOf('Usenet servers'));
+    expect(titles.indexOf('Usenet servers')).toBeLessThan(titles.indexOf('External clients'));
   });
 });
 
@@ -105,6 +166,10 @@ describe('Settings engine tab', () => {
         return jsonResponse({ ...ENGINE_SETTINGS, ...savedPatch });
       }
       if (url.endsWith('/system/status')) return jsonResponse(SYSTEM_STATUS);
+      if (url.endsWith('/indexers')) return jsonResponse({ indexers: [] });
+      if (url.endsWith('/usenet-servers')) return jsonResponse({ usenet_servers: [] });
+      if (url.endsWith('/download-clients/types')) return jsonResponse({ types: [] });
+      if (url.endsWith('/download-clients')) return jsonResponse({ download_clients: [] });
       throw new Error(`unexpected fetch: ${url}`);
     }));
 

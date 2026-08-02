@@ -15,6 +15,7 @@
   import Button from './Button.svelte';
   import Icon from './Icon.svelte';
   import LoadError from './LoadError.svelte';
+  import SettingsCard from './SettingsCard.svelte';
   import Skeleton from './Skeleton.svelte';
 
   interface Props {
@@ -63,7 +64,9 @@
   }
 </script>
 
-<section class="flex flex-col gap-6">
+<SettingsCard
+  title="TV profile"
+  description="What the TV on the other end can decode. Search warns before you grab — it never hides a release.">
   {#if error}
     <LoadError message={error} onretry={load} />
   {:else if loading && profiles === null}
@@ -115,4 +118,4 @@
       title="DTS is flagged on every profile"
       message="Current Samsung sets cannot decode DTS at all and it is flaky elsewhere, so a DTS release is called out whichever profile is active." />
   {/if}
-</section>
+</SettingsCard>

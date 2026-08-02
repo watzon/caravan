@@ -20,6 +20,7 @@
   import Field from './Field.svelte';
   import Icon from './Icon.svelte';
   import LoadError from './LoadError.svelte';
+  import SettingsCard from './SettingsCard.svelte';
   import Skeleton from './Skeleton.svelte';
   import TextInput from './TextInput.svelte';
   import Toggle from './Toggle.svelte';
@@ -97,7 +98,18 @@
   }
 </script>
 
-<section class="flex flex-col gap-6">
+<SettingsCard
+  title="Jellyfin"
+  description="Optional. Caravan already writes Jellyfin's folder layout; turn this on and every import also tells it to rescan.">
+  {#snippet action()}
+    <!-- The header outlives the body's load branch, so it has to refuse a save
+         of values that were never fetched. -->
+    <Button variant="primary" size="sm" disabled={loaded === null || !canSave} onclick={save}>
+      <Icon name="check" size={14} />
+      {saving ? 'Saving…' : 'Save'}
+    </Button>
+  {/snippet}
+
   {#if error}
     <LoadError message={error} onretry={load} />
   {:else if loading && loaded === null}
@@ -126,15 +138,13 @@
       label="Trigger a Jellyfin scan after every import"
       onchange={(next) => (enabled = next)} />
 
-    <div class="flex flex-wrap gap-2">
-      <Button variant="primary" disabled={!canSave} onclick={save}>
-        <Icon name="check" size={14} />
-        {saving ? 'Saving…' : 'Save'}
-      </Button>
-      <Button variant="secondary" disabled={testing || url.trim() === ''} onclick={test}>
-        {testing ? 'Testing…' : 'Test connection'}
-      </Button>
-    </div>
+    <Button
+      variant="secondary"
+      class="self-start"
+      disabled={testing || url.trim() === ''}
+      onclick={test}>
+      {testing ? 'Testing…' : 'Test connection'}
+    </Button>
 
     {#if result}
       <Banner
@@ -143,4 +153,4 @@
         message={result.message} />
     {/if}
   {/if}
-</section>
+</SettingsCard>

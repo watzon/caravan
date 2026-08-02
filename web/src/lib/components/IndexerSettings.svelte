@@ -213,6 +213,9 @@
   }
 
   let rows = $derived(indexers ?? []);
+
+  /** The row the open editor belongs to, which is what its Remove acts on. */
+  let editingRow = $derived(rows.find((indexer) => indexer.id === editingID) ?? null);
 </script>
 
 <section class="flex flex-col gap-4">
@@ -222,7 +225,7 @@
         <Icon name="refresh" size={14} />
         Refresh
       </Button>
-      <Button variant="primary" onclick={openAdd} disabled={editingID === 0}>
+      <Button variant="primary" onclick={openAdd}>
         <Icon name="plus" size={14} />
         Add indexer
       </Button>
@@ -237,7 +240,7 @@
         <Skeleton class="h-14 w-full rounded-md" />
       {/each}
     </div>
-  {:else if rows.length === 0 && editingID === null}
+  {:else if rows.length === 0}
     <EmptyState
       icon="link"
       title="No indexers yet"
@@ -298,18 +301,19 @@
       {/each}
     </ul>
   {/if}
+</section>
 
-  {#if editingID !== null}
+{#if editingID !== null}
+  <Modal
+    title={editingID === 0 ? 'Add indexer' : 'Edit indexer'}
+    width="max-w-xl"
+    onclose={closeForm}>
     <form
-      class="flex flex-col gap-4 rounded-lg border border-border-strong bg-surface p-4"
+      class="flex flex-col gap-4 p-4"
       onsubmit={(event) => {
         event.preventDefault();
         void save();
       }}>
-      <h3 class="text-lg font-semibold text-ink">
-        {editingID === 0 ? 'Add indexer' : 'Edit indexer'}
-      </h3>
-
       <Field label="Name" for="indexer-name" help="How this source is labelled in the release picker.">
         <TextInput id="indexer-name" bind:value={name} placeholder="Jackett — 1337x" />
       </Field>
@@ -389,17 +393,24 @@
       {#if formError}
         <p class="text-sm text-danger">{formError}</p>
       {/if}
-
-      <div class="flex gap-2">
-        <Button variant="primary" type="submit" disabled={saving}>
-          <Icon name="check" size={14} />
-          {saving ? 'Saving…' : 'Save'}
-        </Button>
-        <Button variant="ghost" onclick={closeForm} disabled={saving}>Cancel</Button>
-      </div>
     </form>
-  {/if}
-</section>
+
+    {#snippet footer()}
+      {#if editingRow}
+        {@const target = editingRow}
+        <Button variant="danger" disabled={saving} onclick={() => (confirmingRemove = target)}>
+          Remove
+        </Button>
+        <span class="mx-1 h-5 w-px shrink-0 bg-border"></span>
+      {/if}
+      <Button variant="ghost" onclick={closeForm} disabled={saving}>Cancel</Button>
+      <Button variant="primary" disabled={saving} onclick={save}>
+        <Icon name="check" size={14} />
+        {saving ? 'Saving…' : 'Save'}
+      </Button>
+    {/snippet}
+  </Modal>
+{/if}
 
 {#if confirmingRemove}
   {@const target = confirmingRemove}

@@ -23,6 +23,7 @@
   import Field from './Field.svelte';
   import Icon from './Icon.svelte';
   import LoadError from './LoadError.svelte';
+  import SettingsCard from './SettingsCard.svelte';
   import Skeleton from './Skeleton.svelte';
   import TextInput from './TextInput.svelte';
   import Toggle from './Toggle.svelte';
@@ -79,7 +80,15 @@
   );
 </script>
 
-<section class="flex flex-col gap-6">
+<SettingsCard
+  title="DLNA"
+  description="The built-in media server. TVs and apps browse and play the library directly — no account, no transcoding.">
+  {#snippet action()}
+    {#if status?.advertising}
+      <Badge tone="success">Advertising</Badge>
+    {/if}
+  {/snippet}
+
   {#if error}
     <LoadError message={error} onretry={load} />
   {:else if loading && status === null}
@@ -140,4 +149,4 @@
         message="Look for “{status.friendly_name}” under media servers, sources or inputs on your TV. Discovery can take a minute after a change." />
     {/if}
   {/if}
-</section>
+</SettingsCard>

@@ -13,6 +13,7 @@
   import Button from './Button.svelte';
   import Field from './Field.svelte';
   import Icon from './Icon.svelte';
+  import SettingsCard from './SettingsCard.svelte';
 
   interface Props {
     settings: Settings;
@@ -64,7 +65,16 @@
   }
 </script>
 
-<section class="flex flex-col gap-7">
+<SettingsCard
+  title="Torrent engine"
+  description="Built in. Defaults for every torrent; a download can override its own limits from the queue.">
+  {#snippet action()}
+    <Button variant="primary" size="sm" disabled={saving} onclick={save}>
+      <Icon name="check" size={14} />
+      {saving ? 'Saving...' : 'Save changes'}
+    </Button>
+  {/snippet}
+
   <div class="flex flex-col gap-4">
     <h2 class="micro-label">Connection</h2>
     <Field label="Listen port" for="engine-listen-port" help="TCP and UDP. Forward this port for best swarm health.">
@@ -140,9 +150,4 @@
   {#if restartNotice}
     <p class="text-sm text-ink-muted">Port and connection changes apply after a restart.</p>
   {/if}
-
-  <Button variant="primary" class="self-end" disabled={saving} onclick={save}>
-    <Icon name="check" size={14} />
-    {saving ? 'Saving...' : 'Save changes'}
-  </Button>
-</section>
+</SettingsCard>

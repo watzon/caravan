@@ -86,10 +86,15 @@ function clickButton(label: string, root: ParentNode = host) {
   flushSync();
 }
 
-/** The add/edit form, which carries its own Test button next to the rows'. */
-function form(): HTMLFormElement {
-  const el = host.querySelector('form');
-  expect(el, 'the add/edit form').not.toBeNull();
+/**
+ * The add/edit dialog. Its fields live in a form and its Test, Save and Cancel
+ * in the modal footer, so the dialog — not the form — is what scopes a click
+ * away from the rows' own Test buttons.
+ */
+function editor(): HTMLElement {
+  const el = host.querySelector<HTMLElement>('[role="dialog"]');
+  expect(el, 'the add/edit dialog').not.toBeNull();
+  expect(el!.querySelector('form'), 'the add/edit form inside it').not.toBeNull();
   return el!;
 }
 
@@ -150,6 +155,36 @@ describe('UsenetServerSettings', () => {
     expect(host.textContent).not.toMatch(/download client/i);
   });
 
+  // The editor is a dialog now, so the two ways in have to reach the same one,
+  // and backing out of it must not write anything.
+  it('opens the editor from Add and from a row, and Cancel writes nothing', async () => {
+    app = mount(UsenetServerSettings, { target: host });
+    await settle();
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+
+    clickButton('Add server');
+    await settle();
+    expect(editor()).toBeDefined();
+    // Adding starts empty rather than over whichever row was listed.
+    expect(input('usenet-name').value).toBe('');
+
+    clickButton('Cancel', editor());
+    await settle();
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+
+    clickButton('Edit');
+    await settle();
+    expect(input('usenet-name').value).toBe('Eweka');
+
+    type('usenet-name', 'Discarded');
+    clickButton('Cancel', editor());
+    await settle();
+
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+    expect(writeCalls()).toHaveLength(0);
+    expect(host.textContent).not.toContain('Discarded');
+  });
+
   it('never pre-fills a stored password, and says it is unchanged', async () => {
     await mountAndEdit();
 
@@ -167,7 +202,7 @@ describe('UsenetServerSettings', () => {
     await mountAndEdit();
 
     type('usenet-name', 'Eweka renamed');
-    clickButton('Save', form());
+    clickButton('Save', editor());
     await settle();
 
     const save = writeCalls().find((c) => c.method === 'PUT');
@@ -191,7 +226,7 @@ describe('UsenetServerSettings', () => {
     await mountAndEdit();
 
     type('usenet-password', 'rotated');
-    clickButton('Save', form());
+    clickButton('Save', editor());
     await settle();
 
     const save = writeCalls().find((c) => c.method === 'PUT');
@@ -205,7 +240,7 @@ describe('UsenetServerSettings', () => {
     await mountAndEdit();
 
     type('usenet-username', '');
-    clickButton('Save', form());
+    clickButton('Save', editor());
     await settle();
 
     const save = writeCalls().find((c) => c.method === 'PUT');
@@ -216,7 +251,7 @@ describe('UsenetServerSettings', () => {
     answers = [() => jsonResponse({ status: 'ok' })];
     await mountAndEdit();
 
-    clickButton('Test', form());
+    clickButton('Test', editor());
     await settle();
 
     const test = writeCalls().find((c) => c.url.endsWith('/usenet-servers/test'));
@@ -255,7 +290,7 @@ describe('UsenetServerSettings', () => {
     type('usenet-host', 'news.example.com');
     type('usenet-username', 'u');
     type('usenet-password', 'p');
-    clickButton('Save', form());
+    clickButton('Save', editor());
     await settle();
 
     const save = writeCalls().find((c) => c.method === 'POST' && !c.url.endsWith('/test'));
@@ -280,7 +315,7 @@ describe('UsenetServerSettings', () => {
     await settle();
 
     expect(input('usenet-port').value).toBe('563');
-    clickButton('Use TLS', form());
+    clickButton('Use TLS', editor());
     await settle();
     expect(input('usenet-port').value).toBe('119');
   });
@@ -293,7 +328,7 @@ describe('UsenetServerSettings', () => {
     await settle();
 
     type('usenet-port', '9119');
-    clickButton('Use TLS', form());
+    clickButton('Use TLS', editor());
     await settle();
     expect(input('usenet-port').value).toBe('9119');
   });
@@ -306,7 +341,7 @@ describe('UsenetServerSettings', () => {
     await settle();
 
     type('usenet-name', 'New');
-    clickButton('Save', form());
+    clickButton('Save', editor());
     await settle();
 
     expect(host.textContent).toMatch(/hostname/i);

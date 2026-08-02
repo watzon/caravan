@@ -36,6 +36,7 @@
   import Icon from './Icon.svelte';
   import LoadError from './LoadError.svelte';
   import Modal from './Modal.svelte';
+  import SettingsCard from './SettingsCard.svelte';
   import Skeleton from './Skeleton.svelte';
   import TextInput from './TextInput.svelte';
   import Toggle from './Toggle.svelte';
@@ -243,21 +244,24 @@
   }
 
   let rows = $derived(clients ?? []);
+
+  /** The row the open editor belongs to, which is what its Remove acts on. */
+  let editingRow = $derived(rows.find((client) => client.id === editingID) ?? null);
 </script>
 
-<section class="flex flex-col gap-4">
-  <div class="flex flex-wrap items-center gap-3">
-    <div class="ml-auto flex items-center gap-2">
-      <Button variant="secondary" onclick={load}>
-        <Icon name="refresh" size={14} />
-        Refresh
-      </Button>
-      <Button variant="primary" onclick={openAdd} disabled={editingID === 0}>
-        <Icon name="plus" size={14} />
-        Add client
-      </Button>
-    </div>
-  </div>
+<SettingsCard
+  title="External clients"
+  description="Optional. With none configured, the built-in engines handle everything above.">
+  {#snippet action()}
+    <Button variant="secondary" size="sm" onclick={load}>
+      <Icon name="refresh" size={14} />
+      Refresh
+    </Button>
+    <Button variant="primary" size="sm" onclick={openAdd}>
+      <Icon name="plus" size={14} />
+      Add client
+    </Button>
+  {/snippet}
 
   {#if error}
     <LoadError message={error} onretry={load} />
@@ -267,7 +271,7 @@
         <Skeleton class="h-14 w-full rounded-md" />
       {/each}
     </div>
-  {:else if rows.length === 0 && editingID === null}
+  {:else if rows.length === 0}
     <EmptyState
       icon="link"
       title="No download clients yet"
@@ -333,17 +337,27 @@
     </ul>
   {/if}
 
-  {#if editingID !== null}
+  <!--
+    Routing is the card's last row on purpose: the pickers offer the clients
+    above, so the order on screen is the order the user configures them in. It
+    owns its own settings fetch, like the list owns the client fetch.
+  -->
+  {#if clients !== null}
+    <DownloadRouting clients={rows} {types} />
+  {/if}
+</SettingsCard>
+
+{#if editingID !== null}
+  <Modal
+    title={editingID === 0 ? 'Add download client' : 'Edit download client'}
+    width="max-w-xl"
+    onclose={closeForm}>
     <form
-      class="flex flex-col gap-4 rounded-lg border border-border-strong bg-surface p-4"
+      class="flex flex-col gap-4 p-4"
       onsubmit={(event) => {
         event.preventDefault();
         void save();
       }}>
-      <h3 class="text-lg font-semibold text-ink">
-        {editingID === 0 ? 'Add download client' : 'Edit download client'}
-      </h3>
-
       <Field
         label="Type"
         help={`${typeInfo.label} carries ${typeInfo.protocol} releases.${
@@ -432,34 +446,35 @@
       {#if formError}
         <p class="text-sm text-danger">{formError}</p>
       {/if}
-      {#if formTest}
-        <p class="text-sm {formTest.ok ? 'text-success' : 'text-danger'}">
-          {formTest.ok ? '✓ ' : '✕ '}{formTest.message}
-        </p>
-      {/if}
+    </form>
 
-      <div class="flex gap-2">
-        <Button variant="primary" type="submit" disabled={saving}>
-          <Icon name="check" size={14} />
-          {saving ? 'Saving…' : 'Save'}
-        </Button>
+    {#snippet footer()}
+      <div class="mr-auto flex min-w-0 items-center gap-2">
         <Button variant="secondary" onclick={testForm} disabled={formTesting || saving}>
           {formTesting ? 'Testing…' : 'Test'}
         </Button>
-        <Button variant="ghost" onclick={closeForm} disabled={saving}>Cancel</Button>
+        {#if formTest}
+          <p class="truncate text-sm {formTest.ok ? 'text-success' : 'text-danger'}">
+            {formTest.ok ? '✓ ' : '✕ '}{formTest.message}
+          </p>
+        {/if}
       </div>
-    </form>
-  {/if}
 
-  <!--
-    Routing is below the list on purpose: the pickers offer the clients above,
-    so the order on screen is the order the user configures them in. It owns
-    its own settings fetch, like the list owns the client fetch.
-  -->
-  {#if clients !== null}
-    <DownloadRouting clients={rows} {types} />
-  {/if}
-</section>
+      {#if editingRow}
+        {@const target = editingRow}
+        <Button variant="danger" disabled={saving} onclick={() => (confirmingRemove = target)}>
+          Remove
+        </Button>
+        <span class="mx-1 h-5 w-px shrink-0 bg-border"></span>
+      {/if}
+      <Button variant="ghost" onclick={closeForm} disabled={saving}>Cancel</Button>
+      <Button variant="primary" disabled={saving} onclick={save}>
+        <Icon name="check" size={14} />
+        {saving ? 'Saving…' : 'Save'}
+      </Button>
+    {/snippet}
+  </Modal>
+{/if}
 
 {#if confirmingRemove}
   {@const target = confirmingRemove}

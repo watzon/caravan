@@ -112,10 +112,15 @@ function clickButton(label: string, root: ParentNode = host) {
   flushSync();
 }
 
-/** The add/edit form, which carries its own Test button next to the rows'. */
-function form(): HTMLFormElement {
-  const el = host.querySelector('form');
-  expect(el, 'the add/edit form').not.toBeNull();
+/**
+ * The add/edit dialog. Its fields live in a form and its Test, Save and Cancel
+ * in the modal footer, so the dialog — not the form — is what scopes a click
+ * away from the rows' own Test buttons.
+ */
+function editor(): HTMLElement {
+  const el = host.querySelector<HTMLElement>('[role="dialog"]');
+  expect(el, 'the add/edit dialog').not.toBeNull();
+  expect(el!.querySelector('form'), 'the add/edit form inside it').not.toBeNull();
   return el!;
 }
 
@@ -156,7 +161,7 @@ describe('DownloadClientSettings', () => {
     clickButton('Edit');
     await settle();
     // Switching to a backend the server reported as unsupported says so.
-    clickButton('SABnzbd', form());
+    clickButton('SABnzbd', editor());
     await settle();
     expect(host.textContent).toContain('cannot talk to it yet');
   });
@@ -176,7 +181,7 @@ describe('DownloadClientSettings', () => {
     await mountAndEdit();
 
     type('client-name', 'qBit renamed');
-    clickButton('Save', form());
+    clickButton('Save', editor());
     await settle();
 
     const save = writeCalls().find((c) => c.method === 'PUT');
@@ -194,7 +199,7 @@ describe('DownloadClientSettings', () => {
     await mountAndEdit();
 
     type('client-password', 'rotated');
-    clickButton('Save', form());
+    clickButton('Save', editor());
     await settle();
 
     const save = writeCalls().find((c) => c.method === 'PUT');
@@ -206,7 +211,7 @@ describe('DownloadClientSettings', () => {
     await mountAndEdit();
 
     type('client-url', 'http://nas.local:8080');
-    clickButton('Test', form());
+    clickButton('Test', editor());
     await settle();
 
     const test = writeCalls().find((c) => c.url.endsWith('/download-clients/test'));
@@ -238,7 +243,7 @@ describe('DownloadClientSettings', () => {
     expect(host.querySelector('#client-username')).not.toBeNull();
     expect(host.querySelector('#client-api-key')).toBeNull();
 
-    clickButton('SABnzbd', form());
+    clickButton('SABnzbd', editor());
     await settle();
     expect(host.querySelector('#client-username')).toBeNull();
     expect(host.querySelector('#client-api-key')).not.toBeNull();
@@ -253,7 +258,7 @@ describe('DownloadClientSettings', () => {
     type('client-name', 'new');
     type('client-url', 'nas.local');
     type('client-username', 'admin');
-    clickButton('Save', form());
+    clickButton('Save', editor());
     await settle();
 
     expect(writeCalls()).toHaveLength(0);
