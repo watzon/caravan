@@ -13,6 +13,7 @@ import (
 
 	"github.com/watzon/caravan/internal/api"
 	"github.com/watzon/caravan/internal/core"
+	"github.com/watzon/caravan/internal/download"
 	"github.com/watzon/caravan/internal/store"
 	"github.com/watzon/caravan/internal/wanted"
 )
@@ -365,6 +366,25 @@ func (r *Runner) grab(ctx context.Context, st *store.Store, release core.Release
 		return fmt.Errorf("store: record grab: %w", err)
 	}
 	if _, err := engine.Add(ctx, release, opts); err != nil {
+		// The automatic path routes by protocol exactly like the interactive
+		// one (PLAN phase 6 task 3), so it meets the same wall: a usenet
+		// release with no usenet client configured. That is a recorded
+		// rejection, not a job failure — retrying it every sweep would never
+		// succeed and would bury the real reason under transport errors — so
+		// the reason is written to the grab and the job completes.
+		if errors.Is(err, download.ErrNoEngine) {
+			if statusErr := st.SetGrabStatus(ctx, grab.GrabID, core.GrabStatusRejected, err.Error()); statusErr != nil {
+				return fmt.Errorf("store: mark rejected grab: %w", statusErr)
+			}
+			return st.InsertEvent(ctx, &core.Event{
+				Level:    core.EventLevelWarn,
+				Category: "grab",
+				Message:  "Cannot grab " + release.Title,
+				Detail:   err.Error(),
+				MovieID:  info.MovieID,
+				SeriesID: info.SeriesID,
+			})
+		}
 		if statusErr := st.SetGrabStatus(ctx, grab.GrabID, core.GrabStatusFailed, err.Error()); statusErr != nil {
 			return fmt.Errorf("engine: add download: %w (store: mark failed grab: %v)", err, statusErr)
 		}

@@ -90,5 +90,12 @@ func (s *server) writeDownloadEngineError(w http.ResponseWriter, msg string, err
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
+	// A router satisfies the optional extensions on behalf of engines that may
+	// not, so "this download's engine cannot do that" arrives as an error
+	// rather than a failed type assertion. It is the same 400 either way.
+	if errors.Is(err, download.ErrUnsupported) {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	s.writeEngineError(w, msg, err)
 }

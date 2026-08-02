@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 
+	"github.com/watzon/caravan/internal/clients"
 	"github.com/watzon/caravan/internal/core"
 )
 
@@ -35,6 +36,18 @@ type EngineProvider interface {
 type HealthReporter interface {
 	// Health returns "ok", "unconfigured", or "error".
 	Health() string
+}
+
+// DownloadClientHealthReporter is an optional EngineProvider extension for a
+// provider that polls external download clients and can say which of them are
+// currently unreachable (PLAN phase 6 task 4).
+//
+// It is separate from HealthReporter because the two answer different
+// questions: HealthReporter is about the embedded engine existing at all, this
+// is about a machine on the network having stopped answering. A provider with
+// no external clients configured returns nothing, and the UI shows no banner.
+type DownloadClientHealthReporter interface {
+	UnhealthyDownloadClients() []core.DownloadClientHealth
 }
 
 // IndexerClient is the slice of internal/indexer the HTTP layer uses. It is
@@ -73,6 +86,14 @@ func WithIndexerClients(f IndexerFactory) Option {
 	return func(s *server) { s.indexers = f }
 }
 
+// WithDownloadClients supplies the external download-client registry the
+// /download-clients test endpoints probe through (SPEC §5.1, PLAN phase 6).
+// Without it the process-wide clients.Default is used, which is what the
+// serving process registers its backends into.
+func WithDownloadClients(r *clients.Registry) Option {
+	return func(s *server) { s.downloadClients = r }
+}
+
 // Engine-side categories a grab is labelled with, for users who sort their
 // download client by label.
 const (
@@ -101,6 +122,22 @@ func (s *server) engineName() string {
 		return ""
 	}
 	return s.engine.Name()
+}
+
+// engineNameFor is engineName for a specific release protocol.
+//
+// A routing engine is several engines behind one interface (PLAN phase 6 task
+// 3), so the download row has to record the backend that actually took the
+// release — that column is what addresses the download afterwards, and a
+// library can outlive the engine that fetched it. An engine that does not
+// route, or a protocol it will not take, falls back to the provider's name.
+func (s *server) engineNameFor(ctx context.Context, engine core.Engine, protocol string) string {
+	if router, ok := engine.(core.EngineRouting); ok {
+		if name := router.EngineNameFor(ctx, protocol); name != "" {
+			return name
+		}
+	}
+	return s.engineName()
 }
 
 // requireIndexerClients resolves the indexer client factory, writing a 503 and

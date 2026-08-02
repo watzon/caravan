@@ -42,6 +42,18 @@ const (
 	// configured target is reached. Zero disables that target.
 	SettingEngineSeedRatio = "engine_seed_ratio"
 	SettingEngineSeedDays  = "engine_seed_days"
+	// SettingRouteTorrent and SettingRouteUsenet name the default download
+	// engine per release protocol (SPEC §5.1, PLAN phase 6 task 3). A grab is
+	// routed on the release's protocol, never on the user's last choice, so
+	// these are the whole routing configuration.
+	//
+	// The value is a `download_clients.id` in decimal, or RouteEmbedded for
+	// the built-in torrent engine. Unset means RouteEmbedded for torrents —
+	// a stock Caravan downloads torrents with nothing configured — and means
+	// "nothing configured" for usenet, where there is no built-in engine and
+	// a grab is therefore a recorded rejection rather than a misroute.
+	SettingRouteTorrent = "route_torrent"
+	SettingRouteUsenet  = "route_usenet"
 	// SettingTVProfile is the id of the active core.TVProfile — the target set
 	// releases and imported files are described against (SPEC §8, PLAN phase 4
 	// task 3). Unset resolves to the safe default, so this key is a preference
@@ -75,6 +87,12 @@ const (
 	// which never sees a plaintext value leave this process.
 	SettingPasswordHash = "password_hash"
 )
+
+// RouteEmbedded is the SettingRouteTorrent value that selects Caravan's
+// built-in torrent engine instead of an external client. It is the string
+// those downloads record in `downloads.engine` (download.EngineName), so a
+// routing setting and a download row name the same engine the same way.
+const RouteEmbedded = "embedded"
 
 // GetSetting returns the value for key, or ErrNotFound when the key has never
 // been set.

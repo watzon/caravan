@@ -3,7 +3,7 @@
   import { api, ApiError, errorText } from '../api/client';
   import type { DownloadInsight, DownloadStatus } from '../api/types';
   import { UNKNOWN, formatBytes, formatDuration, formatRate, truncateMiddle } from '../format';
-  import { downloadStateMeta } from '../download';
+  import { downloadStateMeta, engineLabel } from '../download';
   import { QUEUE_POLL_MS } from '../state/downloads.svelte';
   import { pushToast } from '../state/toast.svelte';
   import Badge from './Badge.svelte';
@@ -193,6 +193,23 @@
             <dt class="micro-label">Availability</dt>
             <dd class="mt-1 font-mono text-sm text-ink">
               {insight ? insight.availability.toFixed(2) : UNKNOWN}
+            </dd>
+          </div>
+        </dl>
+        <!-- Which client is holding this, and where it says the data is. For
+             an external client that path is on the client's own machine, and
+             it is the first thing to check when an import cannot read it. -->
+        <dl class="grid grid-cols-4 gap-2">
+          <div class="min-w-0">
+            <dt class="micro-label">Client</dt>
+            <dd class="mt-1 truncate text-sm text-ink" title="Which backend holds this download">
+              {engineLabel(download)}
+            </dd>
+          </div>
+          <div class="col-span-3 min-w-0">
+            <dt class="micro-label">Location</dt>
+            <dd class="mt-1 truncate font-mono text-sm text-ink-secondary" title={download.save_path}>
+              {download.save_path || UNKNOWN}
             </dd>
           </div>
         </dl>

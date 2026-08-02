@@ -11,6 +11,9 @@ import type {
   AuthState,
   CalendarEntry,
   Conversion,
+  DownloadClient,
+  DownloadClientInput,
+  DownloadClientTypeInfo,
   DownloadInsight,
   DlnaStatus,
   DownloadStatus,
@@ -89,6 +92,14 @@ export const endpoints = {
   indexer: (id: number) => `${API_BASE}/indexers/${id}`,
   indexerTest: (id: number) => `${API_BASE}/indexers/${id}/test`,
   indexerCategories: () => `${API_BASE}/indexers/categories`,
+
+  // Phase 6 — external download clients (SPEC §5.1). downloadClientTestConfig
+  // takes the form's current values, so Test works before a client is saved.
+  downloadClients: () => `${API_BASE}/download-clients`,
+  downloadClient: (id: number) => `${API_BASE}/download-clients/${id}`,
+  downloadClientTypes: () => `${API_BASE}/download-clients/types`,
+  downloadClientTest: (id: number) => `${API_BASE}/download-clients/${id}/test`,
+  downloadClientTestConfig: () => `${API_BASE}/download-clients/test`,
   movieReleases: (id: number) => `${API_BASE}/library/movies/${id}/releases`,
   movieGrab: (id: number) => `${API_BASE}/library/movies/${id}/grab`,
   seriesReleases: (id: number) => `${API_BASE}/library/series/${id}/releases`,
@@ -479,6 +490,42 @@ export const api = {
       body,
       signal,
     }).then((payload) => payload?.categories ?? []),
+
+  /* ---------------------------------------------------------------------
+   * Phase 6 — external download clients (SPEC §5.1, §11).
+   * ------------------------------------------------------------------- */
+
+  listDownloadClients: (signal?: AbortSignal) =>
+    listOf<DownloadClient>(endpoints.downloadClients(), 'download_clients', signal),
+
+  /**
+   * Which backends this build can be configured with, and which of them it can
+   * actually probe. Served rather than hard-coded so a build without a backend
+   * says so instead of offering it.
+   */
+  downloadClientTypes: (signal?: AbortSignal) =>
+    listOf<DownloadClientTypeInfo>(endpoints.downloadClientTypes(), 'types', signal),
+
+  addDownloadClient: (body: DownloadClientInput) =>
+    request<DownloadClient>(endpoints.downloadClients(), { method: 'POST', body }),
+
+  updateDownloadClient: (id: number, body: DownloadClientInput) =>
+    request<DownloadClient>(endpoints.downloadClient(id), { method: 'PUT', body }),
+
+  deleteDownloadClient: (id: number) =>
+    request<void>(endpoints.downloadClient(id), { method: 'DELETE' }),
+
+  /** Probe a stored client with its stored credentials. */
+  testDownloadClient: (id: number) =>
+    request<void>(endpoints.downloadClientTest(id), { method: 'POST' }),
+
+  /**
+   * Probe what is on screen, before it is saved. Include `id` when editing a
+   * stored client: the credential was never handed back, so a blank one falls
+   * back to that row's.
+   */
+  testDownloadClientConfig: (body: DownloadClientInput) =>
+    request<void>(endpoints.downloadClientTestConfig(), { method: 'POST', body }),
 
   /**
    * Interactive search (SPEC §9 step 4). The server fans out across enabled

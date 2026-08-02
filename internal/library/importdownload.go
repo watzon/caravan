@@ -29,6 +29,17 @@ const ReasonImport = "import"
 // EventCategoryImport groups import events in the activity feed (SPEC §7).
 const EventCategoryImport = "import"
 
+// ImportPathConstraint is Caravan v1's requirement on an external download
+// client (PLAN phase 6 task 2, docs/external-clients.md).
+//
+// There is no remote path-mapping matrix: whatever directory the client says
+// it wrote into is the directory Caravan opens. A client in another container
+// or on another machine therefore has to expose that directory at the same
+// path here. When it does not, the import stops and says this — a visible
+// failure the user can fix, rather than a job that retries forever against a
+// path that will never exist.
+const ImportPathConstraint = "the client's download path must be accessible to Caravan at the same location"
+
 // ImportDownload imports a finished download into the library (SPEC §5.1,
 // PLAN phase 2 task 5).
 //
@@ -60,6 +71,17 @@ func (m *Manager) ImportDownload(ctx context.Context, dl core.DownloadStatus, gr
 
 	files, err := m.downloadFiles(dl.SavePath)
 	if err != nil {
+		// A payload on an external client's own filesystem that Caravan cannot
+		// open is the v1 constraint being broken, and no number of retries will
+		// open it. It is reported once and the grab is closed out, exactly like
+		// a file that contradicts its grab.
+		//
+		// Inside the storage root the same error means something else — a race
+		// with the engine, a disk that went away — and that *is* worth
+		// retrying, so it stays an error there.
+		if foreignPath(dl.SavePath) && (errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission)) {
+			return m.failUnreadableDownload(ctx, dl, grab)
+		}
 		return err
 	}
 	if len(files) == 0 {
@@ -145,7 +167,7 @@ func (m *Manager) importDownloadedMovie(ctx context.Context, files []downloadedF
 	}
 
 	file := largestFile(files)
-	p := m.parse(path.Base(file.rel))
+	p := m.parse(filepath.Base(file.rel))
 
 	reason := unresolvable
 	if reason == "" {
@@ -200,7 +222,7 @@ func (m *Manager) importDownloadedEpisodes(ctx context.Context, files []download
 
 	var imported, parked int
 	for _, file := range files {
-		p := m.parse(path.Base(file.rel))
+		p := m.parse(filepath.Base(file.rel))
 
 		reason := unresolvable
 		if reason == "" {
@@ -579,19 +601,65 @@ func releaseLabel(p core.ParsedRelease) string {
 	return p.Title
 }
 
-// parkImport puts one file in the stuck-import queue and says why in the
-// activity feed (SPEC §5.1, §13). The file itself is not touched: it stays
-// where the download engine put it until the user resolves it, and resolving
-// it goes through ImportUnmatched like any other parked file.
-func (m *Manager) parkImport(ctx context.Context, f downloadedFile, p core.ParsedRelease, grab core.GrabInfo, reason string) error {
-	u := &core.UnmatchedFile{Path: f.rel, Size: f.size, Parsed: p, Reason: ReasonImport}
-	if err := m.store.UpsertUnmatchedFile(ctx, u); err != nil {
+// failUnreadableDownload closes out a download whose payload Caravan cannot
+// read, with the v1 constraint spelled out (PLAN phase 6 task 2).
+//
+// It is a *successful* outcome for the import job, like parking is: the
+// unreadable path is a configuration problem, and a job that retries it every
+// five minutes forever would bury the one message that explains it. Nothing on
+// disk is touched — the download stays in the client, so fixing the mount and
+// re-grabbing (or re-queueing the import) still works.
+func (m *Manager) failUnreadableDownload(ctx context.Context, dl core.DownloadStatus, grab core.GrabInfo) error {
+	reason := fmt.Sprintf("%s is not readable: %s", dl.SavePath, ImportPathConstraint)
+	if err := m.recordGrabFailure(ctx, grab, reason); err != nil {
 		return err
 	}
 	return m.store.InsertEvent(ctx, &core.Event{
 		Level:    core.EventLevelWarn,
 		Category: EventCategoryImport,
-		Message:  fmt.Sprintf("Import of %s needs a manual match", path.Base(f.rel)),
+		Message:  fmt.Sprintf("Import of %s could not read the downloaded data", dl.Name),
+		Detail:   fmt.Sprintf("%s: %s", grabLabel(grab), reason),
+		MovieID:  grab.MovieID,
+		SeriesID: grab.SeriesID,
+	})
+}
+
+// recordGrabFailure marks a grab failed with reason, tolerating a grab row
+// that is already gone (history is the thing SPEC §7 allows to be lost).
+func (m *Manager) recordGrabFailure(ctx context.Context, grab core.GrabInfo, reason string) error {
+	if grab.GrabID == 0 {
+		return nil
+	}
+	err := m.store.SetGrabStatus(ctx, grab.GrabID, core.GrabStatusFailed, reason)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	return err
+}
+
+// parkImport puts one file in the stuck-import queue and says why in the
+// activity feed (SPEC §5.1, §13). The file itself is not touched: it stays
+// where the download engine put it until the user resolves it, and resolving
+// it goes through ImportUnmatched like any other parked file.
+//
+// A file an external client wrote outside the storage root gets the feed entry
+// but no queue row: the queue is addressed by root-relative path, and putting
+// a foreign absolute path in `unmatched_files` would give the library a path
+// it does not own and cannot resolve after the root moves (SPEC §1.2 pillar
+// 3). Pointing the client's completed directory inside the storage root — what
+// docs/external-clients.md recommends anyway, since it is also what makes
+// imports hardlink — gets the queue row back.
+func (m *Manager) parkImport(ctx context.Context, f downloadedFile, p core.ParsedRelease, grab core.GrabInfo, reason string) error {
+	if !foreignPath(f.rel) {
+		u := &core.UnmatchedFile{Path: f.rel, Size: f.size, Parsed: p, Reason: ReasonImport}
+		if err := m.store.UpsertUnmatchedFile(ctx, u); err != nil {
+			return err
+		}
+	}
+	return m.store.InsertEvent(ctx, &core.Event{
+		Level:    core.EventLevelWarn,
+		Category: EventCategoryImport,
+		Message:  fmt.Sprintf("Import of %s needs a manual match", filepath.Base(f.rel)),
 		Detail:   fmt.Sprintf("%s: %s", grabLabel(grab), reason),
 		MovieID:  grab.MovieID,
 		SeriesID: grab.SeriesID,
@@ -639,7 +707,8 @@ type downloadedFile struct {
 // path order.
 //
 // savePath may be a single file (a one-file torrent) or a directory
-// (everything else). Non-video files — NFOs, artwork, par2 leftovers, the
+// (everything else), and it may be an external client's own absolute path
+// (PLAN phase 6). Non-video files — NFOs, artwork, par2 leftovers, the
 // screenshot folder — are not media and are ignored rather than parked: they
 // are not evidence of anything going wrong.
 func (m *Manager) downloadFiles(savePath string) ([]downloadedFile, error) {
@@ -656,7 +725,13 @@ func (m *Manager) downloadFiles(savePath string) ([]downloadedFile, error) {
 		if !isVideo(info.Name()) {
 			return nil, nil
 		}
-		return []downloadedFile{{rel: savePath, size: info.Size()}}, nil
+		// Through downloadPath for the same reason the walk below is: an
+		// external client reports a single-file torrent by the file's own
+		// absolute path (qBittorrent's content_path), and one that landed inside
+		// the storage root has to come back root-relative or every later
+		// foreignPath test reads it as a file the library does not own — which
+		// would cost a mismatched single-file download its stuck-import row.
+		return []downloadedFile{{rel: m.downloadPath(root), size: info.Size()}}, nil
 	}
 
 	var out []downloadedFile
@@ -677,11 +752,7 @@ func (m *Manager) downloadFiles(savePath string) ([]downloadedFile, error) {
 		if err != nil {
 			return err
 		}
-		rel, err := m.rel(p)
-		if err != nil {
-			return err
-		}
-		out = append(out, downloadedFile{rel: rel, size: fi.Size()})
+		out = append(out, downloadedFile{rel: m.downloadPath(p), size: fi.Size()})
 		return nil
 	})
 	if walkErr != nil {

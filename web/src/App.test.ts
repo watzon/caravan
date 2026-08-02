@@ -136,8 +136,11 @@ function jsonResponse(body: unknown): Response {
 
 let host: HTMLElement;
 let app: Record<string, unknown>;
+/** What /system/status answers this test; a test may swap it before mounting. */
+let statusBody: SystemStatus = STATUS;
 
 beforeEach(() => {
+  statusBody = STATUS;
   window.history.replaceState({}, '', '/movies');
   // A module singleton, and one test drives it to its terminal state.
   shutdown.phase = 'idle';
@@ -149,7 +152,7 @@ beforeEach(() => {
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.endsWith('/system/status')) return jsonResponse(STATUS);
+      if (url.endsWith('/system/status')) return jsonResponse(statusBody);
       // The list endpoints answer with a named envelope (internal/api).
       if (url.endsWith('/library/movies')) return jsonResponse({ movies: [MOVIE] });
       // The sidebar badge polls the queue as soon as the shell mounts.
@@ -220,12 +223,47 @@ describe('App shell', () => {
     expect(host.textContent).not.toContain('The queue is empty');
   });
 
+  // Killing one download client must say so, name it, and leave the rest of
+  // the shell working (SPEC §5.1, PLAN phase 6 task 4).
+  it('banners a download client the poller cannot reach', async () => {
+    statusBody = {
+      ...STATUS,
+      unhealthy_download_clients: [
+        {
+          id: 3,
+          name: 'Seedbox',
+          type: 'qbittorrent',
+          error: 'connection refused',
+          since: '2026-08-01T09:30:00Z',
+        },
+      ],
+    };
+
+    app = mount(App, { target: host });
+    await settle();
+
+    expect(host.textContent).toContain('Download client Seedbox is unreachable');
+    expect(host.textContent).toContain('connection refused');
+    // The rest of the shell is unaffected, which is the point of the wording.
+    // The rest of the shell is unaffected, which is the point of the wording:
+    // the sidebar, the queue badge and the routed screen all still render.
+    expect(host.textContent).toContain('CARAVAN');
+    expect(host.querySelector('a[href="/queue"]')).not.toBeNull();
+    expect(host.textContent).not.toContain('Caravan server unreachable');
+  });
+
+  it('shows no client banner when every client is answering', async () => {
+    app = mount(App, { target: host });
+    await settle();
+    expect(host.textContent).not.toContain('unreachable');
+  });
+
   it('renders the release picker with the best release first', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.endsWith('/system/status')) return jsonResponse(STATUS);
+        if (url.endsWith('/system/status')) return jsonResponse(statusBody);
         if (url.endsWith('/downloads')) return jsonResponse({ downloads: [] });
         if (url.endsWith('/library/movies')) return jsonResponse({ movies: [MOVIE] });
         if (url.endsWith('/library/movies/7')) return jsonResponse(MOVIE);
@@ -265,7 +303,7 @@ describe('App shell', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
-        if (url.endsWith('/system/status')) return jsonResponse(STATUS);
+        if (url.endsWith('/system/status')) return jsonResponse(statusBody);
         if (url.endsWith('/downloads')) return jsonResponse({ downloads: [] });
         if (url.endsWith('/library/movies')) return jsonResponse({ movies: [MOVIE] });
         if (url.endsWith('/library/movies/7')) return jsonResponse(MOVIE);

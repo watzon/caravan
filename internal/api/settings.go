@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/watzon/caravan/internal/clients"
 	"github.com/watzon/caravan/internal/core"
 	"github.com/watzon/caravan/internal/store"
 )
@@ -43,6 +44,8 @@ var writableSettings = map[string]bool{
 	store.SettingEngineMaxUpKBps:        true,
 	store.SettingEngineSeedRatio:        true,
 	store.SettingEngineSeedDays:         true,
+	store.SettingRouteTorrent:           true,
+	store.SettingRouteUsenet:            true,
 	store.SettingTVProfile:              true,
 	store.SettingDLNAEnabled:            true,
 	store.SettingDLNAFriendlyName:       true,
@@ -123,6 +126,10 @@ func (s *server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if err := s.validateRouteSettings(r.Context(), body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	// Sorted so a partial failure is at least deterministic.
 	keys := make([]string, 0, len(body))
@@ -178,6 +185,56 @@ func validateDLNASettings(settings map[string]string) error {
 		// device list; anything longer is truncated there and unreadable.
 		if len([]rune(name)) > 64 {
 			return fmt.Errorf("invalid %s", store.SettingDLNAFriendlyName)
+		}
+	}
+	return nil
+}
+
+// validateRouteSettings refuses a per-protocol default that would not route.
+//
+// The router resolves these ids at grab time and falls back to "nothing
+// configured" for one it cannot use, so an id that is gone, disabled, or of
+// the wrong protocol would otherwise be accepted here and silently reject
+// every grab later. Pointing the torrent default at SABnzbd is the mistake
+// worth catching: it looks configured and downloads nothing.
+func (s *server) validateRouteSettings(ctx context.Context, settings map[string]string) error {
+	for _, route := range []struct {
+		key      string
+		protocol string
+	}{
+		{store.SettingRouteTorrent, core.ProtocolTorrent},
+		{store.SettingRouteUsenet, core.ProtocolUsenet},
+	} {
+		raw, ok := settings[route.key]
+		if !ok {
+			continue
+		}
+		value := strings.TrimSpace(raw)
+		// Empty is "no default": legal everywhere, and the only value usenet
+		// has before a client exists.
+		if value == "" {
+			continue
+		}
+		if value == store.RouteEmbedded {
+			if route.protocol != core.ProtocolTorrent {
+				return fmt.Errorf("invalid %s: the embedded engine only handles torrents", route.key)
+			}
+			continue
+		}
+		id, err := strconv.ParseInt(value, 10, 64)
+		if err != nil || id <= 0 {
+			return fmt.Errorf("invalid %s", route.key)
+		}
+		cfg, err := s.st.GetDownloadClient(ctx, id)
+		if errors.Is(err, store.ErrNotFound) {
+			return fmt.Errorf("invalid %s: no download client with id %d", route.key, id)
+		}
+		if err != nil {
+			return fmt.Errorf("invalid %s", route.key)
+		}
+		t, ok := clients.Lookup(cfg.Type)
+		if !ok || t.Protocol != route.protocol {
+			return fmt.Errorf("invalid %s: %s does not handle %s releases", route.key, cfg.Name, route.protocol)
 		}
 	}
 	return nil
@@ -244,6 +301,12 @@ type statusResponse struct {
 	// EngineHealth is the download engine's state: "ok", "unconfigured" (no
 	// storage root yet, so no engine), or "error" (it failed to start).
 	EngineHealth string `json:"engine_health"`
+	// UnhealthyDownloadClients names the external clients the queue poller
+	// cannot reach (PLAN phase 6 task 4). Empty is the normal case; a
+	// non-empty list is what raises the "client X unreachable" banner. The
+	// embedded engine is never in it — it is not a client, and one dead
+	// seedbox must not make Caravan look broken.
+	UnhealthyDownloadClients []unhealthyClientJSON `json:"unhealthy_download_clients"`
 	// FFmpegAvailable reports whether ffmpeg and ffprobe are both on PATH.
 	// False hides the whole convert-for-TV affordance and degrades the
 	// TV-incompatible warning to informational (SPEC §8).
@@ -258,6 +321,18 @@ type statusResponse struct {
 	// POST /system/verify passes, and while it is true downloads refuse to
 	// resume. Only portable mode ever sets it.
 	Dirty bool `json:"dirty"`
+}
+
+// unhealthyClientJSON is one unreachable download client on GET
+// /system/status. It carries no credential — the fields are the ones the
+// settings screen already shows, plus the poll's own failure message
+// (SPEC §12).
+type unhealthyClientJSON struct {
+	ID    int64  `json:"id"`
+	Name  string `json:"name"`
+	Type  string `json:"type"`
+	Error string `json:"error"`
+	Since string `json:"since"`
 }
 
 type statusCounts struct {
@@ -346,13 +421,14 @@ func (s *server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 			MediaFiles: len(files),
 			Unmatched:  len(unmatched),
 		},
-		DiskFreeBytes:     diskFree,
-		DiskTotalBytes:    diskTotal,
-		EngineHealth:      s.engineHealth(),
-		FFmpegAvailable:   s.ffmpegAvailable(),
-		PasswordSet:       passwordHash != "",
-		ListeningPublicly: listeningPublicly(s.listenAddr),
-		Dirty:             s.dirty.Load(),
+		DiskFreeBytes:            diskFree,
+		DiskTotalBytes:           diskTotal,
+		EngineHealth:             s.engineHealth(),
+		UnhealthyDownloadClients: s.unhealthyDownloadClients(),
+		FFmpegAvailable:          s.ffmpegAvailable(),
+		PasswordSet:              passwordHash != "",
+		ListeningPublicly:        listeningPublicly(s.listenAddr),
+		Dirty:                    s.dirty.Load(),
 	})
 }
 
@@ -370,4 +446,29 @@ func (s *server) engineHealth() string {
 		return "unconfigured"
 	}
 	return "ok"
+}
+
+// unhealthyDownloadClients is the banner's input: the external clients the
+// queue poller cannot reach right now. A provider that does not poll external
+// clients — the phase-2 embedded-only wiring, and every test server built
+// without one — reports none.
+func (s *server) unhealthyDownloadClients() []unhealthyClientJSON {
+	out := []unhealthyClientJSON{}
+	if s.engine == nil {
+		return out
+	}
+	reporter, ok := s.engine.(DownloadClientHealthReporter)
+	if !ok {
+		return out
+	}
+	for _, c := range reporter.UnhealthyDownloadClients() {
+		out = append(out, unhealthyClientJSON{
+			ID:    c.ID,
+			Name:  c.Name,
+			Type:  c.Type,
+			Error: c.Error,
+			Since: jsonTime(c.Since),
+		})
+	}
+	return out
 }

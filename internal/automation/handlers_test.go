@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/watzon/caravan/internal/api"
 	"github.com/watzon/caravan/internal/core"
+	"github.com/watzon/caravan/internal/download"
 	"github.com/watzon/caravan/internal/store"
 )
 
@@ -41,10 +43,15 @@ func (f *fakeIndexer) factory() api.IndexerFactory {
 
 type fakeEngine struct {
 	adds int
+	// added is every release this engine took, so a routing test can see a
+	// misroute as a release in the wrong engine rather than only as a
+	// missing one.
+	added []core.Release
 }
 
-func (e *fakeEngine) Add(_ context.Context, _ core.Release, _ core.AddOpts) (core.DownloadID, error) {
+func (e *fakeEngine) Add(_ context.Context, r core.Release, _ core.AddOpts) (core.DownloadID, error) {
 	e.adds++
+	e.added = append(e.added, r)
 	return core.DownloadID("fake-download"), nil
 }
 
@@ -203,5 +210,109 @@ func TestRunnerHandleBacklogSweepEnqueuesMissingSearchesOnce(t *testing.T) {
 	}
 	if movieJobs[first.ID] != 1 || movieJobs[second.ID] != 1 {
 		t.Fatalf("movie search jobs = %#v, want one per wanted movie", movieJobs)
+	}
+}
+
+// routedRunner builds a runner whose engine is the real protocol router
+// (PLAN phase 6 task 3), so the automatic path is exercised through exactly
+// the dispatch the interactive one uses. A nil usenet engine is the
+// configuration a stock Caravan has.
+func routedRunner(st *store.Store, indexer *fakeIndexer, torrent, usenet *fakeEngine) *Runner {
+	routes := []download.Route{
+		{Name: download.EngineName, Protocol: core.ProtocolTorrent, Engine: torrent},
+	}
+	if usenet != nil {
+		routes = append(routes, download.Route{
+			Name: core.DownloadClientSABnzbd, Protocol: core.ProtocolUsenet, Engine: usenet,
+		})
+	}
+	router := download.NewRouter(func(context.Context) ([]download.Route, error) { return routes, nil })
+	return NewRunner(st, indexer.factory(), func(context.Context) core.Engine { return router })
+}
+
+// The automatic path routes by protocol exactly like the interactive one: an
+// automatic search that picks a Newznab result must reach the usenet client,
+// not the torrent engine.
+func TestRunnerAutomaticGrabRoutesByProtocol(t *testing.T) {
+	ctx := context.Background()
+	st := openStore(t)
+	addIndexer(t, ctx, st)
+	torrentMovie := addMovie(t, ctx, st, "Torrent Movie", 2024, true)
+	usenetMovie := addMovie(t, ctx, st, "Usenet Movie", 2024, true)
+	torrent := &fakeEngine{}
+	usenet := &fakeEngine{}
+
+	indexer := &fakeIndexer{}
+	runner := routedRunner(st, indexer, torrent, usenet)
+
+	indexer.movies = []core.Release{{
+		GUID: "t", Title: "Torrent Movie 2024 1080p", Protocol: core.ProtocolTorrent, Seeders: 5,
+		Parsed: core.ParsedRelease{Quality: core.Quality1080p, Source: core.SourceWebDL},
+	}}
+	payload, _ := json.Marshal(moviePayload{MovieID: torrentMovie.ID})
+	if err := runner.handleSearchMovie(ctx, st, payload); err != nil {
+		t.Fatalf("handle search movie (torrent): %v", err)
+	}
+
+	indexer.movies = []core.Release{{
+		GUID: "u", Title: "Usenet Movie 2024 1080p", Protocol: core.ProtocolUsenet,
+		Parsed: core.ParsedRelease{Quality: core.Quality1080p, Source: core.SourceWebDL},
+	}}
+	payload, _ = json.Marshal(moviePayload{MovieID: usenetMovie.ID})
+	if err := runner.handleSearchMovie(ctx, st, payload); err != nil {
+		t.Fatalf("handle search movie (usenet): %v", err)
+	}
+
+	if len(torrent.added) != 1 || torrent.added[0].Protocol != core.ProtocolTorrent {
+		t.Fatalf("torrent engine got %+v, want only the torrent release", torrent.added)
+	}
+	if len(usenet.added) != 1 || usenet.added[0].Protocol != core.ProtocolUsenet {
+		t.Fatalf("usenet engine got %+v, want only the usenet release", usenet.added)
+	}
+}
+
+// A usenet release picked by an automatic search with no usenet client
+// configured is a recorded rejection, not a job failure: retrying it every
+// sweep would never succeed, and a silent drop leaves "why is nothing
+// downloading" unanswerable.
+func TestRunnerAutomaticGrabRecordsUnroutableProtocol(t *testing.T) {
+	ctx := context.Background()
+	st := openStore(t)
+	addIndexer(t, ctx, st)
+	movie := addMovie(t, ctx, st, "Usenet Movie", 2024, true)
+	torrent := &fakeEngine{}
+	indexer := &fakeIndexer{movies: []core.Release{{
+		GUID: "u", Title: "Usenet Movie 2024 1080p", Protocol: core.ProtocolUsenet,
+		Parsed: core.ParsedRelease{Quality: core.Quality1080p, Source: core.SourceWebDL},
+	}}}
+	runner := routedRunner(st, indexer, torrent, nil)
+	payload, _ := json.Marshal(moviePayload{MovieID: movie.ID})
+
+	// The job completes: there is nothing to retry until the user configures
+	// a client.
+	if err := runner.handleSearchMovie(ctx, st, payload); err != nil {
+		t.Fatalf("handle search movie: %v", err)
+	}
+	if len(torrent.added) != 0 {
+		t.Fatalf("the usenet release reached the torrent engine: %+v", torrent.added)
+	}
+
+	grabs, err := st.ListGrabs(ctx, 0)
+	if err != nil {
+		t.Fatalf("list grabs: %v", err)
+	}
+	if len(grabs) != 1 || grabs[0].Status != core.GrabStatusRejected {
+		t.Fatalf("grabs = %#v, want one rejected grab", grabs)
+	}
+	if !strings.Contains(grabs[0].Reason, "SABnzbd") {
+		t.Fatalf("recorded reason = %q, want the reason the user can act on", grabs[0].Reason)
+	}
+
+	events, err := st.ListEvents(ctx, 0)
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	if len(events) != 1 || events[0].Level != core.EventLevelWarn || events[0].Category != "grab" {
+		t.Fatalf("events = %#v, want one warning grab event", events)
 	}
 }

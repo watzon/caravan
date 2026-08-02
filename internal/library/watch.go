@@ -127,19 +127,30 @@ func (w *watcher) report(ctx context.Context, problem error) {
 // for the queue screen to render after a restart, before the engine has
 // reported in.
 //
-// The engine's name and the grab behind the download are written by whoever
-// added it and are preserved here — a watcher knows what the engine is doing
-// right now, not who asked for it.
+// The grab behind the download is written by whoever added it and is preserved
+// here — a watcher knows what the engine is doing right now, not who asked for
+// it. The engine name is preserved the same way, unless the status names one:
+// a router says which of several backends answered, and that is better
+// evidence than a row an out-of-band download never got to fill in.
+//
+// A save path outside the storage root is deliberately not persisted. An
+// external client's download directory is its own configuration, an absolute
+// path on its own machine, and the `downloads` table is Caravan's — the import
+// pipeline re-reads the live status for it (see runImportJob) rather than
+// resolving a foreign path out of the database (SPEC §1.2 pillar 3).
 func (m *Manager) persistDownload(ctx context.Context, s core.DownloadStatus) error {
 	d := core.Download{
 		EngineID:  s.ID,
+		Engine:    s.Engine,
 		Title:     s.Name,
 		State:     s.State,
 		Progress:  s.Progress,
 		BytesDone: s.BytesDone,
 		Size:      s.Size,
-		SavePath:  s.SavePath,
 		Error:     s.Error,
+	}
+	if !foreignPath(s.SavePath) {
+		d.SavePath = s.SavePath
 	}
 
 	existing, err := m.store.GetDownloadByEngineID(ctx, s.ID)
@@ -147,7 +158,9 @@ func (m *Manager) persistDownload(ctx context.Context, s core.DownloadStatus) er
 	case err == nil:
 		d.ID = existing.ID
 		d.GrabID = existing.GrabID
-		d.Engine = existing.Engine
+		if d.Engine == "" {
+			d.Engine = existing.Engine
+		}
 		d.CreatedAt = existing.CreatedAt
 	case !errors.Is(err, store.ErrNotFound):
 		return err

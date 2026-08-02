@@ -6,7 +6,13 @@
  * Pure — unit-tested in download.test.ts.
  */
 
-import type { DownloadState, DownloadStatus } from './api/types';
+import type {
+  DownloadClientType,
+  DownloadState,
+  DownloadStatus,
+  UnhealthyDownloadClient,
+} from './api/types';
+import { FALLBACK_DOWNLOAD_CLIENT_TYPES } from './downloadClient';
 import type { Tone } from './status';
 
 export interface DownloadStateMeta {
@@ -53,12 +59,52 @@ export function countActiveDownloads(downloads: readonly DownloadStatus[]): numb
   return downloads.filter(isActiveDownload).length;
 }
 
-/** Which engine holds this download; phase 2 ships exactly one. */
+/** The built-in torrent engine, and the answer when a row names no backend. */
 export const DEFAULT_ENGINE = 'embedded';
 
+/**
+ * Which backend holds this download, as the queue row and detail drawer label
+ * it. The server records the backend's own name ("qbittorrent"); the download
+ * client type table already knows how humans spell those, so the row says
+ * "qBittorrent" rather than repeating a database value at the user.
+ */
 export function engineLabel(status: DownloadStatus): string {
-  return status.engine || DEFAULT_ENGINE;
+  const engine = status.engine || DEFAULT_ENGINE;
+  if (engine === DEFAULT_ENGINE) return 'Embedded';
+  return (
+    FALLBACK_DOWNLOAD_CLIENT_TYPES.find((t) => t.type === (engine as DownloadClientType))?.label ??
+    engine
+  );
 }
+
+/**
+ * The "client X unreachable" banner's text (SPEC §5.1, §13).
+ *
+ * Null when everything is answering, which is the normal case. The message
+ * names every client that is down and says what that means for the queue,
+ * because a banner that only says "unreachable" leaves the user wondering
+ * whether their other downloads are still running. They are: the embedded
+ * engine and every other client are untouched.
+ */
+export function unreachableClientBanner(
+  clients: readonly UnhealthyDownloadClient[] | undefined,
+): { title: string; message: string } | null {
+  if (!clients || clients.length === 0) return null;
+  const names = clients.map((c) => c.name).join(', ');
+  const title =
+    clients.length === 1
+      ? `Download client ${names} is unreachable`
+      : `Download clients ${names} are unreachable`;
+  const reasons = [...new Set(clients.map((c) => c.error).filter(Boolean))].join('; ');
+  const detail = reasons ? `${reasons}. ` : '';
+  return {
+    title,
+    message:
+      `${detail}Its queue has stopped updating and new grabs routed to it are refused until it ` +
+      'answers again. Everything else — the built-in engine and any other client — is unaffected.',
+  };
+}
+
 
 /**
  * Queue order: active work first, then failures (they need attention), then the

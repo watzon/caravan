@@ -7,6 +7,7 @@
   import Field from '../components/Field.svelte';
   import Icon from '../components/Icon.svelte';
   import DlnaSettings from '../components/DlnaSettings.svelte';
+  import DownloadClientSettings from '../components/DownloadClientSettings.svelte';
   import EngineSettings from '../components/EngineSettings.svelte';
   import IndexerSettings from '../components/IndexerSettings.svelte';
   import JellyfinSettings from '../components/JellyfinSettings.svelte';
@@ -25,6 +26,7 @@
   type Tab =
     | 'general'
     | 'indexers'
+    | 'download-clients'
     | 'engine'
     | 'quality-profiles'
     | 'tv-profile'
@@ -36,6 +38,7 @@
   const TABS: { key: Tab; label: string }[] = [
     { key: 'general', label: 'General' },
     { key: 'indexers', label: 'Indexers' },
+    { key: 'download-clients', label: 'Download clients' },
     { key: 'engine', label: 'Engine' },
     { key: 'quality-profiles', label: 'Quality profiles' },
     { key: 'tv-profile', label: 'TV profile' },
@@ -87,7 +90,12 @@
   let status = $derived(system.status);
 </script>
 
-<div class="flex flex-col gap-6 {tab === 'indexers' || tab === 'quality-profiles' ? 'max-w-5xl' : 'max-w-3xl'}">
+<div
+  class="flex flex-col gap-6 {tab === 'indexers' ||
+  tab === 'download-clients' ||
+  tab === 'quality-profiles'
+    ? 'max-w-5xl'
+    : 'max-w-3xl'}">
   <PageTabs
     tabs={TABS}
     active={tab}
@@ -97,6 +105,8 @@
   <!-- These own their fetches, so they render whether or not /settings loaded. -->
   {#if tab === 'indexers'}
     <IndexerSettings />
+  {:else if tab === 'download-clients'}
+    <DownloadClientSettings />
   {:else if tab === 'quality-profiles'}
     <QualityProfiles />
   {:else if tab === 'jellyfin'}

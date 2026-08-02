@@ -19,9 +19,39 @@ func cleanRoot(root string) string {
 
 // abs resolves a storage-root-relative path to an OS path. This and rel are
 // the only two places the relative/absolute boundary is crossed.
+//
+// A path that is already absolute is returned as given. That is not a second
+// path model: it is how the import pipeline reads a finished download an
+// external client wrote outside the storage root, where the client's own
+// directory is the only address the file has (PLAN phase 6, docs/external-
+// clients.md). Such a path is never written to the database — see
+// downloadPath, which is the only thing that produces one.
 func (m *Manager) abs(rel string) string {
+	if filepath.IsAbs(rel) {
+		return filepath.Clean(rel)
+	}
 	return filepath.Join(m.root, filepath.FromSlash(rel))
 }
+
+// downloadPath renders a file inside a finished download the way the rest of
+// the import pipeline addresses files: storage-root-relative when the download
+// landed under the root — the embedded engine, and an external client pointed
+// inside it — and the client's own absolute path when it did not.
+//
+// foreignPath is the test for which one came back, and it gates every write:
+// an absolute foreign path describes a file the library does not own and
+// cannot address relative to its root, so it stays out of `media_files`,
+// `unmatched_files` and `downloads.output_path` (SPEC §1.2 pillar 3).
+func (m *Manager) downloadPath(abs string) string {
+	r, err := filepath.Rel(m.root, abs)
+	if err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
+		return filepath.Clean(abs)
+	}
+	return filepath.ToSlash(r)
+}
+
+// foreignPath reports whether p names a file outside Caravan's storage root.
+func foreignPath(p string) bool { return filepath.IsAbs(p) }
 
 // rel is abs' inverse: an OS path under the root becomes a slash-separated
 // storage-root-relative path.

@@ -176,6 +176,12 @@ func runServe(args []string) error {
 	}()
 
 	indexers := newIndexerFactory()
+	// Which external download clients this build can actually talk to. Nothing
+	// is configured by default (SPEC §12); this only decides whether a client
+	// the user adds can be tested, or is stored and answered with a 501.
+	if err := registerDownloadClients(); err != nil {
+		return err
+	}
 	if err := automation.Bootstrap(ctx, st); err != nil {
 		return err
 	}

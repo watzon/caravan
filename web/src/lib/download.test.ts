@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { DownloadState, DownloadStatus } from './api/types';
+import type { DownloadState, DownloadStatus, UnhealthyDownloadClient } from './api/types';
 import {
   DEFAULT_ENGINE,
   countActiveDownloads,
@@ -7,6 +7,7 @@ import {
   engineLabel,
   isActiveDownload,
   sortDownloads,
+  unreachableClientBanner,
 } from './download';
 
 function download(overrides: Partial<DownloadStatus> = {}): DownloadStatus {
@@ -85,11 +86,54 @@ describe('countActiveDownloads', () => {
 
 describe('engineLabel', () => {
   it('falls back to the embedded engine when the server omits it', () => {
-    expect(engineLabel(download())).toBe(DEFAULT_ENGINE);
+    expect(engineLabel(download())).toBe('Embedded');
+    expect(DEFAULT_ENGINE).toBe('embedded');
   });
 
-  it('uses what the server said when it says anything', () => {
-    expect(engineLabel(download({ engine: 'qbittorrent' }))).toBe('qbittorrent');
+  // The row says which client holds the download, spelled the way the settings
+  // screen spells it rather than the way the database stores it.
+  it('names the download client that holds it', () => {
+    expect(engineLabel(download({ engine: 'qbittorrent' }))).toBe('qBittorrent');
+    expect(engineLabel(download({ engine: 'sabnzbd' }))).toBe('SABnzbd');
+    expect(engineLabel(download({ engine: 'nzbget' }))).toBe('NZBGet');
+  });
+
+  it('shows a backend it does not know rather than nothing', () => {
+    expect(engineLabel(download({ engine: 'transmission' }))).toBe('transmission');
+  });
+});
+
+describe('unreachableClientBanner', () => {
+  const client = (over: Partial<UnhealthyDownloadClient> = {}): UnhealthyDownloadClient => ({
+    id: 1,
+    name: 'Seedbox',
+    type: 'qbittorrent',
+    error: 'connection refused',
+    since: '2026-08-01T09:30:00Z',
+    ...over,
+  });
+
+  it('is silent when every client is answering', () => {
+    expect(unreachableClientBanner(undefined)).toBeNull();
+    expect(unreachableClientBanner([])).toBeNull();
+  });
+
+  // The user has to be told which client, why, and that the rest of the queue
+  // is still running — a bare "unreachable" reads as "Caravan is broken".
+  it('names the client, the reason, and what is unaffected', () => {
+    const banner = unreachableClientBanner([client()]);
+    expect(banner?.title).toBe('Download client Seedbox is unreachable');
+    expect(banner?.message).toContain('connection refused');
+    expect(banner?.message).toContain('unaffected');
+  });
+
+  it('names every client that is down, and each distinct reason once', () => {
+    const banner = unreachableClientBanner([
+      client(),
+      client({ id: 2, name: 'Usenet box', type: 'sabnzbd' }),
+    ]);
+    expect(banner?.title).toBe('Download clients Seedbox, Usenet box are unreachable');
+    expect(banner?.message.match(/connection refused/g)).toHaveLength(1);
   });
 });
 

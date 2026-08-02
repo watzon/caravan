@@ -126,6 +126,12 @@ func applyLiveStatus(dto *downloadJSON, status core.DownloadStatus) {
 	dto.Ratio = status.Ratio
 	dto.SavePath = status.SavePath
 	dto.Error = status.Error
+	// Only when the engine said so: a router names the backend that answered,
+	// and a plain engine says nothing, in which case the row (or the provider's
+	// name, for an orphan) already holds the answer.
+	if status.Engine != "" {
+		dto.Engine = status.Engine
+	}
 }
 
 func (s *server) handlePauseDownload(w http.ResponseWriter, r *http.Request) {

@@ -47,9 +47,20 @@ type DownloadStatus struct {
 	ETASeconds int64
 	// Ratio is uploaded over downloaded, for seeding limits.
 	Ratio float64
-	// SavePath is where the engine is writing, relative to the storage root
-	// (SPEC §1.2 pillar 3).
+	// SavePath is where the engine is writing.
+	//
+	// The embedded engine reports it relative to the storage root (SPEC §1.2
+	// pillar 3). An external download client reports its own absolute path
+	// instead, because the directory it writes into is its configuration, not
+	// Caravan's (PLAN phase 6). Such a path is live download state only: it is
+	// read to locate a finished payload and is never stored in `media_files`,
+	// `unmatched_files`, or `downloads.output_path`.
 	SavePath string
+	// Engine names the backend holding this download ("embedded",
+	// "qbittorrent", …). It is set by the router, which is the only thing that
+	// knows which of several engines answered; a single engine leaves it empty
+	// and the caller falls back to the provider's name.
+	Engine string
 	// Error is the engine's failure message; empty unless State is
 	// DownloadFailed.
 	Error string
@@ -102,6 +113,17 @@ type Engine interface {
 // omit it without losing the core queue contract.
 type EngineInsight interface {
 	Insight(ctx context.Context, id DownloadID) (*DownloadInsight, error)
+}
+
+// EngineRouting is an optional extension for an engine that is really several
+// engines behind one interface, dispatching a release by its protocol
+// (SPEC §5.1, PLAN phase 6, task 3).
+//
+// It exists so the caller that records a download can write the backend that
+// actually holds it into `downloads.engine`, rather than the name of the
+// router. A protocol nothing is configured for reports "".
+type EngineRouting interface {
+	EngineNameFor(ctx context.Context, protocol string) string
 }
 
 // EngineRateLimits is an optional extension for engines that support live

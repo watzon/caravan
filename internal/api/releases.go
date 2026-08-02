@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/watzon/caravan/internal/core"
+	"github.com/watzon/caravan/internal/download"
 	"github.com/watzon/caravan/internal/parse"
 )
 
@@ -474,6 +476,26 @@ func (s *server) grab(w http.ResponseWriter, r *http.Request, info core.GrabInfo
 
 	downloadID, err := engine.Add(ctx, *rel, opts)
 	if err != nil {
+		// Nothing broke: the release's protocol has no engine behind it, which
+		// is a configuration the user has not finished rather than a failure.
+		// It is recorded as a rejection with the reason, and answered with a
+		// 4xx that names what to configure — never a silent drop, and never a
+		// misroute to an engine that does not speak this protocol.
+		if errors.Is(err, download.ErrNoEngine) {
+			s.rejectGrab(ctx, g, info, err)
+			writeError(w, http.StatusConflict, err.Error())
+			return
+		}
+		// The client the release routes to has stopped answering its polls.
+		// That is the download client's failure, not Caravan's, so the grab
+		// fails rather than being rejected — but the reason is the poll's own
+		// message, because "add download" alone would leave the user hunting
+		// for a machine that is simply switched off (PLAN phase 6 task 4).
+		if errors.Is(err, download.ErrClientUnreachable) {
+			s.failGrab(ctx, g, info, err)
+			writeError(w, http.StatusBadGateway, err.Error())
+			return
+		}
 		s.failGrab(ctx, g, info, err)
 		s.writeEngineError(w, "add download", err)
 		return
@@ -481,7 +503,7 @@ func (s *server) grab(w http.ResponseWriter, r *http.Request, info core.GrabInfo
 
 	if err := s.st.UpsertDownload(ctx, &core.Download{
 		GrabID:   g.GrabID,
-		Engine:   s.engineName(),
+		Engine:   s.engineNameFor(ctx, engine, rel.Protocol),
 		EngineID: downloadID,
 		Title:    rel.Title,
 		State:    core.DownloadQueued,
@@ -518,6 +540,27 @@ func (s *server) failGrab(ctx context.Context, g *core.Grab, info core.GrabInfo,
 		Level:    core.EventLevelError,
 		Category: "grab",
 		Message:  "Failed to grab " + g.ReleaseTitle,
+		Detail:   cause.Error(),
+		MovieID:  info.MovieID,
+		SeriesID: info.SeriesID,
+	})
+}
+
+// rejectGrab records a grab nothing was configured to take.
+//
+// It is GrabStatusRejected rather than GrabStatusFailed for the same reason
+// phase 3 gives the status to a release an automatic search skipped: the row
+// is a decision-log entry, and "why is this not downloading" is answered by
+// its reason. The event is a warning, not an error — the activity feed is
+// where a user looks for this, and there is nothing broken to report.
+func (s *server) rejectGrab(ctx context.Context, g *core.Grab, info core.GrabInfo, cause error) {
+	if err := s.st.SetGrabStatus(ctx, g.GrabID, core.GrabStatusRejected, cause.Error()); err != nil {
+		s.log.Error("record rejected grab", "error", err, "grab_id", g.GrabID)
+	}
+	s.logEvent(ctx, &core.Event{
+		Level:    core.EventLevelWarn,
+		Category: "grab",
+		Message:  "Cannot grab " + g.ReleaseTitle,
 		Detail:   cause.Error(),
 		MovieID:  info.MovieID,
 		SeriesID: info.SeriesID,

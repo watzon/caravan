@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -369,8 +370,11 @@ func TestSystemStatus(t *testing.T) {
 		DiskFreeBytes:  0,
 		DiskTotalBytes: 0,
 		EngineHealth:   "unconfigured",
+		// No provider means nothing polls external clients, and the banner
+		// input is an empty list rather than null.
+		UnhealthyDownloadClients: []unhealthyClientJSON{},
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("status = %+v, want %+v", got, want)
 	}
 	if got.SchemaVersion < 1 {

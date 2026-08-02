@@ -318,3 +318,83 @@ func TestRunWatcherStopsWithItsContext(t *testing.T) {
 		t.Fatal("RunWatcher did not return after its context was cancelled")
 	}
 }
+
+// A download an external client holds goes through the same poll loop as an
+// embedded one: the state lands in the queue, the owning backend is recorded,
+// and the import runs — but the client's own absolute directory does not reach
+// the `downloads` table (PLAN phase 6 task 1, SPEC §1.2 pillar 3).
+func TestWatcherPersistsExternalDownloadsWithoutTheirForeignPath(t *testing.T) {
+	h := newHarness(t)
+	mv := addMovieItem(h)
+	dl, _ := externalDownload(h, "external bytes")
+	grab := h.grabFor(core.GrabInfo{MovieID: mv.ID, ReleaseTitle: "Big.Buck.Bunny.2008.1080p.BluRay.x264-GRP"})
+
+	ctx := context.Background()
+	// The grab endpoint records the row; the watcher then only refreshes it.
+	if err := h.st.UpsertDownload(ctx, &core.Download{
+		GrabID: grab.GrabID, Engine: "sabnzbd", EngineID: dl.ID,
+		Title: dl.Name, State: core.DownloadDownloading,
+	}); err != nil {
+		t.Fatalf("UpsertDownload: %v", err)
+	}
+
+	w := newWatcher(h, &fakeEngine{statuses: []core.DownloadStatus{dl}})
+	if err := w.tick(ctx); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+
+	stored, err := h.st.GetDownloadByEngineID(ctx, dl.ID)
+	if err != nil {
+		t.Fatalf("GetDownloadByEngineID: %v", err)
+	}
+	if stored.State != core.DownloadCompleted {
+		t.Errorf("persisted state = %q, want %q", stored.State, core.DownloadCompleted)
+	}
+	if stored.Engine != "sabnzbd" {
+		t.Errorf("persisted engine = %q, want the client that holds it", stored.Engine)
+	}
+	if stored.SavePath != "" {
+		t.Errorf("persisted save path = %q, want the client's foreign path kept out of the database", stored.SavePath)
+	}
+	if got := h.read(organizedRel); got != "external bytes" {
+		t.Fatalf("imported content = %q, want the download's bytes", got)
+	}
+
+	// Idempotency across poll cycles and across a restart: the in-process
+	// queued set is what stops the first, the durable grab status the second.
+	if err := w.tick(ctx); err != nil {
+		t.Fatalf("second tick: %v", err)
+	}
+	restarted := newWatcher(h, &fakeEngine{statuses: []core.DownloadStatus{dl}})
+	if err := restarted.tick(ctx); err != nil {
+		t.Fatalf("tick after restart: %v", err)
+	}
+	if jobs := h.jobs(); len(jobs) != 1 {
+		t.Fatalf("jobs = %+v, want exactly one import across every poll and a restart", jobs)
+	}
+	collision := "library/Movies/Big Buck Bunny (2008)/Big Buck Bunny (2008) (1).mkv"
+	if h.exists(collision) {
+		t.Errorf("the download was imported twice, at %s", collision)
+	}
+}
+
+// A router names the backend that answered, and that name heals a row the
+// grab endpoint never got to fill in.
+func TestWatcherRecordsTheEngineTheStatusNames(t *testing.T) {
+	h := newHarness(t)
+	dl, _ := externalDownload(h, "external bytes")
+
+	w := newWatcher(h, &fakeEngine{statuses: []core.DownloadStatus{dl}})
+	ctx := context.Background()
+	if err := w.tick(ctx); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+
+	stored, err := h.st.GetDownloadByEngineID(ctx, dl.ID)
+	if err != nil {
+		t.Fatalf("GetDownloadByEngineID: %v", err)
+	}
+	if stored.Engine != "sabnzbd" {
+		t.Fatalf("persisted engine = %q, want %q", stored.Engine, "sabnzbd")
+	}
+}

@@ -1,0 +1,22 @@
+[
+  {
+    "availability": 1,
+    "index": 0,
+    "is_seed": false,
+    "name": "Arrival.2016.1080p.BluRay.x264-GROUP/Arrival.2016.1080p.BluRay.x264-GROUP.mkv",
+    "piece_range": [0, 8191],
+    "priority": 1,
+    "progress": 0.5,
+    "size": 8589000000
+  },
+  {
+    "availability": 1,
+    "index": 1,
+    "is_seed": false,
+    "name": "Arrival.2016.1080p.BluRay.x264-GROUP/Arrival.2016.1080p.BluRay.x264-GROUP.nfo",
+    "piece_range": [8191, 8191],
+    "priority": 0,
+    "progress": 0,
+    "size": 934592
+  }
+]

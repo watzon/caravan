@@ -206,6 +206,20 @@ export interface StatusCounts {
  * reported: the fields arrive with the phases that make them mean something
  * (SPEC §2.3, §14).
  */
+/**
+ * One download client the poller cannot reach. Never carries a credential —
+ * `error` is the poll's own failure, the same message the client's test button
+ * shows (SPEC §12).
+ */
+export interface UnhealthyDownloadClient {
+  id: number;
+  name: string;
+  type: DownloadClientType;
+  error: string;
+  /** RFC3339 timestamp of when it was first seen as unreachable. */
+  since: string;
+}
+
 export interface SystemStatus {
   version: string;
   /** "server" | "portable" (SPEC §2). */
@@ -219,8 +233,15 @@ export interface SystemStatus {
   /** Filesystem holding the storage root; both 0 when unknown or no root. */
   disk_free_bytes: number;
   disk_total_bytes: number;
-  /** "ok" | "unconfigured" | "error" ("degraded" arrives with external clients). */
+  /** "ok" | "unconfigured" | "error". Describes the embedded engine only. */
   engine_health: string;
+  /**
+   * External download clients the queue poller cannot reach (SPEC §5.1).
+   * Empty is the normal case; a non-empty list raises the "client X
+   * unreachable" banner. Optional so an older server, or a test fixture,
+   * reads as "everything is fine" rather than as a crash.
+   */
+  unhealthy_download_clients?: UnhealthyDownloadClient[];
   /**
    * Whether ffmpeg and ffprobe are both on the server's PATH. False hides the
    * whole convert-for-TV affordance and degrades the TV-incompatible warning
@@ -336,6 +357,22 @@ export const SETTING_ENGINE_MAX_UP_KBPS = 'engine_max_up_kbps';
 export const SETTING_ENGINE_SEED_RATIO = 'engine_seed_ratio';
 export const SETTING_ENGINE_SEED_DAYS = 'engine_seed_days';
 
+/**
+ * The default download engine per release protocol (SPEC §5.1). A grab is
+ * routed on the release's protocol, never on a per-grab choice, so these two
+ * keys are the whole routing configuration.
+ *
+ * The value is a `DownloadClient.id` as a decimal string, or ROUTE_EMBEDDED
+ * for Caravan's built-in torrent engine. Empty means nothing is configured —
+ * legal for usenet, where there is no built-in engine and a grab becomes a
+ * recorded rejection instead.
+ */
+export const SETTING_ROUTE_TORRENT = 'route_torrent';
+export const SETTING_ROUTE_USENET = 'route_usenet';
+
+/** The SETTING_ROUTE_TORRENT value that selects the built-in torrent engine. */
+export const ROUTE_EMBEDDED = 'embedded';
+
 /** Active core.TVProfile id (SPEC §8). Unset resolves to the safe default. */
 export const SETTING_TV_PROFILE = 'tv_profile';
 
@@ -448,6 +485,69 @@ export interface IndexerCategory {
 
 /** internal/core.Protocol* — decides which engine a grab is routed to. */
 export type Protocol = 'torrent' | 'usenet';
+
+/* ---------------------------------------------------------------------------
+ * Phase 6 — external download clients (SPEC §5.1, §7, §11).
+ * ------------------------------------------------------------------------- */
+
+/** internal/core.DownloadClient* — the backends Caravan can be pointed at. */
+export type DownloadClientType = 'qbittorrent' | 'sabnzbd' | 'nzbget';
+
+/**
+ * One entry of GET /download-clients/types: what a backend is called, which
+ * protocol it carries, which credentials it needs, and whether this build can
+ * actually talk to it yet.
+ */
+export interface DownloadClientTypeInfo {
+  type: DownloadClientType;
+  label: string;
+  protocol: Protocol;
+  uses_login: boolean;
+  uses_api_key: boolean;
+  supported: boolean;
+}
+
+/**
+ * internal/core.DownloadClientConfig, redacted.
+ *
+ * Unlike `Indexer.api_key`, the password and API key do NOT round-trip: the
+ * server never hands a download-client credential back (SPEC §12), and reports
+ * only whether one is stored. An edit that leaves the field blank therefore
+ * means "keep what is stored", which is what DownloadClientInput encodes.
+ */
+export interface DownloadClient {
+  id: number;
+  type: DownloadClientType;
+  name: string;
+  url: string;
+  username: string;
+  has_password: boolean;
+  has_api_key: boolean;
+  category: string;
+  /** Lowest wins when more than one enabled client can take a release. */
+  priority: number;
+  enabled: boolean;
+}
+
+/**
+ * Body for POST/PUT /download-clients and POST /download-clients/test.
+ *
+ * `password` and `api_key` are optional on purpose: omitting one keeps the
+ * stored credential, and sending "" clears it. `id` is read only by the test
+ * endpoint, where it names the row a blank credential falls back to.
+ */
+export interface DownloadClientInput {
+  id?: number;
+  type: DownloadClientType;
+  name: string;
+  url: string;
+  username: string;
+  password?: string;
+  api_key?: string;
+  category: string;
+  priority: number;
+  enabled: boolean;
+}
 
 /**
  * internal/core.Release — one indexer search result, already parsed.

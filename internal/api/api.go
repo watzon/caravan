@@ -24,6 +24,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/watzon/caravan/internal/clients"
 	"github.com/watzon/caravan/internal/store"
 )
 
@@ -47,6 +48,10 @@ type server struct {
 	// need it answer 503 rather than the server refusing to start.
 	engine   EngineProvider
 	indexers IndexerFactory
+
+	// downloadClients is the phase-6 external-client registry (SPEC §5.1).
+	// Nil means the process-wide one; see (*server).clients.
+	downloadClients *clients.Registry
 
 	// converter is the phase-4 convert-for-TV queue's ffmpeg availability
 	// (SPEC §8). Nil means the same thing an ffmpeg-less host does: the queue
@@ -211,6 +216,18 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("DELETE /indexers/{id}", s.handleDeleteIndexer)
 	api.HandleFunc("POST /indexers/{id}/test", s.handleTestIndexer)
 	api.HandleFunc("POST /indexers/categories", s.handleIndexerCategories)
+
+	// External download clients (SPEC §5.1, PLAN phase 6 task 1). The type
+	// list is served rather than hard-coded in the SPA so a build without a
+	// backend says so instead of offering it. /test with no id in the path
+	// probes an unsaved configuration, as the indexer category endpoint does.
+	api.HandleFunc("GET /download-clients", s.handleListDownloadClients)
+	api.HandleFunc("POST /download-clients", s.handleCreateDownloadClient)
+	api.HandleFunc("GET /download-clients/types", s.handleListDownloadClientTypes)
+	api.HandleFunc("POST /download-clients/test", s.handleTestDownloadClientConfig)
+	api.HandleFunc("PUT /download-clients/{id}", s.handleUpdateDownloadClient)
+	api.HandleFunc("DELETE /download-clients/{id}", s.handleDeleteDownloadClient)
+	api.HandleFunc("POST /download-clients/{id}/test", s.handleTestDownloadClient)
 
 	// Queue ids are the engine's own handles, not library ids.
 	api.HandleFunc("GET /downloads", s.handleListDownloads)

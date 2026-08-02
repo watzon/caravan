@@ -32,6 +32,7 @@
   import Wanted from './lib/routes/Wanted.svelte';
   import SettingsScreen from './lib/routes/Settings.svelte';
   import Button from './lib/components/Button.svelte';
+  import { unreachableClientBanner } from './lib/download';
   import { auth } from './lib/state/auth.svelte';
   import { shutdown } from './lib/state/shutdown.svelte';
   import { system } from './lib/state/system.svelte';
@@ -82,6 +83,10 @@
       // The in-memory flag is enough for this session.
     }
   }
+
+  let unreachableClients = $derived(
+    unreachableClientBanner(system.status?.unhealthy_download_clients),
+  );
 
   let showBindNag = $derived(
     !nagDismissed &&
@@ -153,6 +158,16 @@
             message={system.error} />
         {:else if system.status?.dirty}
           <DirtyRecovery />
+        {/if}
+
+        <!-- One client being down is not the system being down, so this sits
+             below the server/dirty banners and names the client (SPEC §5.1). -->
+        {#if unreachableClients}
+          <Banner
+            tone="warning"
+            icon="warning"
+            title={unreachableClients.title}
+            message={unreachableClients.message} />
         {/if}
 
         {#if showBindNag}
