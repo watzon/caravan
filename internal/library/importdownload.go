@@ -172,6 +172,11 @@ func (m *Manager) importDownloadedMovie(ctx context.Context, files []downloadedF
 	reason := unresolvable
 	if reason == "" {
 		reason = movieMismatch(meta, p)
+		if reason != "" && m.noClaim(p) {
+			if rp, ok := m.grabTitleParse(grab); ok && movieMismatch(meta, rp) == "" {
+				p, reason = rp, ""
+			}
+		}
 	}
 	if reason != "" {
 		if err := m.parkImport(ctx, file, p, grab, reason); err != nil {
@@ -221,12 +226,21 @@ func (m *Manager) importDownloadedEpisodes(ctx context.Context, files []download
 	}
 
 	var imported, parked int
+	largest := largestFile(files)
 	for _, file := range files {
 		p := m.parse(filepath.Base(file.rel))
 
 		reason := unresolvable
 		if reason == "" {
 			reason = episodeMismatch(meta, p, grab, wanted)
+			// The release title can vouch for one file only — the
+			// feature-sized one — or an obfuscated sample would import as the
+			// same episode and supersede the real payload.
+			if reason != "" && m.noClaim(p) && file.rel == largest.rel {
+				if rp, ok := m.grabTitleParse(grab); ok && episodeMismatch(meta, rp, grab, wanted) == "" {
+					p, reason = rp, ""
+				}
+			}
 		}
 		if reason != "" {
 			if err := m.parkImport(ctx, file, p, grab, reason); err != nil {
@@ -591,6 +605,28 @@ func episodeMismatch(meta *core.SeriesMeta, p core.ParsedRelease, grab core.Grab
 		}
 	}
 	return fmt.Sprintf("%s is not among the episodes the grab was for", episodeTag(p.Season, p.Episodes))
+}
+
+// noClaim reports whether a parse is noise rather than a positive claim about
+// what a file is: no episode numbers and below the confidence that would let a
+// scan import it. Only such a file may borrow its grab's release title — a
+// file that positively claims to be something else parks, never relabels
+// (the movieMismatch principle, applied to the fallback itself).
+func (m *Manager) noClaim(p core.ParsedRelease) bool {
+	return !p.IsEpisode() && p.Confidence < m.minConfidence
+}
+
+// grabTitleParse parses the release title the grab recorded — the name the
+// user actually grabbed. Usenet posts routinely obfuscate the payload's file
+// name, so when that name is noise the release title is the best remaining
+// description of the payload, and the grab it hangs off is the evidence of
+// intent that lets the import trust it.
+func (m *Manager) grabTitleParse(grab core.GrabInfo) (core.ParsedRelease, bool) {
+	title := strings.TrimSpace(grab.ReleaseTitle)
+	if title == "" {
+		return core.ParsedRelease{}, false
+	}
+	return m.parse(title), true
 }
 
 // releaseLabel renders a parse for a human: what the file says it is.

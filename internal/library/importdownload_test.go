@@ -631,6 +631,123 @@ func TestImportDownloadSeasonPackLinksMultiEpisodeFileToEveryEpisode(t *testing.
 	}
 }
 
+// TestImportDownloadImportsObfuscatedEpisodeByReleaseTitle covers what usenet
+// posts routinely do: the payload's file name is random noise. The grab's
+// release title is the evidence of what was fetched, and it vouches for the
+// feature-sized file — an obfuscated extra still parks rather than riding in.
+func TestImportDownloadImportsObfuscatedEpisodeByReleaseTitle(t *testing.T) {
+	h := newHarness(t)
+	sr := addSeriesItem(h)
+
+	const release = "Planet.Earth.II.S01E01.1080p.WEB-DL.x265"
+	const dir = "incomplete/" + release
+	const obfuscated = dir + "/pA9qxTu5Ykpd8Z3UELhIIiADBugdp9zg.mkv"
+	h.writeVideo(obfuscated, "the actual episode payload")
+	// A smaller obfuscated extra: the release title must not vouch for it.
+	h.writeVideo(dir+"/x1.mkv", "sample")
+	h.parser[release] = episodeParse("Planet Earth II", 1, 1)
+
+	grab := h.grabFor(core.GrabInfo{
+		SeriesID:     sr.ID,
+		SeasonNum:    1,
+		EpisodeIDs:   []int64{episodeID(h, sr.ID, 1, 1)},
+		ReleaseTitle: release,
+	})
+	dl := core.DownloadStatus{ID: "u-obfuscated", State: core.DownloadCompleted, SavePath: dir}
+
+	ctx := context.Background()
+	if err := h.mgr.ImportDownload(ctx, dl, grab); err != nil {
+		t.Fatalf("ImportDownload: %v", err)
+	}
+
+	const organized = "library/TV/Planet Earth II (2016)/Season 01/Planet Earth II (2016) - S01E01 - Islands.mkv"
+	if !h.exists(organized) {
+		t.Fatalf("obfuscated episode was not imported to %s", organized)
+	}
+	if !h.sameFile(obfuscated, organized) {
+		t.Errorf("import did not use the feature-sized file")
+	}
+	file, err := h.st.GetMediaFileByPath(ctx, organized)
+	if err != nil {
+		t.Fatalf("GetMediaFileByPath: %v", err)
+	}
+	if file.Quality != core.Quality1080p {
+		t.Errorf("quality = %q, want the release title's %q", file.Quality, core.Quality1080p)
+	}
+	if got := h.grabStatus(grab.GrabID); got != core.GrabStatusImported {
+		t.Errorf("grab status = %q, want %q", got, core.GrabStatusImported)
+	}
+	parked := h.unmatched()
+	if len(parked) != 1 || !strings.Contains(parked[0].Path, "x1.mkv") {
+		t.Errorf("unmatched queue = %+v, want only the obfuscated extra", parked)
+	}
+}
+
+// TestImportDownloadImportsObfuscatedMovieByReleaseTitle is the movie twin: a
+// noise file name borrows the release title, so the import carries the
+// quality tags instead of landing as "unknown" — or parking outright.
+func TestImportDownloadImportsObfuscatedMovieByReleaseTitle(t *testing.T) {
+	h := newHarness(t)
+	mv := addMovieItem(h)
+
+	const release = "Big.Buck.Bunny.2008.1080p.BluRay.x264-GRP"
+	const obfuscated = "incomplete/" + release + "/jK2mNpQ8vTzWxY4bC.mkv"
+	h.writeVideo(obfuscated, "movie bytes")
+	h.parser[release] = movieParse("Big Buck Bunny", 2008)
+
+	grab := h.grabFor(core.GrabInfo{MovieID: mv.ID, ReleaseTitle: release})
+	dl := core.DownloadStatus{ID: "u-movie", State: core.DownloadCompleted, SavePath: "incomplete/" + release}
+
+	ctx := context.Background()
+	if err := h.mgr.ImportDownload(ctx, dl, grab); err != nil {
+		t.Fatalf("ImportDownload: %v", err)
+	}
+	if !h.exists(organizedRel) {
+		t.Fatalf("obfuscated movie was not imported to %s", organizedRel)
+	}
+	if got := h.grabStatus(grab.GrabID); got != core.GrabStatusImported {
+		t.Errorf("grab status = %q, want %q", got, core.GrabStatusImported)
+	}
+	if parked := h.unmatched(); len(parked) != 0 {
+		t.Errorf("unmatched queue = %+v, want empty", parked)
+	}
+}
+
+// TestImportDownloadDoesNotRelabelAPositiveClaim: the fallback must never
+// override a file that names a different episode than the grab asked for — a
+// mislabeled post imports as the wrong episode forever, a parked one is fixed
+// in a minute.
+func TestImportDownloadDoesNotRelabelAPositiveClaim(t *testing.T) {
+	h := newHarness(t)
+	sr := addSeriesItem(h)
+
+	const release = "Planet.Earth.II.S01E01.1080p.WEB-DL.x265"
+	const dir = "incomplete/" + release
+	const file = dir + "/Planet.Earth.II.S01E03.1080p.WEB-DL.x265.mkv"
+	h.writeVideo(file, "actually episode three")
+	h.parser[filepath.Base(file)] = episodeParse("Planet Earth II", 1, 3)
+	h.parser[release] = episodeParse("Planet Earth II", 1, 1)
+
+	grab := h.grabFor(core.GrabInfo{
+		SeriesID:     sr.ID,
+		SeasonNum:    1,
+		EpisodeIDs:   []int64{episodeID(h, sr.ID, 1, 1)},
+		ReleaseTitle: release,
+	})
+	dl := core.DownloadStatus{ID: "u-mislabeled", State: core.DownloadCompleted, SavePath: dir}
+
+	if err := h.mgr.ImportDownload(context.Background(), dl, grab); err != nil {
+		t.Fatalf("ImportDownload: %v", err)
+	}
+	parked := h.unmatched()
+	if len(parked) != 1 {
+		t.Fatalf("unmatched queue = %+v, want the mislabeled file parked", parked)
+	}
+	if got := h.grabStatus(grab.GrabID); got != core.GrabStatusFailed {
+		t.Errorf("grab status = %q, want %q", got, core.GrabStatusFailed)
+	}
+}
+
 // TestImportDownloadAcceptsASingleFileDownload covers the save path pointing
 // at a file rather than a directory, which is what a one-file torrent gives.
 func TestImportDownloadAcceptsASingleFileDownload(t *testing.T) {
