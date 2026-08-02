@@ -1,0 +1,6 @@
+=ybegin part=1 total=3 line=96 size=546 name=reference-multi.bin
+=ypart begin=1 end=200
+*+,-./0123456789:;<=}>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~€‚ƒ„…†‡ˆ
+‰Š‹Œ‘’“”•–—˜™š›œŸ ¡¢£¤¥¦§¨©ª«¬­®¯°±²³´µ¶·¸¹º»¼½¾¿ÀÁÂÃÄÅÆÇÈÉÊËÌÍÎÏĞÑÒÓÔÕÖ×ØÙÚÛÜİŞßàáâãäåæçè
+éêëìíîïğñ
+=yend size=200 part=1 pcrc32=ed086180

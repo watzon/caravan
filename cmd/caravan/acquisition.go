@@ -23,6 +23,7 @@ import (
 	"github.com/watzon/caravan/internal/indexer"
 	"github.com/watzon/caravan/internal/library"
 	"github.com/watzon/caravan/internal/store"
+	"github.com/watzon/caravan/internal/usenet"
 )
 
 // indexerTimeout bounds a single Torznab/Newznab call. An interactive search
@@ -122,6 +123,9 @@ type engineProvider struct {
 
 	mu     sync.Mutex
 	engine *download.Embedded
+	// news is the embedded Usenet engine, built on the same terms as the
+	// torrent one: lazily, under the storage root, once there is one.
+	news *usenet.Engine
 	// lastErr is the last construction failure reported, so an engine that
 	// cannot start does not log once per poll.
 	lastErr string
@@ -257,12 +261,22 @@ func (p *engineProvider) routes(ctx context.Context) ([]download.Route, error) {
 		torrentID = pick.id
 		torrent = p.clientRoute(pick, core.ProtocolTorrent)
 	}
-	// Usenet has no built-in engine, so an unset, deleted or disabled default
-	// leaves the protocol unrouted — and a usenet grab becomes a recorded
-	// rejection rather than a misroute into a torrent engine.
+	// Usenet's default is the embedded Usenet engine unless a usenet client is
+	// picked — the same rule torrents follow, and the reason a stock Caravan
+	// needs no external download client for either protocol (PLAN phase 7
+	// task 6). A picked client that has since been deleted or disabled falls
+	// back to it rather than leaving every usenet grab unrouted.
 	usenetID := int64(0)
 	if pick, ok := engines[routePick(settings, store.SettingRouteUsenet)]; ok && pick.protocol == core.ProtocolUsenet {
 		usenetID = pick.id
+	}
+	news := p.embeddedUsenet()
+	if news != nil {
+		// News-server configuration reaches a running engine here rather than
+		// at construction, so adding or editing a server takes effect on the
+		// next queue operation instead of at the next restart. It is a no-op
+		// when nothing changed.
+		p.syncUsenetServers(ctx, news)
 	}
 
 	routes := []download.Route{torrent}
@@ -274,8 +288,17 @@ func (p *engineProvider) routes(ctx context.Context) ([]download.Route, error) {
 		// protocol-less route, the same rule every non-default client follows.
 		routes = append(routes, download.Route{Name: download.EngineName, Engine: embedded})
 	}
-	if usenetID != 0 {
+	switch {
+	case usenetID != 0:
 		routes = append(routes, p.clientRoute(engines[usenetID], core.ProtocolUsenet))
+		if news != nil {
+			// Same reasoning as the embedded torrent engine above: a client
+			// taking the default must not strand the downloads the built-in
+			// engine is still holding.
+			routes = append(routes, download.Route{Name: usenet.EngineName, Engine: news})
+		}
+	case news != nil:
+		routes = append(routes, download.Route{Name: usenet.EngineName, Protocol: core.ProtocolUsenet, Engine: news})
 	}
 	for _, cfg := range configured {
 		pick, ok := engines[cfg.ID]
@@ -487,6 +510,76 @@ func (p *engineProvider) embedded() core.Engine {
 	return engine
 }
 
+// embeddedUsenet returns the built-in Usenet engine, or nil when there is no
+// storage root to build one under or building one failed.
+//
+// It is built on exactly the terms the torrent engine is: lazily, because a
+// first run has no storage root yet (SPEC §10.1), and once, because
+// construction is also what resumes the queue. No configured news server is
+// not a reason to withhold it — the engine still has to list, pause and remove
+// whatever it already holds, and it tells the user to add a server when they
+// try to grab.
+func (p *engineProvider) embeddedUsenet() *usenet.Engine {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.news != nil {
+		return p.news
+	}
+
+	ctx := context.Background()
+	root, err := p.adapter.StorageRoot(ctx)
+	if err != nil {
+		p.reportLocked("read storage root", err)
+		return nil
+	}
+	if root == "" {
+		return nil
+	}
+	servers, err := p.adapter.st.ListEnabledUsenetServers(ctx)
+	if err != nil {
+		p.reportLocked("read usenet servers", err)
+		return nil
+	}
+	engine, err := usenet.NewEngine(root, usenet.EngineOpts{
+		Servers: usenet.ServerConfigs(servers),
+		Store:   downloadPersistence{st: p.adapter.st},
+		Paused:  p.paused,
+		Logger:  p.log,
+	})
+	if err != nil {
+		p.reportLocked("start usenet engine", err)
+		return nil
+	}
+
+	p.news = engine
+	p.log.Info("usenet engine ready", "root", root, "servers", len(servers))
+	return engine
+}
+
+// syncUsenetServers pushes the enabled `usenet_servers` rows into a running
+// engine.
+//
+// This is how a settings change propagates without a restart, and it is
+// deliberately the same shape as syncClientEngines: the routing table is
+// rebuilt per operation, so re-reading the rows here is what makes "add a
+// backup provider" take effect on the next queue poll. SetServers compares a
+// fingerprint and does nothing when the configuration is unchanged, so the
+// common case costs one small query and no dropped connections.
+func (p *engineProvider) syncUsenetServers(ctx context.Context, engine *usenet.Engine) {
+	servers, err := p.adapter.st.ListEnabledUsenetServers(ctx)
+	if err != nil {
+		p.mu.Lock()
+		p.reportLocked("read usenet servers", err)
+		p.mu.Unlock()
+		return
+	}
+	if err := engine.SetServers(usenet.ServerConfigs(servers)); err != nil {
+		p.mu.Lock()
+		p.reportLocked("apply usenet servers", err)
+		p.mu.Unlock()
+	}
+}
+
 // reportLocked logs a construction failure, skipping a repeat of the one
 // already reported. Must be called with p.mu held.
 func (p *engineProvider) reportLocked(msg string, err error) {
@@ -507,12 +600,20 @@ func (p *engineProvider) Close() error {
 		p.closeClientEngine(cached)
 		delete(p.external, id)
 	}
-	if p.engine == nil {
-		return nil
+
+	var failures []error
+	if news := p.news; news != nil {
+		p.news = nil
+		// Closing flushes each download's resume sidecar, which is what makes
+		// the next start continue a half-finished release rather than refetch
+		// the articles it already has.
+		failures = append(failures, news.Close())
 	}
-	engine := p.engine
-	p.engine = nil
-	return engine.Close()
+	if engine := p.engine; engine != nil {
+		p.engine = nil
+		failures = append(failures, engine.Close())
+	}
+	return errors.Join(failures...)
 }
 
 // ApplyEngineSettings updates rates and seeding targets on an existing engine.

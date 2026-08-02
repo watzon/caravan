@@ -1,0 +1,33 @@
+Loading "basic.par2".
+Loaded 8 new packets
+Loading "basic.par2".
+No new packets found
+Loading "basic.vol07+3.par2".
+Loaded 3 new packets including 3 recovery blocks
+Loading "basic.vol03+4.par2".
+Loaded 4 new packets including 4 recovery blocks
+Loading "basic.vol00+1.par2".
+Loaded 1 new packets including 1 recovery blocks
+Loading "basic.vol01+2.par2".
+Loaded 2 new packets including 2 recovery blocks
+
+There are 3 recoverable files and 0 other files.
+The block size used was 1024 bytes.
+There are a total of 25 data blocks.
+The total size of the data files is 25096 bytes.
+
+Verifying source files:
+
+Target: "alpha.bin" - missing.
+Target: "gamma.bin" - missing.
+Target: "beta.bin" - missing.
+
+Scanning extra files:
+
+
+Repair is required.
+3 file(s) are missing.
+You have 0 out of 25 data blocks available.
+You have 10 recovery blocks available.
+Repair is not possible.
+You need 15 more recovery blocks to be able to repair.

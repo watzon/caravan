@@ -304,7 +304,7 @@ func TestRunnerAutomaticGrabRecordsUnroutableProtocol(t *testing.T) {
 	if len(grabs) != 1 || grabs[0].Status != core.GrabStatusRejected {
 		t.Fatalf("grabs = %#v, want one rejected grab", grabs)
 	}
-	if !strings.Contains(grabs[0].Reason, "SABnzbd") {
+	if !strings.Contains(grabs[0].Reason, "Usenet servers") {
 		t.Fatalf("recorded reason = %q, want the reason the user can act on", grabs[0].Reason)
 	}
 

@@ -5,6 +5,10 @@ your library, what Caravan requires of your filesystem to do it, and what
 happens when the client stops answering (SPEC §5.1, §13; PLAN phase 6, tasks 2
 and 4).
 
+External clients are optional. Caravan has a built-in engine for both protocols
+— [docs/usenet.md](usenet.md) covers the Usenet one — so nothing on this page is
+needed unless you have chosen to route grabs to a client you already run.
+
 Configuring a client and routing releases to one is
 [docs/download-clients.md](download-clients.md). This page starts after that:
 the client has the download.

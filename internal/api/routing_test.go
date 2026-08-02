@@ -122,8 +122,14 @@ func TestUsenetGrabWithoutAUsenetEngineIsRejected(t *testing.T) {
 	wantStatus(t, rec, http.StatusConflict)
 	var failure errorResponse
 	decodeBody(t, rec, &failure)
-	if !strings.Contains(failure.Error, "SABnzbd") || !strings.Contains(failure.Error, "Download clients") {
+	// What to configure is a storage root and a news server: the built-in
+	// Usenet engine needs no external download client, and telling the user
+	// otherwise would present one as required (PLAN phase 7 acceptance).
+	if !strings.Contains(failure.Error, "storage root") || !strings.Contains(failure.Error, "Usenet servers") {
 		t.Fatalf("error = %q, want it to name what to configure", failure.Error)
+	}
+	if strings.Contains(failure.Error, "SABnzbd") || strings.Contains(failure.Error, "NZBGet") {
+		t.Fatalf("error = %q, want it not to present an external client as required", failure.Error)
 	}
 
 	if adds := torrentEngine.addCalls(); len(adds) != 0 {
@@ -137,7 +143,7 @@ func TestUsenetGrabWithoutAUsenetEngineIsRejected(t *testing.T) {
 	if len(grabs) != 1 || grabs[0].Status != core.GrabStatusRejected {
 		t.Fatalf("grabs = %+v, want one rejected grab", grabs)
 	}
-	if !strings.Contains(grabs[0].Reason, "SABnzbd") {
+	if !strings.Contains(grabs[0].Reason, "Usenet servers") {
 		t.Fatalf("recorded reason = %q, want the reason the user can act on", grabs[0].Reason)
 	}
 
@@ -158,7 +164,7 @@ func TestUsenetGrabWithoutAUsenetEngineIsRejected(t *testing.T) {
 	if len(events) != 1 || events[0].Level != core.EventLevelWarn || events[0].Category != "grab" {
 		t.Fatalf("events = %+v, want one warning grab event", events)
 	}
-	if !strings.Contains(events[0].Detail, "Download clients") {
+	if !strings.Contains(events[0].Detail, "Usenet servers") {
 		t.Fatalf("event detail = %q, want it to name what to configure", events[0].Detail)
 	}
 }

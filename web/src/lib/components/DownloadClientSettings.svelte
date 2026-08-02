@@ -275,7 +275,7 @@
     <EmptyState
       icon="link"
       title="No download clients yet"
-      message="Point Caravan at a qBittorrent, SABnzbd or NZBGet instance to hand grabs to it. Usenet releases need one; torrents do not.">
+      message="Optional. Caravan downloads both torrents and NZBs on its own; add a client here only to hand grabs to qBittorrent, SABnzbd or NZBGet instead.">
       {#snippet action()}
         <Button variant="primary" onclick={openAdd}>Add client</Button>
       {/snippet}

@@ -229,6 +229,19 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("DELETE /download-clients/{id}", s.handleDeleteDownloadClient)
 	api.HandleFunc("POST /download-clients/{id}/test", s.handleTestDownloadClient)
 
+	// News servers the embedded engine fetches article bodies from (SPEC §5.1,
+	// PLAN phase 7 task 2). These are article sources, not download clients:
+	// they are what the built-in engine reads Usenet releases from itself.
+	// /test with no id in the path probes an unsaved configuration, exactly as
+	// the download-client and indexer forms do.
+	api.HandleFunc("GET /usenet-servers", s.handleListUsenetServers)
+	api.HandleFunc("POST /usenet-servers", s.handleCreateUsenetServer)
+	api.HandleFunc("POST /usenet-servers/test", s.handleTestUsenetServerConfig)
+	api.HandleFunc("GET /usenet-servers/{id}", s.handleGetUsenetServer)
+	api.HandleFunc("PUT /usenet-servers/{id}", s.handleUpdateUsenetServer)
+	api.HandleFunc("DELETE /usenet-servers/{id}", s.handleDeleteUsenetServer)
+	api.HandleFunc("POST /usenet-servers/{id}/test", s.handleTestUsenetServer)
+
 	// Queue ids are the engine's own handles, not library ids.
 	api.HandleFunc("GET /downloads", s.handleListDownloads)
 	api.HandleFunc("POST /downloads/{id}/pause", s.handlePauseDownload)

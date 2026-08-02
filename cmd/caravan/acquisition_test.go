@@ -16,6 +16,8 @@ import (
 	"github.com/watzon/caravan/internal/core"
 	"github.com/watzon/caravan/internal/download"
 	"github.com/watzon/caravan/internal/store"
+	"github.com/watzon/caravan/internal/usenet"
+	"github.com/watzon/caravan/internal/usenet/nntp"
 )
 
 func testAdapter(t *testing.T) (*libraryAdapter, *store.Store) {
@@ -289,10 +291,12 @@ func TestEngineProviderBuildsEnginesFromDownloadClientRows(t *testing.T) {
 	ctx := context.Background()
 	provider, st, built := routingProvider(t)
 
-	// Nothing configured: torrents go to the embedded engine and usenet has
-	// nowhere to go, which is a stock Caravan.
-	if got := routeNames(t, provider); len(got) != 1 || got[0] != "torrent=embedded" {
-		t.Fatalf("routes with nothing configured = %v, want [torrent=embedded]", got)
+	// Nothing configured: both protocols go to their built-in engine, which
+	// is a stock Caravan with no external download client anywhere
+	// (PLAN phase 7 task 6).
+	if got := routeNames(t, provider); len(got) != 2 ||
+		got[0] != "torrent=embedded" || got[1] != "usenet=embedded-usenet" {
+		t.Fatalf("routes with nothing configured = %v, want [torrent=embedded usenet=embedded-usenet]", got)
 	}
 	if len(*built) != 0 {
 		t.Errorf("built %d client engines with no rows", len(*built))
@@ -307,15 +311,18 @@ func TestEngineProviderBuildsEnginesFromDownloadClientRows(t *testing.T) {
 	}
 	// A client exists but is nobody's default: it is addressable for the
 	// downloads it holds, and takes no new work.
-	if got := routeNames(t, provider); len(got) != 2 || got[1] != "=sabnzbd" {
+	if got := routeNames(t, provider); len(got) != 3 || got[2] != "=sabnzbd" {
 		t.Fatalf("routes with an unpicked client = %v, want the client with no protocol", got)
 	}
 
 	if err := st.SetSetting(ctx, store.SettingRouteUsenet, strconv.FormatInt(sab.ID, 10)); err != nil {
 		t.Fatalf("set usenet route: %v", err)
 	}
-	if got := routeNames(t, provider); len(got) != 2 || got[1] != "usenet=sabnzbd" {
-		t.Fatalf("routes after picking the usenet default = %v, want usenet=sabnzbd", got)
+	// The client takes the default; the built-in engine rejoins without a
+	// protocol, still holding whatever it took before the default moved.
+	if got := routeNames(t, provider); len(got) != 3 ||
+		got[1] != "usenet=sabnzbd" || got[2] != "=embedded-usenet" {
+		t.Fatalf("routes after picking the usenet default = %v, want [torrent=embedded usenet=sabnzbd =embedded-usenet]", got)
 	}
 	if len(*built) != 1 {
 		t.Fatalf("built %d client engines, want 1 reused across resolutions", len(*built))
@@ -327,7 +334,7 @@ func TestEngineProviderBuildsEnginesFromDownloadClientRows(t *testing.T) {
 	if err := st.UpsertDownloadClient(ctx, &sab); err != nil {
 		t.Fatalf("UpsertDownloadClient (edit): %v", err)
 	}
-	if got := routeNames(t, provider); len(got) != 2 || got[1] != "usenet=sabnzbd" {
+	if got := routeNames(t, provider); len(got) != 3 || got[1] != "usenet=sabnzbd" {
 		t.Fatalf("routes after an edit = %v, want usenet=sabnzbd", got)
 	}
 	if len(*built) != 2 {
@@ -337,26 +344,28 @@ func TestEngineProviderBuildsEnginesFromDownloadClientRows(t *testing.T) {
 		t.Error("the pre-edit engine was left open")
 	}
 
-	// Disabling the client takes its engine out of the table, and usenet goes
-	// back to unrouted rather than falling through to a torrent engine.
+	// Disabling the client takes its engine out of the table, and usenet falls
+	// back to the built-in engine rather than going unrouted.
 	sab.Enabled = false
 	if err := st.UpsertDownloadClient(ctx, &sab); err != nil {
 		t.Fatalf("UpsertDownloadClient (disable): %v", err)
 	}
-	if got := routeNames(t, provider); len(got) != 1 || got[0] != "torrent=embedded" {
-		t.Fatalf("routes with the client disabled = %v, want [torrent=embedded]", got)
+	if got := routeNames(t, provider); len(got) != 2 ||
+		got[0] != "torrent=embedded" || got[1] != "usenet=embedded-usenet" {
+		t.Fatalf("routes with the client disabled = %v, want [torrent=embedded usenet=embedded-usenet]", got)
 	}
 	if !(*built)[1].closed {
 		t.Error("the disabled client's engine was left open")
 	}
 
-	// A routing setting pointing at a row that is gone leaves the protocol
-	// unrouted rather than silently routing it somewhere else.
+	// A routing setting pointing at a row that is gone falls back to the
+	// built-in engine rather than silently routing somewhere else.
 	if err := st.DeleteDownloadClient(ctx, sab.ID); err != nil {
 		t.Fatalf("DeleteDownloadClient: %v", err)
 	}
-	if got := routeNames(t, provider); len(got) != 1 || got[0] != "torrent=embedded" {
-		t.Fatalf("routes with the client deleted = %v, want [torrent=embedded]", got)
+	if got := routeNames(t, provider); len(got) != 2 ||
+		got[0] != "torrent=embedded" || got[1] != "usenet=embedded-usenet" {
+		t.Fatalf("routes with the client deleted = %v, want [torrent=embedded usenet=embedded-usenet]", got)
 	}
 }
 
@@ -381,15 +390,17 @@ func TestEngineProviderTorrentDefaultFallsBackToEmbedded(t *testing.T) {
 	// the table without one: it is still holding whatever it took before the
 	// default moved, and those downloads have to stay listable, importable and
 	// removable.
-	if got := routeNames(t, provider); len(got) != 2 || got[0] != "torrent=qbittorrent" || got[1] != "=embedded" {
-		t.Fatalf("routes = %v, want [torrent=qbittorrent =embedded]", got)
+	if got := routeNames(t, provider); len(got) != 3 ||
+		got[0] != "torrent=qbittorrent" || got[1] != "=embedded" || got[2] != "usenet=embedded-usenet" {
+		t.Fatalf("routes = %v, want [torrent=qbittorrent =embedded usenet=embedded-usenet]", got)
 	}
 
 	if err := st.DeleteDownloadClient(ctx, qb.ID); err != nil {
 		t.Fatalf("DeleteDownloadClient: %v", err)
 	}
-	if got := routeNames(t, provider); len(got) != 1 || got[0] != "torrent=embedded" {
-		t.Fatalf("routes after the torrent default vanished = %v, want [torrent=embedded]", got)
+	if got := routeNames(t, provider); len(got) != 2 ||
+		got[0] != "torrent=embedded" || got[1] != "usenet=embedded-usenet" {
+		t.Fatalf("routes after the torrent default vanished = %v, want [torrent=embedded usenet=embedded-usenet]", got)
 	}
 }
 
@@ -529,8 +540,8 @@ func TestEngineProviderIgnoresARouteOfTheWrongProtocol(t *testing.T) {
 		t.Fatalf("set usenet route: %v", err)
 	}
 	got := routeNames(t, provider)
-	if len(got) != 2 || got[0] != "torrent=embedded" || got[1] != "usenet=sabnzbd" {
-		t.Fatalf("routes = %v, want [torrent=embedded usenet=sabnzbd]", got)
+	if len(got) != 3 || got[0] != "torrent=embedded" || got[1] != "usenet=sabnzbd" || got[2] != "=embedded-usenet" {
+		t.Fatalf("routes = %v, want [torrent=embedded usenet=sabnzbd =embedded-usenet]", got)
 	}
 }
 
@@ -681,4 +692,123 @@ func countClientEvents(t *testing.T, st *store.Store, want string) int {
 		}
 	}
 	return n
+}
+
+// A usenet client taking the default must not evict the embedded Usenet engine
+// from the routing table.
+//
+// This is the phase-6 regression class applied to phase 7's engine: the
+// built-in engine keeps running and keeps holding whatever it took before the
+// default moved — releases mid-download, ones waiting on par2, ones about to
+// finish extracting. Dropping it strands every one of them, because
+// Router.List stops reporting them (so they vanish from the queue and the
+// import watcher never sees them complete) and Router.owner stops finding them
+// (so pause, resume and remove all fail).
+func TestEngineProviderKeepsTheEmbeddedUsenetEngineWhenAClientTakesTheUsenetDefault(t *testing.T) {
+	ctx := context.Background()
+	provider, st, _ := routingProvider(t)
+
+	news := provider.embeddedUsenet()
+	if news == nil {
+		t.Fatal("no embedded usenet engine to keep")
+	}
+
+	sab := core.DownloadClientConfig{
+		Type: core.DownloadClientSABnzbd, Name: "sab", URL: "http://sab.example",
+		APIKey: "secret", Priority: 25, Enabled: true,
+	}
+	if err := st.UpsertDownloadClient(ctx, &sab); err != nil {
+		t.Fatalf("UpsertDownloadClient: %v", err)
+	}
+	if err := st.SetSetting(ctx, store.SettingRouteUsenet, strconv.FormatInt(sab.ID, 10)); err != nil {
+		t.Fatalf("set usenet route: %v", err)
+	}
+
+	routes, err := provider.routes(ctx)
+	if err != nil {
+		t.Fatalf("routes: %v", err)
+	}
+	var kept *download.Route
+	for i := range routes {
+		if routes[i].Engine == core.Engine(news) {
+			kept = &routes[i]
+		}
+	}
+	if kept == nil {
+		t.Fatalf("routes = %v: the embedded Usenet engine was dropped when the client took the usenet default, stranding every download it still holds", routeNames(t, provider))
+	}
+	// Protocol-less, exactly like a client that is nobody's default: it is
+	// addressable for what it holds, and takes no new work.
+	if kept.Protocol != "" {
+		t.Errorf("embedded usenet route protocol = %q, want none — the client is the usenet default now", kept.Protocol)
+	}
+	// And the client really is where new NZBs go, so keeping the built-in
+	// engine has not quietly undone the routing choice.
+	if got := provider.Engine().(*download.Router).EngineNameFor(ctx, core.ProtocolUsenet); got != core.DownloadClientSABnzbd {
+		t.Errorf("usenet releases route to %q, want %q", got, core.DownloadClientSABnzbd)
+	}
+}
+
+// A stock Caravan downloads both protocols with nothing configured. This is
+// the "default default" (PLAN phase 7 task 6) and the acceptance criterion
+// that no external client is required for either protocol.
+func TestEngineProviderRoutesUsenetToTheBuiltInEngineWithNothingConfigured(t *testing.T) {
+	ctx := context.Background()
+	provider, _, _ := routingProvider(t)
+
+	router, ok := provider.Engine().(*download.Router)
+	if !ok {
+		t.Fatal("provider did not hand out a router")
+	}
+	if got := router.EngineNameFor(ctx, core.ProtocolUsenet); got != usenet.EngineName {
+		t.Errorf("usenet releases route to %q, want the built-in %q", got, usenet.EngineName)
+	}
+	if got := router.EngineNameFor(ctx, core.ProtocolTorrent); got != download.EngineName {
+		t.Errorf("torrent releases route to %q, want the built-in %q", got, download.EngineName)
+	}
+}
+
+// Adding a news server has to reach a running engine, because the import
+// watcher takes one engine at startup and drives it for the life of the
+// process. Without this a provider added after boot would never be dialled.
+func TestEngineProviderPropagatesUsenetServerChangesWithoutARestart(t *testing.T) {
+	ctx := context.Background()
+	provider, st, _ := routingProvider(t)
+
+	news := provider.embeddedUsenet()
+	if news == nil {
+		t.Fatal("no embedded usenet engine")
+	}
+	if _, err := news.Add(ctx, core.Release{
+		Title: "Before.Any.Server", Protocol: core.ProtocolUsenet, DownloadURL: "http://example.invalid/a.nzb",
+	}, core.AddOpts{}); !errors.Is(err, nntp.ErrNoServers) {
+		t.Fatalf("Add with no servers = %v, want nntp.ErrNoServers", err)
+	}
+
+	server := core.UsenetServerConfig{
+		Name: "primary", Host: "news.example", Port: 563, TLS: true,
+		Username: "reader", Password: "secret", MaxConnections: 8, Priority: 1, Enabled: true,
+	}
+	if err := st.UpsertUsenetServer(ctx, &server); err != nil {
+		t.Fatalf("UpsertUsenetServer: %v", err)
+	}
+
+	// Resolving the routing table is what a queue operation does, and it is
+	// where the new configuration lands.
+	if _, err := provider.routes(ctx); err != nil {
+		t.Fatalf("routes: %v", err)
+	}
+
+	// The engine now has somewhere to fetch from, so the refusal is gone. The
+	// grab fails on the unreachable indexer instead, which is the next thing
+	// to go wrong and proves the server check was passed.
+	_, err := news.Add(ctx, core.Release{
+		Title: "After.A.Server", Protocol: core.ProtocolUsenet, DownloadURL: "http://127.0.0.1:1/a.nzb",
+	}, core.AddOpts{})
+	if errors.Is(err, nntp.ErrNoServers) {
+		t.Fatal("the new news server never reached the running engine")
+	}
+	if err == nil {
+		t.Fatal("Add against an unreachable indexer unexpectedly succeeded")
+	}
 }

@@ -1,0 +1,461 @@
+{
+  "generated_by": "par2cmdline version 1.2.0",
+  "note": "Reference verdicts recorded by par2cmdline. Tests assert agreement with these numbers and never invoke the par2 binary. Regenerate with ./generate.sh.",
+  "sets": [
+    {
+      "block_size": 1024,
+      "cases": [
+        {
+          "case": "pristine",
+          "damaged_files": [],
+          "description": "undamaged; verification alone must report nothing to do",
+          "reference": {
+            "block_deficit": 0,
+            "data_blocks_good": 25,
+            "data_blocks_total": 25,
+            "excess_recovery_blocks": null,
+            "file_blocks_found": {},
+            "files_ok": [
+              "alpha.bin",
+              "beta.bin",
+              "gamma.bin"
+            ],
+            "recovery_blocks_available": 10,
+            "repair_exit_code": null,
+            "slices_needed": 0,
+            "verdict": "complete",
+            "verify_exit_code": 0
+          },
+          "removed_files": []
+        },
+        {
+          "case": "zeroed-range",
+          "damaged_files": [
+            "alpha.bin"
+          ],
+          "description": "300 zeroed bytes straddling two slices of alpha.bin",
+          "reference": {
+            "block_deficit": 0,
+            "data_blocks_good": 23,
+            "data_blocks_total": 25,
+            "excess_recovery_blocks": 8,
+            "file_blocks_found": {
+              "alpha.bin": [
+                18,
+                20
+              ]
+            },
+            "files_ok": [
+              "beta.bin",
+              "gamma.bin"
+            ],
+            "recovery_blocks_available": 10,
+            "repair_exit_code": 0,
+            "slices_needed": 2,
+            "verdict": "repairable",
+            "verify_exit_code": 1
+          },
+          "removed_files": []
+        },
+        {
+          "case": "flipped-byte",
+          "damaged_files": [
+            "alpha.bin"
+          ],
+          "description": "a single inverted byte inside one slice of alpha.bin",
+          "reference": {
+            "block_deficit": 0,
+            "data_blocks_good": 24,
+            "data_blocks_total": 25,
+            "excess_recovery_blocks": 9,
+            "file_blocks_found": {
+              "alpha.bin": [
+                19,
+                20
+              ]
+            },
+            "files_ok": [
+              "beta.bin",
+              "gamma.bin"
+            ],
+            "recovery_blocks_available": 10,
+            "repair_exit_code": 0,
+            "slices_needed": 1,
+            "verdict": "repairable",
+            "verify_exit_code": 1
+          },
+          "removed_files": []
+        },
+        {
+          "case": "truncated",
+          "damaged_files": [
+            "beta.bin"
+          ],
+          "description": "beta.bin cut short mid-slice",
+          "reference": {
+            "block_deficit": 0,
+            "data_blocks_good": 23,
+            "data_blocks_total": 25,
+            "excess_recovery_blocks": 8,
+            "file_blocks_found": {
+              "beta.bin": [
+                2,
+                4
+              ]
+            },
+            "files_ok": [
+              "alpha.bin",
+              "gamma.bin"
+            ],
+            "recovery_blocks_available": 10,
+            "repair_exit_code": 0,
+            "slices_needed": 2,
+            "verdict": "repairable",
+            "verify_exit_code": 1
+          },
+          "removed_files": []
+        },
+        {
+          "case": "missing-file",
+          "damaged_files": [],
+          "description": "gamma.bin absent entirely",
+          "reference": {
+            "block_deficit": 0,
+            "data_blocks_good": 24,
+            "data_blocks_total": 25,
+            "excess_recovery_blocks": 9,
+            "file_blocks_found": {},
+            "files_ok": [
+              "alpha.bin",
+              "beta.bin"
+            ],
+            "recovery_blocks_available": 10,
+            "repair_exit_code": 0,
+            "slices_needed": 1,
+            "verdict": "repairable",
+            "verify_exit_code": 1
+          },
+          "removed_files": [
+            "gamma.bin"
+          ]
+        },
+        {
+          "case": "sub-block-file",
+          "damaged_files": [
+            "gamma.bin"
+          ],
+          "description": "gamma.bin damaged; its only slice is shorter than the block size",
+          "reference": {
+            "block_deficit": 0,
+            "data_blocks_good": 24,
+            "data_blocks_total": 25,
+            "excess_recovery_blocks": 9,
+            "file_blocks_found": {},
+            "files_ok": [
+              "alpha.bin",
+              "beta.bin"
+            ],
+            "recovery_blocks_available": 10,
+            "repair_exit_code": 0,
+            "slices_needed": 1,
+            "verdict": "repairable",
+            "verify_exit_code": 1
+          },
+          "removed_files": []
+        },
+        {
+          "case": "tail-slice",
+          "damaged_files": [
+            "alpha.bin"
+          ],
+          "description": "the short final slice of alpha.bin is destroyed",
+          "reference": {
+            "block_deficit": 0,
+            "data_blocks_good": 24,
+            "data_blocks_total": 25,
+            "excess_recovery_blocks": 9,
+            "file_blocks_found": {
+              "alpha.bin": [
+                19,
+                20
+              ]
+            },
+            "files_ok": [
+              "beta.bin",
+              "gamma.bin"
+            ],
+            "recovery_blocks_available": 10,
+            "repair_exit_code": 0,
+            "slices_needed": 1,
+            "verdict": "repairable",
+            "verify_exit_code": 1
+          },
+          "removed_files": []
+        },
+        {
+          "case": "multi-damage",
+          "damaged_files": [
+            "alpha.bin",
+            "beta.bin"
+          ],
+          "description": "all three files broken at once, still inside capacity",
+          "reference": {
+            "block_deficit": 0,
+            "data_blocks_good": 20,
+            "data_blocks_total": 25,
+            "excess_recovery_blocks": 5,
+            "file_blocks_found": {
+              "alpha.bin": [
+                18,
+                20
+              ],
+              "beta.bin": [
+                2,
+                4
+              ]
+            },
+            "files_ok": [],
+            "recovery_blocks_available": 10,
+            "repair_exit_code": 0,
+            "slices_needed": 5,
+            "verdict": "repairable",
+            "verify_exit_code": 1
+          },
+          "removed_files": [
+            "gamma.bin"
+          ]
+        },
+        {
+          "case": "at-capacity",
+          "damaged_files": [
+            "alpha.bin"
+          ],
+          "description": "exactly 10 slices destroyed against exactly 10 recovery blocks",
+          "reference": {
+            "block_deficit": 0,
+            "data_blocks_good": 15,
+            "data_blocks_total": 25,
+            "excess_recovery_blocks": null,
+            "file_blocks_found": {
+              "alpha.bin": [
+                10,
+                20
+              ]
+            },
+            "files_ok": [
+              "beta.bin",
+              "gamma.bin"
+            ],
+            "recovery_blocks_available": 10,
+            "repair_exit_code": 0,
+            "slices_needed": 10,
+            "verdict": "repairable",
+            "verify_exit_code": 1
+          },
+          "removed_files": []
+        },
+        {
+          "case": "unrepairable",
+          "damaged_files": [
+            "alpha.bin"
+          ],
+          "description": "13 slices destroyed against 10 recovery blocks",
+          "reference": {
+            "block_deficit": 3,
+            "data_blocks_good": 12,
+            "data_blocks_total": 25,
+            "excess_recovery_blocks": null,
+            "file_blocks_found": {
+              "alpha.bin": [
+                7,
+                20
+              ]
+            },
+            "files_ok": [
+              "beta.bin",
+              "gamma.bin"
+            ],
+            "recovery_blocks_available": 10,
+            "repair_exit_code": null,
+            "slices_needed": 13,
+            "verdict": "unrepairable",
+            "verify_exit_code": 2
+          },
+          "removed_files": []
+        },
+        {
+          "case": "all-missing",
+          "damaged_files": [],
+          "description": "every source file gone; far beyond capacity",
+          "reference": {
+            "block_deficit": 15,
+            "data_blocks_good": 0,
+            "data_blocks_total": 25,
+            "excess_recovery_blocks": null,
+            "file_blocks_found": {},
+            "files_ok": [],
+            "recovery_blocks_available": 10,
+            "repair_exit_code": null,
+            "slices_needed": 25,
+            "verdict": "unrepairable",
+            "verify_exit_code": 2
+          },
+          "removed_files": [
+            "alpha.bin",
+            "beta.bin",
+            "gamma.bin"
+          ]
+        }
+      ],
+      "files": [
+        {
+          "md5": "07cfc183f97af48b4994b98f62527274",
+          "name": "alpha.bin",
+          "sha256": "7874c7d1ef41a45d89a7501e5c2fa4056c209f83d262bfa507c7b0ce5fb4adaf",
+          "size": 20000
+        },
+        {
+          "md5": "b7b2e8c14a07f9a56e3613a5d13cca54",
+          "name": "beta.bin",
+          "sha256": "1fd701b4bb9bff70cd505616984d5546b051affecd4b0634ac63f16b6d32dc0e",
+          "size": 4096
+        },
+        {
+          "md5": "68dc2fa74657b828071fd7a856172d7d",
+          "name": "gamma.bin",
+          "sha256": "714a2da0161e5e180da3c02b456dff0a6be3ab4f0b90eca2d9c7d1bf3bcec4e3",
+          "size": 1000
+        }
+      ],
+      "index_file": "basic.par2",
+      "name": "basic",
+      "par2_files": [
+        "basic.par2",
+        "basic.vol00+1.par2",
+        "basic.vol01+2.par2",
+        "basic.vol03+4.par2",
+        "basic.vol07+3.par2"
+      ],
+      "recovery_blocks_created": 10
+    },
+    {
+      "block_size": 512,
+      "cases": [
+        {
+          "case": "pristine",
+          "damaged_files": [],
+          "description": "undamaged single-file set",
+          "reference": {
+            "block_deficit": 0,
+            "data_blocks_good": 6,
+            "data_blocks_total": 6,
+            "excess_recovery_blocks": null,
+            "file_blocks_found": {},
+            "files_ok": [
+              "delta.bin"
+            ],
+            "recovery_blocks_available": 4,
+            "repair_exit_code": null,
+            "slices_needed": 0,
+            "verdict": "complete",
+            "verify_exit_code": 0
+          },
+          "removed_files": []
+        },
+        {
+          "case": "zeroed-range",
+          "damaged_files": [
+            "delta.bin"
+          ],
+          "description": "two slices of delta.bin zeroed",
+          "reference": {
+            "block_deficit": 0,
+            "data_blocks_good": 4,
+            "data_blocks_total": 6,
+            "excess_recovery_blocks": 2,
+            "file_blocks_found": {
+              "delta.bin": [
+                4,
+                6
+              ]
+            },
+            "files_ok": [],
+            "recovery_blocks_available": 4,
+            "repair_exit_code": 0,
+            "slices_needed": 2,
+            "verdict": "repairable",
+            "verify_exit_code": 1
+          },
+          "removed_files": []
+        },
+        {
+          "case": "at-capacity",
+          "damaged_files": [
+            "delta.bin"
+          ],
+          "description": "four slices destroyed against four recovery blocks",
+          "reference": {
+            "block_deficit": 0,
+            "data_blocks_good": 2,
+            "data_blocks_total": 6,
+            "excess_recovery_blocks": null,
+            "file_blocks_found": {
+              "delta.bin": [
+                2,
+                6
+              ]
+            },
+            "files_ok": [],
+            "recovery_blocks_available": 4,
+            "repair_exit_code": 0,
+            "slices_needed": 4,
+            "verdict": "repairable",
+            "verify_exit_code": 1
+          },
+          "removed_files": []
+        },
+        {
+          "case": "unrepairable",
+          "damaged_files": [
+            "delta.bin"
+          ],
+          "description": "five slices destroyed against four recovery blocks",
+          "reference": {
+            "block_deficit": 1,
+            "data_blocks_good": 1,
+            "data_blocks_total": 6,
+            "excess_recovery_blocks": null,
+            "file_blocks_found": {
+              "delta.bin": [
+                1,
+                6
+              ]
+            },
+            "files_ok": [],
+            "recovery_blocks_available": 4,
+            "repair_exit_code": null,
+            "slices_needed": 5,
+            "verdict": "unrepairable",
+            "verify_exit_code": 2
+          },
+          "removed_files": []
+        }
+      ],
+      "files": [
+        {
+          "md5": "6fa2c0c9fc4aa52308997363f37fc4da",
+          "name": "delta.bin",
+          "sha256": "18ec0a972b584eb3cc7b470d73818469bd2075288898935da1ff7cde99afde58",
+          "size": 3000
+        }
+      ],
+      "index_file": "small.par2",
+      "name": "small",
+      "par2_files": [
+        "small.par2",
+        "small.vol0+4.par2"
+      ],
+      "recovery_blocks_created": 4
+    }
+  ]
+}

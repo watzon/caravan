@@ -2,10 +2,10 @@
  * The routing pickers, mounted for real against a stubbed /api/v1.
  *
  * What is worth proving here is that the screen cannot express a routing that
- * would not route: only enabled clients of the right protocol are offered,
- * the built-in engine is always the torrent fallback, and usenet is allowed
- * to be unconfigured — which is the state that makes a usenet grab a recorded
- * rejection rather than a misroute.
+ * would not route: only enabled clients of the right protocol are offered, and
+ * each protocol's built-in engine is always available as its fallback. Leaving
+ * both alone is a working Caravan, so the screen must never read as though an
+ * external client were required.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
@@ -149,7 +149,7 @@ describe('DownloadRouting', () => {
     // The disabled NZBGet is absent: its engine is not built, so picking it
     // would leave usenet unrouted without saying so.
     expect(options('route-usenet')).toEqual([
-      { value: '', label: 'Not configured' },
+      { value: '', label: 'Built-in engine' },
       { value: '9', label: 'Sab' },
     ]);
   });
@@ -159,10 +159,13 @@ describe('DownloadRouting', () => {
 
     expect(options('route-torrent')).toEqual([{ value: 'embedded', label: 'Built-in engine' }]);
     expect(select('route-torrent').value).toBe('embedded');
-    // Usenet has no built-in engine, so "not configured" is the only choice
-    // and the help text has to say what that means.
-    expect(options('route-usenet')).toEqual([{ value: '', label: 'Not configured' }]);
-    expect(host.textContent).toContain('No usenet client is configured');
+    // Usenet has a built-in engine too, so a stock Caravan grabs both
+    // protocols and the screen must not present a client as required
+    // (PLAN phase 7 acceptance).
+    expect(options('route-usenet')).toEqual([{ value: '', label: 'Built-in engine' }]);
+    expect(select('route-usenet').value).toBe('');
+    expect(host.textContent).not.toContain('No usenet client is configured');
+    expect(host.textContent).toContain('Usenet servers');
   });
 
   it('loads the stored routing and saves both protocols', async () => {

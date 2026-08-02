@@ -1,0 +1,17 @@
+{
+  "release_title": "Big Buck Bunny 2008 1080p BluRay x264-CARAVAN",
+  "archive_name": "Big.Buck.Bunny.2008.1080p.BluRay.x264-CARAVAN.zip",
+  "content_name": "Big.Buck.Bunny.2008.1080p.BluRay.x264-CARAVAN.mkv",
+  "content_size": 98304,
+  "content_sha256": "3338914073c3f8caa1fd2b8772fafa165bd4dc81bacfc7604d0dc6280ab32679",
+  "set_name": "caravan-e2e",
+  "block_size": 4096,
+  "recovery_blocks": 6,
+  "par2_files": [
+    "caravan-e2e.par2",
+    "caravan-e2e.vol0+1.par2",
+    "caravan-e2e.vol1+2.par2",
+    "caravan-e2e.vol3+3.par2"
+  ],
+  "generated_by": "par2cmdline version 1.2.0"
+}

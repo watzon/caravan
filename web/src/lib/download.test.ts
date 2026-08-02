@@ -3,6 +3,7 @@ import type { DownloadState, DownloadStatus, UnhealthyDownloadClient } from './a
 import {
   DEFAULT_ENGINE,
   countActiveDownloads,
+  downloadPhaseLabel,
   downloadStateMeta,
   engineLabel,
   isActiveDownload,
@@ -168,5 +169,28 @@ describe('sortDownloads', () => {
     ];
     sortDownloads(input);
     expect(input.map((d) => d.id)).toEqual(['1', '2']);
+  });
+});
+
+describe('downloadPhaseLabel', () => {
+  it('names the stages the state badge cannot express', () => {
+    expect(downloadPhaseLabel(download({ phase: 'repairing' }))).toBe('Repairing');
+    expect(downloadPhaseLabel(download({ phase: 'extracting' }))).toBe('Extracting');
+  });
+
+  it('says nothing while the download is merely downloading', () => {
+    // The state badge beside it already reads "Downloading"; a second badge
+    // saying the same thing is noise.
+    expect(downloadPhaseLabel(download({ phase: 'downloading' }))).toBe('');
+  });
+
+  it('says nothing for an engine that has no phases', () => {
+    expect(downloadPhaseLabel(download())).toBe('');
+    expect(downloadPhaseLabel(download({ phase: '' }))).toBe('');
+  });
+
+  it('shows a phase the server invents later rather than dropping it', () => {
+    const future = download({ phase: 'verifying' as never });
+    expect(downloadPhaseLabel(future)).toBe('Verifying');
   });
 });

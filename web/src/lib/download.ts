@@ -8,6 +8,7 @@
 
 import type {
   DownloadClientType,
+  DownloadPhase,
   DownloadState,
   DownloadStatus,
   UnhealthyDownloadClient,
@@ -30,6 +31,33 @@ export const DOWNLOAD_STATES: Record<DownloadState, DownloadStateMeta> = {
   failed: { label: 'Failed', tone: 'danger', active: false },
   paused: { label: 'Paused', tone: 'warning', active: false },
 };
+
+/**
+ * What each sub-step is called on screen.
+ *
+ * "Downloading" is deliberately absent: while a download is fetching articles
+ * the phase says exactly what the state badge beside it already says, and two
+ * badges reading "Downloading" is noise. The phase badge only appears once the
+ * engine is doing something the state cannot express.
+ */
+export const DOWNLOAD_PHASES: Record<DownloadPhase, string> = {
+  downloading: '',
+  repairing: 'Repairing',
+  extracting: 'Extracting',
+};
+
+/**
+ * The label for a download's current sub-step, or "" when there is nothing
+ * worth showing. Tolerates a phase the server invents later by titlecasing it,
+ * so a new stage shows up rather than disappearing.
+ */
+export function downloadPhaseLabel(status: DownloadStatus): string {
+  const phase = status.phase;
+  if (!phase) return '';
+  const known = DOWNLOAD_PHASES[phase as DownloadPhase];
+  if (known !== undefined) return known;
+  return phase.charAt(0).toUpperCase() + phase.slice(1);
+}
 
 /**
  * Meta for a state, tolerating a state string the server invents later: an

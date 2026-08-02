@@ -25,12 +25,38 @@ const (
 	DownloadPaused      DownloadState = "paused"
 )
 
+// DownloadPhase is the sub-step a download is in while its state is
+// DownloadDownloading.
+//
+// It exists because a Usenet download is three jobs, not one: fetching the
+// articles, repairing the holes with par2, and unpacking the archives
+// (SPEC §5.1, PLAN phase 7). All three are "downloading" as far as the queue's
+// state machine is concerned — the user is still waiting and the item is not
+// importable — but "repairing" and "extracting" are the difference between a
+// stalled download and one that is nearly done, so the queue says which.
+//
+// A torrent has no sub-steps and reports no phase.
+type DownloadPhase string
+
+// Download phases. The empty phase means "no sub-step", which is what every
+// engine but the embedded Usenet one reports.
+const (
+	PhaseDownloading DownloadPhase = "downloading"
+	PhaseRepairing   DownloadPhase = "repairing"
+	PhaseExtracting  DownloadPhase = "extracting"
+)
+
 // DownloadStatus is a live snapshot of one download, as the engine sees it
 // right now. It is not persisted as-is: rates and ETA are meaningless a second
 // later. The durable half lives in Download.
 type DownloadStatus struct {
 	ID    DownloadID
 	State DownloadState
+	// Phase is the sub-step of a multi-stage download, and "" for an engine
+	// that has none. It is live-only: like the transfer rates, it describes
+	// what is happening right now and is meaningless once read back from a
+	// restart, so it is deliberately absent from Download.
+	Phase DownloadPhase
 	// Name is the download's display name (the torrent name, the nzb name).
 	Name string
 	// Progress is completion in [0,1].

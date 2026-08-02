@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE nzb PUBLIC "-//newzBin//DTD NZB 1.1//EN" "http://www.newzbin.com/DTD/nzb/nzb-1.1.dtd">
+<nzb xmlns="http://www.newzbin.com/DTD/2003/nzb">
+  <head>
+    <meta type="name">Big Buck Bunny 2008 1080p BluRay x264-CARAVAN</meta>
+    <meta type="category">Movies &gt; HD</meta>
+  </head>
+  <file poster="poster@example.invalid (poster)" date="1740000000" subject="Big.Buck.Bunny.2008.1080p.BluRay.x264-CARAVAN [1/4] - &quot;big.buck.bunny.2008.1080p.bluray.x264-caravan.mkv&quot; yEnc (1/5)">
+    <groups>
+      <group>alt.binaries.movies.divx</group>
+      <group>alt.binaries.hdtv.x264</group>
+    </groups>
+    <segments>
+      <segment bytes="768000" number="1">bbb.part001.a1b2c3@news.example.invalid</segment>
+      <segment bytes="768000" number="2">bbb.part002.a1b2c3@news.example.invalid</segment>
+      <segment bytes="768000" number="4">bbb.part004.a1b2c3@news.example.invalid</segment>
+      <segment bytes="768000" number="3">bbb.part003.a1b2c3@news.example.invalid</segment>
+      <segment bytes="221184" number="5">bbb.part005.a1b2c3@news.example.invalid</segment>
+    </segments>
+  </file>
+  <file poster="poster@example.invalid (poster)" date="1740000060" subject="Big.Buck.Bunny.2008.1080p.BluRay.x264-CARAVAN [2/4] - &quot;big.buck.bunny.2008.1080p.bluray.x264-caravan.par2&quot; yEnc (1/1)">
+    <groups>
+      <group>alt.binaries.movies.divx</group>
+    </groups>
+    <segments>
+      <segment bytes="40960" number="1">bbb.par2.d4e5f6@news.example.invalid</segment>
+    </segments>
+  </file>
+  <file poster="poster@example.invalid (poster)" date="1740000120" subject="Big.Buck.Bunny.2008.1080p.BluRay.x264-CARAVAN [3/4] - &quot;big.buck.bunny.2008.1080p.bluray.x264-caravan.vol000+01.par2&quot; yEnc (1/1)">
+    <groups>
+      <group>alt.binaries.movies.divx</group>
+    </groups>
+    <segments>
+      <segment bytes="786432" number="1">bbb.vol000.aabbcc@news.example.invalid</segment>
+    </segments>
+  </file>
+  <file poster="poster@example.invalid (poster)" date="1740000180" subject="Big.Buck.Bunny.2008.1080p.BluRay.x264-CARAVAN [4/4] - &quot;big.buck.bunny.2008.1080p.bluray.x264-caravan.vol001+02.par2&quot; yEnc (1/2)">
+    <groups>
+      <group>alt.binaries.movies.divx</group>
+    </groups>
+    <segments>
+      <segment bytes="786432" number="1">bbb.vol001.ddeeff@news.example.invalid</segment>
+      <segment bytes="786432" number="2">bbb.vol001.gghhii@news.example.invalid</segment>
+    </segments>
+  </file>
+</nzb>

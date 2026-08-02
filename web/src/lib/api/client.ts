@@ -39,6 +39,8 @@ import type {
   SystemStatus,
   TVProfile,
   UnmatchedFile,
+  UsenetServer,
+  UsenetServerInput,
   VerifyResult,
   WantedLists,
 } from './types';
@@ -100,6 +102,14 @@ export const endpoints = {
   downloadClientTypes: () => `${API_BASE}/download-clients/types`,
   downloadClientTest: (id: number) => `${API_BASE}/download-clients/${id}/test`,
   downloadClientTestConfig: () => `${API_BASE}/download-clients/test`,
+
+  // Phase 7 — news servers the built-in engine fetches articles from
+  // (SPEC §5.1). Same shape as the download-client endpoints, including the
+  // unsaved-config probe.
+  usenetServers: () => `${API_BASE}/usenet-servers`,
+  usenetServer: (id: number) => `${API_BASE}/usenet-servers/${id}`,
+  usenetServerTest: (id: number) => `${API_BASE}/usenet-servers/${id}/test`,
+  usenetServerTestConfig: () => `${API_BASE}/usenet-servers/test`,
   movieReleases: (id: number) => `${API_BASE}/library/movies/${id}/releases`,
   movieGrab: (id: number) => `${API_BASE}/library/movies/${id}/grab`,
   seriesReleases: (id: number) => `${API_BASE}/library/series/${id}/releases`,
@@ -526,6 +536,34 @@ export const api = {
    */
   testDownloadClientConfig: (body: DownloadClientInput) =>
     request<void>(endpoints.downloadClientTestConfig(), { method: 'POST', body }),
+
+  /* ---------------------------------------------------------------------
+   * Phase 7 — news servers for the built-in engine (SPEC §5.1, §11).
+   * ------------------------------------------------------------------- */
+
+  listUsenetServers: (signal?: AbortSignal) =>
+    listOf<UsenetServer>(endpoints.usenetServers(), 'usenet_servers', signal),
+
+  addUsenetServer: (body: UsenetServerInput) =>
+    request<UsenetServer>(endpoints.usenetServers(), { method: 'POST', body }),
+
+  updateUsenetServer: (id: number, body: UsenetServerInput) =>
+    request<UsenetServer>(endpoints.usenetServer(id), { method: 'PUT', body }),
+
+  deleteUsenetServer: (id: number) =>
+    request<void>(endpoints.usenetServer(id), { method: 'DELETE' }),
+
+  /** Connect and authenticate against a stored server with its stored password. */
+  testUsenetServer: (id: number) =>
+    request<void>(endpoints.usenetServerTest(id), { method: 'POST' }),
+
+  /**
+   * Probe what is on screen, before it is saved. Include `id` when editing a
+   * stored server: the password was never handed back, so a blank one falls
+   * back to that row's — but only while host, port and TLS still match it.
+   */
+  testUsenetServerConfig: (body: UsenetServerInput) =>
+    request<void>(endpoints.usenetServerTestConfig(), { method: 'POST', body }),
 
   /**
    * Interactive search (SPEC §9 step 4). The server fans out across enabled

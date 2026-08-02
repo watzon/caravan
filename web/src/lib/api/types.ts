@@ -550,6 +550,56 @@ export interface DownloadClientInput {
 }
 
 /**
+ * internal/core.UsenetServerConfig, redacted (SPEC §5.1, §11 `/usenet-servers`).
+ *
+ * A news server is an article SOURCE for Caravan's built-in engine, not a
+ * download client: the engine reads article bodies from it directly. That is
+ * why `port` and `max_connections` always arrive resolved — the server fills in
+ * the protocol default before storing, so the form shows the number that will
+ * be dialled rather than a blank the user has to know the default for.
+ *
+ * `password` does not round-trip, exactly as a download-client credential does
+ * not (SPEC §12): only `has_password` is reported.
+ */
+export interface UsenetServer {
+  id: number;
+  name: string;
+  host: string;
+  port: number;
+  /** Implicit TLS (NNTPS). There is no STARTTLS. */
+  tls: boolean;
+  username: string;
+  has_password: boolean;
+  /** Hard per-server connection cap, not a target. */
+  max_connections: number;
+  /** Lowest wins; higher numbers are backup servers. */
+  priority: number;
+  enabled: boolean;
+}
+
+/**
+ * Body for POST/PUT /usenet-servers and POST /usenet-servers/test.
+ *
+ * `password` is optional on purpose: omitting it keeps the stored credential,
+ * and sending "" clears it. `id` is read only by the test endpoint, where it
+ * names the row a blank password falls back to — and the server only honours
+ * that fallback when host, port and TLS still match the stored row, so a
+ * credential can never be pointed at a different machine.
+ */
+export interface UsenetServerInput {
+  id?: number;
+  name: string;
+  host: string;
+  port: number;
+  tls: boolean;
+  username: string;
+  password?: string;
+  max_connections: number;
+  priority: number;
+  enabled: boolean;
+}
+
+/**
  * internal/core.Release — one indexer search result, already parsed.
  *
  * Everything except `id`/`indexer_id` is the indexer's claim, not a fact, which
@@ -600,11 +650,26 @@ export type DownloadState =
   | 'failed'
   | 'paused';
 
+/**
+ * internal/core.DownloadPhase — the sub-step of a multi-stage download.
+ *
+ * Only the built-in Usenet engine has one: fetching articles, repairing holes
+ * with par2, unpacking archives. All three are "downloading" as far as the
+ * state machine is concerned, so the phase is shown beside the state rather
+ * than instead of it. Every other engine reports "".
+ */
+export type DownloadPhase = 'downloading' | 'repairing' | 'extracting';
+
 /** internal/core.DownloadStatus — a live snapshot, not a persisted row. */
 export interface DownloadStatus {
   /** Engine-native handle (an info hash for the embedded engine). */
   id: string;
   state: DownloadState;
+  /**
+   * Sub-step within the state, "" or absent when the engine has none. Live
+   * only: a row the engine is not currently reporting on has no phase.
+   */
+  phase?: DownloadPhase | '';
   name: string;
   /** Completion in [0,1]. */
   progress: number;

@@ -4,11 +4,10 @@
    *
    * There is no per-grab engine choice anywhere in Caravan: a release is
    * routed on its protocol, so the only thing to configure is which engine
-   * each protocol lands on. Torrents always have somewhere to go — the
-   * built-in engine is the default and is offered even when external clients
-   * exist. Usenet has no built-in engine, so leaving it unset is a real
-   * configuration, and every usenet grab is then a recorded rejection rather
-   * than a misroute.
+   * each protocol lands on. Both protocols always have somewhere to go: each
+   * has a built-in engine that is the default and is offered even when
+   * external clients exist, so an external client is a choice rather than a
+   * requirement (PLAN phase 7).
    */
   import { onMount } from 'svelte';
   import { api, errorText } from '../api/client';
@@ -103,7 +102,8 @@
     <h3 class="text-base font-medium text-ink">Routing</h3>
     <p class="mt-1 text-sm text-ink-secondary">
       Which engine takes a release is decided by its protocol, not per grab. Torznab results go to
-      the torrent engine, Newznab results to the usenet one.
+      the torrent engine, Newznab results to the usenet one. Both are built in; an external client
+      is optional.
     </p>
   </div>
 
@@ -131,16 +131,14 @@
   <Field
     label="Usenet releases"
     for="route-usenet"
-    help={usenetClients.length === 0
-      ? 'No usenet client is configured, so usenet releases cannot be grabbed. Add a SABnzbd or NZBGet client above.'
-      : 'There is no built-in usenet engine. Left unset, usenet grabs are rejected with that reason.'}>
+    help="Caravan's built-in engine downloads, repairs and unpacks NZBs itself. It needs a news server under Settings → Usenet servers, and no download client.">
     <select
       id="route-usenet"
       bind:value={usenet}
       disabled={loading}
       class="h-9 w-full rounded-sm border border-border-strong bg-raised px-3 text-md text-ink
              focus:border-accent focus:outline-none disabled:opacity-50">
-      <option value="">Not configured</option>
+      <option value="">Built-in engine</option>
       {#each usenetClients as client (client.id)}
         <option value={String(client.id)}>{client.name}</option>
       {/each}

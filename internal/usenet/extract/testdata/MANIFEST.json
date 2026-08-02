@@ -1,0 +1,8 @@
+{
+  "corrupt": {"volumes":["corrupt.rar"]},
+  "file-encrypted": {"volumes":["fileenc.rar"]},
+  "header-encrypted": {"volumes":["headerenc.rar"]},
+  "multi-new": {"volumes":["multi.part01.rar","multi.part02.rar","multi.part03.rar"],"files":{"big.bin":{"size":3000,"sha256":"2302c67915a1aab2cd2bb31d0862674ec830a112ef06ad0163ff1145f51f0b78"},"readme.nfo":{"size":120,"sha256":"b22cd7a9f4a39ded73bec37707d473dddc496ae46dad646d3e126b7da10bf5c4"}}},
+  "multi-old": {"volumes":["old.rar","old.r00","old.r01"],"files":{"show.mkv":{"size":1500,"sha256":"1bc81e93af5ea6c7aa8ab36e1f22af1964c44a22cb2d7e78b3f4c10dfba2115e"}}},
+  "single": {"volumes":["single.rar"],"files":{"movie.mkv":{"size":2000,"sha256":"a67bc5ff31f93368a34e6a99587e4a41864de84bab054409a0c0c086a1b76988"},"subs/movie.srt":{"size":300,"sha256":"aecd12da14454c8c13532d745071c0942015ae6d8cb96f92fb7f0b58da220e76"}}}
+}

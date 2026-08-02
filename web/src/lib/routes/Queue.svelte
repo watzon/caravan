@@ -25,7 +25,7 @@
     formatRate,
     truncateMiddle,
   } from '../format';
-  import { downloadStateMeta, engineLabel, sortDownloads } from '../download';
+  import { downloadPhaseLabel, downloadStateMeta, engineLabel, sortDownloads } from '../download';
   import { QUEUE_POLL_MS, downloads } from '../state/downloads.svelte';
   import { page } from '../state/page.svelte';
   import { pushToast } from '../state/toast.svelte';
@@ -138,6 +138,7 @@
       {#each rows as download (download.id)}
         {@const meta = downloadStateMeta(download.state)}
         {@const paused = download.state === 'paused'}
+        {@const phaseLabel = downloadPhaseLabel(download)}
         {@const seedingContext = download.state === 'seeding' || (paused && download.progress >= 1)}
         {@const pauseLabel = paused
           ? seedingContext
@@ -158,6 +159,11 @@
               {truncateMiddle(download.name || UNKNOWN, 64)}
             </span>
             <Badge tone={meta.tone}>{meta.label}</Badge>
+            {#if phaseLabel}
+              <Badge tone="info" title="Which stage of the download this is">
+                {phaseLabel}
+              </Badge>
+            {/if}
             <Badge mono tone="neutral" title="Which backend holds this download">
               {engineLabel(download)}
             </Badge>

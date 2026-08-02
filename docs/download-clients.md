@@ -5,9 +5,11 @@ alongside) its own embedded torrent engine (SPEC §5.1, §7; PLAN phase 6).
 Configuration lives in the `download_clients` table and is edited under
 **Settings → Download clients**.
 
-Nothing is preconfigured. With no client configured, torrents go to the
-embedded engine exactly as they did before; Usenet releases need a client here,
-because Caravan has no built-in NZB downloader.
+Nothing is preconfigured, and nothing here is required. With no client
+configured, torrents go to the built-in BitTorrent engine and NZBs go to the
+built-in Usenet engine — see [docs/usenet.md](usenet.md), which needs a news
+server and no download client. Configure a client here only to hand grabs to a
+machine you already run.
 
 ## Supported backends
 
@@ -162,23 +164,29 @@ clients → Routing**:
 
 | Key | Value | Default |
 | --- | --- | --- |
-| `route_torrent` | `embedded`, or a `download_clients.id` | `embedded` |
-| `route_usenet` | empty, or a `download_clients.id` | empty |
+| `route_torrent` | `embedded`, or a `download_clients.id` | `embedded` (the built-in engine) |
+| `route_usenet` | empty, or a `download_clients.id` | empty (the built-in engine) |
 
-- **Torrents always have somewhere to go.** The embedded engine is the default
-  and is always offered. A picked client that is later deleted or disabled
-  falls back to the embedded engine rather than failing every torrent grab.
-- **Usenet has no built-in engine.** Left unset — or pointed at a client that
-  is gone or disabled — usenet is unrouted, and a usenet grab is a **recorded
+- **Both protocols always have somewhere to go.** Each has a built-in engine
+  that is the default and is always offered. A picked client that is later
+  deleted or disabled falls back to it rather than failing every grab of that
+  protocol.
+- **A protocol is only unrouted when no engine exists at all**, which in
+  practice means no storage root has been set yet, since that is what the
+  built-in engines are constructed under. A grab then becomes a **recorded
   rejection**: the `grabs` row gets status `rejected` with a reason naming what
   to configure, a warning lands in the activity feed, and the interactive
   endpoint answers `409` with the same message. It is never a silent drop and
-  never a misroute into the torrent engine.
+  never a misroute into the other protocol's engine.
+- **A client taking a default does not retire the built-in engine.** It rejoins
+  the routing table without a protocol, so the downloads it is still holding
+  stay listable, pausable, removable and importable.
 - A routing value naming a client of the wrong protocol is refused by
   `PUT /settings` rather than stored and ignored.
 
 The `downloads.engine` column records the backend that actually took the
-download (`embedded`, `qbittorrent`, `sabnzbd`, `nzbget`), not the router. That
+download (`embedded`, `embedded-usenet`, `qbittorrent`, `sabnzbd`, `nzbget`),
+not the router. That
 column is what addresses the download afterwards, so moving a protocol's
 default does not strand what the previous client is still holding: every
 enabled client stays addressable for its own downloads, and only the current

@@ -1,0 +1,41 @@
+Loading "small.par2".
+Loaded 4 new packets
+Loading "small.par2".
+No new packets found
+Loading "small.vol0+4.par2".
+Loaded 4 new packets including 4 recovery blocks
+
+There are 1 recoverable files and 0 other files.
+The block size used was 512 bytes.
+There are a total of 6 data blocks.
+The total size of the data files is 3000 bytes.
+
+Verifying source files:
+
+Opening: "delta.bin"
+Target: "delta.bin" - damaged. Found 4 of 6 data blocks.
+
+Scanning extra files:
+
+
+Repair is required.
+1 file(s) exist but are damaged.
+You have 4 out of 6 data blocks available.
+You have 4 recovery blocks available.
+Repair is possible.
+You have an excess of 2 recovery blocks.
+2 recovery blocks will be used to repair.
+
+Computing Reed Solomon matrix.
+Constructing: done.
+Solving: done.
+
+Writing recovered data
+Wrote 3000 bytes to disk
+
+Verifying repaired files:
+
+Opening: "delta.bin"
+Target: "delta.bin" - found.
+
+Repair complete.

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<nzb xmlns="http://www.newzbin.com/DTD/2003/nzb">
+  <file poster="anon@example.invalid" date="1740000000" subject="[1/1] - &quot;a.mkv&quot; yEnc (1/1)">
+    <segments>
+      <segment bytes="-5" number="1">negative.1@news.example.invalid</segment>
+    </segments>
+  </file>
+</nzb>

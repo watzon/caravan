@@ -20,6 +20,11 @@ type downloadJSON struct {
 	Engine string `json:"engine"`
 	Name   string `json:"name"`
 	State  string `json:"state"`
+	// Phase is the sub-step of a multi-stage download ("downloading",
+	// "repairing", "extracting"), and "" for an engine that has none. Like the
+	// rates it is live-only, so a row the engine is not reporting on has no
+	// phase even if it had one before the restart.
+	Phase string `json:"phase"`
 	// Progress is completion in [0,1].
 	Progress    float64 `json:"progress"`
 	BytesDone   int64   `json:"bytes_done"`
@@ -116,6 +121,7 @@ func storedDownloadDTO(d core.Download) downloadJSON {
 func applyLiveStatus(dto *downloadJSON, status core.DownloadStatus) {
 	dto.ID = string(status.ID)
 	dto.State = string(status.State)
+	dto.Phase = string(status.Phase)
 	dto.Name = status.Name
 	dto.Progress = status.Progress
 	dto.BytesDone = status.BytesDone

@@ -1,0 +1,46 @@
+Origin of the fixtures in this directory
+========================================
+
+The .rar files here are NOT third-party test data. They were written by
+gen/main.go in this directory, which hand-assembles RAR 1.5 ("rar4") archives
+containing stored (uncompressed) files.
+
+The original plan was to copy small archives out of github.com/nwaples/rardecode's
+own testdata, which is BSD-2-Clause licensed. That is not possible: the module
+zip that `go get` fetches contains no testdata directory, so there is nothing in
+the module cache to copy. Verify with:
+
+    ls "$(go env GOMODCACHE)/github.com/nwaples/rardecode/v2@"*/
+
+Building the fixtures instead of copying them is only tractable because rar's
+*stored* method needs no encoder — the header layout is documented and the
+payload is the file's bytes verbatim. The fixtures are therefore fully covered
+by this repository's own licence, and every one of them is decoded by
+github.com/nwaples/rardecode/v2 in extract's tests, which is the check that
+they are honest rar files rather than something only our own code accepts.
+
+Regenerate after editing gen/main.go:
+
+    go run ./internal/usenet/extract/testdata/gen
+
+MANIFEST.json records, for each fixture set, the volume filenames and the size
+and SHA-256 of every file the set is supposed to yield. The tests read it
+rather than hard-coding expectations next to the generator.
+
+Fixture sets
+------------
+
+  single            single.rar — two files and a nested directory
+  multi-new         multi.part01.rar .. multi.part03.rar — modern volume
+                    naming, one file wholly inside volume one and one file
+                    split across all three
+  multi-old         old.rar, old.r00, old.r01 — legacy volume naming, one file
+                    split across all three
+  file-encrypted    fileenc.rar — a file header flagged encrypted
+  header-encrypted  headerenc.rar — an archive header flagged encrypted, which
+                    rardecode rejects at open time rather than per entry
+  corrupt           corrupt.rar — a stored file whose recorded CRC32 does not
+                    match its bytes
+
+Zip fixtures are not committed: archive/zip can write them, so the tests build
+those in a temp directory instead.

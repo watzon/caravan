@@ -1,0 +1,52 @@
+Loading "basic.par2".
+Loaded 8 new packets
+Loading "basic.par2".
+No new packets found
+Loading "basic.vol07+3.par2".
+Loaded 3 new packets including 3 recovery blocks
+Loading "basic.vol03+4.par2".
+Loaded 4 new packets including 4 recovery blocks
+Loading "basic.vol00+1.par2".
+Loaded 1 new packets including 1 recovery blocks
+Loading "basic.vol01+2.par2".
+Loaded 2 new packets including 2 recovery blocks
+
+There are 3 recoverable files and 0 other files.
+The block size used was 1024 bytes.
+There are a total of 25 data blocks.
+The total size of the data files is 25096 bytes.
+
+Verifying source files:
+
+Opening: "alpha.bin"
+Opening: "gamma.bin"
+Target: "gamma.bin" - found.
+Opening: "beta.bin"
+Target: "alpha.bin" - found.
+Target: "beta.bin" - damaged. Found 2 of 4 data blocks.
+
+Scanning extra files:
+
+
+Repair is required.
+1 file(s) exist but are damaged.
+2 file(s) are ok.
+You have 23 out of 25 data blocks available.
+You have 10 recovery blocks available.
+Repair is possible.
+You have an excess of 8 recovery blocks.
+2 recovery blocks will be used to repair.
+
+Computing Reed Solomon matrix.
+Constructing: done.
+Solving: done.
+
+Writing recovered data
+Wrote 4096 bytes to disk
+
+Verifying repaired files:
+
+Opening: "beta.bin"
+Target: "beta.bin" - found.
+
+Repair complete.

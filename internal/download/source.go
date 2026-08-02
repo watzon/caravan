@@ -1,6 +1,7 @@
 package download
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
@@ -105,13 +106,23 @@ func (e *Embedded) restoreSpec(rec core.Download) (*torrent.TorrentSpec, error) 
 	}, nil
 }
 
-// fetchMetainfo downloads and parses a .torrent file.
-func (e *Embedded) fetchMetainfo(ctx context.Context, url string) (*metainfo.MetaInfo, error) {
+// FetchPayload GETs url and returns at most max bytes of the response body.
+//
+// It is the one place a release's payload is pulled off an indexer, shared by
+// the two embedded engines: a .torrent here and a .nzb in internal/usenet.
+// Both face the same indexer behaviour — a link that 404s, one that serves an
+// HTML error page with a 200, one that would stream forever — so the status
+// check and the size cap belong together rather than once per engine.
+//
+// The cap truncates rather than erroring; the caller's parser is what decides
+// whether what came back is usable, and every one of them already refuses a
+// document it could not read to the end.
+func FetchPayload(ctx context.Context, hc *http.Client, url string, max int64) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := e.http.Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -120,7 +131,16 @@ func (e *Embedded) fetchMetainfo(ctx context.Context, url string) (*metainfo.Met
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("%s returned %s", url, resp.Status)
 	}
-	mi, err := metainfo.Load(io.LimitReader(resp.Body, maxMetainfoBytes))
+	return io.ReadAll(io.LimitReader(resp.Body, max))
+}
+
+// fetchMetainfo downloads and parses a .torrent file.
+func (e *Embedded) fetchMetainfo(ctx context.Context, url string) (*metainfo.MetaInfo, error) {
+	body, err := FetchPayload(ctx, e.http, url, maxMetainfoBytes)
+	if err != nil {
+		return nil, err
+	}
+	mi, err := metainfo.Load(bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}

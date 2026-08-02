@@ -374,9 +374,9 @@ func routeFor(routes []Route, protocol string) (Route, bool) {
 func configureHint(protocol string) string {
 	switch protocol {
 	case core.ProtocolUsenet:
-		return "add a SABnzbd or NZBGet client under Settings → Download clients and pick it as the usenet default"
+		return "set a storage root so the built-in Usenet engine can start, then add a news server under Settings → Usenet servers"
 	case core.ProtocolTorrent:
-		return "pick a torrent default under Settings → Download clients"
+		return "set a storage root so the built-in torrent engine can start, or pick a torrent default under Settings → Download clients"
 	default:
 		return fmt.Sprintf("unknown release protocol %q", protocol)
 	}

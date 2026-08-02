@@ -19,6 +19,7 @@
   import SecuritySettings from '../components/SecuritySettings.svelte';
   import StorageSettings from '../components/StorageSettings.svelte';
   import TVProfileSettings from '../components/TVProfileSettings.svelte';
+  import UsenetServerSettings from '../components/UsenetServerSettings.svelte';
   import { UNKNOWN } from '../format';
   import { pushToast } from '../state/toast.svelte';
   import { system } from '../state/system.svelte';
@@ -27,6 +28,7 @@
     | 'general'
     | 'indexers'
     | 'download-clients'
+    | 'usenet-servers'
     | 'engine'
     | 'quality-profiles'
     | 'tv-profile'
@@ -39,6 +41,7 @@
     { key: 'general', label: 'General' },
     { key: 'indexers', label: 'Indexers' },
     { key: 'download-clients', label: 'Download clients' },
+    { key: 'usenet-servers', label: 'Usenet servers' },
     { key: 'engine', label: 'Engine' },
     { key: 'quality-profiles', label: 'Quality profiles' },
     { key: 'tv-profile', label: 'TV profile' },
@@ -93,6 +96,7 @@
 <div
   class="flex flex-col gap-6 {tab === 'indexers' ||
   tab === 'download-clients' ||
+  tab === 'usenet-servers' ||
   tab === 'quality-profiles'
     ? 'max-w-5xl'
     : 'max-w-3xl'}">
@@ -107,6 +111,8 @@
     <IndexerSettings />
   {:else if tab === 'download-clients'}
     <DownloadClientSettings />
+  {:else if tab === 'usenet-servers'}
+    <UsenetServerSettings />
   {:else if tab === 'quality-profiles'}
     <QualityProfiles />
   {:else if tab === 'jellyfin'}

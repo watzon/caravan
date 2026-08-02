@@ -171,8 +171,11 @@ func TestRouterDispatchesOnReleaseProtocol(t *testing.T) {
 					t.Fatalf("Add = (%q, %v), want ErrNoEngine", id, err)
 				}
 				// The rejection has to say what to configure; a reason the
-				// user cannot act on is a silent drop with extra steps.
-				if !strings.Contains(err.Error(), "Settings → Download clients") {
+				// user cannot act on is a silent drop with extra steps. Both
+				// protocols have a built-in engine now, so the hint names the
+				// storage root that engine needs rather than an external
+				// client the user does not have to install.
+				if !strings.Contains(err.Error(), "storage root") {
 					t.Errorf("rejection reason = %q, want it to name what to configure", err)
 				}
 				for name, engine := range engines {

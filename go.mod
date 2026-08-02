@@ -4,6 +4,7 @@ go 1.26.5
 
 require (
 	github.com/anacrolix/torrent v1.61.0
+	github.com/nwaples/rardecode/v2 v2.3.0
 	golang.org/x/crypto v0.44.0
 	golang.org/x/sys v0.46.0
 	golang.org/x/time v0.14.0
