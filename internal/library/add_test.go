@@ -145,6 +145,82 @@ func TestAddSeriesWritesTheWholeTree(t *testing.T) {
 	}
 }
 
+func TestAddSeriesLeavesSpecialsUnmonitored(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	// Anime commonly carries a TMDB "Specials" season full of promo shorts;
+	// automation must not hunt for those unless the user opts in.
+	meta := core.SeriesMeta{
+		TMDBID: 312949,
+		Title:  "Chainsmoker Cat",
+		Year:   2026,
+		Seasons: []core.SeasonMeta{
+			{
+				Number: 0,
+				Title:  "Specials",
+				Episodes: []core.EpisodeMeta{
+					{Season: 0, Number: 1, Title: "Episode 1"},
+					{Season: 0, Number: 2, Title: "Episode 2"},
+				},
+			},
+			{
+				Number: 1,
+				Title:  "Season 1",
+				Episodes: []core.EpisodeMeta{
+					{Season: 1, Number: 1, Title: "I'm Yani Neko, Nya"},
+				},
+			},
+		},
+	}
+	h.provider.seriesByID[meta.TMDBID] = meta
+
+	sr, err := h.mgr.AddSeries(ctx, meta.TMDBID)
+	if err != nil {
+		t.Fatalf("AddSeries: %v", err)
+	}
+
+	seasons, err := h.st.ListSeasons(ctx, sr.ID)
+	if err != nil {
+		t.Fatalf("ListSeasons: %v", err)
+	}
+	if len(seasons) != 2 || seasons[0].Number != 0 || seasons[1].Number != 1 {
+		t.Fatalf("seasons = %+v, want specials then season 1", seasons)
+	}
+	if seasons[0].Monitored {
+		t.Fatal("specials season is monitored on add, want unmonitored by default")
+	}
+	if !seasons[1].Monitored {
+		t.Fatal("season 1 is unmonitored on add, want monitored")
+	}
+
+	episodes, err := h.st.ListEpisodes(ctx, sr.ID)
+	if err != nil {
+		t.Fatalf("ListEpisodes: %v", err)
+	}
+	for _, e := range episodes {
+		if want := e.SeasonNumber != 0; e.Monitored != want {
+			t.Fatalf("S%02dE%02d monitored = %v, want %v", e.SeasonNumber, e.EpisodeNumber, e.Monitored, want)
+		}
+	}
+
+	// Opting in is user intent, and a metadata refresh must not undo it.
+	specials := seasons[0]
+	specials.Monitored = true
+	if err := h.st.UpsertSeason(ctx, &specials); err != nil {
+		t.Fatalf("UpsertSeason: %v", err)
+	}
+	if _, err := h.mgr.AddSeries(ctx, meta.TMDBID); err != nil {
+		t.Fatalf("AddSeries again: %v", err)
+	}
+	seasons, err = h.st.ListSeasons(ctx, sr.ID)
+	if err != nil {
+		t.Fatalf("ListSeasons after refresh: %v", err)
+	}
+	if !seasons[0].Monitored {
+		t.Fatal("refresh reset the specials season to unmonitored, want the user's opt-in preserved")
+	}
+}
+
 func TestAddWithoutProviderIsRecognizable(t *testing.T) {
 	h := newHarness(t)
 	// SPEC §13: no TMDB key degrades visibly. The API turns this sentinel into

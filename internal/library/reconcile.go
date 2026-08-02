@@ -269,7 +269,10 @@ func (m *Manager) upsertSeriesTree(ctx context.Context, seriesID int64, meta *co
 	for _, sm := range meta.Seasons {
 		monitored, ok := seasonMonitored[sm.Number]
 		if !ok {
-			monitored = true
+			// Specials (season 0) start unmonitored: they are typically promo
+			// shorts and recaps nobody wants automation hunting for. The user
+			// opts in per season or episode; existing flags are preserved above.
+			monitored = sm.Number != 0
 		}
 		season := &core.Season{
 			SeriesID:  seriesID,
@@ -286,7 +289,7 @@ func (m *Manager) upsertSeriesTree(ctx context.Context, seriesID int64, meta *co
 		for _, em := range sm.Episodes {
 			monitored, ok := episodeMonitored[key{em.Season, em.Number}]
 			if !ok {
-				monitored = true
+				monitored = em.Season != 0
 			}
 			episode := &core.Episode{
 				SeriesID:      seriesID,
