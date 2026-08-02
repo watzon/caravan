@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite" // pure-Go sqlite driver; no CGO (SPEC §4)
@@ -120,3 +121,10 @@ func parseTime(s string) time.Time {
 
 // now is the clock used for created/updated stamps.
 func now() time.Time { return time.Now().UTC() }
+
+// isUniqueViolation reports whether err is sqlite's uniqueness complaint. The
+// driver does not export a typed error for it, so the message is the only
+// handle; a false negative degrades to a generic 500, never to a lost write.
+func isUniqueViolation(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed")
+}

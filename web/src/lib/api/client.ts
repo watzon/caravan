@@ -9,12 +9,16 @@ import type {
   ActivityEvent,
   AddItemRequest,
   CalendarEntry,
+  Conversion,
   DownloadInsight,
+  DlnaStatus,
   DownloadStatus,
   GrabRequest,
   Indexer,
   IndexerCategory,
   IndexerInput,
+  JellyfinConfig,
+  JellyfinTestResult,
   Job,
   MatchRequest,
   Movie,
@@ -26,6 +30,7 @@ import type {
   Series,
   Settings,
   SystemStatus,
+  TVProfile,
   UnmatchedFile,
   WantedLists,
 } from './types';
@@ -87,6 +92,20 @@ export const endpoints = {
   calendar: () => `${API_BASE}/calendar`,
   calendarFeed: (apiKey: string) => `${API_BASE}/calendar.ics?apikey=${encodeURIComponent(apiKey)}`,
   regenerateAPIKey: () => `${API_BASE}/settings/apikey`,
+  tvProfiles: () => `${API_BASE}/tv-profiles`,
+
+  // Phase 4 — the built-in DLNA media server (SPEC §5.1). Read-only: the
+  // toggle and the friendly name are settings keys, saved through PUT /settings.
+  dlna: () => `${API_BASE}/dlna`,
+
+  // Phase 4 — the Jellyfin playback handoff (SPEC §5.2).
+  jellyfin: () => `${API_BASE}/handoff/jellyfin`,
+  jellyfinTest: () => `${API_BASE}/handoff/jellyfin/test`,
+
+  // Phase 4 — the convert-for-TV queue (SPEC §8).
+  conversions: () => `${API_BASE}/convert`,
+  conversionCancel: (id: number) => `${API_BASE}/convert/${id}/cancel`,
+  conversionRetry: (id: number) => `${API_BASE}/convert/${id}/retry`,
   qualityProfiles: () => `${API_BASE}/quality-profiles`,
   qualityProfile: (id: number) => `${API_BASE}/quality-profiles/${id}`,
 } as const;
@@ -215,6 +234,64 @@ export const api = {
 
   putSettings: (patch: Settings) =>
     request<Settings>(endpoints.settings(), { method: 'PUT', body: patch }),
+
+  /**
+   * The built-in TV profiles (SPEC §8). Read-only: the active choice is the
+   * `tv_profile` settings key, saved through putSettings like every other one.
+   */
+  listTVProfiles: (signal?: AbortSignal) =>
+    listOf<TVProfile>(endpoints.tvProfiles(), 'profiles', signal),
+
+  /**
+   * What the built-in DLNA media server is doing (SPEC §5.1).
+   *
+   * `enabled` comes back from the same settings the UI writes; `advertising` is
+   * the part that cannot be read from the settings table, because whether SSDP
+   * came up is a fact about the host's network rather than about configuration.
+   */
+  dlnaStatus: (signal?: AbortSignal) => request<DlnaStatus>(endpoints.dlna(), { signal }),
+
+  /* ------------------------------------------------------------------------
+   * Jellyfin playback handoff (SPEC §5.2). The scan itself is never triggered
+   * from here: the import pipeline queues it and the job queue runs it, so the
+   * UI only configures the connection and proves it works.
+   * --------------------------------------------------------------------- */
+
+  jellyfinConfig: (signal?: AbortSignal) =>
+    request<JellyfinConfig>(endpoints.jellyfin(), { signal }),
+
+  saveJellyfinConfig: (body: JellyfinConfig) =>
+    request<JellyfinConfig>(endpoints.jellyfin(), { method: 'POST', body }),
+
+  /**
+   * Ask the server to talk to Jellyfin with the values currently in the form,
+   * before they are saved. Blank fields fall back to what is stored, so `{}`
+   * tests the saved configuration.
+   */
+  testJellyfin: (body: Partial<Pick<JellyfinConfig, 'url' | 'api_key'>> = {}) =>
+    request<JellyfinTestResult>(endpoints.jellyfinTest(), { method: 'POST', body }),
+
+  /* ------------------------------------------------------------------------
+   * Convert-for-TV queue (SPEC §8). Listing works on a server without ffmpeg;
+   * every mutation answers 503 there, which is what the route's banner says.
+   * --------------------------------------------------------------------- */
+
+  listConversions: (limit = 100, signal?: AbortSignal) =>
+    request<{ conversions: Conversion[] }>(endpoints.conversions(), { query: { limit }, signal })
+      .then((payload) => payload?.conversions ?? []),
+
+  /** Queue one library file. 409 means it is already in the queue. */
+  convertMediaFile: (mediaFileID: number) =>
+    request<Conversion>(endpoints.conversions(), {
+      method: 'POST',
+      body: { media_file_id: mediaFileID },
+    }),
+
+  cancelConversion: (id: number) =>
+    request<Conversion>(endpoints.conversionCancel(id), { method: 'POST' }),
+
+  retryConversion: (id: number) =>
+    request<Conversion>(endpoints.conversionRetry(id), { method: 'POST' }),
 
   listMovies: (signal?: AbortSignal) =>
     listOf<Movie>(endpoints.movies(), 'movies', signal),

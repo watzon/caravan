@@ -7,6 +7,7 @@
   import Button from '../components/Button.svelte';
   import EmptyState from '../components/EmptyState.svelte';
   import Icon from '../components/Icon.svelte';
+  import ConvertFileButton from '../components/ConvertFileButton.svelte';
   import LoadError from '../components/LoadError.svelte';
   import Poster from '../components/Poster.svelte';
   import Skeleton from '../components/Skeleton.svelte';
@@ -15,6 +16,7 @@
   import { UNKNOWN, formatBytes, formatDate, truncateMiddle } from '../format';
   import { pushToast } from '../state/toast.svelte';
   import { movieStatus } from '../status';
+  import { compatBadge } from '../tvcompat';
 
   interface Props {
     id: number;
@@ -140,7 +142,12 @@
     </div>
 
     <section class="flex flex-col gap-3">
-      <h3 class="text-lg font-semibold text-ink">File</h3>
+      <div class="flex flex-wrap items-center gap-3">
+        <h3 class="text-lg font-semibold text-ink">File</h3>
+        {#if file}
+          <div class="ml-auto"><ConvertFileButton {file} /></div>
+        {/if}
+      </div>
 
       {#if !file}
         <EmptyState
@@ -152,6 +159,7 @@
           {/snippet}
         </EmptyState>
       {:else}
+        {@const tv = compatBadge(file.compatibility)}
         <div class="overflow-x-auto rounded-md border border-border">
           <table class="w-full min-w-[640px] border-collapse text-sm">
             <thead>
@@ -161,6 +169,7 @@
                 <th class="micro-label px-3 py-2 font-semibold">Source</th>
                 <th class="micro-label px-3 py-2 font-semibold">Codec</th>
                 <th class="micro-label px-3 py-2 font-semibold">Audio</th>
+                <th class="micro-label px-3 py-2 font-semibold">TV</th>
                 <th class="micro-label px-3 py-2 text-right font-semibold">Size</th>
               </tr>
             </thead>
@@ -176,6 +185,13 @@
                 </td>
                 <td class="px-3 py-2">
                   {#if file.audio}<Badge mono tone={file.audio.toUpperCase().includes('DTS') ? 'warning' : 'neutral'}>{file.audio}</Badge>{:else}<span class="text-ink-muted">{UNKNOWN}</span>{/if}
+                </td>
+                <td class="px-3 py-2">
+                  {#if tv}
+                    <Badge mono tone={tv.tone} title={tv.title}>{tv.label}</Badge>
+                  {:else}
+                    <span class="text-ink-muted">{UNKNOWN}</span>
+                  {/if}
                 </td>
                 <td class="px-3 py-2 text-right font-mono text-ink-secondary">
                   {formatBytes(file.size)}

@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/watzon/caravan/internal/core"
+	"github.com/watzon/caravan/internal/parse"
 	"github.com/watzon/caravan/internal/store"
 )
 
@@ -107,6 +108,11 @@ type mediaFileJSON struct {
 	ReleaseGroup string `json:"release_group"`
 	AddedAt      string `json:"added_at"`
 	ModifiedAt   string `json:"modified_at"`
+	// Compatibility is the active TV profile's verdict on this file (SPEC §8).
+	// The row carries no bit depth — that is a probe's answer, not a
+	// filename's — so a 10-bit file imported from an untagged name reads as
+	// unstated rather than as 8-bit.
+	Compatibility compatibilityJSON `json:"compatibility"`
 }
 
 func movieDTO(m core.Movie) movieJSON {
@@ -151,7 +157,7 @@ func seriesDTO(sr core.Series) seriesJSON {
 	}
 }
 
-func mediaFileDTO(f core.MediaFile) mediaFileJSON {
+func mediaFileDTO(f core.MediaFile, profile core.TVProfile) mediaFileJSON {
 	return mediaFileJSON{
 		ID:           f.ID,
 		Path:         f.Path,
@@ -163,17 +169,26 @@ func mediaFileDTO(f core.MediaFile) mediaFileJSON {
 		ReleaseGroup: f.ReleaseGroup,
 		AddedAt:      jsonTime(f.AddedAt),
 		ModifiedAt:   jsonTime(f.ModifiedAt),
+
+		Compatibility: compatibilityDTO(profile.Check(core.MediaTags{
+			Codec: f.Codec,
+			Audio: f.Audio,
+			// The container is the file's own extension, which is the one
+			// technical fact about an imported file that needs no parser.
+			Container: parse.Container(f.Path),
+			Quality:   f.Quality,
+		})),
 	}
 }
 
 // firstFileDTO renders the current file for an item, or nil when it has none.
 // Several rows for one item can only mean a half-reconciled database, and the
 // first by path is a deterministic choice rather than an arbitrary one.
-func firstFileDTO(files []core.MediaFile) *mediaFileJSON {
+func firstFileDTO(files []core.MediaFile, profile core.TVProfile) *mediaFileJSON {
 	if len(files) == 0 {
 		return nil
 	}
-	dto := mediaFileDTO(files[0])
+	dto := mediaFileDTO(files[0], profile)
 	return &dto
 }
 
@@ -204,10 +219,11 @@ func (s *server) handleListMovies(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	profile := s.activeTVProfile(ctx)
 	out := make([]movieJSON, 0, len(movies))
 	for _, m := range movies {
 		dto := movieDTO(m)
-		dto.File = firstFileDTO(byMovie[m.ID])
+		dto.File = firstFileDTO(byMovie[m.ID], profile)
 		out = append(out, dto)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"movies": out})
@@ -256,8 +272,9 @@ func (s *server) movieDetail(ctx context.Context, id int64) (movieJSON, error) {
 	if err != nil {
 		return movieJSON{}, err
 	}
+	profile := s.activeTVProfile(ctx)
 	dto := movieDTO(*m)
-	dto.File = firstFileDTO(files)
+	dto.File = firstFileDTO(files, profile)
 	return dto, nil
 }
 
@@ -587,6 +604,7 @@ func (s *server) seasonDetail(ctx context.Context, seriesID int64) ([]seasonJSON
 		return nil, err
 	}
 
+	profile := s.activeTVProfile(ctx)
 	byNumber := make(map[int][]episodeJSON)
 	for _, e := range episodes {
 		files, err := s.st.ListMediaFilesForEpisode(ctx, e.ID)
@@ -603,7 +621,7 @@ func (s *server) seasonDetail(ctx context.Context, seriesID int64) ([]seasonJSON
 			Overview:      e.Overview,
 			AirDate:       jsonTime(e.AirDate),
 			Monitored:     e.Monitored,
-			File:          firstFileDTO(files),
+			File:          firstFileDTO(files, profile),
 		})
 	}
 

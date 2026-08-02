@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -15,6 +17,9 @@ import (
 	"github.com/watzon/caravan/internal/api"
 	"github.com/watzon/caravan/internal/automation"
 	"github.com/watzon/caravan/internal/config"
+	"github.com/watzon/caravan/internal/convert"
+	"github.com/watzon/caravan/internal/dlna"
+	"github.com/watzon/caravan/internal/jellyfin"
 	"github.com/watzon/caravan/internal/store"
 	"github.com/watzon/caravan/web"
 )
@@ -72,7 +77,13 @@ func runServe(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	mgr := newLibraryAdapter(st, cfg.StorageRoot, logger)
+	// The playback handoff (SPEC §5.2): imports hand it a "the library changed"
+	// notification, it turns that into a durable job, and the job tells
+	// Jellyfin to rescan. It is always constructed — an unconfigured or
+	// disabled handoff is a no-op, not an absent dependency.
+	handoff := jellyfin.NewService(st, nil, logger)
+
+	mgr := newLibraryAdapter(st, cfg.StorageRoot, logger, handoff)
 	engines := newEngineProvider(mgr, cfg.Portable, logger)
 	// Closed before the store (deferred later, so it runs first): the engine
 	// flushes the queue's state through the store on the way out.
@@ -86,7 +97,34 @@ func runServe(args []string) error {
 	if err := automation.Bootstrap(ctx, st); err != nil {
 		return err
 	}
-	runner := automation.NewRunner(st, indexers, engines.await)
+
+	// The convert-for-TV queue is optional (SPEC §8): without ffmpeg on PATH
+	// the service reports itself unavailable, the API refuses to queue work,
+	// and the UI hides the affordance. Detection happens once at startup — a
+	// binary appearing mid-run is a restart, not a poll.
+	converter := convert.New(st, mgr.StorageRoot, convert.Detect(), logger)
+	logger.Info("convert-for-tv queue", "ffmpeg", converter.Available())
+
+	// The built-in DLNA media server (SPEC §5.1): it shares this process's HTTP
+	// listener, so it needs that port to advertise a LOCATION clients can
+	// fetch. A listen address without a usable port means no advertisement —
+	// the API and the SPA still serve, and GET /dlna says why.
+	dlnaServer := dlna.New(st, mgr.StorageRoot, listenPort(cfg.Listen, logger), logger)
+	// Deferred before Start so a Start that fails halfway is still torn down,
+	// and ordered so byebye goes out while the HTTP server can still answer the
+	// device description a client re-fetches on the way past.
+	defer func() {
+		if err := dlnaServer.Close(); err != nil {
+			logger.Error("closing dlna server", "error", err)
+		}
+	}()
+
+	// Conversions get a worker of their own: a two-hour transcode on the shared
+	// worker would hold up the Jellyfin handoff, the RSS sync and every
+	// monitored search for as long as it ran.
+	runner := automation.NewRunner(st, indexers, engines.await,
+		automation.WithDedicatedWorker(convert.JobKind, converter.Handle),
+		automation.WithHandler(jellyfin.JobKind, handoff.Handle))
 
 	var watcher sync.WaitGroup
 	watcher.Add(2)
@@ -103,9 +141,15 @@ func runServe(args []string) error {
 		Addr: cfg.Listen,
 		Handler: api.NewServer(st, mgr, web.DistFS(),
 			api.WithEngine(engines),
-			api.WithIndexerClients(indexers)),
+			api.WithIndexerClients(indexers),
+			api.WithConverter(converter),
+			api.WithDLNA(dlnaServer)),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
+
+	// Started after the handler exists so nothing is advertised before there is
+	// something to answer with.
+	dlnaServer.Start(ctx)
 
 	err = serveUntilSignal(ctx, srv, logger, cfg)
 
@@ -115,6 +159,24 @@ func runServe(args []string) error {
 	stop()
 	watcher.Wait()
 	return err
+}
+
+// listenPort extracts the port from a listen address, for the DLNA server to
+// advertise. A zero return disables advertising rather than failing the start:
+// the address is already good enough for net/http, and the LAN discovery half
+// of the feature is not worth refusing to boot over.
+func listenPort(addr string, logger *slog.Logger) int {
+	_, raw, err := net.SplitHostPort(addr)
+	if err != nil {
+		logger.Warn("dlna: cannot read the listen port, not advertising", "listen", addr, "error", err)
+		return 0
+	}
+	port, err := strconv.Atoi(raw)
+	if err != nil || port <= 0 {
+		logger.Warn("dlna: listen port is not advertisable", "listen", addr)
+		return 0
+	}
+	return port
 }
 
 // seedSettings reconciles the settings table with the bootstrap config

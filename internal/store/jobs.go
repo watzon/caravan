@@ -60,6 +60,17 @@ func (s *Store) EnqueueJob(ctx context.Context, j *core.Job) error {
 // reclaimed (SPEC §7), delivery is at-least-once and every handler must be
 // idempotent.
 func (s *Store) ClaimJob(ctx context.Context, kinds []string, lease time.Duration) (*core.Job, error) {
+	return s.claimJob(ctx, "IN", kinds, lease)
+}
+
+// ClaimJobExcept is ClaimJob for every kind *but* the given ones. It is what
+// lets a kind that runs for hours have a worker of its own without the general
+// worker claiming it first and starving everything else behind it.
+func (s *Store) ClaimJobExcept(ctx context.Context, kinds []string, lease time.Duration) (*core.Job, error) {
+	return s.claimJob(ctx, "NOT IN", kinds, lease)
+}
+
+func (s *Store) claimJob(ctx context.Context, op string, kinds []string, lease time.Duration) (*core.Job, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("store: claim job: %w", err)
@@ -71,7 +82,7 @@ func (s *Store) ClaimJob(ctx context.Context, kinds []string, lease time.Duratio
 	args := []any{core.JobStatePending, stamp}
 	where := "state = ? AND (run_after = '' OR run_after <= ?)"
 	if len(kinds) > 0 {
-		where += " AND kind IN (" + placeholders(len(kinds)) + ")"
+		where += " AND kind " + op + " (" + placeholders(len(kinds)) + ")"
 		for _, k := range kinds {
 			args = append(args, k)
 		}

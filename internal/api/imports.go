@@ -27,6 +27,7 @@ type parsedJSON struct {
 	Source     string  `json:"source"`
 	Codec      string  `json:"codec"`
 	Audio      string  `json:"audio"`
+	BitDepth   int     `json:"bit_depth"`
 	Group      string  `json:"group"`
 	Proper     bool    `json:"proper"`
 	Repack     bool    `json:"repack"`
@@ -48,6 +49,7 @@ func parsedDTO(p core.ParsedRelease) parsedJSON {
 		Source:     p.Source,
 		Codec:      p.Codec,
 		Audio:      p.Audio,
+		BitDepth:   p.BitDepth,
 		Group:      p.Group,
 		Proper:     p.Proper,
 		Repack:     p.Repack,

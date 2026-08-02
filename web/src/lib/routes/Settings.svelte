@@ -7,24 +7,38 @@
   import Button from '../components/Button.svelte';
   import Field from '../components/Field.svelte';
   import Icon from '../components/Icon.svelte';
+  import DlnaSettings from '../components/DlnaSettings.svelte';
   import EngineSettings from '../components/EngineSettings.svelte';
   import IndexerSettings from '../components/IndexerSettings.svelte';
+  import JellyfinSettings from '../components/JellyfinSettings.svelte';
   import LoadError from '../components/LoadError.svelte';
   import PageTabs from '../components/PageTabs.svelte';
   import Skeleton from '../components/Skeleton.svelte';
   import TextInput from '../components/TextInput.svelte';
   import QualityProfiles from '../components/QualityProfiles.svelte';
+  import TVProfileSettings from '../components/TVProfileSettings.svelte';
   import { UNKNOWN } from '../format';
   import { pushToast } from '../state/toast.svelte';
   import { system } from '../state/system.svelte';
 
-  type Tab = 'general' | 'indexers' | 'engine' | 'quality-profiles' | 'storage';
+  type Tab =
+    | 'general'
+    | 'indexers'
+    | 'engine'
+    | 'quality-profiles'
+    | 'tv-profile'
+    | 'dlna'
+    | 'jellyfin'
+    | 'storage';
 
   const TABS: { key: Tab; label: string }[] = [
     { key: 'general', label: 'General' },
     { key: 'indexers', label: 'Indexers' },
     { key: 'engine', label: 'Engine' },
     { key: 'quality-profiles', label: 'Quality profiles' },
+    { key: 'tv-profile', label: 'TV profile' },
+    { key: 'dlna', label: 'DLNA' },
+    { key: 'jellyfin', label: 'Jellyfin' },
     { key: 'storage', label: 'Storage' },
   ];
 
@@ -97,11 +111,13 @@
     onchange={(key) => (tab = key)}
     ariaLabel="Settings sections" />
 
-  <!-- Indexers and quality profiles own their fetches, so they render whether or not /settings loaded. -->
+  <!-- These own their fetches, so they render whether or not /settings loaded. -->
   {#if tab === 'indexers'}
     <IndexerSettings />
   {:else if tab === 'quality-profiles'}
     <QualityProfiles />
+  {:else if tab === 'jellyfin'}
+    <JellyfinSettings />
   {:else if error}
     <LoadError message={error} onretry={load} />
   {:else if loading && settings === null}
@@ -110,6 +126,16 @@
       <Skeleton class="h-9 w-full" />
       <Skeleton class="h-8 w-24" />
     </div>
+  {:else if tab === 'dlna' && settings}
+    <DlnaSettings
+      {settings}
+      {saving}
+      onsave={(patch) => save(patch, 'DLNA settings saved.')} />
+  {:else if tab === 'tv-profile' && settings}
+    <TVProfileSettings
+      {settings}
+      {saving}
+      onsave={(patch) => save(patch, 'TV profile saved.')} />
   {:else if tab === 'engine' && settings}
     <EngineSettings
       {settings}

@@ -20,6 +20,7 @@ const STATUS: SystemStatus = {
   disk_free_bytes: 500 * 1024 ** 3,
   disk_total_bytes: 1024 ** 4,
   engine_health: 'ok',
+  ffmpeg_available: true,
 };
 
 const MOVIE: Movie = {
@@ -82,6 +83,7 @@ const PARSED = {
   source: 'webdl',
   codec: 'x264',
   audio: 'AAC',
+  bit_depth: 0,
   group: 'GRP',
   proper: false,
   repack: false,
@@ -104,6 +106,7 @@ const RELEASES: Release[] = [
     leechers: 1,
     published_at: '2026-07-01T00:00:00Z',
     parsed: { ...PARSED, quality: '2160p', source: 'cam' },
+    compatibility: { verdict: 'unknown', reasons: [] },
   },
   {
     id: 1,
@@ -119,6 +122,7 @@ const RELEASES: Release[] = [
     leechers: 2,
     published_at: '2026-07-20T00:00:00Z',
     parsed: PARSED,
+    compatibility: { verdict: 'unknown', reasons: [] },
   },
 ];
 
@@ -239,6 +243,49 @@ describe('App shell', () => {
     expect(rows[1]?.textContent).toContain('CAM');
     expect(host.textContent).toContain('Grab');
     expect(host.textContent).not.toContain('No releases found');
+  });
+
+  it('flags a DTS/HEVC release against the active TV profile in the picker', async () => {
+    const clean = RELEASES[1]!;
+    const flagged: Release = {
+      ...clean,
+      guid: 'guid-dts',
+      title: 'Big.Buck.Bunny.2008.1080p.BluRay.x265.10bit.DTS-HD.MA.7.1-GRP',
+      compatibility: {
+        verdict: 'incompatible',
+        reasons: ['HEVC video (profile allows H.264)', 'DTS-HD audio (profile allows AAC)'],
+      },
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/system/status')) return jsonResponse(STATUS);
+        if (url.endsWith('/downloads')) return jsonResponse({ downloads: [] });
+        if (url.endsWith('/library/movies')) return jsonResponse({ movies: [MOVIE] });
+        if (url.endsWith('/library/movies/7')) return jsonResponse(MOVIE);
+        if (url.endsWith('/library/movies/7/releases')) {
+          return jsonResponse({ releases: [flagged, clean] });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      }),
+    );
+
+    app = mount(App, { target: host });
+    await settle();
+    navigate('/movies/7/search');
+    await settle();
+
+    const badge = [...host.querySelectorAll('span')].find(
+      (node) => node.textContent?.trim() === 'NEEDS CONVERT',
+    );
+    expect(badge, 'the incompatible release carries a NEEDS CONVERT badge').toBeDefined();
+    expect(badge?.getAttribute('title')).toContain('DTS-HD audio');
+    expect(badge?.getAttribute('title')).toContain('HEVC video');
+    // The clean release is not flagged, so the badge appears exactly once.
+    expect(
+      [...host.querySelectorAll('span')].filter((n) => n.textContent?.trim() === 'NEEDS CONVERT'),
+    ).toHaveLength(1);
   });
 
   it('sends the user to first run when there is no storage root', async () => {

@@ -56,6 +56,9 @@ describe('endpoints', () => {
     expect(endpoints.seriesReleases(9)).toBe('/api/v1/library/series/9/releases');
     expect(endpoints.seriesGrab(9)).toBe('/api/v1/library/series/9/grab');
     expect(endpoints.downloads()).toBe('/api/v1/downloads');
+    expect(endpoints.conversions()).toBe('/api/v1/convert');
+    expect(endpoints.conversionCancel(4)).toBe('/api/v1/convert/4/cancel');
+    expect(endpoints.conversionRetry(4)).toBe('/api/v1/convert/4/retry');
   });
 
   it('escapes the engine-native download id, which is not a number', () => {
@@ -64,6 +67,125 @@ describe('endpoints', () => {
     expect(endpoints.download('a/b?c')).toBe('/api/v1/downloads/a%2Fb%3Fc');
     expect(endpoints.downloadPause('a/b')).toBe('/api/v1/downloads/a%2Fb/pause');
     expect(endpoints.downloadResume('a/b')).toBe('/api/v1/downloads/a%2Fb/resume');
+  });
+});
+
+describe('tv profiles', () => {
+  it('unwraps the profiles envelope', async () => {
+    stubFetch({ profiles: [{ id: 'safe', active: true }] });
+    const list = await api.listTVProfiles();
+    expect(list).toHaveLength(1);
+    expect(only().url).toBe('/api/v1/tv-profiles');
+  });
+
+  it('saves the active profile through the settings endpoint, not its own', async () => {
+    stubFetch({ tv_profile: 'capable' });
+    await api.putSettings({ tv_profile: 'capable' });
+    expect(only()).toMatchObject({
+      method: 'PUT',
+      url: '/api/v1/settings',
+      body: { tv_profile: 'capable' },
+    });
+  });
+});
+
+describe('dlna media server', () => {
+  it('reads its status from a read-only endpoint', async () => {
+    stubFetch({
+      enabled: true,
+      friendly_name: 'Caravan',
+      uuid: 'abc',
+      advertising: true,
+      error: '',
+    });
+    const status = await api.dlnaStatus();
+    expect(status.advertising).toBe(true);
+    expect(only()).toMatchObject({ method: 'GET', url: '/api/v1/dlna' });
+  });
+
+  it('saves the toggle through the ordinary settings flow', async () => {
+    stubFetch({ dlna_enabled: 'false', dlna_friendly_name: 'Den TV' });
+    await api.putSettings({ dlna_enabled: 'false', dlna_friendly_name: 'Den TV' });
+    expect(only()).toMatchObject({
+      method: 'PUT',
+      url: '/api/v1/settings',
+      body: { dlna_enabled: 'false', dlna_friendly_name: 'Den TV' },
+    });
+  });
+});
+
+describe('jellyfin handoff', () => {
+  it('reads the configuration from its own endpoint', async () => {
+    stubFetch({ url: 'http://jellyfin.lan:8096', api_key: 'k', enabled: true });
+    const cfg = await api.jellyfinConfig();
+    expect(cfg.enabled).toBe(true);
+    expect(only()).toMatchObject({ method: 'GET', url: '/api/v1/handoff/jellyfin' });
+  });
+
+  it('saves the configuration as one POST rather than three settings keys', async () => {
+    stubFetch({ url: 'http://jellyfin.lan:8096', api_key: 'k', enabled: true });
+    await api.saveJellyfinConfig({ url: 'http://jellyfin.lan:8096', api_key: 'k', enabled: true });
+    expect(only()).toMatchObject({
+      method: 'POST',
+      url: '/api/v1/handoff/jellyfin',
+      body: { url: 'http://jellyfin.lan:8096', api_key: 'k', enabled: true },
+    });
+  });
+
+  it('tests unsaved credentials and reports what the server said', async () => {
+    stubFetch({ server_name: 'basement', version: '10.9.11' });
+    const info = await api.testJellyfin({ url: 'http://media-box:8096', api_key: 'typed' });
+    expect(info.server_name).toBe('basement');
+    expect(only()).toMatchObject({
+      method: 'POST',
+      url: '/api/v1/handoff/jellyfin/test',
+      body: { url: 'http://media-box:8096', api_key: 'typed' },
+    });
+  });
+
+  it('tests the stored configuration when given nothing', async () => {
+    stubFetch({ server_name: 'basement', version: '10.9.11' });
+    await api.testJellyfin();
+    expect(only().body).toEqual({});
+  });
+});
+
+describe('convert queue', () => {
+  it('unwraps the conversions envelope and passes the limit', async () => {
+    stubFetch({ conversions: [{ id: 1, status: 'queued' }] });
+    const rows = await api.listConversions(25);
+    expect(rows).toHaveLength(1);
+    expect(only().url).toBe('/api/v1/convert?limit=25');
+  });
+
+  it('reads an ffmpeg-less server as an empty queue, not as a crash', async () => {
+    stubFetch({});
+    await expect(api.listConversions()).resolves.toEqual([]);
+  });
+
+  it('queues a file by media file id', async () => {
+    stubFetch({ id: 4, status: 'queued' });
+    await api.convertMediaFile(42);
+    expect(only()).toMatchObject({
+      method: 'POST',
+      url: '/api/v1/convert',
+      body: { media_file_id: 42 },
+    });
+  });
+
+  it('cancels and retries by conversion id', async () => {
+    stubFetch({ id: 4, status: 'cancelled' });
+    await api.cancelConversion(4);
+    expect(only()).toMatchObject({ method: 'POST', url: '/api/v1/convert/4/cancel' });
+
+    stubFetch({ id: 4, status: 'queued' });
+    await api.retryConversion(4);
+    expect(only()).toMatchObject({ method: 'POST', url: '/api/v1/convert/4/retry' });
+  });
+
+  it('surfaces the 503 an ffmpeg-less server answers a queue attempt with', async () => {
+    stubFetch({ error: 'ffmpeg is not installed' }, 503);
+    await expect(api.convertMediaFile(42)).rejects.toBeInstanceOf(ApiError);
   });
 });
 

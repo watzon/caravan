@@ -46,6 +46,15 @@ type server struct {
 	engine   EngineProvider
 	indexers IndexerFactory
 
+	// converter is the phase-4 convert-for-TV queue's ffmpeg availability
+	// (SPEC §8). Nil means the same thing an ffmpeg-less host does: the queue
+	// is readable, but nothing new can be enqueued.
+	converter Converter
+
+	// dlna is the built-in media server (SPEC §5.1). Nil means the feature is
+	// not built in, which GET /dlna reports as off.
+	dlna DLNAService
+
 	// scanning is the single-flight guard for POST /library/rescan. A scan
 	// walks the whole storage root and reconciles the database; running two
 	// at once would have them fight over the same rows.
@@ -84,6 +93,30 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("PUT /quality-profiles/{id}", s.handleUpdateQualityProfile)
 	api.HandleFunc("DELETE /quality-profiles/{id}", s.handleDeleteQualityProfile)
 	api.HandleFunc("GET /wanted", s.handleWanted)
+
+	// The built-in TV profiles (SPEC §8, PLAN phase 4 task 3). Read-only: the
+	// active choice is a settings key, not a row.
+	api.HandleFunc("GET /tv-profiles", s.handleListTVProfiles)
+
+	// The convert-for-TV queue (SPEC §8, PLAN phase 4 task 4). Listing works
+	// without ffmpeg; queueing does not, and says so with a 503.
+	api.HandleFunc("GET /convert", s.handleListConversions)
+	api.HandleFunc("POST /convert", s.handleCreateConversion)
+	api.HandleFunc("POST /convert/{id}/cancel", s.handleCancelConversion)
+	api.HandleFunc("POST /convert/{id}/retry", s.handleRetryConversion)
+
+	// The Jellyfin playback handoff (SPEC §5.2, PLAN phase 4 task 1). The scan
+	// itself is not an endpoint: it is queued by the import pipeline and run by
+	// the job queue, so the API only configures and proves the connection.
+	// The built-in DLNA media server (SPEC §5.1, PLAN phase 4 task 2). Read
+	// only: the toggle and the friendly name are settings keys, so they are
+	// written through PUT /settings; what cannot be read from that table is
+	// whether SSDP actually came up, which is what this reports.
+	api.HandleFunc("GET /dlna", s.handleDLNAStatus)
+
+	api.HandleFunc("GET /handoff/jellyfin", s.handleGetJellyfin)
+	api.HandleFunc("POST /handoff/jellyfin", s.handleSetJellyfin)
+	api.HandleFunc("POST /handoff/jellyfin/test", s.handleTestJellyfin)
 
 	// The combined calendar and its iCal feed (PLAN phase 3, task 9).
 	api.HandleFunc("GET /calendar", s.handleCalendar)
@@ -143,6 +176,12 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 
 	root := http.NewServeMux()
 	root.Handle("/api/v1/", http.StripPrefix("/api/v1", jsonErrors(api)))
+	// The DLNA protocol surface sits outside /api/v1 and outside the JSON error
+	// envelope: its URLs are the ones SSDP advertises and its clients are
+	// televisions, which speak SOAP and expect SOAP faults.
+	if s.dlna != nil {
+		root.Handle(dlnaMountPrefix, s.dlna.Handler())
+	}
 	// A mistyped API path must not be answered with the SPA's index.html.
 	root.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")

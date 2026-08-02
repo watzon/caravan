@@ -78,7 +78,16 @@ func (m *Manager) ImportDownload(ctx context.Context, dl core.DownloadStatus, gr
 	if err != nil {
 		return err
 	}
-	return m.recordGrabOutcome(ctx, grab, imported, parked)
+	if err := m.recordGrabOutcome(ctx, grab, imported, parked); err != nil {
+		return err
+	}
+	// One notification per download, not per file: a season pack is a single
+	// batch and Jellyfin only needs telling once. A download that landed
+	// nothing changed no files, so there is nothing for a player to rescan.
+	if imported > 0 {
+		m.libraryChanged(ctx)
+	}
+	return nil
 }
 
 // alreadyImported reports whether this grab has already been imported. It is

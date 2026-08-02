@@ -303,10 +303,7 @@ func runImportWatcher(ctx context.Context, engines *engineProvider, adapter *lib
 		log.Error("import watcher: read storage root", "error", err)
 		return
 	}
-	// The provider is resolved per call rather than captured: the watcher
-	// outlives any one settings state, and a TMDB key set after it started
-	// must reach the next import rather than the next restart.
-	mgr := library.NewManager(adapter.st, lateMetadata{adapter: adapter}, root)
+	mgr := adapter.watcherManager(root)
 
 	log.Info("import watcher started", "interval", library.DefaultWatchInterval)
 	if err := mgr.RunWatcher(ctx, engine, library.DefaultWatchInterval); err != nil && ctx.Err() == nil {

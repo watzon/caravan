@@ -93,6 +93,9 @@ func checkParsed(t *testing.T, name string, got core.ParsedRelease, want expecta
 	if got.Audio != w.Audio {
 		t.Errorf("Parse(%q).Audio = %q, want %q", name, got.Audio, w.Audio)
 	}
+	if got.BitDepth != w.BitDepth {
+		t.Errorf("Parse(%q).BitDepth = %d, want %d", name, got.BitDepth, w.BitDepth)
+	}
 	if got.Group != w.Group {
 		t.Errorf("Parse(%q).Group = %q, want %q", name, got.Group, w.Group)
 	}
@@ -158,6 +161,8 @@ func parseExpectation(spec string) (expectation, error) {
 			want.rel.Codec = value
 		case "audio":
 			want.rel.Audio = value
+		case "bitdepth":
+			want.rel.BitDepth, err = strconv.Atoi(value)
 		case "group":
 			want.rel.Group = value
 		case "edition":

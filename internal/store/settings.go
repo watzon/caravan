@@ -42,6 +42,30 @@ const (
 	// configured target is reached. Zero disables that target.
 	SettingEngineSeedRatio = "engine_seed_ratio"
 	SettingEngineSeedDays  = "engine_seed_days"
+	// SettingTVProfile is the id of the active core.TVProfile — the target set
+	// releases and imported files are described against (SPEC §8, PLAN phase 4
+	// task 3). Unset resolves to the safe default, so this key is a preference
+	// and never a required row.
+	SettingTVProfile = "tv_profile"
+	// SettingJellyfinURL, SettingJellyfinAPIKey and SettingJellyfinEnabled
+	// configure the playback handoff (SPEC §5.2, PLAN phase 4 task 1): where
+	// the user's Jellyfin lives, the API key created in its dashboard, and
+	// whether an import is allowed to tell it to rescan. Enabled is stored as
+	// "true"/"false"; anything else reads as off.
+	SettingJellyfinURL     = "jellyfin_url"
+	SettingJellyfinAPIKey  = "jellyfin_api_key"
+	SettingJellyfinEnabled = "jellyfin_enabled"
+	// SettingDLNAEnabled, SettingDLNAFriendlyName and SettingDLNAUUID configure
+	// the built-in DLNA media server (SPEC §5.1, PLAN phase 4 task 2). Enabled
+	// is stored as "true"/"false" and defaults to ON when the key has never been
+	// written, because SPEC's promise is that the library is advertised whenever
+	// the server runs. The UUID is generated on first advertisement and kept so
+	// clients see the same device across restarts; losing it costs a
+	// re-discovery, never media, which is why it is allowed to live in the
+	// disposable database.
+	SettingDLNAEnabled      = "dlna_enabled"
+	SettingDLNAFriendlyName = "dlna_friendly_name"
+	SettingDLNAUUID         = "dlna_uuid"
 )
 
 // GetSetting returns the value for key, or ErrNotFound when the key has never

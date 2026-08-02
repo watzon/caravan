@@ -80,6 +80,13 @@ var audioRules = []rule{
 	{regexp.MustCompile(`(?i)\bpcm\b`), "PCM"},
 }
 
+// Bit-depth rules. "Hi10P" is the anime spelling of the same claim. The values
+// are the digits themselves so the caller parses one integer and no table.
+var bitDepthRules = []rule{
+	{regexp.MustCompile(`(?i)\b(10[\s._-]?bits?|hi10p?)\b`), "10"},
+	{regexp.MustCompile(`(?i)\b8[\s._-]?bits?\b`), "8"},
+}
+
 // Edition rules (SPEC §7 keeps Edition free text; these are the canonical
 // spellings Caravan renders into filenames).
 var editionRules = []rule{
@@ -197,6 +204,7 @@ func Parse(name string) core.ParsedRelease {
 	source, sourceIdx := matchRules(sourceRules, scan)
 	codec, codecIdx := matchRules(codecRules, scan)
 	audio, audioIdx := matchRules(audioRules, scan)
+	bitDepth, bitDepthIdx := matchRules(bitDepthRules, scan)
 	edition, editionIdx := matchRules(editionRules, scan)
 
 	if quality != "" {
@@ -211,6 +219,7 @@ func Parse(name string) core.ParsedRelease {
 		p.Quality = core.Quality480p
 	}
 	p.Codec, p.Audio, p.Edition = codec, audio, edition
+	p.BitDepth = atoi(bitDepth)
 
 	properIdx := firstIndex(reProper, scan)
 	repackIdx := firstIndex(reRepack, scan)
@@ -228,7 +237,7 @@ func Parse(name string) core.ParsedRelease {
 	// marker sitting at the very start is ignored so titles that legitimately
 	// open with a token word ("Extended Family") survive.
 	titleCut := minIndexAfter(titleStart,
-		seLoc[0], qualityIdx, sourceIdx, codecIdx, audioIdx,
+		seLoc[0], qualityIdx, sourceIdx, codecIdx, audioIdx, bitDepthIdx,
 		editionIdx, properIdx, repackIdx, noiseIdx, yearIdx)
 	if titleCut < 0 {
 		titleCut = len(work)
@@ -423,7 +432,7 @@ func validGroup(c string) bool {
 // isKnownToken reports whether s is release metadata rather than a name. It is
 // the guard that stops "1080p" or "E03" from being read as a release group.
 func isKnownToken(s string) bool {
-	for _, rules := range [][]rule{qualityRules, sourceRules, codecRules, audioRules, editionRules} {
+	for _, rules := range [][]rule{qualityRules, sourceRules, codecRules, audioRules, bitDepthRules, editionRules} {
 		if v, _ := matchRules(rules, s); v != "" {
 			return true
 		}

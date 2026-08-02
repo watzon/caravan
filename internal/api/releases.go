@@ -54,6 +54,10 @@ type releaseJSON struct {
 	AgeDays int        `json:"age_days"`
 	Parsed  parsedJSON `json:"parsed"`
 	Flags   []string   `json:"flags"`
+	// Compatibility is the active TV profile's verdict on the parsed tags
+	// (SPEC §8). It is advisory: a flagged release is still grabbable, and
+	// nothing here changes the ordering.
+	Compatibility compatibilityJSON `json:"compatibility"`
 }
 
 // indexerErrorJSON reports an indexer that failed during a fan-out. Partial
@@ -149,6 +153,10 @@ func (s *server) serveReleases(w http.ResponseWriter, r *http.Request, query str
 		return
 	}
 
+	// Resolved once for the whole fan-out so every row in one table is judged
+	// against the same profile.
+	profile := s.activeTVProfile(r.Context())
+
 	ctx, cancel := context.WithTimeout(r.Context(), releaseSearchTimeout)
 	defer cancel()
 	releases, failures := searchIndexers(ctx, newClient, indexers, query)
@@ -163,7 +171,7 @@ func (s *server) serveReleases(w http.ResponseWriter, r *http.Request, query str
 			s.writeStoreError(w, "cache release", err)
 			return
 		}
-		out.Releases = append(out.Releases, releaseDTO(rel, flags(rel)))
+		out.Releases = append(out.Releases, releaseDTO(rel, flags(rel), profile))
 	}
 	sortReleases(out.Releases)
 	writeJSON(w, http.StatusOK, out)
@@ -235,7 +243,20 @@ func searchIndexers(ctx context.Context, newClient IndexerFactory, indexers []co
 	return merged, failures
 }
 
-func releaseDTO(rel core.Release, flags []string) releaseJSON {
+// releaseTags is what the TV-profile check judges a release on. The container
+// comes from the release name, which usually does not carry one — an absent
+// container is simply not judged (core.TVProfile.Check).
+func releaseTags(rel core.Release) core.MediaTags {
+	return core.MediaTags{
+		Codec:     rel.Parsed.Codec,
+		BitDepth:  rel.Parsed.BitDepth,
+		Audio:     rel.Parsed.Audio,
+		Container: parse.Container(rel.Title),
+		Quality:   rel.Parsed.Quality,
+	}
+}
+
+func releaseDTO(rel core.Release, flags []string, profile core.TVProfile) releaseJSON {
 	if flags == nil {
 		flags = []string{}
 	}
@@ -253,6 +274,8 @@ func releaseDTO(rel core.Release, flags []string) releaseJSON {
 		AgeDays:     ageDays(rel.PublishedAt),
 		Parsed:      parsedDTO(rel.Parsed),
 		Flags:       flags,
+
+		Compatibility: compatibilityDTO(profile.Check(releaseTags(rel))),
 	}
 }
 

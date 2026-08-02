@@ -15,6 +15,7 @@
   import { numericParam, ordinalParam, type RoutePattern } from './lib/router';
   import { navigate, router, startRouter } from './lib/router.svelte';
   import Calendar from './lib/routes/Calendar.svelte';
+  import Convert from './lib/routes/Convert.svelte';
   import History from './lib/routes/History.svelte';
   import FirstRun from './lib/routes/FirstRun.svelte';
   import MovieDetail from './lib/routes/MovieDetail.svelte';
@@ -39,6 +40,7 @@
     '/series/:id/search/:season': 'Interactive Search',
     '/series/:id/search/:season/:episode': 'Interactive Search',
     '/queue': 'Queue',
+    '/convert': 'Convert',
     '/wanted': 'Wanted',
     '/calendar': 'Calendar',
     '/history': 'History',
@@ -143,6 +145,8 @@
           {/key}
         {:else if match.pattern === '/queue'}
           <Queue />
+        {:else if match.pattern === '/convert'}
+          <Convert />
         {:else if match.pattern === '/wanted'}
           <Wanted />
         {:else if match.pattern === '/calendar'}

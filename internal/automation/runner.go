@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/watzon/caravan/internal/api"
@@ -20,6 +21,12 @@ const (
 
 	jobLease        = 2 * time.Minute
 	jobPollInterval = time.Second
+
+	// dedicatedJobLease is the lease a dedicated worker takes. It is hours
+	// rather than minutes because the kind that gets its own worker is the kind
+	// that runs for hours (a 4K transcode), and a lease that expires under a
+	// running handler is one the reclaim sweep hands back to the pending pool.
+	dedicatedJobLease = 12 * time.Hour
 )
 
 // Handler performs one job's durable work. It receives only decoded job data
@@ -37,10 +44,45 @@ type Runner struct {
 	indexers api.IndexerFactory
 	engine   EngineGetter
 	handlers map[string]Handler
+	// dedicated are the kinds served by a worker of their own. The general
+	// worker never claims them, which is what keeps a job that runs for hours
+	// from being the only job that runs.
+	dedicated []string
+}
+
+// Option configures a Runner at construction.
+type Option func(*Runner)
+
+// WithHandler registers a job kind owned by another package.
+//
+// The phase-3 handlers live here because they are the automation brain. The
+// convert-for-TV queue (PLAN phase 4, task 4) is not: it is ffmpeg work that
+// needs the storage root, which this package deliberately does not know about.
+// Registering it from outside keeps the durable-queue semantics — leases,
+// backoff, at-least-once — in exactly one place without dragging the
+// filesystem in with them.
+func WithHandler(kind string, h Handler) Option {
+	return func(r *Runner) { r.handlers[kind] = h }
+}
+
+// WithDedicatedWorker registers a kind and gives it a worker of its own.
+//
+// The general worker is a single goroutine that blocks for as long as a handler
+// runs, and a convert job is an ffmpeg process that can run for hours. Left on
+// the shared worker it starves everything behind it: the Jellyfin handoff an
+// import just queued, the RSS sync, every monitored search — a release that
+// appears and expires inside a long transcode is simply missed. The dedicated
+// worker is also single-goroutine, so the one-conversion-at-a-time assumption
+// internal/convert is written against still holds.
+func WithDedicatedWorker(kind string, h Handler) Option {
+	return func(r *Runner) {
+		r.handlers[kind] = h
+		r.dedicated = append(r.dedicated, kind)
+	}
 }
 
 // NewRunner creates the standard phase-3 automation runner.
-func NewRunner(st *store.Store, indexers api.IndexerFactory, engine EngineGetter) *Runner {
+func NewRunner(st *store.Store, indexers api.IndexerFactory, engine EngineGetter, opts ...Option) *Runner {
 	r := &Runner{
 		st:       st,
 		indexers: indexers,
@@ -51,6 +93,9 @@ func NewRunner(st *store.Store, indexers api.IndexerFactory, engine EngineGetter
 	r.handlers[jobBacklogSweep] = r.handleBacklogSweep
 	r.handlers[jobSearchMovie] = r.handleSearchMovie
 	r.handlers[jobSearchEpisode] = r.handleSearchEpisode
+	for _, opt := range opts {
+		opt(r)
+	}
 	return r
 }
 
@@ -76,16 +121,38 @@ func Bootstrap(ctx context.Context, st *store.Store) error {
 // Run serves jobs until ctx is cancelled. Reclaiming at startup and once a
 // minute returns leases abandoned by a crash without making job attempts look
 // like semantic failures.
+//
+// Every kind registered with WithDedicatedWorker gets a goroutine of its own;
+// the general worker runs on this one and claims everything else.
 func (r *Runner) Run(ctx context.Context) {
 	_, _ = r.st.ReclaimExpired(ctx)
 
+	var workers sync.WaitGroup
+	for _, kind := range r.dedicated {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			r.serve(ctx, func(ctx context.Context) (*core.Job, error) {
+				return r.st.ClaimJob(ctx, []string{kind}, dedicatedJobLease)
+			}, false)
+		}()
+	}
+
+	r.serve(ctx, r.claimGeneral, true)
+	workers.Wait()
+}
+
+// serve is one worker's loop. Only the general worker sweeps expired leases:
+// one sweeper is enough, and a dedicated worker is the one most likely to be
+// deep inside a handler when the tick comes.
+func (r *Runner) serve(ctx context.Context, claim claimFunc, sweep bool) {
 	poll := time.NewTicker(jobPollInterval)
 	defer poll.Stop()
 	reclaim := time.NewTicker(time.Minute)
 	defer reclaim.Stop()
 
 	for {
-		worked, _ := r.ProcessOne(ctx)
+		worked, _ := r.process(ctx, claim)
 		if worked {
 			continue
 		}
@@ -93,16 +160,31 @@ func (r *Runner) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-reclaim.C:
-			_, _ = r.st.ReclaimExpired(ctx)
+			if sweep {
+				_, _ = r.st.ReclaimExpired(ctx)
+			}
 		case <-poll.C:
 		}
 	}
 }
 
-// ProcessOne claims and processes one eligible job. It is exported to make the
-// lease-to-completion transition testable without a timing-dependent runner.
+// claimFunc takes the next job a worker may run, or nil when there is none.
+type claimFunc func(ctx context.Context) (*core.Job, error)
+
+// claimGeneral claims anything not owned by a dedicated worker.
+func (r *Runner) claimGeneral(ctx context.Context) (*core.Job, error) {
+	return r.st.ClaimJobExcept(ctx, r.dedicated, jobLease)
+}
+
+// ProcessOne claims and processes one eligible job on the general worker. It is
+// exported to make the lease-to-completion transition testable without a
+// timing-dependent runner.
 func (r *Runner) ProcessOne(ctx context.Context) (bool, error) {
-	job, err := r.st.ClaimJob(ctx, nil, jobLease)
+	return r.process(ctx, r.claimGeneral)
+}
+
+func (r *Runner) process(ctx context.Context, claim claimFunc) (bool, error) {
+	job, err := claim(ctx)
 	if err != nil {
 		return false, fmt.Errorf("store: claim job: %w", err)
 	}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -19,7 +20,7 @@ func testAdapter(t *testing.T) (*libraryAdapter, *store.Store) {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { st.Close() })
-	return newLibraryAdapter(st, "", slog.New(slog.NewTextHandler(io.Discard, nil))), st
+	return newLibraryAdapter(st, "", slog.New(slog.NewTextHandler(io.Discard, nil)), nil), st
 }
 
 // The watcher holds one library.Manager for the life of the process, so the
@@ -122,5 +123,69 @@ func TestEngineOptionsReadsSettings(t *testing.T) {
 	}
 	if opts.SeedRatio != 1.5 || opts.SeedDays != 7 || !opts.Paused {
 		t.Fatalf("seeding settings = ratio %v days %d paused %t", opts.SeedRatio, opts.SeedDays, opts.Paused)
+	}
+}
+
+// watcherNotifier stands in for the playback handoff (internal/jellyfin).
+type watcherNotifier struct{ calls int }
+
+func (n *watcherNotifier) LibraryChanged(context.Context) error {
+	n.calls++
+	return nil
+}
+
+// TestImportWatcherNotifiesTheHandoff is PLAN phase 4 acceptance criterion 1 at
+// the wiring, which is where it was actually broken: the pipeline notifies, but
+// only if the Manager it runs on was built with the notifier. The watcher builds
+// its own and holds it for the life of the process, so an automatic import — the
+// path every finished download takes — silently never triggered a Jellyfin scan
+// while the manual match did.
+func TestImportWatcherNotifiesTheHandoff(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "caravan.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+
+	root := t.TempDir()
+	notify := &watcherNotifier{}
+	adapter := newLibraryAdapter(st, root, slog.New(slog.NewTextHandler(io.Discard, nil)), notify)
+
+	redirectTMDB(t, startFakeTMDB(t))
+	if err := st.SetSetting(ctx, store.SettingTMDBAPIKey, "key"); err != nil {
+		t.Fatalf("set tmdb key: %v", err)
+	}
+	movie := core.Movie{TMDBID: smokeTMDBID, Title: smokeMovieTitle, Year: smokeMovieYear, Monitored: true}
+	if err := st.UpsertMovie(ctx, &movie); err != nil {
+		t.Fatalf("UpsertMovie: %v", err)
+	}
+
+	// A finished download sitting under the storage root, as the engine leaves it.
+	const saveDir = "incomplete/Big.Buck.Bunny.2008.1080p.BluRay.x264-CARAVAN"
+	if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(saveDir)), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	content := filepath.Join(root, filepath.FromSlash(saveDir), smokeContentName)
+	if err := os.WriteFile(content, []byte("movie bytes"), 0o644); err != nil {
+		t.Fatalf("write download: %v", err)
+	}
+
+	mgr := adapter.watcherManager(root)
+	dl := core.DownloadStatus{ID: "infohash", State: core.DownloadCompleted, SavePath: saveDir}
+	grab := core.GrabInfo{MovieID: movie.ID, ReleaseTitle: smokeReleaseTitle}
+	if err := mgr.ImportDownload(ctx, dl, grab); err != nil {
+		t.Fatalf("ImportDownload: %v", err)
+	}
+
+	files, err := st.ListMediaFilesForMovie(ctx, movie.ID)
+	if err != nil {
+		t.Fatalf("ListMediaFilesForMovie: %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("imported %d files, want 1 — the fixture is not exercising an import", len(files))
+	}
+	if notify.calls != 1 {
+		t.Fatalf("handoff notifications = %d, want 1 after an automatic import", notify.calls)
 	}
 }

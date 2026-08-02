@@ -26,6 +26,7 @@
     truncateMiddle,
   } from '../format';
   import { isFlagged, releaseFlags, releaseScore, sortReleases } from '../release';
+  import { compatBadge } from '../tvcompat';
   import { navigate } from '../router.svelte';
   import { pushToast } from '../state/toast.svelte';
 
@@ -197,6 +198,7 @@
         <tbody>
           {#each rows as release, index (release.guid || `${release.indexer_id}:${release.title}`)}
             {@const flags = releaseFlags(release)}
+            {@const tv = compatBadge(release.compatibility)}
             {@const flagged = isFlagged(release)}
             {@const best = index === 0}
             <tr
@@ -254,6 +256,9 @@
                   {#each flags as flag (flag.key)}
                     <Badge mono tone={flag.tone} title={flag.title}>{flag.label}</Badge>
                   {/each}
+                  {#if tv}
+                    <Badge mono tone={tv.tone} title={tv.title}>{tv.label}</Badge>
+                  {/if}
                 </div>
               </td>
 

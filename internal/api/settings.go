@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/watzon/caravan/internal/core"
 	"github.com/watzon/caravan/internal/store"
 )
 
@@ -37,6 +38,9 @@ var writableSettings = map[string]bool{
 	store.SettingEngineMaxUpKBps:        true,
 	store.SettingEngineSeedRatio:        true,
 	store.SettingEngineSeedDays:         true,
+	store.SettingTVProfile:              true,
+	store.SettingDLNAEnabled:            true,
+	store.SettingDLNAFriendlyName:       true,
 	SettingMode:                         true,
 }
 
@@ -81,6 +85,14 @@ func (s *server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if err := validateTVProfileSetting(body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := validateDLNASettings(body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	// Sorted so a partial failure is at least deterministic.
 	keys := make([]string, 0, len(body))
@@ -106,7 +118,56 @@ func (s *server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// The media server re-reads its own keys so the toggle takes effect without
+	// a restart. It cannot fail the request: a LAN that will not carry SSDP is
+	// reported through GET /dlna, not by rejecting a settings save that already
+	// landed.
+	if s.dlna != nil {
+		s.dlna.Reload(r.Context())
+	}
 	writeJSON(w, http.StatusOK, settings)
+}
+
+// validateDLNASettings refuses values the media server would silently reinterpret.
+//
+// An unparseable dlna_enabled reads as off, and a friendly name that is only
+// whitespace falls back to the default — both are quiet surprises, so they are
+// rejected here where the user can see them (SPEC §13).
+func validateDLNASettings(settings map[string]string) error {
+	if raw, ok := settings[store.SettingDLNAEnabled]; ok {
+		if _, err := strconv.ParseBool(strings.TrimSpace(raw)); err != nil {
+			return fmt.Errorf("invalid %s", store.SettingDLNAEnabled)
+		}
+	}
+	if raw, ok := settings[store.SettingDLNAFriendlyName]; ok {
+		name := strings.TrimSpace(raw)
+		if name == "" {
+			return fmt.Errorf("invalid %s", store.SettingDLNAFriendlyName)
+		}
+		// The name is carried in the device description and rendered on a TV's
+		// device list; anything longer is truncated there and unreadable.
+		if len([]rune(name)) > 64 {
+			return fmt.Errorf("invalid %s", store.SettingDLNAFriendlyName)
+		}
+	}
+	return nil
+}
+
+// validateTVProfileSetting refuses a profile id nothing implements. The
+// resolver falls back to the safe default at read time, so an unknown id would
+// otherwise be stored and silently ignored — the opposite of SPEC §13.
+func validateTVProfileSetting(settings map[string]string) error {
+	id, ok := settings[store.SettingTVProfile]
+	if !ok {
+		return nil
+	}
+	id = strings.TrimSpace(id)
+	for _, p := range core.TVProfiles() {
+		if p.ID == id {
+			return nil
+		}
+	}
+	return fmt.Errorf("invalid %s", store.SettingTVProfile)
 }
 
 func validateEngineSettings(settings map[string]string) error {
@@ -153,6 +214,10 @@ type statusResponse struct {
 	// EngineHealth is the download engine's state: "ok", "unconfigured" (no
 	// storage root yet, so no engine), or "error" (it failed to start).
 	EngineHealth string `json:"engine_health"`
+	// FFmpegAvailable reports whether ffmpeg and ffprobe are both on PATH.
+	// False hides the whole convert-for-TV affordance and degrades the
+	// TV-incompatible warning to informational (SPEC §8).
+	FFmpegAvailable bool `json:"ffmpeg_available"`
 }
 
 type statusCounts struct {
@@ -235,9 +300,10 @@ func (s *server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 			MediaFiles: len(files),
 			Unmatched:  len(unmatched),
 		},
-		DiskFreeBytes:  diskFree,
-		DiskTotalBytes: diskTotal,
-		EngineHealth:   s.engineHealth(),
+		DiskFreeBytes:   diskFree,
+		DiskTotalBytes:  diskTotal,
+		EngineHealth:    s.engineHealth(),
+		FFmpegAvailable: s.ffmpegAvailable(),
 	})
 }
 

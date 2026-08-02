@@ -22,6 +22,7 @@ export const ROUTES = [
   '/series/:id/search/:season',
   '/series/:id/search/:season/:episode',
   '/queue',
+  '/convert',
   '/wanted',
   '/calendar',
   '/history',

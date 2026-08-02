@@ -39,14 +39,19 @@ type libraryAdapter struct {
 	fallbackRoot string
 	hc           *http.Client
 	log          *slog.Logger
+	// notify is the playback handoff every Manager this adapter builds carries,
+	// so an import made through the API notifies Jellyfin exactly as one made
+	// by the download watcher does.
+	notify library.Notifier
 }
 
-func newLibraryAdapter(st *store.Store, fallbackRoot string, log *slog.Logger) *libraryAdapter {
+func newLibraryAdapter(st *store.Store, fallbackRoot string, log *slog.Logger, notify library.Notifier) *libraryAdapter {
 	return &libraryAdapter{
 		st:           st,
 		fallbackRoot: fallbackRoot,
 		hc:           &http.Client{Timeout: metadataTimeout},
 		log:          log,
+		notify:       notify,
 	}
 }
 
@@ -56,7 +61,21 @@ func (a *libraryAdapter) current(ctx context.Context) (*library.Manager, error) 
 	if err != nil {
 		return nil, err
 	}
-	return library.NewManager(a.st, a.metadata(ctx), root), nil
+	return library.NewManager(a.st, a.metadata(ctx), root, library.WithNotifier(a.notify)), nil
+}
+
+// watcherManager builds the one library.Manager the import watcher holds for
+// the life of the process.
+//
+// It is here rather than inline in the watcher so it cannot drift from current:
+// the two differ only in where the root and the provider come from — the
+// watcher's root is fixed at startup and its provider is resolved per call
+// (lateMetadata) — and everything else, the playback handoff included, has to
+// be the same. A watcher without the notifier is the phase-4 acceptance
+// criterion silently unmet: automatic imports would land files and never tell
+// Jellyfin to rescan.
+func (a *libraryAdapter) watcherManager(root string) *library.Manager {
+	return library.NewManager(a.st, lateMetadata{adapter: a}, root, library.WithNotifier(a.notify))
 }
 
 // StorageRoot is the storage root in force right now: the settings table's

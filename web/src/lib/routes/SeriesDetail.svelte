@@ -10,6 +10,7 @@
   import type { Episode, Season, Series } from '../api/types';
   import Badge from '../components/Badge.svelte';
   import Button from '../components/Button.svelte';
+  import ConvertFileButton from '../components/ConvertFileButton.svelte';
   import EmptyState from '../components/EmptyState.svelte';
   import Icon from '../components/Icon.svelte';
   import LoadError from '../components/LoadError.svelte';
@@ -20,6 +21,7 @@
   import { UNKNOWN, episodeCode, formatBytes, formatDate, seasonLabel } from '../format';
   import { pushToast } from '../state/toast.svelte';
   import { episodeStatus, seriesStatus } from '../status';
+  import { compatBadge } from '../tvcompat';
 
   interface Props {
     id: number;
@@ -241,7 +243,13 @@
                           </td>
                           <td class="px-3 py-2">
                             {#if episode.file}
-                              <Badge mono>{episode.file.quality}</Badge>
+                              {@const tv = compatBadge(episode.file.compatibility)}
+                              <div class="flex flex-wrap items-center gap-1.5">
+                                <Badge mono>{episode.file.quality}</Badge>
+                                {#if tv}
+                                  <Badge mono tone={tv.tone} title={tv.title}>{tv.label}</Badge>
+                                {/if}
+                              </div>
                             {:else}
                               <span class="text-ink-muted">{UNKNOWN}</span>
                             {/if}
@@ -264,7 +272,10 @@
                             </div>
                           </td>
                           <td class="px-3 py-2">
-                            <div class="flex justify-end">
+                            <div class="flex justify-end gap-1">
+                              {#if episode.file}
+                                <ConvertFileButton file={episode.file} compact />
+                              {/if}
                               <Button
                                 variant="ghost"
                                 size="sm"

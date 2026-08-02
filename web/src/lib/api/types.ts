@@ -17,12 +17,42 @@ export interface ParsedRelease {
   source: string;
   codec: string;
   audio: string;
+  /** Video bit depth the name claimed (8 or 10); 0 when it claimed none. */
+  bit_depth: number;
   group: string;
   proper: boolean;
   repack: boolean;
   edition: string;
   /** Parser self-assessment in [0,1]. */
   confidence: number;
+}
+
+/**
+ * internal/core.TVCompatibility — the active TV profile's verdict on a release
+ * or an imported file (SPEC §8).
+ *
+ * Advisory only: nothing is hidden, refused or reordered because of it. An
+ * "unknown" verdict means the tags carried nothing to judge, never that the
+ * media is bad.
+ */
+export interface TVCompatibility {
+  verdict: 'unknown' | 'compatible' | 'needs-remux' | 'incompatible';
+  /** Human-readable, worst first; empty unless something is off. */
+  reasons: string[];
+}
+
+/** internal/api.tvProfileJSON — one built-in target-set description. */
+export interface TVProfile {
+  id: string;
+  name: string;
+  description: string;
+  video_codecs: string[];
+  max_bit_depth: number;
+  audio_codecs: string[];
+  containers: string[];
+  max_quality: string;
+  /** True for the profile the compatibility fields were computed against. */
+  active: boolean;
 }
 
 /** internal/core.MediaFile */
@@ -38,6 +68,7 @@ export interface MediaFile {
   release_group: string;
   added_at: string;
   modified_at: string;
+  compatibility: TVCompatibility;
 }
 
 /** internal/core.Movie plus the file summary the list/detail endpoints attach. */
@@ -190,6 +221,12 @@ export interface SystemStatus {
   disk_total_bytes: number;
   /** "ok" | "unconfigured" | "error" ("degraded" arrives with external clients). */
   engine_health: string;
+  /**
+   * Whether ffmpeg and ffprobe are both on the server's PATH. False hides the
+   * whole convert-for-TV affordance and degrades the TV-incompatible warning
+   * to informational (SPEC §8).
+   */
+  ffmpeg_available: boolean;
   /** Portable mode: the previous session did not shut down cleanly (phase 5). */
   dirty?: boolean;
 }
@@ -207,6 +244,57 @@ export const SETTING_ENGINE_MAX_DOWN_KBPS = 'engine_max_down_kbps';
 export const SETTING_ENGINE_MAX_UP_KBPS = 'engine_max_up_kbps';
 export const SETTING_ENGINE_SEED_RATIO = 'engine_seed_ratio';
 export const SETTING_ENGINE_SEED_DAYS = 'engine_seed_days';
+
+/** Active core.TVProfile id (SPEC §8). Unset resolves to the safe default. */
+export const SETTING_TV_PROFILE = 'tv_profile';
+
+/**
+ * The built-in DLNA media server (SPEC §5.1). Unlike the Jellyfin handoff these
+ * are plain settings keys: there is nothing to validate across them and nothing
+ * to test against, so they ride on PUT /settings with everything else.
+ *
+ * `dlna_enabled` is absent on a fresh install and reads as ON there — the spec's
+ * promise is that the library is advertised whenever the server runs.
+ */
+export const SETTING_DLNA_ENABLED = 'dlna_enabled';
+export const SETTING_DLNA_FRIENDLY_NAME = 'dlna_friendly_name';
+
+/**
+ * GET /dlna — what the media server is actually doing.
+ *
+ * `enabled` is the toggle; `advertising` is whether SSDP came up. They differ on
+ * a host with no usable multicast, which is a real and common state (a
+ * container on a bridge network, a VPN-only interface) and the reason this is an
+ * endpoint rather than two settings keys the UI could read directly.
+ */
+export interface DlnaStatus {
+  enabled: boolean;
+  friendly_name: string;
+  /** Device identity clients see; stable across restarts. */
+  uuid: string;
+  advertising: boolean;
+  /** Why advertising is off despite being enabled. Empty otherwise. */
+  error: string;
+}
+
+/**
+ * GET/POST /handoff/jellyfin — the playback handoff (SPEC §5.2).
+ *
+ * It has its own endpoints rather than riding on /settings because the three
+ * values are edited, validated and tested as one thing: enabling a handoff with
+ * no server address is a rejected form, not three independent keys.
+ */
+export interface JellyfinConfig {
+  url: string;
+  api_key: string;
+  enabled: boolean;
+}
+
+/** POST /handoff/jellyfin/test — what the server said about itself. */
+export interface JellyfinTestResult {
+  server_name: string;
+  version: string;
+}
 
 /**
  * What the library holds once a scan has finished (see `api.awaitScan`).
@@ -293,6 +381,7 @@ export interface Release {
   leechers: number;
   published_at: string;
   parsed: ParsedRelease;
+  compatibility: TVCompatibility;
 }
 
 /**
@@ -465,4 +554,34 @@ export interface QualityProfileInput {
   cutoff: Quality;
   items: Quality[];
   upgrade_allowed: boolean;
+}
+
+/* ---------------------------------------------------------------------------
+ * Convert-for-TV queue (SPEC §8, GET/POST /convert).
+ * ------------------------------------------------------------------------ */
+
+/** internal/core conversion statuses. */
+export type ConversionStatus = 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
+
+/**
+ * How a file was (or will be) converted. Empty until the job has probed it,
+ * because the choice belongs to the probe and not to whoever pressed Convert.
+ */
+export type ConversionStrategy = '' | 'none' | 'remux' | 'transcode';
+
+/** internal/core.Conversion — one row of the convert queue. */
+export interface Conversion {
+  id: number;
+  media_file_id: number;
+  /** Storage-root-relative path as it was when the conversion was queued. */
+  source_path: string;
+  /** Storage-root-relative path the library now points at; empty until done. */
+  output_path: string;
+  strategy: ConversionStrategy;
+  /** The TV profile this conversion targets, recorded at queue time. */
+  profile_id: string;
+  status: ConversionStatus;
+  error: string;
+  created_at: string;
+  updated_at: string;
 }

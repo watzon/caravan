@@ -21,6 +21,7 @@
 package library
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -72,6 +73,29 @@ type Manager struct {
 	hc *http.Client
 	// minConfidence is the parking threshold described on defaultMinConfidence.
 	minConfidence float64
+	// notify is the playback handoff, or nil when none is configured.
+	notify Notifier
+}
+
+// Notifier is told after an import puts new files in the library, so playback
+// handoff can react (SPEC §5.2: an import triggers a Jellyfin library scan).
+//
+// It is an interface here rather than the handoff itself so the import pipeline
+// neither imports nor waits on it. The contract is that LibraryChanged records
+// intent and returns promptly — it must not make the network call itself —
+// because an import that a sleeping media server can slow down or fail is worse
+// than a handoff that arrives a moment late.
+type Notifier interface {
+	LibraryChanged(ctx context.Context) error
+}
+
+// Option configures a Manager at construction.
+type Option func(*Manager)
+
+// WithNotifier attaches a playback handoff. Without one, imports simply do not
+// notify anything.
+func WithNotifier(n Notifier) Option {
+	return func(m *Manager) { m.notify = n }
 }
 
 // NewManager returns a Manager rooted at the storage root.
@@ -79,8 +103,8 @@ type Manager struct {
 // mp may be nil: without a metadata provider every scanned file parks in the
 // unmatched queue with the parser's guess instead of the scan failing
 // (SPEC §13 — import match failures are visible, never fatal).
-func NewManager(st *store.Store, mp core.MetadataProvider, root string) *Manager {
-	return &Manager{
+func NewManager(st *store.Store, mp core.MetadataProvider, root string, opts ...Option) *Manager {
+	m := &Manager{
 		store:         st,
 		provider:      mp,
 		root:          cleanRoot(root),
@@ -88,5 +112,29 @@ func NewManager(st *store.Store, mp core.MetadataProvider, root string) *Manager
 		link:          osLink,
 		hc:            &http.Client{Timeout: posterTimeout},
 		minConfidence: defaultMinConfidence,
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// libraryChanged tells the playback handoff that new files landed.
+//
+// A handoff that cannot be recorded is a warning in the feed, never an error:
+// the files are in the library either way, and failing the import — which would
+// make the job queue retry a completed import — because a media server could
+// not be told about it inverts what matters (SPEC §13).
+func (m *Manager) libraryChanged(ctx context.Context) {
+	if m.notify == nil {
+		return
+	}
+	if err := m.notify.LibraryChanged(ctx); err != nil {
+		_ = m.store.InsertEvent(ctx, &core.Event{
+			Level:    core.EventLevelWarn,
+			Category: EventCategoryImport,
+			Message:  "Playback handoff could not be notified",
+			Detail:   err.Error(),
+		})
 	}
 }

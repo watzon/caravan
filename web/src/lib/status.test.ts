@@ -14,6 +14,7 @@ const FILE: MediaFile = {
   release_group: 'GROUP',
   added_at: '2026-07-31T00:00:00Z',
   modified_at: '2026-07-31T00:00:00Z',
+  compatibility: { verdict: 'compatible', reasons: [] },
 };
 
 function movie(overrides: Partial<Movie> = {}): Movie {

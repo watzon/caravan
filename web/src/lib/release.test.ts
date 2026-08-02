@@ -12,6 +12,7 @@ function parsed(overrides: Partial<ParsedRelease> = {}): ParsedRelease {
     source: 'bluray',
     codec: 'x264',
     audio: 'AC3',
+    bit_depth: 0,
     group: 'GROUP',
     proper: false,
     repack: false,
@@ -36,6 +37,7 @@ function release(overrides: Partial<Release> = {}): Release {
     leechers: 3,
     published_at: '2026-07-01T00:00:00Z',
     parsed: parsed(),
+    compatibility: { verdict: 'unknown', reasons: [] },
     ...overrides,
   };
 }

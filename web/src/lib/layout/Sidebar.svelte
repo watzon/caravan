@@ -1,8 +1,8 @@
 <script lang="ts">
   /**
    * DESIGN.md §5: fixed 240px sidebar on --color-surface with a hairline right
-   * border. Nav is phase-gated — Wanted, Calendar and Convert appear as phases
-   * 3-4 ship, so they are not rendered here.
+   * border. Nav is phase-gated: Wanted and Calendar arrived with phase 3 and
+   * Convert with phase 4, so every entry here has a screen behind it.
    *
    * The persistent bottom slot holds system status (disk free, engine health).
    */
@@ -31,6 +31,7 @@
 
   const ACTIVITY: NavItem[] = [
     { href: '/queue', label: 'Queue', icon: 'download' },
+    { href: '/convert', label: 'Convert', icon: 'refresh' },
     { href: '/history', label: 'History', icon: 'pulse' },
   ];
 

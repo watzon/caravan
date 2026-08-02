@@ -23,6 +23,10 @@ type ParsedRelease struct {
 	Codec string
 	// Audio is the audio tag as parsed ("DTS", "AAC", …), or empty.
 	Audio string
+	// BitDepth is the video bit depth the name claims (8 or 10), or 0 when it
+	// claimed none. SPEC §8: a Main10 stream is exactly what an older set
+	// refuses, so the TV-profile check needs this separate from Codec.
+	BitDepth int
 	// Group is the release group, or empty.
 	Group string
 	// Proper marks a PROPER re-release.

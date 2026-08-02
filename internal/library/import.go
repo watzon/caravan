@@ -100,5 +100,6 @@ func (m *Manager) ImportUnmatched(ctx context.Context, unmatchedID, tmdbID int64
 		return nil, fmt.Errorf("library: unknown media type %q", mediaType)
 	}
 
+	m.libraryChanged(ctx)
 	return res, nil
 }

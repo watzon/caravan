@@ -12,6 +12,12 @@ import (
 const mediaFileColumns = `id, path, size, movie_id, quality, source, codec, audio,
 	release_group, added_at, modified_at`
 
+// mediaFileColumnsQualified is mediaFileColumns for queries that join another
+// table; only `id` is actually ambiguous, but qualifying all of them keeps the
+// two lists diffable.
+const mediaFileColumnsQualified = `mf.id, mf.path, mf.size, mf.movie_id, mf.quality, mf.source,
+	mf.codec, mf.audio, mf.release_group, mf.added_at, mf.modified_at`
+
 // UpsertMediaFile inserts or updates a media file and writes back the assigned
 // ID. Identity is the storage-root-relative Path: the file on disk is the
 // source of truth, so its path is what a rescan can re-derive.
@@ -60,6 +66,42 @@ func (s *Store) GetMediaFileByPath(ctx context.Context, path string) (*core.Medi
 	return f, nil
 }
 
+// GetMediaFile returns the media file with the given id, or ErrNotFound.
+// The convert queue addresses files by id rather than by path, because the
+// path is exactly what a conversion changes.
+func (s *Store) GetMediaFile(ctx context.Context, id int64) (*core.MediaFile, error) {
+	row := s.db.QueryRowContext(ctx, "SELECT "+mediaFileColumns+" FROM media_files WHERE id = ?", id)
+	f, err := scanMediaFile(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("store: media file %d: %w", id, ErrNotFound)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("store: get media file %d: %w", id, err)
+	}
+	return f, nil
+}
+
+// UpdateMediaFileConverted repoints a media file at the file ffmpeg produced
+// (PLAN phase 4, task 4).
+//
+// It updates in place instead of insert-plus-delete because the row id is what
+// episode_files links against: a multi-episode file that lost its id on
+// conversion would silently detach from every episode it covers.
+//
+// Quality travels with the rest: a conversion may downscale, and a row still
+// claiming the source's resolution is one the TV compatibility check keeps
+// condemning after the file it describes has been made compatible.
+func (s *Store) UpdateMediaFileConverted(ctx context.Context, id int64, path string, size int64, quality, codec, audio string) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE media_files
+		SET path = ?, size = ?, quality = ?, codec = ?, audio = ?, modified_at = ?
+		WHERE id = ?`, path, size, quality, codec, audio, formatTime(now()), id)
+	if err != nil {
+		return fmt.Errorf("store: update converted media file %d: %w", id, err)
+	}
+	return affectedOne(res, "update converted media file", id)
+}
+
 // ListMediaFiles returns every media file ordered by path.
 func (s *Store) ListMediaFiles(ctx context.Context) ([]core.MediaFile, error) {
 	return s.queryMediaFiles(ctx, "SELECT "+mediaFileColumns+" FROM media_files ORDER BY path")
@@ -81,6 +123,59 @@ func (s *Store) ListMediaFilesForEpisode(ctx context.Context, episodeID int64) (
 		JOIN episode_files ON episode_files.media_file_id = media_files.id
 		WHERE episode_files.episode_id = ?
 		ORDER BY media_files.path`, episodeID)
+}
+
+// EpisodeMediaFile pairs one episode with one of the files that covers it. A
+// multi-episode file (S01E01E02) appears once per episode, which is what makes
+// it correct to count these rows as "playable things under this season".
+type EpisodeMediaFile struct {
+	EpisodeID     int64
+	SeasonNumber  int
+	EpisodeNumber int
+	File          core.MediaFile
+}
+
+// ListEpisodeMediaFilesForSeries returns every episode/file pair in a series,
+// ordered by season, episode and path.
+//
+// One query rather than ListEpisodes plus a ListMediaFilesForEpisode per row:
+// the DLNA browse needs both the per-season counts and the per-season files,
+// and a per-episode round trip would turn one browse into a query per episode.
+func (s *Store) ListEpisodeMediaFilesForSeries(ctx context.Context, seriesID int64) ([]EpisodeMediaFile, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT e.id, e.season_number, e.episode_number, `+mediaFileColumnsQualified+`
+		FROM media_files mf
+		JOIN episode_files ef ON ef.media_file_id = mf.id
+		JOIN episodes e ON e.id = ef.episode_id
+		WHERE e.series_id = ?
+		ORDER BY e.season_number, e.episode_number, mf.path`, seriesID)
+	if err != nil {
+		return nil, fmt.Errorf("store: list episode media files for series %d: %w", seriesID, err)
+	}
+	defer rows.Close()
+
+	out := []EpisodeMediaFile{}
+	for rows.Next() {
+		var (
+			pair       EpisodeMediaFile
+			addedAt    string
+			modifiedAt string
+		)
+		err := rows.Scan(&pair.EpisodeID, &pair.SeasonNumber, &pair.EpisodeNumber,
+			&pair.File.ID, &pair.File.Path, &pair.File.Size, &pair.File.MovieID,
+			&pair.File.Quality, &pair.File.Source, &pair.File.Codec, &pair.File.Audio,
+			&pair.File.ReleaseGroup, &addedAt, &modifiedAt)
+		if err != nil {
+			return nil, fmt.Errorf("store: scan episode media file: %w", err)
+		}
+		pair.File.AddedAt = parseTime(addedAt)
+		pair.File.ModifiedAt = parseTime(modifiedAt)
+		out = append(out, pair)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list episode media files for series %d: %w", seriesID, err)
+	}
+	return out, nil
 }
 
 // DeleteMediaFileByPath removes the media file row and, by cascade, its
