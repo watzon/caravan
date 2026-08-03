@@ -47,7 +47,10 @@
            group-hover:ring-border-strong group-focus-visible:ring-accent">
     <Poster path={posterPath} fallback={posterUrl} alt="" {fallbackIcon} />
 
-    <span class="absolute left-2 top-2 rounded-full bg-bg/70 p-1.5">
+    <!-- flex, not inline: line-height would stretch the circle into a pill. -->
+    <span
+      class="absolute left-2 top-2 flex items-center justify-center rounded-full
+             border border-border-strong bg-bg p-1.5">
       <StatusDot {status} showLabel={false} />
     </span>
 
