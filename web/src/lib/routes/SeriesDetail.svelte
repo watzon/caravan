@@ -15,12 +15,21 @@
   import Icon from '../components/Icon.svelte';
   import LoadError from '../components/LoadError.svelte';
   import Poster from '../components/Poster.svelte';
+  import RemoveItemModal from '../components/RemoveItemModal.svelte';
   import Skeleton from '../components/Skeleton.svelte';
   import StatusDot from '../components/StatusDot.svelte';
   import Toggle from '../components/Toggle.svelte';
-  import { UNKNOWN, episodeCode, formatBytes, formatDate, seasonLabel } from '../format';
+  import {
+    UNKNOWN,
+    episodeCode,
+    formatBytes,
+    formatDate,
+    seasonLabel,
+    titleWithYear,
+  } from '../format';
   import MetadataLinks from '../components/MetadataLinks.svelte';
   import { episodeLink, seriesLinks } from '../metadataLinks';
+  import { navigate } from '../router.svelte';
   import { pushToast } from '../state/toast.svelte';
   import { episodeStatus, seriesStatus } from '../status';
   import { compatBadge } from '../tvcompat';
@@ -36,6 +45,8 @@
   let error = $state<string | null>(null);
   let busy = $state(false);
   let searching = $state(false);
+  let confirmingRemove = $state(false);
+  let removing = $state(false);
   let collapsed = $state<Record<number, boolean>>({});
 
   async function load() {
@@ -61,6 +72,10 @@
   function ownedCount(season: Season): number {
     return episodesOf(season).filter((e) => e.file).length;
   }
+
+  // The detail response carries every season's episodes with their files, so
+  // the confirm can name a real count rather than a vague "its files".
+  let fileCount = $derived(seasons.reduce((total, season) => total + ownedCount(season), 0));
 
   async function run(action: () => Promise<unknown>, failureNote: string) {
     busy = true;
@@ -94,6 +109,28 @@
       pushToast(errorText(err), 'danger');
     } finally {
       searching = false;
+    }
+  }
+
+  /** See MovieDetail.remove: a successful removal leaves the page it emptied. */
+  async function remove(deleteFiles: boolean) {
+    const current = series;
+    if (!current) return;
+    removing = true;
+    try {
+      await api.deleteSeries(current.id, deleteFiles);
+      confirmingRemove = false;
+      pushToast(
+        deleteFiles
+          ? `Removed ${current.title} and its files`
+          : `Removed ${current.title} from the library`,
+        'neutral',
+      );
+      navigate('/series');
+    } catch (err) {
+      pushToast(errorText(err), 'danger');
+    } finally {
+      removing = false;
     }
   }
 </script>
@@ -160,6 +197,15 @@
                   () => api.setSeriesMonitored(current.id, next),
                   'Could not update the series',
                 )} />
+            <Button
+              variant="danger"
+              size="sm"
+              disabled={removing}
+              title="Remove this series from the library"
+              onclick={() => (confirmingRemove = true)}>
+              <Icon name="trash" size={14} />
+              <span class="sr-only">Remove {current.title}</span>
+            </Button>
           </div>
         </div>
 
@@ -351,6 +397,16 @@
           </section>
         {/each}
       </div>
+    {/if}
+
+    {#if confirmingRemove}
+      <RemoveItemModal
+        title="Remove {current.title}"
+        subject={titleWithYear(current.title, current.year)}
+        {fileCount}
+        busy={removing}
+        onconfirm={remove}
+        onclose={() => (confirmingRemove = false)} />
     {/if}
   {/if}
 </div>

@@ -172,6 +172,22 @@ func (a *libraryAdapter) AddSeries(ctx context.Context, tmdbID int64) (*core.Ser
 	return mgr.AddSeries(ctx, tmdbID)
 }
 
+func (a *libraryAdapter) RemoveMovie(ctx context.Context, id int64, deleteFiles bool) error {
+	mgr, err := a.current(ctx)
+	if err != nil {
+		return err
+	}
+	return mgr.RemoveMovie(ctx, id, deleteFiles)
+}
+
+func (a *libraryAdapter) RemoveSeries(ctx context.Context, id int64, deleteFiles bool) error {
+	mgr, err := a.current(ctx)
+	if err != nil {
+		return err
+	}
+	return mgr.RemoveSeries(ctx, id, deleteFiles)
+}
+
 // MatchUnmatched adapts the argument order and drops the import result, which
 // the HTTP layer does not return.
 func (a *libraryAdapter) MatchUnmatched(ctx context.Context, unmatchedID int64, mediaType string, tmdbID int64) error {

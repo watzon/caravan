@@ -11,7 +11,9 @@
   import PosterCard from '../components/PosterCard.svelte';
   import PosterGrid from '../components/PosterGrid.svelte';
   import PosterGridSkeleton from '../components/PosterGridSkeleton.svelte';
+  import SelectActions from '../components/SelectActions.svelte';
   import TextInput from '../components/TextInput.svelte';
+  import { createSelection } from '../selection.svelte';
   import {
     MOVIE_FILTERS,
     STATUS,
@@ -31,6 +33,7 @@
   let error = $state<string | null>(null);
   let filter = $state<StatusKey | 'all'>('all');
   let query = $state('');
+  const selection = createSelection();
 
   async function load() {
     loading = true;
@@ -70,6 +73,16 @@
 <div class="flex flex-col gap-6">
   <div class="flex flex-wrap items-center gap-3">
     <FilterChips {chips} active={filter} onselect={(key) => (filter = key)} />
+    <SelectActions
+      {selection}
+      noun="movie"
+      plural="movies"
+      actions={{
+        search: (id) => api.searchMovieNow(id),
+        setMonitored: (id, monitored) => api.setMovieMonitored(id, monitored),
+        remove: (id, deleteFiles) => api.deleteMovie(id, deleteFiles),
+      }}
+      onchanged={load} />
     <div class="ml-auto flex items-center gap-2">
       <div class="w-56">
         <TextInput bind:value={query} type="search" placeholder="Filter titles…" ariaLabel="Filter movies by title" />
@@ -129,7 +142,10 @@
           status={movieStatus(movie)}
           quality={movie.file?.quality && movie.file.quality !== 'unknown'
             ? movie.file.quality
-            : null} />
+            : null}
+          selectable={selection.active}
+          selected={selection.has(movie.id)}
+          ontoggle={() => selection.toggle(movie.id)} />
       {/each}
     </PosterGrid>
   {/if}

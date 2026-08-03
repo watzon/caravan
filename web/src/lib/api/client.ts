@@ -407,6 +407,18 @@ export const api = {
   setMovieMonitored: (id: number, monitored: boolean) =>
     request<Movie>(endpoints.movie(id), { method: 'PATCH', body: { monitored } }),
 
+  /**
+   * Stop tracking a movie. With `files` the movie's files are deleted from
+   * disk as well; without it the filesystem is untouched and a rescan re-adds
+   * the movie (SPEC §1.2). The switch is a query parameter because a DELETE
+   * body is not reliably sent.
+   */
+  deleteMovie: (id: number, files = false) =>
+    request<void>(endpoints.movie(id), {
+      method: 'DELETE',
+      query: { files: files ? 'true' : undefined },
+    }),
+
   listSeries: (signal?: AbortSignal) =>
     listOf<Series>(endpoints.seriesList(), 'series', signal),
 
@@ -418,6 +430,13 @@ export const api = {
 
   setSeriesMonitored: (id: number, monitored: boolean) =>
     request<Series>(endpoints.series(id), { method: 'PATCH', body: { monitored } }),
+
+  /** deleteMovie's series twin; `files` deletes every episode file too. */
+  deleteSeries: (id: number, files = false) =>
+    request<void>(endpoints.series(id), {
+      method: 'DELETE',
+      query: { files: files ? 'true' : undefined },
+    }),
 
   setSeasonMonitored: (seriesID: number, seasonNumber: number, monitored: boolean) =>
     request<void>(endpoints.season(seriesID, seasonNumber), {

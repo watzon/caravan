@@ -10,12 +10,14 @@
   import ConvertFileButton from '../components/ConvertFileButton.svelte';
   import LoadError from '../components/LoadError.svelte';
   import Poster from '../components/Poster.svelte';
+  import RemoveItemModal from '../components/RemoveItemModal.svelte';
   import Skeleton from '../components/Skeleton.svelte';
   import StatusDot from '../components/StatusDot.svelte';
   import Toggle from '../components/Toggle.svelte';
-  import { UNKNOWN, formatBytes, formatDate, truncateMiddle } from '../format';
+  import { UNKNOWN, formatBytes, formatDate, titleWithYear, truncateMiddle } from '../format';
   import MetadataLinks from '../components/MetadataLinks.svelte';
   import { movieLinks } from '../metadataLinks';
+  import { navigate } from '../router.svelte';
   import { pushToast } from '../state/toast.svelte';
   import { movieStatus } from '../status';
   import { compatBadge } from '../tvcompat';
@@ -31,6 +33,8 @@
   let error = $state<string | null>(null);
   let savingMonitored = $state(false);
   let searching = $state(false);
+  let confirmingRemove = $state(false);
+  let removing = $state(false);
 
   async function load() {
     loading = true;
@@ -83,6 +87,31 @@
       pushToast(errorText(err), 'danger');
     } finally {
       searching = false;
+    }
+  }
+
+  /**
+   * Removing leaves the page: the movie it describes is gone. A failure keeps
+   * the user here with the reason, because the movie is still in the library.
+   */
+  async function remove(deleteFiles: boolean) {
+    const current = movie;
+    if (!current) return;
+    removing = true;
+    try {
+      await api.deleteMovie(current.id, deleteFiles);
+      confirmingRemove = false;
+      pushToast(
+        deleteFiles
+          ? `Removed ${current.title} and its files`
+          : `Removed ${current.title} from the library`,
+        'neutral',
+      );
+      navigate('/movies');
+    } catch (err) {
+      pushToast(errorText(err), 'danger');
+    } finally {
+      removing = false;
     }
   }
 </script>
@@ -145,6 +174,15 @@
               label="Monitored"
               disabled={savingMonitored}
               onchange={setMonitored} />
+            <Button
+              variant="danger"
+              size="sm"
+              disabled={removing}
+              title="Remove this movie from the library"
+              onclick={() => (confirmingRemove = true)}>
+              <Icon name="trash" size={14} />
+              <span class="sr-only">Remove {movie.title}</span>
+            </Button>
           </div>
         </div>
 
@@ -234,5 +272,15 @@
         </div>
       {/if}
     </section>
+
+    {#if confirmingRemove}
+      <RemoveItemModal
+        title="Remove {movie.title}"
+        subject={titleWithYear(movie.title, movie.year)}
+        fileCount={file ? 1 : 0}
+        busy={removing}
+        onconfirm={remove}
+        onclose={() => (confirmingRemove = false)} />
+    {/if}
   {/if}
 </div>

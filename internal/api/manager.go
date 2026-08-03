@@ -27,6 +27,15 @@ type Manager interface {
 	// AddSeries adds a series (with its seasons and episodes) by provider id.
 	AddSeries(ctx context.Context, tmdbID int64) (*core.Series, error)
 
+	// RemoveMovie stops tracking a movie. With deleteFiles set it deletes the
+	// movie's files from disk first; without it, only the rows go and a rescan
+	// re-adds the movie. It reports store.ErrNotFound for an unknown id.
+	RemoveMovie(ctx context.Context, id int64, deleteFiles bool) error
+
+	// RemoveSeries is RemoveMovie's series twin, deleting every episode file
+	// of the series when deleteFiles is set.
+	RemoveSeries(ctx context.Context, id int64, deleteFiles bool) error
+
 	// MatchUnmatched resolves a file parked in the scan-review queue against a
 	// provider id and imports it. mediaType is MediaTypeMovie or
 	// MediaTypeSeries; for a series, the season and episode numbers come from

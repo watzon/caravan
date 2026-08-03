@@ -374,9 +374,21 @@ func (s *server) handlePatchMovie(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, dto)
 }
 
-// handleDeleteMovie removes the library record. Files on disk are untouched:
-// the filesystem is the source of truth (SPEC §1.2), so deleting a movie means
-// "stop tracking it", and a rescan would re-add it.
+// deleteFilesRequested reads the ?files=true switch the delete endpoints take.
+//
+// It is a query parameter rather than a body field because a DELETE body is
+// not reliably forwarded by proxies or sent by clients, and the default has to
+// be the safe one: anything but an explicit "true" leaves the files alone.
+func deleteFilesRequested(r *http.Request) bool {
+	return r.URL.Query().Get("files") == "true"
+}
+
+// handleDeleteMovie removes the library record, and with ?files=true the
+// movie's files on disk as well.
+//
+// Without the switch the filesystem is untouched: it is the source of truth
+// (SPEC §1.2), so deleting a movie means "stop tracking it" and a rescan would
+// re-add it. Deleting the files is the way to say the other thing.
 func (s *server) handleDeleteMovie(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -389,8 +401,8 @@ func (s *server) handleDeleteMovie(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreError(w, "get movie", err)
 		return
 	}
-	if err := s.st.DeleteMovie(r.Context(), id); err != nil {
-		s.writeStoreError(w, "delete movie", err)
+	if err := s.mgr.RemoveMovie(r.Context(), id, deleteFilesRequested(r)); err != nil {
+		s.writeManagerError(w, "delete movie", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -538,6 +550,26 @@ func (s *server) handlePatchSeries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, dto)
+}
+
+// handleDeleteSeries is handleDeleteMovie's twin: untrack by default, and with
+// ?files=true every episode file of the series goes from disk too. Untracking
+// takes the seasons, episodes and episode-file links with it by cascade.
+func (s *server) handleDeleteSeries(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+
+	if _, err := s.st.GetSeries(r.Context(), id); err != nil {
+		s.writeStoreError(w, "get series", err)
+		return
+	}
+	if err := s.mgr.RemoveSeries(r.Context(), id, deleteFilesRequested(r)); err != nil {
+		s.writeManagerError(w, "delete series", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // handlePatchSeason updates one season's monitored flag and cascades it to

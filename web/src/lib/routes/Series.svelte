@@ -11,7 +11,9 @@
   import PosterCard from '../components/PosterCard.svelte';
   import PosterGrid from '../components/PosterGrid.svelte';
   import PosterGridSkeleton from '../components/PosterGridSkeleton.svelte';
+  import SelectActions from '../components/SelectActions.svelte';
   import TextInput from '../components/TextInput.svelte';
+  import { createSelection } from '../selection.svelte';
   import {
     SERIES_FILTERS,
     STATUS,
@@ -31,6 +33,7 @@
   let error = $state<string | null>(null);
   let filter = $state<StatusKey | 'all'>('all');
   let query = $state('');
+  const selection = createSelection();
 
   async function load() {
     loading = true;
@@ -76,6 +79,16 @@
 <div class="flex flex-col gap-6">
   <div class="flex flex-wrap items-center gap-3">
     <FilterChips {chips} active={filter} onselect={(key) => (filter = key)} />
+    <SelectActions
+      {selection}
+      noun="series"
+      plural="series"
+      actions={{
+        search: (id) => api.searchSeriesNow(id),
+        setMonitored: (id, monitored) => api.setSeriesMonitored(id, monitored),
+        remove: (id, deleteFiles) => api.deleteSeries(id, deleteFiles),
+      }}
+      onchanged={load} />
     <div class="ml-auto flex items-center gap-2">
       <div class="w-56">
         <TextInput bind:value={query} type="search" placeholder="Filter titles…" ariaLabel="Filter series by title" />
@@ -134,7 +147,10 @@
           posterUrl={item.poster_url}
           status={seriesStatus(item)}
           note={episodeNote(item)}
-          fallbackIcon="tv" />
+          fallbackIcon="tv"
+          selectable={selection.active}
+          selected={selection.has(item.id)}
+          ontoggle={() => selection.toggle(item.id)} />
       {/each}
     </PosterGrid>
   {/if}

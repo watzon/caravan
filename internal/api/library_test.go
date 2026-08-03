@@ -187,6 +187,109 @@ func TestDeleteMovie(t *testing.T) {
 	wantErrorBody(t, rec)
 }
 
+func TestDeleteSeries(t *testing.T) {
+	h, st, _ := newTestServer(t)
+
+	sr := &core.Series{TMDBID: 7, Title: "Gone"}
+	if err := st.UpsertSeries(context.Background(), sr); err != nil {
+		t.Fatalf("UpsertSeries: %v", err)
+	}
+
+	rec := do(t, h, http.MethodDelete, "/api/v1/library/series/"+itoa(sr.ID), "")
+	wantStatus(t, rec, http.StatusNoContent)
+	if rec.Body.Len() != 0 {
+		t.Fatalf("body = %q, want empty on 204", rec.Body.String())
+	}
+
+	rec = do(t, h, http.MethodGet, "/api/v1/library/series/"+itoa(sr.ID), "")
+	wantStatus(t, rec, http.StatusNotFound)
+
+	rec = do(t, h, http.MethodDelete, "/api/v1/library/series/"+itoa(sr.ID), "")
+	wantStatus(t, rec, http.StatusNotFound)
+	wantErrorBody(t, rec)
+}
+
+// The ?files=true switch is the whole difference between untracking an item
+// and deleting media, so the HTTP layer has to forward exactly what was asked
+// for: nothing but an explicit "true" may reach the manager as a file delete.
+func TestDeleteForwardsFilesSwitch(t *testing.T) {
+	tests := []struct {
+		name  string
+		query string
+		want  bool
+	}{
+		{name: "absent", query: ""},
+		{name: "false", query: "?files=false"},
+		{name: "empty", query: "?files="},
+		{name: "not-a-bool", query: "?files=1"},
+		{name: "true", query: "?files=true", want: true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h, st, mgr := newTestServer(t)
+			ctx := context.Background()
+
+			m := &core.Movie{TMDBID: 7, Title: "Gone"}
+			if err := st.UpsertMovie(ctx, m); err != nil {
+				t.Fatalf("UpsertMovie: %v", err)
+			}
+			sr := &core.Series{TMDBID: 8, Title: "Also Gone"}
+			if err := st.UpsertSeries(ctx, sr); err != nil {
+				t.Fatalf("UpsertSeries: %v", err)
+			}
+
+			rec := do(t, h, http.MethodDelete, "/api/v1/library/movies/"+itoa(m.ID)+tc.query, "")
+			wantStatus(t, rec, http.StatusNoContent)
+			rec = do(t, h, http.MethodDelete, "/api/v1/library/series/"+itoa(sr.ID)+tc.query, "")
+			wantStatus(t, rec, http.StatusNoContent)
+
+			calls := mgr.removeCalls()
+			want := []removeCall{
+				{kind: "movie", id: m.ID, deleteFiles: tc.want},
+				{kind: "series", id: sr.ID, deleteFiles: tc.want},
+			}
+			if !slices.Equal(calls, want) {
+				t.Fatalf("remove calls = %+v, want %+v", calls, want)
+			}
+		})
+	}
+}
+
+// A 404 is decided before the manager is asked, so a delete of something that
+// never existed cannot delete files by accident.
+func TestDeleteUnknownItemNeverReachesTheManager(t *testing.T) {
+	h, _, mgr := newTestServer(t)
+
+	for _, target := range []string{"/api/v1/library/movies/404?files=true", "/api/v1/library/series/404?files=true"} {
+		rec := do(t, h, http.MethodDelete, target, "")
+		wantStatus(t, rec, http.StatusNotFound)
+		wantErrorBody(t, rec)
+	}
+	if calls := mgr.removeCalls(); len(calls) != 0 {
+		t.Fatalf("remove calls = %+v, want none", calls)
+	}
+}
+
+// A removal that fails on the filesystem must not answer 204: the item is
+// still in the library and the UI has to say so.
+func TestDeleteReportsManagerFailure(t *testing.T) {
+	h, st, mgr := newTestServer(t)
+	mgr.removeErr = errors.New("permission denied")
+
+	m := &core.Movie{TMDBID: 7, Title: "Stays"}
+	if err := st.UpsertMovie(context.Background(), m); err != nil {
+		t.Fatalf("UpsertMovie: %v", err)
+	}
+
+	rec := do(t, h, http.MethodDelete, "/api/v1/library/movies/"+itoa(m.ID)+"?files=true", "")
+	wantStatus(t, rec, http.StatusBadGateway)
+	wantErrorBody(t, rec)
+
+	rec = do(t, h, http.MethodGet, "/api/v1/library/movies/"+itoa(m.ID), "")
+	wantStatus(t, rec, http.StatusOK)
+}
+
 func TestAddAndListSeries(t *testing.T) {
 	h, _, _ := newTestServer(t)
 

@@ -197,6 +197,7 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("POST /library/series", s.handleAddSeries)
 	api.HandleFunc("GET /library/series/{id}", s.handleGetSeries)
 	api.HandleFunc("PATCH /library/series/{id}", s.handlePatchSeries)
+	api.HandleFunc("DELETE /library/series/{id}", s.handleDeleteSeries)
 	api.HandleFunc("PATCH /library/series/{id}/seasons/{season}", s.handlePatchSeason)
 	api.HandleFunc("PATCH /library/episodes/{id}", s.handlePatchEpisode)
 	api.HandleFunc("POST /library/rescan", s.handleRescan)

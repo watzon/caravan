@@ -33,7 +33,66 @@ let host: HTMLElement;
 let app: Record<string, unknown> | undefined;
 let calls: { url: string; method: string }[];
 
-function stubFetch(queued: number) {
+// Two seasons holding three episode files between them: the confirm names the
+// count it would delete, so "Also delete 3 files" has to come from the data.
+const SERIES_WITH_FILES = {
+  ...SERIES,
+  seasons: [
+    {
+      id: 1,
+      series_id: 3,
+      season_number: 1,
+      title: '',
+      overview: '',
+      poster_path: '',
+      air_date: '',
+      monitored: true,
+      episodes: [1, 2].map((n) => episode(n, true)),
+    },
+    {
+      id: 2,
+      series_id: 3,
+      season_number: 2,
+      title: '',
+      overview: '',
+      poster_path: '',
+      air_date: '',
+      monitored: true,
+      episodes: [episode(1, true), episode(2, false)],
+    },
+  ],
+};
+
+function episode(number: number, withFile: boolean) {
+  return {
+    id: number * 10,
+    series_id: 3,
+    season_number: 1,
+    episode_number: number,
+    tmdb_id: 0,
+    title: '',
+    overview: '',
+    air_date: '',
+    monitored: true,
+    file: withFile
+      ? {
+          id: number,
+          path: `library/TV/Severance (2022)/Season 01/e${number}.mkv`,
+          size: 1,
+          quality: '1080p',
+          source: 'webdl',
+          codec: '',
+          audio: '',
+          release_group: '',
+          added_at: '2026-01-01T00:00:00Z',
+          modified_at: '2026-01-01T00:00:00Z',
+          compatibility: { verdict: 'ok', reasons: [] },
+        }
+      : null,
+  };
+}
+
+function stubFetch(queued: number, series: unknown = SERIES) {
   calls = [];
   vi.stubGlobal(
     'fetch',
@@ -46,7 +105,7 @@ function stubFetch(queued: number) {
           headers: { 'Content-Type': 'application/json' },
         });
       }
-      return new Response(JSON.stringify(SERIES), {
+      return new Response(JSON.stringify(series), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       });
@@ -80,6 +139,88 @@ function searchNowButton(): HTMLButtonElement {
   expect(button, 'Search now button').toBeDefined();
   return button as HTMLButtonElement;
 }
+
+function removeTrigger(): HTMLButtonElement {
+  const button = [...host.querySelectorAll('button')].find((b) =>
+    b.textContent?.includes('Remove Severance'),
+  );
+  expect(button, 'Remove trigger').toBeDefined();
+  return button as HTMLButtonElement;
+}
+
+function confirmButton(): HTMLButtonElement {
+  const button = [...host.querySelectorAll('button')].find(
+    (b) => b.textContent?.trim() === 'Remove',
+  );
+  expect(button, 'confirm Remove button').toBeDefined();
+  return button as HTMLButtonElement;
+}
+
+function deletes(): { url: string; method: string }[] {
+  return calls.filter((c) => c.method === 'DELETE');
+}
+
+describe('SeriesDetail remove', () => {
+  it('untracks without touching files by default', async () => {
+    stubFetch(0, SERIES_WITH_FILES);
+    app = mount(SeriesDetail, { target: host, props: { id: 3 } });
+    await settle();
+
+    removeTrigger().click();
+    await settle();
+    expect(deletes(), 'opening the confirm must not delete anything').toEqual([]);
+
+    confirmButton().click();
+    await settle();
+
+    expect(deletes()).toEqual([{ url: '/api/v1/library/series/3', method: 'DELETE' }]);
+    expect(toasts.items[0]!.message).toContain('Removed Severance');
+  });
+
+  it('counts the episode files the checkbox would delete', async () => {
+    stubFetch(0, SERIES_WITH_FILES);
+    app = mount(SeriesDetail, { target: host, props: { id: 3 } });
+    await settle();
+
+    removeTrigger().click();
+    await settle();
+
+    const dialog = host.querySelector('[role="dialog"]');
+    expect(dialog?.textContent).toContain('Also delete 3 files from disk');
+
+    const checkbox = host.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    expect(checkbox, 'delete-files checkbox').toBeTruthy();
+    checkbox!.checked = true;
+    checkbox!.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    confirmButton().click();
+    await settle();
+
+    expect(deletes()).toEqual([
+      { url: '/api/v1/library/series/3?files=true', method: 'DELETE' },
+    ]);
+  });
+
+  it('sends nothing when the confirm is cancelled', async () => {
+    stubFetch(0, SERIES_WITH_FILES);
+    app = mount(SeriesDetail, { target: host, props: { id: 3 } });
+    await settle();
+
+    removeTrigger().click();
+    await settle();
+
+    const cancel = [...host.querySelectorAll('button')].find(
+      (b) => b.textContent?.trim() === 'Cancel',
+    );
+    expect(cancel, 'Cancel button').toBeDefined();
+    cancel!.click();
+    await settle();
+
+    expect(deletes()).toEqual([]);
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+  });
+});
 
 describe('SeriesDetail search actions', () => {
   it('queues every wanted episode and reports the count', async () => {

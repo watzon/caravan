@@ -49,14 +49,26 @@ type stubManager struct {
 	// something to search for.
 	addSeriesEpisodes int
 
+	removeErr error
+
 	mu      sync.Mutex
 	matches []matchCall
+	removes []removeCall
 }
 
 type matchCall struct {
 	id        int64
 	mediaType string
 	tmdbID    int64
+}
+
+// removeCall records what the handlers asked the manager to remove. Deleting
+// files is the manager's job, so the HTTP layer's contract is the flag it
+// forwards, not what happens on disk — internal/library owns that half.
+type removeCall struct {
+	kind        string
+	id          int64
+	deleteFiles bool
 }
 
 func (m *stubManager) Scan(ctx context.Context) error {
@@ -103,6 +115,32 @@ func (m *stubManager) AddSeries(ctx context.Context, tmdbID int64) (*core.Series
 		}
 	}
 	return sr, nil
+}
+
+func (m *stubManager) RemoveMovie(ctx context.Context, id int64, deleteFiles bool) error {
+	m.mu.Lock()
+	m.removes = append(m.removes, removeCall{kind: "movie", id: id, deleteFiles: deleteFiles})
+	m.mu.Unlock()
+	if m.removeErr != nil {
+		return m.removeErr
+	}
+	return m.st.DeleteMovie(ctx, id)
+}
+
+func (m *stubManager) RemoveSeries(ctx context.Context, id int64, deleteFiles bool) error {
+	m.mu.Lock()
+	m.removes = append(m.removes, removeCall{kind: "series", id: id, deleteFiles: deleteFiles})
+	m.mu.Unlock()
+	if m.removeErr != nil {
+		return m.removeErr
+	}
+	return m.st.DeleteSeries(ctx, id)
+}
+
+func (m *stubManager) removeCalls() []removeCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]removeCall(nil), m.removes...)
 }
 
 func (m *stubManager) MatchUnmatched(ctx context.Context, id int64, mediaType string, tmdbID int64) error {
