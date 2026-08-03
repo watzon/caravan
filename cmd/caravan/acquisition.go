@@ -219,29 +219,49 @@ func (p *engineProvider) Health() string {
 // import watcher, which takes one engine at startup and drives it for the
 // life of the process.
 func (p *engineProvider) Engine() core.Engine {
+	return p.EngineFor("")
+}
+
+// EngineFor is Engine for a grab made on behalf of one library: kind is one of
+// the core.LibraryKind* constants, and "" is an operation that belongs to no
+// library — polling the queue, pausing a download — which routes globally.
+//
+// A library's routing override only ever moves a protocol's *default* (PLAN
+// phase 8 task 2). Every other engine stays in the table, because a download
+// the library took yesterday through a client it no longer defaults to still
+// has to be listable, pausable and removable.
+func (p *engineProvider) EngineFor(kind string) core.Engine {
 	if p.embedded() == nil {
 		// No storage root, or the engine would not start. Without it there is
 		// nowhere for an external client's downloads to be imported to
 		// either, so this stays the single "not configured" answer.
 		return nil
 	}
-	return download.NewRouter(p.routes)
+	return download.NewRouter(func(ctx context.Context) ([]download.Route, error) {
+		return p.routesFor(ctx, kind)
+	})
 }
 
-// routes is the download.Table the router resolves through: the embedded
-// engine plus every enabled external client, with the configured default for
-// each protocol marked.
+// routes is the download.Table for an operation that belongs to no library.
+func (p *engineProvider) routes(ctx context.Context) ([]download.Route, error) {
+	return p.routesFor(ctx, "")
+}
+
+// routesFor is the download.Table the router resolves through: the embedded
+// engine plus every enabled external client, with the default for each
+// protocol marked — the library's own pick when it has one, the global setting
+// otherwise.
 //
 // Every enabled client is a route even when it is nobody's default. A client
 // that was the default yesterday is still holding the downloads it took, and
 // those have to stay listable, pausable and removable — the `downloads.engine`
 // column addresses them, not the current routing settings.
-func (p *engineProvider) routes(ctx context.Context) ([]download.Route, error) {
+func (p *engineProvider) routesFor(ctx context.Context, kind string) ([]download.Route, error) {
 	embedded := p.embedded()
 	if embedded == nil {
 		return nil, nil
 	}
-	settings, err := p.adapter.st.AllSettings(ctx)
+	torrentPick, usenetPick, err := p.routePicks(ctx, kind)
 	if err != nil {
 		return nil, err
 	}
@@ -257,7 +277,7 @@ func (p *engineProvider) routes(ctx context.Context) ([]download.Route, error) {
 	// to something that works rather than reject every torrent grab.
 	torrentID := int64(0)
 	torrent := download.Route{Name: download.EngineName, Protocol: core.ProtocolTorrent, Engine: embedded}
-	if pick, ok := engines[routePick(settings, store.SettingRouteTorrent)]; ok && pick.protocol == core.ProtocolTorrent {
+	if pick, ok := engines[torrentPick]; ok && pick.protocol == core.ProtocolTorrent {
 		torrentID = pick.id
 		torrent = p.clientRoute(pick, core.ProtocolTorrent)
 	}
@@ -267,7 +287,7 @@ func (p *engineProvider) routes(ctx context.Context) ([]download.Route, error) {
 	// task 6). A picked client that has since been deleted or disabled falls
 	// back to it rather than leaving every usenet grab unrouted.
 	usenetID := int64(0)
-	if pick, ok := engines[routePick(settings, store.SettingRouteUsenet)]; ok && pick.protocol == core.ProtocolUsenet {
+	if pick, ok := engines[usenetPick]; ok && pick.protocol == core.ProtocolUsenet {
 		usenetID = pick.id
 	}
 	news := p.embeddedUsenet()
@@ -458,10 +478,37 @@ func (p *engineProvider) closeClientEngine(c *clientEngine) {
 	}
 }
 
-// routePick reads a routing setting as a `download_clients.id`. The embedded
+// routePicks resolves the two routing values a grab for this library must use:
+// the library's own override where it set one, the global setting everywhere
+// else. An operation belonging to no library ("" kind) reads the globals
+// directly, which is what every queue operation does.
+//
+// A library that is not there — a database not yet migrated past 0012 — falls
+// back to the globals rather than failing. Routing is how a download reaches
+// an engine at all, and it must keep working while the rest of the schema
+// catches up.
+func (p *engineProvider) routePicks(ctx context.Context, kind string) (torrent, usenet int64, err error) {
+	settings, err := p.adapter.st.AllSettings(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	torrentValue, usenetValue := settings[store.SettingRouteTorrent], settings[store.SettingRouteUsenet]
+	if kind != "" {
+		resolved, err := p.adapter.st.ResolveLibrarySettingsByKind(ctx, kind)
+		switch {
+		case err == nil:
+			torrentValue, usenetValue = resolved.RouteTorrent, resolved.RouteUsenet
+		case !errors.Is(err, store.ErrNotFound):
+			return 0, 0, err
+		}
+	}
+	return routePick(torrentValue), routePick(usenetValue), nil
+}
+
+// routePick reads a routing value as a `download_clients.id`. The embedded
 // engine and an unset or malformed value are both 0, which matches no row.
-func routePick(settings map[string]string, key string) int64 {
-	id, err := strconv.ParseInt(strings.TrimSpace(settings[key]), 10, 64)
+func routePick(value string) int64 {
+	id, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
 	if err != nil || id <= 0 {
 		return 0
 	}
@@ -709,12 +756,13 @@ func engineSettingFloat(settings map[string]string, key string) (float64, error)
 	return n, nil
 }
 
-// await blocks until an engine exists, returning nil if ctx is done first.
-func (p *engineProvider) await(ctx context.Context) core.Engine {
+// await blocks until an engine for the given library kind exists, returning nil
+// if ctx is done first. "" is an operation belonging to no library.
+func (p *engineProvider) await(ctx context.Context, kind string) core.Engine {
 	ticker := time.NewTicker(engineWaitInterval)
 	defer ticker.Stop()
 	for {
-		if engine := p.Engine(); engine != nil {
+		if engine := p.EngineFor(kind); engine != nil {
 			return engine
 		}
 		select {
@@ -731,7 +779,7 @@ func (p *engineProvider) await(ctx context.Context) core.Engine {
 // It waits for an engine rather than requiring one, so a first run reaches the
 // setup screen and then starts importing without a restart.
 func runImportWatcher(ctx context.Context, engines *engineProvider, adapter *libraryAdapter, log *slog.Logger) {
-	engine := engines.await(ctx)
+	engine := engines.await(ctx, "")
 	if engine == nil {
 		return
 	}
@@ -807,7 +855,8 @@ func (l lateMetadata) provider(ctx context.Context) (core.MetadataProvider, erro
 
 // Compile-time proof that the wiring is what its consumers expect.
 var (
-	_ api.EngineProvider    = (*engineProvider)(nil)
-	_ core.MetadataProvider = lateMetadata{}
-	_ download.Persistence  = downloadPersistence{}
+	_ api.EngineProvider        = (*engineProvider)(nil)
+	_ api.LibraryEngineProvider = (*engineProvider)(nil)
+	_ core.MetadataProvider     = lateMetadata{}
+	_ download.Persistence      = downloadPersistence{}
 )

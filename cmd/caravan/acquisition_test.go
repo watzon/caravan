@@ -812,3 +812,109 @@ func TestEngineProviderPropagatesUsenetServerChangesWithoutARestart(t *testing.T
 		t.Fatal("Add against an unreachable indexer unexpectedly succeeded")
 	}
 }
+
+// A library that routes its downloads somewhere else has to actually send them
+// there. The setting is stored, validated and rendered as an active override,
+// so a router that kept reading the global setting would be a silent misroute:
+// the user picks a seedbox for Series, the UI says Series uses the seedbox, and
+// every episode keeps landing in the global client with nothing to say so.
+func TestEngineForRoutesGrabsThroughTheLibrarysOwnClient(t *testing.T) {
+	ctx := context.Background()
+	provider, st, _ := routingProvider(t)
+
+	local := core.DownloadClientConfig{
+		Type: core.DownloadClientQBittorrent, Name: "local", URL: "http://local.example",
+		Username: "admin", Password: "pw", Priority: 25, Enabled: true,
+	}
+	seedbox := core.DownloadClientConfig{
+		Type: core.DownloadClientQBittorrent, Name: "seedbox", URL: "http://seedbox.example",
+		Username: "admin", Password: "pw", Priority: 25, Enabled: true,
+	}
+	for _, cfg := range []*core.DownloadClientConfig{&local, &seedbox} {
+		if err := st.UpsertDownloadClient(ctx, cfg); err != nil {
+			t.Fatalf("UpsertDownloadClient %q: %v", cfg.Name, err)
+		}
+	}
+
+	// A library with no override of its own reads the global default, which is
+	// the built-in engine until something else is picked.
+	if got := provider.EngineFor(core.LibraryKindTV).(*download.Router).EngineNameFor(ctx, core.ProtocolTorrent); got != download.EngineName {
+		t.Fatalf("torrents route to %q before any override, want the built-in %q", got, download.EngineName)
+	}
+
+	if err := st.SetSetting(ctx, store.SettingRouteTorrent, strconv.FormatInt(local.ID, 10)); err != nil {
+		t.Fatalf("set global torrent route: %v", err)
+	}
+	tv, err := st.GetLibraryByKind(ctx, core.LibraryKindTV)
+	if err != nil {
+		t.Fatalf("get tv library: %v", err)
+	}
+	tv.RouteTorrent = strconv.FormatInt(seedbox.ID, 10)
+	if err := st.UpdateLibrary(ctx, tv); err != nil {
+		t.Fatalf("update tv library: %v", err)
+	}
+
+	// Both clients are the same backend, so the name alone cannot tell them
+	// apart: the handle prefix names the `download_clients` row that took it.
+	got, err := provider.EngineFor(core.LibraryKindTV).Add(ctx, core.Release{
+		Title: "Example Series S01E01", Protocol: core.ProtocolTorrent,
+		DownloadURL: "magnet:?xt=urn:btih:0000000000000000000000000000000000000000",
+	}, core.AddOpts{Category: "tv"})
+	if err != nil {
+		t.Fatalf("add through the tv library's engine: %v", err)
+	}
+	if !strings.HasPrefix(string(got), clientIDPrefix(seedbox.ID)) {
+		t.Errorf("tv grab produced handle %q, want one issued by the seedbox the library routes to", got)
+	}
+
+	// The library that set no override is untouched, and so is every operation
+	// that belongs to no library at all.
+	for _, kind := range []string{core.LibraryKindMovie, ""} {
+		id, err := provider.EngineFor(kind).Add(ctx, core.Release{
+			Title: "Example Movie 2024", Protocol: core.ProtocolTorrent,
+			DownloadURL: "magnet:?xt=urn:btih:1111111111111111111111111111111111111111",
+		}, core.AddOpts{Category: "movies"})
+		if err != nil {
+			t.Fatalf("add through the %q engine: %v", kind, err)
+		}
+		if !strings.HasPrefix(string(id), clientIDPrefix(local.ID)) {
+			t.Errorf("%q grab produced handle %q, want one issued by the global default", kind, id)
+		}
+	}
+}
+
+// The library's usenet route is a separate setting and gets separately ignored.
+// A usenet override must not be answered by the torrent one, and must not leak
+// into the libraries that did not set it.
+func TestEngineForRoutesUsenetThroughTheLibrarysOwnClient(t *testing.T) {
+	ctx := context.Background()
+	provider, st, _ := routingProvider(t)
+
+	sab := core.DownloadClientConfig{
+		Type: core.DownloadClientSABnzbd, Name: "sab", URL: "http://sab.example",
+		APIKey: "secret", Category: "caravan", Priority: 25, Enabled: true,
+	}
+	if err := st.UpsertDownloadClient(ctx, &sab); err != nil {
+		t.Fatalf("UpsertDownloadClient: %v", err)
+	}
+	movies, err := st.GetLibraryByKind(ctx, core.LibraryKindMovie)
+	if err != nil {
+		t.Fatalf("get movie library: %v", err)
+	}
+	movies.RouteUsenet = strconv.FormatInt(sab.ID, 10)
+	if err := st.UpdateLibrary(ctx, movies); err != nil {
+		t.Fatalf("update movie library: %v", err)
+	}
+
+	movieRouter := provider.EngineFor(core.LibraryKindMovie).(*download.Router)
+	if got := movieRouter.EngineNameFor(ctx, core.ProtocolUsenet); got != core.DownloadClientSABnzbd {
+		t.Errorf("movie usenet releases route to %q, want %q", got, core.DownloadClientSABnzbd)
+	}
+	if got := movieRouter.EngineNameFor(ctx, core.ProtocolTorrent); got != download.EngineName {
+		t.Errorf("the usenet override moved torrents to %q as well, want the built-in %q", got, download.EngineName)
+	}
+	tvRouter := provider.EngineFor(core.LibraryKindTV).(*download.Router)
+	if got := tvRouter.EngineNameFor(ctx, core.ProtocolUsenet); got != usenet.EngineName {
+		t.Errorf("the movie library's override reached tv usenet releases as %q, want the built-in %q", got, usenet.EngineName)
+	}
+}

@@ -247,6 +247,15 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("POST /requests/{id}/approve", s.handleApproveRequest)
 	api.HandleFunc("DELETE /requests/{id}", s.handleDismissRequest)
 
+	// The library sections and the settings each may answer for itself
+	// (SPEC §7, PLAN phase 8). Read-mostly and admin-only: memberAllowed names
+	// none of these, so a member never sees them. The rows themselves are
+	// seeded by the migration, so there is no create or delete — a library is
+	// part of the layout, not a thing a user adds.
+	api.HandleFunc("GET /libraries", s.handleListLibraries)
+	api.HandleFunc("PATCH /libraries/{id}", s.handleUpdateLibrary)
+	api.HandleFunc("PUT /libraries/{id}/indexers/{indexerID}", s.handleSetLibraryIndexer)
+
 	api.HandleFunc("GET /indexers", s.handleListIndexers)
 	api.HandleFunc("POST /indexers", s.handleCreateIndexer)
 	api.HandleFunc("PUT /indexers/{id}", s.handleUpdateIndexer)

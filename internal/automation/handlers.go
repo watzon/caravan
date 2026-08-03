@@ -46,28 +46,28 @@ func (r *Runner) handleRSSSync(ctx context.Context, st *store.Store, payload jso
 	if err != nil {
 		return fmt.Errorf("compute wanted releases: %w", err)
 	}
-	indexers, err := st.ListEnabledIndexers(ctx)
+	feeds, err := rssFeeds(ctx, st)
 	if err != nil {
-		return fmt.Errorf("store: list enabled indexers: %w", err)
+		return err
 	}
 	if r.indexers == nil {
 		return fmt.Errorf("no indexer client configured")
 	}
 
-	for _, cfg := range indexers {
+	for _, feed := range feeds {
 		searchCtx, cancel := context.WithTimeout(ctx, searchTimeout)
-		releases, searchErr := r.indexers(cfg).Search(searchCtx, "", cfg.Categories)
+		releases, searchErr := r.indexers(feed.cfg).Search(searchCtx, "", feed.cfg.Categories)
 		cancel()
 		if searchErr != nil {
 			continue
 		}
 		for _, release := range releases {
-			release.IndexerID = cfg.ID
-			release.Indexer = cfg.Name
+			release.IndexerID = feed.cfg.ID
+			release.Indexer = feed.cfg.Name
 			if err := st.UpsertRelease(ctx, &release); err != nil {
 				return fmt.Errorf("store: cache rss release: %w", err)
 			}
-			if err := r.matchRSSRelease(ctx, st, release, lists); err != nil {
+			if err := r.matchRSSRelease(ctx, st, release, lists, feed.kindsFor(release)); err != nil {
 				return err
 			}
 		}
@@ -75,12 +75,132 @@ func (r *Runner) handleRSSSync(ctx context.Context, st *store.Store, payload jso
 	return r.scheduleRecurring(ctx, core.JobRSSSync)
 }
 
-func (r *Runner) matchRSSRelease(ctx context.Context, st *store.Store, release core.Release, lists *wanted.Lists) error {
-	for _, target := range lists.Movies {
+// rssFeed is one indexer's share of an RSS cycle: a single fetch carrying the
+// union of every enabling library's categories, and the libraries that fetch is
+// allowed to satisfy.
+type rssFeed struct {
+	cfg core.IndexerConfig
+	// subscribers are the libraries that enabled this indexer, each with the
+	// categories it asked this indexer for. The fetch is shared; the decision
+	// is not.
+	subscribers []rssSubscriber
+	// unfiltered records that some library asks this indexer for everything,
+	// which is a superset of any category list another library asked for.
+	unfiltered bool
+	categories map[int]bool
+}
+
+// rssSubscriber is one library's subscription to a shared feed.
+type rssSubscriber struct {
+	// kind is one of the core.LibraryKind* constants.
+	kind string
+	// categories are the categories this library asked this indexer for, empty
+	// when it asked unfiltered.
+	categories []int
+}
+
+// kindsFor is the per-library half of a shared fetch: the library kinds that
+// may act on this release.
+//
+// The union that made one fetch out of many is exactly what makes this
+// necessary. A library that narrowed an indexer to its own categories still
+// receives every other library's categories in the shared response, and
+// offering those to its wanted items would grab releases the interactive and
+// backlog searches for the same item would never have seen (PLAN phase 8 task
+// 5).
+func (f rssFeed) kindsFor(release core.Release) map[string]bool {
+	kinds := map[string]bool{}
+	for _, sub := range f.subscribers {
+		if release.InCategories(sub.categories) {
+			kinds[sub.kind] = true
+		}
+	}
+	return kinds
+}
+
+// rssFeeds groups the libraries' resolved indexer sets by indexer.
+//
+// The grouping is the point: a feed is a firehose of everything new, so asking
+// the same indexer once per library would fetch the same document twice, and
+// indexers rate-limit. One fetch per indexer per cycle answers for every
+// library that enabled it, and the per-library decision moves to matching
+// (PLAN phase 8 task 5).
+func rssFeeds(ctx context.Context, st *store.Store) ([]rssFeed, error) {
+	libraries, err := st.ListLibraries(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store: list libraries: %w", err)
+	}
+
+	feeds := []*rssFeed{}
+	byIndexer := map[int64]*rssFeed{}
+	for _, library := range libraries {
+		settings, err := st.ResolveLibrarySettings(ctx, library.ID)
+		if err != nil {
+			return nil, fmt.Errorf("store: resolve settings of library %d: %w", library.ID, err)
+		}
+		for _, cfg := range settings.Indexers {
+			feed, ok := byIndexer[cfg.ID]
+			if !ok {
+				feed = &rssFeed{cfg: cfg, categories: map[int]bool{}}
+				byIndexer[cfg.ID] = feed
+				feeds = append(feeds, feed)
+			}
+			feed.subscribers = append(feed.subscribers, rssSubscriber{
+				kind: library.Kind, categories: cfg.Categories,
+			})
+			if len(cfg.Categories) == 0 {
+				feed.unfiltered = true
+				continue
+			}
+			for _, category := range cfg.Categories {
+				feed.categories[category] = true
+			}
+		}
+	}
+
+	out := make([]rssFeed, 0, len(feeds))
+	for _, feed := range feeds {
+		// The client's own config is what it falls back to when the cat list is
+		// empty, so the union is written to both and the two can never disagree.
+		feed.cfg.Categories = unionCategories(feed)
+		out = append(out, *feed)
+	}
+	return out, nil
+}
+
+// unionCategories renders the merged category filter. A library that asked for
+// everything wins outright: narrowing the fetch to another library's categories
+// would drop releases that library is entitled to see.
+func unionCategories(feed *rssFeed) []int {
+	if feed.unfiltered {
+		return nil
+	}
+	cats := make([]int, 0, len(feed.categories))
+	for category := range feed.categories {
+		cats = append(cats, category)
+	}
+	sort.Ints(cats)
+	return cats
+}
+
+// matchRSSRelease offers one release to the wanted items of every library kind
+// the feed it came from answers for with this release. A library that disabled
+// the indexer, or that narrowed it to categories this release is not in, is not
+// among them — so its items never see the release even though the fetch was
+// shared.
+func (r *Runner) matchRSSRelease(ctx context.Context, st *store.Store, release core.Release, lists *wanted.Lists, kinds map[string]bool) error {
+	movies, episodes := lists.Movies, lists.Episodes
+	if !kinds[core.LibraryKindMovie] {
+		movies = nil
+	}
+	if !kinds[core.LibraryKindTV] {
+		episodes = nil
+	}
+	for _, target := range movies {
 		if !matchesMovie(release, target.Movie) {
 			continue
 		}
-		profile, err := st.ResolveQualityProfile(ctx, target.QualityProfileID)
+		profile, err := st.ResolveItemQualityProfile(ctx, core.LibraryKindMovie, target.QualityProfileID)
 		if err != nil {
 			return fmt.Errorf("store: resolve movie profile: %w", err)
 		}
@@ -92,7 +212,7 @@ func (r *Runner) matchRSSRelease(ctx context.Context, st *store.Store, release c
 			return err
 		}
 	}
-	for _, target := range lists.Episodes {
+	for _, target := range episodes {
 		if !matchesRSSEpisode(release, target) || len(release.Parsed.Episodes) != 1 {
 			continue
 		}
@@ -100,7 +220,7 @@ func (r *Runner) matchRSSRelease(ctx context.Context, st *store.Store, release c
 		if err != nil {
 			return fmt.Errorf("store: get series for rss episode: %w", err)
 		}
-		profile, err := st.ResolveQualityProfile(ctx, series.QualityProfileID)
+		profile, err := st.ResolveItemQualityProfile(ctx, core.LibraryKindTV, series.QualityProfileID)
 		if err != nil {
 			return fmt.Errorf("store: resolve episode profile: %w", err)
 		}
@@ -156,7 +276,7 @@ func (r *Runner) handleSearchMovie(ctx context.Context, st *store.Store, payload
 	if err != nil {
 		return fmt.Errorf("store: get movie: %w", err)
 	}
-	profile, err := st.ResolveQualityProfile(ctx, movie.QualityProfileID)
+	profile, err := st.ResolveItemQualityProfile(ctx, core.LibraryKindMovie, movie.QualityProfileID)
 	if err != nil {
 		return fmt.Errorf("store: resolve movie profile: %w", err)
 	}
@@ -204,7 +324,7 @@ func (r *Runner) handleSearchEpisode(ctx context.Context, st *store.Store, paylo
 	if err != nil {
 		return fmt.Errorf("store: get series: %w", err)
 	}
-	profile, err := st.ResolveQualityProfile(ctx, series.QualityProfileID)
+	profile, err := st.ResolveItemQualityProfile(ctx, core.LibraryKindTV, series.QualityProfileID)
 	if err != nil {
 		return fmt.Errorf("store: resolve episode profile: %w", err)
 	}
@@ -254,7 +374,7 @@ func (r *Runner) handleSearchEpisode(ctx context.Context, st *store.Store, paylo
 }
 
 func (r *Runner) searchMovies(ctx context.Context, st *store.Store, query string) ([]core.Release, error) {
-	return r.searchIndexers(ctx, st, func(ctx context.Context, client api.IndexerClient, cfg core.IndexerConfig) ([]core.Release, error) {
+	return r.searchIndexers(ctx, st, core.LibraryKindMovie, func(ctx context.Context, client api.IndexerClient, cfg core.IndexerConfig) ([]core.Release, error) {
 		searcher, ok := client.(movieSearcher)
 		if !ok {
 			return nil, fmt.Errorf("indexer %q does not support movie search", cfg.Name)
@@ -264,7 +384,7 @@ func (r *Runner) searchMovies(ctx context.Context, st *store.Store, query string
 }
 
 func (r *Runner) searchEpisodes(ctx context.Context, st *store.Store, title string, season, episode int) ([]core.Release, error) {
-	return r.searchIndexers(ctx, st, func(ctx context.Context, client api.IndexerClient, cfg core.IndexerConfig) ([]core.Release, error) {
+	return r.searchIndexers(ctx, st, core.LibraryKindTV, func(ctx context.Context, client api.IndexerClient, cfg core.IndexerConfig) ([]core.Release, error) {
 		searcher, ok := client.(tvSearcher)
 		if !ok {
 			return nil, fmt.Errorf("indexer %q does not support tv search", cfg.Name)
@@ -280,11 +400,15 @@ type indexerResult struct {
 	releases []core.Release
 }
 
-func (r *Runner) searchIndexers(ctx context.Context, st *store.Store, search indexerSearch) ([]core.Release, error) {
-	indexers, err := st.ListEnabledIndexers(ctx)
+// searchIndexers fans one search out over the indexers the library of the given
+// core.LibraryKind* searches, each already carrying the categories that search
+// must send (PLAN phase 8 task 4).
+func (r *Runner) searchIndexers(ctx context.Context, st *store.Store, kind string, search indexerSearch) ([]core.Release, error) {
+	settings, err := st.ResolveLibrarySettingsByKind(ctx, kind)
 	if err != nil {
-		return nil, fmt.Errorf("store: list enabled indexers: %w", err)
+		return nil, fmt.Errorf("store: resolve %s library settings: %w", kind, err)
 	}
+	indexers := settings.Indexers
 	if r.indexers == nil {
 		return nil, fmt.Errorf("no indexer client configured")
 	}
@@ -324,7 +448,7 @@ func (r *Runner) grabMovie(ctx context.Context, st *store.Store, movie core.Movi
 	} else if active {
 		return nil
 	}
-	return r.grab(ctx, st, release, score, source, core.GrabInfo{MovieID: movie.ID}, core.AddOpts{
+	return r.grab(ctx, st, core.LibraryKindMovie, release, score, source, core.GrabInfo{MovieID: movie.ID}, core.AddOpts{
 		Category: "movies", MovieID: movie.ID,
 	})
 }
@@ -336,18 +460,20 @@ func (r *Runner) grabEpisode(ctx context.Context, st *store.Store, episode core.
 		return nil
 	}
 	info := core.GrabInfo{SeriesID: episode.SeriesID, SeasonNum: episode.SeasonNumber, EpisodeIDs: []int64{episode.ID}}
-	return r.grab(ctx, st, release, score, source, info, core.AddOpts{
+	return r.grab(ctx, st, core.LibraryKindTV, release, score, source, info, core.AddOpts{
 		Category: "tv", SeriesID: episode.SeriesID, SeasonNum: episode.SeasonNumber, EpisodeIDs: []int64{episode.ID},
 	})
 }
 
-func (r *Runner) grab(ctx context.Context, st *store.Store, release core.Release, score int, source string, info core.GrabInfo, opts core.AddOpts) error {
+// grab hands one release to the engine the library of kind routes its
+// downloads to, and records the attempt either way.
+func (r *Runner) grab(ctx context.Context, st *store.Store, kind string, release core.Release, score int, source string, info core.GrabInfo, opts core.AddOpts) error {
 	if r.engine == nil {
 		return fmt.Errorf("download engine unavailable")
 	}
 	engineCtx, cancel := context.WithTimeout(ctx, engineWaitTimeout)
 	defer cancel()
-	engine := r.engine(engineCtx)
+	engine := r.engine(engineCtx, kind)
 	if engine == nil {
 		return fmt.Errorf("download engine unavailable")
 	}

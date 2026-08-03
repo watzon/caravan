@@ -670,3 +670,39 @@ func TestConfigRoundTrips(t *testing.T) {
 		t.Errorf("Config() = %+v, want the configuration it was built with", got)
 	}
 }
+
+// An RSS cycle fetches each indexer once with the union of every library's
+// categories, so the per-library narrowing is re-applied to the results rather
+// than to the request. That is only possible if the categories an item was
+// published in survive parsing — including the repeated `category` attribute,
+// which is the one attribute indexers deliberately send more than once.
+func TestSearchParsesItemCategories(t *testing.T) {
+	c, _ := newStub(t, torznabCfg(), map[string]response{"search": ok(t, "torznab_search_categories.xml")})
+
+	rels, err := c.Search(context.Background(), "", nil)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(rels) != 3 {
+		t.Fatalf("got %d releases, want 3", len(rels))
+	}
+	want := [][]int{{5000, 5040}, {2000, 2040}, {}}
+	for i, cats := range want {
+		if !reflect.DeepEqual(rels[i].Categories, cats) {
+			t.Errorf("release %d categories = %v, want %v", i, rels[i].Categories, cats)
+		}
+	}
+
+	// And the filter reads them the way a Torznab `cat` parameter would: a
+	// parent covers its children, an unrelated id does not, and an item with no
+	// categories is never rejected.
+	if !rels[0].InCategories([]int{5000}) {
+		t.Error("a 5040 release was rejected by a filter asking for the 5000 tree")
+	}
+	if rels[0].InCategories([]int{5030}) {
+		t.Error("a 5040 release satisfied a filter narrowed to 5030")
+	}
+	if !rels[2].InCategories([]int{5030}) {
+		t.Error("a release the indexer published no category for was rejected")
+	}
+}

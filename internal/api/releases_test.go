@@ -172,6 +172,57 @@ func TestReleaseSearchUsesConfiguredCategories(t *testing.T) {
 	}
 }
 
+// overrideLibraryIndexer writes one per-library indexer override, addressing
+// the library the way items do: by kind.
+func overrideLibraryIndexer(t *testing.T, st *store.Store, kind string, indexerID int64, enabled bool, cats []int) {
+	t.Helper()
+	ctx := context.Background()
+	library, err := st.GetLibraryByKind(ctx, kind)
+	if err != nil {
+		t.Fatalf("GetLibraryByKind(%q): %v", kind, err)
+	}
+	if err := st.SetLibraryIndexer(ctx, &core.LibraryIndexer{
+		LibraryID: library.ID, IndexerID: indexerID, Enabled: enabled, Categories: cats,
+	}); err != nil {
+		t.Fatalf("SetLibraryIndexer: %v", err)
+	}
+}
+
+// An interactive search belongs to a library too: the picker must ask the
+// indexers that library searches, with the categories that library asked for
+// (PLAN phase 8 task 4).
+func TestReleaseSearchUsesTheLibrarysIndexersAndCategories(t *testing.T) {
+	h, st, _, fake := newAcquisitionServer(t)
+	m := addMovie(t, st, "Big Buck Bunny", 2008)
+	sr, _ := addSeries(t, st, "Planet Earth II")
+	shared := addIndexer(t, st, fake, "shared", 2000, 5000)
+	tvOnly := addIndexer(t, st, fake, "tv-only", 5000)
+	fake.serve("shared")
+	fake.serve("tv-only")
+
+	overrideLibraryIndexer(t, st, core.LibraryKindMovie, shared.ID, true, []int{2000})
+	overrideLibraryIndexer(t, st, core.LibraryKindMovie, tvOnly.ID, false, nil)
+	overrideLibraryIndexer(t, st, core.LibraryKindTV, shared.ID, true, []int{5000})
+
+	rec := do(t, h, http.MethodGet, "/api/v1/library/movies/"+itoa(m.ID)+"/releases", "")
+	wantStatus(t, rec, http.StatusOK)
+	searches := fake.recorded()
+	if len(searches) != 1 || searches[0].name != "shared" || searches[0].cats != "2000" {
+		t.Fatalf("movie searches = %+v, want only the movie library's indexer and categories", searches)
+	}
+
+	rec = do(t, h, http.MethodGet, "/api/v1/library/series/"+itoa(sr.ID)+"/releases", "")
+	wantStatus(t, rec, http.StatusOK)
+	tvSearches := fake.recorded()[1:]
+	byIndexer := map[string]string{}
+	for _, s := range tvSearches {
+		byIndexer[s.name] = s.cats
+	}
+	if len(tvSearches) != 2 || byIndexer["shared"] != "5000" || byIndexer["tv-only"] != "5000" {
+		t.Fatalf("series searches = %+v, want both tv indexers with the tv categories", tvSearches)
+	}
+}
+
 func TestSeriesReleasesNarrowsQueryAndFlags(t *testing.T) {
 	h, st, _, fake := newAcquisitionServer(t)
 	sr, _ := addSeries(t, st, "Planet Earth II")

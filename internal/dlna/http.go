@@ -10,20 +10,43 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/watzon/caravan/internal/store"
 )
 
 // maxSOAPBody caps a control request. Browse arguments are a few hundred bytes;
 // anything larger is a mistake or an attack, and neither deserves the memory.
 const maxSOAPBody = 64 << 10
 
+// defaultSystemUpdateID is what an install nobody has reconfigured reports.
+const defaultSystemUpdateID = "1"
+
 // systemUpdateID is the ContentDirectory's "has anything changed" counter.
 //
-// It is pinned at 1 because this server does not implement GENA eventing:
-// without a subscription there is nobody to notify, and a counter that moves
-// with no event to carry it just makes polling clients re-browse. Clients that
-// poll it see a stable value and trust their cache until the user navigates,
-// which is the behaviour a library that changes a few times a day wants.
-const systemUpdateID = "1"
+// It does not track library contents: a counter that moved every time a file
+// landed would make polling clients re-browse all day for a library that
+// changes a few times an hour, and this server sends no event to carry the
+// change anyway. It tracks the shape of the tree instead — which libraries are
+// advertised (store.SettingDLNAUpdateID, bumped when dlna_visible flips) —
+// because that is the change a client's cache renders as a shelf that is gone
+// from the server but still on the television.
+func (s *Service) systemUpdateID(ctx context.Context) (string, error) {
+	raw, err := s.st.GetSetting(ctx, store.SettingDLNAUpdateID)
+	if errors.Is(err, store.ErrNotFound) {
+		return defaultSystemUpdateID, nil
+	}
+	if err != nil {
+		return "", err
+	}
+	// A value the counter cannot be read out of reads as the default rather
+	// than as an error: this is cache metadata, and refusing to Browse over it
+	// would turn a bad row into a library that will not open.
+	n, err := strconv.ParseUint(strings.TrimSpace(raw), 10, 32)
+	if err != nil || n == 0 {
+		return defaultSystemUpdateID, nil
+	}
+	return strconv.FormatUint(n, 10), nil
+}
 
 // Handler is the DLNA HTTP surface: device and service descriptions, the SOAP
 // control endpoints, and the file server.
@@ -140,7 +163,13 @@ func (s *Service) handleContentDirectory(w http.ResponseWriter, r *http.Request)
 		// clients ask for orderings we would silently ignore.
 		writeSOAPResponse(w, service, action, []soapArg{{Name: "SortCaps", Value: ""}})
 	case "GetSystemUpdateID":
-		writeSOAPResponse(w, service, action, []soapArg{{Name: "Id", Value: systemUpdateID}})
+		id, err := s.systemUpdateID(r.Context())
+		if err != nil {
+			s.log.Error("dlna: read system update id", "error", err)
+			writeSOAPFault(w, errActionFailed, "system update id unavailable")
+			return
+		}
+		writeSOAPResponse(w, service, action, []soapArg{{Name: "Id", Value: id}})
 	case "Search":
 		s.handleSearch(w, r, service)
 	default:
@@ -189,12 +218,18 @@ func (s *Service) handleBrowse(w http.ResponseWriter, r *http.Request, service s
 		writeSOAPFault(w, errActionFailed, "browse failed")
 		return
 	}
+	updateID, err := s.systemUpdateID(ctx)
+	if err != nil {
+		s.log.Error("dlna: read system update id", "error", err)
+		writeSOAPFault(w, errActionFailed, "browse failed")
+		return
+	}
 
 	writeSOAPResponse(w, service, "Browse", []soapArg{
 		{Name: "Result", Value: encoded},
 		{Name: "NumberReturned", Value: strconv.Itoa(page.count())},
 		{Name: "TotalMatches", Value: strconv.Itoa(total)},
-		{Name: "UpdateID", Value: systemUpdateID},
+		{Name: "UpdateID", Value: updateID},
 	})
 }
 
@@ -231,12 +266,18 @@ func (s *Service) handleSearch(w http.ResponseWriter, r *http.Request, service s
 		writeSOAPFault(w, errActionFailed, "search failed")
 		return
 	}
+	updateID, err := s.systemUpdateID(r.Context())
+	if err != nil {
+		s.log.Error("dlna: read system update id", "error", err)
+		writeSOAPFault(w, errActionFailed, "search failed")
+		return
+	}
 
 	writeSOAPResponse(w, service, "Search", []soapArg{
 		{Name: "Result", Value: encoded},
 		{Name: "NumberReturned", Value: strconv.Itoa(page.count())},
 		{Name: "TotalMatches", Value: strconv.Itoa(total)},
-		{Name: "UpdateID", Value: systemUpdateID},
+		{Name: "UpdateID", Value: updateID},
 	})
 }
 

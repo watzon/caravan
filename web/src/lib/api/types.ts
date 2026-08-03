@@ -1091,3 +1091,77 @@ export interface ApproveRequestResult {
   movie?: Movie;
   series?: Series;
 }
+
+/* ---------------------------------------------------------------------------
+ * Phase 8 — libraries as first-class objects (SPEC §7, §11 `/libraries`).
+ * ------------------------------------------------------------------------- */
+
+/** internal/core.LibraryKind* — the whole item→library mapping. */
+export type LibraryKind = 'movie' | 'tv';
+
+/**
+ * One row of a library's indexer matrix (internal/api.libraryIndexerJSON).
+ *
+ * `enabled` and `indexer_enabled` are separate because they are different
+ * problems: `enabled` is the only one this library owns, and an indexer that is
+ * off globally can never be switched back on from here.
+ */
+export interface LibraryIndexer {
+  indexer_id: number;
+  name: string;
+  type: IndexerType;
+  /** The indexer's own switch, read-only from the Libraries screen. */
+  indexer_enabled: boolean;
+  /** Whether this library searches it. True when no override row exists. */
+  enabled: boolean;
+  /** What a search for this library sends: the override, else the indexer's own. */
+  categories: number[];
+  categories_overridden: boolean;
+  /** The indexer's own list — what clearing the override restores. */
+  default_categories: number[];
+}
+
+/**
+ * internal/api.libraryJSON.
+ *
+ * The override fields carry the library's OWN answer, never the resolved one:
+ * `''` and `0` mean "this library does not answer, the global setting does",
+ * which is exactly the distinction the screen draws between an override and a
+ * global default.
+ */
+export interface Library {
+  id: number;
+  kind: LibraryKind;
+  name: string;
+  /** Storage-root-relative and read-only: moving it is the Storage screen's job. */
+  root_path: string;
+  dlna_visible: boolean;
+  route_torrent: string;
+  route_usenet: string;
+  quality_profile_id: number;
+  indexers: LibraryIndexer[];
+}
+
+/**
+ * Body for PATCH /libraries/{id}. Every field is optional because the screen
+ * saves one control at a time, and `''`/`0` clear an override rather than
+ * meaning "unset".
+ */
+export interface LibraryPatch {
+  dlna_visible?: boolean;
+  route_torrent?: string;
+  route_usenet?: string;
+  quality_profile_id?: number;
+}
+
+/**
+ * Body for PUT /libraries/{id}/indexers/{indexerID}.
+ *
+ * `categories: null` undoes an override — it is what an absent row already
+ * means — while `[]` is the override "search unfiltered". The two are not the
+ * same answer and the server stores them differently.
+ */
+export interface LibraryIndexerOverride {
+  enabled: boolean;
+  categories: number[] | null;
+}

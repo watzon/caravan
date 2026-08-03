@@ -7,15 +7,32 @@
     for?: string;
     help?: string;
     error?: string | null;
+    /** Right-aligned on the label row: what this field's current value means. */
+    note?: Snippet;
     class?: string;
     children: Snippet;
   }
 
-  let { label, for: htmlFor, help, error = null, class: klass = '', children }: Props = $props();
+  let {
+    label,
+    for: htmlFor,
+    help,
+    error = null,
+    note,
+    class: klass = '',
+    children,
+  }: Props = $props();
 </script>
 
 <div class="flex flex-col gap-2 {klass}">
-  <label class="micro-label" for={htmlFor}>{label}</label>
+  {#if note}
+    <div class="flex items-baseline justify-between gap-2">
+      <label class="micro-label" for={htmlFor}>{label}</label>
+      {@render note()}
+    </div>
+  {:else}
+    <label class="micro-label" for={htmlFor}>{label}</label>
+  {/if}
   {@render children()}
   {#if error}
     <p class="text-sm text-danger">{error}</p>

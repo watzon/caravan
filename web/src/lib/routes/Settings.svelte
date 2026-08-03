@@ -8,6 +8,7 @@
   import Icon from '../components/Icon.svelte';
   import DownloadsSettings from '../components/DownloadsSettings.svelte';
   import IndexerSettings from '../components/IndexerSettings.svelte';
+  import LibrariesSettings from '../components/LibrariesSettings.svelte';
   import LoadError from '../components/LoadError.svelte';
   import PlaybackSettings from '../components/PlaybackSettings.svelte';
   import Skeleton from '../components/Skeleton.svelte';
@@ -29,6 +30,7 @@
   let { section = '' }: Props = $props();
 
   type SectionKey =
+    | 'libraries'
     | 'metadata'
     | 'quality-profiles'
     | 'storage'
@@ -50,7 +52,7 @@
   }
 
   /**
-   * Seven sections grouped the way the product thinks (the Paper redesign).
+   * Nine sections grouped the way the product thinks (the Paper redesign).
    * Downloads and Playback each hold several cards rather than several rail
    * entries: the things inside them are one decision, not four.
    */
@@ -58,6 +60,13 @@
     {
       label: 'Library',
       items: [
+        {
+          key: 'libraries',
+          label: 'Libraries',
+          title: 'Libraries',
+          blurb:
+            'Movies and Series each carry their own indexers, categories, routing and reach. Anything a library does not answer falls back to the global setting.',
+        },
         {
           key: 'metadata',
           narrow: true,
@@ -258,7 +267,9 @@
     </header>
 
     <!-- These own their fetches, so they render whether or not /settings loaded. -->
-    {#if tab === 'indexers'}
+    {#if tab === 'libraries'}
+      <LibrariesSettings />
+    {:else if tab === 'indexers'}
       <IndexerSettings />
     {:else if tab === 'quality-profiles'}
       <QualityProfiles />

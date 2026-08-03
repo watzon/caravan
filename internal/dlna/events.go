@@ -7,13 +7,15 @@ package dlna
 // subscription as a dead service: the symptom of an empty eventSubURL is a
 // device that is recognized on the network but whose library shows empty.
 //
-// Caravan's evented state never changes while the server runs (SystemUpdateID
-// is a constant), so eventing here is exactly: accept the subscription,
-// deliver the initial NOTIFY the spec requires with the current state, honor
-// renewals and expiry, and never send another event — which is the correct
-// wire encoding of "nothing has changed".
+// Caravan's evented state moves rarely — SystemUpdateID advances only when a
+// library is added to or removed from the advertised tree — so eventing here is
+// exactly: accept the subscription, deliver the initial NOTIFY the spec
+// requires with the current state, honor renewals and expiry, and send nothing
+// further. A client that wants the newer value polls GetSystemUpdateID, which
+// is what the ones that care about freshness already do.
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -214,7 +216,14 @@ func callbackURL(header string) string {
 // logged and dropped: the subscription stands either way, and a client that
 // cannot receive its callback has a problem no retry of ours fixes.
 func (s *Service) sendInitialEvent(sub *subscription) {
-	body := initialPropertySet(sub.service)
+	// The subscription outlives the request that created it, so this runs on a
+	// background context rather than a cancelled one.
+	updateID, err := s.systemUpdateID(context.Background())
+	if err != nil {
+		s.log.Warn("dlna: initial event", "callback", sub.callback, "error", err)
+		updateID = defaultSystemUpdateID
+	}
+	body := initialPropertySet(sub.service, updateID)
 	req, err := http.NewRequest("NOTIFY", sub.callback, strings.NewReader(body))
 	if err != nil {
 		s.log.Warn("dlna: initial event", "callback", sub.callback, "error", err)
@@ -237,7 +246,7 @@ func (s *Service) sendInitialEvent(sub *subscription) {
 // initialPropertySet is the GENA property set for one service's evented
 // variables. Values are XML-escaped by construction: everything here is
 // either constant or already-escaped protocolInfo tokens.
-func initialPropertySet(service string) string {
+func initialPropertySet(service, updateID string) string {
 	var b strings.Builder
 	b.WriteString(`<e:propertyset xmlns:e="urn:schemas-upnp-org:event-1-0">`)
 	if service == "cms" {
@@ -246,7 +255,7 @@ func initialPropertySet(service string) string {
 		b.WriteString(`<e:property><CurrentConnectionIDs>0</CurrentConnectionIDs></e:property>`)
 	} else {
 		// Only what the SCPD declares evented: SystemUpdateID and nothing else.
-		b.WriteString(`<e:property><SystemUpdateID>` + systemUpdateID + `</SystemUpdateID></e:property>`)
+		b.WriteString(`<e:property><SystemUpdateID>` + updateID + `</SystemUpdateID></e:property>`)
 	}
 	b.WriteString(`</e:propertyset>`)
 	return b.String()

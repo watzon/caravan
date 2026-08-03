@@ -61,17 +61,24 @@ func Compute(ctx context.Context, st *store.Store) (*Lists, error) {
 	}
 
 	// Profiles are resolved once and cached: a library shares a handful of
-	// profiles across thousands of items.
-	profiles := map[int64]*core.QualityProfile{}
-	resolve := func(id int64) (*core.QualityProfile, error) {
-		if p, ok := profiles[id]; ok {
+	// profiles across thousands of items. The kind is part of the key because
+	// an item naming no profile of its own resolves to its own library's
+	// default, and the two libraries may have picked different ones.
+	type profileKey struct {
+		kind string
+		id   int64
+	}
+	profiles := map[profileKey]*core.QualityProfile{}
+	resolve := func(kind string, id int64) (*core.QualityProfile, error) {
+		key := profileKey{kind: kind, id: id}
+		if p, ok := profiles[key]; ok {
 			return p, nil
 		}
-		p, err := st.ResolveQualityProfile(ctx, id)
+		p, err := st.ResolveItemQualityProfile(ctx, kind, id)
 		if err != nil {
 			return nil, err
 		}
-		profiles[id] = p
+		profiles[key] = p
 		return p, nil
 	}
 
@@ -103,7 +110,7 @@ func Compute(ctx context.Context, st *store.Store) (*Lists, error) {
 		if !aired {
 			continue
 		}
-		p, err := resolve(es.SeriesProfileID)
+		p, err := resolve(core.LibraryKindTV, es.SeriesProfileID)
 		if err != nil {
 			return nil, err
 		}
@@ -177,11 +184,11 @@ func homeRelease(m core.Movie) time.Time {
 }
 
 // movieReason applies the wanted rules to one movie file state.
-func movieReason(ctx context.Context, ms store.MovieFileState, resolve func(int64) (*core.QualityProfile, error)) (string, error) {
+func movieReason(ctx context.Context, ms store.MovieFileState, resolve func(string, int64) (*core.QualityProfile, error)) (string, error) {
 	if !ms.HasFile {
 		return ReasonMissing, nil
 	}
-	p, err := resolve(ms.Movie.QualityProfileID)
+	p, err := resolve(core.LibraryKindMovie, ms.Movie.QualityProfileID)
 	if err != nil {
 		return "", err
 	}

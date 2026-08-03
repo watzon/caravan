@@ -118,6 +118,20 @@ func (s *Service) search(ctx context.Context, u urls, containerID, criteria stri
 // searchScope flattens everything beneath containerID — containers and items,
 // the container itself excluded — in browse order.
 func (s *Service) searchScope(ctx context.Context, u urls, containerID string) (*didlLite, error) {
+	// Search is a second way to reach the same tree, so it answers the same
+	// question about visibility Browse does — otherwise a library the owner
+	// stopped advertising would still be enumerable by the clients that prefer
+	// Search over walking Browse, which is most of them.
+	if hidden, err := s.hidden(ctx, containerID); err != nil {
+		return nil, err
+	} else if hidden {
+		return nil, errNoObject
+	}
+	visible, err := s.visibleLibraries(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	out := newDIDL()
 	switch {
 	case containerID == rootID:
@@ -126,13 +140,17 @@ func (s *Service) searchScope(ctx context.Context, u urls, containerID string) (
 			return nil, err
 		}
 		out.Containers = append(out.Containers, root.Containers...)
-		movies, err := s.movieChildren(ctx, u)
-		if err != nil {
-			return nil, err
+		if visible[core.LibraryKindMovie] {
+			movies, err := s.movieChildren(ctx, u)
+			if err != nil {
+				return nil, err
+			}
+			out.Items = append(out.Items, movies.Items...)
 		}
-		out.Items = append(out.Items, movies.Items...)
-		if err := s.tvScope(ctx, u, out); err != nil {
-			return nil, err
+		if visible[core.LibraryKindTV] {
+			if err := s.tvScope(ctx, u, out); err != nil {
+				return nil, err
+			}
 		}
 	case containerID == moviesID:
 		movies, err := s.movieChildren(ctx, u)

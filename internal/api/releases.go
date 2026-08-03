@@ -107,7 +107,7 @@ func (s *server) handleMovieReleases(w http.ResponseWriter, r *http.Request) {
 	if m.Year > 0 {
 		query = fmt.Sprintf("%s %d", m.Title, m.Year)
 	}
-	s.serveReleases(w, r, query, func(rel core.Release) []string {
+	s.serveReleases(w, r, core.LibraryKindMovie, query, func(rel core.Release) []string {
 		return movieReleaseFlags(rel, *m)
 	})
 }
@@ -136,24 +136,27 @@ func (s *server) handleSeriesReleases(w http.ResponseWriter, r *http.Request) {
 	case season >= 0:
 		query = fmt.Sprintf("%s S%02d", sr.Title, season)
 	}
-	s.serveReleases(w, r, query, func(rel core.Release) []string {
+	s.serveReleases(w, r, core.LibraryKindTV, query, func(rel core.Release) []string {
 		return seriesReleaseFlags(rel, season, episode)
 	})
 }
 
 // serveReleases runs one interactive search and writes the picker payload:
-// fan out, merge, cache, flag, sort.
-func (s *server) serveReleases(w http.ResponseWriter, r *http.Request, query string, flags func(core.Release) []string) {
+// fan out, merge, cache, flag, sort. kind is the core.LibraryKind* the searched
+// item belongs to, which decides which indexers answer and with which
+// categories (PLAN phase 8 task 4).
+func (s *server) serveReleases(w http.ResponseWriter, r *http.Request, kind, query string, flags func(core.Release) []string) {
 	newClient, ok := s.requireIndexerClients(w)
 	if !ok {
 		return
 	}
 
-	indexers, err := s.st.ListEnabledIndexers(r.Context())
+	settings, err := s.st.ResolveLibrarySettingsByKind(r.Context(), kind)
 	if err != nil {
-		s.writeStoreError(w, "list indexers", err)
+		s.writeStoreError(w, "resolve library settings", err)
 		return
 	}
+	indexers := settings.Indexers
 
 	// Resolved once for the whole fan-out so every row in one table is judged
 	// against the same profile.
@@ -196,8 +199,8 @@ func searchIndexers(ctx context.Context, newClient IndexerFactory, indexers []co
 	results := make(chan indexerSearch, len(indexers))
 	for _, cfg := range indexers {
 		go func() {
-			// Exactly the configured categories, nothing inferred: an empty
-			// configuration searches the indexer unfiltered. Guessing a
+			// Exactly the resolved categories, nothing inferred: an empty
+			// list searches the indexer unfiltered. Guessing a
 			// per-media-type default here silently returned nothing from
 			// indexers that do not expand parent categories.
 			releases, err := newClient(cfg).Search(ctx, query, cfg.Categories)
@@ -370,7 +373,7 @@ func (s *server) handleMovieGrab(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.grab(w, r, core.GrabInfo{MovieID: m.ID}, core.AddOpts{
+	s.grab(w, r, core.LibraryKindMovie, core.GrabInfo{MovieID: m.ID}, core.AddOpts{
 		Category: engineCategoryMovies,
 		MovieID:  m.ID,
 	})
@@ -423,7 +426,7 @@ func (s *server) handleSeriesGrab(w http.ResponseWriter, r *http.Request) {
 	if seasonNum < 0 {
 		seasonNum = 0
 	}
-	s.grab(w, r, core.GrabInfo{
+	s.grab(w, r, core.LibraryKindTV, core.GrabInfo{
 		SeriesID:   sr.ID,
 		SeasonNum:  seasonNum,
 		EpisodeIDs: episodeIDs,
@@ -441,7 +444,7 @@ func (s *server) handleSeriesGrab(w http.ResponseWriter, r *http.Request) {
 // history: "we tried this release and it was rejected" is the answer to "why is
 // nothing downloading", and SPEC §7 keeps that explanation even when the
 // attempt produced no download.
-func (s *server) grab(w http.ResponseWriter, r *http.Request, info core.GrabInfo, opts core.AddOpts) {
+func (s *server) grab(w http.ResponseWriter, r *http.Request, kind string, info core.GrabInfo, opts core.AddOpts) {
 	var body grabRequest
 	if !decodeJSON(w, r, &body) {
 		return
@@ -450,7 +453,7 @@ func (s *server) grab(w http.ResponseWriter, r *http.Request, info core.GrabInfo
 		writeError(w, http.StatusBadRequest, "release_id is required")
 		return
 	}
-	engine, ok := s.requireEngine(w)
+	engine, ok := s.requireEngineFor(w, kind)
 	if !ok {
 		return
 	}

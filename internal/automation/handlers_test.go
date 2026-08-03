@@ -76,7 +76,7 @@ func openStore(t *testing.T) *store.Store {
 }
 
 func newRunner(st *store.Store, indexer *fakeIndexer, engine *fakeEngine) *Runner {
-	return NewRunner(st, indexer.factory(), func(context.Context) core.Engine { return engine })
+	return NewRunner(st, indexer.factory(), func(context.Context, string) core.Engine { return engine })
 }
 
 func addIndexer(t *testing.T, ctx context.Context, st *store.Store) {
@@ -227,7 +227,7 @@ func routedRunner(st *store.Store, indexer *fakeIndexer, torrent, usenet *fakeEn
 		})
 	}
 	router := download.NewRouter(func(context.Context) ([]download.Route, error) { return routes, nil })
-	return NewRunner(st, indexer.factory(), func(context.Context) core.Engine { return router })
+	return NewRunner(st, indexer.factory(), func(context.Context, string) core.Engine { return router })
 }
 
 // The automatic path routes by protocol exactly like the interactive one: an

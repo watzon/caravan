@@ -24,7 +24,16 @@ type migration struct {
 // Migrations are sequential and forward-only (SPEC §7): there is no down
 // path, because the recovery story is "delete the database and rescan", not
 // "roll back".
-func (s *Store) migrate() error {
+func (s *Store) migrate() error { return s.migrateTo(allMigrations) }
+
+// allMigrations is migrateTo's "no ceiling" target.
+const allMigrations = -1
+
+// migrateTo applies every pending migration up to and including target. Only
+// migrate calls it with allMigrations; the tests use a real ceiling to build a
+// database at an older schema version and watch a later migration run against
+// it, which is the only way to prove an upgrade in place.
+func (s *Store) migrateTo(target int) error {
 	if _, err := s.db.Exec(`
 		CREATE TABLE IF NOT EXISTS schema_version (
 			version    INTEGER PRIMARY KEY,
@@ -48,6 +57,9 @@ func (s *Store) migrate() error {
 	for _, m := range migrations {
 		if m.version <= current {
 			continue
+		}
+		if target != allMigrations && m.version > target {
+			break
 		}
 		if err := s.applyMigration(m); err != nil {
 			return err

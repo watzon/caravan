@@ -81,6 +81,13 @@ const (
 	SettingDLNAEnabled      = "dlna_enabled"
 	SettingDLNAFriendlyName = "dlna_friendly_name"
 	SettingDLNAUUID         = "dlna_uuid"
+	// SettingDLNAUpdateID is the ContentDirectory's SystemUpdateID: the version
+	// of the content tree, which clients cache against. It is written only by
+	// bumpDLNAUpdateID and is deliberately not in the PUT /settings allowlist —
+	// a counter a client trusts to mean "something changed" is not a preference.
+	// Absent means 1, so an install nobody has reconfigured reports the value it
+	// always did.
+	SettingDLNAUpdateID = "dlna_update_id"
 	// SettingPasswordHash was the optional single-user password, an argon2id
 	// PHC string (SPEC §11, PLAN phase 5 task 5). Migration 0011 folded it into
 	// an 'admin' row in the users table and deleted the setting, so nothing

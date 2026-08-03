@@ -1,9 +1,9 @@
 # Caravan Development Plan
 
-**Status:** v1.0 (companion to `SPEC.md` Draft v0.2)
-**Date:** 2026-07-31
+**Status:** v1.1 (companion to `SPEC.md` Draft v0.2)
+**Date:** 2026-08-03
 
-Seven phases. Each absorbs one hat of the existing *arr ecosystem and ends with a deliverable a real user can run and test — no phase ends in scaffolding-only limbo.
+Ten phases. Each absorbs one hat of the existing *arr ecosystem and ends with a deliverable a real user can run and test — no phase ends in scaffolding-only limbo.
 
 A standing principle sharpened after phase 6: **Caravan is completely standalone; external clients are explicitly optional.** The embedded engines (torrent since phase 2, Usenet in phase 7) are the defaults, and nothing in the UI or docs may imply an external client is required for any workflow.
 
@@ -183,6 +183,83 @@ A standing principle sharpened after phase 6: **Caravan is completely standalone
 
 ---
 
+## Interlude — shipped between plan revisions
+
+Between v1.0 and v1.1, three unplanned tracks shipped and are treated as done: **discover & requests** (TMDB explore, request queue, minimum availability), **multi-user RBAC** (accounts, admin/member roles, request ownership), and **recurring metadata refresh**. Phases 8–10 build on all three.
+
+---
+
+## Phase 8 — Libraries as first-class objects
+
+**Hat:** the multi-instance *arr pattern — people who run a second Sonarr/Radarr just to get different indexers, categories, or clients per library. Caravan absorbs that into one instance.
+**Deliverable:** libraries become rows, not implications. Movies, TV (and later Adult) each carry their own indexer set with per-pair category overrides, download routing, default quality profile, and DLNA visibility — with global settings as the fallback. Existing installs migrate with behavior unchanged.
+
+### Tasks
+
+1. **`libraries` table + migration:** `id`, `kind` (`movie`|`tv`), `name`, `root_path`, `dlna_visible` (default true), nullable `route_torrent`/`route_usenet`, nullable `quality_profile_id`. Seed one Movies and one TV row from the existing implicit layout; all existing items adopt their library row.
+2. **Settings resolution helper:** one function — library override → global default — with an explicit, deliberately short list of overridable settings (indexers, categories, routing, DLNA visibility, default profile). Everything else stays global.
+3. **`library_indexers` join table:** `(library_id, indexer_id, enabled, categories)` where `categories` overrides the indexer's defaults for that pair. Migration default: every library × every indexer, enabled, no override — today's behavior exactly.
+4. **Search flow rewire:** interactive, backlog, and season searches resolve item → library → enabled indexers → per-pair categories. A TV search never sends movie or XXX categories.
+5. **RSS sync dedup:** each indexer's feed is fetched **once** per cycle using the union of categories across the libraries that enable it; release-to-wanted matching then happens per-library.
+6. **DLNA visibility:** the content tree includes only libraries with `dlna_visible`; toggling bumps ContentDirectory `SystemUpdateID` so cached TVs refresh.
+7. **API + UI:** Libraries settings screen — library list plus a detail view with the indexer/category matrix, routing overrides, default profile, and DLNA toggle. Gate: Paper design pass before implementation (mirroring phase 3 task 10).
+
+### Acceptance criteria
+
+- Against the fake Torznab server's request log: a TV-library search sends only that library's categories for that indexer; a movie search never includes 5000-series categories.
+- Disabling an indexer for one library leaves it active for the others.
+- One RSS cycle produces exactly one feed fetch per enabled indexer, regardless of how many libraries share it.
+- Toggling `dlna_visible` adds/removes the library's container and reference DLNA clients pick up the change without a restart.
+- Migrating an existing DB changes zero observable behavior until a user edits an override.
+
+---
+
+## Phase 9 — Adult module
+
+**Hat:** Whisparr.
+**Deliverable:** an admin-enabled, per-user-granted adult library, fed by stash-box metadata (TPDB endpoint by default), acquiring scene releases end to end — and invisible in every sense when disabled: no routes, no UI, no network traffic, no DLNA container, no presence on prepared drives.
+
+### Tasks
+
+1. **stash-box provider client** (`internal/stashbox`): GraphQL client for the stash-box protocol — scene/site search, scene details, studio + performers, images. Endpoint URL + API key in settings, TPDB preset as default (StashDB et al. become config values, not new code). Fixture-tested; fake stash-box server joins the e2e suite.
+2. **Data model:** `kind` on `series` (`'tv'`|`'adult'`, default `'tv'`); `stash_id` columns on series and episodes with the same partial-unique treatment as `tmdb_id`; scene side metadata (studio, performers, scene URL) in a JSON column on episodes; `requests.media_type` CHECK extended.
+3. **Site-as-series mapping:** site → series, release year → season, scene → episode (air date = scene release date). The wanted list, backlog search, RSS matching, calendar, and import pipeline are reused, not forked.
+4. **Scene release parser:** date-based path (`Site.YY.MM.DD.Performers.Title.…`) selected by library kind / 6000-series indexer category; quality/source parsing shared with the existing parser. Corpus entries land with the parser, per the standing rule.
+5. **Gating:** `adult_enabled` setting + per-user `adult_access` flag (admin-granted). Router-level 404 for all adult routes when off; refresh/RSS jobs for adult items no-op; **zero** stash-box traffic when disabled. Both the global flag and the user grant are required to see anything.
+6. **Exposure defaults:** adult library rooted at `library/Adult`; `dlna_visible` defaults **false** for adult kind (the phase-8 flag renders in the UI as a nested toggle under DLNA, present only when adult is enabled); `caravan prepare` excludes the adult root unless `--include-adult` is passed explicitly.
+7. **UI:** adult enable flow in settings (with a plain-language note that DLNA is unauthenticated when that sub-toggle is touched), per-user grant toggles on the users screen, adult library browse (site grid → site detail with scene rows), discover + requests extended to scenes. Gate: Paper design pass before implementation.
+
+### Acceptance criteria
+
+- Adult disabled: no adult routes respond, no UI traces render for any role, and the fake stash-box server logs zero requests across a full job cycle.
+- Enabled + granted: a member with `adult_access` can discover and request scenes; a member without it sees nothing adult anywhere, including in shared surfaces like the calendar.
+- End to end: add a site, a scene release is found via a search that sends only 6000-series categories, parses by date, imports under `library/Adult`, and the DB disposability rule still holds (delete DB, rescan, adult library returns).
+- The DLNA tree gains an Adult container only when its dedicated toggle is on; a fresh enable of the adult module leaves DLNA exposure off.
+- `prepare` without `--include-adult` produces a drive with zero adult bytes and no adult references in its config.
+
+---
+
+## Phase 10 — Stash integration
+
+**Hat:** none — this is phase 4's Jellyfin seam, replayed for the adult library. Stash is the adult counterpart of Jellyfin, and Caravan treats it that way.
+**Deliverable:** an adult import triggers a scoped Stash scan, then Caravan pushes identity — stash-box ID, title, studio, performers — so the scene arrives in Stash already identified, no manual tagging.
+
+### Tasks
+
+1. **Stash client:** GraphQL client with config + test-connection mirroring the Jellyfin card; wired to the existing `library.Notifier` seam, firing a `metadataScan` scoped to the adult root on adult-library changes only.
+2. **Identify push:** after the scan, locate the scene in Stash by path and `sceneUpdate` with the stash-box ID, title, studio, and performers. Because phase 9 sources metadata via stash-box, the IDs are shared vocabulary — Stash's identify step just happens. Retry with backoff while the scan is still in flight.
+3. **oshash (optional, stretch):** compute the 64KB head+tail oshash at import and include it in the push. phash stays Stash's job permanently — Caravan never decodes video frames for fingerprinting.
+4. **Health model:** unreachable Stash surfaces a banner and queues notifications, mirroring the external-client health pattern; imports are never blocked by Stash being down.
+5. **Settings UI:** a Stash card beside the Jellyfin card (URL, API key, test, scoped-to-library indicator). Designed in the phase 9 Paper pass alongside the adult settings screen.
+
+### Acceptance criteria
+
+- An adult import fires exactly one scoped Stash scan; non-adult imports fire none.
+- The imported scene appears in Stash with its stash-box ID, title, studio, and performers populated, with no manual identify performed.
+- With Stash unreachable: the import completes normally, a banner appears, and the queued notification delivers when Stash returns.
+
+---
+
 ## Risks and long poles
 
 - **The release parser is the long pole.** It gates phase 1 matching quality and phase 3 automation quality. Mitigation: the corpus starts in phase 1 and grows forever; the interactive picker and unmatched queue are the designed graceful-degradation paths.
@@ -190,3 +267,6 @@ A standing principle sharpened after phase 6: **Caravan is completely standalone
 - **DLNA client variance** is unbounded; scope phase 4 to browse+serve with documented reference clients, not per-TV workarounds.
 - **exFAT integrity** can't be fully simulated in CI; phase 5 needs a manual test matrix with a physical drive and at least one real TV.
 - **par2 and yEnc correctness are phase 7's long pole.** Repair math that is subtly wrong corrupts media silently; the fixture corpus (including deliberately damaged sets cross-checked against a reference par2 implementation) must exist before the repair code, and CRC failures always prefer "fail loudly" over "best effort".
+- **stash-box dialect variance.** TPDB, StashDB, and FansDB all speak "stash-box," but field coverage and rate limits differ; the phase 9 client is fixture-tested per endpoint, and endpoint quirks live in config presets, not code branches.
+- **The scene parser corpus starts near-empty.** Adult release naming is more chaotic than TV/movie naming; the interactive picker and stuck-import queue are again the designed degradation path, and the corpus-only-grows rule applies from the first scene grab.
+- **Exposure regressions are phase-blocking.** Any change that lets adult content reach DLNA, Jellyfin, a prepared drive, or an ungranted user by default is treated like an absolute-path violation: a bug that blocks the phase, not a polish item.

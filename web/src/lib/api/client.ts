@@ -31,6 +31,9 @@ import type {
   JellyfinConfig,
   JellyfinTestResult,
   Job,
+  Library,
+  LibraryIndexerOverride,
+  LibraryPatch,
   MatchRequest,
   MediaRequest,
   MinAvailability,
@@ -179,6 +182,13 @@ export const endpoints = {
   conversionRetry: (id: number) => `${API_BASE}/convert/${id}/retry`,
   qualityProfiles: () => `${API_BASE}/quality-profiles`,
   qualityProfile: (id: number) => `${API_BASE}/quality-profiles/${id}`,
+
+  // Phase 8 — libraries as first-class objects (SPEC §7). Admin-only: a member
+  // gets 403 from the allowlist, so nothing here is offered to one.
+  libraries: () => `${API_BASE}/libraries`,
+  library: (id: number) => `${API_BASE}/libraries/${id}`,
+  libraryIndexer: (id: number, indexerID: number) =>
+    `${API_BASE}/libraries/${id}/indexers/${indexerID}`,
 
   // Discover — browse the provider rather than search it. Every id in this
   // block is a TMDB id; library ids only appear in the decorated payloads.
@@ -787,6 +797,23 @@ export const api = {
 
   deleteQualityProfile: (id: number) =>
     request<void>(endpoints.qualityProfile(id), { method: 'DELETE' }),
+
+  /* ------------------------------------------------------------------------
+   * Phase 8 — libraries.
+   *
+   * Both writes answer with the library's whole state, so one response
+   * re-renders every card rather than the screen guessing what a write did to
+   * the rest of them.
+   * --------------------------------------------------------------------- */
+
+  listLibraries: (signal?: AbortSignal) =>
+    listOf<Library>(endpoints.libraries(), 'libraries', signal),
+
+  updateLibrary: (id: number, body: LibraryPatch) =>
+    request<Library>(endpoints.library(id), { method: 'PATCH', body }),
+
+  setLibraryIndexer: (id: number, indexerID: number, body: LibraryIndexerOverride) =>
+    request<Library>(endpoints.libraryIndexer(id, indexerID), { method: 'PUT', body }),
 
   /* ------------------------------------------------------------------------
    * Discover & requests.

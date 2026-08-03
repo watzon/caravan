@@ -70,8 +70,63 @@ func (u urls) art(rel string) string {
 	return u.origin + "/api/v1/images/" + strings.Join(segments, "/")
 }
 
+// libraryKindOf maps an object id onto the library kind whose subtree it lives
+// in, so one lookup answers "may this object be served" for a container and for
+// everything under it. The false return is for the root, which belongs to no
+// single library.
+func libraryKindOf(objectID string) (string, bool) {
+	switch {
+	case objectID == moviesID, strings.HasPrefix(objectID, movieItemPrefix):
+		return core.LibraryKindMovie, true
+	case objectID == tvID,
+		strings.HasPrefix(objectID, seriesPrefix),
+		strings.HasPrefix(objectID, episodeItemPrefix):
+		return core.LibraryKindTV, true
+	}
+	return "", false
+}
+
+// visibleLibraries reports which library kinds the content tree may expose
+// (PLAN phase 8 task 6). A library with dlna_visible off is not advertised at
+// all: its container is absent from the root and every id beneath it resolves
+// to "no such object", so a client cannot keep browsing a shelf the owner took
+// down by holding on to a cached id.
+//
+// This is a visibility switch, not an access control: the media endpoint still
+// serves any file by id, exactly as it did before libraries existed. What the
+// user is choosing here is which shelves the television lists.
+func (s *Service) visibleLibraries(ctx context.Context) (map[string]bool, error) {
+	libraries, err := s.st.ListLibraries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(libraries))
+	for _, l := range libraries {
+		out[l.Kind] = l.DLNAVisible
+	}
+	return out, nil
+}
+
+// hidden reports whether objectID belongs to a library that is not advertised.
+func (s *Service) hidden(ctx context.Context, objectID string) (bool, error) {
+	kind, ok := libraryKindOf(objectID)
+	if !ok {
+		return false, nil
+	}
+	visible, err := s.visibleLibraries(ctx)
+	if err != nil {
+		return false, err
+	}
+	return !visible[kind], nil
+}
+
 // children returns the direct children of objectID as a DIDL document.
 func (s *Service) children(ctx context.Context, u urls, objectID string) (*didlLite, error) {
+	if hidden, err := s.hidden(ctx, objectID); err != nil {
+		return nil, err
+	} else if hidden {
+		return nil, errNoObject
+	}
 	switch {
 	case objectID == rootID:
 		return s.rootChildren(ctx, u)
@@ -99,6 +154,11 @@ func (s *Service) children(ctx context.Context, u urls, objectID string) (*didlL
 
 // metadata returns objectID's own description as a one-object DIDL document.
 func (s *Service) metadata(ctx context.Context, u urls, objectID string) (*didlLite, error) {
+	if hidden, err := s.hidden(ctx, objectID); err != nil {
+		return nil, err
+	} else if hidden {
+		return nil, errNoObject
+	}
 	out := newDIDL()
 	switch {
 	case objectID == rootID:
@@ -156,18 +216,24 @@ func (s *Service) friendlyName(ctx context.Context) (string, error) {
 }
 
 func (s *Service) rootChildren(ctx context.Context, u urls) (*didlLite, error) {
-	movies, err := s.movieChildren(ctx, u)
-	if err != nil {
-		return nil, err
-	}
-	series, err := s.seriesChildren(ctx, u)
+	visible, err := s.visibleLibraries(ctx)
 	if err != nil {
 		return nil, err
 	}
 	out := newDIDL()
-	out.Containers = []didlContainer{
-		container(moviesID, rootID, "Movies", movies.count(), ""),
-		container(tvID, rootID, "TV", series.count(), ""),
+	if visible[core.LibraryKindMovie] {
+		movies, err := s.movieChildren(ctx, u)
+		if err != nil {
+			return nil, err
+		}
+		out.Containers = append(out.Containers, container(moviesID, rootID, "Movies", movies.count(), ""))
+	}
+	if visible[core.LibraryKindTV] {
+		series, err := s.seriesChildren(ctx, u)
+		if err != nil {
+			return nil, err
+		}
+		out.Containers = append(out.Containers, container(tvID, rootID, "TV", series.count(), ""))
 	}
 	return out, nil
 }

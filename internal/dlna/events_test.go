@@ -95,7 +95,7 @@ func TestSubscribeDeliversInitialEvent(t *testing.T) {
 		t.Errorf("NOTIFY headers = NT %q NTS %q SEQ %q, want the initial-event triple",
 			head.Get("NT"), head.Get("NTS"), head.Get("SEQ"))
 	}
-	if !strings.Contains(body, "<SystemUpdateID>"+systemUpdateID+"</SystemUpdateID>") {
+	if !strings.Contains(body, "<SystemUpdateID>"+defaultSystemUpdateID+"</SystemUpdateID>") {
 		t.Errorf("NOTIFY body = %q, want the current SystemUpdateID", body)
 	}
 }

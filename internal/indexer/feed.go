@@ -22,11 +22,15 @@ type feedDoc struct {
 
 // feedItem is one search result as published.
 type feedItem struct {
-	Title      string          `xml:"title"`
-	GUID       string          `xml:"guid"`
-	Link       string          `xml:"link"`
-	PubDate    string          `xml:"pubDate"`
-	Size       string          `xml:"size"`
+	Title   string `xml:"title"`
+	GUID    string `xml:"guid"`
+	Link    string `xml:"link"`
+	PubDate string `xml:"pubDate"`
+	Size    string `xml:"size"`
+	// Categories are the plain RSS <category> elements. Indexers publish the
+	// same ids there and as `category` extension attributes, and which of the
+	// two they use varies, so both are read.
+	Categories []string        `xml:"category"`
 	Enclosures []feedEnclosure `xml:"enclosure"`
 	Attrs      []feedAttr      `xml:"attr"`
 }
@@ -162,6 +166,7 @@ func (c *Client) release(it feedItem) (core.Release, bool) {
 		Seeders:     seeders,
 		Leechers:    leechers,
 		PublishedAt: publishedAt(it, attrs),
+		Categories:  categories(it),
 		Parsed:      parse.Parse(title),
 	}
 	return r, true
@@ -255,6 +260,33 @@ func publishedAt(it feedItem, attrs map[string]string) time.Time {
 		}
 	}
 	return time.Time{}
+}
+
+// categories reads every category id the item was published in.
+//
+// It goes to the raw attribute list rather than through attrMap because
+// `category` is the one attribute indexers deliberately repeat — an item in
+// 5000 and 5040 carries both — and attrMap keeps only the first. Anything that
+// is not a positive integer is dropped: a label alone cannot be matched against
+// a configured id.
+func categories(it feedItem) []int {
+	out := []int{}
+	seen := map[int]bool{}
+	values := append([]string(nil), it.Categories...)
+	for _, a := range it.Attrs {
+		if strings.EqualFold(strings.TrimSpace(a.Name), "category") {
+			values = append(values, a.Value)
+		}
+	}
+	for _, v := range values {
+		id, err := strconv.Atoi(strings.TrimSpace(v))
+		if err != nil || id <= 0 || seen[id] {
+			continue
+		}
+		seen[id] = true
+		out = append(out, id)
+	}
+	return out
 }
 
 // attrMap indexes extension attributes by lowercased name. Later duplicates

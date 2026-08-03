@@ -400,7 +400,7 @@ func TestContentDirectoryStubs(t *testing.T) {
 	}{
 		{action: "GetSearchCapabilities", field: "SearchCaps", want: searchCaps},
 		{action: "GetSortCapabilities", field: "SortCaps", want: ""},
-		{action: "GetSystemUpdateID", field: "Id", want: systemUpdateID},
+		{action: "GetSystemUpdateID", field: "Id", want: defaultSystemUpdateID},
 	}
 	for _, tc := range tests {
 		t.Run(tc.action, func(t *testing.T) {

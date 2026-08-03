@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:torznab="http://torznab.com/schemas/2015/feed">
+  <channel>
+    <title>Example Tracker</title>
+    <item>
+      <!-- the common shape: one item filed under a parent and a child -->
+      <title>The.Expanse.S04E01.1080p.WEB-DL-NTb</title>
+      <guid>expanse-s04e01</guid>
+      <torznab:attr name="category" value="5000" />
+      <torznab:attr name="category" value="5040" />
+      <torznab:attr name="magneturl" value="magnet:?xt=urn:btih:aaaabbbbccccddddeeeeffff00001111222233334" />
+    </item>
+    <item>
+      <!-- indexers that publish ids as plain RSS categories instead -->
+      <title>Blade.Runner.2049.2017.1080p.BluRay-SPARKS</title>
+      <guid>blade-runner-2049</guid>
+      <category>2000</category>
+      <category>2040</category>
+      <category>Movies/HD</category>
+      <torznab:attr name="magneturl" value="magnet:?xt=urn:btih:7a1b2c3d4e5f60718293a4b5c6d7e8f901234567" />
+    </item>
+    <item>
+      <!-- no category anywhere: nothing to match against, and not a reason to
+           drop the release -->
+      <title>Dune.Part.Two.2024.2160p.WEB-DL-FLUX</title>
+      <guid>dune-part-two</guid>
+      <torznab:attr name="magneturl" value="magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567" />
+    </item>
+  </channel>
+</rss>

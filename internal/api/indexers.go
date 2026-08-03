@@ -27,17 +27,13 @@ type indexerJSON struct {
 }
 
 func indexerDTO(c core.IndexerConfig) indexerJSON {
-	categories := c.Categories
-	if categories == nil {
-		categories = []int{}
-	}
 	return indexerJSON{
 		ID:         c.ID,
 		Name:       c.Name,
 		URL:        c.URL,
 		APIKey:     c.APIKey,
 		Type:       c.Type,
-		Categories: categories,
+		Categories: categoryList(c.Categories),
 		Enabled:    c.Enabled,
 	}
 }

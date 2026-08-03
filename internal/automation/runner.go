@@ -30,9 +30,12 @@ const (
 // makes at-least-once delivery an explicit concern at each boundary.
 type Handler func(ctx context.Context, st *store.Store, payload json.RawMessage) error
 
-// EngineGetter waits for, or returns, the currently configured download engine.
-// It may return nil when no storage root has been configured yet.
-type EngineGetter func(ctx context.Context) core.Engine
+// EngineGetter waits for, or returns, the currently configured download engine
+// for grabs made on behalf of the library of one core.LibraryKind* — "" for an
+// operation belonging to no library. The kind is what honours a library's own
+// download routing (PLAN phase 8 task 2). It may return nil when no storage
+// root has been configured yet.
+type EngineGetter func(ctx context.Context, kind string) core.Engine
 
 // Runner claims durable jobs and dispatches them to idempotent handlers.
 type Runner struct {

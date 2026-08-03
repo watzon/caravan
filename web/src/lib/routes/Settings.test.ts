@@ -77,7 +77,7 @@ function stubFetch() {
 }
 
 describe('Settings rail', () => {
-  it('groups the eight sections and links each as a route', async () => {
+  it('groups the nine sections and links each as a route', async () => {
     stubFetch();
     app = mount(Settings, { target: host, props: { section: 'playback' } });
     await settle();
@@ -87,6 +87,7 @@ describe('Settings rail', () => {
     }
     const hrefs = [...host.querySelectorAll('nav a')].map((a) => a.getAttribute('href'));
     expect(hrefs).toEqual([
+      '/settings/libraries',
       '/settings/metadata',
       '/settings/quality-profiles',
       '/settings/storage',

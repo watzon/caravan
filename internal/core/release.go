@@ -85,6 +85,44 @@ type Release struct {
 	Leechers int
 	// PublishedAt is when the indexer published the release, zero when unknown.
 	PublishedAt time.Time
+	// Categories are the indexer category ids the item was published in, empty
+	// when the indexer published none.
+	//
+	// They exist for the one decision that cannot be made by the `cat`
+	// parameter: an RSS cycle fetches each indexer once with the union of every
+	// library's categories (PLAN phase 8 task 5), so the per-library narrowing
+	// has to be re-applied to the results. Empty means the indexer said
+	// nothing, which is not the same as "no category" — a filter cannot reject
+	// what it cannot see.
+	//
+	// They are not cached in the `releases` table: nothing after the match
+	// needs them, and a search sends the categories rather than filtering on
+	// them.
+	Categories []int
 	// Parsed is what the release parser made of Title.
 	Parsed ParsedRelease
+}
+
+// InCategories reports whether this release satisfies a category filter.
+//
+// An empty filter accepts everything, which is what an empty category list has
+// always meant. A release the indexer published no categories for is also
+// accepted: dropping it would silently narrow every indexer that does not
+// publish categories down to nothing.
+//
+// A wanted parent category matches its children, because that is what sending
+// it as `cat` does — asking Torznab for 5000 returns 5040, and a filter that
+// then rejected 5040 would reject the very releases the fetch asked for.
+func (r Release) InCategories(wanted []int) bool {
+	if len(wanted) == 0 || len(r.Categories) == 0 {
+		return true
+	}
+	for _, want := range wanted {
+		for _, got := range r.Categories {
+			if got == want || (want%1000 == 0 && got > want && got < want+1000) {
+				return true
+			}
+		}
+	}
+	return false
 }
