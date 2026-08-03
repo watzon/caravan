@@ -1,7 +1,9 @@
 /**
  * Tab seeding for the add flow: "Add series" must open on the Series tab
  * instead of always defaulting to Movies, while a fixed kind still locks the
- * picker down entirely (scan-review manual match).
+ * picker down entirely (scan-review manual match). Keyboard contract: the
+ * search field owns focus on open, and Tab flips the Movies/Series scope
+ * instead of leaving the field.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
@@ -55,5 +57,37 @@ describe('AddItemModal', () => {
     expect(host!.querySelector('input')?.getAttribute('placeholder')).toBe(
       'Search TMDB for a movie…',
     );
+  });
+
+  it('focuses the search field on open', () => {
+    mountModal();
+    expect(document.activeElement).toBe(host!.querySelector('input'));
+  });
+
+  function pressTab(shiftKey = false): KeyboardEvent {
+    const input = host!.querySelector('input')!;
+    const event = new KeyboardEvent('keydown', { key: 'Tab', shiftKey, cancelable: true, bubbles: true });
+    input.dispatchEvent(event);
+    flushSync();
+    return event;
+  }
+
+  it('flips between Movies and Series on Tab in the search field', () => {
+    mountModal();
+    expect(pressTab().defaultPrevented).toBe(true);
+    expect(selectedTab()).toBe('Series');
+    pressTab();
+    expect(selectedTab()).toBe('Movies');
+  });
+
+  it('leaves Shift+Tab alone so reverse focus navigation still works', () => {
+    mountModal();
+    expect(pressTab(true).defaultPrevented).toBe(false);
+    expect(selectedTab()).toBe('Movies');
+  });
+
+  it('leaves Tab alone when the kind is fixed', () => {
+    mountModal({ kind: 'movie' });
+    expect(pressTab().defaultPrevented).toBe(false);
   });
 });

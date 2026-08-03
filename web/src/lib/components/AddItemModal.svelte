@@ -59,6 +59,26 @@
     kind === 'movie' ? results.movies : results.series,
   );
 
+  let body = $state<HTMLElement | null>(null);
+
+  // Palette-style keys while typing: Tab flips the Movies/Series scope
+  // (so it is not focus navigation here), ArrowDown jumps to the first
+  // result's button, which is where Tab would otherwise have gone.
+  function onSearchKeydown(event: KeyboardEvent) {
+    if (event.key === 'Tab' && !event.shiftKey && !fixedKind) {
+      event.preventDefault();
+      kind = kind === 'movie' ? 'series' : 'movie';
+      return;
+    }
+    if (event.key === 'ArrowDown') {
+      const first = body?.querySelector<HTMLElement>('ul button');
+      if (first) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+  }
+
   $effect(() => {
     const q = query.trim();
     const k = kind;
@@ -121,22 +141,28 @@
 </script>
 
 <Modal {title} {onclose}>
-  <div class="flex flex-col gap-4 p-4">
+  <div bind:this={body} class="flex flex-col gap-4 p-4">
     {#if !fixedKind}
-      <div class="flex gap-2" role="tablist" aria-label="Search type">
-        {#each [{ key: 'movie', label: 'Movies' }, { key: 'series', label: 'Series' }] as tab (tab.key)}
-          <button
-            type="button"
-            role="tab"
-            aria-selected={kind === tab.key}
-            onclick={() => (kind = tab.key as 'movie' | 'series')}
-            class="h-7 rounded-full border px-3 text-sm transition-colors duration-150 ease-out
-                   {kind === tab.key
-              ? 'border-accent bg-accent-tint text-accent-text'
-              : 'border-border bg-surface text-ink-secondary hover:bg-raised hover:text-ink'}">
-            {tab.label}
-          </button>
-        {/each}
+      <div class="flex items-center gap-2">
+        <div class="flex gap-2" role="tablist" aria-label="Search type">
+          {#each [{ key: 'movie', label: 'Movies' }, { key: 'series', label: 'Series' }] as tab (tab.key)}
+            <button
+              type="button"
+              role="tab"
+              aria-selected={kind === tab.key}
+              onclick={() => (kind = tab.key as 'movie' | 'series')}
+              class="h-7 rounded-full border px-3 text-sm transition-colors duration-150 ease-out
+                     {kind === tab.key
+                ? 'border-accent bg-accent-tint text-accent-text'
+                : 'border-border bg-surface text-ink-secondary hover:bg-raised hover:text-ink'}">
+              {tab.label}
+            </button>
+          {/each}
+        </div>
+        <span class="ml-auto flex items-center gap-1 text-xs text-ink-muted" aria-hidden="true">
+          <kbd class="rounded-sm bg-surface px-1.5 py-0.5 font-mono">Tab</kbd>
+          to switch
+        </span>
       </div>
     {/if}
 
@@ -144,6 +170,7 @@
       bind:value={query}
       type="search"
       autofocus
+      onkeydown={onSearchKeydown}
       placeholder={kind === 'movie' ? 'Search TMDB for a movie…' : 'Search TMDB for a series…'}
       ariaLabel="Search TMDB" />
 

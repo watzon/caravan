@@ -25,7 +25,10 @@
 
   $effect(() => {
     const previous = document.activeElement as HTMLElement | null;
-    dialog?.focus();
+    // Native autofocus is unreliable on dynamically inserted nodes, and
+    // focusing the dialog shell would steal it anyway — so honor a child's
+    // autofocus here and fall back to the shell.
+    (dialog?.querySelector<HTMLElement>('[autofocus]') ?? dialog)?.focus();
     // Restore rather than clear on close: a confirm opened from inside an
     // editor stacks two modals, and clearing would unlock page scroll while
     // the editor underneath is still open.
