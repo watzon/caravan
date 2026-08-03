@@ -1,15 +1,14 @@
 <script lang="ts">
   /**
    * The one page-title area every route shares (DESIGN.md §5): title left,
-   * optional subtitle beside it, page actions, then global search (⌘K) and
-   * system health right. Paper's headers have no bottom border, and the bar
-   * must never shrink: it is a flex item above a scrolling column, so
-   * shrink-0 is what keeps tall pages from squishing it.
+   * optional subtitle beside it, page actions, then global search (⌘K)
+   * right. System health lives in the sidebar card, not here. Paper's
+   * headers have no bottom border, and the bar must never shrink: it is a
+   * flex item above a scrolling column, so shrink-0 is what keeps tall
+   * pages from squishing it.
    */
   import Icon from '../components/Icon.svelte';
   import { page } from '../state/page.svelte';
-  import { system } from '../state/system.svelte';
-  import { TONE_DOT, type Tone } from '../status';
 
   interface Props {
     title: string;
@@ -17,18 +16,6 @@
   }
 
   let { title, onsearch }: Props = $props();
-
-  let health = $derived.by((): { tone: Tone; label: string } => {
-    if (system.error) return { tone: 'danger', label: 'Server unreachable' };
-    const s = system.status;
-    if (!s) return { tone: 'neutral', label: 'Checking' };
-    if (s.dirty) return { tone: 'danger', label: 'Dirty shutdown' };
-    if (s.engine_health === 'ok') return { tone: 'success', label: 'Healthy' };
-    if (s.engine_health === 'degraded') return { tone: 'warning', label: 'Degraded' };
-    if (s.engine_health === 'error') return { tone: 'danger', label: 'Engine error' };
-    // "unconfigured": no storage root yet, so no engine — a setup state, not a failure.
-    return { tone: 'neutral', label: 'Not set up' };
-  });
 
   const isMac =
     typeof navigator !== 'undefined' && /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent);
@@ -61,9 +48,4 @@
       {isMac ? '⌘' : 'Ctrl'}K
     </kbd>
   </button>
-
-  <div class="flex items-center gap-2" title="System health">
-    <span class="size-2 shrink-0 rounded-full {TONE_DOT[health.tone]}"></span>
-    <span class="hidden text-sm text-ink-secondary lg:inline">{health.label}</span>
-  </div>
 </header>
