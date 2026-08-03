@@ -23,6 +23,7 @@ const MOVIE = {
   monitored: true,
   quality_profile_id: 0,
   release_date: '',
+  min_availability: 'released',
   added_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
   file: null,
@@ -30,7 +31,7 @@ const MOVIE = {
 
 let host: HTMLElement;
 let app: Record<string, unknown> | undefined;
-let calls: { url: string; method: string }[];
+let calls: { url: string; method: string; body: unknown }[];
 
 // A movie with an imported file: the delete-files checkbox is only offered
 // when there is something on disk to delete.
@@ -57,7 +58,11 @@ function stubFetch(queued: number, movie: unknown = MOVIE) {
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      calls.push({ url, method: init?.method ?? 'GET' });
+      calls.push({
+        url,
+        method: init?.method ?? 'GET',
+        body: typeof init?.body === 'string' ? JSON.parse(init.body) : null,
+      });
       if (url.endsWith('/search')) {
         return new Response(JSON.stringify({ queued }), {
           status: 202,
@@ -118,7 +123,7 @@ function confirmButton(): HTMLButtonElement {
 }
 
 function deletes(): { url: string; method: string }[] {
-  return calls.filter((c) => c.method === 'DELETE');
+  return calls.filter((c) => c.method === 'DELETE').map(({ url, method }) => ({ url, method }));
 }
 
 describe('MovieDetail remove', () => {
@@ -205,7 +210,7 @@ describe('MovieDetail search actions', () => {
     searchNowButton().click();
     await settle();
 
-    expect(calls.filter((c) => c.method === 'POST')).toEqual([
+    expect(calls.filter((c) => c.method === 'POST').map(({ url, method }) => ({ url, method }))).toEqual([
       { url: '/api/v1/library/movies/7/search', method: 'POST' },
     ]);
     expect(toasts.items.map((t) => t.message)).toEqual(['Search started']);
@@ -223,5 +228,27 @@ describe('MovieDetail search actions', () => {
     expect(toasts.items).toHaveLength(1);
     expect(toasts.items[0]!.message).toContain('Nothing to search');
     expect(toasts.items[0]!.tone).toBe('info');
+  });
+});
+
+describe('minimum availability', () => {
+  it('shows the stored stage and PATCHes a new choice', async () => {
+    stubFetch(0);
+    app = mount(MovieDetail, { target: host, props: { id: 7 } });
+    await settle();
+
+    const select = host.querySelector<HTMLSelectElement>(
+      'select[aria-label="Minimum availability"]',
+    );
+    expect(select).not.toBeNull();
+    expect(select!.value).toBe('released');
+
+    select!.value = 'in_cinemas';
+    select!.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    const patch = calls.find((c) => c.method === 'PATCH');
+    expect(patch?.url.endsWith('/library/movies/7')).toBe(true);
+    expect(patch?.body).toEqual({ min_availability: 'in_cinemas' });
   });
 });

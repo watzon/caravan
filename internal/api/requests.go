@@ -290,10 +290,11 @@ func (s *server) handleApproveRequest(w http.ResponseWriter, r *http.Request) {
 // title later.
 //
 // For an admin that is a decision about somebody else's wish; for a member it
-// is cancelling their own, and it is the only row they may touch. Ownership is
-// checked before the pending check on purpose: answering "already decided" for
-// a housemate's request would confirm a row a member is not entitled to know
-// exists.
+// is cancelling their own, and it is the only row they may touch. To a member,
+// a housemate's row and no row at all are the same 404 with the same body:
+// ownership is checked before the pending check so "already decided" cannot
+// confirm the row exists, and a distinct 403 here would let anyone with a
+// member login walk the id space and map how much the household asks for.
 func (s *server) handleDismissRequest(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -305,7 +306,9 @@ func (s *server) handleDismissRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if user := currentUser(r); user.Role == core.RoleMember && req.RequestedBy != user.ID {
-		writeError(w, http.StatusForbidden, "not your request")
+		// Byte-identical to loadRequest's answer for an id that was never
+		// issued, deliberately.
+		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
 	if !insistPending(w, req) {

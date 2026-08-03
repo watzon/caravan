@@ -14,7 +14,7 @@
    */
   import { onMount } from 'svelte';
   import { api, errorText } from '../api/client';
-  import type { User, UserRole } from '../api/types';
+  import { MIN_PASSWORD_LENGTH, type User, type UserRole } from '../api/types';
   import { pushToast } from '../state/toast.svelte';
   import { session } from '../state/session.svelte';
   import Badge from './Badge.svelte';
@@ -27,9 +27,6 @@
   import SettingsCard from './SettingsCard.svelte';
   import Skeleton from './Skeleton.svelte';
   import TextInput from './TextInput.svelte';
-
-  /** The server's floor (internal/api/auth.go). Checked here so Save can be off. */
-  const MIN_PASSWORD_LENGTH = 8;
 
   const SELECT_CLASS =
     'h-9 w-full rounded-sm border border-border-strong bg-raised px-3 text-md text-ink ' +
@@ -89,6 +86,11 @@
 
   let rows = $derived(users ?? []);
   let admins = $derived(rows.filter((u) => u.role === 'admin').length);
+
+  /** Mirrors the server's delete rule so the click is never a dead end. */
+  function undeletable(user: User): boolean {
+    return user.role === 'admin' && admins <= 1 && rows.length > 1;
+  }
 
   /**
    * Whether the open dialog's primary action can fire. A username with a space
@@ -212,15 +214,17 @@
               onclick={() => open({ kind: 'password', user })}>
               Reset password
             </Button>
-            <!-- The last admin cannot go: a Caravan with members and no admin
-                 can never be administered again. The server refuses it too —
-                 this only stops the click from being a dead end. -->
+            <!-- The last admin cannot go while anyone else has an account: a
+                 Caravan with members and no admin can never be administered
+                 again. The one exception is the final account of all, whose
+                 deletion is how the server is reopened. The server enforces
+                 both — this only stops the click from being a dead end. -->
             <Button
               variant="ghost"
               size="sm"
-              disabled={user.role === 'admin' && admins <= 1}
-              title={user.role === 'admin' && admins <= 1
-                ? 'The last admin cannot be deleted'
+              disabled={undeletable(user)}
+              title={undeletable(user)
+                ? 'The only admin cannot be deleted while other accounts exist'
                 : undefined}
               onclick={() => open({ kind: 'delete', user })}>
               <Icon name="trash" size={14} />

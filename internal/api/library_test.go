@@ -799,3 +799,41 @@ func TestAddMovieMinAvailabilityContract(t *testing.T) {
 	wantStatus(t, rec, http.StatusBadRequest)
 	wantErrorBody(t, rec)
 }
+
+// PATCH /library/movies/{id} edits the availability choice after the add — the
+// choice at add time must not be final. Movie-only, like everywhere else the
+// field appears.
+func TestPatchMovieMinAvailability(t *testing.T) {
+	h, st, _ := newTestServer(t)
+
+	rec := do(t, h, http.MethodPost, "/api/v1/library/movies", `{"tmdb_id":78}`)
+	wantStatus(t, rec, http.StatusCreated)
+	var created movieJSON
+	decodeBody(t, rec, &created)
+	if created.MinAvailability != core.AvailabilityReleased {
+		t.Fatalf("min_availability = %q, want the released default", created.MinAvailability)
+	}
+
+	rec = do(t, h, http.MethodPatch, "/api/v1/library/movies/"+itoa(created.ID),
+		`{"min_availability":"announced"}`)
+	wantStatus(t, rec, http.StatusOK)
+	m, err := st.GetMovie(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("GetMovie: %v", err)
+	}
+	if m.MinAvailability != core.AvailabilityAnnounced {
+		t.Errorf("stored min_availability = %q, want announced", m.MinAvailability)
+	}
+
+	rec = do(t, h, http.MethodPatch, "/api/v1/library/movies/"+itoa(created.ID),
+		`{"min_availability":"someday"}`)
+	wantStatus(t, rec, http.StatusBadRequest)
+
+	rec = do(t, h, http.MethodPost, "/api/v1/library/series", `{"tmdb_id":1396}`)
+	wantStatus(t, rec, http.StatusCreated)
+	var series seriesJSON
+	decodeBody(t, rec, &series)
+	rec = do(t, h, http.MethodPatch, "/api/v1/library/series/"+itoa(series.ID),
+		`{"min_availability":"released"}`)
+	wantStatus(t, rec, http.StatusBadRequest)
+}

@@ -871,4 +871,14 @@ export const api = {
       method: 'PATCH',
       body: { quality_profile_id: profileID },
     }),
+
+  /**
+   * Change the release stage a movie's automatic search waits for. The choice
+   * made at add time is not final: the movie detail screen edits it here.
+   */
+  setMovieMinAvailability: (id: number, minAvailability: MinAvailability) =>
+    request<Movie>(endpoints.movie(id), {
+      method: 'PATCH',
+      body: { min_availability: minAvailability },
+    }),
 };

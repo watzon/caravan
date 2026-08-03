@@ -138,10 +138,16 @@ func (s *server) insistAnAdminRemains(w http.ResponseWriter, r *http.Request, ro
 // handleDeleteUser removes an account and turns out every browser signed in as
 // it.
 //
-// The last admin cannot be deleted. A server with members and no admin can
-// never be administered again short of deleting the database, so this refuses
-// rather than warns: 409, because the request is well-formed and it is the
-// state of the world that says no.
+// The last admin cannot be deleted while any other account exists: a server
+// with members and no admin can never be administered again short of deleting
+// the database. 409 because the request is well-formed and it is the state of
+// the world that says no.
+//
+// When the admin is the ONLY account, the delete is allowed: removing the
+// final account is the documented way to reopen the server (zero users = the
+// open LAN default), and refusing it would make gating a one-way door. The
+// caller deletes themself and the response's session is already revoked —
+// which is fine, because the very next request runs open.
 func (s *server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -159,9 +165,17 @@ func (s *server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 			s.writeStoreError(w, "count admins", err)
 			return
 		}
-		if admins <= 1 {
+		total, err := s.st.CountUsers(r.Context())
+		if err != nil {
+			s.writeStoreError(w, "count users", err)
+			return
+		}
+		if admins <= 1 && total > 1 {
+			// Both halves of this instruction are actually possible: there is
+			// no role-change endpoint, so the only ways out are a second admin
+			// account or an empty table.
 			writeError(w, http.StatusConflict,
-				"this is the last admin; make someone else an admin first, or delete every account to reopen the server")
+				"this is the only admin; create another admin account first, or delete every member account and then this one to reopen the server")
 			return
 		}
 	}

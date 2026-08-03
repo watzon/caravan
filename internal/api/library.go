@@ -447,21 +447,25 @@ func (s *server) movieDetail(ctx context.Context, id int64) (movieJSON, error) {
 	return dto, nil
 }
 
-// itemPatchRequest is the body of the movie and series PATCH endpoints. Both
-// fields are optional pointers so "absent" and "set to the zero value" are
-// distinguishable: quality_profile_id 0 explicitly re-assigns the default
+// itemPatchRequest is the body of the movie and series PATCH endpoints. The
+// pointer fields are optional pointers so "absent" and "set to the zero value"
+// are distinguishable: quality_profile_id 0 explicitly re-assigns the default
 // profile. A PATCH that names no field is a client bug worth reporting.
 type itemPatchRequest struct {
 	Monitored        *bool  `json:"monitored"`
 	QualityProfileID *int64 `json:"quality_profile_id"`
+	// MinAvailability is movie-only, like it is on the add: the release stage
+	// the movie's automatic search waits for. Empty means "not changing it" —
+	// there is no unset state to spell, the store always holds a stage.
+	MinAvailability string `json:"min_availability"`
 }
 
 // applyItemPatch validates the patch against the store and reports whether it
 // named at least one field. A nonexistent profile is a 400, not a 404: the
 // error is in the request, not in the addressed item.
 func (s *server) applyItemPatch(w http.ResponseWriter, r *http.Request, body itemPatchRequest, apply func(monitored *bool, profileID int64)) bool {
-	if body.Monitored == nil && body.QualityProfileID == nil {
-		writeError(w, http.StatusBadRequest, "monitored or quality_profile_id is required")
+	if body.Monitored == nil && body.QualityProfileID == nil && body.MinAvailability == "" {
+		writeError(w, http.StatusBadRequest, "monitored, quality_profile_id or min_availability is required")
 		return false
 	}
 	profileID := int64(-1)
@@ -482,9 +486,10 @@ func (s *server) applyItemPatch(w http.ResponseWriter, r *http.Request, body ite
 	return true
 }
 
-// handlePatchMovie updates the mutable fields of a movie: the monitored flag
-// and the quality profile assignment (PLAN phase 3, task 1). Everything else
-// is provider metadata, refreshed by a scan rather than edited by hand.
+// handlePatchMovie updates the mutable fields of a movie: the monitored flag,
+// the quality profile assignment (PLAN phase 3, task 1) and the minimum
+// availability. Everything else is provider metadata, refreshed by a scan
+// rather than edited by hand.
 func (s *server) handlePatchMovie(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -492,6 +497,9 @@ func (s *server) handlePatchMovie(w http.ResponseWriter, r *http.Request) {
 	}
 	var body itemPatchRequest
 	if !decodeJSON(w, r, &body) {
+		return
+	}
+	if !validAvailability(w, body.MinAvailability) {
 		return
 	}
 	ctx := r.Context()
@@ -510,6 +518,9 @@ func (s *server) handlePatchMovie(w http.ResponseWriter, r *http.Request) {
 		}
 	}) {
 		return
+	}
+	if body.MinAvailability != "" {
+		m.MinAvailability = body.MinAvailability
 	}
 	if err := s.st.UpsertMovie(ctx, m); err != nil {
 		s.writeStoreError(w, "update movie", err)
@@ -712,6 +723,10 @@ func (s *server) handlePatchSeries(w http.ResponseWriter, r *http.Request) {
 	}
 	var body itemPatchRequest
 	if !decodeJSON(w, r, &body) {
+		return
+	}
+	if body.MinAvailability != "" {
+		writeError(w, http.StatusBadRequest, "min_availability is only valid for a movie")
 		return
 	}
 	ctx := r.Context()

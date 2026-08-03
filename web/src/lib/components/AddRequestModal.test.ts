@@ -216,13 +216,28 @@ describe('AddRequestModal — modes', () => {
    * POST /requests/{id}/approve takes a search flag and nothing else, so a
    * profile select there would be a control with no effect.
    */
-  it('hides the profile select when approving a request', async () => {
+  it('offers the profile select when approving, and applies the choice after the add', async () => {
     mountModal({ mode: 'add', requestID: 11 });
     await settle();
 
-    expect(host.querySelector('#add-profile')).toBeNull();
+    const select = host.querySelector<HTMLSelectElement>('#add-profile');
+    expect(select).not.toBeNull();
     expect(host.querySelector('#add-root')).not.toBeNull();
-    expect(calls.map((c) => c.url)).not.toContain('/api/v1/quality-profiles');
+
+    // Choose the stubbed HD-1080p profile and approve.
+    select!.value = '4';
+    select!.dispatchEvent(new Event('change'));
+    flushSync();
+    primary().click();
+    await settle();
+
+    // The profile rides as its own call after the approval lands, exactly as
+    // it does on a direct add — it was never part of the approve payload.
+    const approve = calls.find((c) => c.url.endsWith('/requests/11/approve'));
+    expect(approve).toBeTruthy();
+    expect(approve?.body?.quality_profile_id).toBeUndefined();
+    const applied = calls.find((c) => c.method === 'PATCH' && c.url.includes('/library/series/42'));
+    expect(applied?.body).toEqual({ quality_profile_id: 4 });
   });
 });
 

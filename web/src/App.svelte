@@ -141,6 +141,11 @@
     // A missing session says nothing about setup state: the login screen owns
     // the whole viewport until it is resolved.
     if (auth.required) return;
+    // Setup is an admin's job, and /first-run is not a member route: if this
+    // gate pushed a member there, the member guard below would push them
+    // straight back out, and the two effects would chase each other forever.
+    // A member on an unconfigured server just gets an empty Discover.
+    if (!session.isAdmin) return;
     if (system.loading) return;
     if (system.needsSetup) {
       if (router.path !== '/first-run') navigate('/first-run', { replace: true });

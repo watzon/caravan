@@ -119,11 +119,12 @@
   let busy = $state(false);
 
   /**
-   * Approving is an add without a profile: POST /requests/{id}/approve takes a
-   * search flag and nothing else, so the select would be a control with no
-   * effect. It is hidden rather than disabled.
+   * The profile select is add-mode only — a requester does not pick quality —
+   * but it works for approvals too: the profile was never part of the add or
+   * approve payloads, it is applied as its own call after the title lands
+   * (applyProfile), and that call does not care how the title got there.
    */
-  let canChooseProfile = $derived(mode === 'add' && requestID === null);
+  let canChooseProfile = $derived(mode === 'add');
 
   let selectable = $derived(selectableSeasons(seasonList));
   let note = $derived(absorbNote(seasonList, selected, mode));

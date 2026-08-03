@@ -10,7 +10,7 @@
    * on, so an open Caravan is pointed at Users instead.
    */
   import { api, errorText } from '../api/client';
-  import { SETTING_API_KEY, type Settings } from '../api/types';
+  import { MIN_PASSWORD_LENGTH, SETTING_API_KEY, type Settings } from '../api/types';
   import Banner from './Banner.svelte';
   import Button from './Button.svelte';
   import Field from './Field.svelte';
@@ -103,7 +103,7 @@
       <Field
         label="New password"
         for="security-new-password"
-        help="At least 8 characters. Stored as an argon2id hash and never returned by the API.">
+        help="At least {MIN_PASSWORD_LENGTH} characters. Stored as an argon2id hash and never returned by the API.">
         <TextInput
           id="security-new-password"
           bind:value={newPassword}
@@ -114,7 +114,7 @@
       <Button
         variant="primary"
         class="self-start"
-        disabled={busy || currentPassword === '' || newPassword.trim().length < 8}
+        disabled={busy || currentPassword === '' || newPassword.length < MIN_PASSWORD_LENGTH}
         onclick={savePassword}>
         <Icon name="check" size={14} />
         {busy ? 'Saving…' : 'Change password'}

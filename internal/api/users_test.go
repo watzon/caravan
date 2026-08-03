@@ -147,8 +147,10 @@ func TestCreateUserValidation(t *testing.T) {
 }
 
 // A server with members and no admin can never be administered again, so the
-// last admin cannot be deleted. 409, not 403: the request is well-formed and it
-// is the state of the world that says no.
+// last admin cannot be deleted while any other account exists. 409, not 403:
+// the request is well-formed and it is the state of the world that says no.
+// The one exception is the final account of all, whose deletion is how the
+// server is reopened.
 func TestDeletingTheLastAdminIsRefused(t *testing.T) {
 	h, st, _ := newTestServer(t)
 	admin := setPassword(t, st, testPassword)
@@ -177,6 +179,13 @@ func TestDeletingTheLastAdminIsRefused(t *testing.T) {
 	// A member is never the last admin.
 	rec = doAuth(t, h, http.MethodDelete, "/api/v1/users/"+itoa(member.ID), "", withCookie(secondCookie))
 	wantStatus(t, rec, http.StatusNoContent)
+
+	// The second admin is now the only account of any kind, and deleting the
+	// final account is the documented way to reopen the server: it must be
+	// allowed, and the very next unauthenticated request runs open.
+	rec = doAuth(t, h, http.MethodDelete, "/api/v1/users/"+itoa(second.ID), "", withCookie(secondCookie))
+	wantStatus(t, rec, http.StatusNoContent)
+	wantStatus(t, do(t, h, http.MethodGet, "/api/v1/library/movies", ""), http.StatusOK)
 }
 
 // Deleting somebody must not leave their browser logged in.

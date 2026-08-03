@@ -471,8 +471,17 @@ func TestMemberCannotDismissAnotherPersonsRequest(t *testing.T) {
 	decodeBody(t, somebodyElses, &other)
 
 	rec := doAuth(t, h, http.MethodDelete, "/api/v1/requests/"+itoa(other.ID), "", withCookie(theirs))
-	wantStatus(t, rec, http.StatusForbidden)
+	wantStatus(t, rec, http.StatusNotFound)
 	wantErrorBody(t, rec)
+
+	// The refusal is byte-identical to an id that was never issued, so the
+	// endpoint cannot be used to map which ids exist.
+	absent := doAuth(t, h, http.MethodDelete, "/api/v1/requests/999999", "", withCookie(theirs))
+	wantStatus(t, absent, http.StatusNotFound)
+	if rec.Body.String() != absent.Body.String() {
+		t.Errorf("existing-but-foreign body %q != absent body %q; the difference is an oracle",
+			rec.Body.String(), absent.Body.String())
+	}
 
 	stored, err := st.GetRequest(ctx, other.ID)
 	if err != nil {

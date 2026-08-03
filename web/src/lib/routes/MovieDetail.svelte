@@ -2,7 +2,8 @@
   /** Movie detail (DESIGN.md §4: 32px display item title, machine text in mono). */
   import { onMount } from 'svelte';
   import { api, errorText } from '../api/client';
-  import type { Movie } from '../api/types';
+  import type { MinAvailability, Movie } from '../api/types';
+  import { AVAILABILITY_OPTIONS } from '../discover';
   import Badge from '../components/Badge.svelte';
   import Button from '../components/Button.svelte';
   import EmptyState from '../components/EmptyState.svelte';
@@ -64,6 +65,19 @@
       pushToast(errorText(err), 'danger');
     } finally {
       savingMonitored = false;
+    }
+  }
+
+  /** Same optimistic shape as the monitored toggle, for the same reason. */
+  async function setMinAvailability(next: MinAvailability) {
+    const current = movie;
+    if (!current || next === current.min_availability) return;
+    movie = { ...current, min_availability: next };
+    try {
+      await api.setMovieMinAvailability(current.id, next);
+    } catch (err) {
+      movie = current;
+      pushToast(errorText(err), 'danger');
     }
   }
 
@@ -190,7 +204,7 @@
           {movie.overview || 'No overview available.'}
         </p>
 
-        <dl class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <dl class="grid grid-cols-1 gap-4 sm:grid-cols-4">
           <div>
             <dt class="micro-label">Folder</dt>
             <dd class="mt-1 truncate font-mono text-sm text-ink" title={movie.path}>
@@ -206,6 +220,22 @@
           <div>
             <dt class="micro-label">Added</dt>
             <dd class="mt-1 text-sm text-ink">{formatDate(movie.added_at)}</dd>
+          </div>
+          <div>
+            <dt class="micro-label">Minimum availability</dt>
+            <dd class="mt-1">
+              <select
+                aria-label="Minimum availability"
+                value={movie.min_availability}
+                onchange={(event) =>
+                  setMinAvailability(event.currentTarget.value as MinAvailability)}
+                class="h-8 w-full rounded-sm border border-border-strong bg-raised px-2 text-sm text-ink
+                       focus:border-accent focus:outline-none">
+                {#each AVAILABILITY_OPTIONS as option (option.value)}
+                  <option value={option.value}>{option.label}</option>
+                {/each}
+              </select>
+            </dd>
           </div>
         </dl>
       </div>

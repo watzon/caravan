@@ -1035,6 +1035,14 @@ export interface DiscoverTitle extends DiscoverItem {
 
 export type RequestStatus = 'pending' | 'approved' | 'dismissed';
 
+/**
+ * The server's password floor (internal/api/auth.go minPasswordLength). One
+ * constant for every form that collects a password, counted on the exact
+ * string submitted: the server hashes the bytes it is sent, so the client
+ * must not trim before counting what the server will not trim before hashing.
+ */
+export const MIN_PASSWORD_LENGTH = 8;
+
 /** internal/api.requestJSON — one row of the requests screen. */
 export interface MediaRequest {
   id: number;

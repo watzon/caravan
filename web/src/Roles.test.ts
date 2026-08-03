@@ -15,6 +15,7 @@ import type { DiscoverHome, SessionUser, SystemStatus } from './lib/api/types';
 import { navigate, router } from './lib/router.svelte';
 import { discover } from './lib/state/discover.svelte';
 import { session } from './lib/state/session.svelte';
+import { system } from './lib/state/system.svelte';
 import { auth } from './lib/state/auth.svelte';
 import { clearToasts } from './lib/state/toast.svelte';
 
@@ -123,6 +124,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
   session.forget();
   auth.required = false;
+  system.status = null;
+  system.loading = true;
   discover.reset();
   clearToasts();
 });
@@ -162,6 +165,22 @@ describe('a member', () => {
     expect(host.textContent).toContain('Explore');
     // The settings rail never rendered on the way past.
     expect(host.textContent).not.toContain('Quality profiles');
+  });
+
+  it('is never sent to first run, even when the server needs setup', async () => {
+    // Stale admin knowledge in the singleton: the tab loaded the status while
+    // it was an admin's, then the session became a member's. Before the
+    // first-run gate was made admin-only, this state made the two route
+    // effects chase each other — first-run is not a member route, so the
+    // member guard undid the first-run redirect, forever. `loading` must be
+    // false too, or the gate never reads needsSetup and the test proves
+    // nothing.
+    system.status = { ...STATUS, storage_root: '' };
+    system.loading = false;
+    await open('/first-run');
+
+    expect(router.path).toBe('/discover');
+    expect(host.textContent).not.toContain('Choose a storage root');
   });
 
   it('is offered Request on the Discover billboard, never Add', async () => {
