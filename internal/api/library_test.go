@@ -256,6 +256,151 @@ func TestDeleteForwardsFilesSwitch(t *testing.T) {
 	}
 }
 
+// seedActiveGrab writes a grabbed-status grab and its in-flight download row,
+// which is what "this item is downloading right now" looks like in the store.
+func seedActiveGrab(t *testing.T, st *store.Store, info core.GrabInfo, engineID core.DownloadID) *core.Grab {
+	t.Helper()
+	ctx := context.Background()
+	g := &core.Grab{GrabInfo: info, Status: core.GrabStatusGrabbed}
+	g.ReleaseTitle = "Release." + string(engineID)
+	if err := st.InsertGrab(ctx, g); err != nil {
+		t.Fatalf("InsertGrab: %v", err)
+	}
+	if err := st.UpsertDownload(ctx, &core.Download{
+		GrabID:   g.GrabID,
+		Engine:   "embedded",
+		EngineID: engineID,
+		Title:    g.ReleaseTitle,
+		State:    core.DownloadDownloading,
+	}); err != nil {
+		t.Fatalf("UpsertDownload: %v", err)
+	}
+	return g
+}
+
+// Deleting a movie with a download in flight withdraws the download first:
+// the engine is told to drop it with its data, the queue row goes, and the
+// grab is closed as cancelled rather than left claiming to be active.
+func TestDeleteMovieCancelsItsActiveDownload(t *testing.T) {
+	engine := &stubEngine{}
+	h, st, _ := newTestServer(t, WithEngine(&stubEngineProvider{engine: engine}))
+	ctx := context.Background()
+
+	m := &core.Movie{TMDBID: 7, Title: "Gone", Monitored: true}
+	if err := st.UpsertMovie(ctx, m); err != nil {
+		t.Fatalf("UpsertMovie: %v", err)
+	}
+	g := seedActiveGrab(t, st, core.GrabInfo{MovieID: m.ID}, "hash-cancel")
+
+	rec := do(t, h, http.MethodDelete, "/api/v1/library/movies/"+itoa(m.ID), "")
+	wantStatus(t, rec, http.StatusNoContent)
+
+	if want := []engineRemove{{id: "hash-cancel", deleteData: true}}; !slices.Equal(engine.removed, want) {
+		t.Fatalf("engine removals = %+v, want %+v", engine.removed, want)
+	}
+	if _, err := st.GetDownloadByEngineID(ctx, "hash-cancel"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("download row: err = %v, want ErrNotFound", err)
+	}
+	got, err := st.GetGrab(ctx, g.GrabID)
+	if err != nil {
+		t.Fatalf("GetGrab: %v", err)
+	}
+	if got.Status != core.GrabStatusCancelled {
+		t.Fatalf("grab status = %q, want %q", got.Status, core.GrabStatusCancelled)
+	}
+}
+
+// A season pack's one grab covers several episodes; deleting the series must
+// withdraw that one download once, not once per episode.
+func TestDeleteSeriesCancelsASeasonPackOnce(t *testing.T) {
+	engine := &stubEngine{}
+	h, st, _ := newTestServer(t, WithEngine(&stubEngineProvider{engine: engine}))
+	ctx := context.Background()
+
+	sr := &core.Series{TMDBID: 8, Title: "Also Gone", Monitored: true}
+	if err := st.UpsertSeries(ctx, sr); err != nil {
+		t.Fatalf("UpsertSeries: %v", err)
+	}
+	e1 := airedEpisode(t, st, sr.ID, 1, 1)
+	e2 := airedEpisode(t, st, sr.ID, 1, 2)
+	g := seedActiveGrab(t, st,
+		core.GrabInfo{SeriesID: sr.ID, SeasonNum: 1, EpisodeIDs: []int64{e1.ID, e2.ID}}, "hash-pack")
+
+	rec := do(t, h, http.MethodDelete, "/api/v1/library/series/"+itoa(sr.ID), "")
+	wantStatus(t, rec, http.StatusNoContent)
+
+	if want := []engineRemove{{id: "hash-pack", deleteData: true}}; !slices.Equal(engine.removed, want) {
+		t.Fatalf("engine removals = %+v, want %+v", engine.removed, want)
+	}
+	got, err := st.GetGrab(ctx, g.GrabID)
+	if err != nil {
+		t.Fatalf("GetGrab: %v", err)
+	}
+	if got.Status != core.GrabStatusCancelled {
+		t.Fatalf("grab status = %q, want %q", got.Status, core.GrabStatusCancelled)
+	}
+}
+
+// Cancel-first is the contract: when the engine cannot withdraw the download,
+// the delete fails with the library untouched, because deleting the item while
+// its download kept running is exactly what removal must not do.
+func TestDeleteMovieFailsWhenCancelFails(t *testing.T) {
+	engine := &stubEngine{controlErr: errors.New("engine unreachable")}
+	h, st, mgr := newTestServer(t, WithEngine(&stubEngineProvider{engine: engine}))
+	ctx := context.Background()
+
+	m := &core.Movie{TMDBID: 7, Title: "Stays", Monitored: true}
+	if err := st.UpsertMovie(ctx, m); err != nil {
+		t.Fatalf("UpsertMovie: %v", err)
+	}
+	g := seedActiveGrab(t, st, core.GrabInfo{MovieID: m.ID}, "hash-stuck")
+
+	rec := do(t, h, http.MethodDelete, "/api/v1/library/movies/"+itoa(m.ID)+"?files=true", "")
+	wantStatus(t, rec, http.StatusBadGateway)
+	wantErrorBody(t, rec)
+
+	if calls := mgr.removeCalls(); len(calls) != 0 {
+		t.Fatalf("remove calls = %+v, want none", calls)
+	}
+	if _, err := st.GetDownloadByEngineID(ctx, "hash-stuck"); err != nil {
+		t.Fatalf("download row should survive a failed cancel: %v", err)
+	}
+	got, err := st.GetGrab(ctx, g.GrabID)
+	if err != nil {
+		t.Fatalf("GetGrab: %v", err)
+	}
+	if got.Status != core.GrabStatusGrabbed {
+		t.Fatalf("grab status = %q, want %q", got.Status, core.GrabStatusGrabbed)
+	}
+}
+
+// Without any engine configured nothing can actually be downloading, so the
+// delete proceeds and still cleans up the rows the grab left behind.
+func TestDeleteMovieWithoutEngineStillClosesTheGrab(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	ctx := context.Background()
+
+	m := &core.Movie{TMDBID: 7, Title: "Gone", Monitored: true}
+	if err := st.UpsertMovie(ctx, m); err != nil {
+		t.Fatalf("UpsertMovie: %v", err)
+	}
+	g := seedActiveGrab(t, st, core.GrabInfo{MovieID: m.ID}, "hash-noengine")
+
+	rec := do(t, h, http.MethodDelete, "/api/v1/library/movies/"+itoa(m.ID), "")
+	wantStatus(t, rec, http.StatusNoContent)
+
+	if _, err := st.GetDownloadByEngineID(ctx, "hash-noengine"); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("download row: err = %v, want ErrNotFound", err)
+	}
+	got, err := st.GetGrab(ctx, g.GrabID)
+	if err != nil {
+		t.Fatalf("GetGrab: %v", err)
+	}
+	if got.Status != core.GrabStatusCancelled {
+		t.Fatalf("grab status = %q, want %q", got.Status, core.GrabStatusCancelled)
+	}
+}
+
 // A 404 is decided before the manager is asked, so a delete of something that
 // never existed cannot delete files by accident.
 func TestDeleteUnknownItemNeverReachesTheManager(t *testing.T) {

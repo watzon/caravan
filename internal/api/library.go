@@ -401,11 +401,64 @@ func (s *server) handleDeleteMovie(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreError(w, "get movie", err)
 		return
 	}
+	grab, active, err := s.st.ActiveGrabForMovie(r.Context(), id)
+	if err != nil {
+		s.writeStoreError(w, "find active grab", err)
+		return
+	}
+	var grabs []*core.Grab
+	if active {
+		grabs = append(grabs, grab)
+	}
+	if !s.cancelGrabs(w, r.Context(), grabs) {
+		return
+	}
 	if err := s.mgr.RemoveMovie(r.Context(), id, deleteFilesRequested(r)); err != nil {
 		s.writeManagerError(w, "delete movie", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// cancelGrabs withdraws the in-flight downloads of an item being removed, and
+// reports whether the removal may proceed.
+//
+// The order is the contract: cancel first, then delete, so an engine that
+// cannot be reached fails the request with the library untouched — deleting
+// the item while its download kept running is exactly what removal must not
+// do. The downloaded data goes with the download: partial data for an item
+// that is leaving the library has no future. A configured-but-absent engine is
+// tolerated when it has nothing to withdraw; the rows are still cleaned up,
+// since nothing can be downloading through an engine that is not there.
+func (s *server) cancelGrabs(w http.ResponseWriter, ctx context.Context, grabs []*core.Grab) bool {
+	var engine core.Engine
+	if s.engine != nil {
+		engine = s.engine.Engine()
+	}
+	for _, g := range grabs {
+		downloads, err := s.st.ListDownloadsForGrab(ctx, g.GrabID)
+		if err != nil {
+			s.writeStoreError(w, "list grab downloads", err)
+			return false
+		}
+		for _, d := range downloads {
+			if engine != nil {
+				if err := engine.Remove(ctx, d.EngineID, true); err != nil {
+					s.writeEngineError(w, "cancel download", err)
+					return false
+				}
+			}
+			if err := s.st.DeleteDownloadByEngineID(ctx, d.EngineID); err != nil {
+				s.writeStoreError(w, "delete download", err)
+				return false
+			}
+		}
+		if err := s.st.SetGrabStatus(ctx, g.GrabID, core.GrabStatusCancelled, "removed from library"); err != nil {
+			s.writeStoreError(w, "cancel grab", err)
+			return false
+		}
+	}
+	return true
 }
 
 func (s *server) handleListSeries(w http.ResponseWriter, r *http.Request) {
@@ -563,6 +616,29 @@ func (s *server) handleDeleteSeries(w http.ResponseWriter, r *http.Request) {
 
 	if _, err := s.st.GetSeries(r.Context(), id); err != nil {
 		s.writeStoreError(w, "get series", err)
+		return
+	}
+	episodes, err := s.st.ListEpisodes(r.Context(), id)
+	if err != nil {
+		s.writeStoreError(w, "list episodes", err)
+		return
+	}
+	// A season pack's grab covers several episodes; collect each grab once.
+	seen := make(map[int64]bool)
+	var grabs []*core.Grab
+	for _, e := range episodes {
+		grab, active, err := s.st.ActiveGrabForEpisode(r.Context(), e.ID)
+		if err != nil {
+			s.writeStoreError(w, "find active grab", err)
+			return
+		}
+		if !active || seen[grab.GrabID] {
+			continue
+		}
+		seen[grab.GrabID] = true
+		grabs = append(grabs, grab)
+	}
+	if !s.cancelGrabs(w, r.Context(), grabs) {
 		return
 	}
 	if err := s.mgr.RemoveSeries(r.Context(), id, deleteFilesRequested(r)); err != nil {

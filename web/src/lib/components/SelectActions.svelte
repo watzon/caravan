@@ -1,8 +1,9 @@
 <script lang="ts">
   /**
-   * Select mode's controls for the library grids: the button that enters it,
-   * the action bar that appears while it is on, and the one confirm the bulk
-   * removal goes through.
+   * The floating action bar for a grid selection, and the one confirm the bulk
+   * removal goes through. It exists only while something is selected — the
+   * selection itself starts on the cards — and sits pinned near the bottom of
+   * the view, out of the toolbar's way.
    *
    * Movies and Series share it because the only difference between them is
    * which per-item endpoints the actions call — passed in as `actions` — and
@@ -57,72 +58,75 @@
     const result = await runBulk(ids, (id) => actions.remove(id, deleteFiles));
     busy = false;
     confirmingRemove = false;
-    selection.exit();
+    selection.clear();
     pushToast(bulkSummary(result, 'Removed'), result.failed === 0 ? 'success' : 'danger');
     await onchanged();
   }
 
-  /** Escape leaves select mode, the same way it closes a dialog. */
+  /** Escape drops the selection, the same way it closes a dialog. */
   function onkeydown(event: KeyboardEvent) {
     if (event.key === 'Escape' && selection.active && !confirmingRemove) {
-      selection.exit();
+      selection.clear();
     }
   }
 </script>
 
 <svelte:window {onkeydown} />
 
-{#if !selection.active}
-  <Button variant="secondary" onclick={() => selection.enter()}>
-    <Icon name="check" size={14} />
-    Select
-  </Button>
-{/if}
-
 {#if selection.active}
-  <!-- Full width so it wraps onto its own row directly under the chips. -->
-  <div
-    class="flex w-full flex-wrap items-center gap-2 rounded-md border border-border-strong
-           bg-surface px-3 py-2"
-    role="group"
-    aria-label="Selection actions">
-    <span class="text-base text-ink">{selection.count} selected</span>
+  <!-- Pinned to the window bottom, centered over the content column: the
+       left-60 offset is the sidebar's w-60. -->
+  <div class="pointer-events-none fixed bottom-6 left-60 right-0 z-40 flex justify-center">
+    <div
+      class="pointer-events-auto flex items-center gap-1 rounded-lg border border-border-strong
+             bg-overlay py-1.5 pl-4 pr-1.5 shadow-2xl"
+      role="group"
+      aria-label="Selection actions">
+      <span class="mr-2 whitespace-nowrap text-base font-medium text-ink">
+        {selection.count} selected
+      </span>
 
-    <div class="ml-auto flex flex-wrap items-center gap-2">
       <Button
-        variant="secondary"
+        variant="ghost"
         size="sm"
-        disabled={busy || selection.count === 0}
+        disabled={busy}
         onclick={() => run('Queued searches for', actions.search)}>
         <Icon name="search" size={14} />
         Search
       </Button>
       <Button
-        variant="secondary"
+        variant="ghost"
         size="sm"
-        disabled={busy || selection.count === 0}
+        disabled={busy}
         onclick={() => run('Monitored', (id) => actions.setMonitored(id, true))}>
         Monitor
       </Button>
       <Button
-        variant="secondary"
+        variant="ghost"
         size="sm"
-        disabled={busy || selection.count === 0}
+        disabled={busy}
         onclick={() => run('Unmonitored', (id) => actions.setMonitored(id, false))}>
         Unmonitor
       </Button>
       <Button
         variant="danger"
         size="sm"
-        disabled={busy || selection.count === 0}
+        disabled={busy}
         onclick={() => (confirmingRemove = true)}>
         <Icon name="trash" size={14} />
         Remove…
       </Button>
-      <!-- Named "Done", not "Cancel": the confirm dialog owns that word, and
-           leaving select mode undoes nothing that was already applied. -->
-      <Button variant="ghost" size="sm" disabled={busy} onclick={() => selection.exit()}>
-        Done
+
+      <span class="mx-1 h-5 w-px bg-border" aria-hidden="true"></span>
+
+      <Button
+        variant="ghost"
+        size="sm"
+        disabled={busy}
+        onclick={() => selection.clear()}
+        title="Clear selection">
+        <Icon name="close" size={14} />
+        <span class="sr-only">Clear selection</span>
       </Button>
     </div>
   </div>

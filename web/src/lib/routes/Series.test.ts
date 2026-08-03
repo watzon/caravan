@@ -89,22 +89,31 @@ function cards(): HTMLElement[] {
   return [...host.querySelectorAll<HTMLElement>('button[aria-pressed][aria-label]')];
 }
 
-describe('Series grid select mode', () => {
-  it('keeps cards as links until select mode is entered', async () => {
+/** The per-card check circle that starts a selection. */
+async function select(title: string) {
+  const circle = host.querySelector<HTMLButtonElement>(
+    `button[aria-label="Select ${title} (2022)"]`,
+  );
+  expect(circle, `the select circle on ${title}`).toBeTruthy();
+  circle!.click();
+  await settle();
+}
+
+describe('Series grid selection', () => {
+  it('keeps cards as links while nothing is selected', async () => {
     app = mount(Series, { target: host, props: { onadd: () => {} } });
     await settle();
 
     expect(host.querySelector('a[href="/series/2"]')).toBeTruthy();
     expect(cards()).toHaveLength(0);
+    expect(host.querySelectorAll('button[aria-label^="Select "]')).toHaveLength(2);
   });
 
   it('unmonitors the selection through the series endpoints', async () => {
     app = mount(Series, { target: host, props: { onadd: () => {} } });
     await settle();
 
-    button('Select').click();
-    await settle();
-    cards()[0]!.click();
+    await select('Andor');
     cards()[1]!.click();
     await settle();
 
@@ -122,10 +131,7 @@ describe('Series grid select mode', () => {
     app = mount(Series, { target: host, props: { onadd: () => {} } });
     await settle();
 
-    button('Select').click();
-    await settle();
-    cards()[1]!.click();
-    await settle();
+    await select('Severance');
 
     button('Remove…').click();
     await settle();

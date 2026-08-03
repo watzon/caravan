@@ -1,7 +1,9 @@
 /**
- * Select mode on the movie grid. The regression that matters most is the
- * default: without select mode a poster card is still a plain link, because
- * that is how the whole SPA navigates.
+ * Selection on the movie grid. The regression that matters most is the
+ * default: while nothing is selected a poster card is still a plain link,
+ * because that is how the whole SPA navigates. Selection starts on the card
+ * itself — the check circle over the poster — and the floating action bar
+ * exists only while the selection holds something.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
@@ -97,9 +99,19 @@ function button(label: string): HTMLButtonElement {
   return found as HTMLButtonElement;
 }
 
-/** The cards, whichever element they are rendered as. */
+/** The per-card check circle that starts a selection. */
+async function select(title: string) {
+  const circle = host.querySelector<HTMLButtonElement>(
+    `button[aria-label="Select ${title} (2021)"]`,
+  );
+  expect(circle, `the select circle on ${title}`).toBeTruthy();
+  circle!.click();
+  await settle();
+}
+
+/** The cards while a selection is active: whole-card toggle buttons. */
 function cards(): HTMLElement[] {
-  return [...host.querySelectorAll<HTMLElement>('a[aria-label], button[aria-pressed]')].filter(
+  return [...host.querySelectorAll<HTMLElement>('button[aria-pressed][aria-label]')].filter(
     (el) => el.getAttribute('aria-label')?.includes('('),
   );
 }
@@ -109,49 +121,40 @@ function methodsOf(method: string): string[] {
 }
 
 describe('Movies grid', () => {
-  it('renders poster cards as plain links outside select mode', async () => {
+  it('renders poster cards as plain links with a select circle each', async () => {
     await open();
 
     const link = host.querySelector('a[href="/movies/2"]');
-    expect(link, 'a card is a link when nothing is being selected').toBeTruthy();
+    expect(link, 'a card is a link while nothing is selected').toBeTruthy();
     expect(link?.getAttribute('aria-label')).toBe('Dune (2021)');
+    expect(host.querySelectorAll('button[aria-label^="Select "]')).toHaveLength(3);
     // Filter chips carry aria-pressed too; a card toggle also carries the
     // title as its accessible name.
     expect(host.querySelector('button[aria-pressed][aria-label]')).toBeNull();
   });
 
-  it('turns cards into toggles while selecting and back again on Done', async () => {
+  it('starts a selection from a card circle and ends it by deselecting the last card', async () => {
     await open();
 
-    button('Select').click();
-    await settle();
+    await select('Dune');
+    expect(host.textContent).toContain('1 selected');
     expect(host.querySelector('a[href="/movies/2"]'), 'cards stop being links').toBeNull();
     expect(cards()).toHaveLength(3);
-
-    cards()[1]!.click();
-    await settle();
     expect(cards()[1]!.getAttribute('aria-pressed')).toBe('true');
-    expect(host.textContent).toContain('1 selected');
 
-    // Toggling the same card takes it back out.
+    // Toggling the last selected card off dismisses the bar and the toggles.
     cards()[1]!.click();
     await settle();
-    expect(cards()[1]!.getAttribute('aria-pressed')).toBe('false');
-    expect(host.textContent).toContain('0 selected');
-
-    button('Done').click();
-    await settle();
+    expect(host.textContent).not.toContain('selected');
     expect(host.querySelector('a[href="/movies/2"]'), 'cards are links again').toBeTruthy();
   });
 
   it('monitors every selected movie and summarizes the result', async () => {
     await open();
-    button('Select').click();
-    await settle();
-
-    cards()[0]!.click();
+    await select('Arrival');
     cards()[2]!.click();
     await settle();
+    expect(host.textContent).toContain('2 selected');
 
     button('Monitor').click();
     await settle();
@@ -162,11 +165,7 @@ describe('Movies grid', () => {
 
   it('queues a search for every selected movie', async () => {
     await open();
-    button('Select').click();
-    await settle();
-
-    cards()[0]!.click();
-    await settle();
+    await select('Arrival');
 
     button('Search').click();
     await settle();
@@ -175,12 +174,9 @@ describe('Movies grid', () => {
     expect(toasts.items.map((t) => t.message)).toEqual(['Queued searches for 1']);
   });
 
-  it('removes the selection behind one confirm, then reloads and leaves select mode', async () => {
+  it('removes the selection behind one confirm, then reloads and drops the selection', async () => {
     await open();
-    button('Select').click();
-    await settle();
-
-    cards()[0]!.click();
+    await select('Arrival');
     cards()[1]!.click();
     await settle();
 
@@ -203,11 +199,7 @@ describe('Movies grid', () => {
 
   it('deletes files too when the confirm checkbox is ticked', async () => {
     await open();
-    button('Select').click();
-    await settle();
-
-    cards()[0]!.click();
-    await settle();
+    await select('Arrival');
 
     button('Remove…').click();
     await settle();
@@ -226,15 +218,11 @@ describe('Movies grid', () => {
 
   it('sends nothing when the remove confirm is cancelled', async () => {
     await open();
-    button('Select').click();
-    await settle();
-
-    cards()[0]!.click();
-    await settle();
+    await select('Arrival');
 
     button('Remove…').click();
     await settle();
-    // Scoped to the dialog: the action bar has its own Done beside it.
+    // Scoped to the dialog: only its Cancel exists, but scoping keeps it honest.
     const cancel = [...host.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(
       (b) => b.textContent?.trim() === 'Cancel',
     );
@@ -244,26 +232,25 @@ describe('Movies grid', () => {
 
     expect(methodsOf('DELETE')).toEqual([]);
     expect(host.querySelector('[role="dialog"]')).toBeNull();
-    // Cancelling the confirm is not cancelling select mode.
+    // Cancelling the confirm is not cancelling the selection.
     expect(host.textContent).toContain('1 selected');
   });
 
-  it('leaves select mode on Escape, and clears the selection with it', async () => {
+  it('drops the selection on Escape and on the bar’s clear button', async () => {
     await open();
-    button('Select').click();
-    await settle();
-
-    cards()[0]!.click();
-    await settle();
+    await select('Arrival');
     expect(host.textContent).toContain('1 selected');
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     await settle();
     expect(host.querySelector('a[href="/movies/1"]')).toBeTruthy();
 
-    // Re-entering starts empty rather than resurrecting the old selection.
-    button('Select').click();
+    // A fresh selection starts from the card, empty of the old one.
+    await select('Dune');
+    expect(host.textContent).toContain('1 selected');
+    button('Clear selection').click();
     await settle();
-    expect(host.textContent).toContain('0 selected');
+    expect(host.textContent).not.toContain('selected');
+    expect(host.querySelector('a[href="/movies/2"]')).toBeTruthy();
   });
 });

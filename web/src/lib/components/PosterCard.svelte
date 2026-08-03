@@ -4,10 +4,14 @@
    * 13px, hover raises a hairline ring, no zoom gimmicks. The card is one link
    * whose accessible name is the title (DESIGN.md §7).
    *
-   * In the grids' select mode the card becomes a toggle button instead: a link
+   * Selection starts on the card itself: with `ontoggle` set, hovering or
+   * focusing reveals a check circle over the poster's top-right corner (always
+   * shown on coarse pointers, which have no hover). The circle is a sibling of
+   * the link, not a child — interactive elements do not nest. Once a selection
+   * is active (`selectable`) the card becomes a toggle button instead: a link
    * that silently does not navigate is a lie to the keyboard and to
-   * middle-click. Without `selectable` — everywhere else — it is the plain link
-   * it has always been.
+   * middle-click, and the circle drops to a decoration because the whole card
+   * is the control.
    */
   import { titleWithYear } from '../format';
   import type { StatusKey } from '../status';
@@ -29,7 +33,7 @@
     quality?: string | null;
     note?: string | null;
     fallbackIcon?: IconName;
-    /** Render as a selection toggle rather than a link. */
+    /** A selection is active: render as its toggle rather than a link. */
     selectable?: boolean;
     selected?: boolean;
     ontoggle?: () => void;
@@ -50,7 +54,10 @@
     ontoggle,
   }: Props = $props();
 
-  const SHELL = 'group flex flex-col gap-2 rounded-md text-left focus:outline-none';
+  const SHELL = 'group/card flex w-full flex-col gap-2 rounded-md text-left focus:outline-none';
+
+  const CIRCLE = `flex size-5 items-center justify-center rounded-full border
+    transition-opacity duration-150 ease-out`;
 </script>
 
 {#snippet card()}
@@ -58,7 +65,7 @@
     class="relative rounded-md ring-1 transition-[box-shadow] duration-150 ease-out
            {selected
       ? 'ring-2 ring-accent'
-      : 'ring-transparent group-hover:ring-border-strong group-focus-visible:ring-accent'}">
+      : 'ring-transparent group-hover/card:ring-border-strong group-focus-visible/card:ring-accent'}">
     <Poster path={posterPath} fallback={posterUrl} alt="" {fallbackIcon} />
 
     <!-- flex, not inline: line-height would stretch the circle into a pill. -->
@@ -70,7 +77,7 @@
 
     {#if selectable}
       <span
-        class="absolute right-2 top-2 flex size-5 items-center justify-center rounded-full border
+        class="{CIRCLE} absolute right-2 top-2
                {selected
           ? 'border-accent bg-accent text-ink-inverse'
           : 'border-border-strong bg-bg text-transparent'}">
@@ -103,7 +110,20 @@
     {@render card()}
   </button>
 {:else}
-  <a {href} class={SHELL} aria-label={titleWithYear(title, year)}>
-    {@render card()}
-  </a>
+  <div class="group/card relative">
+    <a {href} class={SHELL} aria-label={titleWithYear(title, year)}>
+      {@render card()}
+    </a>
+    {#if ontoggle}
+      <button
+        type="button"
+        class="{CIRCLE} absolute right-2 top-2 z-10 border-border-strong bg-bg text-ink-secondary
+               opacity-0 hover:border-accent hover:text-accent focus-visible:opacity-100
+               group-hover/card:opacity-100 group-focus-within/card:opacity-100 pointer-coarse:opacity-100"
+        aria-label="Select {titleWithYear(title, year)}"
+        onclick={() => ontoggle?.()}>
+        <Icon name="check" size={12} />
+      </button>
+    {/if}
+  </div>
 {/if}

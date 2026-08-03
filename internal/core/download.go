@@ -243,6 +243,10 @@ const (
 	GrabStatusGrabbed  = "grabbed"
 	GrabStatusImported = "imported"
 	GrabStatusFailed   = "failed"
+	// GrabStatusCancelled marks a grab whose item left the library while the
+	// download was still in flight: the download was withdrawn, nothing was
+	// imported, and nothing failed.
+	GrabStatusCancelled = "cancelled"
 	// GrabStatusRejected marks a decision-log row rather than a grab: an
 	// automatic search evaluated this release for the item and skipped it,
 	// and Reason says why (PLAN phase 3, task 3). The row exists so "why was

@@ -73,16 +73,6 @@
 <div class="flex flex-col gap-6">
   <div class="flex flex-wrap items-center gap-3">
     <FilterChips {chips} active={filter} onselect={(key) => (filter = key)} />
-    <SelectActions
-      {selection}
-      noun="movie"
-      plural="movies"
-      actions={{
-        search: (id) => api.searchMovieNow(id),
-        setMonitored: (id, monitored) => api.setMovieMonitored(id, monitored),
-        remove: (id, deleteFiles) => api.deleteMovie(id, deleteFiles),
-      }}
-      onchanged={load} />
     <div class="ml-auto flex items-center gap-2">
       <div class="w-56">
         <TextInput bind:value={query} type="search" placeholder="Filter titles…" ariaLabel="Filter movies by title" />
@@ -149,4 +139,15 @@
       {/each}
     </PosterGrid>
   {/if}
+
+  <SelectActions
+    {selection}
+    noun="movie"
+    plural="movies"
+    actions={{
+      search: (id) => api.searchMovieNow(id),
+      setMonitored: (id, monitored) => api.setMovieMonitored(id, monitored),
+      remove: (id, deleteFiles) => api.deleteMovie(id, deleteFiles),
+    }}
+    onchanged={load} />
 </div>

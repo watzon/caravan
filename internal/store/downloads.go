@@ -107,6 +107,30 @@ func (s *Store) ListDownloads(ctx context.Context) ([]core.Download, error) {
 	return out, nil
 }
 
+// ListDownloadsForGrab returns the downloads a grab started. Usually zero or
+// one row; it is what an item removal walks to withdraw the in-flight work.
+func (s *Store) ListDownloadsForGrab(ctx context.Context, grabID int64) ([]core.Download, error) {
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT "+downloadColumns+" FROM downloads WHERE grab_id = ? ORDER BY id", grabID)
+	if err != nil {
+		return nil, fmt.Errorf("store: list downloads for grab %d: %w", grabID, err)
+	}
+	defer rows.Close()
+
+	out := []core.Download{}
+	for rows.Next() {
+		d, err := scanDownload(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: scan download: %w", err)
+		}
+		out = append(out, *d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list downloads for grab %d: %w", grabID, err)
+	}
+	return out, nil
+}
+
 // DeleteDownloadByEngineID forgets a download. It removes a row and nothing
 // else: deleting downloaded data is the engine's job, and the library is never
 // touched by a download removal (SPEC §13). Deleting an absent handle is not an
