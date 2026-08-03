@@ -19,6 +19,9 @@ export const ROUTES = [
   '/movies/:id/search',
   '/series',
   '/series/:id',
+  // The whole-series picker, mirroring /movies/:id/search. The narrower forms
+  // below carry the season (and optionally the episode) that scopes the query.
+  '/series/:id/search',
   '/series/:id/search/:season',
   '/series/:id/search/:season/:episode',
   '/queue',

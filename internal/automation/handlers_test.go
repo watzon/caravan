@@ -106,7 +106,7 @@ func TestRunnerHandleSearchMovieGrabsBestOnce(t *testing.T) {
 	}}
 	engine := &fakeEngine{}
 	runner := newRunner(st, indexer, engine)
-	payload, _ := json.Marshal(moviePayload{MovieID: movie.ID})
+	payload, _ := json.Marshal(core.JobSearchMoviePayload{MovieID: movie.ID})
 
 	if err := runner.handleSearchMovie(ctx, st, payload); err != nil {
 		t.Fatalf("handle search movie: %v", err)
@@ -139,7 +139,7 @@ func TestRunnerHandleSearchMovieRecordsRejectedCandidates(t *testing.T) {
 		Parsed: core.ParsedRelease{Quality: core.QualityUnknown, Source: core.SourceCam},
 	}}}
 	runner := newRunner(st, indexer, &fakeEngine{})
-	payload, _ := json.Marshal(moviePayload{MovieID: movie.ID})
+	payload, _ := json.Marshal(core.JobSearchMoviePayload{MovieID: movie.ID})
 
 	if err := runner.handleSearchMovie(ctx, st, payload); err != nil {
 		t.Fatalf("handle search movie: %v", err)
@@ -156,7 +156,7 @@ func TestRunnerHandleSearchMovieRecordsRejectedCandidates(t *testing.T) {
 func TestRunnerHandleRSSSyncSchedulesSingleton(t *testing.T) {
 	ctx := context.Background()
 	st := openStore(t)
-	if err := st.EnqueueJob(ctx, &core.Job{Kind: jobRSSSync, Payload: "{}"}); err != nil {
+	if err := st.EnqueueJob(ctx, &core.Job{Kind: core.JobRSSSync, Payload: "{}"}); err != nil {
 		t.Fatalf("enqueue rss sync: %v", err)
 	}
 	runner := newRunner(st, &fakeIndexer{}, &fakeEngine{})
@@ -170,7 +170,7 @@ func TestRunnerHandleRSSSyncSchedulesSingleton(t *testing.T) {
 	}
 	count := 0
 	for _, job := range jobs {
-		if job.Kind == jobRSSSync {
+		if job.Kind == core.JobRSSSync {
 			count++
 		}
 	}
@@ -184,8 +184,8 @@ func TestRunnerHandleBacklogSweepEnqueuesMissingSearchesOnce(t *testing.T) {
 	st := openStore(t)
 	first := addMovie(t, ctx, st, "First", 2020, true)
 	second := addMovie(t, ctx, st, "Second", 2021, true)
-	firstPayload, _ := json.Marshal(moviePayload{MovieID: first.ID})
-	if err := st.EnqueueJob(ctx, &core.Job{Kind: jobSearchMovie, Payload: string(firstPayload)}); err != nil {
+	firstPayload, _ := json.Marshal(core.JobSearchMoviePayload{MovieID: first.ID})
+	if err := st.EnqueueJob(ctx, &core.Job{Kind: core.JobSearchMovie, Payload: string(firstPayload)}); err != nil {
 		t.Fatalf("enqueue existing movie job: %v", err)
 	}
 	runner := newRunner(st, &fakeIndexer{}, &fakeEngine{})
@@ -199,10 +199,10 @@ func TestRunnerHandleBacklogSweepEnqueuesMissingSearchesOnce(t *testing.T) {
 	}
 	movieJobs := map[int64]int{}
 	for _, job := range jobs {
-		if job.Kind != jobSearchMovie {
+		if job.Kind != core.JobSearchMovie {
 			continue
 		}
-		var payload moviePayload
+		var payload core.JobSearchMoviePayload
 		if err := json.Unmarshal([]byte(job.Payload), &payload); err != nil {
 			t.Fatalf("decode movie job payload: %v", err)
 		}
@@ -249,7 +249,7 @@ func TestRunnerAutomaticGrabRoutesByProtocol(t *testing.T) {
 		GUID: "t", Title: "Torrent Movie 2024 1080p", Protocol: core.ProtocolTorrent, Seeders: 5,
 		Parsed: core.ParsedRelease{Quality: core.Quality1080p, Source: core.SourceWebDL},
 	}}
-	payload, _ := json.Marshal(moviePayload{MovieID: torrentMovie.ID})
+	payload, _ := json.Marshal(core.JobSearchMoviePayload{MovieID: torrentMovie.ID})
 	if err := runner.handleSearchMovie(ctx, st, payload); err != nil {
 		t.Fatalf("handle search movie (torrent): %v", err)
 	}
@@ -258,7 +258,7 @@ func TestRunnerAutomaticGrabRoutesByProtocol(t *testing.T) {
 		GUID: "u", Title: "Usenet Movie 2024 1080p", Protocol: core.ProtocolUsenet,
 		Parsed: core.ParsedRelease{Quality: core.Quality1080p, Source: core.SourceWebDL},
 	}}
-	payload, _ = json.Marshal(moviePayload{MovieID: usenetMovie.ID})
+	payload, _ = json.Marshal(core.JobSearchMoviePayload{MovieID: usenetMovie.ID})
 	if err := runner.handleSearchMovie(ctx, st, payload); err != nil {
 		t.Fatalf("handle search movie (usenet): %v", err)
 	}
@@ -286,7 +286,7 @@ func TestRunnerAutomaticGrabRecordsUnroutableProtocol(t *testing.T) {
 		Parsed: core.ParsedRelease{Quality: core.Quality1080p, Source: core.SourceWebDL},
 	}}}
 	runner := routedRunner(st, indexer, torrent, nil)
-	payload, _ := json.Marshal(moviePayload{MovieID: movie.ID})
+	payload, _ := json.Marshal(core.JobSearchMoviePayload{MovieID: movie.ID})
 
 	// The job completes: there is nothing to retry until the user configures
 	// a client.

@@ -80,7 +80,7 @@ func TestWithHandlerDoesNotDisplaceTheBuiltIns(t *testing.T) {
 	runner := NewRunner(openStore(t), nil, nil, WithHandler("frobnicate", func(context.Context, *store.Store, json.RawMessage) error {
 		return nil
 	}))
-	for _, kind := range []string{jobRSSSync, jobBacklogSweep, jobSearchMovie, jobSearchEpisode, "frobnicate"} {
+	for _, kind := range []string{core.JobRSSSync, core.JobBacklogSweep, core.JobSearchMovie, core.JobSearchEpisode, "frobnicate"} {
 		if _, ok := runner.handlers[kind]; !ok {
 			t.Errorf("handler for %q is missing", kind)
 		}

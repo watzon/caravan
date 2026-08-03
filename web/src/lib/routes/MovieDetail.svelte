@@ -30,6 +30,7 @@
   let loading = $state(true);
   let error = $state<string | null>(null);
   let savingMonitored = $state(false);
+  let searching = $state(false);
 
   async function load() {
     loading = true;
@@ -59,6 +60,29 @@
       pushToast(errorText(err), 'danger');
     } finally {
       savingMonitored = false;
+    }
+  }
+
+  /**
+   * Automatic search (SPEC §9): the server queues the job and answers how many
+   * it added, so a movie that already meets its cutoff says so instead of
+   * claiming a search started that would never grab anything.
+   */
+  async function searchNow() {
+    const current = movie;
+    if (!current) return;
+    searching = true;
+    try {
+      const { queued } = await api.searchMovieNow(current.id);
+      if (queued > 0) {
+        pushToast('Search started', 'success');
+      } else {
+        pushToast('Nothing to search — the file already meets the cutoff', 'info');
+      }
+    } catch (err) {
+      pushToast(errorText(err), 'danger');
+    } finally {
+      searching = false;
     }
   }
 </script>
@@ -109,9 +133,12 @@
             </div>
           </div>
           <div class="flex items-center gap-3">
-            <Button variant="primary" size="sm" href="/movies/{movie.id}/search">
+            <Button variant="primary" size="sm" disabled={searching} onclick={searchNow}>
               <Icon name="search" size={14} />
-              Search
+              {searching ? 'Searching…' : 'Search now'}
+            </Button>
+            <Button variant="secondary" size="sm" href="/movies/{movie.id}/search">
+              Interactive search
             </Button>
             <Toggle
               checked={movie.monitored}

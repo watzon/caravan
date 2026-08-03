@@ -444,6 +444,19 @@ export interface AddItemRequest {
   tmdb_id: number;
   monitored: boolean;
   quality_profile_id?: number;
+  /** Movies only: queue the automatic search as soon as the add succeeds. */
+  search_now?: boolean;
+  /** Series only: queue a search for every wanted episode after the add. */
+  search_missing?: boolean;
+}
+
+/**
+ * Reply from the on-demand search endpoints. `queued` is how many search jobs
+ * were actually added: zero means there was nothing to search for, or the same
+ * search was already on the queue.
+ */
+export interface SearchQueued {
+  queued: number;
 }
 
 /** Body for POST /import/queue/{id}/match. */

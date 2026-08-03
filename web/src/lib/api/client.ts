@@ -31,6 +31,7 @@ import type {
   Release,
   RepointResult,
   ScanSummary,
+  SearchQueued,
   SearchResults,
   Series,
   Settings,
@@ -121,6 +122,12 @@ export const endpoints = {
   downloadInsight: (id: string) => `${API_BASE}/downloads/${encodeURIComponent(id)}/insight`,
   downloadLimits: (id: string) => `${API_BASE}/downloads/${encodeURIComponent(id)}/limits`,
   wanted: () => `${API_BASE}/wanted`,
+  // On-demand automatic search (SPEC §9): the same jobs the backlog sweep
+  // queues, asked for now. Distinct from the /releases pair above, which is
+  // the interactive picker.
+  movieSearchNow: (id: number) => `${API_BASE}/library/movies/${id}/search`,
+  seriesSearchNow: (id: number) => `${API_BASE}/library/series/${id}/search`,
+  wantedSearch: () => `${API_BASE}/wanted/search`,
   events: () => `${API_BASE}/events`,
   jobs: () => `${API_BASE}/jobs`,
   calendar: () => `${API_BASE}/calendar`,
@@ -633,6 +640,22 @@ export const api = {
       movies: payload?.movies ?? [],
       episodes: payload?.episodes ?? [],
     })),
+
+  /**
+   * Queue the automatic search for one movie. Answers how many jobs it added:
+   * 0 when the movie already meets its cutoff, or when the same search is
+   * still on the queue.
+   */
+  searchMovieNow: (id: number) =>
+    request<SearchQueued>(endpoints.movieSearchNow(id), { method: 'POST' }),
+
+  /** Queue a search for every wanted episode of one series. */
+  searchSeriesNow: (id: number) =>
+    request<SearchQueued>(endpoints.seriesSearchNow(id), { method: 'POST' }),
+
+  /** Queue a search for the whole wanted list — the backlog sweep on demand. */
+  searchWanted: () =>
+    request<SearchQueued>(endpoints.wantedSearch(), { method: 'POST' }),
 
   listEvents: (limit = 100, signal?: AbortSignal) =>
     request<{ events: ActivityEvent[] }>(endpoints.events(), { query: { limit }, signal })

@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/watzon/caravan/internal/core"
 	"github.com/watzon/caravan/internal/store"
@@ -41,6 +42,12 @@ type stubManager struct {
 
 	addErr   error
 	matchErr error
+
+	// addSeriesEpisodes is how many aired, monitored, file-less episodes
+	// AddSeries writes alongside the series. Zero — the default — keeps the
+	// stub's historical shape; the search-on-add tests need a series that has
+	// something to search for.
+	addSeriesEpisodes int
 
 	mu      sync.Mutex
 	matches []matchCall
@@ -81,6 +88,19 @@ func (m *stubManager) AddSeries(ctx context.Context, tmdbID int64) (*core.Series
 	sr := &core.Series{TMDBID: tmdbID, Title: "Stub Series", SortTitle: "stub series", Year: 2016, Monitored: true}
 	if err := m.st.UpsertSeries(ctx, sr); err != nil {
 		return nil, err
+	}
+	for i := 1; i <= m.addSeriesEpisodes; i++ {
+		e := &core.Episode{
+			SeriesID:      sr.ID,
+			SeasonNumber:  1,
+			EpisodeNumber: i,
+			Title:         "Stub Episode",
+			AirDate:       time.Now().UTC().AddDate(0, 0, -7),
+			Monitored:     true,
+		}
+		if err := m.st.UpsertEpisode(ctx, e); err != nil {
+			return nil, err
+		}
 	}
 	return sr, nil
 }

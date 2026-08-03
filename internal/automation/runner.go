@@ -15,11 +15,6 @@ import (
 )
 
 const (
-	jobRSSSync       = "rss_sync"
-	jobBacklogSweep  = "backlog_sweep"
-	jobSearchMovie   = "search_movie"
-	jobSearchEpisode = "search_episode"
-
 	jobLease        = 2 * time.Minute
 	jobPollInterval = time.Second
 
@@ -90,10 +85,10 @@ func NewRunner(st *store.Store, indexers api.IndexerFactory, engine EngineGetter
 		engine:   engine,
 		handlers: make(map[string]Handler),
 	}
-	r.handlers[jobRSSSync] = r.handleRSSSync
-	r.handlers[jobBacklogSweep] = r.handleBacklogSweep
-	r.handlers[jobSearchMovie] = r.handleSearchMovie
-	r.handlers[jobSearchEpisode] = r.handleSearchEpisode
+	r.handlers[core.JobRSSSync] = r.handleRSSSync
+	r.handlers[core.JobBacklogSweep] = r.handleBacklogSweep
+	r.handlers[core.JobSearchMovie] = r.handleSearchMovie
+	r.handlers[core.JobSearchEpisode] = r.handleSearchEpisode
 	for _, opt := range opts {
 		opt(r)
 	}
@@ -116,7 +111,7 @@ func Bootstrap(ctx context.Context, st *store.Store) error {
 	} else if n > 0 {
 		slog.Warn("jobs left running by a previous process were returned to the queue", "jobs", n)
 	}
-	for _, kind := range []string{jobRSSSync, jobBacklogSweep} {
+	for _, kind := range []string{core.JobRSSSync, core.JobBacklogSweep} {
 		open, err := st.HasOpenJob(ctx, kind, "{}")
 		if err != nil {
 			return fmt.Errorf("store: check %s bootstrap job: %w", kind, err)
@@ -223,7 +218,7 @@ func (r *Runner) process(ctx context.Context, claim claimFunc) (bool, error) {
 
 	// A running recurring job counts as open while its handler executes. Once it
 	// is complete, schedule the successor under the normal singleton check.
-	if job.Kind == jobRSSSync || job.Kind == jobBacklogSweep {
+	if job.Kind == core.JobRSSSync || job.Kind == core.JobBacklogSweep {
 		if err := r.scheduleRecurring(ctx, job.Kind); err != nil {
 			return true, err
 		}

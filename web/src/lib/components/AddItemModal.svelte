@@ -46,6 +46,33 @@
   const DEBOUNCE_MS = 250;
   const MIN_QUERY = 2;
 
+  /**
+   * "Start searching immediately" is sticky per browser: it is a habit, not a
+   * per-item decision, and Sonarr/Radarr users expect the box to remember. It
+   * defaults on — adding something you do not want searched is the rarer case.
+   */
+  const SEARCH_ON_ADD_KEY = 'caravan.searchOnAdd';
+
+  function readSearchOnAdd(): boolean {
+    try {
+      return window.localStorage.getItem(SEARCH_ON_ADD_KEY) !== '0';
+    } catch {
+      // Private mode, or storage disabled: the default still applies.
+      return true;
+    }
+  }
+
+  let searchOnAdd = $state(readSearchOnAdd());
+
+  function setSearchOnAdd(next: boolean) {
+    searchOnAdd = next;
+    try {
+      window.localStorage.setItem(SEARCH_ON_ADD_KEY, next ? '1' : '0');
+    } catch {
+      // The in-memory choice still governs this add.
+    }
+  }
+
   // Both props seed local state once: the modal is remounted per use, so
   // reading them untracked is the intent, not an oversight.
   let query = $state(untrack(() => initialQuery));
@@ -139,12 +166,20 @@
         return;
       }
       if (kind === 'movie') {
-        const added = await api.addMovie({ tmdb_id: row.tmdb_id, monitored: true });
+        const added = await api.addMovie({
+          tmdb_id: row.tmdb_id,
+          monitored: true,
+          search_now: searchOnAdd,
+        });
         pushToast(`Added ${added.title}`, 'success');
         onclose();
         navigate(`/movies/${added.id}`);
       } else {
-        const added = await api.addSeries({ tmdb_id: row.tmdb_id, monitored: true });
+        const added = await api.addSeries({
+          tmdb_id: row.tmdb_id,
+          monitored: true,
+          search_missing: searchOnAdd,
+        });
         pushToast(`Added ${added.title}`, 'success');
         onclose();
         navigate(`/series/${added.id}`);
@@ -247,6 +282,19 @@
           </li>
         {/each}
       </ul>
+    {/if}
+
+    {#if !onpick}
+      <!-- Add-mode only: the manual-match picker re-points an existing file at
+           a different item, which is never something to search for. -->
+      <label class="flex items-center gap-3 rounded-md border border-border bg-raised px-3 py-2">
+        <input
+          type="checkbox"
+          checked={searchOnAdd}
+          onchange={(event) => setSearchOnAdd(event.currentTarget.checked)}
+          class="size-4 accent-accent" />
+        <span class="text-base text-ink">Start searching immediately</span>
+      </label>
     {/if}
   </div>
 </Modal>

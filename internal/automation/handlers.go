@@ -26,14 +26,6 @@ const (
 	highTitleConfidence    = 0.9
 )
 
-type moviePayload struct {
-	MovieID int64 `json:"movie_id"`
-}
-
-type episodePayload struct {
-	EpisodeID int64 `json:"episode_id"`
-}
-
 type movieSearcher interface {
 	SearchMovie(ctx context.Context, q string, cats []int) ([]core.Release, error)
 }
@@ -76,7 +68,7 @@ func (r *Runner) handleRSSSync(ctx context.Context, st *store.Store, payload jso
 			}
 		}
 	}
-	return r.scheduleRecurring(ctx, jobRSSSync)
+	return r.scheduleRecurring(ctx, core.JobRSSSync)
 }
 
 func (r *Runner) matchRSSRelease(ctx context.Context, st *store.Store, release core.Release, lists *wanted.Lists) error {
@@ -128,28 +120,28 @@ func (r *Runner) handleBacklogSweep(ctx context.Context, st *store.Store, payloa
 		return fmt.Errorf("compute wanted releases: %w", err)
 	}
 	for _, movie := range lists.Movies {
-		payload, err := json.Marshal(moviePayload{MovieID: movie.ID})
+		payload, err := json.Marshal(core.JobSearchMoviePayload{MovieID: movie.ID})
 		if err != nil {
 			return fmt.Errorf("encode movie search payload: %w", err)
 		}
-		if err := enqueueIfMissing(ctx, st, jobSearchMovie, string(payload)); err != nil {
+		if err := enqueueIfMissing(ctx, st, core.JobSearchMovie, string(payload)); err != nil {
 			return err
 		}
 	}
 	for _, episode := range lists.Episodes {
-		payload, err := json.Marshal(episodePayload{EpisodeID: episode.ID})
+		payload, err := json.Marshal(core.JobSearchEpisodePayload{EpisodeID: episode.ID})
 		if err != nil {
 			return fmt.Errorf("encode episode search payload: %w", err)
 		}
-		if err := enqueueIfMissing(ctx, st, jobSearchEpisode, string(payload)); err != nil {
+		if err := enqueueIfMissing(ctx, st, core.JobSearchEpisode, string(payload)); err != nil {
 			return err
 		}
 	}
-	return r.scheduleRecurring(ctx, jobBacklogSweep)
+	return r.scheduleRecurring(ctx, core.JobBacklogSweep)
 }
 
 func (r *Runner) handleSearchMovie(ctx context.Context, st *store.Store, payload json.RawMessage) error {
-	var input moviePayload
+	var input core.JobSearchMoviePayload
 	if err := json.Unmarshal(payload, &input); err != nil || input.MovieID <= 0 {
 		return fmt.Errorf("decode search_movie payload")
 	}
@@ -190,7 +182,7 @@ func (r *Runner) handleSearchMovie(ctx context.Context, st *store.Store, payload
 }
 
 func (r *Runner) handleSearchEpisode(ctx context.Context, st *store.Store, payload json.RawMessage) error {
-	var input episodePayload
+	var input core.JobSearchEpisodePayload
 	if err := json.Unmarshal(payload, &input); err != nil || input.EpisodeID <= 0 {
 		return fmt.Errorf("decode search_episode payload")
 	}
@@ -408,9 +400,9 @@ func (r *Runner) scheduleRecurring(ctx context.Context, kind string) error {
 		defaultMinutes int
 	)
 	switch kind {
-	case jobRSSSync:
+	case core.JobRSSSync:
 		key, defaultMinutes = store.SettingRSSSyncIntervalMinutes, defaultRSSSyncInterval
-	case jobBacklogSweep:
+	case core.JobBacklogSweep:
 		key, defaultMinutes = store.SettingBacklogIntervalMinutes, defaultBacklogInterval
 	default:
 		return fmt.Errorf("unsupported recurring job kind %q", kind)

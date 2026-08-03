@@ -9,6 +9,8 @@
   import PageTabs from '../components/PageTabs.svelte';
   import Poster from '../components/Poster.svelte';
   import Skeleton from '../components/Skeleton.svelte';
+  import Icon from '../components/Icon.svelte';
+  import { pushToast } from '../state/toast.svelte';
   import { episodeCode, formatDate, titleWithYear } from '../format';
 
   type Tab = WantedReason;
@@ -22,6 +24,7 @@
   let loading = $state(true);
   let error = $state<string | null>(null);
   let tab = $state<Tab>('missing');
+  let searching = $state(false);
 
   async function load() {
     loading = true;
@@ -59,6 +62,23 @@
     return 'No file in the library';
   }
 
+  /**
+   * Queue an automatic search for the whole wanted list — the backlog sweep on
+   * demand. The count comes back from the server because it deduplicates
+   * against searches already on the queue, so it is not simply `count`.
+   */
+  async function searchAll() {
+    searching = true;
+    try {
+      const { queued } = await api.searchWanted();
+      pushToast(`Queued ${queued} search${queued === 1 ? '' : 'es'}`, queued > 0 ? 'success' : 'info');
+    } catch (err) {
+      pushToast(errorText(err), 'danger');
+    } finally {
+      searching = false;
+    }
+  }
+
   function searchHref(item: WantedMovie | WantedEpisode): string {
     if ('series_id' in item) {
       return `/series/${item.series_id}/search/${item.season_number}/${item.episode_number}`;
@@ -68,11 +88,21 @@
 </script>
 
 <div class="flex max-w-5xl flex-col gap-6">
-  <PageTabs
-    {tabs}
-    active={tab}
-    onchange={(key) => (tab = key)}
-    ariaLabel="Wanted filter" />
+  <div class="flex flex-wrap items-center gap-3">
+    <PageTabs
+      {tabs}
+      active={tab}
+      onchange={(key) => (tab = key)}
+      ariaLabel="Wanted filter" />
+    <div class="ml-auto">
+      <!-- The whole list, both tabs: the sweep is not scoped to the filter the
+           user happens to be looking at. -->
+      <Button variant="primary" size="sm" disabled={searching} onclick={searchAll}>
+        <Icon name="search" size={14} />
+        {searching ? 'Searching…' : 'Search all'}
+      </Button>
+    </div>
+  </div>
 
   {#if error && wanted === null}
     <LoadError message={error} onretry={load} />

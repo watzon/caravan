@@ -193,8 +193,19 @@ func firstFileDTO(files []core.MediaFile, profile core.TVProfile) *mediaFileJSON
 }
 
 // addRequest is the body of POST /library/movies and POST /library/series.
+//
+// The two search flags are optional and endpoint-specific: movies read
+// SearchNow, series read SearchMissing. Omitting them is the historical
+// behaviour — add and wait for the next backlog sweep.
 type addRequest struct {
 	TMDBID int64 `json:"tmdb_id"`
+	// SearchNow queues the new movie's automatic search straight after the
+	// add. A movie that was just added has no file, so there is nothing to
+	// check it against the wanted list for.
+	SearchNow bool `json:"search_now"`
+	// SearchMissing queues a search for every wanted episode of the new
+	// series.
+	SearchMissing bool `json:"search_missing"`
 }
 
 func (s *server) handleListMovies(w http.ResponseWriter, r *http.Request) {
@@ -243,6 +254,14 @@ func (s *server) handleAddMovie(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.writeManagerError(w, "add movie", err)
 		return
+	}
+	if body.SearchNow {
+		if _, err := s.enqueueMovieSearch(r.Context(), m.ID); err != nil {
+			// The movie is in the library; failing the request now would tell
+			// the client the opposite. The add stands and the missed search is
+			// logged — the next backlog sweep queues it anyway.
+			s.log.Error("queue search for added movie", "movie_id", m.ID, "error", err)
+		}
 	}
 	writeJSON(w, http.StatusCreated, movieDTO(*m))
 }
@@ -415,6 +434,14 @@ func (s *server) handleAddSeries(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.writeManagerError(w, "add series", err)
 		return
+	}
+	if body.SearchMissing {
+		// Episode rows exist by the time AddSeries returns, so the wanted list
+		// already names them. See handleAddMovie for why a failure here does
+		// not fail the add.
+		if _, err := s.queueSeriesSearch(r.Context(), sr.ID); err != nil {
+			s.log.Error("queue search for added series", "series_id", sr.ID, "error", err)
+		}
 	}
 	writeJSON(w, http.StatusCreated, seriesDTO(*sr))
 }

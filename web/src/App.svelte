@@ -44,6 +44,7 @@
     '/movies/:id/search': 'Interactive Search',
     '/series': 'Series',
     '/series/:id': 'Series',
+    '/series/:id/search': 'Interactive Search',
     '/series/:id/search/:season': 'Interactive Search',
     '/series/:id/search/:season/:episode': 'Interactive Search',
     '/queue': 'Queue',
@@ -206,6 +207,11 @@
         {:else if match.pattern === '/series/:id'}
           {#key match.params.id}
             <SeriesDetail id={numericParam(match.params, 'id')} />
+          {/key}
+        {:else if match.pattern === '/series/:id/search'}
+          {#key router.path}
+            <!-- No season: ReleaseSearch reads -1 as "search the whole series". -->
+            <ReleaseSearch kind="series" id={numericParam(match.params, 'id')} />
           {/key}
         {:else if match.pattern === '/series/:id/search/:season'}
           {#key router.path}

@@ -267,6 +267,34 @@ type Grab struct {
 	CreatedAt time.Time
 }
 
+// Job kinds for the automation queue (SPEC §7): the two recurring roots and
+// the per-item searches they fan out into.
+//
+// They live in core rather than in internal/automation because both sides of
+// the queue name them: the automation runner registers handlers for them, and
+// the API enqueues the same searches on demand. package automation imports
+// package api, so the shared vocabulary cannot live in either one.
+const (
+	JobRSSSync       = "rss_sync"
+	JobBacklogSweep  = "backlog_sweep"
+	JobSearchMovie   = "search_movie"
+	JobSearchEpisode = "search_episode"
+)
+
+// JobSearchMoviePayload is the search_movie job's arguments. The encoded form
+// is also the queue's dedupe key (store.HasOpenJob matches on the payload
+// string), so producers must marshal this type rather than hand-rolling the
+// object: a differently-ordered or differently-spelled payload is a duplicate
+// search, not a deduped one.
+type JobSearchMoviePayload struct {
+	MovieID int64 `json:"movie_id"`
+}
+
+// JobSearchEpisodePayload is the search_episode job's arguments.
+type JobSearchEpisodePayload struct {
+	EpisodeID int64 `json:"episode_id"`
+}
+
 // Job states for the durable queue (SPEC §7).
 const (
 	JobStatePending = "pending"

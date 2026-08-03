@@ -155,6 +155,7 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("PUT /quality-profiles/{id}", s.handleUpdateQualityProfile)
 	api.HandleFunc("DELETE /quality-profiles/{id}", s.handleDeleteQualityProfile)
 	api.HandleFunc("GET /wanted", s.handleWanted)
+	api.HandleFunc("POST /wanted/search", s.handleSearchWanted)
 
 	// The built-in TV profiles (SPEC §8, PLAN phase 4 task 3). Read-only: the
 	// active choice is a settings key, not a row.
@@ -207,6 +208,12 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("POST /library/movies/{id}/grab", s.handleMovieGrab)
 	api.HandleFunc("GET /library/series/{id}/releases", s.handleSeriesReleases)
 	api.HandleFunc("POST /library/series/{id}/grab", s.handleSeriesGrab)
+
+	// Automatic search on demand (SPEC §9): the same jobs the backlog sweep
+	// fans out, queued for one item now. They answer 202 and a count rather
+	// than releases — the work happens on the job queue, not in the request.
+	api.HandleFunc("POST /library/movies/{id}/search", s.handleSearchMovieNow)
+	api.HandleFunc("POST /library/series/{id}/search", s.handleSearchSeriesNow)
 
 	api.HandleFunc("GET /search", s.handleSearch)
 

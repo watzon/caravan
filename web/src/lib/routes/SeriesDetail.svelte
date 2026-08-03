@@ -35,6 +35,7 @@
   let loading = $state(true);
   let error = $state<string | null>(null);
   let busy = $state(false);
+  let searching = $state(false);
   let collapsed = $state<Record<number, boolean>>({});
 
   async function load() {
@@ -70,6 +71,29 @@
       pushToast(`${failureNote}: ${errorText(err)}`, 'danger');
     } finally {
       busy = false;
+    }
+  }
+
+  /**
+   * Automatic search for the whole series (SPEC §9). The server queues one job
+   * per wanted episode and answers the count, so a series that is already
+   * complete says so rather than reporting work that was never queued.
+   */
+  async function searchNow() {
+    const current = series;
+    if (!current) return;
+    searching = true;
+    try {
+      const { queued } = await api.searchSeriesNow(current.id);
+      if (queued > 0) {
+        pushToast(`${queued} search${queued === 1 ? '' : 'es'} started`, 'success');
+      } else {
+        pushToast('Nothing to search — every monitored episode is covered', 'info');
+      }
+    } catch (err) {
+      pushToast(errorText(err), 'danger');
+    } finally {
+      searching = false;
     }
   }
 </script>
@@ -119,15 +143,24 @@
               <MetadataLinks links={seriesLinks(current)} />
             </div>
           </div>
-          <Toggle
-            checked={current.monitored}
-            label="Monitored"
-            disabled={busy}
-            onchange={(next) =>
-              run(
-                () => api.setSeriesMonitored(current.id, next),
-                'Could not update the series',
-              )} />
+          <div class="flex items-center gap-3">
+            <Button variant="primary" size="sm" disabled={searching} onclick={searchNow}>
+              <Icon name="search" size={14} />
+              {searching ? 'Searching…' : 'Search now'}
+            </Button>
+            <Button variant="secondary" size="sm" href="/series/{current.id}/search">
+              Interactive search
+            </Button>
+            <Toggle
+              checked={current.monitored}
+              label="Monitored"
+              disabled={busy}
+              onchange={(next) =>
+                run(
+                  () => api.setSeriesMonitored(current.id, next),
+                  'Could not update the series',
+                )} />
+          </div>
         </div>
 
         <p class="max-w-3xl text-md text-ink-secondary">

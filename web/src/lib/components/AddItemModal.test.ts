@@ -15,6 +15,7 @@ let app: Record<string, unknown> | undefined;
 function mountModal(props: {
   kind?: 'movie' | 'series' | null;
   initialKind?: 'movie' | 'series';
+  onpick?: (kind: 'movie' | 'series', tmdbID: number) => void;
 } = {}): HTMLElement {
   host = document.createElement('div');
   document.body.appendChild(host);
@@ -35,6 +36,7 @@ afterEach(() => {
   host?.remove();
   app = undefined;
   host = undefined;
+  window.localStorage.clear();
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
@@ -136,5 +138,107 @@ describe('AddItemModal', () => {
     expect(document.activeElement).toBe(buttons[0]);
     press(buttons[0]!, 'ArrowUp');
     expect(document.activeElement).toBe(input);
+  });
+
+  /**
+   * Search-on-add (SPEC §9). The checkbox is a sticky per-browser habit, so it
+   * is asserted through what the add request actually carries rather than
+   * through the DOM alone.
+   */
+  const MOVIES = [{ tmdb_id: 1, title: 'Dune', year: 2021, overview: '', poster_url: '' }];
+  const SERIES = [{ tmdb_id: 2, title: 'Severance', year: 2022, overview: '', poster_url: '' }];
+
+  function stubSearchAndAdd(): { url: string; method: string; body: unknown }[] {
+    const calls: { url: string; method: string; body: unknown }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        calls.push({
+          url,
+          method: init?.method ?? 'GET',
+          body: typeof init?.body === 'string' ? JSON.parse(init.body) : null,
+        });
+        const payload = init?.method === 'POST'
+          ? { id: 9, title: 'Added' }
+          : { movies: MOVIES, series: SERIES };
+        return new Response(JSON.stringify(payload), {
+          status: init?.method === 'POST' ? 201 : 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    );
+    return calls;
+  }
+
+  async function addFirstResult(kindTab: 'movie' | 'series' = 'movie') {
+    const input = host!.querySelector('input[type="search"]') as HTMLInputElement;
+    input.value = 'dune';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    await vi.advanceTimersByTimeAsync(300);
+    flushSync();
+
+    const add = host!.querySelector('ul button') as HTMLButtonElement;
+    expect(add, `an ${kindTab} result to add`).toBeTruthy();
+    add.click();
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+  }
+
+  function checkbox(): HTMLInputElement | null {
+    return host!.querySelector('input[type="checkbox"]');
+  }
+
+  it('defaults to searching on add and sends search_now for a movie', async () => {
+    vi.useFakeTimers();
+    const calls = stubSearchAndAdd();
+    mountModal();
+
+    expect(checkbox()?.checked).toBe(true);
+    await addFirstResult();
+
+    const post = calls.find((c) => c.method === 'POST');
+    expect(post?.url).toBe('/api/v1/library/movies');
+    expect(post?.body).toMatchObject({ tmdb_id: 1, search_now: true });
+  });
+
+  it('sends search_missing for a series, not search_now', async () => {
+    vi.useFakeTimers();
+    const calls = stubSearchAndAdd();
+    mountModal({ initialKind: 'series' });
+
+    await addFirstResult('series');
+
+    const post = calls.find((c) => c.method === 'POST');
+    expect(post?.url).toBe('/api/v1/library/series');
+    expect(post?.body).toMatchObject({ tmdb_id: 2, search_missing: true });
+    expect((post?.body as Record<string, unknown>).search_now).toBeUndefined();
+  });
+
+  it('omits the search when the box is cleared, and remembers the choice', async () => {
+    vi.useFakeTimers();
+    const calls = stubSearchAndAdd();
+    mountModal();
+
+    const box = checkbox()!;
+    box.checked = false;
+    box.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+
+    await addFirstResult();
+    expect(calls.find((c) => c.method === 'POST')?.body).toMatchObject({ search_now: false });
+
+    // The next modal opens with the same answer: this is a habit, not a
+    // per-item decision.
+    unmount(app!);
+    host!.remove();
+    mountModal();
+    expect(checkbox()?.checked).toBe(false);
+  });
+
+  it('hides the checkbox in pick mode, where there is nothing to search for', () => {
+    mountModal({ onpick: () => {} });
+    expect(checkbox()).toBeNull();
   });
 });
