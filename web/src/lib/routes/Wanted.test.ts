@@ -29,7 +29,7 @@ beforeEach(() => {
           { id: 8, title: 'Blade Runner', year: 1982, poster_path: '', poster_url: '', reason: 'below_cutoff', file_quality: '720p' },
         ],
         episodes: [
-          { id: 10, series_id: 3, series_title: 'Severance', season_number: 1, episode_number: 2, title: 'Half Loop', air_date: '2026-07-14', reason: 'missing', file_quality: '' },
+          { id: 10, series_id: 3, series_title: 'Severance', season_number: 1, episode_number: 2, title: 'Half Loop', air_date: '2026-07-14', poster_path: 'TV/Severance/poster.jpg', poster_url: '', reason: 'missing', file_quality: '' },
         ],
       });
     }

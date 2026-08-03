@@ -88,6 +88,10 @@ func (s *Store) MovieFileStates(ctx context.Context) ([]MovieFileState, error) {
 type EpisodeFileState struct {
 	Episode     core.Episode
 	SeriesTitle string
+	// SeriesPosterPath and SeriesPosterURL are the series' artwork: episodes
+	// have none of their own, and the wanted list shows the series poster.
+	SeriesPosterPath string
+	SeriesPosterURL  string
 	// SeriesProfileID is the series' quality_profile_id: episodes carry no
 	// profile of their own, so the wanted computation resolves the series'.
 	SeriesProfileID int64
@@ -101,7 +105,8 @@ type EpisodeFileState struct {
 // already pushed its flag down to every episode.
 func (s *Store) EpisodeFileStates(ctx context.Context) ([]EpisodeFileState, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT `+episodeStateColumns+`, s.title, s.quality_profile_id, COALESCE(mf.quality, '')
+		SELECT `+episodeStateColumns+`, s.title, s.poster_path, s.poster_url,
+			s.quality_profile_id, COALESCE(mf.quality, '')
 		FROM episodes e
 		JOIN series s ON s.id = e.series_id
 		LEFT JOIN episode_files ef ON ef.episode_id = e.id
@@ -117,16 +122,20 @@ func (s *Store) EpisodeFileStates(ctx context.Context) ([]EpisodeFileState, erro
 	order := []int64{}
 	for rows.Next() {
 		var (
-			seriesTitle, quality string
-			profileID            int64
+			seriesTitle, posterPath, posterURL, quality string
+			profileID                                   int64
 		)
-		e, err := scanEpisodeWith(rows, &seriesTitle, &profileID, &quality)
+		e, err := scanEpisodeWith(rows, &seriesTitle, &posterPath, &posterURL, &profileID, &quality)
 		if err != nil {
 			return nil, fmt.Errorf("store: scan episode file state: %w", err)
 		}
 		st, ok := byID[e.ID]
 		if !ok {
-			st = &EpisodeFileState{Episode: *e, SeriesTitle: seriesTitle, SeriesProfileID: profileID}
+			st = &EpisodeFileState{
+				Episode: *e, SeriesTitle: seriesTitle,
+				SeriesPosterPath: posterPath, SeriesPosterURL: posterURL,
+				SeriesProfileID: profileID,
+			}
 			byID[e.ID] = st
 			order = append(order, e.ID)
 		}

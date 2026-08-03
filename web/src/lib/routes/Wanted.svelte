@@ -149,9 +149,13 @@
           <h2 id="wanted-episodes" class="micro-label">Episodes</h2>
           <ul class="overflow-hidden rounded-md border border-border bg-surface">
             {#each episodes as episode (episode.id)}
-              <li class="flex min-w-0 items-center gap-3 px-3 py-3">
-                <div class="flex size-[54px] shrink-0 items-center justify-center rounded-md bg-raised font-mono text-xs text-ink-secondary">
-                  {episodeCode(episode.season_number, episode.episode_number)}
+              <li class="flex min-w-0 items-center gap-3 border-b border-border px-3 py-2 last:border-b-0">
+                <div class="w-9 shrink-0">
+                  <Poster
+                    path={episode.poster_path}
+                    fallback={episode.poster_url}
+                    alt={episode.series_title}
+                    fallbackIcon="tv" />
                 </div>
                 <div class="min-w-0 flex-1">
                   <p class="truncate font-medium text-ink">

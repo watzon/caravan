@@ -756,6 +756,9 @@ export interface WantedEpisode {
   episode_number: number;
   title: string;
   air_date: string;
+  /** The series' artwork — episodes have none of their own. */
+  poster_path: string;
+  poster_url: string;
   reason: WantedReason;
   file_quality: string;
 }

@@ -159,7 +159,8 @@ func TestWantedList(t *testing.T) {
 		t.Fatalf("UpsertMovie: %v", err)
 	}
 
-	sr := &core.Series{TMDBID: 9, Title: "Andor", Monitored: true}
+	sr := &core.Series{TMDBID: 9, Title: "Andor", Monitored: true,
+		PosterPath: "TV/Andor/poster.jpg", PosterURL: "https://img.example/andor.jpg"}
 	if err := st.UpsertSeries(ctx, sr); err != nil {
 		t.Fatalf("UpsertSeries: %v", err)
 	}
@@ -198,5 +199,11 @@ func TestWantedList(t *testing.T) {
 
 	if len(body.Episodes) != 1 || body.Episodes[0].Title != "Kassa" {
 		t.Fatalf("wanted episodes = %+v, want only the aired one", body.Episodes)
+	}
+	// The row carries the series' artwork: episodes have none of their own,
+	// and the wanted list renders the series poster beside them.
+	if got := body.Episodes[0]; got.PosterPath != sr.PosterPath || got.PosterURL != sr.PosterURL {
+		t.Fatalf("episode poster = %q/%q, want the series' %q/%q",
+			got.PosterPath, got.PosterURL, sr.PosterPath, sr.PosterURL)
 	}
 }

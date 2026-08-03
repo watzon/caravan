@@ -29,6 +29,9 @@ type Movie struct {
 type Episode struct {
 	core.Episode
 	SeriesTitle string
+	// The series' artwork, since episodes have none of their own.
+	SeriesPosterPath string
+	SeriesPosterURL  string
 	// Reason is one of the Reason* constants. An unaired episode is never
 	// wanted: there is nothing to find yet.
 	Reason string
@@ -102,7 +105,9 @@ func Compute(ctx context.Context, st *store.Store) (*Lists, error) {
 			continue
 		}
 		out.Episodes = append(out.Episodes, Episode{
-			Episode: es.Episode, SeriesTitle: es.SeriesTitle, Reason: reason, FileQuality: es.FileQuality,
+			Episode: es.Episode, SeriesTitle: es.SeriesTitle,
+			SeriesPosterPath: es.SeriesPosterPath, SeriesPosterURL: es.SeriesPosterURL,
+			Reason: reason, FileQuality: es.FileQuality,
 		})
 	}
 	return out, nil

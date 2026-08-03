@@ -18,7 +18,8 @@ type wantedMovieJSON struct {
 	FileQuality string `json:"file_quality"`
 }
 
-// wantedEpisodeJSON is one row of the wanted episode list.
+// wantedEpisodeJSON is one row of the wanted episode list. The poster is the
+// series' — episodes have no artwork of their own.
 type wantedEpisodeJSON struct {
 	ID            int64  `json:"id"`
 	SeriesID      int64  `json:"series_id"`
@@ -27,6 +28,8 @@ type wantedEpisodeJSON struct {
 	EpisodeNumber int    `json:"episode_number"`
 	Title         string `json:"title"`
 	AirDate       string `json:"air_date"`
+	PosterPath    string `json:"poster_path"`
+	PosterURL     string `json:"poster_url"`
 	Reason        string `json:"reason"`
 	FileQuality   string `json:"file_quality"`
 }
@@ -62,6 +65,8 @@ func (s *server) handleWanted(w http.ResponseWriter, r *http.Request) {
 			EpisodeNumber: e.EpisodeNumber,
 			Title:         e.Title,
 			AirDate:       jsonDate(e.AirDate),
+			PosterPath:    e.SeriesPosterPath,
+			PosterURL:     e.SeriesPosterURL,
 			Reason:        e.Reason,
 			FileQuality:   e.FileQuality,
 		})
