@@ -79,6 +79,23 @@
     }
   }
 
+  // Up/Down walk the result buttons; Up from the first hands focus back to
+  // the search field so the whole list is reachable without leaving arrows.
+  function onListKeydown(event: KeyboardEvent) {
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    const buttons = [...(body?.querySelectorAll<HTMLElement>('ul button') ?? [])];
+    const index = buttons.indexOf(event.target as HTMLElement);
+    if (index === -1) return;
+    event.preventDefault();
+    if (event.key === 'ArrowDown') {
+      buttons[Math.min(index + 1, buttons.length - 1)].focus();
+    } else if (index === 0) {
+      body?.querySelector<HTMLElement>('input')?.focus();
+    } else {
+      buttons[index - 1].focus();
+    }
+  }
+
   $effect(() => {
     const q = query.trim();
     const k = kind;
@@ -199,9 +216,10 @@
         title="No matches"
         message="TMDB returned nothing for “{query.trim()}”. Try the original-language title, or add the year." />
     {:else}
-      <ul class="flex flex-col gap-2">
+      <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+      <ul class="flex flex-col gap-2" onkeydown={onListKeydown}>
         {#each rows as row (row.tmdb_id)}
-          <li class="flex items-start gap-3 rounded-md border border-border p-2 transition-colors duration-150 ease-out hover:bg-raised">
+          <li class="flex items-start gap-3 rounded-md border border-border p-2 transition-colors duration-150 ease-out hover:bg-raised focus-within:bg-raised">
             <div class="w-12 shrink-0">
               <Poster
                 path={row.poster_url}

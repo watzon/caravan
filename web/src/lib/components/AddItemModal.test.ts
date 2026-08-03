@@ -5,7 +5,7 @@
  * search field owns focus on open, and Tab flips the Movies/Series scope
  * instead of leaving the field.
  */
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import AddItemModal from './AddItemModal.svelte';
 
@@ -35,6 +35,8 @@ afterEach(() => {
   host?.remove();
   app = undefined;
   host = undefined;
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe('AddItemModal', () => {
@@ -89,5 +91,50 @@ describe('AddItemModal', () => {
   it('leaves Tab alone when the kind is fixed', () => {
     mountModal({ kind: 'movie' });
     expect(pressTab().defaultPrevented).toBe(false);
+  });
+
+  function press(target: Element, key: string) {
+    target.dispatchEvent(new KeyboardEvent('keydown', { key, cancelable: true, bubbles: true }));
+    flushSync();
+  }
+
+  it('walks the results with Up/Down and hands focus back to the field from the top', async () => {
+    vi.useFakeTimers();
+    const movies = [
+      { tmdb_id: 1, title: 'Dune', year: 2021, overview: '', poster_url: '' },
+      { tmdb_id: 2, title: 'Dune: Part Two', year: 2024, overview: '', poster_url: '' },
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(JSON.stringify({ movies, series: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      ),
+    );
+    mountModal();
+
+    const input = host!.querySelector('input')!;
+    input.value = 'dune';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    await vi.advanceTimersByTimeAsync(300);
+    flushSync();
+
+    const buttons = [...host!.querySelectorAll<HTMLElement>('ul button')];
+    expect(buttons).toHaveLength(2);
+
+    press(input, 'ArrowDown');
+    expect(document.activeElement).toBe(buttons[0]);
+    press(buttons[0]!, 'ArrowDown');
+    expect(document.activeElement).toBe(buttons[1]);
+    // The bottom is a stop, not a wrap: Down again stays put.
+    press(buttons[1]!, 'ArrowDown');
+    expect(document.activeElement).toBe(buttons[1]);
+    press(buttons[1]!, 'ArrowUp');
+    expect(document.activeElement).toBe(buttons[0]);
+    press(buttons[0]!, 'ArrowUp');
+    expect(document.activeElement).toBe(input);
   });
 });
