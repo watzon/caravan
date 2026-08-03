@@ -8,8 +8,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import App from './App.svelte';
 import { navigate } from './lib/router.svelte';
+import { discover } from './lib/state/discover.svelte';
 import { shutdown } from './lib/state/shutdown.svelte';
-import type { DownloadStatus, Movie, Release, SystemStatus } from './lib/api/types';
+import type {
+  DiscoverHome,
+  DownloadStatus,
+  MediaRequest,
+  Movie,
+  Release,
+  SystemStatus,
+} from './lib/api/types';
 
 const STATUS: SystemStatus = {
   version: '0.1.0',
@@ -38,6 +46,7 @@ const MOVIE: Movie = {
   monitored: true,
   quality_profile_id: 0,
   release_date: '2008-05-20',
+  min_availability: 'released',
   added_at: '2026-07-31T00:00:00Z',
   updated_at: '2026-07-31T00:00:00Z',
   file: null,
@@ -134,20 +143,53 @@ function jsonResponse(body: unknown): Response {
   });
 }
 
+/** One trending series is enough to prove the discover screen came up. */
+const DISCOVER: DiscoverHome = {
+  trending: [
+    {
+      media_type: 'series',
+      tmdb_id: 95396,
+      title: 'Severance',
+      year: 2022,
+      overview: 'Work-life balance, surgically.',
+      poster_path: '/p.jpg',
+      poster_url: '',
+      backdrop_url: '',
+      vote_average: 8.4,
+      date: '2022-02-18',
+      in_library: false,
+      library_id: 0,
+      requested: false,
+    },
+  ],
+  popular_movies: [],
+  popular_series: [],
+  networks: [{ id: 213, name: 'Netflix', type: 'network' }],
+  studios: [],
+};
+
 let host: HTMLElement;
 let app: Record<string, unknown>;
 /** What /system/status answers this test; a test may swap it before mounting. */
 let statusBody: SystemStatus = STATUS;
+/** What GET /requests answers; the sidebar badge counts the pending ones. */
+let requestRows: MediaRequest[] = [];
 
 beforeEach(() => {
   statusBody = STATUS;
+  requestRows = [];
+  discover.reset();
+  // jsdom has no layout, so scrollTo is unimplemented; the router calls it.
+  window.scrollTo = () => {};
   window.history.replaceState({}, '', '/movies');
+  // The router is a module singleton seeded from location at import time, and
+  // `/` is Discover now rather than a redirect to the library — so the shared
+  // path state has to be told, not just the History API.
+  navigate('/movies', { replace: true });
   // A module singleton, and one test drives it to its terminal state.
   shutdown.phase = 'idle';
   shutdown.confirming = false;
   shutdown.error = null;
-  // jsdom has no layout, so scrollTo is unimplemented; the router calls it.
-  window.scrollTo = () => {};
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
@@ -157,6 +199,9 @@ beforeEach(() => {
       if (url.endsWith('/library/movies')) return jsonResponse({ movies: [MOVIE] });
       // The sidebar badge polls the queue as soon as the shell mounts.
       if (url.endsWith('/downloads')) return jsonResponse({ downloads: DOWNLOADS });
+      // …and the requests badge alongside it.
+      if (url.endsWith('/requests')) return jsonResponse({ requests: requestRows });
+      if (url.endsWith('/discover')) return jsonResponse(DISCOVER);
       throw new Error(`unexpected fetch: ${url}`);
     }),
   );
@@ -188,6 +233,49 @@ describe('App shell', () => {
     // The library list rendered its one movie rather than an empty state.
     expect(host.textContent).toContain('Big Buck Bunny');
     expect(host.textContent).not.toContain('No movies yet');
+  });
+
+  /**
+   * `/` is Discover, not a redirect to the library: the first question on
+   * opening Caravan is what to watch, not what is already downloaded.
+   */
+  it('renders Discover at the index and leaves the library where it was', async () => {
+    navigate('/', { replace: true });
+    app = mount(App, { target: host });
+    await settle();
+
+    expect(host.querySelector('a[href="/discover"]')).not.toBeNull();
+    expect(host.querySelector('a[href="/requests"]')).not.toBeNull();
+    // The trending billboard, from the stubbed /discover payload.
+    expect(host.textContent).toContain('TRENDING #1 · SERIES');
+    expect(host.textContent).toContain('Severance');
+    expect(host.textContent).toContain('Browse by network');
+    // The movie grid did not come along for the ride.
+    expect(host.textContent).not.toContain('Big Buck Bunny');
+  });
+
+  it('badges the queue nav with the pending request count', async () => {
+    requestRows = [
+      {
+        id: 1,
+        media_type: 'series',
+        tmdb_id: 1396,
+        title: 'Severance',
+        year: 2022,
+        poster_path: '',
+        poster_url: '',
+        seasons: null,
+        min_availability: '',
+        status: 'pending',
+        created_at: '2026-08-01T00:00:00Z',
+        updated_at: '2026-08-01T00:00:00Z',
+      },
+    ];
+    app = mount(App, { target: host });
+    await settle();
+
+    const link = host.querySelector('a[href="/requests"]');
+    expect(link?.textContent).toContain('1');
   });
 
   it('badges the queue nav with the active download count', async () => {

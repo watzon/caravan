@@ -1,0 +1,129 @@
+/**
+ * The discover cache. Two behaviours matter: the landing page costs three
+ * sequential TMDB round trips, so it must not be refetched on every visit; and
+ * when the user requests or adds a title, every shelf holding it has to say so
+ * without another fetch.
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { DiscoverHome, DiscoverItem } from '../api/types';
+import { discover } from './discover.svelte';
+
+function item(tmdbID: number, extra: Partial<DiscoverItem> = {}): DiscoverItem {
+  return {
+    media_type: 'movie',
+    tmdb_id: tmdbID,
+    title: `Title ${tmdbID}`,
+    year: 2020,
+    overview: '',
+    poster_path: '',
+    poster_url: '',
+    backdrop_url: '',
+    vote_average: 7,
+    date: '2020-01-01',
+    in_library: false,
+    library_id: 0,
+    requested: false,
+    ...extra,
+  };
+}
+
+function home(): DiscoverHome {
+  return {
+    // The same title appears on two shelves — that is exactly the case a patch
+    // has to cover.
+    trending: [item(1), item(2, { media_type: 'series' })],
+    popular_movies: [item(1)],
+    popular_series: [item(2, { media_type: 'series' })],
+    networks: [],
+    studios: [],
+  };
+}
+
+let calls: string[];
+
+function stubFetch(payload: unknown, status = 200) {
+  calls = [];
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) => {
+      calls.push(String(input));
+      return new Response(JSON.stringify(payload), {
+        status,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }),
+  );
+}
+
+beforeEach(() => {
+  discover.reset();
+});
+
+afterEach(() => {
+  discover.reset();
+  vi.unstubAllGlobals();
+});
+
+describe('discover store', () => {
+  it('fetches once and serves the cache afterwards', async () => {
+    stubFetch(home());
+
+    await discover.load();
+    await discover.load();
+
+    expect(calls).toEqual(['/api/v1/discover']);
+    expect(discover.home?.trending).toHaveLength(2);
+    expect(discover.error).toBeNull();
+  });
+
+  it('refetches when forced — that is what the retry button is', async () => {
+    stubFetch(home());
+    await discover.load();
+    await discover.load(true);
+    expect(calls).toHaveLength(2);
+  });
+
+  // 503 is "no TMDB key" and 502 is "TMDB is unhappy": the screen sends the
+  // user to settings for one and offers a retry for the other, so the status
+  // has to survive the failure.
+  it('keeps the failure status so the screen can tell 503 from 502', async () => {
+    stubFetch({ error: 'no metadata provider configured' }, 503);
+    await discover.load();
+
+    expect(discover.home).toBeNull();
+    expect(discover.status).toBe(503);
+    expect(discover.error).toBe('no metadata provider configured');
+  });
+
+  it('marks a requested title on every shelf that holds it', async () => {
+    stubFetch(home());
+    await discover.load();
+
+    discover.markRequested('movie', 1);
+
+    expect(discover.home?.trending[0]?.requested).toBe(true);
+    expect(discover.home?.popular_movies[0]?.requested).toBe(true);
+    // Same TMDB id, different media type: two id spaces, not one.
+    expect(discover.home?.popular_series[0]?.requested).toBe(false);
+  });
+
+  it('marks an added title owned, and drops the request the add absorbed', async () => {
+    stubFetch(home());
+    await discover.load();
+    discover.markRequested('series', 2);
+
+    discover.markInLibrary('series', 2, 42);
+
+    const added = discover.home?.trending[1];
+    expect(added?.in_library).toBe(true);
+    expect(added?.library_id).toBe(42);
+    expect(added?.requested).toBe(false);
+  });
+
+  it('ignores marks for a title it has never seen', async () => {
+    stubFetch(home());
+    await discover.load();
+    expect(() => discover.markRequested('movie', 999)).not.toThrow();
+    expect(discover.home?.trending[0]?.requested).toBe(false);
+  });
+});

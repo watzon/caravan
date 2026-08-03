@@ -2,6 +2,7 @@ package wanted
 
 import (
 	"testing"
+	"time"
 
 	"github.com/watzon/caravan/internal/core"
 )
@@ -126,5 +127,93 @@ func TestSelectBestNothingAcceptable(t *testing.T) {
 	}
 	if len(rejected) != 1 || rejected[0].Reject == "" {
 		t.Fatalf("the one candidate must be rejected with a reason, got %+v", rejected)
+	}
+}
+
+// TestAvailable pins the minimum-availability rules to Radarr's semantics
+// (Movie.IsAvailable), plus the one documented deviation: no dates at all
+// means available, not never.
+func TestAvailable(t *testing.T) {
+	today := time.Date(2026, 8, 3, 0, 0, 0, 0, time.UTC)
+	day := func(y, m, d int) time.Time { return time.Date(y, time.Month(m), d, 0, 0, 0, 0, time.UTC) }
+
+	tests := []struct {
+		name  string
+		movie core.Movie
+		want  bool
+	}{
+		{
+			name:  "announced is available before any date",
+			movie: core.Movie{MinAvailability: core.AvailabilityAnnounced, ReleaseDate: day(2027, 1, 1)},
+			want:  true,
+		},
+		{
+			name:  "in cinemas waits for the theatrical date",
+			movie: core.Movie{MinAvailability: core.AvailabilityInCinemas, ReleaseDate: day(2026, 9, 1)},
+			want:  false,
+		},
+		{
+			name:  "in cinemas on the theatrical day itself",
+			movie: core.Movie{MinAvailability: core.AvailabilityInCinemas, ReleaseDate: day(2026, 8, 3)},
+			want:  true,
+		},
+		{
+			// Radarr's fall-through: no theatrical date must not read as
+			// "already in cinemas".
+			name: "in cinemas without a theatrical date degrades to released",
+			movie: core.Movie{MinAvailability: core.AvailabilityInCinemas,
+				DigitalRelease: day(2026, 9, 1)},
+			want: false,
+		},
+		{
+			name: "released takes the earlier home date: digital first",
+			movie: core.Movie{MinAvailability: core.AvailabilityReleased,
+				DigitalRelease: day(2026, 8, 1), PhysicalRelease: day(2026, 12, 1)},
+			want: true,
+		},
+		{
+			name: "released takes the earlier home date: physical first",
+			movie: core.Movie{MinAvailability: core.AvailabilityReleased,
+				DigitalRelease: day(2026, 12, 1), PhysicalRelease: day(2026, 8, 1)},
+			want: true,
+		},
+		{
+			name: "released with both home dates ahead",
+			movie: core.Movie{MinAvailability: core.AvailabilityReleased,
+				DigitalRelease: day(2026, 9, 1), PhysicalRelease: day(2026, 10, 1)},
+			want: false,
+		},
+		{
+			name: "released with no home dates waits out the cinema window",
+			movie: core.Movie{MinAvailability: core.AvailabilityReleased,
+				ReleaseDate: day(2026, 6, 1)},
+			want: false,
+		},
+		{
+			name: "released once the cinema window has passed",
+			movie: core.Movie{MinAvailability: core.AvailabilityReleased,
+				ReleaseDate: day(2026, 5, 1)},
+			want: true,
+		},
+		{
+			// The deviation: an episode with no air date is treated as aired,
+			// and a movie the provider has no dates for is treated the same
+			// way rather than hidden forever.
+			name:  "released with no dates at all is available",
+			movie: core.Movie{MinAvailability: core.AvailabilityReleased},
+			want:  true,
+		},
+		{
+			name:  "empty availability reads as released",
+			movie: core.Movie{ReleaseDate: day(2026, 6, 1)},
+			want:  false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Available(tt.movie, today); got != tt.want {
+				t.Errorf("Available = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

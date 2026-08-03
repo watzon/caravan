@@ -8,9 +8,15 @@
 import type {
   ActivityEvent,
   AddItemRequest,
+  ApproveRequestResult,
   AuthState,
   CalendarEntry,
   Conversion,
+  CreateRequestBody,
+  DiscoverBrowse,
+  DiscoverHome,
+  DiscoverSourceType,
+  DiscoverTitle,
   DownloadClient,
   DownloadClientInput,
   DownloadClientTypeInfo,
@@ -25,11 +31,15 @@ import type {
   JellyfinTestResult,
   Job,
   MatchRequest,
+  MediaRequest,
+  MinAvailability,
+  MediaType,
   Movie,
   QualityProfile,
   QualityProfileInput,
   Release,
   RepointResult,
+  RequestStatus,
   ScanSummary,
   SearchQueued,
   SearchResults,
@@ -155,6 +165,18 @@ export const endpoints = {
   conversionRetry: (id: number) => `${API_BASE}/convert/${id}/retry`,
   qualityProfiles: () => `${API_BASE}/quality-profiles`,
   qualityProfile: (id: number) => `${API_BASE}/quality-profiles/${id}`,
+
+  // Discover — browse the provider rather than search it. Every id in this
+  // block is a TMDB id; library ids only appear in the decorated payloads.
+  discover: () => `${API_BASE}/discover`,
+  discoverBrowse: () => `${API_BASE}/discover/browse`,
+  discoverTitle: (type: MediaType, tmdbID: number) => `${API_BASE}/discover/${type}/${tmdbID}`,
+
+  // Requests — a wish for a title that is not in the library yet. Adding the
+  // title (from anywhere) absorbs its pending request server-side.
+  requests: () => `${API_BASE}/requests`,
+  request: (id: number) => `${API_BASE}/requests/${id}`,
+  requestApprove: (id: number) => `${API_BASE}/requests/${id}/approve`,
 } as const;
 
 /**
@@ -727,4 +749,88 @@ export const api = {
 
   deleteQualityProfile: (id: number) =>
     request<void>(endpoints.qualityProfile(id), { method: 'DELETE' }),
+
+  /* ------------------------------------------------------------------------
+   * Discover & requests.
+   *
+   * 503 means no metadata provider is configured (send the user to settings);
+   * 502 means the provider is unhappy (offer a retry). Both arrive as an
+   * ApiError, so the routes branch on `status` rather than on the message.
+   * --------------------------------------------------------------------- */
+
+  /** The discover landing page. Three sequential provider calls — show a skeleton. */
+  discoverHome: (signal?: AbortSignal) =>
+    request<DiscoverHome>(endpoints.discover(), { signal }),
+
+  /**
+   * One page of a curated shelf. The media type follows the shelf — a network
+   * browses series, a studio browses movies — so it is not a separate param.
+   */
+  discoverBrowse: (
+    type: DiscoverSourceType,
+    id: number,
+    page = 1,
+    signal?: AbortSignal,
+  ) =>
+    request<DiscoverBrowse>(endpoints.discoverBrowse(), {
+      query: { type, id, page },
+      signal,
+    }),
+
+  /** One title's acquisition screen, addressed by TMDB id (never a library id). */
+  discoverTitle: (type: MediaType, tmdbID: number, signal?: AbortSignal) =>
+    request<DiscoverTitle>(endpoints.discoverTitle(type, tmdbID), { signal }),
+
+  /** Every request, newest first. Pass a status to narrow it. */
+  listRequests: (status?: RequestStatus, signal?: AbortSignal) =>
+    listOf<MediaRequest>(withQuery(endpoints.requests(), { status }), 'requests', signal),
+
+  /**
+   * Record a request. A second one for the same title merges into the pending
+   * row and answers 201 with *that* row — replace it locally, do not append.
+   * 409 means the title is already in the library: the view is stale.
+   */
+  createRequest: (body: CreateRequestBody) =>
+    request<MediaRequest>(endpoints.requests(), { method: 'POST', body }),
+
+  /**
+   * Grant a request by adding its title, the same path the add button takes.
+   * There is deliberately no quality-profile field: the add endpoints have
+   * none either, so this one does not pretend to.
+   */
+  approveRequest: (
+    id: number,
+    searchNow: boolean,
+    seasons?: number[],
+    minAvailability?: MinAvailability,
+  ) =>
+    request<ApproveRequestResult>(endpoints.requestApprove(id), {
+      method: 'POST',
+      body: {
+        search_now: searchNow,
+        ...(seasons ? { seasons } : {}),
+        ...(minAvailability ? { min_availability: minAvailability } : {}),
+      },
+    }),
+
+  /** Turn a request down. The row survives as dismissed history. */
+  dismissRequest: (id: number) =>
+    request<void>(endpoints.request(id), { method: 'DELETE' }),
+
+  /**
+   * Re-assign a library item's quality profile. The add endpoints take only a
+   * tmdb id and a search flag, so choosing a profile while adding is this
+   * PATCH applied straight after the add.
+   */
+  setMovieQualityProfile: (id: number, profileID: number) =>
+    request<Movie>(endpoints.movie(id), {
+      method: 'PATCH',
+      body: { quality_profile_id: profileID },
+    }),
+
+  setSeriesQualityProfile: (id: number, profileID: number) =>
+    request<Series>(endpoints.series(id), {
+      method: 'PATCH',
+      body: { quality_profile_id: profileID },
+    }),
 };

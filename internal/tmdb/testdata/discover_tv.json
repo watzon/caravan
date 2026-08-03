@@ -1,0 +1,19 @@
+{
+  "page": 3,
+  "results": [
+    {
+      "adult": false,
+      "backdrop_path": "/56v2KjBlU4XaOv9rVYEQypROD7P.jpg",
+      "id": 66732,
+      "name": "Stranger Things",
+      "original_name": "Stranger Things",
+      "overview": "When a young boy vanishes, a small town uncovers a mystery involving secret experiments.",
+      "poster_path": "/49WJfeN0moxb9IPfGn8AIqMGskD.jpg",
+      "first_air_date": "2016-07-15",
+      "vote_average": 8.6,
+      "vote_count": 16000
+    }
+  ],
+  "total_pages": 42,
+  "total_results": 831
+}

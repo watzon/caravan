@@ -32,6 +32,7 @@ function movie(overrides: Partial<Movie> = {}): Movie {
     monitored: true,
     quality_profile_id: 0,
     release_date: '2008-05-20',
+    min_availability: 'released',
     added_at: '2026-07-31T00:00:00Z',
     updated_at: '2026-07-31T00:00:00Z',
     ...overrides,

@@ -41,8 +41,13 @@ type MovieMeta struct {
 	OriginalTitle string
 	Year          int
 	Overview      string
-	// ReleaseDate is zero when the provider did not supply one.
+	// ReleaseDate is the theatrical release date, zero when the provider did
+	// not supply one.
 	ReleaseDate time.Time
+	// DigitalRelease and PhysicalRelease are the home-release dates, zero when
+	// unknown. Search results never carry them; GetMovie does.
+	DigitalRelease  time.Time
+	PhysicalRelease time.Time
 	// PosterURL is an absolute provider URL, not a storage-root-relative path:
 	// it is what the organizer downloads from, not what it writes.
 	PosterURL string

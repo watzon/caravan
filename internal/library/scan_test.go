@@ -776,3 +776,52 @@ func TestScanMissingLibraryDirectoryIsNotAnError(t *testing.T) {
 		t.Fatalf("unexpected result: %+v", res)
 	}
 }
+
+// SPEC: a pending request is absorbed when its title enters the library
+// through any path, and copying a file into the storage root is one of them.
+// Without this the request would keep asking, with an Approve button that
+// re-adds a title the library already tracks.
+func TestScanAbsorbsPendingRequests(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+	seedMovie(h)
+	seedSeries(h)
+
+	movieReq := core.Request{MediaType: core.MediaTypeMovie, TMDBID: 10378, Title: "Big Buck Bunny"}
+	seriesReq := core.Request{MediaType: core.MediaTypeSeries, TMDBID: 42, Title: "Planet Earth II"}
+	// A title nobody scanned keeps asking: the scan must not approve the world.
+	untouched := core.Request{MediaType: core.MediaTypeMovie, TMDBID: 999, Title: "Elsewhere"}
+	for _, r := range []*core.Request{&movieReq, &seriesReq, &untouched} {
+		if err := h.st.CreateRequest(ctx, r); err != nil {
+			t.Fatalf("CreateRequest: %v", err)
+		}
+	}
+
+	h.writeVideo(rawMovieRel, "movie bytes")
+	raw := "library/TV/Planet.Earth.II.S01E01.1080p.WEB-DL.x265.mkv"
+	h.parser[filepath.Base(raw)] = episodeParse("Planet Earth II", 1, 1)
+	h.writeVideo(raw, "episode bytes")
+
+	res := h.scan()
+	if len(res.Errors) != 0 {
+		t.Fatalf("unexpected scan errors: %v", res.Errors)
+	}
+
+	for _, tt := range []struct {
+		name string
+		id   int64
+		want string
+	}{
+		{name: "movie", id: movieReq.ID, want: core.RequestApproved},
+		{name: "series", id: seriesReq.ID, want: core.RequestApproved},
+		{name: "unscanned", id: untouched.ID, want: core.RequestPending},
+	} {
+		got, err := h.st.GetRequest(ctx, tt.id)
+		if err != nil {
+			t.Fatalf("GetRequest(%s): %v", tt.name, err)
+		}
+		if got.Status != tt.want {
+			t.Errorf("%s request status = %q, want %q", tt.name, got.Status, tt.want)
+		}
+	}
+}

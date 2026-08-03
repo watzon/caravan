@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 
@@ -31,8 +32,11 @@ type movieJSON struct {
 	Monitored        bool   `json:"monitored"`
 	QualityProfileID int64  `json:"quality_profile_id"`
 	ReleaseDate      string `json:"release_date"`
-	AddedAt          string `json:"added_at"`
-	UpdatedAt        string `json:"updated_at"`
+	// MinAvailability is the release stage the movie's automatic search waits
+	// for: announced, in_cinemas or released.
+	MinAvailability string `json:"min_availability"`
+	AddedAt         string `json:"added_at"`
+	UpdatedAt       string `json:"updated_at"`
 	// File is the imported file, null while the movie is only wanted. A movie
 	// has at most one current file in v1 (upgrades replace it, SPEC §9), so
 	// this is a single object rather than a list.
@@ -130,6 +134,7 @@ func movieDTO(m core.Movie) movieJSON {
 		Monitored:        m.Monitored,
 		QualityProfileID: m.QualityProfileID,
 		ReleaseDate:      jsonTime(m.ReleaseDate),
+		MinAvailability:  m.MinAvailability,
 		AddedAt:          jsonTime(m.AddedAt),
 		UpdatedAt:        jsonTime(m.UpdatedAt),
 	}
@@ -206,6 +211,16 @@ type addRequest struct {
 	// SearchMissing queues a search for every wanted episode of the new
 	// series.
 	SearchMissing bool `json:"search_missing"`
+	// Seasons names the seasons of a new series this add is going after.
+	// Omitting it adds the whole series, which is the historical behaviour;
+	// naming a subset leaves every other season unmonitored, and scopes what a
+	// pending request for this title counts as granted (see absorbSeriesRequests).
+	Seasons []int `json:"seasons"`
+	// MinAvailability is the release stage a new movie's automatic search
+	// waits for: announced, in_cinemas or released. Movie-only, like Seasons
+	// is series-only. Omitting it defaults a new movie to released and leaves
+	// a re-added movie's choice alone.
+	MinAvailability string `json:"min_availability"`
 }
 
 func (s *server) handleListMovies(w http.ResponseWriter, r *http.Request) {
@@ -249,21 +264,156 @@ func (s *server) handleAddMovie(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "tmdb_id is required")
 		return
 	}
+	if len(body.Seasons) > 0 {
+		writeError(w, http.StatusBadRequest, "seasons are only valid for a series")
+		return
+	}
+	if !validAvailability(w, body.MinAvailability) {
+		return
+	}
 
-	m, err := s.mgr.AddMovie(r.Context(), body.TMDBID)
+	m, err := s.addMovieToLibrary(r.Context(), body.TMDBID, body.SearchNow, body.MinAvailability)
 	if err != nil {
 		s.writeManagerError(w, "add movie", err)
 		return
 	}
-	if body.SearchNow {
-		if _, err := s.enqueueMovieSearch(r.Context(), m.ID); err != nil {
+	writeJSON(w, http.StatusCreated, movieDTO(*m))
+}
+
+// validAvailability rejects an availability that names no known stage, writing
+// the failure itself. Empty is fine — it means "no opinion" everywhere the
+// field appears.
+func validAvailability(w http.ResponseWriter, s string) bool {
+	if s != "" && !core.ValidAvailability(s) {
+		writeError(w, http.StatusBadRequest, "min_availability must be announced, in_cinemas or released")
+		return false
+	}
+	return true
+}
+
+// addMovieToLibrary is the single path a movie enters the library through from
+// the HTTP layer: the add button and approving a request both come here. That
+// is what makes "a pending request is absorbed when its title arrives" true
+// however the title arrived, and it is the one place a permission check goes
+// when Caravan grows more than one kind of user.
+func (s *server) addMovieToLibrary(ctx context.Context, tmdbID int64, searchNow bool, minAvailability string) (*core.Movie, error) {
+	m, err := s.mgr.AddMovie(ctx, tmdbID, minAvailability)
+	if err != nil {
+		return nil, err
+	}
+	s.absorbRequests(ctx, MediaTypeMovie, tmdbID)
+	if searchNow {
+		if _, err := s.enqueueMovieSearch(ctx, m.ID); err != nil {
 			// The movie is in the library; failing the request now would tell
 			// the client the opposite. The add stands and the missed search is
 			// logged — the next backlog sweep queues it anyway.
 			s.log.Error("queue search for added movie", "movie_id", m.ID, "error", err)
 		}
 	}
-	writeJSON(w, http.StatusCreated, movieDTO(*m))
+	return m, nil
+}
+
+// addSeriesToLibrary is addMovieToLibrary's series twin.
+//
+// seasons, when non-nil, narrows the add to those season numbers: everything
+// else the provider knows about lands unmonitored. It is the same season
+// selection the add dialog shows, and it is what makes a partial add absorb
+// only the part of a pending request it actually granted.
+func (s *server) addSeriesToLibrary(ctx context.Context, tmdbID int64, searchMissing bool, seasons []int) (*core.Series, error) {
+	sr, err := s.mgr.AddSeries(ctx, tmdbID)
+	if err != nil {
+		return nil, err
+	}
+	ungranted, err := s.applySeasonSelection(ctx, sr.ID, seasons)
+	if err != nil {
+		return nil, err
+	}
+	s.absorbSeriesRequests(ctx, tmdbID, ungranted)
+	if searchMissing {
+		// Episode rows exist by the time AddSeries returns, so the wanted list
+		// already names them. See addMovieToLibrary for why a failure here does
+		// not fail the add.
+		if _, err := s.queueSeriesSearch(ctx, sr.ID); err != nil {
+			s.log.Error("queue search for added series", "series_id", sr.ID, "error", err)
+		}
+	}
+	return sr, nil
+}
+
+// absorbRequests marks any pending request for a title approved, because the
+// title has just reached the library and there is nothing left to ask for.
+//
+// It never fails the caller: the add already happened, and a request row left
+// saying "pending" is a cosmetic wrong, not a reason to tell the client the
+// add did not work.
+func (s *server) absorbRequests(ctx context.Context, mediaType string, tmdbID int64) {
+	n, err := s.st.ApproveRequestsFor(ctx, mediaType, tmdbID)
+	if err != nil {
+		s.log.Error("absorb requests", "media_type", mediaType, "tmdb_id", tmdbID, "error", err)
+		return
+	}
+	if n > 0 {
+		s.log.Info("requests absorbed by library add",
+			"media_type", mediaType, "tmdb_id", tmdbID, "requests", n)
+	}
+}
+
+// absorbSeriesRequests is absorbRequests for a series add, told which seasons
+// the add left behind.
+//
+// A request the add covered in full is approved like any other. One that also
+// asked for a season nobody went after is narrowed to that remainder and stays
+// pending: closing it would throw away the ask with no record that only part of
+// it was granted.
+func (s *server) absorbSeriesRequests(ctx context.Context, tmdbID int64, ungranted []int) {
+	if len(ungranted) == 0 {
+		s.absorbRequests(ctx, MediaTypeSeries, tmdbID)
+		return
+	}
+	n, err := s.st.GrantRequestSeasons(ctx, tmdbID, ungranted)
+	if err != nil {
+		s.log.Error("absorb requests", "media_type", MediaTypeSeries, "tmdb_id", tmdbID, "error", err)
+		return
+	}
+	if n > 0 {
+		s.log.Info("requests absorbed by library add",
+			"media_type", MediaTypeSeries, "tmdb_id", tmdbID, "requests", n)
+	}
+}
+
+// applySeasonSelection unmonitors every season of a freshly added series the
+// caller did not ask for, and reports those season numbers.
+//
+// A nil selection is "the whole series": nothing is touched and nothing is
+// outstanding. The monitored flag is the only lever here — the rows have to
+// exist either way, because the series view shows what is missing.
+func (s *server) applySeasonSelection(ctx context.Context, seriesID int64, seasons []int) ([]int, error) {
+	if seasons == nil {
+		return nil, nil
+	}
+	rows, err := s.st.ListSeasons(ctx, seriesID)
+	if err != nil {
+		return nil, err
+	}
+
+	var ungranted []int
+	for _, season := range rows {
+		if slices.Contains(seasons, season.Number) {
+			continue
+		}
+		ungranted = append(ungranted, season.Number)
+		if !season.Monitored {
+			continue
+		}
+		season.Monitored = false
+		if err := s.st.UpsertSeason(ctx, &season); err != nil {
+			return nil, err
+		}
+		if err := s.st.CascadeSeasonMonitored(ctx, seriesID, season.Number, false); err != nil {
+			return nil, err
+		}
+	}
+	return ungranted, nil
 }
 
 func (s *server) handleGetMovie(w http.ResponseWriter, r *http.Request) {
@@ -494,19 +644,18 @@ func (s *server) handleAddSeries(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "tmdb_id is required")
 		return
 	}
+	if !validSeasonNumbers(w, body.Seasons) {
+		return
+	}
+	if body.MinAvailability != "" {
+		writeError(w, http.StatusBadRequest, "min_availability is only valid for a movie")
+		return
+	}
 
-	sr, err := s.mgr.AddSeries(r.Context(), body.TMDBID)
+	sr, err := s.addSeriesToLibrary(r.Context(), body.TMDBID, body.SearchMissing, body.Seasons)
 	if err != nil {
 		s.writeManagerError(w, "add series", err)
 		return
-	}
-	if body.SearchMissing {
-		// Episode rows exist by the time AddSeries returns, so the wanted list
-		// already names them. See handleAddMovie for why a failure here does
-		// not fail the add.
-		if _, err := s.queueSeriesSearch(r.Context(), sr.ID); err != nil {
-			s.log.Error("queue search for added series", "series_id", sr.ID, "error", err)
-		}
 	}
 	writeJSON(w, http.StatusCreated, seriesDTO(*sr))
 }

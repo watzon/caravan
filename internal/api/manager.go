@@ -21,8 +21,10 @@ type Manager interface {
 	Scan(ctx context.Context) error
 
 	// AddMovie adds a movie to the library by provider id, fetching its
-	// metadata. It returns the stored movie.
-	AddMovie(ctx context.Context, tmdbID int64) (*core.Movie, error)
+	// metadata, and returns the stored movie. minAvailability is the release
+	// stage its automatic search waits for; an empty string keeps an existing
+	// row's choice and defaults a new one.
+	AddMovie(ctx context.Context, tmdbID int64, minAvailability string) (*core.Movie, error)
 
 	// AddSeries adds a series (with its seasons and episodes) by provider id.
 	AddSeries(ctx context.Context, tmdbID int64) (*core.Series, error)
@@ -48,9 +50,11 @@ type Manager interface {
 	Metadata() core.MetadataProvider
 }
 
-// Media types accepted by POST /import/queue/{id}/match and reported by
-// GET /search.
+// Media types accepted by POST /import/queue/{id}/match and POST /requests,
+// and reported by GET /search and the discover endpoints. They alias the core
+// constants because the same two strings are stored in requests.media_type:
+// one spelling, one place to change it.
 const (
-	MediaTypeMovie  = "movie"
-	MediaTypeSeries = "series"
+	MediaTypeMovie  = core.MediaTypeMovie
+	MediaTypeSeries = core.MediaTypeSeries
 )

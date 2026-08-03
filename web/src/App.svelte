@@ -17,6 +17,10 @@
   import { navigate, router, startRouter } from './lib/router.svelte';
   import Calendar from './lib/routes/Calendar.svelte';
   import Convert from './lib/routes/Convert.svelte';
+  import Discover from './lib/routes/Discover.svelte';
+  import DiscoverBrowse from './lib/routes/DiscoverBrowse.svelte';
+  import DiscoverTitle from './lib/routes/DiscoverTitle.svelte';
+  import Requests from './lib/routes/Requests.svelte';
   import History from './lib/routes/History.svelte';
   import FirstRun from './lib/routes/FirstRun.svelte';
   import Login from './lib/routes/Login.svelte';
@@ -39,6 +43,13 @@
 
   const TITLES: Record<RoutePattern, string> = {
     '/first-run': 'Welcome',
+    '/': 'Discover',
+    '/discover': 'Discover',
+    '/discover/network/:id': 'Discover',
+    '/discover/studio/:id': 'Discover',
+    '/discover/movie/:tmdbId': 'Discover',
+    '/discover/series/:tmdbId': 'Discover',
+    '/requests': 'Requests',
     '/movies': 'Movies',
     '/movies/:id': 'Movies',
     '/movies/:id/search': 'Interactive Search',
@@ -119,8 +130,9 @@
       if (router.path !== '/first-run') navigate('/first-run', { replace: true });
       return;
     }
-    if (router.path === '/first-run' || router.path === '/') {
-      navigate('/movies', { replace: true });
+    // `/` is Discover now, so only the finished first-run screen is redirected.
+    if (router.path === '/first-run') {
+      navigate('/', { replace: true });
     }
   });
 
@@ -192,6 +204,22 @@
 
         {#if !match}
           <NotFound />
+        {:else if match.pattern === '/' || match.pattern === '/discover'}
+          <Discover />
+        {:else if match.pattern === '/discover/network/:id' || match.pattern === '/discover/studio/:id'}
+          {#key router.path}
+            <DiscoverBrowse
+              type={match.pattern === '/discover/network/:id' ? 'network' : 'studio'}
+              id={numericParam(match.params, 'id')} />
+          {/key}
+        {:else if match.pattern === '/discover/movie/:tmdbId' || match.pattern === '/discover/series/:tmdbId'}
+          {#key router.path}
+            <DiscoverTitle
+              type={match.pattern === '/discover/movie/:tmdbId' ? 'movie' : 'series'}
+              tmdbID={numericParam(match.params, 'tmdbId')} />
+          {/key}
+        {:else if match.pattern === '/requests'}
+          <Requests />
         {:else if match.pattern === '/movies'}
           <Movies onadd={() => openAdd('movie')} />
         {:else if match.pattern === '/movies/:id'}

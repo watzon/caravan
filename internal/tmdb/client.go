@@ -30,6 +30,10 @@ const (
 	// size Caravan stores: large enough for the detail screen, small enough
 	// that a full library of posters is not a download in its own right.
 	DefaultImageBaseURL = "https://image.tmdb.org/t/p/w500"
+	// DefaultBackdropBaseURL is the CDN prefix for backdrop paths. Backdrops
+	// are only ever shown full-bleed behind a discover screen, so they get a
+	// wider size than posters do.
+	DefaultBackdropBaseURL = "https://image.tmdb.org/t/p/w780"
 
 	// defaultTimeout bounds a single request when the caller supplies no
 	// client of its own. A metadata lookup that hangs must not wedge a scan.
@@ -93,6 +97,8 @@ type Client struct {
 	BaseURL string
 	// ImageBaseURL is the prefix poster paths are joined onto.
 	ImageBaseURL string
+	// BackdropBaseURL is the prefix backdrop paths are joined onto.
+	BackdropBaseURL string
 
 	hc *http.Client
 	// sleep is the delay used between a throttled request and its retry.
@@ -111,11 +117,12 @@ func New(apiKey string, hc *http.Client) *Client {
 		hc = &http.Client{Timeout: defaultTimeout}
 	}
 	return &Client{
-		APIKey:       apiKey,
-		BaseURL:      DefaultBaseURL,
-		ImageBaseURL: DefaultImageBaseURL,
-		hc:           hc,
-		sleep:        sleepCtx,
+		APIKey:          apiKey,
+		BaseURL:         DefaultBaseURL,
+		ImageBaseURL:    DefaultImageBaseURL,
+		BackdropBaseURL: DefaultBackdropBaseURL,
+		hc:              hc,
+		sleep:           sleepCtx,
 	}
 }
 
@@ -233,10 +240,26 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 // stays empty: core.MovieMeta.PosterURL being blank is how "no poster" is
 // expressed.
 func (c *Client) posterURL(path string) string {
+	return imageURL(c.ImageBaseURL, path)
+}
+
+// PosterURL is posterURL exported for core.DiscoverProvider: a request row
+// stores the provider's poster path, and the API needs the client that knows
+// the CDN prefix to render it back into a URL.
+func (c *Client) PosterURL(path string) string {
+	return c.posterURL(path)
+}
+
+// backdropURL is posterURL for the wider artwork the discover screens use.
+func (c *Client) backdropURL(path string) string {
+	return imageURL(c.BackdropBaseURL, path)
+}
+
+func imageURL(base, path string) string {
 	if path == "" {
 		return ""
 	}
-	return strings.TrimSuffix(c.ImageBaseURL, "/") + "/" + strings.TrimPrefix(path, "/")
+	return strings.TrimSuffix(base, "/") + "/" + strings.TrimPrefix(path, "/")
 }
 
 // dateLayout is TMDB's date format for release, air, and first-air dates.

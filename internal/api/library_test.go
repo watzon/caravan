@@ -767,3 +767,35 @@ func TestSearchFailureModes(t *testing.T) {
 func itoa(id int64) string {
 	return strconv.FormatInt(id, 10)
 }
+
+// POST /library/movies carries the availability choice onto the row, and both
+// halves of the movie-only rule hold.
+func TestAddMovieMinAvailabilityContract(t *testing.T) {
+	h, st, _ := newTestServer(t)
+
+	rec := do(t, h, http.MethodPost, "/api/v1/library/movies",
+		`{"tmdb_id":78,"min_availability":"announced"}`)
+	wantStatus(t, rec, http.StatusCreated)
+	var created movieJSON
+	decodeBody(t, rec, &created)
+	if created.MinAvailability != core.AvailabilityAnnounced {
+		t.Errorf("min_availability = %q, want announced", created.MinAvailability)
+	}
+	m, err := st.GetMovieByTMDBID(context.Background(), 78)
+	if err != nil {
+		t.Fatalf("GetMovieByTMDBID: %v", err)
+	}
+	if m.MinAvailability != core.AvailabilityAnnounced {
+		t.Errorf("stored min_availability = %q, want announced", m.MinAvailability)
+	}
+
+	rec = do(t, h, http.MethodPost, "/api/v1/library/movies",
+		`{"tmdb_id":79,"min_availability":"day_one"}`)
+	wantStatus(t, rec, http.StatusBadRequest)
+	wantErrorBody(t, rec)
+
+	rec = do(t, h, http.MethodPost, "/api/v1/library/series",
+		`{"tmdb_id":1396,"min_availability":"released"}`)
+	wantStatus(t, rec, http.StatusBadRequest)
+	wantErrorBody(t, rec)
+}

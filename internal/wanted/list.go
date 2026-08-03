@@ -75,8 +75,17 @@ func Compute(ctx context.Context, st *store.Store) (*Lists, error) {
 		return p, nil
 	}
 
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+
 	out := &Lists{Movies: []Movie{}, Episodes: []Episode{}}
 	for _, ms := range movieStates {
+		// A movie that has not reached its minimum availability is never
+		// wanted, the way an unaired episode never is: there is nothing real
+		// to find yet. A file on disk overrides the calendar — whatever
+		// exists is graded against the profile, not against release dates.
+		if !ms.HasFile && !Available(ms.Movie, today) {
+			continue
+		}
 		reason, err := movieReason(ctx, ms, resolve)
 		if err != nil {
 			return nil, err
@@ -86,8 +95,6 @@ func Compute(ctx context.Context, st *store.Store) (*Lists, error) {
 		}
 		out.Movies = append(out.Movies, Movie{Movie: ms.Movie, Reason: reason, FileQuality: ms.FileQuality})
 	}
-
-	today := time.Now().UTC().Truncate(24 * time.Hour)
 	for _, es := range episodeStates {
 		// An episode with no known air date is treated as aired: providers do
 		// not always publish one, and "we don't know" must not hide a hole in
@@ -111,6 +118,62 @@ func Compute(ctx context.Context, st *store.Store) (*Lists, error) {
 		})
 	}
 	return out, nil
+}
+
+// cinemaWindow is how long after the theatrical date a movie with no known
+// home-release date is assumed to have reached one. It is Radarr's number: by
+// three months out, a movie that is going to get a home release has had it.
+const cinemaWindow = 90 * 24 * time.Hour
+
+// Available reports whether a movie has reached its minimum availability —
+// whether a file for it can plausibly exist yet. The rules are Radarr's
+// (Movie.IsAvailable), so a library migrated from one behaves identically:
+//
+//   - announced: available immediately.
+//   - in_cinemas: available once the theatrical date passes. With no
+//     theatrical date on record it degrades to the released rule rather than
+//     to "always": a missing date must not mean "search now".
+//   - released: available at the earlier of the digital and physical release
+//     dates; with neither on record, cinemaWindow after the theatrical date.
+//
+// One deliberate deviation: Radarr holds a movie with no dates at all forever,
+// which silently never searches for obscure titles the provider has no dates
+// for. Caravan treats it as available, the same reading Compute gives an
+// episode with no air date: "we don't know" must not hide a hole in the
+// library.
+//
+// An empty MinAvailability reads as released, the store default.
+func Available(m core.Movie, today time.Time) bool {
+	switch m.MinAvailability {
+	case core.AvailabilityAnnounced:
+		return true
+	case core.AvailabilityInCinemas:
+		if !m.ReleaseDate.IsZero() {
+			return !m.ReleaseDate.After(today)
+		}
+	}
+
+	when := homeRelease(m)
+	if when.IsZero() {
+		return true
+	}
+	return !when.After(today)
+}
+
+// homeRelease is the date a movie's home release is (or is expected to be)
+// out, zero when there is nothing to expect one from.
+func homeRelease(m core.Movie) time.Time {
+	when := m.DigitalRelease
+	if when.IsZero() || (!m.PhysicalRelease.IsZero() && m.PhysicalRelease.Before(when)) {
+		when = m.PhysicalRelease
+	}
+	if !when.IsZero() {
+		return when
+	}
+	if !m.ReleaseDate.IsZero() {
+		return m.ReleaseDate.Add(cinemaWindow)
+	}
+	return time.Time{}
 }
 
 // movieReason applies the wanted rules to one movie file state.

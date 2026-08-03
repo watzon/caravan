@@ -18,7 +18,11 @@ import (
 // Adding a movie that is already in the library refreshes its metadata and
 // keeps the user's monitored flag and profile assignment, exactly as a rescan
 // does.
-func (m *Manager) AddMovie(ctx context.Context, tmdbID int64) (*core.Movie, error) {
+//
+// minAvailability is the release stage the movie's automatic search waits for
+// (a core.Availability* constant). Empty means "no opinion": a new row gets
+// the released default, an existing row keeps whatever it has.
+func (m *Manager) AddMovie(ctx context.Context, tmdbID int64, minAvailability string) (*core.Movie, error) {
 	if m.provider == nil {
 		return nil, core.ErrNoMetadataProvider
 	}
@@ -34,7 +38,8 @@ func (m *Manager) AddMovie(ctx context.Context, tmdbID int64) (*core.Movie, erro
 		return nil, fmt.Errorf("library: movie %d not found", tmdbID)
 	}
 
-	return m.upsertMovieRow(ctx, meta, movieDir(meta.Title, meta.Year), "")
+	mv, _, err := m.upsertMovieRow(ctx, meta, movieDir(meta.Title, meta.Year), "", minAvailability)
+	return mv, err
 }
 
 // AddSeries adds a series and its full season/episode tree by provider id.
@@ -58,7 +63,7 @@ func (m *Manager) AddSeries(ctx context.Context, tmdbID int64) (*core.Series, er
 		return nil, fmt.Errorf("library: series %d not found", tmdbID)
 	}
 
-	sr, err := m.upsertSeriesRow(ctx, meta, seriesDir(meta.Title, meta.Year), "")
+	sr, _, err := m.upsertSeriesRow(ctx, meta, seriesDir(meta.Title, meta.Year), "")
 	if err != nil {
 		return nil, err
 	}

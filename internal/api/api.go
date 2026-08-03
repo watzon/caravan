@@ -218,6 +218,24 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 
 	api.HandleFunc("GET /search", s.handleSearch)
 
+	// Discover: browse the provider rather than search it. /discover is the
+	// landing page, /discover/browse pages one curated shelf, and
+	// /discover/{type}/{id} is one title's detail screen. Every response is
+	// decorated with what the library already holds and what has been
+	// requested, so the SPA never has to cross-reference two calls.
+	api.HandleFunc("GET /discover", s.handleDiscoverHome)
+	api.HandleFunc("GET /discover/browse", s.handleDiscoverBrowse)
+	api.HandleFunc("GET /discover/{type}/{id}", s.handleDiscoverTitle)
+
+	// Requests: a wish for something not in the library. Approving one takes
+	// the same add path the library endpoints do, and any add absorbs a
+	// matching pending request (see absorbRequests). There are no roles yet,
+	// so requesting and adding directly are both open.
+	api.HandleFunc("GET /requests", s.handleListRequests)
+	api.HandleFunc("POST /requests", s.handleCreateRequest)
+	api.HandleFunc("POST /requests/{id}/approve", s.handleApproveRequest)
+	api.HandleFunc("DELETE /requests/{id}", s.handleDismissRequest)
+
 	api.HandleFunc("GET /indexers", s.handleListIndexers)
 	api.HandleFunc("POST /indexers", s.handleCreateIndexer)
 	api.HandleFunc("PUT /indexers/{id}", s.handleUpdateIndexer)

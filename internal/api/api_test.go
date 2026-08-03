@@ -49,6 +49,11 @@ type stubManager struct {
 	// something to search for.
 	addSeriesEpisodes int
 
+	// addSeriesSeasons is how many monitored season rows AddSeries writes,
+	// numbered from 1. Zero keeps the stub's historical shape; the season
+	// selection tests need a series with seasons to leave behind.
+	addSeriesSeasons int
+
 	removeErr error
 
 	mu      sync.Mutex
@@ -82,11 +87,14 @@ func (m *stubManager) Scan(ctx context.Context) error {
 	return m.scanErr
 }
 
-func (m *stubManager) AddMovie(ctx context.Context, tmdbID int64) (*core.Movie, error) {
+func (m *stubManager) AddMovie(ctx context.Context, tmdbID int64, minAvailability string) (*core.Movie, error) {
 	if m.addErr != nil {
 		return nil, m.addErr
 	}
-	mv := &core.Movie{TMDBID: tmdbID, Title: "Stub Movie", SortTitle: "stub movie", Year: 2008, Monitored: true}
+	// The stub persists minAvailability verbatim (the store defaults an empty
+	// one), so handler tests can read the row to prove the plumbing.
+	mv := &core.Movie{TMDBID: tmdbID, Title: "Stub Movie", SortTitle: "stub movie", Year: 2008,
+		Monitored: true, MinAvailability: minAvailability}
 	if err := m.st.UpsertMovie(ctx, mv); err != nil {
 		return nil, err
 	}
@@ -100,6 +108,12 @@ func (m *stubManager) AddSeries(ctx context.Context, tmdbID int64) (*core.Series
 	sr := &core.Series{TMDBID: tmdbID, Title: "Stub Series", SortTitle: "stub series", Year: 2016, Monitored: true}
 	if err := m.st.UpsertSeries(ctx, sr); err != nil {
 		return nil, err
+	}
+	for i := 1; i <= m.addSeriesSeasons; i++ {
+		se := &core.Season{SeriesID: sr.ID, Number: i, Title: "Stub Season", Monitored: true}
+		if err := m.st.UpsertSeason(ctx, se); err != nil {
+			return nil, err
+		}
 	}
 	for i := 1; i <= m.addSeriesEpisodes; i++ {
 		e := &core.Episode{

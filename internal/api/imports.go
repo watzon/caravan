@@ -117,6 +117,9 @@ func (s *server) handleImportMatch(w http.ResponseWriter, r *http.Request) {
 		s.writeManagerError(w, "match unmatched file", err)
 		return
 	}
+	// Matching a parked file puts the title in the library, which is what a
+	// pending request was asking for. See absorbRequests.
+	s.absorbRequests(r.Context(), body.Type, body.TMDBID)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "matched"})
 }
 

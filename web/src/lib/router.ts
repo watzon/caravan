@@ -14,6 +14,18 @@
  */
 export const ROUTES = [
   '/first-run',
+  // Explore. The index is Discover: the first question on opening Caravan is
+  // "what should I watch", not "what do I already have". /discover is the same
+  // screen under its own name, so the nav entry has a canonical href.
+  '/',
+  '/discover',
+  '/discover/network/:id',
+  '/discover/studio/:id',
+  // TMDB ids, not library ids — a discover detail is about a title Caravan may
+  // not track at all.
+  '/discover/movie/:tmdbId',
+  '/discover/series/:tmdbId',
+  '/requests',
   '/movies',
   '/movies/:id',
   '/movies/:id/search',

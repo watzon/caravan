@@ -89,6 +89,38 @@ describe('matchRoutes', () => {
   it('resolves the queue', () => {
     expect(matchRoutes(ROUTES, '/queue')?.pattern).toBe('/queue');
   });
+
+  // The index is Discover now: it is a route in its own right, not a redirect
+  // to the library.
+  it('resolves the index and the discover screens', () => {
+    expect(matchRoutes(ROUTES, '/')?.pattern).toBe('/');
+    expect(matchRoutes(ROUTES, '/discover')?.pattern).toBe('/discover');
+    expect(matchRoutes(ROUTES, '/requests')?.pattern).toBe('/requests');
+  });
+
+  it('keeps the browse shelves apart from the title screens', () => {
+    expect(matchRoutes(ROUTES, '/discover/network/213')).toEqual({
+      pattern: '/discover/network/:id',
+      params: { id: '213' },
+    });
+    expect(matchRoutes(ROUTES, '/discover/studio/41077')).toEqual({
+      pattern: '/discover/studio/:id',
+      params: { id: '41077' },
+    });
+  });
+
+  // These ids are TMDB's, not the library's — /discover/series/1396 and
+  // /series/1396 are different titles entirely.
+  it('resolves a discover title by media type', () => {
+    expect(matchRoutes(ROUTES, '/discover/movie/78')).toEqual({
+      pattern: '/discover/movie/:tmdbId',
+      params: { tmdbId: '78' },
+    });
+    expect(matchRoutes(ROUTES, '/discover/series/1396')).toEqual({
+      pattern: '/discover/series/:tmdbId',
+      params: { tmdbId: '1396' },
+    });
+  });
 });
 
 describe('ordinalParam', () => {

@@ -248,3 +248,38 @@ func TestAddSeriesSearchesMissingOnlyWhenAsked(t *testing.T) {
 		})
 	}
 }
+
+// A monitored movie that has not reached its minimum availability must not be
+// searched: before the gate, adding an unreleased movie queued a search that
+// could only find junk. A file on disk overrides the calendar — whatever
+// exists is graded against the profile regardless of dates.
+func TestSearchWantedSkipsUnavailableMovies(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	ctx := context.Background()
+
+	future := time.Now().UTC().AddDate(1, 0, 0)
+	unreleased := &core.Movie{TMDBID: 41, Title: "Dune Part Three", Monitored: true,
+		ReleaseDate: future}
+	if err := st.UpsertMovie(ctx, unreleased); err != nil {
+		t.Fatalf("UpsertMovie: %v", err)
+	}
+	// Same dates, but the user said announced: searchable immediately.
+	eager := &core.Movie{TMDBID: 42, Title: "Impatience", Monitored: true,
+		ReleaseDate: future, MinAvailability: core.AvailabilityAnnounced}
+	if err := st.UpsertMovie(ctx, eager); err != nil {
+		t.Fatalf("UpsertMovie: %v", err)
+	}
+
+	wantQueued(t, h, "/api/v1/wanted/search", 1)
+	jobs := openJobs(t, st, core.JobSearchMovie)
+	if len(jobs) != 1 {
+		t.Fatalf("search_movie jobs = %d, want 1", len(jobs))
+	}
+	if want := `{"movie_id":` + itoa(eager.ID) + `}`; jobs[0].Payload != want {
+		t.Fatalf("payload = %q, want %q (the announced movie, not the gated one)", jobs[0].Payload, want)
+	}
+
+	// Search-now on the gated movie answers "nothing to search", exactly like
+	// an unaired episode.
+	wantQueued(t, h, "/api/v1/library/movies/"+itoa(unreleased.ID)+"/search", 0)
+}

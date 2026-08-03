@@ -123,6 +123,12 @@ func (s *Store) ListSeries(ctx context.Context) ([]core.Series, error) {
 	return out, nil
 }
 
+// SeriesIDsByTMDBID is MovieIDsByTMDBID's series twin; see it for why the
+// discover screens need it.
+func (s *Store) SeriesIDsByTMDBID(ctx context.Context, tmdbIDs []int64) (map[int64]int64, error) {
+	return s.idsByTMDBID(ctx, "series", tmdbIDs)
+}
+
 // DeleteSeries removes the series and, by foreign-key cascade, its seasons,
 // episodes, and episode-file links. Files on disk are untouched.
 func (s *Store) DeleteSeries(ctx context.Context, id int64) error {

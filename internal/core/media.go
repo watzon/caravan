@@ -34,10 +34,36 @@ type Movie struct {
 	// QualityProfileID references quality_profiles.id; 0 means "use the
 	// default profile".
 	QualityProfileID int64
-	// ReleaseDate is the theatrical/digital release date, zero when unknown.
+	// ReleaseDate is the theatrical release date, zero when unknown.
 	ReleaseDate time.Time
-	AddedAt     time.Time
-	UpdatedAt   time.Time
+	// DigitalRelease and PhysicalRelease are the home-release dates, zero when
+	// the provider has not published them. Together with ReleaseDate they are
+	// what MinAvailability is judged against (internal/wanted).
+	DigitalRelease  time.Time
+	PhysicalRelease time.Time
+	// MinAvailability is the release stage the movie must reach before its
+	// automatic search runs: one of the Availability* constants.
+	MinAvailability string
+	AddedAt         time.Time
+	UpdatedAt       time.Time
+}
+
+// Minimum-availability stages, stored verbatim in movies.min_availability and
+// constrained by a CHECK in migration 0010. The ordering is temporal:
+// announced happens before cinemas, cinemas before the home release.
+const (
+	// AvailabilityAnnounced searches as soon as the movie is added.
+	AvailabilityAnnounced = "announced"
+	// AvailabilityInCinemas waits for the theatrical release.
+	AvailabilityInCinemas = "in_cinemas"
+	// AvailabilityReleased waits for a home release (digital or physical). It
+	// is the default: before that, most of what a search finds is junk.
+	AvailabilityReleased = "released"
+)
+
+// ValidAvailability reports whether s names a minimum-availability stage.
+func ValidAvailability(s string) bool {
+	return s == AvailabilityAnnounced || s == AvailabilityInCinemas || s == AvailabilityReleased
 }
 
 // Series is a library TV series.

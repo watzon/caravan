@@ -38,9 +38,12 @@ func (m *Manager) importMovie(ctx context.Context, meta *core.MovieMeta, rel str
 		warn("%v", err)
 	}
 
-	mv, err := m.upsertMovieRow(ctx, meta, dir, posterRel)
+	mv, created, err := m.upsertMovieRow(ctx, meta, dir, posterRel, "")
 	if err != nil {
 		return "", 0, err
+	}
+	if created {
+		m.absorbRequests(ctx, core.MediaTypeMovie, meta.TMDBID, warn)
 	}
 
 	file := mediaFileFrom(finalRel, size, mv.ID, p)
@@ -81,12 +84,15 @@ func (m *Manager) importEpisode(ctx context.Context, meta *core.SeriesMeta, rel 
 		warn("%v", err)
 	}
 
-	sr, err := m.upsertSeriesRow(ctx, meta, dir, posterRel)
+	sr, created, err := m.upsertSeriesRow(ctx, meta, dir, posterRel)
 	if err != nil {
 		return "", 0, err
 	}
 	if err := m.upsertSeriesTree(ctx, sr.ID, meta); err != nil {
 		return "", 0, err
+	}
+	if created {
+		m.absorbRequests(ctx, core.MediaTypeSeries, meta.TMDBID, warn)
 	}
 	episodeIDs, err := m.ensureEpisodes(ctx, sr.ID, p.Season, p.Episodes)
 	if err != nil {
@@ -160,30 +166,58 @@ func (m *Manager) preserveKnownTags(ctx context.Context, f *core.MediaFile) erro
 	return nil
 }
 
+// absorbRequests marks a pending request approved because its title has just
+// entered the library through the scan/import path.
+//
+// A request is granted by the title arriving, not by the route it took: the
+// HTTP add endpoints do the same thing (internal/api/library.go). Without this,
+// a title requested and then simply copied into the storage root would leave
+// its request asking forever, with an Approve button that re-adds something
+// already tracked.
+//
+// It is a warning rather than an error for the same reason the poster and NFO
+// steps are: the file is imported and the library is correct, and a request row
+// still reading "pending" must not abort a scan (SPEC §13).
+func (m *Manager) absorbRequests(ctx context.Context, mediaType string, tmdbID int64, warn warnf) {
+	if tmdbID == 0 {
+		return
+	}
+	if _, err := m.store.ApproveRequestsFor(ctx, mediaType, tmdbID); err != nil {
+		warn("library: absorb requests for %s %d: %v", mediaType, tmdbID, err)
+	}
+}
+
 // upsertMovieRow refreshes provider metadata onto the movies row, creating it
-// when the TMDB id is new.
+// when the TMDB id is new, and reports whether the row was created.
 //
 // A rescan must not overwrite user intent, so the monitored flag, the quality
-// profile assignment, and the original add time survive from any existing row.
-func (m *Manager) upsertMovieRow(ctx context.Context, meta *core.MovieMeta, dir, posterRel string) (*core.Movie, error) {
+// profile assignment, the minimum availability, and the original add time
+// survive from any existing row. minAvailability, when non-empty, is fresh
+// user intent and overrides; the scan and import paths pass "".
+func (m *Manager) upsertMovieRow(ctx context.Context, meta *core.MovieMeta, dir, posterRel, minAvailability string) (*core.Movie, bool, error) {
 	mv := &core.Movie{
-		TMDBID:      meta.TMDBID,
-		IMDBID:      meta.IMDBID,
-		Title:       meta.Title,
-		SortTitle:   sortTitle(meta.Title),
-		Year:        meta.Year,
-		Overview:    meta.Overview,
-		Path:        dir,
-		PosterPath:  posterRel,
-		PosterURL:   meta.PosterURL,
-		Monitored:   true,
-		ReleaseDate: meta.ReleaseDate,
+		TMDBID:          meta.TMDBID,
+		IMDBID:          meta.IMDBID,
+		Title:           meta.Title,
+		SortTitle:       sortTitle(meta.Title),
+		Year:            meta.Year,
+		Overview:        meta.Overview,
+		Path:            dir,
+		PosterPath:      posterRel,
+		PosterURL:       meta.PosterURL,
+		Monitored:       true,
+		ReleaseDate:     meta.ReleaseDate,
+		DigitalRelease:  meta.DigitalRelease,
+		PhysicalRelease: meta.PhysicalRelease,
+		MinAvailability: minAvailability,
 	}
 
+	created := true
 	if meta.TMDBID != 0 {
 		existing, err := m.store.GetMovieByTMDBID(ctx, meta.TMDBID)
 		switch {
 		case err == nil:
+			created = false
 			mv.ID = existing.ID
 			mv.Monitored = existing.Monitored
 			mv.QualityProfileID = existing.QualityProfileID
@@ -191,20 +225,23 @@ func (m *Manager) upsertMovieRow(ctx context.Context, meta *core.MovieMeta, dir,
 			if posterRel == "" {
 				mv.PosterPath = existing.PosterPath
 			}
+			if minAvailability == "" {
+				mv.MinAvailability = existing.MinAvailability
+			}
 		case !errors.Is(err, store.ErrNotFound):
-			return nil, err
+			return nil, false, err
 		}
 	}
 
 	if err := m.store.UpsertMovie(ctx, mv); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return mv, nil
+	return mv, created, nil
 }
 
 // upsertSeriesRow is upsertMovieRow's series twin, with the same
 // preserve-user-intent rule.
-func (m *Manager) upsertSeriesRow(ctx context.Context, meta *core.SeriesMeta, dir, posterRel string) (*core.Series, error) {
+func (m *Manager) upsertSeriesRow(ctx context.Context, meta *core.SeriesMeta, dir, posterRel string) (*core.Series, bool, error) {
 	sr := &core.Series{
 		TMDBID:     meta.TMDBID,
 		TVDBID:     meta.TVDBID,
@@ -221,10 +258,12 @@ func (m *Manager) upsertSeriesRow(ctx context.Context, meta *core.SeriesMeta, di
 		FirstAired: meta.FirstAirDate,
 	}
 
+	created := true
 	if meta.TMDBID != 0 {
 		existing, err := m.store.GetSeriesByTMDBID(ctx, meta.TMDBID)
 		switch {
 		case err == nil:
+			created = false
 			sr.ID = existing.ID
 			sr.Monitored = existing.Monitored
 			sr.QualityProfileID = existing.QualityProfileID
@@ -233,14 +272,14 @@ func (m *Manager) upsertSeriesRow(ctx context.Context, meta *core.SeriesMeta, di
 				sr.PosterPath = existing.PosterPath
 			}
 		case !errors.Is(err, store.ErrNotFound):
-			return nil, err
+			return nil, false, err
 		}
 	}
 
 	if err := m.store.UpsertSeries(ctx, sr); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return sr, nil
+	return sr, created, nil
 }
 
 // upsertSeriesTree writes the provider's seasons and episodes for a series.

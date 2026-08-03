@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/watzon/caravan/internal/core"
 )
@@ -21,7 +22,7 @@ func TestAddMovieCreatesTheRowWithoutTouchingDisk(t *testing.T) {
 		PosterURL: h.posterURL,
 	}
 
-	mv, err := h.mgr.AddMovie(ctx, 10378)
+	mv, err := h.mgr.AddMovie(ctx, 10378, "")
 	if err != nil {
 		t.Fatalf("AddMovie: %v", err)
 	}
@@ -66,7 +67,7 @@ func TestAddMovieAgainKeepsUserIntent(t *testing.T) {
 	ctx := context.Background()
 	h.provider.movieByID[10378] = core.MovieMeta{TMDBID: 10378, Title: "Big Buck Bunny", Year: 2008}
 
-	first, err := h.mgr.AddMovie(ctx, 10378)
+	first, err := h.mgr.AddMovie(ctx, 10378, "")
 	if err != nil {
 		t.Fatalf("AddMovie: %v", err)
 	}
@@ -79,7 +80,7 @@ func TestAddMovieAgainKeepsUserIntent(t *testing.T) {
 	// Re-adding refreshes provider metadata; it must not undo the user's
 	// choices, exactly as a rescan does not.
 	h.provider.movieByID[10378] = core.MovieMeta{TMDBID: 10378, Title: "Big Buck Bunny", Year: 2008, Overview: "Updated."}
-	second, err := h.mgr.AddMovie(ctx, 10378)
+	second, err := h.mgr.AddMovie(ctx, 10378, "")
 	if err != nil {
 		t.Fatalf("AddMovie again: %v", err)
 	}
@@ -227,7 +228,7 @@ func TestAddWithoutProviderIsRecognizable(t *testing.T) {
 	// a 503 that tells the user to add a key, so it must survive the call.
 	mgr := h.newManager(h.st, nil)
 
-	if _, err := mgr.AddMovie(context.Background(), 1); !errors.Is(err, core.ErrNoMetadataProvider) {
+	if _, err := mgr.AddMovie(context.Background(), 1, ""); !errors.Is(err, core.ErrNoMetadataProvider) {
 		t.Fatalf("AddMovie error = %v, want core.ErrNoMetadataProvider", err)
 	}
 	if _, err := mgr.AddSeries(context.Background(), 1); !errors.Is(err, core.ErrNoMetadataProvider) {
@@ -238,10 +239,66 @@ func TestAddWithoutProviderIsRecognizable(t *testing.T) {
 func TestAddRejectsInvalidProviderID(t *testing.T) {
 	h := newHarness(t)
 
-	if _, err := h.mgr.AddMovie(context.Background(), 0); err == nil {
+	if _, err := h.mgr.AddMovie(context.Background(), 0, ""); err == nil {
 		t.Fatal("AddMovie(0) succeeded, want an error")
 	}
 	if _, err := h.mgr.AddSeries(context.Background(), -1); err == nil {
 		t.Fatal("AddSeries(-1) succeeded, want an error")
+	}
+}
+
+// The availability choice is user intent like the monitored flag: an add that
+// names one sets it, an add that does not leaves the existing choice alone,
+// and the provider's home-release dates always refresh alongside.
+func TestAddMovieMinAvailability(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	digital := time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC)
+	h.provider.movieByID[10378] = core.MovieMeta{TMDBID: 10378, Title: "Big Buck Bunny", Year: 2008,
+		DigitalRelease: digital}
+
+	mv, err := h.mgr.AddMovie(ctx, 10378, core.AvailabilityAnnounced)
+	if err != nil {
+		t.Fatalf("AddMovie: %v", err)
+	}
+	if mv.MinAvailability != core.AvailabilityAnnounced {
+		t.Fatalf("MinAvailability = %q, want %q", mv.MinAvailability, core.AvailabilityAnnounced)
+	}
+	if !mv.DigitalRelease.Equal(digital) {
+		t.Fatalf("DigitalRelease = %v, want the provider's %v", mv.DigitalRelease, digital)
+	}
+
+	// Re-adding with no opinion keeps the choice.
+	kept, err := h.mgr.AddMovie(ctx, 10378, "")
+	if err != nil {
+		t.Fatalf("AddMovie again: %v", err)
+	}
+	if kept.MinAvailability != core.AvailabilityAnnounced {
+		t.Fatalf("MinAvailability after silent re-add = %q, want %q kept", kept.MinAvailability, core.AvailabilityAnnounced)
+	}
+
+	// Re-adding with a new choice is fresh user intent.
+	changed, err := h.mgr.AddMovie(ctx, 10378, core.AvailabilityInCinemas)
+	if err != nil {
+		t.Fatalf("AddMovie with a new choice: %v", err)
+	}
+	if changed.MinAvailability != core.AvailabilityInCinemas {
+		t.Fatalf("MinAvailability = %q, want the new choice %q", changed.MinAvailability, core.AvailabilityInCinemas)
+	}
+}
+
+// A movie that arrives with no stated availability gets the released default —
+// the store's job, but the add path is where it matters.
+func TestAddMovieDefaultsToReleased(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.provider.movieByID[10378] = core.MovieMeta{TMDBID: 10378, Title: "Big Buck Bunny", Year: 2008}
+
+	mv, err := h.mgr.AddMovie(ctx, 10378, "")
+	if err != nil {
+		t.Fatalf("AddMovie: %v", err)
+	}
+	if mv.MinAvailability != core.AvailabilityReleased {
+		t.Fatalf("MinAvailability = %q, want the %q default", mv.MinAvailability, core.AvailabilityReleased)
 	}
 }

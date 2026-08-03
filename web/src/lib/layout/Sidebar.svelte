@@ -9,6 +9,7 @@
   import { isActive } from '../router.svelte';
   import { auth } from '../state/auth.svelte';
   import { BADGE_POLL_MS, downloads } from '../state/downloads.svelte';
+  import { REQUESTS_BADGE_POLL_MS, requests } from '../state/requests.svelte';
   import { system } from '../state/system.svelte';
   import { formatBytes } from '../format';
   import Icon, { type IconName } from '../components/Icon.svelte';
@@ -22,7 +23,14 @@
     href: string;
     label: string;
     icon: IconName;
+    /** Extra paths that also light this row up — Discover also owns `/`. */
+    alsoActiveOn?: string[];
   }
+
+  const EXPLORE: NavItem[] = [
+    { href: '/discover', label: 'Discover', icon: 'compass', alsoActiveOn: ['/'] },
+    { href: '/requests', label: 'Requests', icon: 'inbox' },
+  ];
 
   const LIBRARY: NavItem[] = [
     { href: '/movies', label: 'Movies', icon: 'film' },
@@ -45,6 +53,10 @@
   // The badge is the only reason the shell polls downloads, so it does so
   // lazily; the queue screen subscribes at its own faster rate while open.
   $effect(() => downloads.subscribe(BADGE_POLL_MS));
+
+  // Same deal for pending requests: the badge is work waiting on the user, so
+  // it stays live, at the laziest rate that still feels current.
+  $effect(() => requests.subscribe(REQUESTS_BADGE_POLL_MS));
 
   // The nav counts come from system status, which is otherwise only fetched
   // on mount and after setting changes. A lazy poll keeps them honest without
@@ -70,6 +82,10 @@
     const counts = status?.counts;
     const quiet = (count?: number): NavBadge | null => (count ? { count, kind: 'quiet' } : null);
     switch (href) {
+      case '/requests':
+        return requests.pendingCount
+          ? { count: requests.pendingCount, kind: 'warning' }
+          : null;
       case '/movies':
         return quiet(counts?.movies);
       case '/series':
@@ -125,7 +141,8 @@
 
   <nav class="flex flex-1 flex-col gap-6 overflow-y-auto px-2">
     {#snippet navLink(item: NavItem)}
-      {@const active = isActive(item.href)}
+      {@const active =
+        isActive(item.href) || (item.alsoActiveOn ?? []).some((p) => isActive(p, true))}
       {@const badge = navBadge(item.href)}
       <!-- The accent is the box's own left border, so it wraps the rounded
            corners (the Paper mock). Inactive rows carry it transparent to
@@ -159,6 +176,13 @@
         {/if}
       </a>
     {/snippet}
+
+    <div class="flex flex-col gap-1">
+      <p class="micro-label px-2 pb-1">Explore</p>
+      {#each EXPLORE as item (item.href)}
+        {@render navLink(item)}
+      {/each}
+    </div>
 
     <div class="flex flex-col gap-1">
       <p class="micro-label px-2 pb-1">Library</p>

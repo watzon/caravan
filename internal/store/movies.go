@@ -10,7 +10,8 @@ import (
 )
 
 const movieColumns = `id, tmdb_id, imdb_id, title, sort_title, year, overview,
-	path, poster_path, poster_url, monitored, quality_profile_id, release_date, added_at, updated_at`
+	path, poster_path, poster_url, monitored, quality_profile_id, release_date,
+	digital_release, physical_release, min_availability, added_at, updated_at`
 
 // UpsertMovie inserts or updates m and writes back the assigned ID.
 //
@@ -36,14 +37,20 @@ func (s *Store) UpsertMovie(ctx context.Context, m *core.Movie) error {
 	}
 	m.UpdatedAt = ts
 
+	if m.MinAvailability == "" {
+		m.MinAvailability = core.AvailabilityReleased
+	}
+
 	if m.ID != 0 {
 		res, err := s.db.ExecContext(ctx, `
 			UPDATE movies SET tmdb_id = ?, imdb_id = ?, title = ?, sort_title = ?, year = ?,
 				overview = ?, path = ?, poster_path = ?, poster_url = ?, monitored = ?,
-				quality_profile_id = ?, release_date = ?, added_at = ?, updated_at = ?
+				quality_profile_id = ?, release_date = ?, digital_release = ?,
+				physical_release = ?, min_availability = ?, added_at = ?, updated_at = ?
 			WHERE id = ?`,
 			m.TMDBID, m.IMDBID, m.Title, m.SortTitle, m.Year, m.Overview, m.Path, m.PosterPath,
 			m.PosterURL, m.Monitored, m.QualityProfileID, formatTime(m.ReleaseDate),
+			formatTime(m.DigitalRelease), formatTime(m.PhysicalRelease), m.MinAvailability,
 			formatTime(m.AddedAt), formatTime(m.UpdatedAt), m.ID)
 		if err != nil {
 			return fmt.Errorf("store: update movie %d: %w", m.ID, err)
@@ -60,11 +67,13 @@ func (s *Store) UpsertMovie(ctx context.Context, m *core.Movie) error {
 
 	res, err := s.db.ExecContext(ctx, `
 		INSERT INTO movies (tmdb_id, imdb_id, title, sort_title, year, overview, path,
-			poster_path, poster_url, monitored, quality_profile_id, release_date, added_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			poster_path, poster_url, monitored, quality_profile_id, release_date,
+			digital_release, physical_release, min_availability, added_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		m.TMDBID, m.IMDBID, m.Title, m.SortTitle, m.Year, m.Overview, m.Path, m.PosterPath,
-		m.PosterURL, m.Monitored, m.QualityProfileID, formatTime(m.ReleaseDate), formatTime(m.AddedAt),
-		formatTime(m.UpdatedAt))
+		m.PosterURL, m.Monitored, m.QualityProfileID, formatTime(m.ReleaseDate),
+		formatTime(m.DigitalRelease), formatTime(m.PhysicalRelease), m.MinAvailability,
+		formatTime(m.AddedAt), formatTime(m.UpdatedAt))
 	if err != nil {
 		return fmt.Errorf("store: insert movie %q: %w", m.Title, err)
 	}
@@ -125,6 +134,46 @@ func (s *Store) ListMovies(ctx context.Context) ([]core.Movie, error) {
 	return out, nil
 }
 
+// MovieIDsByTMDBID maps the given provider ids onto library ids, omitting the
+// ones that are not in the library. It exists for the discover screens, which
+// decorate a page of provider results with "already yours" and would otherwise
+// either load the whole library or issue a query per row.
+func (s *Store) MovieIDsByTMDBID(ctx context.Context, tmdbIDs []int64) (map[int64]int64, error) {
+	return s.idsByTMDBID(ctx, "movies", tmdbIDs)
+}
+
+// idsByTMDBID is the shared body of MovieIDsByTMDBID and SeriesIDsByTMDBID.
+// table is a package-internal literal, never caller input.
+func (s *Store) idsByTMDBID(ctx context.Context, table string, tmdbIDs []int64) (map[int64]int64, error) {
+	out := map[int64]int64{}
+	if len(tmdbIDs) == 0 {
+		return out, nil
+	}
+	args := make([]any, 0, len(tmdbIDs))
+	for _, id := range tmdbIDs {
+		args = append(args, id)
+	}
+
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT tmdb_id, id FROM "+table+" WHERE tmdb_id IN ("+placeholders(len(tmdbIDs))+")", args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: %s ids by tmdb id: %w", table, err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var tmdbID, id int64
+		if err := rows.Scan(&tmdbID, &id); err != nil {
+			return nil, fmt.Errorf("store: scan %s id: %w", table, err)
+		}
+		out[tmdbID] = id
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: %s ids by tmdb id: %w", table, err)
+	}
+	return out, nil
+}
+
 // DeleteMovie removes the movie row. It does not touch files on disk and does
 // not remove media_files rows: those are reconciled by a rescan.
 func (s *Store) DeleteMovie(ctx context.Context, id int64) error {
@@ -140,20 +189,5 @@ type scanner interface {
 }
 
 func scanMovie(sc scanner) (*core.Movie, error) {
-	var (
-		m           core.Movie
-		releaseDate string
-		addedAt     string
-		updatedAt   string
-	)
-	err := sc.Scan(&m.ID, &m.TMDBID, &m.IMDBID, &m.Title, &m.SortTitle, &m.Year, &m.Overview,
-		&m.Path, &m.PosterPath, &m.PosterURL, &m.Monitored, &m.QualityProfileID, &releaseDate,
-		&addedAt, &updatedAt)
-	if err != nil {
-		return nil, err
-	}
-	m.ReleaseDate = parseTime(releaseDate)
-	m.AddedAt = parseTime(addedAt)
-	m.UpdatedAt = parseTime(updatedAt)
-	return &m, nil
+	return scanMovieWith(sc)
 }

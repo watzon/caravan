@@ -76,7 +76,7 @@ func (h *harness) events() []core.Event {
 func addMovieItem(h *harness) *core.Movie {
 	h.t.Helper()
 	seedMovie(h)
-	mv, err := h.mgr.AddMovie(context.Background(), 10378)
+	mv, err := h.mgr.AddMovie(context.Background(), 10378, "")
 	if err != nil {
 		h.t.Fatalf("AddMovie: %v", err)
 	}

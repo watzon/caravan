@@ -13,7 +13,7 @@ import (
 const (
 	movieStateColumns = `m.id, m.tmdb_id, m.imdb_id, m.title, m.sort_title, m.year, m.overview,
 		m.path, m.poster_path, m.poster_url, m.monitored, m.quality_profile_id, m.release_date,
-		m.added_at, m.updated_at`
+		m.digital_release, m.physical_release, m.min_availability, m.added_at, m.updated_at`
 	episodeStateColumns = `e.id, e.series_id, e.season_number, e.episode_number, e.tmdb_id,
 		e.title, e.overview, e.air_date, e.monitored`
 )
@@ -163,18 +163,22 @@ func (s *Store) EpisodeFileStates(ctx context.Context) ([]EpisodeFileState, erro
 // that carry no extras.
 func scanMovieWith(sc scanner, extra ...any) (*core.Movie, error) {
 	var (
-		m           core.Movie
-		releaseDate string
-		addedAt     string
-		updatedAt   string
+		m               core.Movie
+		releaseDate     string
+		digitalRelease  string
+		physicalRelease string
+		addedAt         string
+		updatedAt       string
 	)
 	dest := []any{&m.ID, &m.TMDBID, &m.IMDBID, &m.Title, &m.SortTitle, &m.Year, &m.Overview,
 		&m.Path, &m.PosterPath, &m.PosterURL, &m.Monitored, &m.QualityProfileID, &releaseDate,
-		&addedAt, &updatedAt}
+		&digitalRelease, &physicalRelease, &m.MinAvailability, &addedAt, &updatedAt}
 	if err := sc.Scan(append(dest, extra...)...); err != nil {
 		return nil, err
 	}
 	m.ReleaseDate = parseTime(releaseDate)
+	m.DigitalRelease = parseTime(digitalRelease)
+	m.PhysicalRelease = parseTime(physicalRelease)
 	m.AddedAt = parseTime(addedAt)
 	m.UpdatedAt = parseTime(updatedAt)
 	return &m, nil

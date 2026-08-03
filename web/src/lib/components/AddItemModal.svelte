@@ -8,6 +8,7 @@
   import { api, errorText } from '../api/client';
   import type { MovieMeta, SearchResults, SeriesMeta } from '../api/types';
   import { navigate } from '../router.svelte';
+  import { readSearchOnAdd, writeSearchOnAdd } from '../searchOnAdd';
   import { pushToast } from '../state/toast.svelte';
   import Badge from './Badge.svelte';
   import Button from './Button.svelte';
@@ -46,31 +47,11 @@
   const DEBOUNCE_MS = 250;
   const MIN_QUERY = 2;
 
-  /**
-   * "Start searching immediately" is sticky per browser: it is a habit, not a
-   * per-item decision, and Sonarr/Radarr users expect the box to remember. It
-   * defaults on — adding something you do not want searched is the rarer case.
-   */
-  const SEARCH_ON_ADD_KEY = 'caravan.searchOnAdd';
-
-  function readSearchOnAdd(): boolean {
-    try {
-      return window.localStorage.getItem(SEARCH_ON_ADD_KEY) !== '0';
-    } catch {
-      // Private mode, or storage disabled: the default still applies.
-      return true;
-    }
-  }
-
   let searchOnAdd = $state(readSearchOnAdd());
 
   function setSearchOnAdd(next: boolean) {
     searchOnAdd = next;
-    try {
-      window.localStorage.setItem(SEARCH_ON_ADD_KEY, next ? '1' : '0');
-    } catch {
-      // The in-memory choice still governs this add.
-    }
+    writeSearchOnAdd(next);
   }
 
   // Both props seed local state once: the modal is remounted per use, so

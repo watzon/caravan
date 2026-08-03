@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"time"
 
 	"github.com/watzon/caravan/internal/core"
 )
@@ -18,11 +19,28 @@ type movieResult struct {
 	ReleaseDate   string `json:"release_date"`
 }
 
+// TMDB release types, from /movie/{id}/release_dates. Only the two home-release
+// kinds matter to Caravan; theatrical is already the top-level release_date.
+const (
+	releaseTypeDigital  = 4
+	releaseTypePhysical = 5
+)
+
 // movieDetail is /movie/{id}. IMDB ids only appear on the details endpoint,
-// never on search results.
+// never on search results. ReleaseDates is the appended per-region release
+// list; its dates are full timestamps ("2017-01-03T00:00:00.000Z"), unlike
+// every other date TMDB serves.
 type movieDetail struct {
 	movieResult
-	IMDBID string `json:"imdb_id"`
+	IMDBID       string `json:"imdb_id"`
+	ReleaseDates struct {
+		Results []struct {
+			ReleaseDates []struct {
+				ReleaseDate string `json:"release_date"`
+				Type        int    `json:"type"`
+			} `json:"release_dates"`
+		} `json:"results"`
+	} `json:"release_dates"`
 }
 
 type movieSearchResponse struct {
@@ -44,14 +62,46 @@ func (c *Client) SearchMovies(ctx context.Context, q string) ([]core.MovieMeta, 
 	return out, nil
 }
 
-// GetMovie returns full details for one movie.
+// GetMovie returns full details for one movie, including its home-release
+// dates: they are what a minimum availability of "released" waits for.
 func (c *Client) GetMovie(ctx context.Context, tmdbID int64) (*core.MovieMeta, error) {
 	var d movieDetail
-	if err := c.get(ctx, fmt.Sprintf("/movie/%d", tmdbID), nil, &d); err != nil {
+	q := url.Values{"append_to_response": {"release_dates"}}
+	if err := c.get(ctx, fmt.Sprintf("/movie/%d", tmdbID), q, &d); err != nil {
 		return nil, err
 	}
 	m := c.movieMeta(d.movieResult, d.IMDBID)
+	m.DigitalRelease = earliestRelease(d, releaseTypeDigital)
+	m.PhysicalRelease = earliestRelease(d, releaseTypePhysical)
 	return &m, nil
+}
+
+// earliestRelease finds the earliest release of one type across every region.
+// Earliest-anywhere rather than one home region: "released" asks whether a
+// copy can exist at all, and the first region's release is when that starts
+// being true.
+func earliestRelease(d movieDetail, releaseType int) time.Time {
+	var earliest time.Time
+	for _, region := range d.ReleaseDates.Results {
+		for _, r := range region.ReleaseDates {
+			if r.Type != releaseType {
+				continue
+			}
+			// The timestamp's date half is dateLayout; the clock is noise.
+			raw := r.ReleaseDate
+			if len(raw) > len(dateLayout) {
+				raw = raw[:len(dateLayout)]
+			}
+			when := parseDate(raw)
+			if when.IsZero() {
+				continue
+			}
+			if earliest.IsZero() || when.Before(earliest) {
+				earliest = when
+			}
+		}
+	}
+	return earliest
 }
 
 // movieMeta converts a TMDB movie into the provider-side domain type.

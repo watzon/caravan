@@ -87,11 +87,20 @@ export interface Movie {
   monitored: boolean;
   quality_profile_id: number;
   release_date: string;
+  /** The release stage the movie's automatic search waits for. */
+  min_availability: MinAvailability;
   added_at: string;
   updated_at: string;
   /** Present when the movie has an imported file. */
   file?: MediaFile | null;
 }
+
+/**
+ * Minimum availability: how far into its release a movie must be before the
+ * automatic search goes after it (internal/wanted). Movies only — episodes
+ * gate on their air date instead.
+ */
+export type MinAvailability = 'announced' | 'in_cinemas' | 'released';
 
 /** internal/core.Episode plus its imported file, when there is one. */
 export interface Episode {
@@ -448,6 +457,18 @@ export interface AddItemRequest {
   search_now?: boolean;
   /** Series only: queue a search for every wanted episode after the add. */
   search_missing?: boolean;
+  /**
+   * Series only: the seasons this add is going after. Omitting it adds the
+   * whole series; naming a subset leaves every other season unmonitored, and
+   * is what stops a partial add from closing a request for seasons it never
+   * acquired.
+   */
+  seasons?: number[];
+  /**
+   * Movies only: the release stage the automatic search waits for. Omitting
+   * it defaults a new movie to 'released' and leaves a re-add's choice alone.
+   */
+  min_availability?: MinAvailability;
 }
 
 /**
@@ -860,4 +881,160 @@ export interface Conversion {
   error: string;
   created_at: string;
   updated_at: string;
+}
+
+/* ---------------------------------------------------------------------------
+ * Discover & requests (SPEC §11 `/discover`, `/requests`).
+ *
+ * Two id spaces meet here: `tmdb_id` addresses everything under /discover,
+ * `library_id` addresses /library/*. Nothing cross-references two calls to work
+ * out owned/requested state — every discover payload arrives pre-decorated.
+ * ------------------------------------------------------------------------- */
+
+/** internal/api MediaTypeMovie/MediaTypeSeries. Never TMDB's "tv". */
+export type MediaType = 'movie' | 'series';
+
+/** internal/api.discoverItemJSON — one provider title, decorated. */
+export interface DiscoverItem {
+  media_type: MediaType;
+  tmdb_id: number;
+  title: string;
+  year: number;
+  overview: string;
+  /** The provider's raw path; round-trips into POST /requests unchanged. */
+  poster_path: string;
+  /** Rendered poster URL, read-only (derived server-side). */
+  poster_url: string;
+  backdrop_url: string;
+  /** TMDB's 0-10 vote average; 0 when nobody has voted. */
+  vote_average: number;
+  /** Release date (movie) or first air date (series); "" when unknown. */
+  date: string;
+  in_library: boolean;
+  /** 0 when `in_library` is false. */
+  library_id: number;
+  /** A *pending* request names this title. Approved/dismissed do not count. */
+  requested: boolean;
+}
+
+export type DiscoverSourceType = 'network' | 'studio';
+
+/**
+ * internal/api.discoverSourceJSON — one curated browse shelf. Deliberately
+ * carries no title count: TMDB's is the whole catalogue, not what Caravan
+ * holds, and a number nobody can act on is worse than no number.
+ */
+export interface DiscoverSource {
+  id: number;
+  name: string;
+  type: DiscoverSourceType;
+}
+
+/** GET /discover. */
+export interface DiscoverHome {
+  trending: DiscoverItem[];
+  popular_movies: DiscoverItem[];
+  popular_series: DiscoverItem[];
+  networks: DiscoverSource[];
+  studios: DiscoverSource[];
+}
+
+/** GET /discover/browse — one page of a curated shelf. */
+export interface DiscoverBrowse {
+  source: DiscoverSource;
+  page: number;
+  total_pages: number;
+  items: DiscoverItem[];
+}
+
+/** internal/api.castMemberJSON. */
+export interface CastMember {
+  tmdb_id: number;
+  name: string;
+  character: string;
+  profile_url: string;
+}
+
+/**
+ * internal/api.discoverSeasonJSON. `requested` is true when a pending request
+ * covers this season — including a whole-title request, which covers them all.
+ */
+export interface DiscoverSeason {
+  season_number: number;
+  title: string;
+  overview: string;
+  poster_url: string;
+  air_date: string;
+  episode_count: number;
+  in_library: boolean;
+  requested: boolean;
+}
+
+/** GET /discover/{type}/{tmdbID} — the acquisition screen's payload. */
+export interface DiscoverTitle extends DiscoverItem {
+  status: string;
+  /** Feature length (movie) or one episode's run time (series), in minutes. */
+  runtime: number;
+  /**
+   * Originating network (series) or lead production company (movie); "" when
+   * the provider names neither. One field because exactly one applies, the
+   * same way `date` is a release date or a first air date.
+   */
+  network: string;
+  /** A series' most recent air date; "" for movies and for unaired series. */
+  last_aired: string;
+  /** ISO 639-1 original-language code ("en"); "" when unknown. */
+  language: string;
+  genres: string[];
+  imdb_id: string;
+  tvdb_id: number;
+  cast: CastMember[];
+  recommendations: DiscoverItem[];
+  /** Always empty for movies. */
+  seasons: DiscoverSeason[];
+}
+
+export type RequestStatus = 'pending' | 'approved' | 'dismissed';
+
+/** internal/api.requestJSON — one row of the requests screen. */
+export interface MediaRequest {
+  id: number;
+  media_type: MediaType;
+  tmdb_id: number;
+  title: string;
+  year: number;
+  poster_path: string;
+  /** "" when no metadata provider is configured; the list still works. */
+  poster_url: string;
+  /** null means the whole title: every movie, and an all-seasons series ask. */
+  seasons: number[] | null;
+  /** "" when unspecified — every series request. */
+  min_availability: MinAvailability | '';
+  status: RequestStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Body for POST /requests. A second request for the same title merges into the
+ * pending one and answers 201 with that row's id — update in place, never
+ * append.
+ */
+export interface CreateRequestBody {
+  media_type: MediaType;
+  tmdb_id: number;
+  title: string;
+  year: number;
+  poster_path?: string;
+  /** Series only; omitting it asks for the whole title. */
+  seasons?: number[];
+  /** Movies only: the release stage the asker wants the movie held for. */
+  min_availability?: MinAvailability;
+}
+
+/** POST /requests/{id}/approve — the add happened, and the row is approved. */
+export interface ApproveRequestResult {
+  request: MediaRequest;
+  movie?: Movie;
+  series?: Series;
 }

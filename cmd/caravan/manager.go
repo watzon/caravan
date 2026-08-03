@@ -156,12 +156,12 @@ func (a *libraryAdapter) Scan(ctx context.Context) error {
 	return nil
 }
 
-func (a *libraryAdapter) AddMovie(ctx context.Context, tmdbID int64) (*core.Movie, error) {
+func (a *libraryAdapter) AddMovie(ctx context.Context, tmdbID int64, minAvailability string) (*core.Movie, error) {
 	mgr, err := a.current(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return mgr.AddMovie(ctx, tmdbID)
+	return mgr.AddMovie(ctx, tmdbID, minAvailability)
 }
 
 func (a *libraryAdapter) AddSeries(ctx context.Context, tmdbID int64) (*core.Series, error) {
