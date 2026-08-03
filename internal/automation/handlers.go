@@ -21,6 +21,10 @@ import (
 const (
 	defaultRSSSyncInterval = 15
 	defaultBacklogInterval = 360
+	// defaultRefreshInterval is twelve hours, Radarr and Sonarr's cadence: a
+	// release date or a series status changes on the scale of days, and every
+	// sweep is one provider round trip per movie plus one per season.
+	defaultRefreshInterval = 720
 	searchTimeout          = 30 * time.Second
 	engineWaitTimeout      = 5 * time.Second
 	highTitleConfidence    = 0.9
@@ -404,6 +408,8 @@ func (r *Runner) scheduleRecurring(ctx context.Context, kind string) error {
 		key, defaultMinutes = store.SettingRSSSyncIntervalMinutes, defaultRSSSyncInterval
 	case core.JobBacklogSweep:
 		key, defaultMinutes = store.SettingBacklogIntervalMinutes, defaultBacklogInterval
+	case core.JobRefreshMetadata:
+		key, defaultMinutes = store.SettingRefreshIntervalMinutes, defaultRefreshInterval
 	default:
 		return fmt.Errorf("unsupported recurring job kind %q", kind)
 	}

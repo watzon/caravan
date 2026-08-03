@@ -283,6 +283,11 @@ const (
 	JobBacklogSweep  = "backlog_sweep"
 	JobSearchMovie   = "search_movie"
 	JobSearchEpisode = "search_episode"
+	// JobRefreshMetadata re-fetches provider metadata for every monitored
+	// title. It is what keeps release dates, series statuses and new seasons
+	// current for titles that have no files yet — nothing else ever revisits
+	// those, and the minimum-availability gate judges against their dates.
+	JobRefreshMetadata = "refresh_metadata"
 )
 
 // JobSearchMoviePayload is the search_movie job's arguments. The encoded form

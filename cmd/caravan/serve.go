@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -220,7 +221,28 @@ func runServe(args []string) error {
 	runner := automation.NewRunner(st, indexers, engines.await,
 		automation.WithDedicatedWorker(convert.JobKind, converter.Handle),
 		automation.WithDedicatedWorker(relocate.JobKind, relocator.Handle),
-		automation.WithHandler(jellyfin.JobKind, handoff.Handle))
+		automation.WithHandler(jellyfin.JobKind, handoff.Handle),
+		// The metadata refresh needs the library manager, which the automation
+		// package deliberately does not know about — same registration story
+		// as the Jellyfin handoff. A process with no TMDB key yet skips the
+		// sweep cleanly rather than burning the recurring job's retries on
+		// ordinary first-run state.
+		automation.WithHandler(core.JobRefreshMetadata,
+			func(ctx context.Context, _ *store.Store, _ json.RawMessage) error {
+				res, err := mgr.RefreshLibrary(ctx)
+				if err != nil {
+					if errors.Is(err, core.ErrNoMetadataProvider) {
+						return nil
+					}
+					return err
+				}
+				for _, warning := range res.Errors {
+					logger.Warn("metadata refresh", "problem", warning)
+				}
+				logger.Info("metadata refresh complete",
+					"movies", res.Movies, "series", res.Series, "problems", len(res.Errors))
+				return nil
+			}))
 
 	var watcher sync.WaitGroup
 	watcher.Add(2)

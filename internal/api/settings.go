@@ -39,6 +39,7 @@ var writableSettings = map[string]bool{
 	store.SettingTMDBAPIKey:             true,
 	store.SettingRSSSyncIntervalMinutes: true,
 	store.SettingBacklogIntervalMinutes: true,
+	store.SettingRefreshIntervalMinutes: true,
 	store.SettingEngineListenPort:       true,
 	store.SettingEngineMaxConnections:   true,
 	store.SettingEngineMaxDownKBps:      true,

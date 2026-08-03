@@ -28,6 +28,9 @@ const (
 	// SettingBacklogIntervalMinutes is how often the wanted list is swept for
 	// items that need a backlog search (PLAN phase 3, task 4).
 	SettingBacklogIntervalMinutes = "backlog_interval_minutes"
+	// SettingRefreshIntervalMinutes is how often provider metadata is
+	// re-fetched for every monitored title (core.JobRefreshMetadata).
+	SettingRefreshIntervalMinutes = "refresh_interval_minutes"
 	// SettingEngineListenPort is the port the embedded engine binds. Zero lets
 	// the torrent library choose its default.
 	SettingEngineListenPort = "engine_listen_port"

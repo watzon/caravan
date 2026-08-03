@@ -172,6 +172,14 @@ func (a *libraryAdapter) AddSeries(ctx context.Context, tmdbID int64) (*core.Ser
 	return mgr.AddSeries(ctx, tmdbID)
 }
 
+func (a *libraryAdapter) RefreshLibrary(ctx context.Context) (*library.RefreshResult, error) {
+	mgr, err := a.current(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return mgr.RefreshLibrary(ctx)
+}
+
 func (a *libraryAdapter) RemoveMovie(ctx context.Context, id int64, deleteFiles bool) error {
 	mgr, err := a.current(ctx)
 	if err != nil {

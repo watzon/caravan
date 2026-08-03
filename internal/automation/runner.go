@@ -111,7 +111,7 @@ func Bootstrap(ctx context.Context, st *store.Store) error {
 	} else if n > 0 {
 		slog.Warn("jobs left running by a previous process were returned to the queue", "jobs", n)
 	}
-	for _, kind := range []string{core.JobRSSSync, core.JobBacklogSweep} {
+	for _, kind := range []string{core.JobRSSSync, core.JobBacklogSweep, core.JobRefreshMetadata} {
 		open, err := st.HasOpenJob(ctx, kind, "{}")
 		if err != nil {
 			return fmt.Errorf("store: check %s bootstrap job: %w", kind, err)
@@ -119,7 +119,17 @@ func Bootstrap(ctx context.Context, st *store.Store) error {
 		if open {
 			continue
 		}
-		if err := st.EnqueueJob(ctx, &core.Job{Kind: kind, Payload: "{}"}); err != nil {
+		job := &core.Job{Kind: kind, Payload: "{}"}
+		// The searches run right away — a restart must not delay a release
+		// that appeared while the process was down. The metadata refresh
+		// waits a full interval instead: it is one provider round trip per
+		// movie plus one per season, dates change on the scale of days, and a
+		// dev loop restarting the process must not hammer TMDB every time.
+		if kind == core.JobRefreshMetadata {
+			job.RunAfter = time.Now().Add(
+				time.Duration(settingMinutes(ctx, st, store.SettingRefreshIntervalMinutes, defaultRefreshInterval)) * time.Minute)
+		}
+		if err := st.EnqueueJob(ctx, job); err != nil {
 			return fmt.Errorf("store: enqueue %s bootstrap job: %w", kind, err)
 		}
 	}
@@ -217,8 +227,10 @@ func (r *Runner) process(ctx context.Context, claim claimFunc) (bool, error) {
 	}
 
 	// A running recurring job counts as open while its handler executes. Once it
-	// is complete, schedule the successor under the normal singleton check.
-	if job.Kind == core.JobRSSSync || job.Kind == core.JobBacklogSweep {
+	// is complete, schedule the successor under the normal singleton check. The
+	// refresh handler is registered from outside the package (cmd/caravan), so
+	// this hook is the only thing that keeps its chain going.
+	if job.Kind == core.JobRSSSync || job.Kind == core.JobBacklogSweep || job.Kind == core.JobRefreshMetadata {
 		if err := r.scheduleRecurring(ctx, job.Kind); err != nil {
 			return true, err
 		}
