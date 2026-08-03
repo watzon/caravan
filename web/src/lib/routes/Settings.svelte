@@ -16,6 +16,7 @@
   import SecuritySettings from '../components/SecuritySettings.svelte';
   import SettingsCard from '../components/SettingsCard.svelte';
   import StorageSettings from '../components/StorageSettings.svelte';
+  import UsersSettings from '../components/UsersSettings.svelte';
   import { UNKNOWN } from '../format';
   import { pushToast } from '../state/toast.svelte';
   import { system } from '../state/system.svelte';
@@ -34,6 +35,7 @@
     | 'indexers'
     | 'downloads'
     | 'playback'
+    | 'users'
     | 'security';
 
   interface SectionDef {
@@ -110,11 +112,18 @@
       label: 'System',
       items: [
         {
+          key: 'users',
+          narrow: true,
+          label: 'Users',
+          title: 'Users',
+          blurb: 'Who can sign in, and what each of them may do. With no accounts, Caravan is open to anyone who can reach it.',
+        },
+        {
           key: 'security',
           narrow: true,
           label: 'Security',
           title: 'Security',
-          blurb: 'Password and sessions for this Caravan, and what it is running.',
+          blurb: 'Your own password, the API key external tools use, and what this Caravan is running.',
         },
       ],
     },
@@ -253,6 +262,8 @@
       <IndexerSettings />
     {:else if tab === 'quality-profiles'}
       <QualityProfiles />
+    {:else if tab === 'users'}
+      <UsersSettings />
     {:else if error}
       <LoadError message={error} onretry={load} />
     {:else if loading && settings === null}

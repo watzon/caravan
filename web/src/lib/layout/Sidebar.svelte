@@ -5,9 +5,14 @@
    * Convert with phase 4, so every entry here has a screen behind it.
    *
    * The persistent bottom slot holds system status (disk free, engine health).
+   *
+   * A member sees the Explore group and nothing else: the other three lead to
+   * screens the server answers 403 for (SPEC §11), and the status card below
+   * reads a status they may not fetch.
    */
   import { isActive } from '../router.svelte';
   import { auth } from '../state/auth.svelte';
+  import { session } from '../state/session.svelte';
   import { BADGE_POLL_MS, downloads } from '../state/downloads.svelte';
   import { REQUESTS_BADGE_POLL_MS, requests } from '../state/requests.svelte';
   import { system } from '../state/system.svelte';
@@ -52,7 +57,8 @@
 
   // The badge is the only reason the shell polls downloads, so it does so
   // lazily; the queue screen subscribes at its own faster rate while open.
-  $effect(() => downloads.subscribe(BADGE_POLL_MS));
+  // A member has no queue badge and no permission to ask for one.
+  $effect(() => (session.isAdmin ? downloads.subscribe(BADGE_POLL_MS) : undefined));
 
   // Same deal for pending requests: the badge is work waiting on the user, so
   // it stays live, at the laziest rate that still feels current.
@@ -63,6 +69,7 @@
   // making the shell chatty.
   const COUNT_POLL_MS = 60_000;
   $effect(() => {
+    if (!session.isAdmin) return;
     const timer = setInterval(() => void system.refresh(), COUNT_POLL_MS);
     return () => clearInterval(timer);
   });
@@ -125,7 +132,9 @@
 <aside
   class="flex w-60 shrink-0 flex-col border-r border-border bg-surface"
   aria-label="Primary navigation">
-  <a href="/movies" class="flex items-center gap-3 px-4 py-6 focus:outline-none">
+  <a
+    href={session.isAdmin ? '/movies' : '/discover'}
+    class="flex items-center gap-3 px-4 py-6 focus:outline-none">
     <!-- The mark is the accent itself, not inverse-on-a-fill (the Paper mock,
          and §6's "never solid fills"). -->
     <span class="text-accent" aria-hidden="true">
@@ -184,30 +193,37 @@
       {/each}
     </div>
 
-    <div class="flex flex-col gap-1">
-      <p class="micro-label px-2 pb-1">Library</p>
-      {#each LIBRARY as item (item.href)}
-        {@render navLink(item)}
-      {/each}
-    </div>
+    {#if session.isAdmin}
+      <div class="flex flex-col gap-1">
+        <p class="micro-label px-2 pb-1">Library</p>
+        {#each LIBRARY as item (item.href)}
+          {@render navLink(item)}
+        {/each}
+      </div>
 
-    <div class="flex flex-col gap-1">
-      <p class="micro-label px-2 pb-1">Activity</p>
-      {#each ACTIVITY as item (item.href)}
-        {@render navLink(item)}
-      {/each}
-    </div>
+      <div class="flex flex-col gap-1">
+        <p class="micro-label px-2 pb-1">Activity</p>
+        {#each ACTIVITY as item (item.href)}
+          {@render navLink(item)}
+        {/each}
+      </div>
 
-    <div class="flex flex-col gap-1">
-      <p class="micro-label px-2 pb-1">Manage</p>
-      {#each MANAGE as item (item.href)}
-        {@render navLink(item)}
-      {/each}
-    </div>
+      <div class="flex flex-col gap-1">
+        <p class="micro-label px-2 pb-1">Manage</p>
+        {#each MANAGE as item (item.href)}
+          {@render navLink(item)}
+        {/each}
+      </div>
+    {/if}
   </nav>
 
   <div class="m-2 flex flex-col gap-3 rounded-md border border-border bg-raised p-3">
-    {#if system.loading && !status}
+    <!-- Disks, engine health and the safe-eject button are all read from
+         GET /system/status, which is an admin route. A member gets the part of
+         this card that is about them. -->
+    {#if !session.isAdmin}
+      <!-- The sign-out row below names them; there is nothing else to say. -->
+    {:else if system.loading && !status}
       <Skeleton class="h-3 w-full" />
       <Skeleton class="h-3 w-2/3" />
     {:else}
@@ -241,19 +257,19 @@
       {#if status?.mode === 'portable'}
         <SafeShutdown />
       {/if}
+    {/if}
 
-      <!-- Only meaningful when a password is set; without one there is no
-           session to end (SPEC §11). -->
-      {#if status?.password_set}
-        <button
-          type="button"
-          class="flex items-center gap-2 rounded-md py-1 text-sm text-ink-secondary transition-colors duration-150 ease-out hover:text-ink disabled:opacity-50"
-          disabled={auth.busy}
-          onclick={() => auth.logout()}>
-          <Icon name="back" size={14} />
-          <span>{auth.busy ? 'Signing out…' : 'Sign out'}</span>
-        </button>
-      {/if}
+    <!-- A username means an account is behind this browser; an open server has
+         nobody to sign out (SPEC §11). -->
+    {#if session.username}
+      <button
+        type="button"
+        class="flex items-center gap-2 rounded-md py-1 text-sm text-ink-secondary transition-colors duration-150 ease-out hover:text-ink disabled:opacity-50"
+        disabled={auth.busy}
+        onclick={() => auth.logout()}>
+        <Icon name="back" size={14} />
+        <span>{auth.busy ? 'Signing out…' : `Sign out ${session.username}`}</span>
+      </button>
     {/if}
   </div>
 </aside>

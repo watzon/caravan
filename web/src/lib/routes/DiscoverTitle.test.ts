@@ -9,6 +9,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import DiscoverTitle from './DiscoverTitle.svelte';
 import type { DiscoverSeason, DiscoverTitle as DiscoverTitlePayload } from '../api/types';
 import { discover } from '../state/discover.svelte';
+import { session } from '../state/session.svelte';
 
 function season(number: number, extra: Partial<DiscoverSeason> = {}): DiscoverSeason {
   return {
@@ -114,7 +115,12 @@ afterEach(() => {
   app = undefined;
   host.remove();
   vi.unstubAllGlobals();
+  session.forget();
 });
+
+function buttonLabels(): (string | undefined)[] {
+  return [...host.querySelectorAll('button')].map((b) => b.textContent?.trim());
+}
 
 describe('DiscoverTitle — season rows', () => {
   it('offers a Request for a missing season of a title nobody owns', async () => {
@@ -177,5 +183,52 @@ describe('DiscoverTitle — facts', () => {
     expect(rows).not.toHaveProperty('Network');
     expect(rows).not.toHaveProperty('Last aired');
     expect(rows.Released).toBe('20 Jan 2008');
+  });
+});
+
+describe('DiscoverTitle — who is asking', () => {
+  it('offers an admin both the ask and the direct add', async () => {
+    session.user = { username: 'root', role: 'admin', open: false };
+    await mountTitle(payload());
+
+    expect(buttonLabels()).toContain('Request series');
+    expect(buttonLabels()).toContain('Add to library');
+    expect(host.textContent).toContain('Direct add is available to admins');
+  });
+
+  /**
+   * A member's add would be a 403, and the sentence explaining the admin's
+   * quality-profile choice is about a button they cannot see.
+   */
+  it('offers a member only the ask', async () => {
+    session.user = { username: 'ada', role: 'member', open: false };
+    await mountTitle(payload());
+
+    expect(buttonLabels()).toContain('Request series');
+    expect(buttonLabels()).not.toContain('Add to library');
+    expect(host.textContent).not.toContain('Direct add is available to admins');
+    // Per-season Request is theirs either way: it is a request, not an add.
+    expect(seasonSlots()).toEqual(['Request', 'Request']);
+  });
+
+  /**
+   * /series/:id is an admin screen: App.svelte bounces a member off it the
+   * instant they land. "Open in library" is this screen's only call to action
+   * for a title Caravan already has, so for a member it must state the fact
+   * rather than offer a door that closes in their face.
+   */
+  it('tells a member a title is in the library without linking into it', async () => {
+    session.user = { username: 'ada', role: 'member', open: false };
+    await mountTitle(payload({ in_library: true, library_id: 7 }));
+
+    expect(host.textContent).toContain('In library');
+    expect(host.querySelector('a[href="/series/7"]')).toBeNull();
+  });
+
+  it('keeps the link into the library for an admin', async () => {
+    session.user = { username: 'root', role: 'admin', open: false };
+    await mountTitle(payload({ in_library: true, library_id: 7 }));
+
+    expect(host.querySelector('a[href="/series/7"]')).not.toBeNull();
   });
 });

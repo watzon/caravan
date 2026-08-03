@@ -13,6 +13,7 @@ import type {
   CalendarEntry,
   Conversion,
   CreateRequestBody,
+  CreateUserBody,
   DiscoverBrowse,
   DiscoverHome,
   DiscoverSourceType,
@@ -44,6 +45,7 @@ import type {
   SearchQueued,
   SearchResults,
   Series,
+  SessionUser,
   Settings,
   StorageMigration,
   StorageMigrationStatus,
@@ -52,6 +54,7 @@ import type {
   UnmatchedFile,
   UsenetServer,
   UsenetServerInput,
+  User,
   VerifyResult,
   WantedLists,
 } from './types';
@@ -144,11 +147,22 @@ export const endpoints = {
   calendarFeed: (apiKey: string) => `${API_BASE}/calendar.ics?apikey=${encodeURIComponent(apiKey)}`,
   regenerateAPIKey: () => `${API_BASE}/settings/apikey`,
 
-  // Phase 5 — the optional single-user password (SPEC §11). The session lives
-  // in an HttpOnly cookie, so no token is ever handled here.
+  // The optional login (SPEC §11). The session lives in an HttpOnly cookie, so
+  // no token is ever handled here.
   login: () => `${API_BASE}/auth/login`,
   logout: () => `${API_BASE}/auth/logout`,
+  me: () => `${API_BASE}/auth/me`,
+  // Changing your own password lives under /settings for historical reasons;
+  // it is the one settings route a member may reach.
   password: () => `${API_BASE}/settings/password`,
+
+  // Accounts (SPEC §11). Admin-only, except that on a server with no accounts
+  // everyone is an implicit admin — which is what makes POST /users the door
+  // that closes an open Caravan.
+  users: () => `${API_BASE}/users`,
+  user: (id: number) => `${API_BASE}/users/${id}`,
+  userPassword: (id: number) => `${API_BASE}/users/${id}/password`,
+
   tvProfiles: () => `${API_BASE}/tv-profiles`,
 
   // Phase 4 — the built-in DLNA media server (SPEC §5.1). Read-only: the
@@ -716,26 +730,50 @@ export const api = {
     request<{ api_key: string }>(endpoints.regenerateAPIKey(), { method: 'POST' }),
 
   /* ------------------------------------------------------------------------
-   * Phase 5 — the optional single-user password (SPEC §11).
+   * Accounts and the optional login (SPEC §11).
    *
    * The session is an HttpOnly cookie the browser attaches on its own, so
    * nothing here reads or stores a token; a 401 from any other call is what
    * tells the SPA the session is gone.
    * --------------------------------------------------------------------- */
 
-  login: (password: string) =>
-    request<AuthState>(endpoints.login(), { method: 'POST', body: { password } }),
+  login: (username: string, password: string) =>
+    request<AuthState>(endpoints.login(), { method: 'POST', body: { username, password } }),
 
   logout: () => request<void>(endpoints.logout(), { method: 'POST' }),
 
+  /** Who this browser is talking as, and whether the server has any accounts. */
+  me: (signal?: AbortSignal) => request<SessionUser>(endpoints.me(), { signal }),
+
   /**
-   * Set, change or clear the password. An empty `newPassword` clears it;
-   * `currentPassword` is required whenever one is already set.
+   * Change the calling account's own password. It can only ever touch the
+   * caller — resetting somebody else's is `resetUserPassword` — and it needs a
+   * signed-in account, so it fails on a server that is still open.
    */
   setPassword: (currentPassword: string, newPassword: string) =>
     request<AuthState>(endpoints.password(), {
       method: 'POST',
       body: { current_password: currentPassword, new_password: newPassword },
+    }),
+
+  /** Every account, without a hash between them. */
+  listUsers: (signal?: AbortSignal) => listOf<User>(endpoints.users(), 'users', signal),
+
+  /** 409 means the username is taken — case-insensitively, as logins are. */
+  createUser: (body: CreateUserBody) =>
+    request<User>(endpoints.users(), { method: 'POST', body }),
+
+  /**
+   * Delete an account and sign out every browser holding it. 409 means it was
+   * the last admin: a server with no admin can never be administered again.
+   */
+  deleteUser: (id: number) => request<void>(endpoints.user(id), { method: 'DELETE' }),
+
+  /** Set someone else's password without proving the old one, and sign them out. */
+  resetUserPassword: (id: number, newPassword: string) =>
+    request<void>(endpoints.userPassword(id), {
+      method: 'POST',
+      body: { new_password: newPassword },
     }),
 
   listQualityProfiles: (signal?: AbortSignal) =>

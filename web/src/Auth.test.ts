@@ -12,6 +12,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import App from './App.svelte';
 import type { SystemStatus } from './lib/api/types';
 import { auth } from './lib/state/auth.svelte';
+import { session } from './lib/state/session.svelte';
 import { clearToasts, pushToast, toasts } from './lib/state/toast.svelte';
 
 const STATUS: SystemStatus = {
@@ -28,6 +29,9 @@ const STATUS: SystemStatus = {
   password_set: true,
   listening_publicly: true,
 };
+
+/** What GET /auth/me answers on a Caravan with no accounts at all. */
+const OPEN_ADMIN = { username: '', role: 'admin', open: true };
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -51,15 +55,24 @@ afterEach(() => {
   unmount(app);
   host.remove();
   vi.unstubAllGlobals();
-  // `auth` is a singleton: a test that ended logged out must not start the
-  // next one there.
+  // `auth` and `session` are singletons: a test that ended logged out must not
+  // start the next one there.
   auth.required = false;
   auth.error = null;
+  session.forget();
   clearToasts();
 });
 
 async function settle() {
   for (let i = 0; i < 3; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+}
+
+function type(selector: string, value: string) {
+  const field = host.querySelector(selector) as HTMLInputElement;
+  expect(field, selector).not.toBeNull();
+  field.value = value;
+  field.dispatchEvent(new Event('input', { bubbles: true }));
   flushSync();
 }
 
@@ -85,14 +98,17 @@ describe('password gate', () => {
           posted.push({ url, body: init?.body ? JSON.parse(String(init.body)) : null });
         }
         if (url.endsWith('/auth/login')) {
-          const body = JSON.parse(String(init?.body)) as { password: string };
-          if (body.password !== 'hunter2hunter2') {
-            return jsonResponse({ error: 'invalid password' }, 401);
+          const body = JSON.parse(String(init?.body)) as { username: string; password: string };
+          if (body.username !== 'ada' || body.password !== 'hunter2hunter2') {
+            return jsonResponse({ error: 'invalid username or password' }, 401);
           }
           loggedIn = true;
           return jsonResponse({ password_set: true });
         }
         if (!loggedIn) return jsonResponse({ error: 'unauthorized' }, 401);
+        if (url.endsWith('/auth/me')) {
+          return jsonResponse({ username: 'ada', role: 'admin', open: false });
+        }
         if (url.endsWith('/system/status')) return jsonResponse(STATUS);
         if (url.endsWith('/library/movies')) return jsonResponse({ movies: [] });
         if (url.endsWith('/downloads')) return jsonResponse({ downloads: [] });
@@ -114,21 +130,17 @@ describe('password gate', () => {
     expect(toasts.items.length).toBe(1);
 
     // Wrong password: still on the login screen, with the server's reason.
-    const field = host.querySelector('#login-password') as HTMLInputElement;
-    field.value = 'wrong';
-    field.dispatchEvent(new Event('input', { bubbles: true }));
-    flushSync();
+    type('#login-username', 'ada');
+    type('#login-password', 'wrong');
     button('Sign in').click();
     await settle();
 
-    expect(host.textContent).toContain('invalid password');
+    expect(host.textContent).toContain('invalid username or password');
     expect(host.querySelector('aside')).toBeNull();
 
-    // Right password: the shell comes up, without a reload.
-    const retry = host.querySelector('#login-password') as HTMLInputElement;
-    retry.value = 'hunter2hunter2';
-    retry.dispatchEvent(new Event('input', { bubbles: true }));
-    flushSync();
+    // Right credentials: the shell comes up, without a reload.
+    type('#login-username', 'ada');
+    type('#login-password', 'hunter2hunter2');
     button('Sign in').click();
     await settle();
 
@@ -140,7 +152,32 @@ describe('password gate', () => {
       '/api/v1/auth/login',
       '/api/v1/auth/login',
     ]);
-    expect(posted[1]?.body).toEqual({ password: 'hunter2hunter2' });
+    expect(posted[1]?.body).toEqual({ username: 'ada', password: 'hunter2hunter2' });
+    // The role is what the shell renders from, so it is read before anything
+    // else the shell needs.
+    expect(session.user).toEqual({ username: 'ada', role: 'admin', open: false });
+  });
+
+  it('will not submit without a username, and says which field is empty', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/auth/me') || url.endsWith('/system/status')) {
+          return jsonResponse({ error: 'unauthorized' }, 401);
+        }
+        return jsonResponse({ error: 'unauthorized' }, 401);
+      }),
+    );
+
+    app = mount(App, { target: host });
+    await settle();
+
+    type('#login-password', 'hunter2hunter2');
+    button('Sign in').click();
+    await settle();
+
+    expect(host.textContent).toContain('Enter your username.');
   });
 
   it('sends the user back to the login screen when a later request 401s', async () => {
@@ -150,6 +187,9 @@ describe('password gate', () => {
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
         if (!sessionAlive) return jsonResponse({ error: 'unauthorized' }, 401);
+        if (url.endsWith('/auth/me')) {
+          return jsonResponse({ username: 'ada', role: 'admin', open: false });
+        }
         if (url.endsWith('/system/status')) return jsonResponse(STATUS);
         if (url.endsWith('/library/movies')) return jsonResponse({ movies: [] });
         if (url.endsWith('/downloads')) return jsonResponse({ downloads: [] });
@@ -178,6 +218,7 @@ describe('password gate', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
+        if (url.endsWith('/auth/me')) return jsonResponse(OPEN_ADMIN);
         if (url.endsWith('/system/status')) {
           return jsonResponse({ ...STATUS, password_set: false, listening_publicly: true });
         }
@@ -202,6 +243,7 @@ describe('password gate', () => {
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
+        if (url.endsWith('/auth/me')) return jsonResponse(OPEN_ADMIN);
         if (url.endsWith('/system/status')) {
           return jsonResponse({ ...STATUS, password_set: false, listening_publicly: false });
         }

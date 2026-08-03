@@ -12,7 +12,7 @@ import (
 )
 
 const requestColumns = `id, media_type, tmdb_id, title, year, poster_path, seasons,
-	min_availability, status, created_at, updated_at`
+	min_availability, status, requested_by, created_at, updated_at`
 
 // CreateRequest records a wish for a title that is not in the library.
 //
@@ -24,6 +24,12 @@ const requestColumns = `id, media_type, tmdb_id, title, year, poster_path, seaso
 //
 // A nil Seasons list means the whole title, and it wins over any named seasons
 // already on the row: "all of it" is not narrowed by a later "season 3".
+//
+// RequestedBy records who asked. A merge leaves the existing row's asker alone
+// and writes it back to r, so the caller answers with the truth rather than
+// with itself. The rest of the row's description — title, year, artwork, the
+// availability a movie is held for — belongs to that asker too: a merge fills a
+// field nobody has filled and overwrites nothing.
 func (s *Store) CreateRequest(ctx context.Context, r *core.Request) error {
 	if r.Status == "" {
 		r.Status = core.RequestPending
@@ -38,14 +44,19 @@ func (s *Store) CreateRequest(ctx context.Context, r *core.Request) error {
 
 	var (
 		existingID           int64
+		existingTitle        string
+		existingYear         int
+		existingPoster       sql.NullString
 		existingSeasons      sql.NullString
 		existingAvailability string
+		existingRequestedBy  int64
 	)
 	err = tx.QueryRowContext(ctx, `
-		SELECT id, seasons, min_availability FROM requests
+		SELECT id, title, year, poster_path, seasons, min_availability, requested_by FROM requests
 		WHERE media_type = ? AND tmdb_id = ? AND status = ?`,
 		r.MediaType, r.TMDBID, core.RequestPending).Scan(
-		&existingID, &existingSeasons, &existingAvailability)
+		&existingID, &existingTitle, &existingYear, &existingPoster, &existingSeasons,
+		&existingAvailability, &existingRequestedBy)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		// New request below.
@@ -60,12 +71,32 @@ func (s *Store) CreateRequest(ctx context.Context, r *core.Request) error {
 		if err != nil {
 			return fmt.Errorf("store: merge request %d: %w", existingID, err)
 		}
-		// The first asker's availability choice stands: a later request for
-		// the same title fills the field only when nobody has chosen yet.
-		// Nothing merges toward "wait longer" behind the first asker's back.
+		// The first asker's row is theirs, so a merge fills a field only when
+		// nobody has filled it — it never overwrites one. POST /requests is
+		// member-allowed and its body is free text, and a merge that rewrote
+		// the description would let one housemate put words in another's
+		// mouth, under their name, in the admin's approval queue. The same
+		// rule keeps a later request from merging toward "wait longer" behind
+		// the first asker's back.
+		//
+		// Seasons are the exception, and the reason a merge exists: they union.
+		if existingTitle != "" {
+			r.Title = existingTitle
+		}
+		if existingYear != 0 {
+			r.Year = existingYear
+		}
+		if existingPoster.String != "" {
+			r.PosterPath = existingPoster.String
+		}
 		if existingAvailability != "" {
 			r.MinAvailability = existingAvailability
 		}
+		// The first asker owns the row, so the UPDATE below leaves requested_by
+		// alone. A merge is a second person queueing behind the first, not a
+		// handover: rewriting the owner would move somebody else's request out
+		// of their own list and into the newcomer's.
+		r.RequestedBy = existingRequestedBy
 		if _, err := tx.ExecContext(ctx, `
 			UPDATE requests SET title = ?, year = ?, poster_path = ?, seasons = ?,
 				min_availability = ?, updated_at = ?
@@ -91,10 +122,10 @@ func (s *Store) CreateRequest(ctx context.Context, r *core.Request) error {
 	}
 	res, err := tx.ExecContext(ctx, `
 		INSERT INTO requests (media_type, tmdb_id, title, year, poster_path, seasons,
-			min_availability, status, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			min_availability, status, requested_by, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.MediaType, r.TMDBID, r.Title, r.Year, nullString(r.PosterPath), encoded,
-		r.MinAvailability, r.Status, formatTime(ts), formatTime(ts))
+		r.MinAvailability, r.Status, r.RequestedBy, formatTime(ts), formatTime(ts))
 	if err != nil {
 		return fmt.Errorf("store: create request for %s %d: %w", r.MediaType, r.TMDBID, err)
 	}
@@ -132,6 +163,24 @@ func (s *Store) ListRequests(ctx context.Context, status string) ([]core.Request
 	var args []any
 	if status != "" {
 		query += " WHERE status = ?"
+		args = append(args, status)
+	}
+	query += " ORDER BY created_at DESC, id DESC"
+	return s.listRequests(ctx, query, args...)
+}
+
+// ListRequestsBy returns one account's requests, newest first, filtered by
+// status exactly as ListRequests is. Everybody's wishes live in one table, and
+// requested_by is the only thing that says whose a row was, so this is what a
+// member's requests screen reads.
+//
+// requestedBy 0 is a real query and not a wildcard: it selects the rows that
+// record no account, which is what a pre-accounts or open-server row is.
+func (s *Store) ListRequestsBy(ctx context.Context, requestedBy int64, status string) ([]core.Request, error) {
+	query := "SELECT " + requestColumns + " FROM requests WHERE requested_by = ?"
+	args := []any{requestedBy}
+	if status != "" {
+		query += " AND status = ?"
 		args = append(args, status)
 	}
 	query += " ORDER BY created_at DESC, id DESC"
@@ -305,7 +354,7 @@ func scanRequest(sc scanner) (*core.Request, error) {
 		updated    string
 	)
 	if err := sc.Scan(&r.ID, &r.MediaType, &r.TMDBID, &r.Title, &r.Year, &posterPath,
-		&seasons, &r.MinAvailability, &r.Status, &created, &updated); err != nil {
+		&seasons, &r.MinAvailability, &r.Status, &r.RequestedBy, &created, &updated); err != nil {
 		return nil, err
 	}
 	r.PosterPath = posterPath.String

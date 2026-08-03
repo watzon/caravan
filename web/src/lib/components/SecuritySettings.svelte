@@ -1,12 +1,13 @@
 <script lang="ts">
   /**
-   * Security (SPEC §11, PLAN phase 5 task 5): the optional single-user password
-   * and the API key external tools authenticate with.
+   * Security (SPEC §11): the calling account's own password, and the API key
+   * external tools authenticate with.
    *
-   * The password is not a settings key the form can PUT: setting it needs the
+   * The password is not a settings key the form can PUT: changing it needs the
    * current one, and the plaintext must never round-trip, so it has its own
-   * endpoint. The hash is never returned by GET /settings at all — whether a
-   * password exists is read from system status.
+   * endpoint. It only ever touches the caller — creating accounts and resetting
+   * somebody else's password live under Users — and it needs an account to act
+   * on, so an open Caravan is pointed at Users instead.
    */
   import { api, errorText } from '../api/client';
   import { SETTING_API_KEY, type Settings } from '../api/types';
@@ -16,6 +17,7 @@
   import Icon from './Icon.svelte';
   import TextInput from './TextInput.svelte';
   import { pushToast } from '../state/toast.svelte';
+  import { session } from '../state/session.svelte';
   import { system } from '../state/system.svelte';
 
   interface Props {
@@ -33,8 +35,11 @@
   let newPassword = $state('');
   let busy = $state(false);
 
-  let passwordSet = $derived(system.status?.password_set === true);
+  /** `password_set` means "this server has at least one account" (internal/api). */
+  let hasAccounts = $derived(system.status?.password_set === true);
   let publicBind = $derived(system.status?.listening_publicly === true);
+  /** No account behind this browser: an open server, or the API key. */
+  let signedIn = $derived(session.username !== '');
 
   async function savePassword() {
     busy = true;
@@ -42,23 +47,7 @@
       await api.setPassword(currentPassword, newPassword);
       currentPassword = '';
       newPassword = '';
-      await system.refresh();
-      pushToast(passwordSet ? 'Password updated.' : 'Password set.', 'success');
-    } catch (err) {
-      pushToast(errorText(err), 'danger');
-    } finally {
-      busy = false;
-    }
-  }
-
-  async function clearPassword() {
-    busy = true;
-    try {
-      await api.setPassword(currentPassword, '');
-      currentPassword = '';
-      newPassword = '';
-      await system.refresh();
-      pushToast('Password cleared. Caravan no longer asks for a login.', 'warning');
+      pushToast('Password updated. Your other browsers are signed out.', 'success');
     } catch (err) {
       pushToast(errorText(err), 'danger');
     } finally {
@@ -81,63 +70,58 @@
 </script>
 
 <section class="flex flex-col gap-6">
-  {#if publicBind && !passwordSet}
+  {#if publicBind && !hasAccounts}
     <Banner
       tone="warning"
       icon="warning"
       title="Listening on every interface without a password"
-      message="Anyone on this network can reach Caravan and change its settings. Setting a password here closes that." />
+      message="Anyone on this network can reach Caravan and change its settings. Adding the first account under Users closes that." />
   {/if}
 
   <div class="flex flex-col gap-4">
     <div>
-      <h2 class="font-display text-base font-semibold text-ink">Password</h2>
+      <h2 class="font-display text-base font-semibold text-ink">Your password</h2>
       <p class="mt-1 text-sm text-ink-secondary">
-        {passwordSet
-          ? 'Caravan asks for this password before showing the library. Changing it signs out every other browser.'
-          : 'Optional. With no password, anyone who can reach this server can use it.'}
+        {signedIn
+          ? 'Changes your own password and signs out every other browser you are signed in on. Nobody else is affected.'
+          : 'This browser is not signed in as an account, so there is no password of yours to change. Add the first account under Users.'}
       </p>
     </div>
 
-    {#if passwordSet}
+    {#if signedIn}
       <Field
         label="Current password"
         for="security-current-password"
-        help="Required to change or clear the password.">
+        help="Proves it is you and not somebody at your unlocked screen.">
         <TextInput
           id="security-current-password"
           bind:value={currentPassword}
           type="password"
           placeholder="•••••" />
       </Field>
-    {/if}
 
-    <Field
-      label={passwordSet ? 'New password' : 'Password'}
-      for="security-new-password"
-      help="At least 8 characters. Stored as an argon2id hash and never returned by the API.">
-      <TextInput
-        id="security-new-password"
-        bind:value={newPassword}
-        type="password"
-        placeholder="•••••" />
-    </Field>
+      <Field
+        label="New password"
+        for="security-new-password"
+        help="At least 8 characters. Stored as an argon2id hash and never returned by the API.">
+        <TextInput
+          id="security-new-password"
+          bind:value={newPassword}
+          type="password"
+          placeholder="•••••" />
+      </Field>
 
-    <div class="flex flex-wrap gap-2">
       <Button
         variant="primary"
-        disabled={busy || newPassword.trim().length < 8}
+        class="self-start"
+        disabled={busy || currentPassword === '' || newPassword.trim().length < 8}
         onclick={savePassword}>
         <Icon name="check" size={14} />
-        {busy ? 'Saving…' : passwordSet ? 'Change password' : 'Set password'}
+        {busy ? 'Saving…' : 'Change password'}
       </Button>
-      {#if passwordSet}
-        <Button variant="danger" disabled={busy} onclick={clearPassword}>
-          <Icon name="close" size={14} />
-          Clear password
-        </Button>
-      {/if}
-    </div>
+    {:else}
+      <Button variant="secondary" class="self-start" href="/settings/users">Open Users</Button>
+    {/if}
   </div>
 
   <div class="flex flex-col gap-4 border-t border-border pt-6">

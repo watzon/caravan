@@ -81,13 +81,15 @@ const (
 	SettingDLNAEnabled      = "dlna_enabled"
 	SettingDLNAFriendlyName = "dlna_friendly_name"
 	SettingDLNAUUID         = "dlna_uuid"
-	// SettingPasswordHash is the optional single-user password, stored as an
-	// argon2id PHC string (SPEC §11, PLAN phase 5 task 5). The key being absent
-	// or empty is what "no password" means: Caravan on a trusted LAN is allowed
-	// to have no login at all. It is the one setting GET /settings never
-	// returns (SPEC §12 — credentials never leave the server), and it is not in
-	// the PUT /settings allowlist: it is written only by POST /settings/password,
-	// which never sees a plaintext value leave this process.
+	// SettingPasswordHash was the optional single-user password, an argon2id
+	// PHC string (SPEC §11, PLAN phase 5 task 5). Migration 0011 folded it into
+	// an 'admin' row in the users table and deleted the setting, so nothing
+	// writes it any more.
+	//
+	// The name survives because the API still refuses to read or write it: it
+	// stays out of the PUT /settings allowlist and inside hiddenSettings, so a
+	// database that somehow still carries the row can neither serve the hash
+	// nor have one planted (SPEC §12 — credentials never leave the server).
 	SettingPasswordHash = "password_hash"
 )
 

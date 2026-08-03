@@ -11,35 +11,56 @@ import (
 	"testing"
 	"time"
 
+	"github.com/watzon/caravan/internal/core"
 	"github.com/watzon/caravan/internal/store"
 )
 
-const testPassword = "correct horse battery"
+const (
+	testPassword = "correct horse battery"
+	testAdmin    = "admin"
+	testMember   = "housemate"
+)
 
-// setPassword writes a hash directly, the way a server that already has a
-// password set starts up.
-func setPassword(t *testing.T, st *store.Store, password string) {
+// createUser writes an account directly, the way a server that already has
+// accounts starts up.
+func createUser(t *testing.T, st *store.Store, username, password, role string) *core.User {
 	t.Helper()
 	hash, err := hashPassword(password)
 	if err != nil {
 		t.Fatalf("hashPassword: %v", err)
 	}
-	if err := st.SetSetting(context.Background(), store.SettingPasswordHash, hash); err != nil {
-		t.Fatalf("SetSetting: %v", err)
+	u := &core.User{Username: username, PasswordHash: hash, Role: role}
+	if err := st.CreateUser(context.Background(), u); err != nil {
+		t.Fatalf("CreateUser(%q): %v", username, err)
 	}
+	return u
 }
 
-// login exchanges the password for a session cookie, failing the test when the
-// login itself fails.
-func login(t *testing.T, h http.Handler, password string) *http.Cookie {
+// setPassword closes an open server the way it used to be closed: one admin,
+// named "admin", with this password.
+func setPassword(t *testing.T, st *store.Store, password string) *core.User {
 	t.Helper()
-	rec := do(t, h, http.MethodPost, "/api/v1/auth/login", `{"password":`+quote(password)+`}`)
+	return createUser(t, st, testAdmin, password, core.RoleAdmin)
+}
+
+// login exchanges a username and password for a session cookie, failing the
+// test when the login itself fails.
+func login(t *testing.T, h http.Handler, username, password string) *http.Cookie {
+	t.Helper()
+	rec := do(t, h, http.MethodPost, "/api/v1/auth/login",
+		`{"username":`+quote(username)+`,"password":`+quote(password)+`}`)
 	wantStatus(t, rec, http.StatusOK)
 	cookie := sessionCookieFrom(rec)
 	if cookie == nil {
 		t.Fatal("login set no session cookie")
 	}
 	return cookie
+}
+
+// withCookie decorates a request with a session cookie, which is what most of
+// the tests below need from doAuth.
+func withCookie(c *http.Cookie) func(*http.Request) {
+	return func(r *http.Request) { r.AddCookie(c) }
 }
 
 func quote(s string) string {
@@ -78,9 +99,10 @@ func doAuth(t *testing.T, h http.Handler, method, target, body string, decorate 
 	return rec
 }
 
-// The pre-phase-5 contract: with no password, nothing changes. This is the
-// regression that keeps the gate from becoming mandatory by accident.
-func TestNoPasswordLeavesTheAPIOpen(t *testing.T) {
+// The pre-RBAC contract: with no accounts, nothing changes. This is the
+// regression that keeps the gate from becoming mandatory by accident — an
+// upgrade must not lock a household out of its own media box.
+func TestNoUsersLeavesTheAPIOpen(t *testing.T) {
 	h, _, _ := newTestServer(t)
 
 	for _, target := range []string{
@@ -88,11 +110,22 @@ func TestNoPasswordLeavesTheAPIOpen(t *testing.T) {
 		"/api/v1/settings",
 		"/api/v1/library/movies",
 		"/api/v1/downloads",
+		// Admin-only once accounts exist; open here, like everything else.
+		"/api/v1/users",
 	} {
 		rec := do(t, h, http.MethodGet, target, "")
-		if rec.Code == http.StatusUnauthorized {
-			t.Fatalf("GET %s = 401 with no password set; the API must stay open", target)
+		if rec.Code == http.StatusUnauthorized || rec.Code == http.StatusForbidden {
+			t.Fatalf("GET %s = %d with no accounts; the API must stay open", target, rec.Code)
 		}
+	}
+
+	// And the caller is an implicit admin, not a nobody.
+	rec := do(t, h, http.MethodGet, "/api/v1/auth/me", "")
+	wantStatus(t, rec, http.StatusOK)
+	var me meResponse
+	decodeBody(t, rec, &me)
+	if me != (meResponse{Username: "", Role: core.RoleAdmin, Open: true}) {
+		t.Fatalf("auth/me on an open server = %+v, want an anonymous open admin", me)
 	}
 }
 
@@ -103,7 +136,7 @@ func TestPasswordGateAcceptsSessionCookieAndAPIKey(t *testing.T) {
 	if err := st.SetSetting(ctx, store.SettingAPIKey, "deadbeef"); err != nil {
 		t.Fatalf("SetSetting: %v", err)
 	}
-	cookie := login(t, h, testPassword)
+	cookie := login(t, h, testAdmin, testPassword)
 
 	tests := []struct {
 		name      string
@@ -170,7 +203,7 @@ func TestPasswordGateExemptions(t *testing.T) {
 		// A calendar subscription carries the API key, not a cookie.
 		{"ical feed with key", http.MethodGet, "/api/v1/calendar.ics?apikey=deadbeef", "", http.StatusOK},
 		// The login endpoint itself, or nobody could ever log in.
-		{"login", http.MethodPost, "/api/v1/auth/login", `{"password":"wrong"}`, http.StatusUnauthorized},
+		{"login", http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"wrong"}`, http.StatusUnauthorized},
 		{"logout", http.MethodPost, "/api/v1/auth/logout", "", http.StatusNoContent},
 	}
 	for _, tc := range tests {
@@ -192,25 +225,62 @@ func TestPasswordGateExemptions(t *testing.T) {
 	wantStatus(t, rec, http.StatusNotFound)
 }
 
-func TestLoginRejectsTheWrongPassword(t *testing.T) {
+// A rejected login must not say which half was wrong: a message that
+// distinguishes "no such user" from "wrong password" is a list of who lives
+// here, handed out one guess at a time.
+func TestLoginRejectionsAreIndistinguishable(t *testing.T) {
 	h, st, _ := newTestServer(t)
 	setPassword(t, st, testPassword)
 
-	rec := do(t, h, http.MethodPost, "/api/v1/auth/login", `{"password":"correct horse batteryy"}`)
-	wantStatus(t, rec, http.StatusUnauthorized)
-	wantErrorBody(t, rec)
-	if cookie := sessionCookieFrom(rec); cookie != nil {
-		t.Fatalf("a failed login issued a session: %+v", cookie)
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"wrong password", `{"username":"admin","password":"correct horse batteryy"}`},
+		{"unknown username", `{"username":"nobody","password":"correct horse battery"}`},
+		{"no username at all", `{"password":"correct horse battery"}`},
+	}
+	var messages []string
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := do(t, h, http.MethodPost, "/api/v1/auth/login", tc.body)
+			wantStatus(t, rec, http.StatusUnauthorized)
+			wantErrorBody(t, rec)
+			if cookie := sessionCookieFrom(rec); cookie != nil {
+				t.Fatalf("a failed login issued a session: %+v", cookie)
+			}
+			var body errorResponse
+			decodeBody(t, rec, &body)
+			messages = append(messages, body.Error)
+		})
+	}
+	for _, got := range messages {
+		if got != messages[0] {
+			t.Fatalf("failure messages differ (%q vs %q); the reply names which half was wrong",
+				messages[0], got)
+		}
+	}
+	if messages[0] != invalidCredentials {
+		t.Fatalf("failure message = %q, want %q", messages[0], invalidCredentials)
 	}
 }
 
-func TestLoginWithoutAPasswordSetIsRefused(t *testing.T) {
+// Capitalising your own name is not a wrong password.
+func TestLoginIsCaseInsensitiveOnTheUsername(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	createUser(t, st, "Chris", testPassword, core.RoleAdmin)
+
+	login(t, h, "chris", testPassword)
+	login(t, h, "CHRIS", testPassword)
+}
+
+func TestLoginWithoutAnyAccountsIsRefused(t *testing.T) {
 	h, _, _ := newTestServer(t)
 
-	rec := do(t, h, http.MethodPost, "/api/v1/auth/login", `{"password":"anything"}`)
+	rec := do(t, h, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"anything"}`)
 	wantStatus(t, rec, http.StatusBadRequest)
 	if cookie := sessionCookieFrom(rec); cookie != nil {
-		t.Fatal("a login against a passwordless server issued a session")
+		t.Fatal("a login against an open server issued a session")
 	}
 }
 
@@ -218,7 +288,7 @@ func TestSessionCookieIsHttpOnlyAndSameSiteLax(t *testing.T) {
 	h, st, _ := newTestServer(t)
 	setPassword(t, st, testPassword)
 
-	cookie := login(t, h, testPassword)
+	cookie := login(t, h, testAdmin, testPassword)
 	if !cookie.HttpOnly {
 		t.Error("session cookie is not HttpOnly")
 	}
@@ -235,100 +305,105 @@ func TestSessionCookieIsHttpOnlyAndSameSiteLax(t *testing.T) {
 func TestSessionExpires(t *testing.T) {
 	h, st, _ := newTestServer(t, WithSessionTTL(20*time.Millisecond))
 	setPassword(t, st, testPassword)
-	cookie := login(t, h, testPassword)
+	cookie := login(t, h, testAdmin, testPassword)
 
-	rec := doAuth(t, h, http.MethodGet, "/api/v1/library/movies", "", func(r *http.Request) { r.AddCookie(cookie) })
+	rec := doAuth(t, h, http.MethodGet, "/api/v1/library/movies", "", withCookie(cookie))
 	wantStatus(t, rec, http.StatusOK)
 
 	time.Sleep(30 * time.Millisecond)
 
-	rec = doAuth(t, h, http.MethodGet, "/api/v1/library/movies", "", func(r *http.Request) { r.AddCookie(cookie) })
+	rec = doAuth(t, h, http.MethodGet, "/api/v1/library/movies", "", withCookie(cookie))
 	wantStatus(t, rec, http.StatusUnauthorized)
 }
 
 func TestLogoutInvalidatesTheSession(t *testing.T) {
 	h, st, _ := newTestServer(t)
 	setPassword(t, st, testPassword)
-	cookie := login(t, h, testPassword)
+	cookie := login(t, h, testAdmin, testPassword)
 
-	rec := doAuth(t, h, http.MethodPost, "/api/v1/auth/logout", "", func(r *http.Request) { r.AddCookie(cookie) })
+	rec := doAuth(t, h, http.MethodPost, "/api/v1/auth/logout", "", withCookie(cookie))
 	wantStatus(t, rec, http.StatusNoContent)
 
-	rec = doAuth(t, h, http.MethodGet, "/api/v1/library/movies", "", func(r *http.Request) { r.AddCookie(cookie) })
+	rec = doAuth(t, h, http.MethodGet, "/api/v1/library/movies", "", withCookie(cookie))
 	wantStatus(t, rec, http.StatusUnauthorized)
 }
 
-func TestSetPasswordFlow(t *testing.T) {
+// POST /settings/password changes the caller's own password and nobody else's,
+// and turns out only their own other browsers.
+func TestSetPasswordChangesOnlyTheCallersOwnAccount(t *testing.T) {
 	h, st, _ := newTestServer(t)
 	ctx := context.Background()
+	admin := setPassword(t, st, testPassword)
+	createUser(t, st, testMember, testPassword, core.RoleMember)
 
-	// Set: no current password to prove, and the API closes behind it.
-	rec := do(t, h, http.MethodPost, "/api/v1/settings/password", `{"new_password":"first password"}`)
+	// Two browsers signed in as the admin, and one as the housemate.
+	first := login(t, h, testAdmin, testPassword)
+	second := login(t, h, testAdmin, testPassword)
+	member := login(t, h, testMember, testPassword)
+
+	// The current password is required.
+	rec := doAuth(t, h, http.MethodPost, "/api/v1/settings/password",
+		`{"current_password":"wrong","new_password":"second password"}`, withCookie(first))
+	wantStatus(t, rec, http.StatusBadRequest)
+	wantErrorBody(t, rec)
+	// The old password still works, so the failed change changed nothing.
+	login(t, h, testAdmin, testPassword)
+
+	rec = doAuth(t, h, http.MethodPost, "/api/v1/settings/password",
+		`{"current_password":`+quote(testPassword)+`,"new_password":"second password"}`,
+		withCookie(first))
 	wantStatus(t, rec, http.StatusOK)
 	var got authResponse
 	decodeBody(t, rec, &got)
 	if !got.PasswordSet {
-		t.Fatal("password_set = false after setting a password")
+		t.Fatal("password_set = false after changing a password")
 	}
-	// The response re-issues a session, so the browser that just set the
-	// password is not immediately locked out.
-	setter := sessionCookieFrom(rec)
-	if setter == nil {
-		t.Fatal("setting a password issued no session")
-	}
-	wantStatus(t, do(t, h, http.MethodGet, "/api/v1/library/movies", ""), http.StatusUnauthorized)
-	wantStatus(t, doAuth(t, h, http.MethodGet, "/api/v1/library/movies", "",
-		func(r *http.Request) { r.AddCookie(setter) }), http.StatusOK)
-
-	// The stored value is a hash, not the password.
-	stored, err := st.GetSetting(ctx, store.SettingPasswordHash)
-	if err != nil {
-		t.Fatalf("GetSetting: %v", err)
-	}
-	if strings.Contains(stored, "first password") || !strings.HasPrefix(stored, "$argon2id$") {
-		t.Fatalf("stored password = %q, want an argon2id hash", stored)
-	}
-
-	// Change: the current password is required.
-	rec = doAuth(t, h, http.MethodPost, "/api/v1/settings/password",
-		`{"current_password":"wrong","new_password":"second password"}`,
-		func(r *http.Request) { r.AddCookie(setter) })
-	wantStatus(t, rec, http.StatusBadRequest)
-	wantErrorBody(t, rec)
-	// The old password still works, so the failed change changed nothing.
-	login(t, h, "first password")
-
-	rec = doAuth(t, h, http.MethodPost, "/api/v1/settings/password",
-		`{"current_password":"first password","new_password":"second password"}`,
-		func(r *http.Request) { r.AddCookie(setter) })
-	wantStatus(t, rec, http.StatusOK)
 	changed := sessionCookieFrom(rec)
 	if changed == nil {
 		t.Fatal("changing the password issued no session")
 	}
-	// Every other session died with the old password.
-	wantStatus(t, doAuth(t, h, http.MethodGet, "/api/v1/library/movies", "",
-		func(r *http.Request) { r.AddCookie(setter) }), http.StatusUnauthorized)
-	wantStatus(t, doAuth(t, h, http.MethodGet, "/api/v1/library/movies", "",
-		func(r *http.Request) { r.AddCookie(changed) }), http.StatusOK)
-	login(t, h, "second password")
 
-	// Clear: the API is open again, exactly as it shipped before phase 5.
-	rec = doAuth(t, h, http.MethodPost, "/api/v1/settings/password",
-		`{"current_password":"second password","new_password":""}`,
-		func(r *http.Request) { r.AddCookie(changed) })
-	wantStatus(t, rec, http.StatusOK)
-	decodeBody(t, rec, &got)
-	if got.PasswordSet {
-		t.Fatal("password_set = true after clearing the password")
+	// The browser that made the change stays logged in; the admin's other
+	// browser is turned out.
+	wantStatus(t, doAuth(t, h, http.MethodGet, "/api/v1/library/movies", "", withCookie(changed)),
+		http.StatusOK)
+	wantStatus(t, doAuth(t, h, http.MethodGet, "/api/v1/library/movies", "", withCookie(second)),
+		http.StatusUnauthorized)
+	// The housemate never signed anything and is still signed in.
+	wantStatus(t, doAuth(t, h, http.MethodGet, "/api/v1/requests", "", withCookie(member)),
+		http.StatusOK)
+	login(t, h, testAdmin, "second password")
+	login(t, h, testMember, testPassword)
+
+	// The stored value is a hash, not the password.
+	stored, err := st.GetUser(ctx, admin.ID)
+	if err != nil {
+		t.Fatalf("GetUser: %v", err)
 	}
-	wantStatus(t, do(t, h, http.MethodGet, "/api/v1/library/movies", ""), http.StatusOK)
+	if strings.Contains(stored.PasswordHash, "second password") ||
+		!strings.HasPrefix(stored.PasswordHash, "$argon2id$") {
+		t.Fatalf("stored password = %q, want an argon2id hash", stored.PasswordHash)
+	}
 }
 
 func TestSetPasswordRejectsAShortPassword(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	setPassword(t, st, testPassword)
+	cookie := login(t, h, testAdmin, testPassword)
+
+	rec := doAuth(t, h, http.MethodPost, "/api/v1/settings/password",
+		`{"current_password":`+quote(testPassword)+`,"new_password":"short"}`, withCookie(cookie))
+	wantStatus(t, rec, http.StatusBadRequest)
+	wantErrorBody(t, rec)
+}
+
+// An open server has no account to change: whoever is calling is an admin, but
+// an anonymous one. Refusing here is what keeps this route "change MY password"
+// rather than a second, unguarded way to create the first user.
+func TestSetPasswordOnAnOpenServerHasNothingToChange(t *testing.T) {
 	h, _, _ := newTestServer(t)
 
-	rec := do(t, h, http.MethodPost, "/api/v1/settings/password", `{"new_password":"short"}`)
+	rec := do(t, h, http.MethodPost, "/api/v1/settings/password", `{"new_password":"first password"}`)
 	wantStatus(t, rec, http.StatusBadRequest)
 	wantErrorBody(t, rec)
 }
@@ -343,7 +418,7 @@ func TestSetPasswordRequiresASession(t *testing.T) {
 		`{"current_password":"`+testPassword+`","new_password":"a new password"}`)
 	wantStatus(t, rec, http.StatusUnauthorized)
 	// ...and the old password still works.
-	login(t, h, testPassword)
+	login(t, h, testAdmin, testPassword)
 }
 
 // SPEC §12: credentials never leave the server and never reach the logs.
@@ -354,24 +429,24 @@ func TestPasswordHashNeverLeavesTheServer(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(previous) })
 
 	h, st, _ := newTestServer(t)
-	setPassword(t, st, testPassword)
-	cookie := login(t, h, testPassword)
+	admin := setPassword(t, st, testPassword)
+	cookie := login(t, h, testAdmin, testPassword)
 	// A failed login and a failed change are the paths most likely to log what
 	// they were given.
-	do(t, h, http.MethodPost, "/api/v1/auth/login", `{"password":"wrong password"}`)
+	do(t, h, http.MethodPost, "/api/v1/auth/login", `{"username":"admin","password":"wrong password"}`)
 	doAuth(t, h, http.MethodPost, "/api/v1/settings/password",
 		`{"current_password":"`+testPassword+`","new_password":"another password"}`,
-		func(r *http.Request) { r.AddCookie(cookie) })
+		withCookie(cookie))
 
-	hash, err := st.GetSetting(context.Background(), store.SettingPasswordHash)
+	stored, err := st.GetUser(context.Background(), admin.ID)
 	if err != nil {
-		t.Fatalf("GetSetting: %v", err)
+		t.Fatalf("GetUser: %v", err)
 	}
 
-	rec := doAuth(t, h, http.MethodGet, "/api/v1/settings", "", func(r *http.Request) { r.AddCookie(cookie) })
+	rec := doAuth(t, h, http.MethodGet, "/api/v1/settings", "", withCookie(cookie))
 	wantStatus(t, rec, http.StatusUnauthorized) // the change above revoked this session
-	fresh := login(t, h, "another password")
-	rec = doAuth(t, h, http.MethodGet, "/api/v1/settings", "", func(r *http.Request) { r.AddCookie(fresh) })
+	fresh := login(t, h, testAdmin, "another password")
+	rec = doAuth(t, h, http.MethodGet, "/api/v1/settings", "", withCookie(fresh))
 	wantStatus(t, rec, http.StatusOK)
 
 	var settings map[string]string
@@ -383,7 +458,14 @@ func TestPasswordHashNeverLeavesTheServer(t *testing.T) {
 		t.Fatalf("GET /settings body contains a hash: %s", rec.Body.String())
 	}
 
-	for _, secret := range []string{hash, testPassword, "wrong password", "another password"} {
+	// Nor does the account listing, which is the new place a hash could leak.
+	rec = doAuth(t, h, http.MethodGet, "/api/v1/users", "", withCookie(fresh))
+	wantStatus(t, rec, http.StatusOK)
+	if strings.Contains(rec.Body.String(), "$argon2id$") {
+		t.Fatalf("GET /users body contains a hash: %s", rec.Body.String())
+	}
+
+	for _, secret := range []string{stored.PasswordHash, testPassword, "wrong password", "another password"} {
 		if strings.Contains(logged.String(), secret) {
 			t.Fatalf("a credential reached the logs: %s", logged.String())
 		}
@@ -416,12 +498,12 @@ func TestStatusReportsAuthFlags(t *testing.T) {
 	}
 
 	setPassword(t, st, testPassword)
-	cookie := login(t, h, testPassword)
-	rec = doAuth(t, h, http.MethodGet, "/api/v1/system/status", "", func(r *http.Request) { r.AddCookie(cookie) })
+	cookie := login(t, h, testAdmin, testPassword)
+	rec = doAuth(t, h, http.MethodGet, "/api/v1/system/status", "", withCookie(cookie))
 	wantStatus(t, rec, http.StatusOK)
 	decodeBody(t, rec, &status)
 	if !status.PasswordSet {
-		t.Error("password_set = false after setting a password")
+		t.Error("password_set = false once an account exists")
 	}
 }
 
@@ -482,34 +564,206 @@ func TestPasswordHashing(t *testing.T) {
 
 func TestSessionStoreRevocation(t *testing.T) {
 	sessions := newSessionStore()
-	first, err := sessions.issue(time.Minute)
+	// Two browsers for account 7, one for account 9.
+	first, err := sessions.issue(7, time.Minute)
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
-	second, err := sessions.issue(time.Minute)
+	second, err := sessions.issue(7, time.Minute)
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
-	if first == second {
+	other, err := sessions.issue(9, time.Minute)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	if first == second || first == other {
 		t.Fatal("two sessions share a token")
 	}
-	if !sessions.valid(first) || !sessions.valid(second) {
-		t.Fatal("a fresh session is not valid")
+
+	// A live session reports whose it is, which is the whole point of the map.
+	if userID, ok := sessions.valid(first); !ok || userID != 7 {
+		t.Fatalf("valid(first) = %d, %v; want 7, true", userID, ok)
 	}
-	if sessions.valid("") {
+	if userID, ok := sessions.valid(other); !ok || userID != 9 {
+		t.Fatalf("valid(other) = %d, %v; want 9, true", userID, ok)
+	}
+	if _, ok := sessions.valid(""); ok {
 		t.Fatal("the empty token is valid")
 	}
 
 	sessions.revoke(first)
-	if sessions.valid(first) {
+	if _, ok := sessions.valid(first); ok {
 		t.Fatal("a revoked session is still valid")
 	}
-	if !sessions.valid(second) {
+	if _, ok := sessions.valid(second); !ok {
 		t.Fatal("revoking one session revoked another")
 	}
 
-	sessions.revokeAll()
-	if sessions.valid(second) {
-		t.Fatal("revokeAll left a session alive")
+	// revokeUser is per-account: everything of account 7's goes, and account
+	// 9 never notices.
+	sessions.revokeUser(7)
+	if _, ok := sessions.valid(second); ok {
+		t.Fatal("revokeUser left the account's other session alive")
 	}
+	if _, ok := sessions.valid(other); !ok {
+		t.Fatal("revokeUser ended somebody else's session")
+	}
+}
+
+// The allowlist itself, stated as a table so the boundary is readable in one
+// place. Everything not listed is closed to members: that is the point of an
+// allowlist, and this table is what would fail if a route quietly joined it.
+func TestMemberAllowlist(t *testing.T) {
+	tests := []struct {
+		method string
+		path   string
+		want   bool
+	}{
+		// Finding something.
+		{http.MethodGet, "/discover", true},
+		{http.MethodGet, "/discover/browse", true},
+		{http.MethodGet, "/discover/movie/27205", true},
+		{http.MethodGet, "/discover/series/1396", true},
+		// Asking for it, and taking the ask back.
+		{http.MethodPost, "/requests", true},
+		{http.MethodGet, "/requests", true},
+		{http.MethodDelete, "/requests/12", true},
+		// Approving it is somebody else's decision.
+		{http.MethodPost, "/requests/12/approve", false},
+		// The session.
+		{http.MethodGet, "/auth/me", true},
+		{http.MethodPost, "/auth/login", true},
+		{http.MethodPost, "/auth/logout", true},
+		{http.MethodPost, "/settings/password", true},
+		// Running the box.
+		{http.MethodGet, "/settings", false},
+		{http.MethodPut, "/settings", false},
+		{http.MethodPost, "/settings/apikey", false},
+		{http.MethodGet, "/system/status", false},
+		{http.MethodPost, "/system/shutdown", false},
+		{http.MethodGet, "/library/movies", false},
+		{http.MethodPost, "/library/movies", false},
+		{http.MethodGet, "/library/series", false},
+		{http.MethodPost, "/library/rescan", false},
+		{http.MethodGet, "/wanted", false},
+		{http.MethodGet, "/calendar", false},
+		{http.MethodGet, "/downloads", false},
+		{http.MethodGet, "/import/queue", false},
+		{http.MethodGet, "/jobs", false},
+		{http.MethodGet, "/events", false},
+		{http.MethodGet, "/search", false},
+		{http.MethodGet, "/indexers", false},
+		{http.MethodGet, "/users", false},
+		{http.MethodPost, "/users", false},
+		{http.MethodDelete, "/users/2", false},
+		{http.MethodPost, "/users/2/password", false},
+		// Right shape, wrong method.
+		{http.MethodPost, "/discover", false},
+		{http.MethodDelete, "/discover/movie/27205", false},
+		{http.MethodPut, "/requests/12", false},
+		{http.MethodDelete, "/requests", false},
+	}
+	for _, tc := range tests {
+		if got := memberAllowed(tc.method, tc.path); got != tc.want {
+			t.Errorf("memberAllowed(%s %s) = %v, want %v", tc.method, tc.path, got, tc.want)
+		}
+	}
+}
+
+// A member turned away gets 403, not 401. A 401 means "log in", and sending a
+// member to the login screen for a door that will never open for them is a lie
+// the SPA would loop on.
+func TestMemberIsForbiddenNotUnauthorized(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	setPassword(t, st, testPassword)
+	createUser(t, st, testMember, testPassword, core.RoleMember)
+	member := login(t, h, testMember, testPassword)
+	admin := login(t, h, testAdmin, testPassword)
+
+	for _, target := range []string{
+		"/api/v1/settings",
+		"/api/v1/system/status",
+		"/api/v1/library/movies",
+		"/api/v1/wanted",
+		"/api/v1/downloads",
+		"/api/v1/users",
+	} {
+		rec := doAuth(t, h, http.MethodGet, target, "", withCookie(member))
+		wantStatus(t, rec, http.StatusForbidden)
+		wantErrorBody(t, rec)
+		// The same route, for the admin, is not forbidden.
+		rec = doAuth(t, h, http.MethodGet, target, "", withCookie(admin))
+		if rec.Code == http.StatusForbidden {
+			t.Fatalf("GET %s = 403 for an admin", target)
+		}
+	}
+
+	// And what a member may reach, they reach.
+	wantStatus(t, doAuth(t, h, http.MethodGet, "/api/v1/requests", "", withCookie(member)),
+		http.StatusOK)
+	// Discover needs a metadata provider this server has none of, so it
+	// answers 503 — but it is the handler answering, which is the point: the
+	// gate let the member through.
+	if rec := doAuth(t, h, http.MethodGet, "/api/v1/discover", "", withCookie(member)); rec.Code == http.StatusForbidden {
+		t.Fatal("GET /discover = 403 for a member; discover is what a member is for")
+	}
+}
+
+func TestMeReportsTheCallingIdentity(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	ctx := context.Background()
+	setPassword(t, st, testPassword)
+	createUser(t, st, testMember, testPassword, core.RoleMember)
+	if err := st.SetSetting(ctx, store.SettingAPIKey, "deadbeef"); err != nil {
+		t.Fatalf("SetSetting: %v", err)
+	}
+
+	tests := []struct {
+		name     string
+		decorate func(*http.Request)
+		want     meResponse
+	}{
+		{"admin session", withCookie(login(t, h, testAdmin, testPassword)),
+			meResponse{Username: testAdmin, Role: core.RoleAdmin}},
+		{"member session", withCookie(login(t, h, testMember, testPassword)),
+			meResponse{Username: testMember, Role: core.RoleMember}},
+		// The API key is the owner's own credential, so it is an admin — but
+		// it names no account, so there is nobody to report.
+		{"api key", func(r *http.Request) { r.Header.Set("X-Api-Key", "deadbeef") },
+			meResponse{Role: core.RoleAdmin}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := doAuth(t, h, http.MethodGet, "/api/v1/auth/me", "", tc.decorate)
+			wantStatus(t, rec, http.StatusOK)
+			var got meResponse
+			decodeBody(t, rec, &got)
+			if got != tc.want {
+				t.Fatalf("auth/me = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+
+	// With no credential at all it is 401 like everything else inside the gate.
+	wantStatus(t, do(t, h, http.MethodGet, "/api/v1/auth/me", ""), http.StatusUnauthorized)
+}
+
+// A session whose account was deleted underneath it is not a session. This is
+// the one path where the cookie is valid and the identity is not.
+func TestSessionForADeletedAccountIsRefused(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	setPassword(t, st, testPassword)
+	member := createUser(t, st, testMember, testPassword, core.RoleMember)
+	cookie := login(t, h, testMember, testPassword)
+
+	wantStatus(t, doAuth(t, h, http.MethodGet, "/api/v1/requests", "", withCookie(cookie)),
+		http.StatusOK)
+
+	if err := st.DeleteUser(context.Background(), member.ID); err != nil {
+		t.Fatalf("DeleteUser: %v", err)
+	}
+	rec := doAuth(t, h, http.MethodGet, "/api/v1/requests", "", withCookie(cookie))
+	wantStatus(t, rec, http.StatusUnauthorized)
+	wantErrorBody(t, rec)
 }

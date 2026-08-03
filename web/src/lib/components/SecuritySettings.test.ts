@@ -1,10 +1,12 @@
 /**
- * The Security settings section (SPEC §11, PLAN phase 5 task 5): setting,
- * changing and clearing the password, and showing/regenerating the API key.
+ * The Security settings section (SPEC §11): changing your OWN password, and
+ * showing/regenerating the API key. Creating accounts and resetting somebody
+ * else's password are the Users section's, not this one's.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import Settings from '../routes/Settings.svelte';
+import { session } from '../state/session.svelte';
 import { system } from '../state/system.svelte';
 import type { SystemStatus } from '../api/types';
 
@@ -38,9 +40,10 @@ let posted: { url: string; body: unknown }[] = [];
 beforeEach(() => {
   host = document.createElement('div');
   document.body.appendChild(host);
-  passwordSet = false;
+  passwordSet = true;
   posted = [];
   system.status = null;
+  session.user = { username: 'ada', role: 'admin', open: false };
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -49,11 +52,7 @@ beforeEach(() => {
       if (method === 'POST') {
         posted.push({ url, body: init?.body ? JSON.parse(String(init.body)) : null });
       }
-      if (url.endsWith('/settings/password')) {
-        const body = JSON.parse(String(init?.body)) as { new_password: string };
-        passwordSet = body.new_password !== '';
-        return jsonResponse({ password_set: passwordSet });
-      }
+      if (url.endsWith('/settings/password')) return jsonResponse({ password_set: true });
       if (url.endsWith('/settings/apikey')) return jsonResponse({ api_key: 'newkey' });
       if (url.endsWith('/settings')) return jsonResponse({ api_key: 'oldkey' });
       if (url.endsWith('/system/status')) return jsonResponse({ ...STATUS, password_set: passwordSet });
@@ -67,6 +66,7 @@ afterEach(() => {
   host.remove();
   vi.unstubAllGlobals();
   system.status = null;
+  session.forget();
 });
 
 async function settle() {
@@ -99,50 +99,45 @@ async function openSecurityTab() {
 }
 
 describe('Security settings', () => {
-  it('sets a password, then changes it with the current one', async () => {
+  it('changes the signed-in account own password, proving the current one', async () => {
     await openSecurityTab();
 
-    // No password yet: nothing to prove, and the nag says why it matters.
-    expect(host.querySelector('#security-current-password')).toBeNull();
-    expect(host.textContent).toContain('Listening on every interface without a password');
-
-    // A short password cannot be submitted at all.
-    type('#security-new-password', 'short');
-    expect(button('Set password').hasAttribute('disabled')).toBe(true);
-
-    type('#security-new-password', 'a good password');
-    button('Set password').click();
-    await settle();
-
-    expect(posted[0]?.url).toBe('/api/v1/settings/password');
-    expect(posted[0]?.body).toEqual({ current_password: '', new_password: 'a good password' });
-    // The status refresh flipped the section into "password set" mode.
-    expect(host.querySelector('#security-current-password')).not.toBeNull();
-    expect(host.textContent).not.toContain('Listening on every interface without a password');
-    // The typed password is not left sitting in the form.
-    expect((host.querySelector('#security-new-password') as HTMLInputElement).value).toBe('');
-
+    // Neither field filled in, and a too-short new password, are both refused
+    // before a request is made.
+    expect(button('Change password').hasAttribute('disabled')).toBe(true);
     type('#security-current-password', 'a good password');
+    type('#security-new-password', 'short');
+    expect(button('Change password').hasAttribute('disabled')).toBe(true);
+
     type('#security-new-password', 'a better password');
     button('Change password').click();
     await settle();
 
-    expect(posted[1]?.body).toEqual({
+    expect(posted[0]?.url).toBe('/api/v1/settings/password');
+    expect(posted[0]?.body).toEqual({
       current_password: 'a good password',
       new_password: 'a better password',
     });
+    // Neither password is left sitting in the form.
+    expect((host.querySelector('#security-current-password') as HTMLInputElement).value).toBe('');
+    expect((host.querySelector('#security-new-password') as HTMLInputElement).value).toBe('');
   });
 
-  it('clears the password with an empty new password', async () => {
-    passwordSet = true;
+  /**
+   * There is no password of "mine" on a server with no accounts, and clearing
+   * one is no longer a thing at all: reopening a Caravan means deleting every
+   * account, which is the Users section's business.
+   */
+  it('offers Users instead of a password form when nothing is signed in', async () => {
+    session.user = { username: '', role: 'admin', open: true };
+    passwordSet = false;
     await openSecurityTab();
 
-    type('#security-current-password', 'a good password');
-    button('Clear password').click();
-    await settle();
-
-    expect(posted[0]?.body).toEqual({ current_password: 'a good password', new_password: '' });
     expect(host.querySelector('#security-current-password')).toBeNull();
+    expect(host.querySelector('#security-new-password')).toBeNull();
+    expect(host.textContent).not.toContain('Clear password');
+    expect(host.querySelector('a[href="/settings/users"]')).not.toBeNull();
+    expect(host.textContent).toContain('Listening on every interface without a password');
   });
 
   it('shows the API key and swaps in the regenerated one', async () => {

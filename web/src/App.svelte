@@ -13,7 +13,12 @@
   import Toasts from './lib/components/Toasts.svelte';
   import Sidebar from './lib/layout/Sidebar.svelte';
   import TopBar from './lib/layout/TopBar.svelte';
-  import { numericParam, ordinalParam, type RoutePattern } from './lib/router';
+  import {
+    memberAllowedRoute,
+    numericParam,
+    ordinalParam,
+    type RoutePattern,
+  } from './lib/router';
   import { navigate, router, startRouter } from './lib/router.svelte';
   import Calendar from './lib/routes/Calendar.svelte';
   import Convert from './lib/routes/Convert.svelte';
@@ -38,6 +43,7 @@
   import Button from './lib/components/Button.svelte';
   import { unreachableClientBanner } from './lib/download';
   import { auth } from './lib/state/auth.svelte';
+  import { session } from './lib/state/session.svelte';
   import { shutdown } from './lib/state/shutdown.svelte';
   import { system } from './lib/state/system.svelte';
 
@@ -115,9 +121,19 @@
 
   onMount(() => {
     const stop = startRouter();
-    system.refresh();
+    void boot();
     return stop;
   });
+
+  /**
+   * Who we are, then what the server is doing. The order matters: GET
+   * /system/status is an admin route, so asking for it as a member would turn a
+   * perfectly healthy server into a "Caravan server unreachable" banner.
+   */
+  async function boot() {
+    await session.refresh();
+    if (session.isAdmin) await system.refresh();
+  }
 
   // Route gate: no storage root means first run, and once there is one the
   // first-run screen is no longer reachable (SPEC §10.1).
@@ -136,8 +152,25 @@
     }
   });
 
+  /**
+   * Members have no library, activity or system screens. A direct link to one —
+   * a bookmark, a shared URL, a role that changed under them — lands on
+   * Discover rather than on a screen whose every call 403s.
+   *
+   * The server is still the enforcer; this only spares them the wreckage.
+   */
+  $effect(() => {
+    if (session.isAdmin) return;
+    const current = router.match;
+    if (current && memberAllowedRoute(current.pattern)) return;
+    navigate('/discover', { replace: true });
+  });
+
   function onKeydown(event: KeyboardEvent) {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+      // Adding straight to the library is an admin's to do; a member's ⌘K
+      // would open a dialog whose submit is a 403.
+      if (!session.isAdmin) return;
       event.preventDefault();
       openAdd();
     }
@@ -167,39 +200,44 @@
     <Sidebar />
 
     <div class="flex min-w-0 flex-1 flex-col overflow-y-auto">
-      <TopBar {title} onsearch={() => openAdd()} />
+      <TopBar {title} onsearch={session.isAdmin ? () => openAdd() : undefined} />
 
       <main class="flex flex-1 flex-col gap-4 px-6 py-6">
-        {#if system.error}
-          <Banner
-            tone="danger"
-            icon="warning"
-            title="Caravan server unreachable"
-            message={system.error} />
-        {:else if system.status?.dirty}
-          <DirtyRecovery />
-        {/if}
+        <!-- Every banner here reports on the server itself, and every one of
+             them offers a fix on a screen a member cannot open. They are also
+             read from a status a member is never allowed to fetch (see boot). -->
+        {#if session.isAdmin}
+          {#if system.error}
+            <Banner
+              tone="danger"
+              icon="warning"
+              title="Caravan server unreachable"
+              message={system.error} />
+          {:else if system.status?.dirty}
+            <DirtyRecovery />
+          {/if}
 
-        <!-- One client being down is not the system being down, so this sits
-             below the server/dirty banners and names the client (SPEC §5.1). -->
-        {#if unreachableClients}
-          <Banner
-            tone="warning"
-            icon="warning"
-            title={unreachableClients.title}
-            message={unreachableClients.message} />
-        {/if}
+          <!-- One client being down is not the system being down, so this sits
+               below the server/dirty banners and names the client (SPEC §5.1). -->
+          {#if unreachableClients}
+            <Banner
+              tone="warning"
+              icon="warning"
+              title={unreachableClients.title}
+              message={unreachableClients.message} />
+          {/if}
 
-        {#if showBindNag}
-          <Banner
-            tone="warning"
-            icon="warning"
-            title="Listening on every interface without a password"
-            message="Anyone on this network can reach Caravan and change its settings. Set a password under Settings → Security.">
-            {#snippet action()}
-              <Button variant="secondary" size="sm" onclick={dismissNag}>Dismiss</Button>
-            {/snippet}
-          </Banner>
+          {#if showBindNag}
+            <Banner
+              tone="warning"
+              icon="warning"
+              title="Listening on every interface without a password"
+              message="Anyone on this network can reach Caravan and change its settings. Add an account under Settings → Users.">
+              {#snippet action()}
+                <Button variant="secondary" size="sm" onclick={dismissNag}>Dismiss</Button>
+              {/snippet}
+            </Banner>
+          {/if}
         {/if}
 
         {#if !match}

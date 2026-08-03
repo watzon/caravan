@@ -48,6 +48,29 @@ export const ROUTES = [
 
 export type RoutePattern = (typeof ROUTES)[number];
 
+/**
+ * The screens a member may open (SPEC §11): find something, and ask for it.
+ *
+ * It mirrors the server's own allowlist in internal/api/auth.go — everything
+ * absent from it answers 403 for a member — so this is an allowlist too rather
+ * than a list of admin screens. A route added tomorrow is closed to members
+ * until somebody names it here, which is the safe direction to be wrong in.
+ */
+export const MEMBER_ROUTES: readonly RoutePattern[] = [
+  '/',
+  '/discover',
+  '/discover/network/:id',
+  '/discover/studio/:id',
+  '/discover/movie/:tmdbId',
+  '/discover/series/:tmdbId',
+  '/requests',
+];
+
+/** Whether a member may open this route. Pure — the guard lives in App.svelte. */
+export function memberAllowedRoute(pattern: RoutePattern): boolean {
+  return MEMBER_ROUTES.includes(pattern);
+}
+
 export interface RouteMatch {
   pattern: RoutePattern;
   params: Record<string, string>;

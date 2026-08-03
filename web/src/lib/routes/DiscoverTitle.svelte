@@ -30,6 +30,7 @@
   } from '../discover';
   import { UNKNOWN, formatDate, seasonLabel } from '../format';
   import { discover } from '../state/discover.svelte';
+  import { session } from '../state/session.svelte';
 
   interface Props {
     type: MediaType;
@@ -175,20 +176,30 @@
           </p>
 
           <div class="mt-1 flex flex-wrap items-center gap-3">
-            {#if title.in_library}
+            {#if title.in_library && session.isAdmin}
               <Button variant="primary" href={libraryHref(title.media_type, title.library_id)}>
                 <Icon name="check" size={14} />
                 Open in library
               </Button>
+            {:else if title.in_library}
+              <!-- The library screens are admin-only, so a member following
+                   this would be bounced back to Discover. It is the screen's
+                   only call to action for a title Caravan already has, which
+                   makes a dead one worse than none: state the fact instead. -->
+              <Badge tone="success">In library</Badge>
             {:else}
               <Button variant="primary" onclick={() => open('request')}>
                 Request {title.media_type === 'movie' ? 'movie' : 'series'}
               </Button>
-              <Button variant="secondary" onclick={() => open('add')}>Add to library</Button>
+              <!-- Adding straight to the library picks a quality profile and a
+                   root folder, which are the admin's calls. A member only asks. -->
+              {#if session.isAdmin}
+                <Button variant="secondary" onclick={() => open('add')}>Add to library</Button>
+              {/if}
             {/if}
           </div>
 
-          {#if !title.in_library}
+          {#if !title.in_library && session.isAdmin}
             <p class="text-sm text-ink-muted">
               Direct add is available to admins · picks quality profile &amp; root folder
             </p>

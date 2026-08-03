@@ -5,7 +5,12 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { MediaRequest, RequestStatus } from './api/types';
-import { pendingRequestCount, pendingRequests, requestSeasonsLabel } from './requests';
+import {
+  pendingRequestCount,
+  pendingRequests,
+  requestSeasonsLabel,
+  requestStatusChip,
+} from './requests';
 
 function request(id: number, extra: Partial<MediaRequest> = {}): MediaRequest {
   return {
@@ -18,6 +23,7 @@ function request(id: number, extra: Partial<MediaRequest> = {}): MediaRequest {
     poster_url: '',
     seasons: null,
     min_availability: '',
+    requested_by_username: '',
     status: 'pending' as RequestStatus,
     created_at: '2026-08-01T00:00:00Z',
     updated_at: '2026-08-01T00:00:00Z',
@@ -57,5 +63,15 @@ describe('requestSeasonsLabel', () => {
     expect(requestSeasonsLabel(request(1, { seasons: [1, 2] }))).toBe(
       '2 seasons · Season 01, Season 02',
     );
+  });
+});
+
+describe('requestStatusChip', () => {
+  // Only a member's list renders this, and it is the one place they learn that
+  // a wish was granted — so an approved row must not read as a quiet nothing.
+  it('gives each status its own word and tone', () => {
+    expect(requestStatusChip('pending')).toEqual({ label: 'Pending', tone: 'warning' });
+    expect(requestStatusChip('approved')).toEqual({ label: 'Approved', tone: 'success' });
+    expect(requestStatusChip('dismissed')).toEqual({ label: 'Dismissed', tone: 'neutral' });
   });
 });

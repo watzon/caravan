@@ -10,6 +10,7 @@
   import { onMount } from 'svelte';
   import type { DiscoverItem, DiscoverSource } from '../api/types';
   import AddRequestModal from '../components/AddRequestModal.svelte';
+  import Badge from '../components/Badge.svelte';
   import Button from '../components/Button.svelte';
   import DiscoverError from '../components/DiscoverError.svelte';
   import DiscoverShelf from '../components/DiscoverShelf.svelte';
@@ -22,17 +23,34 @@
     mediaTypeChip,
     ratingText,
     sourceHref,
+    type RequestMode,
   } from '../discover';
   import { UNKNOWN } from '../format';
   import { discover } from '../state/discover.svelte';
+  import { session } from '../state/session.svelte';
 
-  let adding = $state<DiscoverItem | null>(null);
+  /** The billboard title the modal is open for, in whichever mode the role allows. */
+  let acquiring = $state<DiscoverItem | null>(null);
+
+  /**
+   * Putting a title straight into the library is an admin's to do; a member
+   * asks for it. One button either way — offering both to somebody who cannot
+   * use one of them is a door painted on a wall.
+   */
+  let mode = $derived<RequestMode>(session.isAdmin ? 'add' : 'request');
 
   onMount(() => void discover.load());
 
   let home = $derived(discover.home);
   let hero = $derived<DiscoverItem | null>(home?.trending[0] ?? null);
   let heroRating = $derived(hero ? ratingText(hero.vote_average) : null);
+
+  /** The billboard's one call to action, under whichever verb the role gets. */
+  let heroAction = $derived(
+    hero === null
+      ? ''
+      : `${mode === 'add' ? 'Add' : 'Request'} ${hero.media_type === 'movie' ? 'movie' : 'series'}`,
+  );
 
   /** Trending shelf minus the billboard, so #1 is not on screen twice. */
   let trendingRest = $derived(home ? home.trending.slice(1) : []);
@@ -115,15 +133,22 @@
             {hero.overview || 'No overview available.'}
           </p>
           <div class="mt-1 flex flex-wrap items-center gap-3">
-            {#if hero.in_library}
+            {#if hero.in_library && session.isAdmin}
               <Button variant="primary" href={libraryHref(hero.media_type, hero.library_id)}>
                 <Icon name="check" size={14} />
                 In library
               </Button>
+            {:else if hero.in_library}
+              <!-- /movies/:id and /series/:id are admin screens, so this link
+                   would bounce a member straight back here — from the
+                   billboard it would read as a button that does nothing. The
+                   fact is still worth saying, so it is said rather than
+                   linked. -->
+              <Badge tone="success">In library</Badge>
             {:else}
-              <Button variant="primary" onclick={() => (adding = hero)}>
+              <Button variant="primary" onclick={() => (acquiring = hero)}>
                 <Icon name="plus" size={14} />
-                Add {hero.media_type === 'movie' ? 'movie' : 'series'}
+                {heroAction}
               </Button>
             {/if}
             <Button variant="secondary" href={discoverHref(hero)}>Details</Button>
@@ -157,19 +182,24 @@
   {/if}
 </div>
 
-{#if adding}
+{#if acquiring}
   <AddRequestModal
-    mode="add"
-    mediaType={adding.media_type}
-    tmdbID={adding.tmdb_id}
-    title={adding.title}
-    year={adding.year}
-    posterPath={adding.poster_path}
-    onclose={() => (adding = null)}
+    {mode}
+    mediaType={acquiring.media_type}
+    tmdbID={acquiring.tmdb_id}
+    title={acquiring.title}
+    year={acquiring.year}
+    posterPath={acquiring.poster_path}
+    onclose={() => (acquiring = null)}
     ondone={(result) => {
-      const item = adding;
-      if (item && result.kind === 'added') {
+      const item = acquiring;
+      if (!item) return;
+      // The cached shelves hold this same title, so they are patched rather
+      // than refetched — the home payload costs three TMDB round trips.
+      if (result.kind === 'added') {
         discover.markInLibrary(item.media_type, item.tmdb_id, result.libraryID);
+      } else {
+        discover.markRequested(item.media_type, item.tmdb_id);
       }
     }} />
 {/if}

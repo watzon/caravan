@@ -3,8 +3,8 @@
    * Login (SPEC §11). Rendered without the shell, like first run: there is
    * nothing to navigate to until the session exists.
    *
-   * It appears only once the server has answered 401, so reaching it means a
-   * password is set - there is no "is auth on?" probe to get wrong.
+   * It appears only once the server has answered 401, so reaching it means the
+   * server has accounts - there is no "is auth on?" probe to get wrong.
    */
   import Button from '../components/Button.svelte';
   import Field from '../components/Field.svelte';
@@ -12,20 +12,29 @@
   import LoadError from '../components/LoadError.svelte';
   import TextInput from '../components/TextInput.svelte';
   import { auth } from '../state/auth.svelte';
+  import { session } from '../state/session.svelte';
   import { system } from '../state/system.svelte';
 
+  let username = $state('');
   let password = $state('');
 
   async function submit() {
+    if (username.trim() === '') {
+      auth.error = 'Enter your username.';
+      return;
+    }
     if (password === '') {
       auth.error = 'Enter your password.';
       return;
     }
-    if (await auth.login(password)) {
+    if (await auth.login(username.trim(), password)) {
       password = '';
-      // The shell mounts against a status fetch that 401'd; refresh it before
-      // it renders so the sidebar is not blank behind a successful login.
-      await system.refresh();
+      // The shell mounts against fetches that 401'd. The role comes first:
+      // it decides which navigation renders, and a member must never see the
+      // admin one flash. System status is admin-only, so it is only asked for
+      // when the account that just signed in may have it.
+      await session.refresh();
+      if (session.isAdmin) await system.refresh();
     }
   }
 </script>
@@ -48,7 +57,7 @@
 
     <h1 class="font-display text-xl font-semibold tracking-tight text-ink">Sign in</h1>
     <p class="mt-2 text-base text-ink-secondary">
-      This Caravan is password-protected.
+      This Caravan is password-protected. Sign in with your account.
     </p>
 
     <form
@@ -57,12 +66,15 @@
         event.preventDefault();
         submit();
       }}>
+      <Field label="Username" for="login-username">
+        <TextInput id="login-username" bind:value={username} autofocus placeholder="admin" />
+      </Field>
+
       <Field label="Password" for="login-password">
         <TextInput
           id="login-password"
           bind:value={password}
           type="password"
-          autofocus
           placeholder="•••••" />
       </Field>
 

@@ -164,10 +164,8 @@ func TestIntegrityEndpointsRequireAuth(t *testing.T) {
 	}
 
 	// Still dirty, as seen through an authenticated status read.
-	cookie := login(t, h, testPassword)
-	rec := doAuth(t, h, http.MethodGet, "/api/v1/system/status", "", func(r *http.Request) {
-		r.AddCookie(cookie)
-	})
+	cookie := login(t, h, testAdmin, testPassword)
+	rec := doAuth(t, h, http.MethodGet, "/api/v1/system/status", "", withCookie(cookie))
 	wantStatus(t, rec, http.StatusOK)
 	var status statusResponse
 	decodeBody(t, rec, &status)

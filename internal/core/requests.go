@@ -41,6 +41,12 @@ type Request struct {
 	// request carries it onto the movie row.
 	MinAvailability string
 	Status          string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	// RequestedBy is the account that asked, or 0 when no account did: a row
+	// that predates accounts, or one made while the server runs open. It is
+	// deliberately an id and not a name — usernames change, and a request is a
+	// record of what happened. It is also not a foreign key: deleting a
+	// housemate must not delete the history of what they asked for.
+	RequestedBy int64
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }

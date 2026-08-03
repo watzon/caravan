@@ -1,13 +1,19 @@
 <script lang="ts">
   /**
-   * Explore → Requests: the pending wishes, and the two things that can happen
-   * to one.
+   * Explore → Requests, which is two screens sharing one list (SPEC §11).
    *
-   * Approve reopens the shared add/request modal in add mode prefilled with the
-   * requested seasons, and submits through POST /requests/{id}/approve — the
-   * add is what marks the row approved, so there is no second write to get out
-   * of step with. Dismiss answers no; the row survives as history, and the
-   * title can be requested again later.
+   * An admin sees everyone's pending wishes and the two things that can happen
+   * to one. Approve reopens the shared add/request modal in add mode prefilled
+   * with the requested seasons, and submits through POST /requests/{id}/approve
+   * — the add is what marks the row approved, so there is no second write to
+   * get out of step with. Dismiss answers no; the row survives as history, and
+   * the title can be requested again later.
+   *
+   * A member sees only their own rows, and every status of them, so they can
+   * watch a wish go from pending to approved. The only thing they may do to one
+   * is cancel it while it is still pending — the same DELETE, under the name it
+   * has when the row is yours. The server enforces both halves and the list it
+   * hands back is already scoped, so nothing here filters by owner.
    */
   import { api, errorText } from '../api/client';
   import type { MediaRequest } from '../api/types';
@@ -20,7 +26,8 @@
   import Skeleton from '../components/Skeleton.svelte';
   import { availabilityLabel, discoverHref } from '../discover';
   import { formatDate, titleWithYear } from '../format';
-  import { pendingRequests, requestSeasonsLabel } from '../requests';
+  import { pendingRequests, requestSeasonsLabel, requestStatusChip } from '../requests';
+  import { session } from '../state/session.svelte';
   import { pushToast } from '../state/toast.svelte';
   import { REQUESTS_POLL_MS, requests } from '../state/requests.svelte';
 
@@ -29,14 +36,27 @@
 
   $effect(() => requests.subscribe(REQUESTS_POLL_MS));
 
-  let rows = $derived(pendingRequests(requests.items));
+  let isAdmin = $derived(session.isAdmin);
+
+  /**
+   * An admin's list is a decision queue, so it holds only what is undecided. A
+   * member's is the record of what they asked for, so it holds everything the
+   * server gave them — which is already only their own rows.
+   */
+  let rows = $derived(isAdmin ? pendingRequests(requests.items) : (requests.items ?? []));
 
   async function dismiss(request: MediaRequest) {
     dismissing = request.id;
     try {
       await api.dismissRequest(request.id);
       requests.forget(request.id);
-      pushToast(`Dismissed ${request.title}`, 'neutral');
+      pushToast(
+        isAdmin ? `Dismissed ${request.title}` : `Cancelled ${request.title}`,
+        'neutral',
+      );
+      // A member's list keeps every status, so the row belongs back on screen
+      // as dismissed. forget() above is only what stops the click feeling slow.
+      if (!isAdmin) void requests.refresh();
     } catch (err) {
       // 409 means it stopped being pending while this screen was open: the
       // list is stale, so refetch rather than guess.
@@ -60,8 +80,10 @@
   {:else if rows.length === 0}
     <EmptyState
       icon="inbox"
-      title="No pending requests"
-      message="Nothing is waiting on a decision. Requests made from Discover show up here until they are approved or dismissed.">
+      title={isAdmin ? 'No pending requests' : 'No requests yet'}
+      message={isAdmin
+        ? 'Nothing is waiting on a decision. Requests made from Discover show up here until they are approved or dismissed.'
+        : 'Anything you ask for from Discover shows up here, and stays until it is approved or turned down.'}>
       {#snippet action()}
         <Button variant="primary" href="/discover">Open Discover</Button>
       {/snippet}
@@ -69,6 +91,7 @@
   {:else}
     <ul class="flex flex-col gap-2">
       {#each rows as request (request.id)}
+        {@const statusChip = requestStatusChip(request.status)}
         <li class="flex items-center gap-3 rounded-md border border-border bg-surface p-3">
           <a
             href={discoverHref(request)}
@@ -88,6 +111,11 @@
               <Badge mono tone="neutral">
                 {request.media_type === 'movie' ? 'MOVIE' : 'SERIES'}
               </Badge>
+              <!-- Only on a member's list: an admin's holds pending rows only,
+                   so the badge would say the same word on every one of them. -->
+              {#if !isAdmin}
+                <Badge tone={statusChip.tone}>{statusChip.label}</Badge>
+              {/if}
               <span>{requestSeasonsLabel(request)}</span>
               {#if request.media_type === 'movie' && request.min_availability}
                 <span class="text-ink-muted">·</span>
@@ -95,24 +123,41 @@
               {/if}
               <span class="text-ink-muted">·</span>
               <span>Requested {formatDate(request.created_at)}</span>
+              <!-- Empty for a row that predates accounts, one made while the
+                   server ran open, or an asker since deleted. All three mean
+                   the same thing to whoever is reading: nobody left to ask. -->
+              {#if isAdmin && request.requested_by_username}
+                <span class="text-ink-muted">·</span>
+                <span>by {request.requested_by_username}</span>
+              {/if}
             </p>
           </div>
 
           <div class="flex shrink-0 items-center gap-2">
-            <Button
-              variant="primary"
-              size="sm"
-              disabled={dismissing === request.id}
-              onclick={() => (approving = request)}>
-              Approve
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              disabled={dismissing === request.id}
-              onclick={() => void dismiss(request)}>
-              {dismissing === request.id ? 'Dismissing…' : 'Dismiss'}
-            </Button>
+            {#if isAdmin}
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={dismissing === request.id}
+                onclick={() => (approving = request)}>
+                Approve
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={dismissing === request.id}
+                onclick={() => void dismiss(request)}>
+                {dismissing === request.id ? 'Dismissing…' : 'Dismiss'}
+              </Button>
+            {:else if request.status === 'pending'}
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={dismissing === request.id}
+                onclick={() => void dismiss(request)}>
+                {dismissing === request.id ? 'Cancelling…' : 'Cancel'}
+              </Button>
+            {/if}
           </div>
         </li>
       {/each}

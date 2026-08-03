@@ -284,6 +284,45 @@ export interface AuthState {
 }
 
 /**
+ * What an account may do (SPEC §11). An admin runs the server; a member can
+ * only find something and ask for it.
+ */
+export type UserRole = 'admin' | 'member';
+
+/**
+ * GET /auth/me — who this browser is talking as.
+ *
+ * A server with no accounts answers with an empty username, the admin role and
+ * `open: true`: there is nobody to name, and whoever reached the API may do
+ * anything, which is exactly how a passwordless Caravan always behaved.
+ */
+export interface SessionUser {
+  username: string;
+  role: UserRole;
+  open: boolean;
+}
+
+/**
+ * internal/api.userJSON — one account in the Users settings list. There is
+ * deliberately no password field in either direction: the hash never leaves
+ * the server, and a new password only travels on the way in.
+ */
+export interface User {
+  id: number;
+  username: string;
+  role: UserRole;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Body for POST /users. On a server with no accounts this is what closes it. */
+export interface CreateUserBody {
+  username: string;
+  password: string;
+  role: UserRole;
+}
+
+/**
  * POST /system/verify — the dirty-eject recovery action (SPEC §13).
  *
  * A response at all means the database passed sqlite's own consistency check;
@@ -1010,6 +1049,12 @@ export interface MediaRequest {
   seasons: number[] | null;
   /** "" when unspecified — every series request. */
   min_availability: MinAvailability | '';
+  /**
+   * Who asked. "" covers three cases the screen renders identically: the row
+   * predates accounts, it was made while the server ran open, or the asker has
+   * since been deleted.
+   */
+  requested_by_username: string;
   status: RequestStatus;
   created_at: string;
   updated_at: string;

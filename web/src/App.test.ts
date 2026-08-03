@@ -9,6 +9,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import App from './App.svelte';
 import { navigate } from './lib/router.svelte';
 import { discover } from './lib/state/discover.svelte';
+import { session } from './lib/state/session.svelte';
 import { shutdown } from './lib/state/shutdown.svelte';
 import type {
   DiscoverHome,
@@ -194,6 +195,10 @@ beforeEach(() => {
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      // The shell asks who it is talking as before anything else.
+      if (url.endsWith('/auth/me')) {
+        return jsonResponse({ username: '', role: 'admin', open: true });
+      }
       if (url.endsWith('/system/status')) return jsonResponse(statusBody);
       // The list endpoints answer with a named envelope (internal/api).
       if (url.endsWith('/library/movies')) return jsonResponse({ movies: [MOVIE] });
@@ -213,6 +218,9 @@ afterEach(() => {
   unmount(app);
   host.remove();
   vi.unstubAllGlobals();
+  // A module singleton: these tests all run as the open-server admin, and the
+  // next file must not inherit that.
+  session.forget();
 });
 
 async function settle() {
@@ -266,6 +274,7 @@ describe('App shell', () => {
         poster_url: '',
         seasons: null,
         min_availability: '',
+        requested_by_username: 'chris',
         status: 'pending',
         created_at: '2026-08-01T00:00:00Z',
         updated_at: '2026-08-01T00:00:00Z',

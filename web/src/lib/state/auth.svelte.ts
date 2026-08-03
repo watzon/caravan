@@ -1,13 +1,14 @@
 /**
- * Session state for the optional single-user password (SPEC §11).
+ * Whether the login screen is in front of the app (SPEC §11).
  *
  * There is no token to hold: the session is an HttpOnly cookie the browser
  * attaches by itself. All this tracks is whether the server has told us the
- * session is missing or expired, which is what puts the login screen in front
- * of the app.
+ * session is missing or expired. *Who* is signed in lives in session.svelte.ts,
+ * which this deliberately only writes to on the way out.
  */
 
 import { api, errorText, onUnauthorized } from '../api/client';
+import { session } from './session.svelte';
 import { clearToasts } from './toast.svelte';
 
 class AuthState {
@@ -18,12 +19,12 @@ class AuthState {
   /** Why the last login failed; cleared by the next attempt. */
   error = $state<string | null>(null);
 
-  /** Returns true when the password was accepted. */
-  async login(password: string): Promise<boolean> {
+  /** Returns true when the credentials were accepted. */
+  async login(username: string, password: string): Promise<boolean> {
     this.busy = true;
     this.error = null;
     try {
-      await api.login(password);
+      await api.login(username, password);
       this.required = false;
       return true;
     } catch (err) {
@@ -49,6 +50,9 @@ class AuthState {
       this.busy = false;
       this.error = null;
       this.required = true;
+      // The next person to sign in on this browser may not be this one, so the
+      // login screen must not sit in front of a stale role.
+      session.forget();
       clearToasts();
     }
   }

@@ -141,12 +141,23 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("POST /system/storage-root/migrate", s.handleMigrateStorageRoot)
 	api.HandleFunc("GET /system/storage-root/migration", s.handleStorageMigration)
 
-	// The optional single-user password and its session (SPEC §11, PLAN phase 5
-	// task 5). Login and logout are exempt from the gate below; setting the
-	// password is not, so changing it always needs the current session.
+	// Accounts and sessions (SPEC §11). Login and logout are exempt from the
+	// gate below; /auth/me and the password change are not, so both always
+	// speak for the current session. Changing a password here only ever
+	// changes the caller's own.
 	api.HandleFunc("POST /auth/login", s.handleLogin)
 	api.HandleFunc("POST /auth/logout", s.handleLogout)
+	api.HandleFunc("GET /auth/me", s.handleMe)
 	api.HandleFunc("POST /settings/password", s.handleSetPassword)
+
+	// Managing other people's accounts, which is an admin's job: memberAllowed
+	// names none of these, so a member is turned away by the gate itself. On a
+	// server with no accounts everyone is an implicit admin, which is what
+	// makes POST /users the route that closes an open server.
+	api.HandleFunc("GET /users", s.handleListUsers)
+	api.HandleFunc("POST /users", s.handleCreateUser)
+	api.HandleFunc("DELETE /users/{id}", s.handleDeleteUser)
+	api.HandleFunc("POST /users/{id}/password", s.handleResetUserPassword)
 
 	// Quality profiles (PLAN phase 3, task 1) and the wanted list they drive
 	// (task 2).
@@ -229,8 +240,8 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 
 	// Requests: a wish for something not in the library. Approving one takes
 	// the same add path the library endpoints do, and any add absorbs a
-	// matching pending request (see absorbRequests). There are no roles yet,
-	// so requesting and adding directly are both open.
+	// matching pending request (see absorbRequests). Members may make, list
+	// and cancel their own; approving is an admin's decision (memberAllowed).
 	api.HandleFunc("GET /requests", s.handleListRequests)
 	api.HandleFunc("POST /requests", s.handleCreateRequest)
 	api.HandleFunc("POST /requests/{id}/approve", s.handleApproveRequest)

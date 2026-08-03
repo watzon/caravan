@@ -12,7 +12,11 @@
 
   interface Props {
     title: string;
-    onsearch: () => void;
+    /**
+     * Opens the add-to-library dialog. Omitted for a member, who has no
+     * library to add to — the button goes with it rather than being disabled.
+     */
+    onsearch?: () => void;
   }
 
   let { title, onsearch }: Props = $props();
@@ -37,15 +41,17 @@
     {@render page.actions()}
   {/if}
 
-  <button
-    type="button"
-    onclick={onsearch}
-    class="flex h-8 items-center gap-2 rounded-md border border-border-strong bg-raised px-3
-           text-base text-ink-muted transition-colors duration-150 ease-out hover:bg-overlay hover:text-ink-secondary">
-    <Icon name="search" size={14} />
-    <span class="hidden sm:inline">Add movie or series</span>
-    <kbd class="ml-2 rounded-sm bg-surface px-1.5 py-0.5 font-mono text-xs text-ink-muted">
-      {isMac ? '⌘' : 'Ctrl'}K
-    </kbd>
-  </button>
+  {#if onsearch}
+    <button
+      type="button"
+      onclick={onsearch}
+      class="flex h-8 items-center gap-2 rounded-md border border-border-strong bg-raised px-3
+             text-base text-ink-muted transition-colors duration-150 ease-out hover:bg-overlay hover:text-ink-secondary">
+      <Icon name="search" size={14} />
+      <span class="hidden sm:inline">Add movie or series</span>
+      <kbd class="ml-2 rounded-sm bg-surface px-1.5 py-0.5 font-mono text-xs text-ink-muted">
+        {isMac ? '⌘' : 'Ctrl'}K
+      </kbd>
+    </button>
+  {/if}
 </header>

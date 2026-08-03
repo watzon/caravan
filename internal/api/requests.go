@@ -26,8 +26,13 @@ type requestJSON struct {
 	// empty when unspecified (and always for a series).
 	MinAvailability string `json:"min_availability"`
 	Status          string `json:"status"`
-	CreatedAt       string `json:"created_at"`
-	UpdatedAt       string `json:"updated_at"`
+	// RequestedByUsername is who asked, empty when the row records no account:
+	// one made before accounts existed, one made while the server ran open, or
+	// one whose asker has since been deleted. The screen renders all three the
+	// same way, because from the row's side they are the same thing.
+	RequestedByUsername string `json:"requested_by_username"`
+	CreatedAt           string `json:"created_at"`
+	UpdatedAt           string `json:"updated_at"`
 }
 
 // requestCreateRequest is the body of POST /requests. Seasons is optional and
@@ -65,6 +70,11 @@ type approveRequestRequest struct {
 // the season lists — see store.CreateRequest. Requesting something already in
 // the library is refused rather than merged: nothing would ever absorb the row,
 // and it would sit pending forever.
+//
+// The row records the calling account, which is zero on an open server or for
+// the API key. A merge keeps the first asker, so the row the answer describes
+// can be somebody else's — which is why the name on it is filtered by
+// visibleRequester rather than reported flat.
 func (s *server) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 	var body requestCreateRequest
 	if !decodeJSON(w, r, &body) {
@@ -117,6 +127,7 @@ func (s *server) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		PosterPath:      body.PosterPath,
 		Seasons:         body.Seasons,
 		MinAvailability: body.MinAvailability,
+		RequestedBy:     currentUser(r).ID,
 	}
 	if err := s.st.CreateRequest(ctx, &req); err != nil {
 		s.writeStoreError(w, "create request", err)
@@ -130,11 +141,35 @@ func (s *server) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreError(w, "get request", err)
 		return
 	}
-	writeJSON(w, http.StatusCreated, s.requestDTO(*stored))
+	names, err := s.requesterNames(ctx, []core.Request{*stored})
+	if err != nil {
+		s.writeStoreError(w, "read usernames", err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, s.requestDTO(*stored, s.visibleRequester(r, *stored, names)))
+}
+
+// visibleRequester is the asker's name as this caller may know it.
+//
+// A member sees only their own rows, and a merge is the one place that rule
+// could be walked around: POST /requests answers with the row that now exists,
+// which on a merge is a housemate's. Handing the name back would turn the
+// endpoint into a lookup from a provider id to whoever asked for it — the
+// roster of accounts a failed login goes out of its way not to confirm.
+func (s *server) visibleRequester(r *http.Request, row core.Request, names map[int64]string) string {
+	if user := currentUser(r); user.Role == core.RoleMember && row.RequestedBy != user.ID {
+		return ""
+	}
+	return names[row.RequestedBy]
 }
 
 // handleListRequests lists requests newest first, optionally filtered by
 // status.
+//
+// A member sees only their own rows, in every status: this is their screen for
+// watching a wish go from pending to approved, not a window onto the household.
+// An admin sees everybody's, which is what makes the screen a queue to work
+// through, and each row names who asked.
 func (s *server) handleListRequests(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
 	switch status {
@@ -144,15 +179,29 @@ func (s *server) handleListRequests(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := s.st.ListRequests(r.Context(), status)
+	ctx := r.Context()
+	var (
+		rows []core.Request
+		err  error
+	)
+	if user := currentUser(r); user.Role == core.RoleMember {
+		rows, err = s.st.ListRequestsBy(ctx, user.ID, status)
+	} else {
+		rows, err = s.st.ListRequests(ctx, status)
+	}
 	if err != nil {
 		s.writeStoreError(w, "list requests", err)
+		return
+	}
+	names, err := s.requesterNames(ctx, rows)
+	if err != nil {
+		s.writeStoreError(w, "read usernames", err)
 		return
 	}
 
 	out := make([]requestJSON, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, s.requestDTO(row))
+		out = append(out, s.requestDTO(row, names[row.RequestedBy]))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"requests": out})
 }
@@ -161,6 +210,10 @@ func (s *server) handleListRequests(w http.ResponseWriter, r *http.Request) {
 // the same path POST /library/movies and POST /library/series take, so an
 // approved title is indistinguishable from a directly added one. The request
 // is marked approved as a side effect of the add absorbing it.
+//
+// Admin-only, and enforced at the gate rather than here (memberAllowed): a
+// member who could approve their own request would be an admin wearing a
+// smaller badge.
 func (s *server) handleApproveRequest(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -176,8 +229,8 @@ func (s *server) handleApproveRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	req, ok := s.pendingRequest(ctx, w, id)
-	if !ok {
+	req, ok := s.loadRequest(ctx, w, id)
+	if !ok || !insistPending(w, req) {
 		return
 	}
 	if req.MediaType == MediaTypeMovie && len(body.Seasons) > 0 {
@@ -220,20 +273,42 @@ func (s *server) handleApproveRequest(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreError(w, "get request", err)
 		return
 	}
-	out["request"] = s.requestDTO(*approved)
+	names, err := s.requesterNames(ctx, []core.Request{*approved})
+	if err != nil {
+		s.writeStoreError(w, "read usernames", err)
+		return
+	}
+	// Admin-only at the gate, so visibleRequester never withholds anything here
+	// — it is used so that every single-row answer goes through one rule rather
+	// than two that have to be kept in step.
+	out["request"] = s.requestDTO(*approved, s.visibleRequester(r, *approved, names))
 	writeJSON(w, http.StatusOK, out)
 }
 
 // handleDismissRequest turns a request down. The row stays as history with a
 // dismissed status, which is also what unblocks a fresh request for the same
 // title later.
+//
+// For an admin that is a decision about somebody else's wish; for a member it
+// is cancelling their own, and it is the only row they may touch. Ownership is
+// checked before the pending check on purpose: answering "already decided" for
+// a housemate's request would confirm a row a member is not entitled to know
+// exists.
 func (s *server) handleDismissRequest(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
 		return
 	}
 	ctx := r.Context()
-	if _, ok := s.pendingRequest(ctx, w, id); !ok {
+	req, ok := s.loadRequest(ctx, w, id)
+	if !ok {
+		return
+	}
+	if user := currentUser(r); user.Role == core.RoleMember && req.RequestedBy != user.ID {
+		writeError(w, http.StatusForbidden, "not your request")
+		return
+	}
+	if !insistPending(w, req) {
 		return
 	}
 	if err := s.st.SetRequestStatus(ctx, id, core.RequestDismissed); err != nil {
@@ -243,20 +318,26 @@ func (s *server) handleDismissRequest(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// pendingRequest loads a request and insists it is still pending. Approving or
-// dismissing a request that has already been decided is a stale client, and
-// answering 409 tells it to reload instead of silently re-adding a title.
-func (s *server) pendingRequest(ctx context.Context, w http.ResponseWriter, id int64) (*core.Request, bool) {
+// loadRequest reads one request, writing the failure itself. An absent id is
+// the store's ErrNotFound, which writeStoreError turns into a 404.
+func (s *server) loadRequest(ctx context.Context, w http.ResponseWriter, id int64) (*core.Request, bool) {
 	req, err := s.st.GetRequest(ctx, id)
 	if err != nil {
 		s.writeStoreError(w, "get request", err)
 		return nil, false
 	}
+	return req, true
+}
+
+// insistPending refuses a request that has already been decided. Approving or
+// dismissing one twice is a stale client, and answering 409 tells it to reload
+// instead of silently re-adding a title.
+func insistPending(w http.ResponseWriter, req *core.Request) bool {
 	if req.Status != core.RequestPending {
 		writeError(w, http.StatusConflict, "request is not pending")
-		return nil, false
+		return false
 	}
-	return req, true
+	return true
 }
 
 // validSeasonNumbers rejects a season list containing a negative number,
@@ -288,21 +369,38 @@ func (s *server) inLibrary(ctx context.Context, mediaType string, tmdbID int64) 
 	return found[tmdbID] != 0, nil
 }
 
-func (s *server) requestDTO(r core.Request) requestJSON {
+// requestDTO renders one row. username is the asker's name, which the caller
+// resolves with requesterNames — passing it in rather than looking it up here
+// is what keeps a list of rows from becoming a query per row.
+func (s *server) requestDTO(r core.Request, username string) requestJSON {
 	return requestJSON{
-		ID:              r.ID,
-		MediaType:       r.MediaType,
-		TMDBID:          r.TMDBID,
-		Title:           r.Title,
-		Year:            r.Year,
-		PosterPath:      r.PosterPath,
-		PosterURL:       s.providerPosterURL(r.PosterPath),
-		Seasons:         r.Seasons,
-		MinAvailability: r.MinAvailability,
-		Status:          r.Status,
-		CreatedAt:       jsonTime(r.CreatedAt),
-		UpdatedAt:       jsonTime(r.UpdatedAt),
+		ID:                  r.ID,
+		MediaType:           r.MediaType,
+		TMDBID:              r.TMDBID,
+		Title:               r.Title,
+		Year:                r.Year,
+		PosterPath:          r.PosterPath,
+		PosterURL:           s.providerPosterURL(r.PosterPath),
+		Seasons:             r.Seasons,
+		MinAvailability:     r.MinAvailability,
+		Status:              r.Status,
+		RequestedByUsername: username,
+		CreatedAt:           jsonTime(r.CreatedAt),
+		UpdatedAt:           jsonTime(r.UpdatedAt),
 	}
+}
+
+// requesterNames resolves the asker of every row in one query. Rows that record
+// no account contribute no id, so a screen full of pre-accounts rows costs
+// nothing at all.
+func (s *server) requesterNames(ctx context.Context, rows []core.Request) (map[int64]string, error) {
+	ids := make([]int64, 0, len(rows))
+	for _, r := range rows {
+		if r.RequestedBy != 0 {
+			ids = append(ids, r.RequestedBy)
+		}
+	}
+	return s.st.UsernamesByID(ctx, ids)
 }
 
 // providerPosterURL renders a stored provider poster path. A missing provider

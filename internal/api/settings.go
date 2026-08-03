@@ -314,8 +314,10 @@ type statusResponse struct {
 	// TV-incompatible warning to informational (SPEC §8).
 	FFmpegAvailable bool `json:"ffmpeg_available"`
 	// PasswordSet and ListeningPublicly are the two halves of the nag in
-	// SPEC §11: a server reachable from other machines with no password on it.
-	// Neither is a credential — the hash itself never leaves the server.
+	// SPEC §11: a server reachable from other machines with no login on it.
+	// Since accounts replaced the single password, PasswordSet means "this
+	// server has at least one account and is therefore gated" — the same
+	// question the SPA has always asked of it. Neither is a credential.
 	PasswordSet       bool `json:"password_set"`
 	ListeningPublicly bool `json:"listening_publicly"`
 	// Dirty says the previous session ended without a clean shutdown — a pulled
@@ -417,9 +419,9 @@ func (s *server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	passwordHash, err := s.passwordHash(ctx)
+	users, err := s.st.CountUsers(ctx)
 	if err != nil {
-		s.writeStoreError(w, "read password", err)
+		s.writeStoreError(w, "count users", err)
 		return
 	}
 
@@ -451,7 +453,7 @@ func (s *server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 		EngineHealth:             s.engineHealth(),
 		UnhealthyDownloadClients: s.unhealthyDownloadClients(),
 		FFmpegAvailable:          s.ffmpegAvailable(),
-		PasswordSet:              passwordHash != "",
+		PasswordSet:              users > 0,
 		ListeningPublicly:        listeningPublicly(s.listenAddr),
 		Dirty:                    s.dirty.Load(),
 	})

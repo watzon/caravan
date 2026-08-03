@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -19,10 +20,12 @@ import (
 	"github.com/watzon/caravan/internal/store"
 )
 
-// Caravan's authentication is single-user and optional (SPEC §11): with no
-// password set the API is wide open, which is the right default for a box on a
-// trusted LAN. Once a password exists, every /api/v1 request needs either the
-// session cookie a login issues or the API key an external tool carries.
+// Caravan's authentication is optional and role-aware (SPEC §11). With no
+// accounts at all the API is wide open, which is the right default for a box
+// on a trusted LAN; every caller then acts as an implicit admin. Once one
+// account exists, every /api/v1 request needs either the session cookie a
+// login issues or the API key an external tool carries, and what a session may
+// reach depends on whether it belongs to an admin or a member (memberAllowed).
 const (
 	// sessionCookieName is the opaque session handle. It is HttpOnly so no
 	// script can read it and SameSite=Lax so another site cannot make the
@@ -71,9 +74,10 @@ const (
 // loginGuard bounds POST /auth/login: how many verifications run at once, and
 // how fast wrong ones may be tried.
 //
-// In memory and process-wide, like the session store: Caravan is single-user,
-// so there is no per-account state to keep, and a restart clearing the lockout
-// costs an attacker more than it costs the owner.
+// In memory and process-wide, deliberately not per-account: a household has a
+// handful of people, so a per-account counter would only give a guesser a
+// fresh budget per username they invent. A restart clearing the lockout costs
+// an attacker more than it costs the owner.
 type loginGuard struct {
 	// slots is the concurrency cap, held for the duration of one verification.
 	slots chan struct{}
@@ -157,20 +161,28 @@ func WithSessionTTL(d time.Duration) Option {
 	return func(s *server) { s.sessionTTL = d }
 }
 
+// session is one live login: whose it is, and when it stops being one.
+type session struct {
+	userID int64
+	expiry time.Time
+}
+
 // sessionStore holds the live logins. In-memory by design (see
-// defaultSessionTTL) and tiny: Caravan is single-user, so this map holds one
-// entry per browser the owner has logged in from.
+// defaultSessionTTL) and tiny: a household has a handful of people, so this map
+// holds one entry per browser any of them has logged in from.
 type sessionStore struct {
 	mu     sync.Mutex
-	tokens map[string]time.Time
+	tokens map[string]session
 }
 
 func newSessionStore() *sessionStore {
-	return &sessionStore{tokens: make(map[string]time.Time)}
+	return &sessionStore{tokens: make(map[string]session)}
 }
 
-// issue mints a 256-bit opaque token valid for ttl.
-func (s *sessionStore) issue(ttl time.Duration) (string, error) {
+// issue mints a 256-bit opaque token for userID, valid for ttl. The token
+// carries no identity itself — the map is the only place the pairing exists —
+// so a stolen cookie is worth nothing once the entry is gone.
+func (s *sessionStore) issue(userID int64, ttl time.Duration) (string, error) {
 	var raw [32]byte
 	if _, err := rand.Read(raw[:]); err != nil {
 		return "", fmt.Errorf("api: generate session token: %w", err)
@@ -179,36 +191,39 @@ func (s *sessionStore) issue(ttl time.Duration) (string, error) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.tokens[token] = time.Now().Add(ttl)
+	s.tokens[token] = session{userID: userID, expiry: time.Now().Add(ttl)}
 	return token, nil
 }
 
-// valid reports whether token names a live session, dropping it when it has
+// valid reports whose live session token names, dropping it when it has
 // expired.
 //
 // The lookup is a constant-time scan rather than a map hit: the map is at most
 // a handful of entries, and comparing a presented credential in constant time
 // is the rule here, not an optimisation to be traded away.
-func (s *sessionStore) valid(token string) bool {
+func (s *sessionStore) valid(token string) (int64, bool) {
 	if token == "" {
-		return false
+		return 0, false
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	now := time.Now()
-	found := false
-	for stored, expiry := range s.tokens {
+	var (
+		userID int64
+		found  bool
+	)
+	for stored, sess := range s.tokens {
 		if subtle.ConstantTimeCompare([]byte(stored), []byte(token)) != 1 {
 			continue
 		}
-		if now.After(expiry) {
+		if now.After(sess.expiry) {
 			delete(s.tokens, stored)
-			return false
+			return 0, false
 		}
-		found = true
+		userID, found = sess.userID, true
 	}
-	return found
+	return userID, found
 }
 
 // revoke ends one session; revoking an unknown token is not an error.
@@ -218,12 +233,18 @@ func (s *sessionStore) revoke(token string) {
 	delete(s.tokens, token)
 }
 
-// revokeAll ends every session. A password that changed must not leave the
-// sessions it protected alive.
-func (s *sessionStore) revokeAll() {
+// revokeUser ends every session belonging to one account, and nothing else. A
+// password that changed must not leave the sessions it protected alive, and a
+// deleted account must not leave a live browser behind — but neither is a
+// reason to sign a housemate out of the film they were browsing.
+func (s *sessionStore) revokeUser(userID int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	clear(s.tokens)
+	for token, sess := range s.tokens {
+		if sess.userID == userID {
+			delete(s.tokens, token)
+		}
+	}
 }
 
 // hashPassword returns an argon2id PHC string. The salt is per-password, so
@@ -273,14 +294,100 @@ func verifyPassword(encoded, password string) bool {
 	return subtle.ConstantTimeCompare(got, want) == 1
 }
 
-// passwordHash reads the stored hash. An absent key and an empty value mean
-// the same thing: no password.
-func (s *server) passwordHash(ctx context.Context) (string, error) {
-	hash, err := s.st.GetSetting(ctx, store.SettingPasswordHash)
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		return "", err
+// requestUser is who a gated request is acting as. Handlers read it with
+// currentUser; requireAuth is the only thing that writes it, so a handler can
+// never be reached with an identity nobody checked.
+type requestUser struct {
+	// ID is the account behind the session, or 0 when there is no account:
+	// an open server, or a caller holding the API key.
+	ID int64
+	// Role is core.RoleAdmin or core.RoleMember.
+	Role string
+	// Open says the server has no accounts at all and is therefore running in
+	// its trusted-LAN default. It is what distinguishes "everyone is an admin
+	// because nobody has signed up" from "this person is an admin".
+	Open bool
+}
+
+// userContextKey is the private key requestUser is stored under. It is an
+// unexported empty struct type so no other package can read or forge the
+// identity out of a context.
+type userContextKey struct{}
+
+// withRequestUser returns r carrying u as its identity.
+func withRequestUser(r *http.Request, u requestUser) *http.Request {
+	return r.WithContext(context.WithValue(r.Context(), userContextKey{}, u))
+}
+
+// currentUser is who the request is acting as. A request that never went
+// through requireAuth — an exempt path, or a unit test calling a handler
+// directly — reports the open implicit admin, which is what those paths behave
+// as anyway.
+func currentUser(r *http.Request) requestUser {
+	if u, ok := r.Context().Value(userContextKey{}).(requestUser); ok {
+		return u
 	}
-	return hash, nil
+	return requestUser{Role: core.RoleAdmin, Open: true}
+}
+
+// memberAllowed reports whether a member may make this request. The path is as
+// seen after the /api/v1 prefix is stripped.
+//
+// The philosophy is a server-side allowlist, not a denylist: everything not
+// named here is 403 for a member, so a route added tomorrow is closed to
+// members until somebody decides otherwise. A member's whole job is to find
+// something and ask for it, which is:
+//
+//   - the discover screens (GET /discover, its browse pages, and one title's
+//     detail), because that is where you find something;
+//   - making a request, listing requests, and cancelling one — the handlers
+//     narrow those last two to the member's own rows, because "who owns this"
+//     is a question about the row, not about the URL;
+//   - the session endpoints: who am I, log in, log out, and change my own
+//     password.
+//
+// Deliberately absent: approving a request (that is the admin's decision, and
+// approving your own request would make the whole role pointless), and every
+// library, queue, wanted, calendar, settings and system route. GET /images is
+// not here because it never reaches this function — it is exempt from
+// authentication entirely, for televisions (see authExempt).
+func memberAllowed(method, path string) bool {
+	switch method + " " + path {
+	case http.MethodGet + " /discover",
+		http.MethodGet + " /discover/browse",
+		http.MethodGet + " /requests",
+		http.MethodPost + " /requests",
+		http.MethodGet + " /auth/me",
+		http.MethodPost + " /auth/login",
+		http.MethodPost + " /auth/logout",
+		// Changing your own password. It lives under /settings for historical
+		// reasons — it is the one settings route a member may reach — and
+		// handleSetPassword only ever touches the caller's own account.
+		http.MethodPost + " /settings/password":
+		return true
+	}
+
+	seg := pathSegments(path)
+	switch {
+	// GET /discover/{type}/{id}: one title's detail screen.
+	case method == http.MethodGet && len(seg) == 3 && seg[0] == "discover":
+		return true
+	// DELETE /requests/{id}: cancel my request. The handler is what insists on
+	// "mine" and "still pending"; the router only knows the shape.
+	case method == http.MethodDelete && len(seg) == 2 && seg[0] == "requests":
+		return true
+	}
+	return false
+}
+
+// pathSegments splits a routed path into its segments: "/requests/12" becomes
+// ["requests", "12"], and "/" becomes the empty list.
+func pathSegments(path string) []string {
+	trimmed := strings.Trim(path, "/")
+	if trimmed == "" {
+		return nil
+	}
+	return strings.Split(trimmed, "/")
 }
 
 // authExempt reports whether a path inside /api/v1 is reachable without
@@ -305,9 +412,15 @@ func authExempt(path string) bool {
 	return strings.HasPrefix(path, "/images/")
 }
 
-// requireAuth gates the JSON API. It wraps only the /api/v1 subtree, which is
-// what exempts the SPA and its assets (the login screen has to load) and the
-// /dlna protocol surface (televisions cannot log in).
+// requireAuth gates the JSON API and resolves who is calling. It wraps only the
+// /api/v1 subtree, which is what exempts the SPA and its assets (the login
+// screen has to load) and the /dlna protocol surface (televisions cannot log
+// in).
+//
+// It is also the single place a role is enforced. A member reaching a route
+// outside memberAllowed gets 403 rather than 401: 401 means "log in", and
+// sending a member to the login screen for a door that will never open for
+// them is a lie the SPA would loop on.
 func (s *server) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if authExempt(r.URL.Path) {
@@ -315,28 +428,50 @@ func (s *server) requireAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		hash, err := s.passwordHash(r.Context())
+		users, err := s.st.CountUsers(r.Context())
 		if err != nil {
-			s.writeStoreError(w, "read password", err)
+			s.writeStoreError(w, "count users", err)
 			return
 		}
-		// No password set: Caravan behaves exactly as it did before phase 5.
-		if hash == "" {
-			next.ServeHTTP(w, r)
+		// No accounts: Caravan behaves exactly as a passwordless server always
+		// did, and the caller is an implicit admin.
+		if users == 0 {
+			next.ServeHTTP(w, withRequestUser(r, requestUser{Role: core.RoleAdmin, Open: true}))
 			return
 		}
 
-		if cookie, err := r.Cookie(sessionCookieName); err == nil && s.sessions.valid(cookie.Value) {
-			next.ServeHTTP(w, r)
-			return
+		if cookie, err := r.Cookie(sessionCookieName); err == nil {
+			if userID, ok := s.sessions.valid(cookie.Value); ok {
+				user, err := s.st.GetUser(r.Context(), userID)
+				if errors.Is(err, store.ErrNotFound) {
+					// The account was deleted while this browser held a live
+					// session. Tidy the rest of them away and make it log in.
+					s.sessions.revokeUser(userID)
+					writeError(w, http.StatusUnauthorized, "unauthorized")
+					return
+				}
+				if err != nil {
+					s.writeStoreError(w, "read user", err)
+					return
+				}
+				if user.Role != core.RoleAdmin && !memberAllowed(r.Method, r.URL.Path) {
+					writeError(w, http.StatusForbidden, "admins only")
+					return
+				}
+				next.ServeHTTP(w, withRequestUser(r, requestUser{ID: user.ID, Role: user.Role}))
+				return
+			}
 		}
+		// The API key is the owner's own credential, configured in the settings
+		// screen and pasted into tools they chose, so it carries admin. It
+		// names no account, which is why its ID is zero.
 		ok, err := s.apiKeyAuthenticated(r)
 		if err != nil {
 			s.writeStoreError(w, "read api key", err)
 			return
 		}
 		if ok {
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(w, withRequestUser(r, requestUser{Role: core.RoleAdmin}))
 			return
 		}
 		writeError(w, http.StatusUnauthorized, "unauthorized")
@@ -388,49 +523,83 @@ func (s *server) apiKeyMatches(r *http.Request, presented string) (bool, error) 
 
 // authResponse is what the auth endpoints answer with. It carries no
 // credential: the session is in the cookie and the password never comes back.
+//
+// PasswordSet means "this server has accounts and is therefore gated", which
+// is the same question the SPA asked of it before roles existed.
 type authResponse struct {
 	PasswordSet bool `json:"password_set"`
 }
 
 type loginRequest struct {
+	Username string `json:"username"`
 	Password string `json:"password"`
 }
 
-// handleLogin exchanges the password for a session cookie.
+// invalidCredentials is the one thing a failed login ever says. Naming the half
+// that was wrong would turn the endpoint into a list of who lives here.
+const invalidCredentials = "invalid username or password"
+
+// decoyHash is verified against when the username names nobody, so that a login
+// for an account that does not exist costs the same as one for an account that
+// does. Without it the reply time answers the question the message refuses to.
+//
+// Computed once, on the first such attempt rather than at startup: a server
+// nobody guesses at should not pay 19 MiB of key derivation to boot.
+var decoyHash = sync.OnceValue(func() string {
+	// A hash of a value nothing can present. An error here yields the empty
+	// string, which verifyPassword rejects — the wrong cost, never a wrong
+	// answer.
+	hash, _ := hashPassword("caravan decoy: no account has this password")
+	return hash
+})
+
+// handleLogin exchanges a username and password for a session cookie.
 func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var body loginRequest
 	if !decodeJSON(w, r, &body) {
 		return
 	}
 
-	// Before the hash is even read: the guard exists so that a burst of
-	// requests cannot make this process allocate one argon2 block per request.
+	// Before anything is read: the guard exists so that a burst of requests
+	// cannot make this process allocate one argon2 block per request.
 	if !s.logins.enter() {
 		writeError(w, http.StatusTooManyRequests, "too many login attempts; wait a moment and try again")
 		return
 	}
 	defer s.logins.leave()
 
-	hash, err := s.passwordHash(r.Context())
+	users, err := s.st.CountUsers(r.Context())
 	if err != nil {
-		s.writeStoreError(w, "read password", err)
+		s.writeStoreError(w, "count users", err)
 		return
 	}
-	if hash == "" {
-		writeError(w, http.StatusBadRequest, "no password is set")
+	if users == 0 {
+		writeError(w, http.StatusBadRequest, "no accounts exist on this server")
 		return
 	}
-	if !verifyPassword(hash, body.Password) {
+
+	user, err := s.st.GetUserByUsername(r.Context(), strings.TrimSpace(body.Username))
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		user = &core.User{PasswordHash: decoyHash()}
+	case err != nil:
+		s.writeStoreError(w, "read user", err)
+		return
+	}
+
+	if !verifyPassword(user.PasswordHash, body.Password) {
 		// A failure nobody can see cannot be responded to (SPEC §13), so it
 		// reaches the process log with the device that sent it and — for the
 		// first of a burst, and every lockout — the activity feed the History
-		// screen renders.
+		// screen renders. The username is deliberately not logged: it is
+		// attacker-supplied text, and often a real person's password typed
+		// into the wrong box.
 		s.log.Warn("rejected login", "remote_addr", r.RemoteAddr)
 		if notable, locked := s.logins.fail(); notable {
-			detail := "One or more passwords were rejected. If this was not you, someone on your network is guessing."
+			detail := "One or more logins were rejected. If this was not you, someone on your network is guessing."
 			if locked {
 				detail = fmt.Sprintf(
-					"%d passwords were rejected in a row, so logins are refused for %s. If this was not you, someone on your network is guessing.",
+					"%d logins were rejected in a row, so logins are refused for %s. If this was not you, someone on your network is guessing.",
 					loginFailureLimit, loginLockout)
 			}
 			s.logEvent(r.Context(), &core.Event{
@@ -440,17 +609,51 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 				Detail:   detail,
 			})
 		}
-		// Deliberately says nothing about which half was wrong; there is only
-		// one account, so there is nothing to enumerate either.
-		writeError(w, http.StatusUnauthorized, "invalid password")
+		writeError(w, http.StatusUnauthorized, invalidCredentials)
+		return
+	}
+	// A decoy verifying would be a bug in hashPassword, not a login.
+	if user.ID == 0 {
+		writeError(w, http.StatusUnauthorized, invalidCredentials)
 		return
 	}
 	s.logins.succeed()
 
-	if !s.startSession(w) {
+	if !s.startSession(w, user.ID) {
 		return
 	}
 	writeJSON(w, http.StatusOK, authResponse{PasswordSet: true})
+}
+
+// meResponse is who the caller is, as GET /auth/me reports it.
+type meResponse struct {
+	Username string `json:"username"`
+	Role     string `json:"role"`
+	// Open says the server has no accounts, so nobody logged in and everybody
+	// is an admin. The SPA renders the full navigation for it, exactly as it
+	// did before roles existed.
+	Open bool `json:"open"`
+}
+
+// handleMe reports the calling identity. It is inside the gate and reachable by
+// members: it is how the SPA learns which half of itself to render, so a
+// member has to be able to ask.
+//
+// An open server answers with no username and the admin role, which is the
+// truth: there is nobody to name, and whoever asked may do anything. So does
+// the API key, for the same reason.
+func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r)
+	if user.ID == 0 {
+		writeJSON(w, http.StatusOK, meResponse{Role: user.Role, Open: user.Open})
+		return
+	}
+	row, err := s.st.GetUser(r.Context(), user.ID)
+	if err != nil {
+		s.writeStoreError(w, "read user", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, meResponse{Username: row.Username, Role: row.Role})
 }
 
 // handleLogout invalidates the presented session. It is exempt from the
@@ -469,24 +672,37 @@ type passwordRequest struct {
 	NewPassword     string `json:"new_password"`
 }
 
-// handleSetPassword sets, changes or clears the password. An empty new_password
-// clears it, which puts the server back in its open default.
+// handleSetPassword changes the calling account's own password. It is the one
+// settings route a member may reach, and it can only ever touch the caller:
+// resetting somebody else's is POST /users/{id}/password, which is an admin's
+// to make.
 //
-// Changing the password revokes every session, including this request's, and
-// then issues a fresh one: the browser that made the change stays logged in and
-// every other one is turned out.
+// The change revokes the account's sessions, including this request's, and then
+// issues a fresh one: the browser that made the change stays logged in and
+// every other browser signed in as that person is turned out. Other people's
+// sessions are untouched.
 func (s *server) handleSetPassword(w http.ResponseWriter, r *http.Request) {
 	var body passwordRequest
 	if !decodeJSON(w, r, &body) {
 		return
 	}
 
-	current, err := s.passwordHash(r.Context())
-	if err != nil {
-		s.writeStoreError(w, "read password", err)
+	user := currentUser(r)
+	if user.ID == 0 {
+		// An open server, or the API key: admin either way, but with no
+		// account behind it, so there is no password of "mine" to change.
+		// 400 rather than 403 — the caller has every right, there is just
+		// nothing to act on.
+		writeError(w, http.StatusBadRequest,
+			"this request is not signed in as an account; create one with POST /users")
 		return
 	}
-	if current != "" && !verifyPassword(current, body.CurrentPassword) {
+	row, err := s.st.GetUser(r.Context(), user.ID)
+	if err != nil {
+		s.writeStoreError(w, "read user", err)
+		return
+	}
+	if !verifyPassword(row.PasswordHash, body.CurrentPassword) {
 		// 400 rather than 401: the session that got here is valid, it is the
 		// body that is wrong, and a 401 would send the SPA to the login screen
 		// over a typo.
@@ -494,46 +710,47 @@ func (s *server) handleSetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if body.NewPassword == "" {
-		if err := s.st.DeleteSetting(r.Context(), store.SettingPasswordHash); err != nil {
-			s.writeStoreError(w, "clear password", err)
-			return
-		}
-		s.sessions.revokeAll()
-		http.SetCookie(w, clearedSessionCookie())
-		writeJSON(w, http.StatusOK, authResponse{PasswordSet: false})
+	hash, ok := hashNewPassword(w, s.log, body.NewPassword)
+	if !ok {
 		return
 	}
-
-	if n := len(body.NewPassword); n < minPasswordLength || n > maxPasswordLength {
-		writeError(w, http.StatusBadRequest,
-			fmt.Sprintf("password must be between %d and %d characters", minPasswordLength, maxPasswordLength))
-		return
-	}
-	hash, err := hashPassword(body.NewPassword)
-	if err != nil {
-		// The error carries no password material, but it is still only a log
-		// line; the reply says nothing.
-		s.log.Error("hash password", "error", err)
-		writeError(w, http.StatusInternalServerError, "hash password")
-		return
-	}
-	if err := s.st.SetSetting(r.Context(), store.SettingPasswordHash, hash); err != nil {
+	if err := s.st.SetUserPassword(r.Context(), row.ID, hash); err != nil {
 		s.writeStoreError(w, "write password", err)
 		return
 	}
 
-	s.sessions.revokeAll()
-	if !s.startSession(w) {
+	s.sessions.revokeUser(row.ID)
+	if !s.startSession(w, row.ID) {
 		return
 	}
 	writeJSON(w, http.StatusOK, authResponse{PasswordSet: true})
 }
 
-// startSession issues a session and sets its cookie, reporting whether the
-// caller may continue.
-func (s *server) startSession(w http.ResponseWriter) bool {
-	token, err := s.sessions.issue(s.sessionTTL)
+// hashNewPassword validates and hashes a password on its way into the database,
+// writing the failure itself when it will not do. It is shared by every route
+// that sets one — first account, own change, admin reset — so the length rule
+// is stated once.
+func hashNewPassword(w http.ResponseWriter, log *slog.Logger, password string) (string, bool) {
+	if n := len(password); n < minPasswordLength || n > maxPasswordLength {
+		writeError(w, http.StatusBadRequest,
+			fmt.Sprintf("password must be between %d and %d characters", minPasswordLength, maxPasswordLength))
+		return "", false
+	}
+	hash, err := hashPassword(password)
+	if err != nil {
+		// The error carries no password material, but it is still only a log
+		// line; the reply says nothing.
+		log.Error("hash password", "error", err)
+		writeError(w, http.StatusInternalServerError, "hash password")
+		return "", false
+	}
+	return hash, true
+}
+
+// startSession issues a session for userID and sets its cookie, reporting
+// whether the caller may continue.
+func (s *server) startSession(w http.ResponseWriter, userID int64) bool {
+	token, err := s.sessions.issue(userID, s.sessionTTL)
 	if err != nil {
 		s.log.Error("issue session", "error", err)
 		writeError(w, http.StatusInternalServerError, "issue session")

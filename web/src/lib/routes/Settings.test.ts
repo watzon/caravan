@@ -77,7 +77,7 @@ function stubFetch() {
 }
 
 describe('Settings rail', () => {
-  it('groups the seven sections and links each as a route', async () => {
+  it('groups the eight sections and links each as a route', async () => {
     stubFetch();
     app = mount(Settings, { target: host, props: { section: 'playback' } });
     await settle();
@@ -93,6 +93,7 @@ describe('Settings rail', () => {
       '/settings/indexers',
       '/settings/downloads',
       '/settings/playback',
+      '/settings/users',
       '/settings/security',
     ]);
     const active = host.querySelector('nav a[aria-current="page"]');

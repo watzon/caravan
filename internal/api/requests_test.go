@@ -248,6 +248,280 @@ func TestDismissRequest(t *testing.T) {
 	wantErrorBody(t, repeat)
 }
 
+// Ownership is recorded from the session, and an admin's list names who asked.
+// A row nobody owns — made while the server ran open, or before accounts
+// existed — names nobody rather than guessing.
+func TestRequestsRecordTheAskerAndNameThemToAdmins(t *testing.T) {
+	ctx := context.Background()
+	h, st, _ := newTestServer(t)
+
+	// Made while the server still ran open, so it belongs to nobody.
+	if err := st.CreateRequest(ctx, &core.Request{
+		MediaType: MediaTypeMovie, TMDBID: 80, Title: "Nobody's",
+	}); err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+
+	setPassword(t, st, testPassword)
+	member := createUser(t, st, testMember, testPassword, core.RoleMember)
+	theirs := login(t, h, testMember, testPassword)
+	admin := login(t, h, testAdmin, testPassword)
+
+	create := doAuth(t, h, http.MethodPost, "/api/v1/requests",
+		`{"media_type":"movie","tmdb_id":78,"title":"Blade Runner"}`, withCookie(theirs))
+	wantStatus(t, create, http.StatusCreated)
+	var created requestJSON
+	decodeBody(t, create, &created)
+	if created.RequestedByUsername != testMember {
+		t.Errorf("requested_by_username = %q, want %q", created.RequestedByUsername, testMember)
+	}
+
+	stored, err := st.GetRequest(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetRequest: %v", err)
+	}
+	if stored.RequestedBy != member.ID {
+		t.Errorf("requested_by = %d, want the session's account %d", stored.RequestedBy, member.ID)
+	}
+
+	list := doAuth(t, h, http.MethodGet, "/api/v1/requests", "", withCookie(admin))
+	wantStatus(t, list, http.StatusOK)
+	var body requestListBody
+	decodeBody(t, list, &body)
+	if len(body.Requests) != 2 {
+		t.Fatalf("admin sees %d requests, want both", len(body.Requests))
+	}
+	names := map[int64]string{}
+	for _, row := range body.Requests {
+		names[row.TMDBID] = row.RequestedByUsername
+	}
+	if names[78] != testMember {
+		t.Errorf("request 78 requested_by_username = %q, want %q", names[78], testMember)
+	}
+	if names[80] != "" {
+		t.Errorf("ownerless request requested_by_username = %q, want empty", names[80])
+	}
+}
+
+// A merge is somebody queueing behind the first asker, not taking their request
+// over, so the row keeps naming whoever asked first.
+func TestMergedRequestKeepsTheFirstAsker(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	setPassword(t, st, testPassword)
+	createUser(t, st, testMember, testPassword, core.RoleMember)
+	first := login(t, h, testMember, testPassword)
+	second := login(t, h, testAdmin, testPassword)
+
+	create := doAuth(t, h, http.MethodPost, "/api/v1/requests",
+		`{"media_type":"series","tmdb_id":1396,"title":"Breaking Bad","seasons":[1]}`, withCookie(first))
+	wantStatus(t, create, http.StatusCreated)
+
+	merge := doAuth(t, h, http.MethodPost, "/api/v1/requests",
+		`{"media_type":"series","tmdb_id":1396,"title":"Breaking Bad","seasons":[2]}`, withCookie(second))
+	wantStatus(t, merge, http.StatusCreated)
+	var merged requestJSON
+	decodeBody(t, merge, &merged)
+	if merged.RequestedByUsername != testMember {
+		t.Errorf("requested_by_username = %q, want the first asker %q",
+			merged.RequestedByUsername, testMember)
+	}
+}
+
+// A member sees their own rows and no others, and POST /requests is not a hole
+// in that: a merge answers with a row that may belong to somebody else, so the
+// name comes off it. Otherwise a member could walk the provider ids and read
+// back which housemate asked for what.
+func TestMergedRequestDoesNotNameAnotherMemberToAMember(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	setPassword(t, st, testPassword)
+	createUser(t, st, "alice", testPassword, core.RoleMember)
+	createUser(t, st, "bob", testPassword, core.RoleMember)
+	alice := login(t, h, "alice", testPassword)
+	bob := login(t, h, "bob", testPassword)
+
+	create := doAuth(t, h, http.MethodPost, "/api/v1/requests",
+		`{"media_type":"movie","tmdb_id":603,"title":"The Matrix"}`, withCookie(alice))
+	wantStatus(t, create, http.StatusCreated)
+
+	merge := doAuth(t, h, http.MethodPost, "/api/v1/requests",
+		`{"media_type":"movie","tmdb_id":603,"title":"The Matrix"}`, withCookie(bob))
+	wantStatus(t, merge, http.StatusCreated)
+	var merged requestJSON
+	decodeBody(t, merge, &merged)
+	if merged.RequestedByUsername != "" {
+		t.Errorf("requested_by_username = %q, want it withheld from a member who does not own the row",
+			merged.RequestedByUsername)
+	}
+
+	// The row itself still records alice, so the admin's queue names her.
+	admin := login(t, h, testAdmin, testPassword)
+	list := doAuth(t, h, http.MethodGet, "/api/v1/requests", "", withCookie(admin))
+	wantStatus(t, list, http.StatusOK)
+	var body requestListBody
+	decodeBody(t, list, &body)
+	if len(body.Requests) != 1 || body.Requests[0].RequestedByUsername != "alice" {
+		t.Fatalf("admin's queue = %+v, want the one row still naming alice", body.Requests)
+	}
+
+	// A member's own row is still named to them: the rule is ownership, not
+	// "members never see a name".
+	own := doAuth(t, h, http.MethodPost, "/api/v1/requests",
+		`{"media_type":"movie","tmdb_id":78,"title":"Blade Runner"}`, withCookie(bob))
+	wantStatus(t, own, http.StatusCreated)
+	var mine requestJSON
+	decodeBody(t, own, &mine)
+	if mine.RequestedByUsername != "bob" {
+		t.Errorf("own requested_by_username = %q, want %q", mine.RequestedByUsername, "bob")
+	}
+}
+
+// POST /requests is member-allowed and its body is free text, so a merge must
+// not become a way to edit a housemate's pending request.
+func TestMergedRequestKeepsTheOwnersDescription(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	setPassword(t, st, testPassword)
+	createUser(t, st, "alice", testPassword, core.RoleMember)
+	createUser(t, st, "bob", testPassword, core.RoleMember)
+	alice := login(t, h, "alice", testPassword)
+	bob := login(t, h, "bob", testPassword)
+
+	create := doAuth(t, h, http.MethodPost, "/api/v1/requests",
+		`{"media_type":"series","tmdb_id":1399,"title":"Game of Thrones","year":2011,"seasons":[1]}`,
+		withCookie(alice))
+	wantStatus(t, create, http.StatusCreated)
+
+	merge := doAuth(t, h, http.MethodPost, "/api/v1/requests",
+		`{"media_type":"series","tmdb_id":1399,"title":"BOB OWNS THIS NOW","year":1999,"seasons":[2]}`,
+		withCookie(bob))
+	wantStatus(t, merge, http.StatusCreated)
+
+	list := doAuth(t, h, http.MethodGet, "/api/v1/requests", "", withCookie(alice))
+	wantStatus(t, list, http.StatusOK)
+	var body requestListBody
+	decodeBody(t, list, &body)
+	if len(body.Requests) != 1 {
+		t.Fatalf("alice sees %d requests, want her one row", len(body.Requests))
+	}
+	row := body.Requests[0]
+	if row.Title != "Game of Thrones" || row.Year != 2011 {
+		t.Errorf("alice's row = %q (%d), want her own words", row.Title, row.Year)
+	}
+}
+
+// A member's requests screen is their own wishes in every status, not a window
+// onto the household.
+func TestMembersSeeOnlyTheirOwnRequests(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	setPassword(t, st, testPassword)
+	createUser(t, st, testMember, testPassword, core.RoleMember)
+	theirs := login(t, h, testMember, testPassword)
+	admin := login(t, h, testAdmin, testPassword)
+
+	mine := doAuth(t, h, http.MethodPost, "/api/v1/requests",
+		`{"media_type":"movie","tmdb_id":78,"title":"Blade Runner"}`, withCookie(theirs))
+	wantStatus(t, mine, http.StatusCreated)
+	var created requestJSON
+	decodeBody(t, mine, &created)
+
+	somebodyElses := doAuth(t, h, http.MethodPost, "/api/v1/requests",
+		`{"media_type":"movie","tmdb_id":79,"title":"Theirs"}`, withCookie(admin))
+	wantStatus(t, somebodyElses, http.StatusCreated)
+
+	list := doAuth(t, h, http.MethodGet, "/api/v1/requests", "", withCookie(theirs))
+	wantStatus(t, list, http.StatusOK)
+	var body requestListBody
+	decodeBody(t, list, &body)
+	if len(body.Requests) != 1 || body.Requests[0].ID != created.ID {
+		t.Fatalf("member sees %+v, want only their own request %d", body.Requests, created.ID)
+	}
+
+	// Dismissed is still theirs to see: watching a wish get decided is the point
+	// of the screen.
+	dismiss := doAuth(t, h, http.MethodDelete, "/api/v1/requests/"+itoa(created.ID), "", withCookie(theirs))
+	wantStatus(t, dismiss, http.StatusNoContent)
+
+	list = doAuth(t, h, http.MethodGet, "/api/v1/requests?status=dismissed", "", withCookie(theirs))
+	decodeBody(t, list, &body)
+	if len(body.Requests) != 1 || body.Requests[0].ID != created.ID {
+		t.Errorf("member's dismissed list = %+v, want their own row", body.Requests)
+	}
+
+	// The admin still sees both.
+	list = doAuth(t, h, http.MethodGet, "/api/v1/requests", "", withCookie(admin))
+	decodeBody(t, list, &body)
+	if len(body.Requests) != 2 {
+		t.Errorf("admin sees %d requests, want both", len(body.Requests))
+	}
+}
+
+// Cancelling is "cancel mine". Somebody else's request is not a member's to
+// turn down, and the refusal must not double as a way to probe for rows.
+func TestMemberCannotDismissAnotherPersonsRequest(t *testing.T) {
+	ctx := context.Background()
+	h, st, _ := newTestServer(t)
+	setPassword(t, st, testPassword)
+	createUser(t, st, testMember, testPassword, core.RoleMember)
+	theirs := login(t, h, testMember, testPassword)
+	admin := login(t, h, testAdmin, testPassword)
+
+	somebodyElses := doAuth(t, h, http.MethodPost, "/api/v1/requests",
+		`{"media_type":"movie","tmdb_id":79,"title":"Theirs"}`, withCookie(admin))
+	wantStatus(t, somebodyElses, http.StatusCreated)
+	var other requestJSON
+	decodeBody(t, somebodyElses, &other)
+
+	rec := doAuth(t, h, http.MethodDelete, "/api/v1/requests/"+itoa(other.ID), "", withCookie(theirs))
+	wantStatus(t, rec, http.StatusForbidden)
+	wantErrorBody(t, rec)
+
+	stored, err := st.GetRequest(ctx, other.ID)
+	if err != nil {
+		t.Fatalf("GetRequest: %v", err)
+	}
+	if stored.Status != core.RequestPending {
+		t.Fatalf("status = %q, want it left %q", stored.Status, core.RequestPending)
+	}
+
+	// An admin dismissing the same row is the normal case and still works.
+	wantStatus(t, doAuth(t, h, http.MethodDelete, "/api/v1/requests/"+itoa(other.ID), "", withCookie(admin)),
+		http.StatusNoContent)
+}
+
+// Approving is the admin's decision. A member who could approve their own
+// request would be an admin wearing a smaller badge, so the gate turns them
+// away before the handler runs.
+func TestApprovingIsAdminOnly(t *testing.T) {
+	ctx := context.Background()
+	h, st, _ := newTestServer(t)
+	setPassword(t, st, testPassword)
+	createUser(t, st, testMember, testPassword, core.RoleMember)
+	theirs := login(t, h, testMember, testPassword)
+
+	create := doAuth(t, h, http.MethodPost, "/api/v1/requests",
+		`{"media_type":"movie","tmdb_id":78,"title":"Blade Runner"}`, withCookie(theirs))
+	wantStatus(t, create, http.StatusCreated)
+	var created requestJSON
+	decodeBody(t, create, &created)
+
+	rec := doAuth(t, h, http.MethodPost, "/api/v1/requests/"+itoa(created.ID)+"/approve", `{}`,
+		withCookie(theirs))
+	wantStatus(t, rec, http.StatusForbidden)
+	wantErrorBody(t, rec)
+
+	// Nothing landed: the request is still asking and the title is not in the
+	// library.
+	stored, err := st.GetRequest(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetRequest: %v", err)
+	}
+	if stored.Status != core.RequestPending {
+		t.Errorf("status = %q, want it left %q", stored.Status, core.RequestPending)
+	}
+	if _, err := st.GetMovieByTMDBID(ctx, 78); err == nil {
+		t.Error("the member's approval added the movie anyway")
+	}
+}
+
 // The absorb rule: however a title reaches the library, a pending request for
 // it stops asking.
 func TestAddingToLibraryAbsorbsPendingRequest(t *testing.T) {

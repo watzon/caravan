@@ -137,6 +137,196 @@ func TestCreateRequestWholeTitleAbsorbsSeasons(t *testing.T) {
 	}
 }
 
+// Who asked is recorded on the row, and a request made with no account behind
+// it — an open server — records the zero that means "nobody in particular".
+func TestCreateRequestRecordsTheAsker(t *testing.T) {
+	ctx := context.Background()
+	st, _ := openTemp(t)
+
+	mine := core.Request{MediaType: core.MediaTypeMovie, TMDBID: 78, Title: "Blade Runner", RequestedBy: 7}
+	if err := st.CreateRequest(ctx, &mine); err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+	got, err := st.GetRequest(ctx, mine.ID)
+	if err != nil {
+		t.Fatalf("GetRequest: %v", err)
+	}
+	if got.RequestedBy != 7 {
+		t.Errorf("RequestedBy = %d, want 7", got.RequestedBy)
+	}
+
+	open := core.Request{MediaType: core.MediaTypeMovie, TMDBID: 79, Title: "Nobody's"}
+	if err := st.CreateRequest(ctx, &open); err != nil {
+		t.Fatalf("CreateRequest(open): %v", err)
+	}
+	got, err = st.GetRequest(ctx, open.ID)
+	if err != nil {
+		t.Fatalf("GetRequest: %v", err)
+	}
+	if got.RequestedBy != 0 {
+		t.Errorf("RequestedBy = %d, want 0 for a request made with no account", got.RequestedBy)
+	}
+}
+
+// The first asker owns the row. A housemate asking for the same show queues
+// behind them rather than taking the request over.
+func TestCreateRequestMergeKeepsTheFirstAsker(t *testing.T) {
+	ctx := context.Background()
+	st, _ := openTemp(t)
+
+	first := core.Request{
+		MediaType: core.MediaTypeSeries, TMDBID: 1396, Title: "Breaking Bad",
+		Seasons: []int{1}, RequestedBy: 7,
+	}
+	if err := st.CreateRequest(ctx, &first); err != nil {
+		t.Fatalf("CreateRequest(first): %v", err)
+	}
+
+	second := core.Request{
+		MediaType: core.MediaTypeSeries, TMDBID: 1396, Title: "Breaking Bad",
+		Seasons: []int{2}, RequestedBy: 9,
+	}
+	if err := st.CreateRequest(ctx, &second); err != nil {
+		t.Fatalf("CreateRequest(second): %v", err)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("second request id = %d, want it merged into %d", second.ID, first.ID)
+	}
+	// Written back, so the caller answers with the row's real owner rather than
+	// with the id it sent.
+	if second.RequestedBy != 7 {
+		t.Errorf("written-back RequestedBy = %d, want the first asker's 7", second.RequestedBy)
+	}
+
+	got, err := st.GetRequest(ctx, first.ID)
+	if err != nil {
+		t.Fatalf("GetRequest: %v", err)
+	}
+	if got.RequestedBy != 7 {
+		t.Errorf("stored RequestedBy = %d, want the first asker's 7", got.RequestedBy)
+	}
+}
+
+// A merge queues behind the first asker, so it must not rewrite what their row
+// says either. POST /requests is member-allowed and its body is free text: a
+// merge that overwrote the description would let one housemate put words in
+// another's mouth, under their name, in the admin's approval queue.
+func TestCreateRequestMergeKeepsTheOwnersDescription(t *testing.T) {
+	ctx := context.Background()
+	st, _ := openTemp(t)
+
+	first := core.Request{
+		MediaType: core.MediaTypeSeries, TMDBID: 1399, Title: "Game of Thrones",
+		Year: 2011, PosterPath: "/got.jpg", Seasons: []int{1}, RequestedBy: 7,
+	}
+	if err := st.CreateRequest(ctx, &first); err != nil {
+		t.Fatalf("CreateRequest(first): %v", err)
+	}
+
+	second := core.Request{
+		MediaType: core.MediaTypeSeries, TMDBID: 1399, Title: "BOB OWNS THIS NOW",
+		Year: 1999, PosterPath: "/bob.jpg", Seasons: []int{2}, RequestedBy: 9,
+	}
+	if err := st.CreateRequest(ctx, &second); err != nil {
+		t.Fatalf("CreateRequest(second): %v", err)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("second request id = %d, want it merged into %d", second.ID, first.ID)
+	}
+
+	got, err := st.GetRequest(ctx, first.ID)
+	if err != nil {
+		t.Fatalf("GetRequest: %v", err)
+	}
+	if got.Title != "Game of Thrones" || got.Year != 2011 || got.PosterPath != "/got.jpg" {
+		t.Errorf("merged row = %q/%d/%q, want the first asker's description kept",
+			got.Title, got.Year, got.PosterPath)
+	}
+	// Seasons still union: that is what a merge is for.
+	if want := []int{1, 2}; !reflect.DeepEqual(got.Seasons, want) {
+		t.Errorf("merged Seasons = %v, want %v", got.Seasons, want)
+	}
+	// Written back, so the caller answers with the row rather than with itself.
+	if second.Title != "Game of Thrones" || second.Year != 2011 || second.PosterPath != "/got.jpg" {
+		t.Errorf("written-back description = %q/%d/%q, want the merged row's",
+			second.Title, second.Year, second.PosterPath)
+	}
+}
+
+// The other half of the same rule: a merge fills a field nobody has filled,
+// exactly as it does for min_availability. A first request made without artwork
+// gets it from the second rather than staying blank forever.
+func TestCreateRequestMergeFillsAnEmptyDescription(t *testing.T) {
+	ctx := context.Background()
+	st, _ := openTemp(t)
+
+	first := core.Request{MediaType: core.MediaTypeMovie, TMDBID: 78, Title: "Blade Runner"}
+	if err := st.CreateRequest(ctx, &first); err != nil {
+		t.Fatalf("CreateRequest(first): %v", err)
+	}
+
+	second := core.Request{
+		MediaType: core.MediaTypeMovie, TMDBID: 78, Title: "Blade Runner",
+		Year: 1982, PosterPath: "/br.jpg",
+	}
+	if err := st.CreateRequest(ctx, &second); err != nil {
+		t.Fatalf("CreateRequest(second): %v", err)
+	}
+
+	got, err := st.GetRequest(ctx, first.ID)
+	if err != nil {
+		t.Fatalf("GetRequest: %v", err)
+	}
+	if got.Year != 1982 || got.PosterPath != "/br.jpg" {
+		t.Errorf("merged row = %d/%q, want the blanks filled in", got.Year, got.PosterPath)
+	}
+}
+
+func TestListRequestsByRequester(t *testing.T) {
+	ctx := context.Background()
+	st, _ := openTemp(t)
+
+	mine := core.Request{MediaType: core.MediaTypeMovie, TMDBID: 78, Title: "Blade Runner", RequestedBy: 7}
+	theirs := core.Request{MediaType: core.MediaTypeMovie, TMDBID: 79, Title: "Theirs", RequestedBy: 9}
+	nobodys := core.Request{MediaType: core.MediaTypeMovie, TMDBID: 80, Title: "Nobody's"}
+	for _, r := range []*core.Request{&mine, &theirs, &nobodys} {
+		if err := st.CreateRequest(ctx, r); err != nil {
+			t.Fatalf("CreateRequest: %v", err)
+		}
+	}
+	if err := st.SetRequestStatus(ctx, mine.ID, core.RequestDismissed); err != nil {
+		t.Fatalf("SetRequestStatus: %v", err)
+	}
+
+	// Every status, because watching a wish get decided is the whole point of
+	// the screen.
+	got, err := st.ListRequestsBy(ctx, 7, "")
+	if err != nil {
+		t.Fatalf("ListRequestsBy: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != mine.ID {
+		t.Fatalf("ListRequestsBy(7) = %+v, want only request %d", got, mine.ID)
+	}
+
+	// ...and the status filter still narrows within one person's rows.
+	got, err = st.ListRequestsBy(ctx, 7, core.RequestPending)
+	if err != nil {
+		t.Fatalf("ListRequestsBy(pending): %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("ListRequestsBy(7, pending) = %+v, want none — it was dismissed", got)
+	}
+
+	// Zero is a real requester, not a wildcard: it selects the rows nobody owns.
+	got, err = st.ListRequestsBy(ctx, 0, "")
+	if err != nil {
+		t.Fatalf("ListRequestsBy(0): %v", err)
+	}
+	if len(got) != 1 || got[0].ID != nobodys.ID {
+		t.Errorf("ListRequestsBy(0) = %+v, want only the ownerless request %d", got, nobodys.ID)
+	}
+}
+
 func TestCreateRequestSeparatesMediaTypes(t *testing.T) {
 	ctx := context.Background()
 	st, _ := openTemp(t)

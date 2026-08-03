@@ -167,7 +167,8 @@ func TestLoginIsBoundedAndAudited(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			rec := do(t, h, http.MethodPost, "/api/v1/auth/login", `{"password":"rockyou"}`)
+			rec := do(t, h, http.MethodPost, "/api/v1/auth/login",
+				`{"username":"admin","password":"rockyou"}`)
 			codes[i] = rec.Code
 		}()
 	}
