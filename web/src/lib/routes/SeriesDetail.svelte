@@ -16,6 +16,8 @@
   import LoadError from '../components/LoadError.svelte';
   import Poster from '../components/Poster.svelte';
   import RemoveItemModal from '../components/RemoveItemModal.svelte';
+  import MonitorButton from '../components/MonitorButton.svelte';
+  import OverflowMenu from '../components/OverflowMenu.svelte';
   import Skeleton from '../components/Skeleton.svelte';
   import StatusDot from '../components/StatusDot.svelte';
   import Toggle from '../components/Toggle.svelte';
@@ -181,31 +183,35 @@
             </div>
           </div>
           <div class="flex items-center gap-3">
-            <Button variant="primary" size="sm" disabled={searching} onclick={searchNow}>
+            <Button variant="primary" disabled={searching} onclick={searchNow}>
               <Icon name="search" size={14} />
               {searching ? 'Searching…' : 'Search now'}
             </Button>
-            <Button variant="secondary" size="sm" href="/series/{current.id}/search">
+            <Button variant="secondary" href="/series/{current.id}/search">
               Interactive search
             </Button>
-            <Toggle
-              checked={current.monitored}
-              label="Monitored"
+            <MonitorButton
+              monitored={current.monitored}
+              subject={current.title}
               disabled={busy}
               onchange={(next) =>
                 run(
                   () => api.setSeriesMonitored(current.id, next),
                   'Could not update the series',
                 )} />
-            <Button
-              variant="danger"
-              size="sm"
-              disabled={removing}
-              title="Remove this series from the library"
-              onclick={() => (confirmingRemove = true)}>
-              <Icon name="trash" size={14} />
-              <span class="sr-only">Remove {current.title}</span>
-            </Button>
+            <!-- Removal lives behind the ⋯ rather than one mis-click from the
+                 search buttons. There is no per-series metadata refresh route,
+                 so removal is the only item there is. -->
+            <OverflowMenu
+              subject={current.title}
+              items={[
+                {
+                  label: 'Remove from library…',
+                  danger: true,
+                  disabled: removing,
+                  onselect: () => (confirmingRemove = true),
+                },
+              ]} />
           </div>
         </div>
 

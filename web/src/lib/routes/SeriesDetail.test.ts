@@ -31,7 +31,7 @@ const SERIES = {
 
 let host: HTMLElement;
 let app: Record<string, unknown> | undefined;
-let calls: { url: string; method: string }[];
+let calls: { url: string; method: string; body?: Record<string, unknown> | null }[];
 
 // Two seasons holding three episode files between them: the confirm names the
 // count it would delete, so "Also delete 3 files" has to come from the data.
@@ -98,7 +98,11 @@ function stubFetch(queued: number, series: unknown = SERIES) {
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      calls.push({ url, method: init?.method ?? 'GET' });
+      calls.push({
+        url,
+        method: init?.method ?? 'GET',
+        body: typeof init?.body === 'string' ? JSON.parse(init.body) : null,
+      });
       if (url.endsWith('/search')) {
         return new Response(JSON.stringify({ queued }), {
           status: 202,
@@ -140,11 +144,36 @@ function searchNowButton(): HTMLButtonElement {
   return button as HTMLButtonElement;
 }
 
-function removeTrigger(): HTMLButtonElement {
-  const button = [...host.querySelectorAll('button')].find((b) =>
-    b.textContent?.includes('Remove Severance'),
+/** The header's ⋯ trigger, named for a screen reader by the series title. */
+function menuTrigger(): HTMLButtonElement {
+  const button = [...host.querySelectorAll('button')].find(
+    (b) => b.getAttribute('aria-label') === 'More actions for Severance',
   );
-  expect(button, 'Remove trigger').toBeDefined();
+  expect(button, 'overflow menu trigger').toBeDefined();
+  return button as HTMLButtonElement;
+}
+
+/**
+ * The Remove item, with its menu opened. Removal moved behind the ⋯; what it
+ * does after the click is unchanged, which is why every assertion below this
+ * line is unchanged too.
+ */
+function removeTrigger(): HTMLButtonElement {
+  menuTrigger().click();
+  flushSync();
+  const item = [...host.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((b) =>
+    b.textContent?.includes('Remove'),
+  );
+  expect(item, 'Remove trigger').toBeDefined();
+  return item as HTMLButtonElement;
+}
+
+/** The header's monitored control, now an icon toggle rather than a switch. */
+function monitorButton(): HTMLButtonElement {
+  const button = [...host.querySelectorAll<HTMLButtonElement>('button[aria-pressed]')].find((b) =>
+    b.getAttribute('aria-label')?.includes('monitor'),
+  );
+  expect(button, 'monitor toggle').toBeDefined();
   return button as HTMLButtonElement;
 }
 
@@ -156,8 +185,10 @@ function confirmButton(): HTMLButtonElement {
   return button as HTMLButtonElement;
 }
 
+// The body is recorded for the monitored PATCH; the assertions here are about
+// the request itself, so it is projected away.
 function deletes(): { url: string; method: string }[] {
-  return calls.filter((c) => c.method === 'DELETE');
+  return calls.filter((c) => c.method === 'DELETE').map(({ url, method }) => ({ url, method }));
 }
 
 describe('SeriesDetail remove', () => {
@@ -235,7 +266,9 @@ describe('SeriesDetail search actions', () => {
     searchNowButton().click();
     await settle();
 
-    expect(calls.filter((c) => c.method === 'POST')).toEqual([
+    expect(
+      calls.filter((c) => c.method === 'POST').map(({ url, method }) => ({ url, method })),
+    ).toEqual([
       { url: '/api/v1/library/series/3/search', method: 'POST' },
     ]);
     expect(toasts.items.map((t) => t.message)).toEqual(['4 searches started']);
@@ -262,5 +295,47 @@ describe('SeriesDetail search actions', () => {
     await settle();
 
     expect(toasts.items.map((t) => t.message)).toEqual(['1 search started']);
+  });
+});
+
+/**
+ * The redesigned action row (Option A): the labeled switch became an icon
+ * toggle and Remove moved behind the ⋯. The requests are the ones the old
+ * surface made.
+ */
+describe('SeriesDetail action row', () => {
+  it('sends the same monitored PATCH the switch used to', async () => {
+    stubFetch(0);
+    app = mount(SeriesDetail, { target: host, props: { id: 3 } });
+    await settle();
+
+    monitorButton().click();
+    await settle();
+
+    const patch = calls.find((c) => c.method === 'PATCH');
+    expect(patch?.url).toBe('/api/v1/library/series/3');
+    expect(patch?.body).toEqual({ monitored: false });
+  });
+
+  it('announces the state it is in', async () => {
+    stubFetch(0);
+    app = mount(SeriesDetail, { target: host, props: { id: 3 } });
+    await settle();
+    expect(monitorButton().getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('closes the menu on Escape without removing anything', async () => {
+    stubFetch(0);
+    app = mount(SeriesDetail, { target: host, props: { id: 3 } });
+    await settle();
+
+    menuTrigger().click();
+    flushSync();
+    expect(host.querySelector('[role="menu"]'), 'the menu is open').not.toBeNull();
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    flushSync();
+    expect(host.querySelector('[role="menu"]')).toBeNull();
+    expect(deletes()).toEqual([]);
   });
 });

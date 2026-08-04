@@ -104,12 +104,36 @@ function searchNowButton(): HTMLButtonElement {
   return button as HTMLButtonElement;
 }
 
-/** The header's Remove trigger, named for a screen reader by the movie title. */
-function removeTrigger(): HTMLButtonElement {
-  const button = [...host.querySelectorAll('button')].find((b) =>
-    b.textContent?.includes('Remove Dune'),
+/** The header's ⋯ trigger, named for a screen reader by the movie title. */
+function menuTrigger(): HTMLButtonElement {
+  const button = [...host.querySelectorAll('button')].find(
+    (b) => b.getAttribute('aria-label') === 'More actions for Dune',
   );
-  expect(button, 'Remove trigger').toBeDefined();
+  expect(button, 'overflow menu trigger').toBeDefined();
+  return button as HTMLButtonElement;
+}
+
+/**
+ * The Remove item, with its menu opened. Removal moved behind the ⋯ so it is no
+ * longer one mis-click from the search buttons; everything it does after the
+ * click is unchanged, which is why every assertion below this line is.
+ */
+function removeTrigger(): HTMLButtonElement {
+  menuTrigger().click();
+  flushSync();
+  const item = [...host.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((b) =>
+    b.textContent?.includes('Remove'),
+  );
+  expect(item, 'Remove trigger').toBeDefined();
+  return item as HTMLButtonElement;
+}
+
+/** The header's monitored control, now an icon toggle rather than a switch. */
+function monitorButton(): HTMLButtonElement {
+  const button = [...host.querySelectorAll<HTMLButtonElement>('button[aria-pressed]')].find((b) =>
+    b.getAttribute('aria-label')?.includes('monitor'),
+  );
+  expect(button, 'monitor toggle').toBeDefined();
   return button as HTMLButtonElement;
 }
 
@@ -250,5 +274,56 @@ describe('minimum availability', () => {
     const patch = calls.find((c) => c.method === 'PATCH');
     expect(patch?.url.endsWith('/library/movies/7')).toBe(true);
     expect(patch?.body).toEqual({ min_availability: 'in_cinemas' });
+  });
+});
+
+/**
+ * The redesigned action row (Option A): the labeled switch became an icon
+ * toggle and Remove moved behind the ⋯. What the controls DO is unchanged, so
+ * these assert the same requests the old surface made.
+ */
+describe('MovieDetail action row', () => {
+  it('sends the same monitored PATCH the switch used to', async () => {
+    stubFetch(0);
+    app = mount(MovieDetail, { target: host, props: { id: 7 } });
+    await settle();
+
+    monitorButton().click();
+    await settle();
+
+    const patch = calls.find((c) => c.method === 'PATCH');
+    expect(patch?.url).toBe('/api/v1/library/movies/7');
+    expect(patch?.body).toEqual({ monitored: false });
+  });
+
+  it('announces the state it is in', async () => {
+    stubFetch(0);
+    app = mount(MovieDetail, { target: host, props: { id: 7 } });
+    await settle();
+    expect(monitorButton().getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('closes the menu on Escape without removing anything', async () => {
+    stubFetch(0);
+    app = mount(MovieDetail, { target: host, props: { id: 7 } });
+    await settle();
+
+    menuTrigger().click();
+    flushSync();
+    expect(host.querySelector('[role="menu"]'), 'the menu is open').not.toBeNull();
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    flushSync();
+    expect(host.querySelector('[role="menu"]')).toBeNull();
+    expect(deletes()).toEqual([]);
+  });
+
+  it('keeps the red trash button out of the row', async () => {
+    stubFetch(0);
+    app = mount(MovieDetail, { target: host, props: { id: 7 } });
+    await settle();
+
+    const row = [...host.querySelectorAll('button')].map((b) => b.className).join(' ');
+    expect(row).not.toContain('bg-danger');
   });
 });

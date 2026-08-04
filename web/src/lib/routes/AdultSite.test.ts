@@ -322,8 +322,8 @@ describe('AdultSite scene rows', () => {
 
 describe('AdultSite monitoring and removal', () => {
   /**
-   * The switch whose accessible name is `label`. A visible label lives in the
-   * button's own text; a hidden one is its aria-label.
+   * The switch whose accessible name is `label` — the per-year and per-scene
+   * toggles, which are still switches.
    */
   function toggle(label: string): HTMLElement | undefined {
     return [...host!.querySelectorAll<HTMLElement>('[role="switch"]')].find(
@@ -331,9 +331,36 @@ describe('AdultSite monitoring and removal', () => {
     );
   }
 
+  /**
+   * The header's monitored control, which is now an icon toggle button rather
+   * than a labeled switch: it reports state with aria-pressed and names the
+   * ACTION, not the state, so the label says what a click will do.
+   */
+  function monitorButton(): HTMLElement | undefined {
+    return [...host!.querySelectorAll<HTMLElement>('button[aria-pressed]')].find((el) =>
+      el.getAttribute('aria-label')?.includes('monitor'),
+    );
+  }
+
+  /** The header's ⋯ trigger. */
+  function menuTrigger(): HTMLElement | undefined {
+    return [...host!.querySelectorAll<HTMLElement>('button')].find(
+      (el) => el.getAttribute('aria-label') === 'More actions for Brazzers',
+    );
+  }
+
+  /** The Remove item, with its menu opened. */
+  function removeItem(): HTMLElement | undefined {
+    menuTrigger()?.click();
+    flushSync();
+    return [...host!.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((el) =>
+      el.textContent?.includes('Remove'),
+    );
+  }
+
   async function flip(label: string) {
-    const control = toggle(label);
-    expect(control, `a toggle labelled ${label}`).toBeTruthy();
+    const control = label === 'Monitored' ? monitorButton() : toggle(label);
+    expect(control, `a control for ${label}`).toBeTruthy();
     control!.click();
     await vi.waitFor(() => {
       if (!calls.some((c) => c.method === 'PATCH')) throw new Error('no write yet');
@@ -388,7 +415,7 @@ describe('AdultSite monitoring and removal', () => {
     stubFetch();
     await mountSite();
 
-    buttonLabelled('Remove Brazzers')!.click();
+    removeItem()!.click();
     flushSync();
     const confirm = [...host!.querySelectorAll('button')].find(
       (b) => b.textContent?.trim() === 'Remove',
@@ -411,7 +438,7 @@ describe('AdultSite monitoring and removal', () => {
     stubFetch();
     await mountSite();
 
-    buttonLabelled('Remove Brazzers')!.click();
+    removeItem()!.click();
     flushSync();
     // The count comes off the detail response, so the confirm names it.
     expect(host!.textContent).toContain('Also delete 1 file from disk');
@@ -432,14 +459,29 @@ describe('AdultSite monitoring and removal', () => {
     );
   });
 
+  it('closes the menu on Escape without removing anything', async () => {
+    stubFetch();
+    await mountSite();
+
+    menuTrigger()!.click();
+    flushSync();
+    expect(host!.querySelector('[role="menu"]'), 'the menu is open').not.toBeNull();
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    flushSync();
+    expect(host!.querySelector('[role="menu"]')).toBeNull();
+    expect(calls.some((c) => c.method === 'DELETE')).toBe(false);
+  });
+
   it('offers a member no control over any of it', async () => {
     stubFetch();
     await mountSite('member');
 
-    expect(toggle('Monitored')).toBeUndefined();
+    expect(monitorButton()).toBeUndefined();
+    expect(menuTrigger()).toBeUndefined();
+    expect(host!.querySelector('[role="menu"]')).toBeNull();
     expect(toggle('Monitor 2022')).toBeUndefined();
     expect(toggle('Monitor #003')).toBeUndefined();
-    expect(buttonLabelled('Remove Brazzers')).toBeUndefined();
     // But the state itself is still readable: an unmonitored year says so.
     expect(host!.textContent).toContain('2022');
   });

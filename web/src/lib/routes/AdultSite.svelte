@@ -33,6 +33,8 @@
   import EmptyState from '../components/EmptyState.svelte';
   import Icon from '../components/Icon.svelte';
   import LoadError from '../components/LoadError.svelte';
+  import MonitorButton from '../components/MonitorButton.svelte';
+  import OverflowMenu from '../components/OverflowMenu.svelte';
   import Poster from '../components/Poster.svelte';
   import RemoveItemModal from '../components/RemoveItemModal.svelte';
   import Skeleton from '../components/Skeleton.svelte';
@@ -217,28 +219,32 @@
           </div>
           {#if session.isAdmin}
             <div class="flex items-center gap-3">
-              <Button variant="primary" size="sm" disabled={searching} onclick={searchNow}>
+              <Button variant="primary" disabled={searching} onclick={searchNow}>
                 <Icon name="search" size={14} />
                 {searching ? 'Searching…' : 'Search monitored'}
               </Button>
-              <Button variant="secondary" size="sm" href="/adult/sites/{current.id}/search">
+              <Button variant="secondary" href="/adult/sites/{current.id}/search">
                 Interactive search
               </Button>
-              <Toggle
-                checked={current.monitored}
-                label="Monitored"
+              <MonitorButton
+                monitored={current.monitored}
+                subject={current.title}
                 disabled={busy}
                 onchange={(next) =>
                   run(() => api.setSeriesMonitored(current.id, next), 'Could not update the site')} />
-              <Button
-                variant="danger"
-                size="sm"
-                disabled={removing}
-                title="Remove this site from the library"
-                onclick={() => (confirmingRemove = true)}>
-                <Icon name="trash" size={14} />
-                <span class="sr-only">Remove {current.title}</span>
-              </Button>
+              <!-- Removal lives behind the ⋯ rather than one mis-click from the
+                   search buttons. There is no per-site metadata refresh route,
+                   so removal is the only item there is. -->
+              <OverflowMenu
+                subject={current.title}
+                items={[
+                  {
+                    label: 'Remove from library…',
+                    danger: true,
+                    disabled: removing,
+                    onselect: () => (confirmingRemove = true),
+                  },
+                ]} />
             </div>
           {/if}
         </div>

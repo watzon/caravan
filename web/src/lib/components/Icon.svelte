@@ -40,6 +40,12 @@
     compass: '<circle cx="12" cy="12" r="10"/><path d="m16.24 7.76-2.12 6.36-6.36 2.12 2.12-6.36z"/>',
     clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
     star: '<path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.2-5.4-2.9-5.4 2.9 1-6.2L3.2 9.5l6.1-.9z"/>',
+    // Monitoring, on the detail pages: a bookmark is "watch this one", which is
+    // what monitored means, and it reads at 14px where an eye does not.
+    bookmark: '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>',
+    // The overflow trigger. Filled dots rather than stroked circles: at 2px
+    // stroke and this size, rings read as smudges.
+    more: '<circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.4" fill="currentColor" stroke="none"/>',
     // The adult module's mark (phase 9). Stroke-based and 24x24 like the rest;
     // it is the one icon in the set that is not a noun from the media domain,
     // which is the point — it reads as "this is a different kind of shelf".
