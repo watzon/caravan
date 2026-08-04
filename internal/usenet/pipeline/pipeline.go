@@ -304,16 +304,22 @@ func DownloadFiles(ctx context.Context, files []nzb.File, dir string, fetch Fetc
 	// today".
 	var totalSegments int
 	var totalBytes, remaining int64
+	filePlan := make([]FileProgress, len(files))
 	for i, f := range files {
 		totalSegments += len(f.Segments)
 		totalBytes += targets[i].wire
+		filePlan[i] = FileProgress{
+			Name:     targets[i].name,
+			Segments: targets[i].total,
+			IsPar2:   targets[i].isPar2,
+		}
 		for _, s := range f.Segments {
 			if _, done := resumed[i][s.Number]; !done {
 				remaining += s.Bytes
 			}
 		}
 	}
-	d.track.reset(len(files), totalSegments, totalBytes)
+	d.track.reset(filePlan, totalSegments, totalBytes)
 
 	// The preflight measures what is left to fetch, so resuming a download
 	// onto a nearly full disk is not refused for space its own parts already
@@ -334,7 +340,7 @@ func DownloadFiles(ctx context.Context, files []nzb.File, dir string, fetch Fetc
 		t.done = len(done)
 		for _, s := range files[i].Segments {
 			if seg, ok := done[s.Number]; ok {
-				d.track.segmentDone(s.Bytes, seg.Bytes)
+				d.track.segmentDone(t.index, s.Bytes, seg.Bytes)
 			}
 		}
 		if t.done >= t.total {
@@ -495,7 +501,7 @@ func classify(err error) Reason {
 // changed to be worth the write.
 func (d *download) done(j job, part *yenc.Part) {
 	t := j.target
-	d.track.segmentDone(j.segment.Bytes, int64(len(part.Body)))
+	d.track.segmentDone(t.index, j.segment.Bytes, int64(len(part.Body)))
 
 	t.mu.Lock()
 	t.done++
@@ -517,7 +523,7 @@ func (d *download) done(j job, part *yenc.Part) {
 
 // record writes off one segment.
 func (d *download) record(j job, reason Reason, err error) {
-	d.track.segmentFailed()
+	d.track.segmentFailed(j.target.index)
 
 	j.target.mu.Lock()
 	j.target.failed++

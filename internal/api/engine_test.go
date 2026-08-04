@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"reflect"
+	"sort"
 	"testing"
 
 	"github.com/watzon/caravan/internal/core"
@@ -82,6 +84,77 @@ func TestDownloadInsight(t *testing.T) {
 		}
 		if body.Insight.Availability != 1.25 {
 			t.Fatalf("availability = %v, want 1.25", body.Insight.Availability)
+		}
+	})
+
+	// The Usenet half of DownloadInsight is omitempty for exactly this reason:
+	// a torrent's insight body has to be what it always was, key for key, so
+	// the drawer's torrent path is untouched by the Usenet one existing.
+	t.Run("carries no usenet keys for a torrent", func(t *testing.T) {
+		engine := &insightEngine{
+			stubEngine: &stubEngine{},
+			insight: core.DownloadInsight{
+				Peers:        []core.PeerInsight{{Addr: "127.0.0.1:51413"}},
+				Trackers:     []core.TrackerInsight{{URL: "https://tracker.example/announce"}},
+				Availability: 1.25,
+			},
+		}
+		h, _, _ := newTestServer(t, WithEngine(&stubEngineProvider{engine: engine}))
+
+		rec := do(t, h, http.MethodGet, "/api/v1/downloads/hash/insight", "")
+		wantStatus(t, rec, http.StatusOK)
+		var body struct {
+			Insight map[string]any `json:"insight"`
+		}
+		decodeBody(t, rec, &body)
+
+		keys := make([]string, 0, len(body.Insight))
+		for k := range body.Insight {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		want := []string{"availability", "peers", "trackers"}
+		if !reflect.DeepEqual(keys, want) {
+			t.Fatalf("insight keys = %v, want exactly %v", keys, want)
+		}
+	})
+
+	// And a Usenet engine's insight carries the file half and no peer chatter.
+	t.Run("carries the file breakdown for a usenet download", func(t *testing.T) {
+		engine := &insightEngine{
+			stubEngine: &stubEngine{},
+			insight: core.DownloadInsight{
+				Peers:    []core.PeerInsight{},
+				Trackers: []core.TrackerInsight{},
+				Files: []core.UsenetFileInsight{
+					{Name: "movie.mkv", Segments: 10, SegmentsDone: 4},
+					{Name: "movie.nfo", Segments: 1, SegmentsDone: 1, Complete: true},
+				},
+				FilesComplete:   1,
+				Segments:        11,
+				SegmentsDone:    5,
+				DamagedSegments: 2,
+				DamagedFiles:    []string{"movie.mkv"},
+			},
+		}
+		h, _, _ := newTestServer(t, WithEngine(&stubEngineProvider{engine: engine}))
+
+		rec := do(t, h, http.MethodGet, "/api/v1/downloads/nzo/insight", "")
+		wantStatus(t, rec, http.StatusOK)
+		var body struct {
+			Insight core.DownloadInsight `json:"insight"`
+		}
+		decodeBody(t, rec, &body)
+
+		if len(body.Insight.Files) != 2 || body.Insight.Files[0].Name != "movie.mkv" ||
+			body.Insight.Files[0].SegmentsDone != 4 {
+			t.Fatalf("files = %#v, want the per-file segment counts", body.Insight.Files)
+		}
+		if body.Insight.SegmentsDone != 5 || body.Insight.FilesComplete != 1 {
+			t.Fatalf("insight = %#v, want the aggregate counts", body.Insight)
+		}
+		if body.Insight.DamagedSegments != 2 || len(body.Insight.DamagedFiles) != 1 {
+			t.Fatalf("insight = %#v, want the repair detail", body.Insight)
 		}
 	})
 

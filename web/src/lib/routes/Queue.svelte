@@ -40,8 +40,21 @@
   let busyID = $state<string | null>(null);
   let removing = $state<DownloadStatus | null>(null);
   let removeData = $state(false);
-  let detail = $state<DownloadStatus | null>(null);
+  /**
+   * The open drawer is tracked by id, never by the row object: the store
+   * replaces every row on each poll, so holding the object froze the drawer at
+   * whatever progress, speed and phase it had when it was clicked while the
+   * list under it kept moving.
+   */
+  let detailID = $state<string | null>(null);
+  let detail = $derived(detailID === null ? null : (downloads.items ?? []).find((d) => d.id === detailID) ?? null);
 
+  // A download that leaves the queue — removed, or gone from the engine — takes
+  // its drawer with it rather than leaving a stale one that would reopen if the
+  // id ever came back.
+  $effect(() => {
+    if (detailID !== null && downloads.items !== null && detail === null) detailID = null;
+  });
 
   function openRemoveFromDetail(deleteData: boolean) {
     if (!detail) return;
@@ -84,7 +97,7 @@
       await api.removeDownload(target.id, deleteData);
       downloads.forget(target.id);
       removing = null;
-      detail = null;
+      detailID = null;
       pushToast(
         deleteData ? 'Removed, and its data deleted.' : 'Removed. The data is still on disk.',
         'neutral',
@@ -199,7 +212,7 @@
             type="button"
             class="absolute inset-0 rounded-md focus:outline-none focus:ring-2 focus:ring-accent"
             aria-label="Open details for {download.name}"
-            onclick={() => (detail = download)}></button>
+            onclick={() => (detailID = download.id)}></button>
           <div class="relative z-10 flex pointer-events-none flex-wrap items-center gap-3">
             <span class="size-2 shrink-0 rounded-full {TONE_DOT[meta.tone]}" aria-hidden="true"></span>
             <span class="min-w-0 flex-1 font-mono text-ink" title={download.name}>
@@ -283,12 +296,13 @@
 </div>
 
 {#if detail}
+  {@const open = detail}
   <QueueDetailDrawer
-    download={detail}
-    busy={busyID === detail.id}
-    onclose={() => (detail = null)}
-    onpause={() => void act(detail, () => api.pauseDownload(detail.id), 'Paused.')}
-    onresume={() => void act(detail, () => api.resumeDownload(detail.id), 'Resumed.')}
+    download={open}
+    busy={busyID === open.id}
+    onclose={() => (detailID = null)}
+    onpause={() => void act(open, () => api.pauseDownload(open.id), 'Paused.')}
+    onresume={() => void act(open, () => api.resumeDownload(open.id), 'Resumed.')}
     onremove={openRemoveFromDetail}
     onlimitsapplied={() => downloads.refresh()} />
 {/if}

@@ -139,6 +139,13 @@ func (m *memStore) get(id core.DownloadID) (core.Download, bool) {
 func newTestEngine(t *testing.T, srv *nntptest.Server, store download.Persistence) (*Engine, string) {
 	t.Helper()
 	root := t.TempDir()
+	return newTestEngineAt(t, root, srv, store), root
+}
+
+// newTestEngineAt is newTestEngine over an existing storage root, which is what
+// a restart looks like: the same directory, the same sidecars, a new engine.
+func newTestEngineAt(t *testing.T, root string, srv *nntptest.Server, store download.Persistence) *Engine {
+	t.Helper()
 	opts := EngineOpts{
 		Servers:      []nntp.ServerConfig{testServer(srv)},
 		NNTP:         fastRetry(),
@@ -153,7 +160,7 @@ func newTestEngine(t *testing.T, srv *nntptest.Server, store download.Persistenc
 		t.Fatalf("NewEngine: %v", err)
 	}
 	t.Cleanup(func() { e.Close() })
-	return e, root
+	return e
 }
 
 // fastRetry keeps the transport's failure paths honest but instant: the retry

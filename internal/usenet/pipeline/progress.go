@@ -52,6 +52,30 @@ func (p Progress) Fraction() float64 {
 	return 0
 }
 
+// FileProgress is one file's share of a download, live.
+//
+// The aggregate counters in Progress answer "how far along is this download";
+// these answer "which files are whole", which is what a Usenet queue drawer
+// shows in place of a torrent's peer list. They are carried alongside Progress
+// rather than inside it because the aggregate is read on every engine poll and
+// this slice is read only when someone has the drawer open.
+type FileProgress struct {
+	// Name is the file's name inside the download directory — the same name
+	// FileResult reports once the download is over.
+	Name string
+	// Segments is how many segments the file was posted in.
+	Segments int
+	// SegmentsDone is how many of them are on disk, resumed ones included.
+	SegmentsDone int
+	// SegmentsFailed is how many this run gave up on.
+	SegmentsFailed int
+	// IsPar2 marks a recovery volume rather than payload.
+	IsPar2 bool
+}
+
+// Complete reports whether every segment of this file is on disk.
+func (f FileProgress) Complete() bool { return f.Segments > 0 && f.SegmentsDone == f.Segments }
+
 // Tracker is the live progress of a download, safe to read from another
 // goroutine while Download runs.
 //
@@ -63,8 +87,9 @@ func (p Progress) Fraction() float64 {
 //
 // The zero Tracker is usable and reports an empty Progress.
 type Tracker struct {
-	mu sync.Mutex
-	p  Progress
+	mu    sync.Mutex
+	p     Progress
+	files []FileProgress
 }
 
 // NewTracker returns a Tracker to hand to Download in Options.Progress.
@@ -80,28 +105,67 @@ func (t *Tracker) Snapshot() Progress {
 	return t.p
 }
 
-// reset installs the totals and clears the counters, so a Tracker reused
-// across a restart reports this run's plan rather than the last one's.
-func (t *Tracker) reset(files, segments int, total int64) {
+// Files is the per-file progress right now, in NZB order. Like Snapshot it
+// copies, so a caller can hold the value as long as it likes.
+func (t *Tracker) Files() []FileProgress {
+	if t == nil {
+		return nil
+	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	t.p = Progress{Files: files, Segments: segments, TotalBytes: total}
+	if len(t.files) == 0 {
+		return nil
+	}
+	out := make([]FileProgress, len(t.files))
+	copy(out, t.files)
+	return out
 }
 
-func (t *Tracker) segmentDone(wire, written int64) {
+// reset installs the plan and clears the counters, so a Tracker reused across a
+// restart reports this run's plan rather than the last one's. files is one
+// entry per file with only the totals filled in.
+func (t *Tracker) reset(files []FileProgress, segments int, total int64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.p = Progress{Files: len(files), Segments: segments, TotalBytes: total}
+	t.files = make([]FileProgress, len(files))
+	copy(t.files, files)
+}
+
+// file resolves one entry, or nil when the index is outside this run's plan.
+// The counters are fed from the fetch workers, and a tracker handed to a second
+// DownloadFiles call (the par2 pass) has a different plan; a bounds check here
+// is cheaper than a panic in a worker goroutine.
+func (t *Tracker) file(i int) *FileProgress {
+	if i < 0 || i >= len(t.files) {
+		return nil
+	}
+	return &t.files[i]
+}
+
+func (t *Tracker) segmentDone(file int, wire, written int64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.p.SegmentsDone++
 	t.p.Bytes += wire
 	t.p.BytesWritten += written
+	if f := t.file(file); f != nil {
+		f.SegmentsDone++
+	}
 }
 
-func (t *Tracker) segmentFailed() {
+func (t *Tracker) segmentFailed(file int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.p.SegmentsFailed++
+	if f := t.file(file); f != nil {
+		f.SegmentsFailed++
+	}
 }
 
+// fileComplete counts one whole file. It takes no index: whether a particular
+// file is whole is already derivable from its own counters (FileProgress.
+// Complete), and a second flag for the same fact is a second thing to keep true.
 func (t *Tracker) fileComplete() {
 	t.mu.Lock()
 	defer t.mu.Unlock()

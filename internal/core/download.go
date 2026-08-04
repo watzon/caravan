@@ -178,12 +178,51 @@ type TrackerInsight struct {
 	Leechers int    `json:"leechers"`
 }
 
-// DownloadInsight is the torrent-specific detail surfaced by the queue drawer.
-// Availability is the aggregate peer piece availability divided by piece count.
+// UsenetFileInsight is one file inside an NZB, as the pipeline sees it right
+// now: a Usenet download is a set of files assembled from segments, and which
+// of them are whole is the equivalent of a torrent's piece map.
+type UsenetFileInsight struct {
+	// Name is the file's name inside the download directory.
+	Name string `json:"name"`
+	// Segments is how many segments the file was posted in, and SegmentsDone
+	// how many of them are on disk. SegmentsFailed counts the ones this run
+	// gave up on — holes for par2, not a reason to stop.
+	Segments       int  `json:"segments"`
+	SegmentsDone   int  `json:"segments_done"`
+	SegmentsFailed int  `json:"segments_failed"`
+	Complete       bool `json:"complete"`
+	// Par2 marks a recovery volume rather than payload.
+	Par2 bool `json:"par2"`
+}
+
+// DownloadInsight is the protocol-specific detail surfaced by the queue drawer.
+//
+// The two halves are disjoint and both optional. A torrent engine fills the
+// peer half — Availability is the aggregate peer piece availability divided by
+// piece count — and a Usenet engine fills the file half; every Usenet field is
+// omitempty precisely so a torrent's insight JSON is exactly what it always
+// was.
 type DownloadInsight struct {
 	Peers        []PeerInsight    `json:"peers"`
 	Trackers     []TrackerInsight `json:"trackers"`
 	Availability float64          `json:"availability"`
+
+	// Files is one entry per file the NZB indexes, in NZB order.
+	Files []UsenetFileInsight `json:"files,omitempty"`
+	// The same counts aggregated, so the drawer does not have to sum a
+	// thousand-file release on every poll.
+	FilesComplete  int `json:"files_complete,omitempty"`
+	Segments       int `json:"segments,omitempty"`
+	SegmentsDone   int `json:"segments_done,omitempty"`
+	SegmentsFailed int `json:"segments_failed,omitempty"`
+
+	// DamagedSegments is how many articles verification found missing or
+	// corrupt, and DamagedFiles names the files they belonged to. They are what
+	// the repairing phase is working on. par2 reports no live progress, so
+	// there is deliberately no percentage here: the UI shows an indeterminate
+	// stage rather than a number nothing measures.
+	DamagedSegments int      `json:"damaged_segments,omitempty"`
+	DamagedFiles    []string `json:"damaged_files,omitempty"`
 }
 
 // Download is the persisted record of a download (the `downloads` table): the

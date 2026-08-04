@@ -87,6 +87,43 @@ var types = []Type{
 	},
 }
 
+// The `downloads.engine` values of the two built-in engines.
+//
+// They are spelled out here rather than imported from internal/download and
+// internal/usenet because those packages sit *above* this one — internal/usenet
+// reaches this registry through its nntp package, so importing them back would
+// close a cycle. The strings are pinned to the constants they mirror by
+// TestEmbeddedEngineNamesMatchTheEngines in internal/api, which is the one
+// place all three packages are visible at once.
+const (
+	EmbeddedTorrentEngine = "embedded"
+	EmbeddedUsenetEngine  = "embedded-usenet"
+)
+
+// ProtocolForEngine reports which protocol a `downloads.engine` value speaks:
+// core.ProtocolTorrent or core.ProtocolUsenet.
+//
+// It is the single authority on that mapping — the queue tags every row with
+// it so the UI can tell a torrent's chrome (peers, trackers, ratio) from a
+// Usenet download's (files, repair, unpack), and nothing else may re-derive it
+// from an engine name.
+//
+// An empty or unrecognised engine reads as a torrent, which is what the queue
+// has assumed since before this column existed: the built-in torrent engine is
+// the fallback everywhere else too (web/src/lib/download.ts DEFAULT_ENGINE).
+func ProtocolForEngine(engine string) string {
+	switch engine {
+	case EmbeddedUsenetEngine:
+		return core.ProtocolUsenet
+	case EmbeddedTorrentEngine, "":
+		return core.ProtocolTorrent
+	}
+	if t, ok := Lookup(engine); ok {
+		return t.Protocol
+	}
+	return core.ProtocolTorrent
+}
+
 // Types returns every supported backend. The slice is a copy: the table is
 // shared by every caller and must not be editable through one of them.
 func Types() []Type {

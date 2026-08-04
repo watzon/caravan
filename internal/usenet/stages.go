@@ -39,6 +39,9 @@ func (e *Engine) start(it *item) {
 	it.phase = core.PhaseDownloading
 	it.track = pipeline.NewTracker()
 	it.sampledAt, it.lastBytes = time.Time{}, 0
+	// This run's damage is this run's to find. Carrying the last attempt's over
+	// would have the drawer report a repair that is not happening.
+	it.damagedSegments, it.damagedFiles = 0, nil
 
 	e.workers.Add(1)
 	go e.run(ctx, it, cancel, stopped)
@@ -144,6 +147,7 @@ func (e *Engine) stages(ctx context.Context, it *item) error {
 	// halfway through reads as a download that restarted.
 	e.mu.Lock()
 	it.bytesDone, it.size = res.Progress.Bytes, res.Progress.TotalBytes
+	it.files = insightFiles(res.Files)
 	it.track = nil
 	e.mu.Unlock()
 
@@ -175,7 +179,9 @@ func (e *Engine) stages(ctx context.Context, it *item) error {
 func (e *Engine) verify(ctx context.Context, it *item, res *pipeline.Result) error {
 	if holes := res.Count(pipeline.ReasonMissing) + res.Count(pipeline.ReasonCorrupt); holes > 0 {
 		damage := fmt.Sprintf("%d article(s) are missing or damaged", holes)
-		return e.repair(ctx, it, damage, damagedFiles(res))
+		files := damagedFiles(res)
+		e.setDamage(it, holes, files)
+		return e.repair(ctx, it, damage, files)
 	}
 
 	bad, err := checksumFailures(ctx, res)
@@ -187,7 +193,42 @@ func (e *Engine) verify(ctx context.Context, it *item, res *pipeline.Result) err
 	}
 	damage := fmt.Sprintf("%s arrived whole but does not match the checksum its poster declared",
 		strings.Join(bad, ", "))
+	// A whole file that fails its own checksum has no damaged-article count to
+	// give: every article arrived. The file names are the whole of the answer.
+	e.setDamage(it, 0, bad)
 	return e.repair(ctx, it, damage, bad)
+}
+
+// setDamage records what verification found, for the drawer to show while the
+// repairing phase runs.
+func (e *Engine) setDamage(it *item, segments int, files []string) {
+	e.mu.Lock()
+	it.damagedSegments = segments
+	it.damagedFiles = append([]string(nil), files...)
+	e.mu.Unlock()
+}
+
+// insightFiles freezes a finished download stage's per-file results, so the
+// drawer keeps its file list through repair and extraction.
+func insightFiles(files []pipeline.FileResult) []core.UsenetFileInsight {
+	if len(files) == 0 {
+		return nil
+	}
+	out := make([]core.UsenetFileInsight, 0, len(files))
+	for _, f := range files {
+		out = append(out, core.UsenetFileInsight{
+			Name:         f.Name,
+			Segments:     f.Segments,
+			SegmentsDone: f.SegmentsDone,
+			// The failure count is not carried on a FileResult: it is
+			// Segments - SegmentsDone by construction once the stage is over,
+			// with nothing still in flight to confuse the two.
+			SegmentsFailed: f.Segments - f.SegmentsDone,
+			Complete:       f.Complete(),
+			Par2:           f.IsPar2,
+		})
+	}
+	return out
 }
 
 // checksumFailures re-reads every fully assembled file and names the ones that

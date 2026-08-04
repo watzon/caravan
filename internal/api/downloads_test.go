@@ -6,8 +6,11 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/watzon/caravan/internal/clients"
 	"github.com/watzon/caravan/internal/core"
+	"github.com/watzon/caravan/internal/download"
 	"github.com/watzon/caravan/internal/store"
+	"github.com/watzon/caravan/internal/usenet"
 )
 
 // storeDownload persists a download row the way a grab would.
@@ -64,6 +67,73 @@ func TestListDownloadsMergesEngineAndStore(t *testing.T) {
 	// A download the engine knows about and Caravan does not is still shown.
 	if body.Downloads[1].ID != "orphan" || body.Downloads[1].GrabID != 0 || body.Downloads[1].Engine != "stub" {
 		t.Fatalf("orphan = %+v, want it surfaced", body.Downloads[1])
+	}
+}
+
+// Every queue row says which protocol it is, because the detail drawer is
+// built from it: a torrent has peers, trackers, a ratio and an upload limit,
+// and a Usenet download has a file list and repair stages instead. Before this
+// the UI showed torrent chrome — and a Limits tab the embedded Usenet engine
+// answers 400 for — on every download whatever fetched it.
+func TestListDownloadsTagsEachRowWithItsProtocol(t *testing.T) {
+	h, st, engine, _ := newAcquisitionServer(t)
+
+	for _, row := range []struct {
+		id     core.DownloadID
+		engine string
+		want   string
+	}{
+		{"torrent-embedded", clients.EmbeddedTorrentEngine, core.ProtocolTorrent},
+		{"torrent-external", core.DownloadClientQBittorrent, core.ProtocolTorrent},
+		{"usenet-embedded", clients.EmbeddedUsenetEngine, core.ProtocolUsenet},
+		{"usenet-sabnzbd", core.DownloadClientSABnzbd, core.ProtocolUsenet},
+		{"usenet-nzbget", core.DownloadClientNZBGet, core.ProtocolUsenet},
+	} {
+		d := core.Download{Engine: row.engine, EngineID: row.id, Title: string(row.id), State: core.DownloadQueued}
+		if err := st.UpsertDownload(context.Background(), &d); err != nil {
+			t.Fatalf("UpsertDownload: %v", err)
+		}
+		// The engine is authoritative for the backend name too, so the live
+		// overlay has to be what the protocol follows from.
+		engine.statuses = append(engine.statuses, core.DownloadStatus{
+			ID: row.id, State: core.DownloadDownloading, Name: string(row.id), Engine: row.engine,
+		})
+	}
+
+	rec := do(t, h, http.MethodGet, "/api/v1/downloads", "")
+	wantStatus(t, rec, http.StatusOK)
+	var body struct {
+		Downloads []downloadJSON `json:"downloads"`
+	}
+	decodeBody(t, rec, &body)
+
+	got := map[string]string{}
+	for _, d := range body.Downloads {
+		got[d.ID] = d.Protocol
+	}
+	want := map[string]string{
+		"torrent-embedded": core.ProtocolTorrent,
+		"torrent-external": core.ProtocolTorrent,
+		"usenet-embedded":  core.ProtocolUsenet,
+		"usenet-sabnzbd":   core.ProtocolUsenet,
+		"usenet-nzbget":    core.ProtocolUsenet,
+	}
+	for id, wantProtocol := range want {
+		if got[id] != wantProtocol {
+			t.Errorf("download %s protocol = %q, want %q", id, got[id], wantProtocol)
+		}
+	}
+}
+
+// The engine name constants are duplicated in internal/clients, which cannot
+// import the engines themselves without closing a cycle. This is the one place
+// all three packages are visible, so it is where the copy is pinned.
+func TestEmbeddedEngineNamesMatchTheEngines(t *testing.T) {
+	if clients.EmbeddedTorrentEngine != download.EngineName {
+		t.Errorf("clients.EmbeddedTorrentEngine = %q, want %q", clients.EmbeddedTorrentEngine, download.EngineName)
+	}
+	if clients.EmbeddedUsenetEngine != usenet.EngineName {
+		t.Errorf("clients.EmbeddedUsenetEngine = %q, want %q", clients.EmbeddedUsenetEngine, usenet.EngineName)
 	}
 }
 

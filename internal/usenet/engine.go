@@ -160,6 +160,16 @@ type item struct {
 	track     *pipeline.Tracker
 	bytesDone int64
 	size      int64
+	// files is the per-file breakdown frozen out of the download stage, so the
+	// queue drawer keeps showing which files arrived while par2 and the
+	// unpacker run with no tracker of their own. Nil until that stage has
+	// finished at least once this process, and the NZB answers instead.
+	files []core.UsenetFileInsight
+	// What verification found wrong, which is what the repairing phase is
+	// working on. par2 reports no live progress, so this is the whole of what
+	// can honestly be said about that stage.
+	damagedSegments int
+	damagedFiles    []string
 
 	// cancel stops the running worker; stopped closes when it has returned.
 	// Both are nil when no worker is running.
@@ -172,8 +182,13 @@ type item struct {
 	downRate  int64
 }
 
-// Engine implements the interface every download backend speaks.
-var _ core.Engine = (*Engine)(nil)
+// Engine implements the interface every download backend speaks, plus the
+// optional insight extension — a Usenet download's detail is its file list and
+// its repair state, where a torrent's is peers and trackers.
+var (
+	_ core.Engine        = (*Engine)(nil)
+	_ core.EngineInsight = (*Engine)(nil)
+)
 
 // NewEngine starts the embedded Usenet engine, writing in-progress data under
 // root/download.IncompleteDir, and re-adds whatever opts.Store remembers.
@@ -483,6 +498,89 @@ func (e *Engine) List(ctx context.Context) ([]core.DownloadStatus, error) {
 		return out[i].ID < out[j].ID
 	})
 	return out, nil
+}
+
+// Insight returns the Usenet-shaped detail the queue drawer shows in place of
+// a torrent's peers and trackers: which files the NZB indexes, how much of each
+// one is on disk, and what the repair stage is working on when it is running.
+// See core.EngineInsight.
+//
+// The peer and tracker halves stay empty rather than absent: a Usenet download
+// has neither, and an empty list says so where a null would only look like a
+// bug.
+func (e *Engine) Insight(ctx context.Context, id core.DownloadID) (*core.DownloadInsight, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	it, ok := e.items[id]
+	if !ok {
+		return nil, fmt.Errorf("usenet: insight %q: %w", id, download.ErrNotFound)
+	}
+
+	ins := &core.DownloadInsight{
+		Peers:           []core.PeerInsight{},
+		Trackers:        []core.TrackerInsight{},
+		Files:           e.filesLocked(it),
+		DamagedSegments: it.damagedSegments,
+		DamagedFiles:    append([]string(nil), it.damagedFiles...),
+	}
+	for _, f := range ins.Files {
+		ins.Segments += f.Segments
+		ins.SegmentsDone += f.SegmentsDone
+		ins.SegmentsFailed += f.SegmentsFailed
+		if f.Complete {
+			ins.FilesComplete++
+		}
+	}
+	return ins, nil
+}
+
+// filesLocked is the per-file breakdown from the best source available, which
+// changes as a download moves through its stages. It must be called with e.mu
+// held.
+//
+// The live tracker while articles are being fetched; the snapshot frozen out of
+// it once that stage is over and par2 or the unpacker owns the download; and
+// failing both — a download restored from a previous process, which has no
+// counters at all — the NZB itself, where the only honest per-file answer is
+// "all of it" for a finished download and "none of it" for one that has not
+// started.
+func (e *Engine) filesLocked(it *item) []core.UsenetFileInsight {
+	if live := it.track.Files(); len(live) > 0 {
+		out := make([]core.UsenetFileInsight, 0, len(live))
+		for _, f := range live {
+			out = append(out, core.UsenetFileInsight{
+				Name:           f.Name,
+				Segments:       f.Segments,
+				SegmentsDone:   f.SegmentsDone,
+				SegmentsFailed: f.SegmentsFailed,
+				Complete:       f.Complete(),
+				Par2:           f.IsPar2,
+			})
+		}
+		return out
+	}
+	if len(it.files) > 0 {
+		return append([]core.UsenetFileInsight(nil), it.files...)
+	}
+	if it.doc == nil {
+		return nil
+	}
+	content := it.doc.ContentFiles()
+	out := make([]core.UsenetFileInsight, 0, len(content))
+	for _, f := range content {
+		segments := len(f.Segments)
+		done := 0
+		if it.finished {
+			done = segments
+		}
+		out = append(out, core.UsenetFileInsight{
+			Name:         f.Filename(),
+			Segments:     segments,
+			SegmentsDone: done,
+			Complete:     it.finished,
+		})
+	}
+	return out
 }
 
 // Pause stops transferring without discarding progress. See core.Engine.

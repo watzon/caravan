@@ -55,17 +55,36 @@ function button(label: string) {
   return found!;
 }
 
-function mountDrawer() {
+function mountDrawer(overrides: Partial<DownloadStatus> = {}) {
   app = mount(QueueDetailDrawer, {
     target: host,
     props: {
-      download: download(),
+      download: download(overrides),
       onclose: vi.fn(),
       onpause: vi.fn(),
       onresume: vi.fn(),
       onremove: vi.fn(),
     },
   });
+}
+
+/** A Usenet insight body: the file half, and no peers or trackers. */
+function usenetInsight(overrides: Record<string, unknown> = {}) {
+  return {
+    insight: {
+      peers: [],
+      trackers: [],
+      availability: 0,
+      files: [
+        { name: 'movie.mkv', segments: 40, segments_done: 18, segments_failed: 0, complete: false, par2: false },
+        { name: 'movie.nfo', segments: 1, segments_done: 1, segments_failed: 0, complete: true, par2: false },
+      ],
+      files_complete: 1,
+      segments: 41,
+      segments_done: 19,
+      ...overrides,
+    },
+  };
 }
 
 describe('QueueDetailDrawer', () => {
@@ -148,5 +167,63 @@ describe('QueueDetailDrawer', () => {
     expect(host.textContent).toContain('Limits');
     expect(host.textContent).not.toContain('Peers');
     expect(host.textContent).not.toContain('Trackers');
+  });
+});
+
+describe('QueueDetailDrawer (usenet)', () => {
+  // The complaint this split fixes: a Usenet download used to show a torrent's
+  // upload rate, share ratio and piece availability — all structurally zero —
+  // plus a Limits tab whose Apply button the embedded engine answers 400 for.
+  it('drops every torrent-only figure, tab and control', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(usenetInsight())));
+    mountDrawer({ protocol: 'usenet', engine: 'embedded-usenet' });
+    await settle();
+
+    // The stats row carries only the two figures a Usenet download has.
+    const stats = [...host.querySelectorAll('dt.micro-label')].map((el) => el.textContent?.trim());
+    expect(stats).toEqual(['Down', 'ETA', 'Client', 'Location']);
+
+    const tabs = [...host.querySelectorAll('[role="tab"]')].map((el) => el.textContent?.trim());
+    expect(tabs).toEqual(['Files (2)']);
+    expect(host.querySelector('input[aria-label="Upload limit"]')).toBeNull();
+    expect(host.querySelector('input[aria-label="Download limit"]')).toBeNull();
+    expect(host.textContent).not.toContain('Seeding targets');
+  });
+
+  it('lists each file in the NZB with its own segment progress', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(usenetInsight())));
+    mountDrawer({ protocol: 'usenet' });
+    await settle();
+
+    expect(host.textContent).toContain('Files (2)');
+    expect(host.textContent).toContain('movie.mkv');
+    expect(host.textContent).toContain('18 / 40 segments');
+    expect(host.textContent).toContain('movie.nfo');
+    expect(host.textContent).toContain('1 / 1 segments');
+    expect(host.textContent).toContain('Complete');
+  });
+
+  it('names the damaged files a repair is working through', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      jsonResponse(usenetInsight({ damaged_segments: 3, damaged_files: ['movie.mkv'] })),
+    ));
+    mountDrawer({ protocol: 'usenet', phase: 'repairing' });
+    await settle();
+
+    expect(host.textContent).toContain('Repairing');
+    expect(host.textContent).toContain('3 segments to reconstruct');
+  });
+
+  it('polls insight while the drawer is open, whatever tab is showing', async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(usenetInsight()));
+    vi.stubGlobal('fetch', fetchMock);
+    mountDrawer({ protocol: 'usenet' });
+    await settle();
+    const initial = fetchMock.mock.calls.length;
+
+    // A Usenet download's files and phase change under the drawer with no tab
+    // interaction at all, so the poll cannot be gated on one.
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(initial);
   });
 });

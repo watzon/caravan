@@ -777,6 +777,16 @@ export type DownloadState =
  */
 export type DownloadPhase = 'downloading' | 'repairing' | 'extracting';
 
+/**
+ * internal/core's release protocols, as the queue tags each row (derived
+ * server-side from the engine holding it, internal/clients.ProtocolForEngine).
+ *
+ * It is what makes the detail drawer protocol-specific: a torrent has peers,
+ * trackers, a share ratio and an upload limit; a Usenet download has none of
+ * those and a list of files being assembled instead.
+ */
+export type DownloadProtocol = 'torrent' | 'usenet';
+
 /** internal/core.DownloadStatus — a live snapshot, not a persisted row. */
 export interface DownloadStatus {
   /** Engine-native handle (an info hash for the embedded engine). */
@@ -787,6 +797,12 @@ export interface DownloadStatus {
    * only: a row the engine is not currently reporting on has no phase.
    */
   phase?: DownloadPhase | '';
+  /**
+   * Which protocol this download speaks. Absent from a server older than the
+   * field; the UI falls back to "torrent", which is what it assumed before it
+   * existed.
+   */
+  protocol?: DownloadProtocol;
   name: string;
   /** Completion in [0,1]. */
   progress: number;
@@ -810,11 +826,42 @@ export interface DownloadStatus {
   engine?: string;
 }
 
-/** Torrent-specific diagnostics from GET /downloads/{id}/insight. */
+/**
+ * Protocol-specific diagnostics from GET /downloads/{id}/insight.
+ *
+ * The two halves are disjoint: a torrent engine fills peers/trackers/
+ * availability, a Usenet engine fills the file and repair fields, and every
+ * Usenet field is omitted from a torrent's response rather than sent as zero.
+ */
 export interface DownloadInsight {
   peers: DownloadPeer[];
   trackers: DownloadTracker[];
   availability: number;
+
+  /** One entry per file the NZB indexes, in NZB order. */
+  files?: DownloadFile[];
+  files_complete?: number;
+  segments?: number;
+  segments_done?: number;
+  segments_failed?: number;
+  /**
+   * What verification found wrong, which is what the repairing phase is
+   * working on. par2 reports no live progress, so there is no percentage: the
+   * stage is shown as indeterminate.
+   */
+  damaged_segments?: number;
+  damaged_files?: string[];
+}
+
+/** One file inside an NZB, as the engine's pipeline sees it. */
+export interface DownloadFile {
+  name: string;
+  segments: number;
+  segments_done: number;
+  segments_failed: number;
+  complete: boolean;
+  /** A par2 recovery volume rather than payload. */
+  par2: boolean;
 }
 
 export interface DownloadPeer {

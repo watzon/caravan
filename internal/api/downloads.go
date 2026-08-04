@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 
+	"github.com/watzon/caravan/internal/clients"
 	"github.com/watzon/caravan/internal/core"
 	"github.com/watzon/caravan/internal/store"
 )
@@ -18,8 +19,13 @@ type downloadJSON struct {
 	ID     string `json:"id"`
 	GrabID int64  `json:"grab_id"`
 	Engine string `json:"engine"`
-	Name   string `json:"name"`
-	State  string `json:"state"`
+	// Protocol is "torrent" or "usenet", derived from Engine through the one
+	// authority on that mapping (clients.ProtocolForEngine). The queue drawer
+	// is built from it: a torrent has peers, trackers, a ratio and an upload
+	// limit, and a Usenet download has none of those and a file list instead.
+	Protocol string `json:"protocol"`
+	Name     string `json:"name"`
+	State    string `json:"state"`
 	// Phase is the sub-step of a multi-stage download ("downloading",
 	// "repairing", "extracting"), and "" for an engine that has none. Like the
 	// rates it is live-only, so a row the engine is not reporting on has no
@@ -78,6 +84,10 @@ func (s *server) handleListDownloads(w http.ResponseWriter, r *http.Request) {
 			applyLiveStatus(&dto, status)
 			delete(live, row.EngineID)
 		}
+		// After the overlay, not before: a router names the backend that
+		// actually holds the download, and that is the name the protocol
+		// follows from.
+		dto.Protocol = clients.ProtocolForEngine(dto.Engine)
 		out = append(out, dto)
 	}
 
@@ -88,6 +98,7 @@ func (s *server) handleListDownloads(w http.ResponseWriter, r *http.Request) {
 	for _, status := range live {
 		dto := downloadJSON{Engine: s.engineName(), ETASeconds: -1}
 		applyLiveStatus(&dto, status)
+		dto.Protocol = clients.ProtocolForEngine(dto.Engine)
 		orphans = append(orphans, dto)
 	}
 	sort.Slice(orphans, func(i, j int) bool { return orphans[i].ID < orphans[j].ID })

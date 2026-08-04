@@ -1,9 +1,18 @@
 <script lang="ts">
-  /** Detail drawer for one active download, including optional torrent insight. */
+  /**
+   * Detail drawer for one active download.
+   *
+   * It is protocol-specific, because the two protocols have almost nothing in
+   * common past a progress bar: a torrent has peers, trackers, a share ratio,
+   * piece availability and an upload limit worth setting, and a Usenet download
+   * has none of those. It has files being assembled out of segments, and stages
+   * — repair, unpack — that a torrent never enters. Showing a Usenet download a
+   * Limits tab the embedded engine answers 400 for is the bug this split fixes.
+   */
   import { api, ApiError, errorText } from '../api/client';
   import type { DownloadInsight, DownloadStatus } from '../api/types';
   import { UNKNOWN, formatBytes, formatDuration, formatRate, truncateMiddle } from '../format';
-  import { downloadStateMeta, engineLabel } from '../download';
+  import { downloadPhaseLabel, downloadStateMeta, engineLabel } from '../download';
   import { QUEUE_POLL_MS } from '../state/downloads.svelte';
   import { pushToast } from '../state/toast.svelte';
   import Badge from './Badge.svelte';
@@ -11,7 +20,7 @@
   import Icon from './Icon.svelte';
   import ProgressBar from './ProgressBar.svelte';
 
-  type Tab = 'peers' | 'trackers' | 'limits';
+  type Tab = 'peers' | 'trackers' | 'limits' | 'files';
 
   interface Props {
     download: DownloadStatus;
@@ -63,6 +72,17 @@
   });
   let meta = $derived(downloadStateMeta(download.state));
   let paused = $derived(download.state === 'paused');
+  // A server older than the protocol field only ever ran a torrent engine, so
+  // its downloads read as torrents — which is exactly what they were.
+  let usenet = $derived(download.protocol === 'usenet');
+  let phaseLabel = $derived(downloadPhaseLabel(download));
+  let files = $derived(insight?.files ?? []);
+
+  // Each protocol opens on its own first tab. It re-runs only when the protocol
+  // changes, so a user who has switched to Trackers stays there across polls.
+  $effect(() => {
+    tab = usenet ? 'files' : 'peers';
+  });
 
   function nonNegativeKbps(value: string): number {
     const parsed = Number(value);
@@ -77,15 +97,22 @@
       if (signal?.aborted) return;
       if (err instanceof ApiError && (err.status === 400 || err.status === 501)) {
         insightSupported = false;
-        tab = 'limits';
+        // Fall back to the only other tab the protocol has. A Usenet download
+        // has no Limits tab to fall back to — the Files panel says so instead.
+        tab = usenet ? 'files' : 'limits';
         return;
       }
       insightError = errorText(err);
     }
   }
 
+  // Torrent insight is peer chatter nobody is looking at unless the Peers tab
+  // is open. Usenet insight is the download's own file and repair state, which
+  // changes underneath the drawer whichever tab is showing, so it is polled for
+  // as long as the drawer is open.
   $effect(() => {
-    if (tab !== 'peers' || !insightSupported) return;
+    if (!insightSupported) return;
+    if (!usenet && tab !== 'peers') return;
     const controller = new AbortController();
     void loadInsight(controller.signal);
     const interval = window.setInterval(() => void loadInsight(), QUEUE_POLL_MS);
@@ -176,26 +203,65 @@
           <p class="font-mono text-sm text-ink-secondary">ETA {formatDuration(download.eta_seconds)}</p>
         </div>
         <ProgressBar value={download.progress} tone="info" label="{download.name} progress" />
-        <dl class="grid grid-cols-4 gap-2">
-          <div class="min-w-0">
-            <dt class="micro-label">Down</dt>
-            <dd class="mt-1 truncate font-mono text-sm text-ink">{formatRate(download.down_rate)}</dd>
-          </div>
-          <div class="min-w-0">
-            <dt class="micro-label">Up</dt>
-            <dd class="mt-1 truncate font-mono text-sm text-ink">{formatRate(download.up_rate)}</dd>
-          </div>
-          <div class="min-w-0">
-            <dt class="micro-label">Ratio</dt>
-            <dd class="mt-1 font-mono text-sm text-ink">{download.ratio.toFixed(2)}</dd>
-          </div>
-          <div class="min-w-0">
-            <dt class="micro-label">Availability</dt>
-            <dd class="mt-1 font-mono text-sm text-ink">
-              {insight ? insight.availability.toFixed(2) : UNKNOWN}
-            </dd>
-          </div>
-        </dl>
+        <!-- A Usenet download has no upload half, no share ratio and no piece
+             availability. Showing those as 0.00 would read as a torrent that is
+             seeding nothing rather than as a protocol that has no such thing. -->
+        {#if usenet}
+          <dl class="grid grid-cols-4 gap-2">
+            <div class="min-w-0">
+              <dt class="micro-label">Down</dt>
+              <dd class="mt-1 truncate font-mono text-sm text-ink">{formatRate(download.down_rate)}</dd>
+            </div>
+            <div class="min-w-0">
+              <dt class="micro-label">ETA</dt>
+              <dd class="mt-1 truncate font-mono text-sm text-ink">{formatDuration(download.eta_seconds)}</dd>
+            </div>
+          </dl>
+        {:else}
+          <dl class="grid grid-cols-4 gap-2">
+            <div class="min-w-0">
+              <dt class="micro-label">Down</dt>
+              <dd class="mt-1 truncate font-mono text-sm text-ink">{formatRate(download.down_rate)}</dd>
+            </div>
+            <div class="min-w-0">
+              <dt class="micro-label">Up</dt>
+              <dd class="mt-1 truncate font-mono text-sm text-ink">{formatRate(download.up_rate)}</dd>
+            </div>
+            <div class="min-w-0">
+              <dt class="micro-label">Ratio</dt>
+              <dd class="mt-1 font-mono text-sm text-ink">{download.ratio.toFixed(2)}</dd>
+            </div>
+            <div class="min-w-0">
+              <dt class="micro-label">Availability</dt>
+              <dd class="mt-1 font-mono text-sm text-ink">
+                {insight ? insight.availability.toFixed(2) : UNKNOWN}
+              </dd>
+            </div>
+          </dl>
+        {/if}
+
+        <!-- Which stage the engine is in, when it is one the state badge cannot
+             express. par2 reports no live progress, so repair is described by
+             what it is working on rather than by a percentage nothing
+             measures. -->
+        {#if usenet && phaseLabel}
+          <p
+            class="flex items-center gap-2 rounded-sm border border-border bg-raised px-3 py-2 text-sm text-ink-secondary"
+            title={insight?.damaged_files?.length
+              ? `Damaged: ${insight.damaged_files.join(', ')}`
+              : undefined}>
+            <Badge tone="info">{phaseLabel}</Badge>
+            <span>
+              {#if download.phase === 'repairing'}
+                {insight?.damaged_segments
+                  ? `${insight.damaged_segments} segment${insight.damaged_segments === 1 ? '' : 's'} to reconstruct`
+                  : 'Rebuilding damaged files from the release’s par2 volumes.'}
+              {:else if download.phase === 'extracting'}
+                Unpacking the release’s archives.
+              {/if}
+            </span>
+          </p>
+        {/if}
         <!-- Which client is holding this, and where it says the data is. For
              an external client that path is on the client's own machine, and
              it is the first thing to check when an import cannot read it. -->
@@ -216,7 +282,19 @@
       </section>
 
       <div class="flex border-b border-border px-5" role="tablist" aria-label="Download detail sections">
-        {#if insightSupported}
+        {#if usenet}
+          <!-- One tab, and deliberately no Limits: the embedded Usenet engine
+               implements no per-download rate control, so the tab could only
+               ever have answered 400. -->
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'files'}
+            class="-mb-px border-b-2 border-accent px-3 py-2 text-sm text-ink"
+            onclick={() => (tab = 'files')}>
+            Files{files.length ? ` (${files.length})` : ''}
+          </button>
+        {:else if insightSupported}
           <button
             type="button"
             role="tab"
@@ -234,17 +312,64 @@
             Trackers{insight ? ` (${insight.trackers.length})` : ''}
           </button>
         {/if}
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === 'limits'}
-          class="-mb-px border-b-2 px-3 py-2 text-sm transition-colors duration-150 {tab === 'limits' ? 'border-accent text-ink' : 'border-transparent text-ink-secondary hover:text-ink'}"
-          onclick={() => (tab = 'limits')}>
-          Limits
-        </button>
+        {#if !usenet}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'limits'}
+            class="-mb-px border-b-2 px-3 py-2 text-sm transition-colors duration-150 {tab === 'limits' ? 'border-accent text-ink' : 'border-transparent text-ink-secondary hover:text-ink'}"
+            onclick={() => (tab = 'limits')}>
+            Limits
+          </button>
+        {/if}
       </div>
 
-      {#if tab === 'peers' && insightSupported}
+      {#if usenet}
+        <section class="px-5 py-4" aria-label="Files">
+          {#if insightError}
+            <p class="text-sm text-ink-secondary">File detail is unavailable: {insightError}</p>
+          {:else if !insightSupported}
+            <p class="text-sm text-ink-secondary">
+              This download client does not report the files inside an NZB.
+            </p>
+          {:else if insight === null}
+            <p class="text-sm text-ink-secondary">Loading files...</p>
+          {:else if files.length === 0}
+            <p class="text-sm text-ink-secondary">The engine is not reporting any files yet.</p>
+          {:else}
+            <!-- Segments, not bytes: an NZB's per-file size is the on-the-wire
+                 total the poster declared, and a file's real progress is how
+                 many of its articles are on disk. That is also the number par2
+                 works in. -->
+            <ul class="flex flex-col">
+              {#each files as file (file.name)}
+                <li class="flex flex-col gap-1.5 border-b border-border py-3 last:border-b-0">
+                  <div class="flex items-center gap-2">
+                    <p class="min-w-0 flex-1 truncate font-mono text-sm text-ink" title={file.name}>
+                      {truncateMiddle(file.name || UNKNOWN, 48)}
+                    </p>
+                    {#if file.segments_failed > 0}
+                      <Badge tone="danger">{file.segments_failed} missing</Badge>
+                    {:else if file.complete}
+                      <Badge tone="success">Complete</Badge>
+                    {/if}
+                    {#if file.par2}
+                      <Badge tone="neutral">par2</Badge>
+                    {/if}
+                  </div>
+                  <ProgressBar
+                    value={file.segments > 0 ? file.segments_done / file.segments : 0}
+                    tone={file.segments_failed > 0 ? 'warning' : file.complete ? 'success' : 'info'}
+                    label="{file.name} progress" />
+                  <p class="font-mono text-xs text-ink-muted">
+                    {file.segments_done} / {file.segments} segments
+                  </p>
+                </li>
+              {/each}
+            </ul>
+          {/if}
+        </section>
+      {:else if tab === 'peers' && insightSupported}
         <section class="px-5 py-4" aria-label="Peers">
           {#if insightError}
             <p class="text-sm text-ink-secondary">Insight is unavailable: {insightError}</p>
