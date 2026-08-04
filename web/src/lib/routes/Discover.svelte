@@ -88,7 +88,7 @@
   {#if discover.error}
     <DiscoverError
       message={discover.error}
-      status={discover.status}
+      fault={discover.fault}
       onretry={() => void discover.load(true)} />
   {:else if discover.loading && home === null}
     <Skeleton class="h-64 w-full rounded-lg" />

@@ -409,3 +409,68 @@ func TestAdultProviderIsSafeForConcurrentCallers(t *testing.T) {
 		}
 	}
 }
+
+// A candidate credential is exactly what the client cache must not hold.
+//
+// The enable gate validates a pair BEFORE deciding whether to commit it, so
+// routing that validation through the cache installed an unproven pair: a
+// typo'd key in the enable modal evicted the working client of a module that
+// was already on, and the next search paid the endpoint-dialect probe again —
+// the per-search round trip the cache exists to prevent.
+func TestValidatingACredentialDoesNotEvictTheWorkingClient(t *testing.T) {
+	ctx := context.Background()
+	adapter, st := testAdapter(t)
+	// tpdbFake plus the blank-query operation, which is what a credential test
+	// runs (stashbox.Client.Test searches for nothing).
+	fake := stashboxtest.New(stashboxtest.Options{
+		WithoutQueryStudios: true,
+		Operations: map[string][]stashboxtest.Response{
+			"SearchSitesByScene": {stashboxtest.Data([]byte(`{"searchScene":[]}`))},
+			"RecentSitesByScene": {stashboxtest.Data([]byte(`{"queryScenes":{"scenes":[]}}`))},
+		},
+	})
+	t.Cleanup(fake.Close)
+
+	if err := st.SetAdultEnabled(ctx, true); err != nil {
+		t.Fatalf("SetAdultEnabled: %v", err)
+	}
+	if err := st.SetSetting(ctx, store.SettingStashboxEndpoint, fake.URL()); err != nil {
+		t.Fatalf("set endpoint: %v", err)
+	}
+	if err := st.SetSetting(ctx, store.SettingStashboxAPIKey, "secret"); err != nil {
+		t.Fatalf("set api key: %v", err)
+	}
+
+	search := func(what string) {
+		t.Helper()
+		provider := adapter.adultMetadata(ctx)
+		if provider == nil {
+			t.Fatalf("adultMetadata = nil %s", what)
+		}
+		if _, err := provider.SearchSites(ctx, "brazzers"); err != nil {
+			t.Fatalf("SearchSites %s: %v", what, err)
+		}
+	}
+
+	// One search warms the cache and learns the endpoint's dialect.
+	search("before the validation")
+	if n := queryStudiosAttempts(fake); n != 1 {
+		t.Fatalf("queryStudios attempts = %d after the first search, want 1", n)
+	}
+
+	// The enable modal, opened again on a live module and submitted with a
+	// typo. Nothing is committed — the settings still name the working key.
+	if err := adapter.ValidateAdultCredential(ctx, fake.URL(), "typo"); err != nil {
+		t.Fatalf("ValidateAdultCredential: %v", err)
+	}
+
+	search("after the validation")
+
+	// Two probes: the warmed client's, and the throwaway validation client's.
+	// A third would mean the validation replaced the cached client and the
+	// search had to rebuild — the memo thrown away by a credential that was
+	// never stored.
+	if n := queryStudiosAttempts(fake); n != 2 {
+		t.Errorf("queryStudios attempts = %d, want 2: the validation must not evict the cached client", n)
+	}
+}

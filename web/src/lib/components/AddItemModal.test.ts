@@ -709,3 +709,195 @@ describe('AddItemModal adult scope', () => {
     );
   });
 });
+
+/**
+ * The guarded add surface (PLAN phase 10 task 3).
+ *
+ * TMDB is what names a movie or a series, so with no usable key this dialog
+ * has nothing to search and nothing to add. It must say that where the results
+ * would have been — with the destination attached — rather than throwing the
+ * provider's complaint at a toast and leaving an empty list behind it.
+ */
+describe('AddItemModal — metadata credential', () => {
+  let calls: { url: string; method: string }[];
+
+  function stub(reply: () => Response) {
+    calls = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        calls.push({ url: String(input), method: init?.method ?? 'GET' });
+        return reply();
+      }),
+    );
+  }
+
+  function coded(code: string, message: string, status = 503): Response {
+    return new Response(JSON.stringify({ error: message, code }), {
+      status,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  async function search(text: string) {
+    const input = host!.querySelector('input[type="search"]') as HTMLInputElement;
+    input.value = text;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    await vi.advanceTimersByTimeAsync(300);
+    flushSync();
+  }
+
+  it('sends the user to metadata settings when the key is missing', async () => {
+    vi.useFakeTimers();
+    stub(() => coded('metadata_credential_absent', 'no metadata provider configured'));
+    mountModal();
+
+    await search('dune');
+
+    expect(host!.textContent).toContain('No TMDB API key yet');
+    expect(host!.textContent).toContain('Settings → Metadata');
+    expect(host!.querySelector('a[href="/settings/metadata"]')).not.toBeNull();
+    // An empty state, not an error toast.
+    expect(toasts.items).toHaveLength(0);
+  });
+
+  it('says a rejected key is rejected, not missing', async () => {
+    vi.useFakeTimers();
+    stub(() => coded('metadata_credential_invalid', 'the TMDB API key was rejected'));
+    mountModal();
+
+    await search('dune');
+
+    expect(host!.textContent).toContain('TMDB rejected this API key');
+    expect(toasts.items).toHaveLength(0);
+  });
+
+  // A key revoked between the search and the click: the add fails where the
+  // search succeeded, and the dialog answers the same way rather than toasting.
+  it('turns a credential failure on the add itself into the same empty state', async () => {
+    vi.useFakeTimers();
+    stub(() => {
+      const post = calls[calls.length - 1]?.method === 'POST';
+      if (post) return coded('metadata_credential_invalid', 'the TMDB API key was rejected');
+      return new Response(
+        JSON.stringify({
+          movies: [{ tmdb_id: 1, title: 'Dune', year: 2021, overview: '', poster_url: '' }],
+          series: [],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    });
+    mountModal();
+
+    await search('dune');
+    (host!.querySelector('ul button') as HTMLButtonElement).click();
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    expect(host!.textContent).toContain('TMDB rejected this API key');
+    expect(toasts.items).toHaveLength(0);
+  });
+
+  // Settings is admin-only (MEMBER_ROUTES in router.ts) and App.svelte bounces a
+  // member off it, so the admin copy's destination is a door a member cannot
+  // open. Offering it made "every metadata-needing surface names the fix" false
+  // for the only role that lives on those surfaces.
+  it('offers a member no door they cannot open', async () => {
+    vi.useFakeTimers();
+    stub(() => coded('metadata_credential_absent', 'no metadata provider configured'));
+    session.user = { username: 'housemate', role: 'member', open: false, adult: false };
+    mountModal();
+
+    await search('dune');
+
+    expect(host!.textContent).toContain('No TMDB API key yet');
+    expect(host!.textContent).toContain('Ask a Caravan admin');
+    expect(host!.textContent).not.toContain('Settings → Metadata');
+    expect(host!.querySelector('a[href="/settings/metadata"]')).toBeNull();
+    expect(toasts.items).toHaveLength(0);
+  });
+
+  // The fault belongs to TMDB, and the Adult scope does not call TMDB. Leaking
+  // it across replaced working stash-box rows with an empty state pointing at a
+  // settings screen that had nothing to do with the failure.
+  it('keeps a TMDB add fault out of the Adult scope', async () => {
+    vi.useFakeTimers();
+    session.user = { username: 'someone', role: 'admin', open: false, adult: true };
+    const ok = (payload: unknown) =>
+      new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if ((init?.method ?? 'GET') === 'POST') {
+          return coded('metadata_credential_invalid', 'the TMDB API key was rejected');
+        }
+        if (url.includes('/adult/search')) {
+          return ok({
+            sites: [
+              {
+                stash_id: 'site-1',
+                name: 'Brazzers',
+                aliases: [],
+                parent_name: '',
+                url: '',
+                image_url: '',
+                in_library: false,
+                library_id: 0,
+              },
+            ],
+          });
+        }
+        return ok({
+          movies: [{ tmdb_id: 1, title: 'Dune', year: 2021, overview: '', poster_url: '' }],
+          series: [],
+        });
+      }),
+    );
+    mountModal();
+
+    await search('dune');
+    (host!.querySelector('ul button') as HTMLButtonElement).click();
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+    expect(host!.textContent).toContain('TMDB rejected this API key');
+
+    // Tab twice: Movies → Series → Adult. The query never changes, so the
+    // effect that clears the add fault on a new query does not fire.
+    const input = host!.querySelector('input[type="search"]') as HTMLInputElement;
+    for (let i = 0; i < 2; i++) {
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Tab', cancelable: true, bubbles: true }),
+      );
+      flushSync();
+    }
+    await vi.advanceTimersByTimeAsync(300);
+    flushSync();
+
+    expect(host!.textContent).toContain('Brazzers');
+    expect(host!.textContent).not.toContain('TMDB rejected this API key');
+  });
+
+  // A provider that is simply unhappy is not a credential problem, and the
+  // dialog must not send anyone to a settings screen that is already correct.
+  it('leaves an uncoded provider failure as the error it is', async () => {
+    vi.useFakeTimers();
+    stub(
+      () =>
+        new Response(JSON.stringify({ error: 'tmdb: http 500' }), {
+          status: 502,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    );
+    mountModal();
+
+    await search('dune');
+
+    expect(host!.textContent).toContain('tmdb: http 500');
+    expect(host!.textContent).not.toContain('Settings → Metadata');
+  });
+});

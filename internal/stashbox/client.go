@@ -213,6 +213,20 @@ func New(apiKey, endpoint string, hc *http.Client) *Client {
 	return c
 }
 
+// Test proves the endpoint answers with this credential, mirroring the indexer
+// and download-client "Test" buttons. It is what the adult enable gate runs
+// before it commits anything (PLAN phase 10 task 5).
+//
+// It asks for the site list rather than issuing a bespoke ping, for the reason
+// SearchSites has a fallback chain at all: "stash-box" is a protocol with
+// dialects, and the only honest test is the request the add-a-site screen will
+// make. A blank query is the screen's own first request, so a passing test
+// proves the exact path the module needs.
+func (c *Client) Test(ctx context.Context) error {
+	_, err := c.SearchSites(ctx, "")
+	return err
+}
+
 // gqlRequest is the standard GraphQL-over-HTTP request body.
 type gqlRequest struct {
 	Query         string         `json:"query"`

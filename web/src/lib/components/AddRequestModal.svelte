@@ -24,6 +24,7 @@
    */
   import { onMount } from 'svelte';
   import { api, errorText } from '../api/client';
+  import { metadataToast } from '../credentials';
   import type {
     DiscoverSeason,
     MediaType,
@@ -52,6 +53,7 @@
   import { formatBytes, seasonLabel } from '../format';
   import { navigate } from '../router.svelte';
   import { readSearchOnAdd, writeSearchOnAdd } from '../searchOnAdd';
+  import { session } from '../state/session.svelte';
   import { pushToast } from '../state/toast.svelte';
   import { system } from '../state/system.svelte';
   import Badge from './Badge.svelte';
@@ -151,8 +153,11 @@
         .then((detail) => seed(detail.seasons ?? []))
         .catch((err) => {
           // Without season data the modal still works as a whole-title ask,
-          // which is better than refusing to open. Say so rather than hide it.
-          pushToast(errorText(err), 'warning');
+          // which is better than refusing to open. Say so rather than hide it —
+          // and say it the way submit() does, because this call needs the same
+          // credential and a member opening it from Discover or Requests would
+          // otherwise get the provider's raw complaint as a toast.
+          pushToast(metadataToast(err, session.isAdmin) ?? errorText(err), 'warning');
           seed([]);
         })
         .finally(() => (loadingSeasons = false));
@@ -186,7 +191,10 @@
     } catch (err) {
       // 409 on either path means the view is stale (already in the library, or
       // the request is no longer pending). The server's own words say which.
-      pushToast(errorText(err), 'danger');
+      // A 503 means the TMDB key is missing or refused — the add cannot work
+      // until that is fixed, so the toast names the fix rather than repeating
+      // the provider's complaint.
+      pushToast(metadataToast(err, session.isAdmin) ?? errorText(err), 'danger');
     } finally {
       busy = false;
     }

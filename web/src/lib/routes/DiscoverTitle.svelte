@@ -8,7 +8,8 @@
    * being pieced together from a second call.
    */
   import { onMount } from 'svelte';
-  import { ApiError, api, errorText, posterSrc } from '../api/client';
+  import { api, errorText, posterSrc } from '../api/client';
+  import { metadataFault, type CredentialFault } from '../credentials';
   import type { DiscoverTitle, MediaType } from '../api/types';
   import AddRequestModal from '../components/AddRequestModal.svelte';
   import Badge from '../components/Badge.svelte';
@@ -42,7 +43,8 @@
   let title = $state<DiscoverTitle | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
-  let status = $state(0);
+  /** The credential fault behind the last failure, if that is what it was. */
+  let fault = $state<CredentialFault | null>(null);
 
   /** Which modal is open, and (for a per-season Request) what it starts with. */
   let modal = $state<{ mode: RequestMode; preselect: number[] | null } | null>(null);
@@ -52,10 +54,10 @@
     try {
       title = await api.discoverTitle(type, tmdbID);
       error = null;
-      status = 0;
+      fault = null;
     } catch (err) {
       error = errorText(err);
-      status = err instanceof ApiError ? err.status : 0;
+      fault = metadataFault(err);
     } finally {
       loading = false;
     }
@@ -128,7 +130,7 @@
   </a>
 
   {#if error}
-    <DiscoverError message={error} {status} onretry={load} />
+    <DiscoverError message={error} {fault} onretry={load} />
   {:else if loading && title === null}
     <div class="flex gap-6">
       <Skeleton class="aspect-[2/3] w-52 rounded-md" />

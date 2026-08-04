@@ -14,6 +14,7 @@
   import { api, errorText } from '../api/client';
   import type { MovieMeta, SearchResults, SeriesMeta, SiteMeta } from '../api/types';
   import { siteHref } from '../adult';
+  import { metadataFault, type CredentialFault } from '../credentials';
   import { navigate } from '../router.svelte';
   import { session } from '../state/session.svelte';
   import { pushToast } from '../state/toast.svelte';
@@ -21,6 +22,7 @@
   import { createTypeahead } from '../typeahead.svelte';
   import Badge from './Badge.svelte';
   import Button from './Button.svelte';
+  import CredentialEmptyState from './CredentialEmptyState.svelte';
   import EmptyState from './EmptyState.svelte';
   import LoadError from './LoadError.svelte';
   import Modal from './Modal.svelte';
@@ -147,6 +149,37 @@
   );
   let sites = $derived<SiteMeta[]>(search.results.sites);
 
+  /**
+   * The TMDB credential fault behind the last failure, from whichever half of
+   * the dialog hit it (PLAN phase 10 task 3).
+   *
+   * Both halves need it: the search says "no key" before a row can exist, and
+   * the add says it for a key that was revoked between the search and the
+   * click. A toast would be the wrong shape for either — the dialog cannot do
+   * its job at all until the key is fixed, so it says so where the results
+   * would have been, with the destination attached.
+   *
+   * `addFault` is cleared whenever the query changes, so correcting the key in
+   * another tab and searching again is not stuck behind a stale answer.
+   */
+  let addFault = $state<CredentialFault | null>(null);
+  let searchFault = $derived(metadataFault(search.cause));
+  // Scoped as a whole, not per-source. TMDB is not what the Adult scope calls,
+  // so neither half's fault says anything about it — and scoping only the
+  // search half let a failed movie add blank out working stash-box results on
+  // the very next tab press, behind an empty state pointing at a settings
+  // screen with nothing to do with the failure.
+  let credentialFault = $derived<CredentialFault | null>(
+    scope === 'site' ? null : (searchFault ?? addFault),
+  );
+
+  // A new query is a new attempt: the fault an add reported belongs to the
+  // click that caused it, not to the dialog for as long as it is open.
+  $effect(() => {
+    void search.trimmed;
+    addFault = null;
+  });
+
   let body = $state<HTMLElement | null>(null);
 
   // Palette-style keys while typing: Tab cycles the scope (so it is not focus
@@ -215,6 +248,7 @@
 
   async function choose(row: MovieMeta | SeriesMeta) {
     busyID = row.tmdb_id;
+    addFault = null;
     try {
       if (onpick) {
         // scope is never 'site' in pick mode: siteScope is false whenever
@@ -242,7 +276,11 @@
         navigate(`/series/${added.id}`);
       }
     } catch (err) {
-      pushToast(errorText(err), 'danger');
+      // A missing or rejected key is not a toast: it names a fix, and the
+      // dialog stays open on the empty state that carries it.
+      const fault = metadataFault(err);
+      if (fault) addFault = fault;
+      else pushToast(errorText(err), 'danger');
     } finally {
       busyID = null;
     }
@@ -287,7 +325,12 @@
           : 'Search TMDB for a series…'}
       ariaLabel={scope === 'site' ? 'Search the metadata provider for a site' : 'Search TMDB'} />
 
-    {#if search.error}
+    {#if credentialFault}
+      <!-- TMDB is what names a movie or a series, so with no usable key there
+           is nothing for this dialog to search and nothing for it to add. The
+           one thing that would change that is a link, not a retry. -->
+      <CredentialEmptyState fault={credentialFault} />
+    {:else if search.error}
       <!-- The retry belongs to the adult scope: a stash-box endpoint that is
            down or unconfigured fails every search the same way and recovers on
            its own, which is what a Retry is for. TMDB's failures here are

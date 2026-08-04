@@ -20,6 +20,13 @@ const maxBodyBytes = 1 << 20
 // errorResponse is the failure envelope every error reply uses (SPEC §11).
 type errorResponse struct {
 	Error string `json:"error"`
+	// Code is a stable machine-readable tag for the failures a client has to
+	// branch on rather than merely display — today, the credential states in
+	// credentials.go (PLAN phase 10 task 3). It is omitted from every other
+	// failure: an absent code means "render the message", which is what the
+	// SPA has always done and must keep doing for errors nobody has had a
+	// reason to name.
+	Code string `json:"code,omitempty"`
 }
 
 // writeJSON sends v with the given status. An encoding failure is logged as
@@ -37,6 +44,13 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 // writeError sends the error envelope.
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, errorResponse{Error: msg})
+}
+
+// writeCodedError sends the error envelope with a machine-readable code beside
+// the message, for the failures a client changes its screen over instead of
+// showing a toast.
+func writeCodedError(w http.ResponseWriter, status int, code, msg string) {
+	writeJSON(w, status, errorResponse{Error: msg, Code: code})
 }
 
 // writeStoreError maps a store failure to a status: a missing row is a 404,

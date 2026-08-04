@@ -53,8 +53,11 @@ const (
 // errors.Is; use errors.As with *APIError for TMDB's own status code and
 // message.
 var (
-	// ErrUnauthorized means the API key is missing, wrong, or suspended.
-	ErrUnauthorized = errors.New("tmdb: unauthorized")
+	// ErrUnauthorized means the API key is missing, wrong, or suspended. It
+	// wraps core.ErrMetadataUnauthorized so a caller that only wants to know
+	// "the credential was rejected" — the credential-health model in
+	// internal/api — never has to import this package.
+	ErrUnauthorized = fmt.Errorf("tmdb: unauthorized: %w", core.ErrMetadataUnauthorized)
 	// ErrNotFound means TMDB has no record with that id.
 	ErrNotFound = errors.New("tmdb: not found")
 	// ErrRateLimited means TMDB throttled the request and the one retry did
@@ -124,6 +127,19 @@ func New(apiKey string, hc *http.Client) *Client {
 		hc:              hc,
 		sleep:           sleepCtx,
 	}
+}
+
+// Test proves the API key against TMDB, mirroring the indexer and download
+// client "Test" buttons (PLAN phase 10 task 4).
+//
+// /configuration is the cheapest authenticated endpoint TMDB has: it takes no
+// parameters, returns a small fixed document, and answers 401 for a key it does
+// not like. Nothing in the reply is used — the question is only whether the
+// credential works, and a search would answer it with an unbounded body and a
+// dependency on whatever the query happened to match.
+func (c *Client) Test(ctx context.Context) error {
+	var out struct{}
+	return c.get(ctx, "/configuration", nil, &out)
 }
 
 // get performs a GET against path and decodes the JSON body into out.

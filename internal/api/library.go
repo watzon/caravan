@@ -1089,14 +1089,25 @@ func (s *server) writeManagerError(w http.ResponseWriter, msg string, err error)
 		return
 	}
 	if errors.Is(err, core.ErrNoMetadataProvider) {
-		writeError(w, http.StatusServiceUnavailable, "no metadata provider configured")
+		writeCodedError(w, http.StatusServiceUnavailable, CodeMetadataCredentialAbsent,
+			"no metadata provider configured")
+		return
+	}
+	// A key that exists and was refused. Without this the add-movie screen got
+	// a raw 502 for the one failure it can actually tell the user how to fix
+	// (PLAN phase 10 task 3), and the cached credential state never learned
+	// that the key had gone bad.
+	if s.noteMetadataFailure(err) {
+		writeCodedError(w, http.StatusServiceUnavailable, CodeMetadataCredentialInvalid,
+			"the TMDB API key was rejected")
 		return
 	}
 	// The adult twin. It is reachable only from behind requireAdult, so it can
 	// say plainly that the credential is missing: the caller has already been
 	// shown the module exists.
 	if errors.Is(err, core.ErrNoAdultProvider) {
-		writeError(w, http.StatusServiceUnavailable, "no adult metadata provider configured")
+		writeCodedError(w, http.StatusServiceUnavailable, CodeAdultCredentialAbsent,
+			"no adult metadata provider configured")
 		return
 	}
 	s.log.Error(msg, "error", err)

@@ -83,16 +83,39 @@ describe('discover store', () => {
     expect(calls).toHaveLength(2);
   });
 
-  // 503 is "no TMDB key" and 502 is "TMDB is unhappy": the screen sends the
-  // user to settings for one and offers a retry for the other, so the status
+  // A credential fault sends the user to settings; anything else offers a
+  // retry. The two are told apart by the error envelope's code, so the fault
   // has to survive the failure.
-  it('keeps the failure status so the screen can tell 503 from 502', async () => {
-    stubFetch({ error: 'no metadata provider configured' }, 503);
+  it('keeps a missing-key fault so the screen can send the user to settings', async () => {
+    stubFetch(
+      { error: 'no metadata provider configured', code: 'metadata_credential_absent' },
+      503,
+    );
     await discover.load();
 
     expect(discover.home).toBeNull();
-    expect(discover.status).toBe(503);
+    expect(discover.fault).toBe('absent');
     expect(discover.error).toBe('no metadata provider configured');
+  });
+
+  it('tells a rejected key apart from a missing one', async () => {
+    stubFetch(
+      { error: 'the TMDB API key was rejected', code: 'metadata_credential_invalid' },
+      503,
+    );
+    await discover.load();
+
+    expect(discover.fault).toBe('invalid');
+  });
+
+  // A provider that is simply unhappy is not a credential problem: no code,
+  // and the screen keeps its retry.
+  it('leaves a provider failure without a fault so the retry stays', async () => {
+    stubFetch({ error: 'tmdb: http 500' }, 502);
+    await discover.load();
+
+    expect(discover.fault).toBeNull();
+    expect(discover.error).toBe('tmdb: http 500');
   });
 
   it('marks a requested title on every shelf that holds it', async () => {

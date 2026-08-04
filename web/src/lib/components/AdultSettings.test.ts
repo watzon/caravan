@@ -118,9 +118,32 @@ function toggle(index: number): HTMLButtonElement {
   return found as HTMLButtonElement;
 }
 
+/** Type into a bound input the way a person does: value, then the event. */
+function typeInto(selector: string, value: string): void {
+  const field = host.querySelector(selector) as HTMLInputElement | null;
+  expect(field, selector).not.toBeNull();
+  field!.value = value;
+  field!.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
 function button(label: string): HTMLButtonElement {
   const found = [...host.querySelectorAll('button')].find((b) => b.textContent?.trim() === label);
   expect(found, `button labelled ${label}`).toBeDefined();
+  return found as HTMLButtonElement;
+}
+
+/**
+ * A button inside the setup modal. Scoped, because "Enable adult content" is
+ * also the master switch's own label — an unscoped lookup would find the
+ * toggle behind the dialog and click that instead.
+ */
+function modalButton(label: string): HTMLButtonElement {
+  const dialog = host.querySelector('[role="dialog"]');
+  expect(dialog, 'setup modal').not.toBeNull();
+  const found = [...dialog!.querySelectorAll('button')].find(
+    (b) => b.textContent?.trim() === label,
+  );
+  expect(found, `modal button labelled ${label}`).toBeDefined();
   return found as HTMLButtonElement;
 }
 
@@ -139,21 +162,55 @@ describe('AdultSettings', () => {
     expect(calls).toEqual([]);
   });
 
-  it('turns the module on through POST /settings/adult and refreshes the session', async () => {
+  // PLAN phase 10 task 5: the switch no longer writes. Enabling needs a
+  // stash-box credential that works and a statement of what it exposes, so the
+  // switch opens the setup modal and nothing is written until it finishes.
+  it('opens the setup modal instead of enabling, and writes nothing yet', async () => {
     await mountPane({});
 
     toggle(0).click();
     await settle();
 
+    expect(host.textContent).toContain('Enable adult content');
+    expect(host.querySelector('#adult-enable-api-key')).not.toBeNull();
+    expect(calls).toEqual([]);
+  });
+
+  it('turns the module on once the setup modal reports it enabled, and refreshes the session', async () => {
+    await mountPane({});
+
+    toggle(0).click();
+    await settle();
+    typeInto('#adult-enable-api-key', 'sb-key');
+    modalButton('Continue').click();
+    await settle();
+    modalButton('Enable adult content').click();
+    await settle();
+
+    // One atomic call: the credential the enable was made with travels with it,
+    // so a provider that refuses leaves everything exactly as it was.
     expect(calls[0]).toMatchObject({
       method: 'POST',
-      body: { enabled: true },
+      body: { enabled: true, stashbox_endpoint: '', stashbox_api_key: 'sb-key' },
       url: expect.stringContaining('/settings/adult'),
     });
     // The sidebar, Discover and the request form all read session.adult, which
     // only /auth/me can answer.
     expect(calls.some((c) => c.url.endsWith('/auth/me'))).toBe(true);
     expect(host.textContent).toContain('Metadata source');
+  });
+
+  // Disabling exposes nothing and deletes nothing, so it never prompts.
+  it('disables straight through, with no modal', async () => {
+    await mountPane({ adult_enabled: 'true' });
+
+    toggle(0).click();
+    await settle();
+
+    expect(calls.some((c) => c.body && (c.body as { enabled: boolean }).enabled === false)).toBe(
+      true,
+    );
+    expect(host.querySelector('#adult-enable-api-key')).toBeNull();
   });
 
   it('saves the endpoint preset as blank and the key trimmed', async () => {

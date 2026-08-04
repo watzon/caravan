@@ -9,7 +9,8 @@
    */
   import { onMount } from 'svelte';
   import type { DiscoverBrowse, DiscoverItem, DiscoverSourceType, MediaType } from '../api/types';
-  import { ApiError, api, errorText } from '../api/client';
+  import { api, errorText } from '../api/client';
+  import { metadataFault, type CredentialFault } from '../credentials';
   import Button from '../components/Button.svelte';
   import DiscoverCard from '../components/DiscoverCard.svelte';
   import DiscoverError from '../components/DiscoverError.svelte';
@@ -45,7 +46,8 @@
   let loading = $state(true);
   let loadingMore = $state(false);
   let error = $state<string | null>(null);
-  let status = $state(0);
+  /** The credential fault behind the last failure, if that is what it was. */
+  let fault = $state<CredentialFault | null>(null);
   let filter = $state<TypeFilter>('all');
   let hideOwned = $state(false);
   let sort = $state<SortKey>('popularity');
@@ -62,10 +64,10 @@
       // a page twice, either side of a retry or at its own page ceiling.
       items = pageNumber === 1 ? fetched.items : mergeItems(items, fetched.items);
       error = null;
-      status = 0;
+      fault = null;
     } catch (err) {
       error = errorText(err);
-      status = err instanceof ApiError ? err.status : 0;
+      fault = metadataFault(err);
     } finally {
       loading = false;
       loadingMore = false;
@@ -129,7 +131,7 @@
   </a>
 
   {#if error && items.length === 0}
-    <DiscoverError message={error} {status} onretry={() => void load(1)} />
+    <DiscoverError message={error} {fault} onretry={() => void load(1)} />
   {:else}
     <div class="flex items-center gap-4">
       <span
@@ -200,7 +202,7 @@
     {#if error}
       <!-- `page` only advances on success, so retrying targets the page that
            failed, never the last one that worked. -->
-      <DiscoverError message={error} {status} onretry={() => void load(nextPage)} />
+      <DiscoverError message={error} {fault} onretry={() => void load(nextPage)} />
     {/if}
 
     {#if hasMore}

@@ -9,6 +9,7 @@
   import type { UnmatchedFile } from '../api/types';
   import AddItemModal from '../components/AddItemModal.svelte';
   import Badge from '../components/Badge.svelte';
+  import Banner from '../components/Banner.svelte';
   import Button from '../components/Button.svelte';
   import EmptyState from '../components/EmptyState.svelte';
   import Icon from '../components/Icon.svelte';
@@ -22,6 +23,7 @@
     truncateMiddle,
   } from '../format';
   import { pushToast } from '../state/toast.svelte';
+  import { system } from '../state/system.svelte';
 
   let files = $state<UnmatchedFile[] | null>(null);
   let loading = $state(true);
@@ -92,6 +94,14 @@
   }
 
   let queue = $derived(files ?? []);
+
+  /**
+   * A scan with no usable TMDB key still runs: it walks the disk, parses every
+   * name and imports what it finds — it just cannot ask TMDB which title any of
+   * it is, so everything lands here (PLAN phase 10 task 3). Without this banner
+   * that reads as a broken scanner, which is the one thing it is not.
+   */
+  let credentialState = $derived(system.metadataCredential);
 </script>
 
 <div class="flex flex-col gap-6">
@@ -110,6 +120,20 @@
       </Button>
     </div>
   </div>
+
+  {#if credentialState !== 'ok'}
+    <Banner
+      tone="warning"
+      icon="warning"
+      title={credentialState === 'invalid'
+        ? 'Nothing can be matched: TMDB rejected your API key'
+        : 'Nothing can be matched: no TMDB API key'}
+      message="The scan still ran — every file was found, parsed and imported — but naming a title takes TMDB, so everything it found is parked here. Add a working key and rescan to match them in one pass.">
+      {#snippet action()}
+        <Button variant="primary" href="/settings/metadata">Open metadata settings</Button>
+      {/snippet}
+    </Banner>
+  {/if}
 
   {#if error}
     <LoadError message={error} onretry={load} />

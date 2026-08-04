@@ -8,7 +8,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount, type ComponentProps } from 'svelte';
 import AddRequestModal from './AddRequestModal.svelte';
 import type { DiscoverSeason } from '../api/types';
-import { clearToasts } from '../state/toast.svelte';
+import { session } from '../state/session.svelte';
+import { clearToasts, toasts } from '../state/toast.svelte';
 
 interface Call {
   url: string;
@@ -131,6 +132,9 @@ afterEach(() => {
   if (app) unmount(app);
   app = undefined;
   host.remove();
+  // A role leaking into the next test would decide which half of the credential
+  // copy it reads; null is "not answered for yet", which reads as admin.
+  session.user = null;
   clearToasts();
   window.localStorage.clear();
   vi.unstubAllGlobals();
@@ -469,5 +473,117 @@ describe('AddRequestModal — minimum availability', () => {
 
     const post = calls.find((c) => c.url.endsWith('/requests/11/approve'));
     expect(post?.body?.min_availability).toBe('announced');
+  });
+});
+
+/**
+ * The add path's credential guard (PLAN phase 10 task 3).
+ *
+ * This dialog closes on success and has no empty state to fall back to, so the
+ * toast is the only affordance — which makes it all the more important that it
+ * names the fix rather than repeating the provider's complaint.
+ */
+describe('AddRequestModal — metadata credential', () => {
+  it('names the fix when the key is missing', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith('/quality-profiles')) return json({ profiles: [] });
+        if ((init?.method ?? 'GET') === 'POST') {
+          return json(
+            { error: 'no metadata provider configured', code: 'metadata_credential_absent' },
+            503,
+          );
+        }
+        return json(null, 204);
+      }),
+    );
+    mountModal({ mode: 'add', mediaType: 'movie', seasons: [] });
+
+    primary().click();
+    await settle();
+
+    expect(toasts.items.map((t) => t.message).join(' ')).toContain('Settings → Metadata');
+  });
+
+  // Discover and Requests both mount this modal without a `seasons` prop, so a
+  // series ask prefetches them on mount. That call needs the same credential as
+  // the submit below it, and used to raw-toast the provider's complaint — the
+  // exact thing PLAN phase 10 task 3 rules out. The Requests path is the
+  // reachable one: the queue renders without TMDB, so an admin approving a
+  // series asked for yesterday meets it the moment the key goes bad.
+  it('names the fix when the season prefetch is the call that fails', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        if (url.endsWith('/quality-profiles')) return json({ profiles: [] });
+        if (url.includes('/discover/series/')) {
+          return json(
+            { error: 'the TMDB API key was rejected', code: 'metadata_credential_invalid' },
+            503,
+          );
+        }
+        return json(null, 204);
+      }),
+    );
+    mountModal({ mode: 'request', mediaType: 'series', seasons: null });
+
+    await settle();
+
+    const said = toasts.items.map((t) => t.message).join(' ');
+    expect(said).toContain('Settings → Metadata');
+    expect(said).not.toContain('the TMDB API key was rejected');
+  });
+
+  // A member is told who can fix it instead: Settings is admin-only, so the
+  // destination in the admin copy is a door they cannot open.
+  it('tells a member who to ask rather than where to go', async () => {
+    session.user = { username: 'housemate', role: 'member', open: false, adult: false };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith('/quality-profiles')) return json({ profiles: [] });
+        if ((init?.method ?? 'GET') === 'POST') {
+          return json(
+            { error: 'no metadata provider configured', code: 'metadata_credential_absent' },
+            503,
+          );
+        }
+        return json(null, 204);
+      }),
+    );
+    mountModal({ mode: 'request', mediaType: 'movie', seasons: [] });
+
+    primary().click();
+    await settle();
+
+    const said = toasts.items.map((t) => t.message).join(' ');
+    expect(said).toContain('Ask a Caravan admin');
+    expect(said).not.toContain('Settings → Metadata');
+  });
+
+  it('leaves an unrelated failure in the server’s own words', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith('/quality-profiles')) return json({ profiles: [] });
+        if ((init?.method ?? 'GET') === 'POST') {
+          return json({ error: 'already in the library' }, 409);
+        }
+        return json(null, 204);
+      }),
+    );
+    mountModal({ mode: 'add', mediaType: 'movie', seasons: [] });
+
+    primary().click();
+    await settle();
+
+    const said = toasts.items.map((t) => t.message).join(' ');
+    expect(said).toContain('already in the library');
+    expect(said).not.toContain('Settings → Metadata');
   });
 });

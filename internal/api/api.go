@@ -89,6 +89,11 @@ type server struct {
 	// request while the status endpoint and the queue read it from others.
 	dirty atomic.Bool
 
+	// credentials is the cached verdict on the TMDB API key (SPEC §10.1, PLAN
+	// phase 10 task 2). It is why GET /system/status can report credential
+	// health on every poll without a single upstream call; see credentials.go.
+	credentials metadataCredential
+
 	// shutdown is the orderly-stop trigger POST /system/shutdown pulls, wired
 	// by the serving process to the same cancel a signal uses. Nil means this
 	// process cannot stop itself, which the endpoint reports rather than fakes.
@@ -126,6 +131,10 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("GET /settings", s.handleGetSettings)
 	api.HandleFunc("PUT /settings", s.handlePutSettings)
 	api.HandleFunc("POST /settings/apikey", s.handleGenerateAPIKey)
+	// The metadata credential's Test button (PLAN phase 10 task 4), the twin of
+	// POST /indexers/{id}/test. It takes the key from the body so the first-run
+	// wizard can prove one before it is saved.
+	api.HandleFunc("POST /settings/metadata/test", s.handleMetadataTest)
 	api.HandleFunc("GET /system/status", s.handleSystemStatus)
 
 	// The portable integrity flow (SPEC §2.3, §13). Both are deliberately

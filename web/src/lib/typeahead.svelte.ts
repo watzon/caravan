@@ -56,6 +56,13 @@ export interface Typeahead<T> {
   readonly results: T;
   readonly loading: boolean;
   readonly error: string | null;
+  /**
+   * What was actually thrown, kept beside the rendered text so a caller can
+   * ask it a typed question — the add dialog branches on the credential code
+   * the server put on the envelope, which no amount of message-matching would
+   * recover.
+   */
+  readonly cause: unknown;
   /** True when there is nothing to search for, so the caller can say why. */
   readonly idle: boolean;
   /** Run the current query again — the Retry on a failed search. */
@@ -82,6 +89,7 @@ export function createTypeahead<T>(options: TypeaheadOptions<T>): Typeahead<T> {
   let results = $state<T>(blank());
   let loading = $state(false);
   let error = $state<string | null>(null);
+  let cause = $state<unknown>(null);
   // Bumped by retry(). It is state rather than a direct call so a retry goes
   // through the one path a keystroke does, debounce and cancellation included.
   let attempt = $state(0);
@@ -102,6 +110,7 @@ export function createTypeahead<T>(options: TypeaheadOptions<T>): Typeahead<T> {
       results = blank();
       loading = false;
       error = null;
+      cause = null;
       return;
     }
 
@@ -113,11 +122,13 @@ export function createTypeahead<T>(options: TypeaheadOptions<T>): Typeahead<T> {
       try {
         results = await run(q, controller.signal);
         error = null;
+        cause = null;
       } catch (err) {
         // A request that lost the race is not a failure anybody should see:
         // the newer one owns the screen now.
         if (controller.signal.aborted) return;
         error = errorText(err);
+        cause = err;
       } finally {
         if (!controller.signal.aborted) loading = false;
       }
@@ -147,6 +158,9 @@ export function createTypeahead<T>(options: TypeaheadOptions<T>): Typeahead<T> {
     },
     get error() {
       return error;
+    },
+    get cause() {
+      return cause;
     },
     get idle() {
       return !searchable(query.trim());

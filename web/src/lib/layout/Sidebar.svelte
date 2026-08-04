@@ -19,6 +19,7 @@
   import { REQUESTS_BADGE_POLL_MS, requests } from '../state/requests.svelte';
   import { system } from '../state/system.svelte';
   import { formatBytes } from '../format';
+  import { metadataStateLabel } from '../credentials';
   import Icon, { type IconName } from '../components/Icon.svelte';
   import ProgressBar from '../components/ProgressBar.svelte';
   import SafeShutdown from '../components/SafeShutdown.svelte';
@@ -154,6 +155,16 @@
     // "unconfigured": no storage root yet, so no engine — a setup state, not a failure.
     return { tone: 'neutral', label: 'Not set up' };
   });
+
+  /**
+   * The TMDB credential, when it needs attention (PLAN phase 10 task 2).
+   *
+   * It is quiet while the key works — a healthy credential is not news — and
+   * loud in exactly the two states where every metadata surface is degraded.
+   * The state is read from the status payload's cached verdict, so this row
+   * costs no upstream call however often the card refreshes.
+   */
+  let credentialLabel = $derived(metadataStateLabel(system.metadataCredential));
 </script>
 
 <aside
@@ -260,6 +271,18 @@
         <span class="size-2 shrink-0 rounded-full {TONE_DOT[health.tone]}"></span>
         <span class="text-sm text-ink">{health.label}</span>
       </div>
+
+      <!-- A link rather than a statement: every screen this breaks is fixed in
+           one place, so the card that reports it goes there. -->
+      {#if credentialLabel}
+        <a
+          href="/settings/metadata"
+          class="flex items-center gap-2 rounded-sm text-sm text-warning transition-colors duration-150 ease-out hover:underline"
+          title={system.metadataCredentialReason || undefined}>
+          <span class="size-2 shrink-0 rounded-full {TONE_DOT.warning}"></span>
+          <span>{credentialLabel}</span>
+        </a>
+      {/if}
 
       <div class="flex flex-col gap-2">
         <div class="flex items-center gap-2">

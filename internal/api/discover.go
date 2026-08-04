@@ -141,7 +141,7 @@ type discoverTitleResponse struct {
 // limited; those round trips are the honest cost of the data, and racing them
 // would buy latency at the price of a bigger burst.
 func (s *server) handleDiscoverHome(w http.ResponseWriter, r *http.Request) {
-	provider, ok := s.discovery(w)
+	provider, ok := s.discovery(w, r)
 	if !ok {
 		return
 	}
@@ -182,7 +182,7 @@ func (s *server) handleDiscoverHome(w http.ResponseWriter, r *http.Request) {
 // support, so the media type follows from the shelf rather than being asked
 // for separately.
 func (s *server) handleDiscoverBrowse(w http.ResponseWriter, r *http.Request) {
-	provider, ok := s.discovery(w)
+	provider, ok := s.discovery(w, r)
 	if !ok {
 		return
 	}
@@ -231,7 +231,7 @@ func (s *server) handleDiscoverBrowse(w http.ResponseWriter, r *http.Request) {
 // handleDiscoverTitle serves one title's detail screen: the provider's record
 // plus, for a series, what the library holds season by season.
 func (s *server) handleDiscoverTitle(w http.ResponseWriter, r *http.Request) {
-	provider, ok := s.discovery(w)
+	provider, ok := s.discovery(w, r)
 	if !ok {
 		return
 	}
@@ -437,10 +437,18 @@ func (st *libraryState) decorateAll(items []core.DiscoverItem) []discoverItemJSO
 // cannot browse is reported exactly like no provider at all, because to the
 // discover screens it is the same thing: there is nothing to show and the fix
 // is configuration, not a retry.
-func (s *server) discovery(w http.ResponseWriter) (core.DiscoverProvider, bool) {
-	provider, ok := s.mgr.Metadata().(core.DiscoverProvider)
+func (s *server) discovery(w http.ResponseWriter, r *http.Request) (core.DiscoverProvider, bool) {
+	// A key that is absent or already known bad is answered with the typed code
+	// the discover screens turn into their directed empty state, before any
+	// round trip is spent proving it again (PLAN phase 10 task 3).
+	metadata, ok := s.metadataProvider(w, r)
 	if !ok {
-		writeError(w, http.StatusServiceUnavailable, "no metadata provider configured")
+		return nil, false
+	}
+	provider, ok := metadata.(core.DiscoverProvider)
+	if !ok {
+		writeCodedError(w, http.StatusServiceUnavailable, CodeMetadataCredentialAbsent,
+			"no metadata provider configured")
 		return nil, false
 	}
 	return provider, true
@@ -454,6 +462,14 @@ func (s *server) writeDiscoverError(w http.ResponseWriter, r *http.Request, what
 	if clientGone(r) {
 		s.log.Debug("discover request abandoned by the caller", "what", what, "error", err)
 		writeError(w, statusClientClosedRequest, "client closed request")
+		return
+	}
+	// A rejected credential is the credential model's second transition: mark
+	// it and answer the code, so a key revoked since it was entered turns the
+	// discover screen into the same directed empty state an absent key does.
+	if s.noteMetadataFailure(err) {
+		writeCodedError(w, http.StatusServiceUnavailable, CodeMetadataCredentialInvalid,
+			"the TMDB API key was rejected")
 		return
 	}
 	s.log.Error("discover request failed", "what", what, "error", err)

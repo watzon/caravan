@@ -33,6 +33,7 @@
   } from '../api/types';
   import { session } from '../state/session.svelte';
   import { pushToast } from '../state/toast.svelte';
+  import AdultEnableModal from './AdultEnableModal.svelte';
   import Badge from './Badge.svelte';
   import Banner from './Banner.svelte';
   import Button from './Button.svelte';
@@ -64,6 +65,8 @@
    */
   let enabled = $state(false);
   let flipping = $state(false);
+  /** True while the enable setup modal is open (PLAN phase 10 task 5). */
+  let enabling = $state(false);
 
   /** '' is stored as "use the preset", which is what the server resolves it to. */
   let preset = $state(true);
@@ -115,21 +118,55 @@
     }
   }
 
-  async function flip(next: boolean) {
+  /**
+   * The two directions are not symmetrical (PLAN phase 10 task 5).
+   *
+   * Turning it ON needs a stash-box credential that works and a statement of
+   * what it exposes, so the switch opens the setup modal and the write happens
+   * there. Turning it OFF needs neither — it deletes nothing and exposes
+   * nothing — so it goes straight through, and a disable never prompts.
+   */
+  function flip(next: boolean) {
+    if (next) {
+      enabling = true;
+      return;
+    }
+    void disable();
+  }
+
+  async function disable() {
     flipping = true;
     try {
-      await api.setAdultEnabled(next);
-      enabled = next;
+      await api.setAdultEnabled(false);
+      enabled = false;
       // The nav item, the discover shelves and the request form all read
       // `session.adult`, which the server recomputes on /auth/me.
       await session.refresh();
-      pushToast(next ? 'Adult content is on.' : 'Adult content is off. Nothing was deleted.', next ? 'success' : 'neutral');
+      pushToast('Adult content is off. Nothing was deleted.', 'neutral');
       await load();
     } catch (err) {
       pushToast(errorText(err), 'danger');
     } finally {
       flipping = false;
     }
+  }
+
+  /**
+   * The modal already wrote the credential it proved, as part of the same
+   * atomic enable — so this only catches up the screen with what is now true.
+   */
+  async function onEnabled(committed: { endpoint: string; apiKey: string }) {
+    enabling = false;
+    enabled = true;
+    // Re-seed the source card from what the enable committed, so the fields
+    // below show the credential that is actually in force rather than the
+    // blanks this screen mounted with.
+    preset = committed.endpoint === '';
+    endpoint = committed.endpoint === '' ? STASHBOX_TPDB_ENDPOINT : committed.endpoint;
+    apiKey = committed.apiKey;
+    await session.refresh();
+    pushToast('Adult content is on.', 'success');
+    await load();
   }
 
   async function saveSource() {
@@ -194,7 +231,7 @@
 
     <Toggle
       checked={enabled}
-      disabled={flipping}
+      disabled={flipping || enabling}
       label="Enable adult content"
       onchange={flip} />
 
@@ -348,3 +385,14 @@
     </SettingsCard>
   {/if}
 </div>
+
+{#if enabling}
+  <!-- Cancel closes it and nothing was written: the enable is one server-side
+       call that validates before it writes, so an abandoned setup leaves the
+       endpoint, the key and the switch exactly where they were. -->
+  <AdultEnableModal
+    initialEndpoint={preset ? '' : endpoint}
+    initialApiKey={apiKey}
+    onclose={() => (enabling = false)}
+    onenabled={onEnabled} />
+{/if}

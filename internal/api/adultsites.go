@@ -690,10 +690,15 @@ func (s *server) handleSetAdultAccess(w http.ResponseWriter, r *http.Request) {
 // adultProvider returns the configured stash-box provider, writing the 503
 // itself when there is none. A missing credential is configuration, not a
 // retry, so it reads the same way a missing TMDB key does on GET /search.
+//
+// The code matters as much as the status: the SPA reads an UNCODED 503 as a
+// missing TMDB key, so naming the adult credential here is what keeps a
+// stash-box failure from being reported as a TMDB one.
 func (s *server) adultProvider(w http.ResponseWriter) (core.AdultMetadataProvider, bool) {
 	provider := s.mgr.AdultMetadata()
 	if provider == nil {
-		writeError(w, http.StatusServiceUnavailable, "no adult metadata provider configured")
+		writeCodedError(w, http.StatusServiceUnavailable, CodeAdultCredentialAbsent,
+			"no adult metadata provider configured")
 		return nil, false
 	}
 	return provider, true

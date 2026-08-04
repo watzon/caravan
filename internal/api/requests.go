@@ -429,7 +429,12 @@ func (s *server) loadRequest(w http.ResponseWriter, r *http.Request, id int64) (
 func (s *server) approveScene(ctx context.Context, w http.ResponseWriter, r *http.Request, req *core.Request) (*core.Series, error) {
 	provider := s.mgr.AdultMetadata()
 	if provider == nil {
-		writeError(w, http.StatusServiceUnavailable, "no adult metadata provider configured")
+		// Coded, and coded as the ADULT credential: an uncoded 503 is read by
+		// the SPA as a missing TMDB key (web/src/lib/credentials.ts), so
+		// approving a scene with no stash-box provider would send the admin to
+		// the wrong settings screen to fix the wrong credential.
+		writeCodedError(w, http.StatusServiceUnavailable, CodeAdultCredentialAbsent,
+			"no adult metadata provider configured")
 		return nil, core.ErrNoAdultProvider
 	}
 	scene, err := provider.GetScene(ctx, req.StashID)

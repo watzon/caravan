@@ -69,9 +69,10 @@ func (s *server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	provider := s.mgr.Metadata()
-	if provider == nil {
-		writeError(w, http.StatusServiceUnavailable, "no metadata provider configured")
+	// Absent or known-bad key: the typed answer the add-to-library screen turns
+	// into "add your TMDB API key in Settings → Metadata" (PLAN phase 10 task 3).
+	provider, ok := s.metadataProvider(w, r)
+	if !ok {
 		return
 	}
 
@@ -81,8 +82,7 @@ func (s *server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	if kind == TypeAll || kind == MediaTypeMovie {
 		movies, err := provider.SearchMovies(ctx, query)
 		if err != nil {
-			s.log.Error("metadata movie search failed", "error", err)
-			writeError(w, http.StatusBadGateway, "metadata search failed")
+			s.writeMetadataError(w, "metadata movie search failed", err)
 			return
 		}
 		for _, m := range movies {
@@ -93,8 +93,7 @@ func (s *server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	if kind == TypeAll || kind == MediaTypeSeries {
 		series, err := provider.SearchSeries(ctx, query)
 		if err != nil {
-			s.log.Error("metadata series search failed", "error", err)
-			writeError(w, http.StatusBadGateway, "metadata search failed")
+			s.writeMetadataError(w, "metadata series search failed", err)
 			return
 		}
 		for _, sr := range series {

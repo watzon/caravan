@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 )
 
 // Setting keys owned by the application. Everything the UI manages lives in
@@ -150,6 +151,47 @@ func (s *Store) SetSetting(ctx context.Context, key, value string) error {
 		key, value, formatTime(now()))
 	if err != nil {
 		return fmt.Errorf("store: set setting %q: %w", key, err)
+	}
+	return nil
+}
+
+// SetSettings writes every pair or none of them.
+//
+// It exists for the settings that are only meaningful together — the stash-box
+// endpoint and its API key are one credential, and committing half of a new
+// pair leaves a combination nothing ever validated behind a module that is
+// already on (SPEC §10.2). Callers writing independent keys should keep using
+// SetSetting; this is for the ones where a partial write is a wrong answer
+// rather than an incomplete one.
+func (s *Store) SetSettings(ctx context.Context, values map[string]string) error {
+	if len(values) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: set settings: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Sorted so two concurrent writers touching the same keys take them in the
+	// same order, and so a failure is reproducible.
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	updated := formatTime(now())
+	for _, key := range keys {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+			ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+			key, values[key], updated); err != nil {
+			return fmt.Errorf("store: set setting %q: %w", key, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: set settings: %w", err)
 	}
 	return nil
 }

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import Settings from './Settings.svelte';
+import { system } from '../state/system.svelte';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -37,6 +38,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // A module singleton: a status one test seeded must not decide the next.
+  system.status = null;
   unmount(app);
   host.remove();
   vi.unstubAllGlobals();
@@ -202,5 +205,120 @@ describe('Settings engine tab', () => {
       engine_seed_ratio: '2.5',
       engine_seed_days: '14',
     });
+  });
+});
+
+/**
+ * Settings → Metadata (PLAN phase 10 task 4).
+ *
+ * The key entered here is the one every metadata surface runs on, so it gets
+ * the indexer card's idiom: ask the provider, report what it said, inline —
+ * and prove the key in the field rather than the one on disk, so a typo never
+ * has to be saved to find out it was one.
+ */
+describe('Settings metadata pane', () => {
+  function stubMetadata(testReply: () => Response): { url: string; method: string; body: unknown }[] {
+    const calls: { url: string; method: string; body: unknown }[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({
+        url,
+        method: init?.method ?? 'GET',
+        body: typeof init?.body === 'string' ? JSON.parse(init.body) : null,
+      });
+      if (url.includes('/settings/metadata/test')) return testReply();
+      if (url.endsWith('/settings')) return jsonResponse({ tmdb_api_key: 'stored-key' });
+      if (url.endsWith('/system/status')) return jsonResponse(SYSTEM_STATUS);
+      if (url.endsWith('/indexers')) return jsonResponse({ indexers: [] });
+      if (url.endsWith('/usenet-servers')) return jsonResponse({ usenet_servers: [] });
+      if (url.endsWith('/download-clients/types')) return jsonResponse({ types: [] });
+      if (url.endsWith('/download-clients')) return jsonResponse({ download_clients: [] });
+      throw new Error(`unexpected fetch: ${url}`);
+    }));
+    return calls;
+  }
+
+  it('tests the key in the field, not the one on disk', async () => {
+    const calls = stubMetadata(() => jsonResponse({ status: 'ok' }));
+    app = mount(Settings, { target: host, props: { section: 'metadata' } });
+    await settle();
+
+    const field = host.querySelector('#tmdb-key') as HTMLInputElement;
+    field.value = '  typed-key  ';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+
+    button('Test').click();
+    await settle();
+
+    expect(calls.find((c) => c.url.includes('/settings/metadata/test'))).toMatchObject({
+      method: 'POST',
+      body: { api_key: 'typed-key' },
+    });
+    expect(host.textContent).toContain('TMDB accepted this key');
+    // Testing is not saving: a key is only stored when Save says so.
+    expect(calls.some((c) => c.method === 'PUT')).toBe(false);
+  });
+
+  it('reports the provider’s own complaint inline when the key is refused', async () => {
+    stubMetadata(() =>
+      jsonResponse(
+        { error: 'metadata test failed: Invalid API key', code: 'metadata_credential_invalid' },
+        502,
+      ),
+    );
+    app = mount(Settings, { target: host, props: { section: 'metadata' } });
+    await settle();
+
+    button('Test').click();
+    await settle();
+
+    expect(host.textContent).toContain('Invalid API key');
+  });
+
+  // A verdict is about the string that was tested. FirstRun already treats that
+  // as a correctness rule and clears on input; this field outlived the value it
+  // was about, so a green ✓ could sit under a completely different key and a red
+  // ✕ under one the user had just corrected.
+  it('forgets the verdict once the key is edited', async () => {
+    stubMetadata(() => jsonResponse({ status: 'ok' }));
+    app = mount(Settings, { target: host, props: { section: 'metadata' } });
+    await settle();
+
+    const field = host.querySelector('#tmdb-key') as HTMLInputElement;
+    field.value = 'proven-key';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    button('Test').click();
+    await settle();
+    expect(host.textContent).toContain('TMDB accepted this key');
+
+    field.value = 'proven-key-typo';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+
+    expect(host.textContent).not.toContain('TMDB accepted this key');
+  });
+
+  // The pane that fixes it says so: every metadata surface is degraded while
+  // this is true, and inferring that from empty states elsewhere is not a plan.
+  it('names the credential state it is there to fix', async () => {
+    stubMetadata(() => jsonResponse({ status: 'ok' }));
+    // The banner reads the shared status store, which the shell keeps current.
+    system.status = { ...SYSTEM_STATUS, metadata_credential: 'absent' } as never;
+    app = mount(Settings, { target: host, props: { section: 'metadata' } });
+    await settle();
+
+    expect(host.textContent).toContain('No TMDB API key yet');
+  });
+
+  it('stays quiet about a key that works', async () => {
+    stubMetadata(() => jsonResponse({ status: 'ok' }));
+    system.status = { ...SYSTEM_STATUS, metadata_credential: 'ok' } as never;
+    app = mount(Settings, { target: host, props: { section: 'metadata' } });
+    await settle();
+
+    expect(host.textContent).not.toContain('No TMDB API key yet');
+    expect(host.textContent).not.toContain('TMDB rejected this key');
   });
 });

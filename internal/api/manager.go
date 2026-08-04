@@ -80,6 +80,26 @@ type Manager interface {
 	// 503 rather than pretending there are no results.
 	Metadata() core.MetadataProvider
 
+	// ValidateMetadataKey proves apiKey against the metadata provider with one
+	// live call, reporting nil when the provider accepted it and an error
+	// wrapping core.ErrMetadataUnauthorized when it rejected it.
+	//
+	// It takes the key rather than reading the settings table because the two
+	// callers that matter test a key that is not stored yet: the first-run
+	// wizard, which proves the credential before writing it, and the settings
+	// Test button, which proves what is in the field rather than what was last
+	// saved.
+	ValidateMetadataKey(ctx context.Context, apiKey string) error
+
+	// ValidateAdultCredential is ValidateMetadataKey's stash-box twin. The
+	// endpoint travels with the key because a stash-box credential is only
+	// meaningful against the endpoint it was issued by; a blank endpoint means
+	// the TPDB preset, exactly as it does in the settings table.
+	//
+	// It is what POST /settings/adult runs before it commits anything, so the
+	// module cannot be switched on with a credential that does not work.
+	ValidateAdultCredential(ctx context.Context, endpoint, apiKey string) error
+
 	// AdultMetadata returns the configured adult metadata provider, or nil.
 	//
 	// Nil is the answer both when no stash-box credential has been entered and

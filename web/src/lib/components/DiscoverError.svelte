@@ -1,33 +1,32 @@
 <script lang="ts">
   /**
    * The two ways discover fails, told apart (SPEC §13: failures are visible and
-   * actionable). 503 is "no TMDB key" — a setup problem with a destination, not
-   * something a retry will fix. Everything else is the provider being unhappy,
-   * which is what the retry is for.
+   * actionable). A credential fault — no TMDB key, or one the provider refused
+   * — is a setup problem with a destination, not something a retry will fix.
+   * Everything else is the provider being unhappy, which is what the retry is
+   * for.
+   *
+   * Phase 10 split "no key" into absent vs invalid: the error envelope now
+   * carries a code, and the two need different sentences because they need
+   * different actions (enter one / correct one). A 503 with no code still reads
+   * as absent, which is what every such route meant before the code existed.
    */
-  import Button from './Button.svelte';
-  import EmptyState from './EmptyState.svelte';
+  import type { CredentialFault } from '../credentials';
+  import CredentialEmptyState from './CredentialEmptyState.svelte';
   import LoadError from './LoadError.svelte';
 
   interface Props {
     message: string;
-    /** ApiError status; 503 means no metadata provider is configured. */
-    status?: number;
+    /** The credential fault the failed call reported, if it reported one. */
+    fault?: CredentialFault | null;
     onretry?: () => void;
   }
 
-  let { message, status = 0, onretry }: Props = $props();
+  let { message, fault = null, onretry }: Props = $props();
 </script>
 
-{#if status === 503}
-  <EmptyState
-    icon="settings"
-    title="No metadata provider configured"
-    message="Discover browses TMDB, so it needs an API key. Add one under Settings → Metadata and this screen fills in.">
-    {#snippet action()}
-      <Button variant="primary" href="/settings/metadata">Open metadata settings</Button>
-    {/snippet}
-  </EmptyState>
+{#if fault}
+  <CredentialEmptyState {fault} />
 {:else}
   <LoadError {message} {onretry} />
 {/if}

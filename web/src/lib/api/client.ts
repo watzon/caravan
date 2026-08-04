@@ -97,6 +97,10 @@ export const endpoints = {
   storageRootMigrate: () => `${API_BASE}/system/storage-root/migrate`,
   storageMigration: () => `${API_BASE}/system/storage-root/migration`,
   settings: () => `${API_BASE}/settings`,
+  // Phase 10 — proving the TMDB key where it is typed, the same idiom as
+  // POST /indexers/{id}/test. It takes the key in the body so the first-run
+  // wizard can prove one that has not been saved yet.
+  metadataTest: () => `${API_BASE}/settings/metadata/test`,
   movies: () => `${API_BASE}/library/movies`,
   movie: (id: number) => `${API_BASE}/library/movies/${id}`,
   seriesList: () => `${API_BASE}/library/series`,
@@ -325,6 +329,25 @@ function errorMessage(payload: unknown, res: Response): string {
   return `${res.status} ${res.statusText || 'request failed'}`;
 }
 
+/**
+ * The stable `code` on an error envelope, or '' when the server sent none.
+ *
+ * The envelope grew the field in phase 10 (internal/api.errorResponse): a coded
+ * error is one the SPA is expected to branch on — a missing credential has a
+ * destination, not a message — while an uncoded one keeps the old contract of
+ * "render what it says". Everything that reads a code lives in credentials.ts;
+ * this is only the accessor, so no caller has to know the body's shape.
+ */
+export function errorCode(err: unknown): string {
+  if (!(err instanceof ApiError)) return '';
+  const body = err.body;
+  if (body && typeof body === 'object') {
+    const code = (body as Record<string, unknown>).code;
+    if (typeof code === 'string') return code;
+  }
+  return '';
+}
+
 /** Human-readable text for anything thrown by this module. */
 export function errorText(err: unknown): string {
   if (err instanceof ApiError) {
@@ -410,6 +433,23 @@ export const api = {
 
   putSettings: (patch: Settings) =>
     request<Settings>(endpoints.settings(), { method: 'PUT', body: patch }),
+
+  /**
+   * Prove a TMDB API key against TMDB (PLAN phase 10 task 4).
+   *
+   * Passing the key tests that exact string without storing it, which is what
+   * the first-run wizard and the settings field both do — so a wrong key is
+   * caught before it is saved. Passing nothing tests the stored one.
+   *
+   * The server caches the verdict against the key's value, so testing and then
+   * saving the same key costs one upstream call, not two: prefer test-then-save
+   * over saving blind.
+   */
+  testMetadataKey: (apiKey = '') =>
+    request<{ status: string }>(endpoints.metadataTest(), {
+      method: 'POST',
+      body: { api_key: apiKey },
+    }),
 
   /**
    * The built-in TV profiles (SPEC §8). Read-only: the active choice is the
@@ -970,11 +1010,29 @@ export const api = {
    * Turn the module on or off. The first enable creates the Adult library row
    * (hidden from DLNA); a disable deletes nothing, so turning it back on finds
    * the sites, the scenes and the files exactly as they were.
+   *
+   * An enable carries the credential it is made with (PLAN phase 10 task 5):
+   * the server proves the stash-box endpoint and key BEFORE it writes anything
+   * and commits `adult_enabled` last, so a credential that does not work leaves
+   * the endpoint, the key and the switch byte-identical. Omitting either field
+   * means "use what is stored", which is what re-enabling a module that was
+   * configured once and switched off should send.
+   *
+   * A failure arrives as an ApiError coded `adult_credential_absent` (nothing
+   * to authenticate with) or `adult_credential_invalid` (the endpoint refused
+   * it) — see credentials.ts.
    */
-  setAdultEnabled: (enabled: boolean) =>
+  setAdultEnabled: (
+    enabled: boolean,
+    credential?: { endpoint?: string; apiKey?: string },
+  ) =>
     request<{ enabled: boolean }>(endpoints.settingsAdult(), {
       method: 'POST',
-      body: { enabled },
+      body: {
+        enabled,
+        ...(credential?.endpoint === undefined ? {} : { stashbox_endpoint: credential.endpoint }),
+        ...(credential?.apiKey === undefined ? {} : { stashbox_api_key: credential.apiKey }),
+      },
     }),
 
   /** Every site in the library, with the scene counts the grid badges. */

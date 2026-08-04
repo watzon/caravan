@@ -262,6 +262,45 @@ describe('App shell', () => {
     expect(host.textContent).not.toContain('Big Buck Bunny');
   });
 
+  /**
+   * The credential badge (PLAN phase 10 task 2). It reads the cached verdict
+   * on /system/status, so the card can report it on every poll without
+   * anything calling TMDB — and it stays quiet while the key works, because a
+   * healthy credential is not news.
+   */
+  it('says nothing about the metadata key while it works', async () => {
+    statusBody = { ...STATUS, metadata_credential: 'ok' };
+    app = mount(App, { target: host });
+    await settle();
+
+    expect(host.textContent).not.toContain('No TMDB key');
+    expect(host.textContent).not.toContain('TMDB key rejected');
+  });
+
+  it('badges a missing metadata key and links to the screen that fixes it', async () => {
+    statusBody = { ...STATUS, metadata_credential: 'absent' };
+    app = mount(App, { target: host });
+    await settle();
+
+    const badge = host.querySelector('a[href="/settings/metadata"]');
+    expect(badge?.textContent).toContain('No TMDB key');
+  });
+
+  it('badges a rejected metadata key', async () => {
+    statusBody = {
+      ...STATUS,
+      metadata_credential: 'invalid',
+      metadata_credential_reason: 'tmdb: http 401: Invalid API key',
+    };
+    app = mount(App, { target: host });
+    await settle();
+
+    const badge = host.querySelector('a[href="/settings/metadata"]');
+    expect(badge?.textContent).toContain('TMDB key rejected');
+    // The provider's own words, where they do not crowd the card.
+    expect(badge?.getAttribute('title')).toContain('Invalid API key');
+  });
+
   it('badges the queue nav with the pending request count', async () => {
     requestRows = [
       {
@@ -529,6 +568,6 @@ describe('App shell', () => {
     await settle();
 
     expect(window.location.pathname).toBe('/first-run');
-    expect(host.textContent).toContain('Choose a storage root');
+    expect(host.textContent).toContain('Where does your media live?');
   });
 });

@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/watzon/caravan/internal/core"
 )
 
 // testAPIKey is the key every stubbed client sends; tests assert it never
@@ -401,5 +403,63 @@ func TestTransportErrorDoesNotLeakAPIKey(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "/movie/78") {
 		t.Errorf("err = %v, want it to name the failing path", err)
+	}
+}
+
+// TestTestProvesTheKey covers the credential check behind Settings → Metadata
+// and the first-run wizard (PLAN phase 10 task 4).
+func TestTestProvesTheKey(t *testing.T) {
+	c, stub := newStub(t, map[string][]response{
+		"/configuration": {{status: http.StatusOK, body: []byte(`{"images":{}}`)}},
+	})
+
+	if err := c.Test(context.Background()); err != nil {
+		t.Fatalf("Test with a good key = %v, want nil", err)
+	}
+	seen := stub.seen()
+	if len(seen) != 1 || seen[0].path != "/configuration" {
+		t.Fatalf("Test requested %v, want one /configuration call", seen)
+	}
+	if seen[0].query.Get("api_key") != testAPIKey {
+		t.Errorf("Test sent api_key=%q, want the client's key", seen[0].query.Get("api_key"))
+	}
+}
+
+// A rejected key has to be distinguishable from an unreachable TMDB all the way
+// up in internal/api, which never imports this package: that is what the core
+// sentinel is for.
+func TestTestReportsARejectedKeyAsUnauthorized(t *testing.T) {
+	c, _ := newStub(t, map[string][]response{
+		"/configuration": {{
+			status: http.StatusUnauthorized,
+			body:   []byte(`{"status_code":7,"status_message":"Invalid API key: You must be granted a valid key."}`),
+		}},
+	})
+
+	err := c.Test(context.Background())
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("Test with a bad key = %v, want ErrUnauthorized", err)
+	}
+	if !errors.Is(err, core.ErrMetadataUnauthorized) {
+		t.Fatalf("Test with a bad key = %v, want it to wrap core.ErrMetadataUnauthorized", err)
+	}
+	if strings.Contains(err.Error(), testAPIKey) {
+		t.Errorf("the API key leaked into the error: %q", err)
+	}
+}
+
+// A TMDB that is merely down must NOT read as a wrong credential, or the UI
+// sends people to fix a key that is fine.
+func TestTestDoesNotConfuseAnOutageWithABadKey(t *testing.T) {
+	c, _ := newStub(t, map[string][]response{
+		"/configuration": {{status: http.StatusBadGateway, body: []byte(`<html>bad gateway</html>`)}},
+	})
+
+	err := c.Test(context.Background())
+	if err == nil {
+		t.Fatal("Test against a broken TMDB = nil, want an error")
+	}
+	if errors.Is(err, core.ErrMetadataUnauthorized) {
+		t.Fatalf("a 502 reported itself as a rejected credential: %v", err)
 	}
 }

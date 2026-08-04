@@ -504,3 +504,34 @@ func TestFirstURL(t *testing.T) {
 		})
 	}
 }
+
+// TestTestProvesTheCredential covers the adult enable gate's live check (PLAN
+// phase 10 task 5): the module only turns on when the endpoint answers.
+func TestTestProvesTheCredential(t *testing.T) {
+	c, s := newStub(t, map[string][]stashboxtest.Response{
+		opSearchSites: {okFixture(t, "query_studios.json")},
+	})
+
+	if err := c.Test(context.Background()); err != nil {
+		t.Fatalf("Test against a working endpoint = %v, want nil", err)
+	}
+	// It asks the question the add-a-site screen asks, rather than a bespoke
+	// ping a dialect might not implement.
+	if reqs := s.Requests(); len(reqs) != 1 {
+		t.Fatalf("Test made %d requests, want 1", len(reqs))
+	}
+}
+
+func TestTestReportsARejectedCredential(t *testing.T) {
+	c, _ := newStub(t, map[string][]stashboxtest.Response{
+		opSearchSites: {{Status: http.StatusUnauthorized}},
+	})
+
+	err := c.Test(context.Background())
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("Test with a bad key = %v, want ErrUnauthorized", err)
+	}
+	if strings.Contains(err.Error(), testAPIKey) {
+		t.Errorf("the API key leaked into the error: %q", err)
+	}
+}

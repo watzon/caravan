@@ -224,6 +224,32 @@ func (a *libraryAdapter) metadata(ctx context.Context) core.MetadataProvider {
 	return tmdb.New(key, a.hc)
 }
 
+// ValidateMetadataKey proves a TMDB API key with one live call (PLAN phase 10
+// tasks 2 and 4).
+//
+// It builds a client for the key it was handed rather than reading the settings
+// table, because the callers that matter are testing a key that is not stored
+// yet. The client is not cached: a validation happens when a person presses a
+// button, which is rare enough that one allocation is cheaper than another
+// cache to invalidate.
+func (a *libraryAdapter) ValidateMetadataKey(ctx context.Context, apiKey string) error {
+	return tmdb.New(apiKey, a.hc).Test(ctx)
+}
+
+// ValidateAdultCredential proves a stash-box endpoint and key.
+//
+// The client is a throwaway rather than the cached one, because a candidate
+// credential is exactly what the cache must not hold: going through
+// stashboxClient installs the unproven pair on a miss, so a typo'd key in the
+// enable modal evicted the working client of a module that is already on and
+// the next search re-probed the endpoint's dialect from scratch. Nothing is
+// lost by not caching — the credential is committed immediately afterwards, and
+// the next adultMetadata() call builds and caches the client for the pair that
+// was actually stored.
+func (a *libraryAdapter) ValidateAdultCredential(ctx context.Context, endpoint, apiKey string) error {
+	return stashbox.New(apiKey, endpoint, a.hc).Test(ctx)
+}
+
 // Scan reconciles the database with the storage root. api.Manager discards the
 // summary, so it is logged here — this is the only place it would otherwise be
 // dropped, and it is the evidence that a scan did anything.

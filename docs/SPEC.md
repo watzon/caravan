@@ -296,11 +296,22 @@ Disk-to-server migration is therefore: copy or move the drive contents, re-point
 
 ### 10.1 First run
 
-1. Pick the storage root (pre-filled: `/data` in Docker, the drive root in portable mode).
-2. Optionally point Caravan at existing media; a library scan is queued immediately.
-3. Scan review screen: confidently matched items land in the library; everything else parks in an unmatched queue showing the parser's best guess, with manual metadata search to resolve.
+Three light steps, then the scan review. Everything else ships with defaults; there is no further wizard.
 
-Everything else ships with defaults; there is no further wizard.
+1. **Storage root.** Pick the storage root (pre-filled: `/data` in Docker, the drive root in portable mode).
+2. **Metadata.** Enter the TMDB API key. The key is proved before it is stored — `POST /settings/metadata/test` runs one live check and answers `{"status":"ok"}` or the provider's own reason — so an invalid key is caught in the field it was typed into rather than by the first add that fails. "Skip for now" is an explicit escape hatch and names its consequence: scanning still parses and imports, but nothing matches against TMDB until a key is entered in Settings → Metadata.
+3. **Optional scan.** Point Caravan at existing media; a library scan is queued immediately.
+4. **Scan review.** Confidently matched items land in the library; everything else parks in an unmatched queue showing the parser's best guess, with manual metadata search to resolve.
+
+The first run contains no adult-content references at all: the module is invisible when off, and turning it on is its own setup inside Settings (§10.2).
+
+**Credential health.** `GET /system/status` reports `metadata_credential` as `absent`, `invalid` or `ok`, from a cached verdict rather than a live call — the status endpoint is polled on a timer and must cost no upstream traffic. The verdict changes only when the user does something: the Test button, a key edit (one live check, skipped when the Test button already proved that exact key), or a metadata call that comes back rejected. An unreachable provider is not a wrong key and never flips the state.
+
+**Guarded surfaces.** Every screen that needs metadata — Add Movie/Series, search, Discover — answers a stable error code (`metadata_credential_absent` / `metadata_credential_invalid`) instead of a raw upstream failure, and the SPA renders the fix rather than an error toast: "Add your TMDB API key in Settings → Metadata" for an admin, and who to ask for a member, since a member cannot open that screen. A scan without a key still walks, parses and imports; the unmatched queue explains why nothing matched. The recurring metadata refresh has no error code because it has no caller to answer: with no key it skips the sweep rather than burning the recurring job's retries on ordinary first-run state, and per-title provider failures are logged. Reporting a credential-shaped failure on the Tasks screen waits on the queue rescheduling a recurring job that fails terminally, which it does not do today.
+
+### 10.2 Enabling adult content
+
+Adult content is off until it is deliberately switched on, and the switch is gated on a working credential. `POST /settings/adult` takes `{"enabled": true, "stashbox_endpoint": "…", "stashbox_api_key": "…"}` — a blank endpoint means the TPDB preset — validates the pair against the endpoint before writing anything, and commits `adult_enabled` last. A missing or rejected credential leaves the endpoint, the key and the switch exactly as they were, so cancelling changes nothing because a failed enable already changed nothing. Disabling never validates: switching the module off has to work when the credential behind it has expired.
 
 ---
 
@@ -310,7 +321,9 @@ Resource-oriented, consumed by the embedded SPA. Outline:
 
 ```
 GET/PUT   /settings
-GET       /system/status            # mode, storage root, engine health, dirty flag
+POST      /settings/metadata/test   # live TMDB key check (body: api_key, or the stored one)
+POST      /settings/adult           # adult module switch; enabling validates the stash-box credential first
+GET       /system/status            # mode, storage root, engine health, metadata credential health, dirty flag
 POST      /system/shutdown          # safe shutdown (portable mode)
 POST      /system/verify            # dirty-eject recovery: integrity check + rescan, clears the dirty flag
 GET/POST  /library/movies           # list / add

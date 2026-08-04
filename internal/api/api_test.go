@@ -73,9 +73,20 @@ type stubManager struct {
 
 	removeErr error
 
-	mu      sync.Mutex
-	matches []matchCall
-	removes []removeCall
+	// validateKeys is the verdict ValidateMetadataKey gives each API key. A key
+	// with no entry is accepted, so a test only has to name the keys it wants
+	// rejected.
+	validateKeys map[string]error
+
+	// adultCredentialErr is what ValidateAdultCredential reports, nil by
+	// default: the enable gate's happy path.
+	adultCredentialErr error
+
+	mu                   sync.Mutex
+	matches              []matchCall
+	removes              []removeCall
+	validateCalls        []string
+	adultCredentialCalls []adultCredential
 }
 
 type matchCall struct {
@@ -241,6 +252,46 @@ func (m *stubManager) siteCalls() []string {
 func (m *stubManager) Metadata() core.MetadataProvider { return m.provider }
 
 func (m *stubManager) AdultMetadata() core.AdultMetadataProvider { return m.adult }
+
+// ValidateMetadataKey answers from validateKeys: an entry maps a key to the
+// verdict the provider would give it, and a key with no entry is accepted. The
+// default therefore matches the pre-phase-10 world, where nothing validated
+// anything, so every existing test keeps meaning what it meant.
+func (m *stubManager) ValidateMetadataKey(ctx context.Context, apiKey string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.validateCalls = append(m.validateCalls, apiKey)
+	return m.validateKeys[apiKey]
+}
+
+// ValidateAdultCredential answers from adultCredentialErr, recording what it
+// was asked so the enable-gating tests can prove the request's own credential
+// was tested rather than the stored one.
+func (m *stubManager) ValidateAdultCredential(ctx context.Context, endpoint, apiKey string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.adultCredentialCalls = append(m.adultCredentialCalls, adultCredential{endpoint, apiKey})
+	return m.adultCredentialErr
+}
+
+// adultCredential is one (endpoint, key) pair ValidateAdultCredential was asked
+// about.
+type adultCredential struct {
+	endpoint string
+	key      string
+}
+
+func (m *stubManager) validatedKeys() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.validateCalls...)
+}
+
+func (m *stubManager) adultCredentials() []adultCredential {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]adultCredential(nil), m.adultCredentialCalls...)
+}
 
 func (m *stubManager) matchCalls() []matchCall {
 	m.mu.Lock()
@@ -553,6 +604,9 @@ func TestSystemStatus(t *testing.T) {
 		DiskFreeBytes:  0,
 		DiskTotalBytes: 0,
 		EngineHealth:   "unconfigured",
+		// A fresh database has no TMDB key, which is the first-run state the
+		// wizard's metadata step exists to fix.
+		MetadataCredential: CredentialAbsent,
 		// No provider means nothing polls external clients, and the banner
 		// input is an empty list rather than null.
 		UnhealthyDownloadClients: []unhealthyClientJSON{},

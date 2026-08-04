@@ -8,15 +8,20 @@
  * title instead of refetching the whole page for one changed flag.
  */
 
-import { ApiError, api, errorText } from '../api/client';
+import { api, errorText } from '../api/client';
 import type { DiscoverHome, DiscoverItem, MediaType } from '../api/types';
+import { metadataFault, type CredentialFault } from '../credentials';
 
 class DiscoverState {
   home = $state<DiscoverHome | null>(null);
   error = $state<string | null>(null);
   loading = $state(false);
-  /** The ApiError status of the last failure: 503 = no key, 502 = provider. */
-  status = $state(0);
+  /**
+   * What the last failure said about the TMDB key, or null when it said
+   * nothing. A fault gets the directed empty state (there is one fix, and a
+   * retry is not it); null gets the retry.
+   */
+  fault = $state<CredentialFault | null>(null);
 
   #inFlight = false;
 
@@ -32,10 +37,10 @@ class DiscoverState {
     try {
       this.home = await api.discoverHome();
       this.error = null;
-      this.status = 0;
+      this.fault = null;
     } catch (err) {
       this.error = errorText(err);
-      this.status = err instanceof ApiError ? err.status : 0;
+      this.fault = metadataFault(err);
     } finally {
       this.#inFlight = false;
       this.loading = false;
@@ -65,7 +70,7 @@ class DiscoverState {
   reset(): void {
     this.home = null;
     this.error = null;
-    this.status = 0;
+    this.fault = null;
     this.loading = false;
   }
 

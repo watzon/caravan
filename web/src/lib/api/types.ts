@@ -278,6 +278,19 @@ export interface SystemStatus {
    * with `password_set` this is the nag: reachable, and nothing protecting it.
    */
   listening_publicly?: boolean;
+  /**
+   * The TMDB key's cached verdict — "absent" | "invalid" | "ok" (PLAN phase 10
+   * task 2). Answered from a cache, so polling this endpoint never costs an
+   * upstream call. Optional so an older server, or a test fixture, reads as the
+   * optimistic "ok" rather than as a problem; read it through
+   * `credentials.metadataStateOf` rather than comparing here.
+   */
+  metadata_credential?: string;
+  /** The provider's own words for a rejection. Absent unless invalid. Never
+   * contains the key. */
+  metadata_credential_reason?: string;
+  /** RFC3339 timestamp of the verdict. Absent when nothing has checked yet. */
+  metadata_credential_checked_at?: string;
 }
 
 /** POST /auth/login, POST /settings/password — never carries a credential. */

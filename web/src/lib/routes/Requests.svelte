@@ -23,6 +23,7 @@
    * hands back is already scoped, so nothing here filters by owner.
    */
   import { api, errorText } from '../api/client';
+  import { metadataToast } from '../credentials';
   import type { MediaRequest } from '../api/types';
   import AddRequestModal from '../components/AddRequestModal.svelte';
   import Badge from '../components/Badge.svelte';
@@ -78,7 +79,7 @@
       await api.approveRequest(request.id, false);
       pushToast(`Approved ${request.title}`, 'success');
     } catch (err) {
-      pushToast(errorText(err), 'danger');
+      pushToast(metadataToast(err, isAdmin) ?? errorText(err), 'danger');
     } finally {
       approvingScene = null;
       void requests.refresh();

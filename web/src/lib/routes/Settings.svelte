@@ -4,6 +4,7 @@
   import { api, errorText } from '../api/client';
   import { SETTING_TMDB_API_KEY, type Settings } from '../api/types';
   import AdultSettings from '../components/AdultSettings.svelte';
+  import Banner from '../components/Banner.svelte';
   import Button from '../components/Button.svelte';
   import Field from '../components/Field.svelte';
   import Icon from '../components/Icon.svelte';
@@ -215,6 +216,13 @@
   let saving = $state(false);
 
   let tmdbKey = $state('');
+  /**
+   * The Test button's last verdict, in the indexer card's own shape and idiom
+   * (PLAN phase 10 task 4): an inline ✓/✕ under the field rather than a toast,
+   * because it is about the field you are looking at.
+   */
+  let tmdbTest = $state<{ ok: boolean; message: string } | null>(null);
+  let testingTMDB = $state(false);
 
   async function load() {
     loading = true;
@@ -247,7 +255,32 @@
     }
   }
 
+  /**
+   * Prove the key in the field, not the one on disk.
+   *
+   * The field's value is sent so a key can be checked before it is saved —
+   * the same thing the first-run wizard does, and the reason a typo never has
+   * to be committed to find out it was one. An empty field falls back to the
+   * stored key, which is what "Test" means on a card that has already been
+   * saved. The server caches the verdict against the key's value, so testing
+   * and then saving costs one upstream call rather than two.
+   */
+  async function testMetadata() {
+    testingTMDB = true;
+    try {
+      await api.testMetadataKey(tmdbKey.trim());
+      tmdbTest = { ok: true, message: 'TMDB accepted this key.' };
+    } catch (err) {
+      tmdbTest = { ok: false, message: errorText(err) };
+    } finally {
+      testingTMDB = false;
+      // The verdict the server just cached is what the sidebar badge reads.
+      await system.refresh();
+    }
+  }
+
   let status = $derived(system.status);
+  let metadataState = $derived(system.metadataCredential);
 </script>
 
 <div class="flex flex-col gap-6 md:flex-row md:gap-7">
@@ -345,21 +378,56 @@
       </SettingsCard>
     {:else if tab === 'metadata'}
       <section class="flex flex-col gap-6">
+        {#if metadataState !== 'ok'}
+          <!-- Every metadata surface is degraded while this is true, and this
+               is the screen that fixes it, so it is stated here rather than
+               left for the user to infer from the empty states elsewhere. -->
+          <Banner
+            tone="warning"
+            icon="warning"
+            title={metadataState === 'invalid' ? 'TMDB rejected this key' : 'No TMDB API key yet'}
+            message={metadataState === 'invalid'
+              ? system.metadataCredentialReason ||
+                'The key on file was refused. Correct it below and press Test.'
+              : 'Search, Discover and adding a title all read TMDB. Enter a key below and press Test.'} />
+        {/if}
+
         <Field
           label="TMDB API key"
           for="tmdb-key"
-          help="Stored in the database, never in caravan.yaml or logs.">
-          <TextInput id="tmdb-key" bind:value={tmdbKey} type="password" mono placeholder="•••••" />
+          help="Stored in the database, never in caravan.yaml or logs."
+          error={tmdbTest && !tmdbTest.ok ? tmdbTest.message : null}>
+          <!-- Typing invalidates a verdict about a different string, exactly as
+               it does in the first-run wizard: a green ✓ under a key that is no
+               longer the one that was tested is a lie, and a red ✕ under a key
+               the user has just corrected is a worse one. -->
+          <TextInput
+            id="tmdb-key"
+            bind:value={tmdbKey}
+            type="password"
+            mono
+            placeholder="•••••"
+            oninput={() => (tmdbTest = null)} />
         </Field>
 
-        <Button
-          variant="primary"
-          disabled={saving}
-          class="self-start"
-          onclick={() => save({ [SETTING_TMDB_API_KEY]: tmdbKey.trim() }, 'TMDB API key saved.')}>
-          <Icon name="check" size={14} />
-          {saving ? 'Saving…' : 'Save'}
-        </Button>
+        {#if tmdbTest?.ok}
+          <p class="-mt-4 text-sm text-success">✓ {tmdbTest.message}</p>
+        {/if}
+
+        <div class="flex flex-wrap items-center gap-2">
+          <Button
+            variant="primary"
+            disabled={saving}
+            onclick={() => save({ [SETTING_TMDB_API_KEY]: tmdbKey.trim() }, 'TMDB API key saved.')}>
+            <Icon name="check" size={14} />
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
+          <!-- The indexer card's idiom, on the credential every other card
+               assumes: ask the provider, report what it said. -->
+          <Button variant="secondary" disabled={testingTMDB} onclick={testMetadata}>
+            {testingTMDB ? 'Testing…' : 'Test'}
+          </Button>
+        </div>
       </section>
     {:else if settings}
       <!-- Storage owns two operations with very different consequences, so it

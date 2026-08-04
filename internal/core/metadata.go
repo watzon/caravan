@@ -15,6 +15,16 @@ import (
 // says so) rather than a failure.
 var ErrNoMetadataProvider = errors.New("core: no metadata provider configured")
 
+// ErrMetadataUnauthorized reports that a metadata provider rejected the
+// credential it was given — a wrong, revoked or suspended TMDB API key.
+//
+// It is a sentinel in core, and every provider-side unauthorized error wraps
+// it, so the layers above can tell "the key is wrong" from "the upstream is
+// having a bad day" without importing the provider package. That distinction
+// is the whole of the credential-health model (PLAN phase 10 task 2): only a
+// rejected credential marks the cached state invalid; a timeout does not.
+var ErrMetadataUnauthorized = errors.New("core: metadata credential rejected")
+
 // MetadataProvider is the metadata source Caravan matches library items
 // against (TMDB in v1, SPEC §4). It is the seam that keeps the library and
 // scanner packages testable without network access.

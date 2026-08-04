@@ -352,9 +352,11 @@ func TestDisablingTheModuleHidesSceneRequestsFromTheAdminToo(t *testing.T) {
 	wantStatus(t, doAuth(t, h, http.MethodPost, "/api/v1/requests/"+itoa(created.ID)+"/approve",
 		"{}", withCookie(cookie)), http.StatusNotFound)
 
-	// Nothing was deleted: turning it back on finds the row as it was.
+	// Nothing was deleted: turning it back on finds the row as it was. The
+	// re-enable carries the credential the gate now insists on (PLAN phase 10
+	// task 5); see TestAdultEnableGate for the gate's own tests.
 	wantStatus(t, doAuth(t, h, http.MethodPost, "/api/v1/settings/adult",
-		`{"enabled":true}`, withCookie(cookie)), http.StatusOK)
+		`{"enabled":true,"stashbox_api_key":"stash-key"}`, withCookie(cookie)), http.StatusOK)
 	rec = doAuth(t, h, http.MethodGet, "/api/v1/requests", "", withCookie(cookie))
 	if !strings.Contains(rec.Body.String(), "Deep Impact") {
 		t.Errorf("disabling deleted the scene request: %s", rec.Body.String())
@@ -620,7 +622,7 @@ func TestSettingsAdultSwitchCreatesTheLibraryAndIsAdminOnly(t *testing.T) {
 	}
 
 	wantStatus(t, doAuth(t, h, http.MethodPost, "/api/v1/settings/adult",
-		`{"enabled":true}`, withCookie(adminCookie)), http.StatusOK)
+		`{"enabled":true,"stashbox_api_key":"stash-key"}`, withCookie(adminCookie)), http.StatusOK)
 
 	lib, err := st.GetLibraryByKind(context.Background(), core.LibraryKindAdult)
 	if err != nil {
