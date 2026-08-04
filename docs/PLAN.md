@@ -3,7 +3,7 @@
 **Status:** v1.1 (companion to `SPEC.md` Draft v0.2)
 **Date:** 2026-08-03
 
-Ten phases. Each absorbs one hat of the existing *arr ecosystem and ends with a deliverable a real user can run and test — no phase ends in scaffolding-only limbo.
+Eleven phases. Each absorbs one hat of the existing *arr ecosystem and ends with a deliverable a real user can run and test — no phase ends in scaffolding-only limbo.
 
 A standing principle sharpened after phase 6: **Caravan is completely standalone; external clients are explicitly optional.** The embedded engines (torrent since phase 2, Usenet in phase 7) are the defaults, and nothing in the UI or docs may imply an external client is required for any workflow.
 
@@ -239,7 +239,32 @@ Between v1.0 and v1.1, three unplanned tracks shipped and are treated as done: *
 
 ---
 
-## Phase 10 — Stash integration
+## Phase 10 — Onboarding & credential gating
+
+**Hat:** none — this is the front door. Phase 1's first run stopped at the storage root; everything downstream assumes credentials it never collected.
+**Deliverable:** a first run that cannot end broken — the TMDB key is collected and validated where it's entered, every surface that needs a missing credential says so instead of failing, and enabling adult content runs its own setup that refuses to switch on without a working stash-box credential. Runs after phase 9, before Stash.
+
+### Tasks
+
+1. **First-run wizard restructure:** three light steps — storage root (existing behavior) → metadata (TMDB API key with a live inline test; an explicit "skip for now" escape hatch that names the consequence) → optional scan (existing). Everything else keeps shipping with defaults; SPEC §10.1 is updated to match.
+2. **Credential health model:** `/system/status` (and the sidebar card) reports metadata-credential state — absent / invalid / ok — from a cached validation result, never a live upstream call per status poll. State transitions when the key is edited or a metadata call fails auth.
+3. **Guarded surfaces:** Add Movie/Series, Discover, and metadata refresh degrade to a directed empty state ("Add your TMDB API key in Settings → Metadata") when the key is absent or invalid — never a raw error toast. A scan without a key still parses and imports; a banner explains why nothing matched.
+4. **Settings → Metadata test button:** the same live validation, mirroring the indexer "Test" pattern; the adult metadata-source card already has one from phase 9 — behavior must match.
+5. **Adult enable setup:** toggling adult content on opens a setup modal — stash-box endpoint (TPDB preset) + API key with live validation, then a confirm step restating the exposure defaults (DLNA off, prepare excludes, member grants pending). `adult_enabled` only commits when the test passes; cancel leaves everything off. Disabling never prompts.
+6. **Onboarding stays clean:** the main first run contains zero adult references, consistent with invisible-when-off.
+7. Gate: Paper design pass (revised First Run steps, adult enable modal) before implementation — done alongside planning.
+
+### Acceptance criteria
+
+- A fresh install that completes first run with a valid key can add a movie immediately; one that skips the key lands in a UI where every metadata-needing surface names the fix, with no raw failures anywhere.
+- An invalid TMDB key is caught by the inline test at first run and in settings before anything downstream breaks.
+- Toggling adult on with a missing or invalid stash-box key cannot leave `adult_enabled` on; cancel changes nothing; a valid key completes and lands on the Adult Content settings section.
+- `/system/status` reflects credential-state transitions without upstream calls on every poll.
+- The first-run flow renders zero adult-content references.
+
+---
+
+## Phase 11 — Stash integration
 
 **Hat:** none — this is phase 4's Jellyfin seam, replayed for the adult library. Stash is the adult counterpart of Jellyfin, and Caravan treats it that way.
 **Deliverable:** an adult import triggers a scoped Stash scan, then Caravan pushes identity — stash-box ID, title, studio, performers — so the scene arrives in Stash already identified, no manual tagging.
