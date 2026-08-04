@@ -9,6 +9,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import AdultSite from './AdultSite.svelte';
+import { CATALOGUING_POLL_MS } from '../adult';
 import type { SessionUser } from '../api/types';
 import { session } from '../state/session.svelte';
 import { clearToasts } from '../state/toast.svelte';
@@ -32,6 +33,7 @@ const SITE = {
   scene_file_count: 1,
   added_at: '2024-01-01T00:00:00Z',
   provider_url: 'https://theporndb.net/sites/e3b61b3e-1111-4111-8111-111111111111',
+  cataloguing: false,
   years: [
     {
       year: 2022,
@@ -493,5 +495,172 @@ describe('AdultSite monitoring and removal', () => {
     expect(toggle('Monitor #003')).toBeUndefined();
     // But the state itself is still readable: an unmonitored year says so.
     expect(host!.textContent).toContain('2022');
+  });
+});
+
+/**
+ * The catalogue walk, watched.
+ *
+ * A site is added and its scenes arrive a release year at a time from a
+ * background job, so this page is the one place in the app that has to show
+ * work happening somewhere else. The properties below are what "reactive" has
+ * to mean for it to be worth anything: the page re-reads itself while the walk
+ * runs, the years appear without a reload, it stops when the walk does, and a
+ * background read never takes the page away from the reader.
+ */
+describe('AdultSite cataloguing', () => {
+  /** What the next GET will answer with; tests move it as the walk progresses. */
+  let served: Record<string, unknown> = SITE;
+  let failNext = false;
+
+  const EMPTY_CATALOGUING = { ...SITE, cataloguing: true, scene_count: 0, years: [] };
+  const PARTLY_CATALOGUED = { ...SITE, cataloguing: true, scene_count: 3 };
+  const DONE = { ...SITE, cataloguing: false };
+
+  function stubPolling(initial: Record<string, unknown>) {
+    served = initial;
+    failNext = false;
+    calls = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const method = init?.method ?? 'GET';
+        calls.push({ url: String(input), method, body: null });
+        if (failNext) {
+          failNext = false;
+          return new Response(JSON.stringify({ error: 'database is locked' }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify(served), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    );
+  }
+
+  async function mountPolling(): Promise<HTMLElement> {
+    session.user = user('admin');
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    app = mount(AdultSite, { target: host, props: { id: 7 } }) as Record<string, unknown>;
+    flushSync();
+    // Let onMount's first load resolve under fake timers.
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+    return host;
+  }
+
+  async function tick(times = 1) {
+    for (let i = 0; i < times; i++) {
+      await vi.advanceTimersByTimeAsync(CATALOGUING_POLL_MS);
+      flushSync();
+    }
+  }
+
+  const reads = () => calls.filter((c) => c.method === 'GET').length;
+
+  it('shows the cataloguing state instead of an empty site, and no reload advice', async () => {
+    vi.useFakeTimers();
+    stubPolling(EMPTY_CATALOGUING);
+    await mountPolling();
+
+    expect(host!.textContent).toContain('Cataloguing scenes');
+    // The old copy told the reader to do the page's job for it.
+    expect(host!.textContent).not.toContain('reload');
+    expect(host!.textContent).not.toContain('No scenes yet');
+  });
+
+  it('polls while cataloguing and shows years as they land, without a remount', async () => {
+    vi.useFakeTimers();
+    stubPolling(EMPTY_CATALOGUING);
+    await mountPolling();
+    expect(host!.textContent).not.toContain('Deep Impact');
+
+    // The walk publishes 2022; the next poll is what makes it visible.
+    served = PARTLY_CATALOGUED;
+    await tick();
+
+    expect(host!.textContent).toContain('Deep Impact');
+    expect(host!.textContent).toContain('2022');
+  });
+
+  it('swaps the empty state for a slim banner once scenes are on screen', async () => {
+    vi.useFakeTimers();
+    stubPolling(PARTLY_CATALOGUED);
+    await mountPolling();
+
+    // Still working, but there is something to look at — so the page keeps the
+    // scenes and says so in one line, with the live count.
+    expect(host!.textContent).toContain('Deep Impact');
+    expect(host!.textContent).toContain('Cataloguing scenes — 3 so far');
+    expect(host!.textContent).not.toContain('there is nothing to do but watch');
+  });
+
+  it('stops polling once the walk finishes, after one last read', async () => {
+    vi.useFakeTimers();
+    stubPolling(PARTLY_CATALOGUED);
+    await mountPolling();
+    const afterMount = reads();
+
+    // The walk ends: this poll observes cataloguing going false.
+    served = DONE;
+    await tick();
+    const afterEnd = reads();
+    expect(afterEnd).toBeGreaterThan(afterMount);
+
+    // One final read settles whatever landed with the last year, and then the
+    // page goes quiet however long it is left open.
+    await tick();
+    const settled = reads();
+    await tick(5);
+    expect(reads()).toBe(settled);
+    expect(settled).toBe(afterEnd + 1);
+    expect(host!.textContent).not.toContain('Cataloguing scenes');
+  });
+
+  it('never polls a site that was not being catalogued when it loaded', async () => {
+    vi.useFakeTimers();
+    stubPolling(DONE);
+    await mountPolling();
+    const afterMount = reads();
+
+    await tick(5);
+    expect(reads()).toBe(afterMount);
+  });
+
+  it('keeps the rendered page through a background poll, skeleton and all', async () => {
+    vi.useFakeTimers();
+    stubPolling(PARTLY_CATALOGUED);
+    await mountPolling();
+
+    // A poll must not flash the loading skeleton over a page that is already
+    // showing its scenes.
+    const skeletons = () => host!.querySelectorAll('.animate-pulse').length;
+    expect(skeletons()).toBe(0);
+    await tick();
+    expect(skeletons()).toBe(0);
+    expect(host!.textContent).toContain('Deep Impact');
+  });
+
+  it('does not throw the reader out of a rendered page when a poll fails', async () => {
+    vi.useFakeTimers();
+    stubPolling(PARTLY_CATALOGUED);
+    await mountPolling();
+    expect(host!.textContent).toContain('Deep Impact');
+
+    failNext = true;
+    await tick();
+
+    // The error branch wins over everything in this template, so a background
+    // failure that set it would replace a perfectly good page with a banner.
+    expect(host!.textContent).not.toContain('Something went wrong');
+    expect(host!.textContent).toContain('Deep Impact');
+
+    // And the next tick recovers on its own.
+    await tick();
+    expect(host!.textContent).toContain('Deep Impact');
   });
 });

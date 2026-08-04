@@ -222,25 +222,101 @@ func (m *Manager) upsertSiteRow(ctx context.Context, meta *core.SiteMeta, dir, p
 // syncSiteScenes walks a site's whole catalogue and writes it as seasons and
 // episodes.
 //
-// The walk is complete rather than incremental because episode numbering needs
-// every scene at once: a scene's number is its sequence within its release
-// year, which is not in any single scene's metadata.
+// The walk publishes as it goes, one complete release year at a time, so the
+// site page fills in while the pages are still arriving rather than staying
+// empty until the last one lands. walkSiteScenes owns that; everything about
+// how a scene becomes an episode row is writeScenes' and numberScenes' job,
+// unchanged.
 func (m *Manager) syncSiteScenes(ctx context.Context, sr *core.Series) error {
-	scenes, err := m.siteScenes(ctx, sr.StashID)
-	if err != nil {
-		return err
-	}
-	return m.writeScenes(ctx, sr, scenes)
+	return m.walkSiteScenes(ctx, sr.StashID, func(batch []core.SceneMeta) error {
+		return m.writeScenes(ctx, sr, batch)
+	})
 }
 
-// siteScenes pages the provider for every scene a site has released.
-func (m *Manager) siteScenes(ctx context.Context, siteStashID string) ([]core.SceneMeta, error) {
-	var out []core.SceneMeta
+// sceneBatch receives one publishable group of scenes during a catalogue walk.
+type sceneBatch func([]core.SceneMeta) error
+
+// walkSiteScenes pages the provider for every scene a site has released and
+// hands them to flush as it goes.
+//
+// It writes incrementally because a large site is two hundred provider round
+// trips and the site page is open while they happen: a walk that wrote nothing
+// until it finished left that page empty for minutes, with no way to tell
+// "still working" from "this site has nothing".
+//
+// The unit it publishes is a RELEASE YEAR rather than a page, and that is the
+// whole subtlety. A scene's number is its sequence within its release year,
+// which no single scene's metadata carries — it can only be computed from every
+// scene of that year at once. Writing page by page would number each year in
+// arrival order, and the provider is asked for DATE/DESC (see
+// stashbox.SearchScenes), so the NEWEST scene of a year would become episode 1
+// and the site page — which orders scenes on that number — would list every
+// year backwards.
+//
+// Holding a year until it is complete is cheap for exactly the same reason:
+// under DESC ordering, once a scene from an older year has arrived no scene
+// from a newer one can. Each year is then numbered from its full set, which is
+// the numbering a single end-of-walk write would have produced. The years are
+// published newest first, because that is the end the site page shows and the
+// end somebody watching it is waiting for.
+//
+// A provider that answered out of order would settle a year early and append
+// whatever arrived late to the end of that year's numbering. That is not a new
+// failure mode: it is what a refresh already does when the provider back-fills
+// an old scene, and numberScenes' stability rule is what makes it survivable
+// either way. A site whose whole catalogue sits in one year publishes once, at
+// the end — nothing can be numbered before its year is complete, and a
+// single-year site is a short walk anyway.
+func (m *Manager) walkSiteScenes(ctx context.Context, siteStashID string, flush sceneBatch) error {
 	seen := map[string]bool{}
+	// Scenes waiting for their year to be proven complete, keyed by that year,
+	// and lowest is the oldest year the walk has reached. Everything above it
+	// is settled; lowest itself may still be receiving scenes.
+	pending := map[int][]core.SceneMeta{}
+	lowest := 0
+	// Scenes the provider gave no release date. numberScenes drops them — the
+	// date IS the season — so they take no part in the completeness bookkeeping
+	// (their year would read as 1 and hold every real year open). They are
+	// still handed over at the end, so a flush sees the provider's whole answer
+	// rather than a filtered one.
+	var undated []core.SceneMeta
+
+	// publish hands over buffered years, newest first. With settledOnly it
+	// keeps back the year the walk is still inside; without it, everything.
+	publish := func(settledOnly bool) error {
+		years := make([]int, 0, len(pending))
+		for year := range pending {
+			if settledOnly && year <= lowest {
+				continue
+			}
+			years = append(years, year)
+		}
+		sort.Sort(sort.Reverse(sort.IntSlice(years)))
+		for _, year := range years {
+			if err := flush(pending[year]); err != nil {
+				return err
+			}
+			delete(pending, year)
+		}
+		return nil
+	}
+
+	// drain ends the walk: the year still open, then the undated remainder.
+	drain := func() error {
+		if err := publish(false); err != nil {
+			return err
+		}
+		if len(undated) == 0 {
+			return nil
+		}
+		batch := undated
+		undated = nil
+		return flush(batch)
+	}
 
 	for page := 1; page <= maxScenePages; page++ {
 		if err := ctx.Err(); err != nil {
-			return nil, err
+			return err
 		}
 		result, err := m.adult.SearchScenes(ctx, core.SceneQuery{
 			SiteStashID: siteStashID,
@@ -248,10 +324,10 @@ func (m *Manager) siteScenes(ctx context.Context, siteStashID string) ([]core.Sc
 			PerPage:     scenePageSize,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("library: list scenes of site %s: %w", siteStashID, err)
+			return fmt.Errorf("library: list scenes of site %s: %w", siteStashID, err)
 		}
 		if result == nil || len(result.Scenes) == 0 {
-			return out, nil
+			return drain()
 		}
 		for _, scene := range result.Scenes {
 			// A provider that answers the same page twice would otherwise
@@ -261,16 +337,27 @@ func (m *Manager) siteScenes(ctx context.Context, siteStashID string) ([]core.Sc
 				continue
 			}
 			seen[scene.StashID] = true
-			out = append(out, scene)
+			if scene.Date.IsZero() {
+				undated = append(undated, scene)
+				continue
+			}
+			year := scene.Date.Year()
+			if lowest == 0 || year < lowest {
+				lowest = year
+			}
+			pending[year] = append(pending[year], scene)
+		}
+		if err := publish(true); err != nil {
+			return err
 		}
 		if result.Total > 0 && len(seen) >= result.Total {
-			return out, nil
+			return drain()
 		}
 		if len(result.Scenes) < result.PerPage {
-			return out, nil
+			return drain()
 		}
 	}
-	return out, nil
+	return drain()
 }
 
 // writeScenes reconciles a site's scenes into season and episode rows.

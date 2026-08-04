@@ -259,6 +259,43 @@ func (s *Store) HasOpenJob(ctx context.Context, kind, payload string) (bool, err
 	return n > 0, nil
 }
 
+// OpenJobsByKind returns every pending or running job of one kind.
+//
+// It is the reader's counterpart to HasOpenJob, and the difference is the
+// payload. HasOpenJob matches an EXACT payload string, which is the right
+// dedupe key for a producer that always encodes the same struct — but the wrong
+// question for "is there a job about this thing", because a payload with more
+// than one field has more than one spelling for the same subject.
+// core.JobSyncSitePayload is exactly that: it carries SearchNow beside the
+// series id, so one site has two possible payloads and an exact match would
+// answer "no job" for half of them.
+//
+// The caller decodes the payloads it cares about. The queue stays a queue: it
+// does not learn the shape of any one kind's arguments, and a kind that grows a
+// field does not come back here.
+func (s *Store) OpenJobsByKind(ctx context.Context, kind string) ([]core.Job, error) {
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT "+jobColumns+" FROM jobs WHERE kind = ? AND state IN (?, ?) ORDER BY id",
+		kind, core.JobStatePending, core.JobStateRunning)
+	if err != nil {
+		return nil, fmt.Errorf("store: open %s jobs: %w", kind, err)
+	}
+	defer rows.Close()
+
+	out := []core.Job{}
+	for rows.Next() {
+		j, err := scanJob(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: scan open %s job: %w", kind, err)
+		}
+		out = append(out, *j)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: open %s jobs: %w", kind, err)
+	}
+	return out, nil
+}
+
 // GetJob returns the job with the given id, or ErrNotFound.
 func (s *Store) GetJob(ctx context.Context, id int64) (*core.Job, error) {
 	row := s.db.QueryRowContext(ctx, "SELECT "+jobColumns+" FROM jobs WHERE id = ?", id)

@@ -29,6 +29,7 @@
   import { api, errorText } from '../api/client';
   import type { Scene, SiteDetail, SiteYear } from '../api/types';
   import Badge from '../components/Badge.svelte';
+  import Banner from '../components/Banner.svelte';
   import Button from '../components/Button.svelte';
   import EmptyState from '../components/EmptyState.svelte';
   import Icon from '../components/Icon.svelte';
@@ -41,7 +42,13 @@
   import Skeleton from '../components/Skeleton.svelte';
   import StatusDot from '../components/StatusDot.svelte';
   import Toggle from '../components/Toggle.svelte';
-  import { performerSummary, sceneLine, sceneNumber, scenePerformers } from '../adult';
+  import {
+    CATALOGUING_POLL_MS,
+    performerSummary,
+    sceneLine,
+    sceneNumber,
+    scenePerformers,
+  } from '../adult';
   import { UNKNOWN, formatDate } from '../format';
   import { siteLinks } from '../metadataLinks';
   import { navigate } from '../router.svelte';
@@ -66,19 +73,50 @@
   let confirmingRemove = $state(false);
   let removing = $state(false);
 
-  async function load() {
-    loading = true;
+  /**
+   * Reload the page's data.
+   *
+   * `quiet` is what the cataloguing poll uses: it skips the loading flag, so a
+   * background refresh does not replace a page the reader is looking at with a
+   * skeleton every few seconds. An error is swallowed on a quiet pass too — a
+   * single failed poll against a page that is already rendered is not worth
+   * throwing the reader out for, and the next tick retries.
+   */
+  async function load(quiet = false) {
+    if (!quiet) loading = true;
     try {
       site = await api.getSite(id);
       error = null;
     } catch (err) {
-      error = errorText(err);
+      if (!quiet) error = errorText(err);
     } finally {
-      loading = false;
+      if (!quiet) loading = false;
     }
   }
 
-  onMount(load);
+  /**
+   * While the catalogue walk runs, the page watches it.
+   *
+   * The walk publishes a whole release year at a time (library.walkSiteScenes),
+   * so re-reading on a timer is enough to make the years appear as they land —
+   * there is no partial state to stitch together, each poll is simply a later
+   * version of the same page. The interval lives for the life of the component
+   * and checks the flag itself rather than being started and stopped, because
+   * `cataloguing` can go true again without a remount: a re-add or a refresh
+   * queues another walk while this page is open.
+   */
+  onMount(() => {
+    void load();
+    let wasCataloguing = false;
+    const timer = setInterval(() => {
+      const now = site?.cataloguing ?? false;
+      // One last read after it goes false: the poll that observes the end of
+      // the walk is reading state from just before the final year landed.
+      if (now || wasCataloguing) void load(true);
+      wasCataloguing = now;
+    }, CATALOGUING_POLL_MS);
+    return () => clearInterval(timer);
+  });
 
   let years = $derived<SiteYear[]>(site?.years ?? []);
 
@@ -180,7 +218,10 @@
   </a>
 
   {#if error}
-    <LoadError message={error} onretry={load} />
+    <!-- Wrapped rather than passed by reference: onretry is wired straight to a
+         button's onclick, so `load` would receive the MouseEvent as its `quiet`
+         argument and a retry would silently swallow its own failure. -->
+    <LoadError message={error} onretry={() => load()} />
   {:else if loading && site === null}
     <div class="flex gap-6">
       <Skeleton class="aspect-[2/3] w-52 rounded-md" />
@@ -281,11 +322,30 @@
       </div>
     </div>
 
+    <!-- The walk publishes a release year at a time, so there are two honest
+         things to say and they need different room. With nothing filed yet the
+         page has space for the full explanation; once years are on screen the
+         reader can see it working, and a slim line that keeps count is all that
+         is left to add. -->
+    {#if current.cataloguing && years.length > 0}
+      <Banner
+        tone="info"
+        icon="refresh"
+        message="Cataloguing scenes — {current.scene_count} so far. More release years appear as they are indexed." />
+    {/if}
+
     {#if years.length === 0}
-      <EmptyState
-        icon="flame"
-        title="No scenes yet"
-        message="Caravan knows this site but has no scenes filed under it yet. Cataloguing runs in the background after a site is added — reload in a moment. A metadata refresh fills it in too." />
+      {#if current.cataloguing}
+        <EmptyState
+          icon="refresh"
+          title="Cataloguing scenes"
+          message="Caravan is reading this site's catalogue from the metadata provider. Its release years appear here as they are indexed, newest first — there is nothing to do but watch." />
+      {:else}
+        <EmptyState
+          icon="flame"
+          title="No scenes yet"
+          message="Caravan knows this site but has no scenes filed under it. A metadata refresh fills the catalogue in." />
+      {/if}
     {:else}
       <div class="flex flex-col gap-4">
         {#each years as year (year.year)}

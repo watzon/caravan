@@ -436,6 +436,22 @@ func TestRefreshLibraryDoesNotSendSitesToTMDB(t *testing.T) {
 
 // ---- paging ---------------------------------------------------------------
 
+// collectScenes runs a catalogue walk and returns everything it published. The
+// walk hands scenes over a year at a time (see walkSiteScenes); the paging
+// tests below care about what came back in total, not when.
+func (a *adultHarness) collectScenes(id string) []core.SceneMeta {
+	a.t.Helper()
+	var out []core.SceneMeta
+	err := a.mgr.walkSiteScenes(context.Background(), id, func(batch []core.SceneMeta) error {
+		out = append(out, batch...)
+		return nil
+	})
+	if err != nil {
+		a.t.Fatalf("walkSiteScenes: %v", err)
+	}
+	return out
+}
+
 func TestSiteScenesPagesTheWholeCatalogue(t *testing.T) {
 	h := newAdultHarness(t, true)
 	h.adult.sites = []core.SiteMeta{{StashID: "site-1", Name: "Brazzers"}}
@@ -447,11 +463,7 @@ func TestSiteScenesPagesTheWholeCatalogue(t *testing.T) {
 		})
 	}
 
-	scenes, err := h.mgr.siteScenes(context.Background(), "site-1")
-	if err != nil {
-		t.Fatalf("siteScenes: %v", err)
-	}
-	if len(scenes) != 7 {
+	if scenes := h.collectScenes("site-1"); len(scenes) != 7 {
 		t.Errorf("scenes = %d, want 7", len(scenes))
 	}
 }
@@ -469,11 +481,7 @@ func TestSiteScenesSurvivesAProviderThatNeverAdvances(t *testing.T) {
 	stuck := &stuckPager{inner: h.adult}
 	h.mgr.adult = stuck
 
-	scenes, err := h.mgr.siteScenes(context.Background(), "site-1")
-	if err != nil {
-		t.Fatalf("siteScenes: %v", err)
-	}
-	if len(scenes) != 2 {
+	if scenes := h.collectScenes("site-1"); len(scenes) != 2 {
 		t.Errorf("scenes = %d, want 2 distinct", len(scenes))
 	}
 	if stuck.inner.calls > maxScenePages {
@@ -1088,6 +1096,223 @@ func TestAddSiteUnmonitoredLeavesItsScenesUnmonitored(t *testing.T) {
 	for _, e := range b.episodes(kept.ID) {
 		if !e.Monitored {
 			t.Errorf("scene %q is unmonitored under a monitored site", e.StashID)
+		}
+	}
+}
+
+// ---- streaming: the catalogue appears while the walk is still running ------
+
+// pageObserver wraps the stub provider and runs a hook just before answering
+// each page, so a test can assert what the STORE held part-way through a walk.
+// That is the only honest way to test streaming: the property is about what is
+// visible before the walk returns, and after it returns everything is visible.
+type pageObserver struct {
+	inner  *stubAdultProvider
+	before func(page int)
+}
+
+func (p *pageObserver) SearchSites(ctx context.Context, q string) ([]core.SiteMeta, error) {
+	return p.inner.SearchSites(ctx, q)
+}
+func (p *pageObserver) GetSite(ctx context.Context, id string) (*core.SiteMeta, error) {
+	return p.inner.GetSite(ctx, id)
+}
+func (p *pageObserver) GetScene(ctx context.Context, id string) (*core.SceneMeta, error) {
+	return p.inner.GetScene(ctx, id)
+}
+func (p *pageObserver) SearchScenes(ctx context.Context, q core.SceneQuery) (*core.ScenePage, error) {
+	if p.before != nil {
+		p.before(max(q.Page, 1))
+	}
+	return p.inner.SearchScenes(ctx, q)
+}
+
+// seedThreeYears gives the provider a site with two scenes in each of three
+// years, newest first — the order the DATE/DESC query actually returns.
+func (a *adultHarness) seedThreeYears() {
+	a.adult.sites = []core.SiteMeta{{StashID: "site-1", Name: "Brazzers"}}
+	a.adult.scenes["site-1"] = []core.SceneMeta{
+		{StashID: "s2024b", SiteStashID: "site-1", Title: "2024 late", Date: date(2024, time.November, 2)},
+		{StashID: "s2024a", SiteStashID: "site-1", Title: "2024 early", Date: date(2024, time.February, 3)},
+		{StashID: "s2023b", SiteStashID: "site-1", Title: "2023 late", Date: date(2023, time.October, 5)},
+		{StashID: "s2023a", SiteStashID: "site-1", Title: "2023 early", Date: date(2023, time.January, 9)},
+		{StashID: "s2022b", SiteStashID: "site-1", Title: "2022 late", Date: date(2022, time.August, 1)},
+		{StashID: "s2022a", SiteStashID: "site-1", Title: "2022 early", Date: date(2022, time.April, 6)},
+	}
+	a.adult.pageSize = 2
+}
+
+func (a *adultHarness) stashIDsOf(seriesID int64) []string {
+	a.t.Helper()
+	out := []string{}
+	for _, e := range a.episodes(seriesID) {
+		out = append(out, e.StashID)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// The regression the whole restructuring exists for: a year's scenes are in the
+// store BEFORE the walk that found the later years has returned.
+//
+// It fails against a walk that collects every page and writes once at the end —
+// there, the store is empty at every page and only fills in afterwards.
+func TestCatalogueWalkPublishesEachYearBeforeItFinishes(t *testing.T) {
+	a := newAdultHarness(t, true)
+	a.seedThreeYears()
+	ctx := context.Background()
+
+	sr, err := a.mgr.AddSite(ctx, "site-1", nil)
+	if err != nil {
+		t.Fatalf("AddSite: %v", err)
+	}
+
+	// What the store held when each page was asked for.
+	atPage := map[int][]string{}
+	a.mgr.adult = &pageObserver{inner: a.adult, before: func(page int) {
+		atPage[page] = a.stashIDsOf(sr.ID)
+	}}
+
+	if err := a.mgr.SyncSite(ctx, sr.ID); err != nil {
+		t.Fatalf("SyncSite: %v", err)
+	}
+
+	// Page 1 is asked for before anything can have been found.
+	if got := atPage[1]; len(got) != 0 {
+		t.Errorf("store held %v before the first page, want nothing", got)
+	}
+	// Page 1 returned only 2024 scenes, so 2024 is not yet known to be
+	// complete and nothing may be numbered: the year is held, not written.
+	if got := atPage[2]; len(got) != 0 {
+		t.Errorf("at page 2 the store held %v, want the open year still held back", got)
+	}
+	// Page 2 returned 2023, which is what proves 2024 complete — so 2024 is
+	// filed before page 3 is even requested. This is the streaming property:
+	// a whole year is readable while the walk is still running.
+	if got := fmt.Sprint(atPage[3]); got != "[s2024a s2024b]" {
+		t.Errorf("at page 3 the store held %v, want 2024 already filed", atPage[3])
+	}
+	// And the finished walk has everything.
+	if got := fmt.Sprint(a.stashIDsOf(sr.ID)); got != "[s2022a s2022b s2023a s2023b s2024a s2024b]" {
+		t.Errorf("after the walk the store held %v, want the whole catalogue", a.stashIDsOf(sr.ID))
+	}
+}
+
+// Streaming must not cost the numbering. A year is numbered oldest-first
+// however many pages it arrived over, because it is held until complete — a
+// naive page-by-page write would number the DESC-ordered newest scene as
+// episode 1 and stand every year on its head.
+func TestStreamedCatalogueStillNumbersEachYearOldestFirst(t *testing.T) {
+	a := newAdultHarness(t, true)
+	a.seedThreeYears()
+	// One scene per page, so every year spans two pages and no year can be
+	// numbered from a single response.
+	a.adult.pageSize = 1
+
+	sr := a.addSite("site-1")
+	want := []struct {
+		season, number int
+		stashID        string
+	}{
+		{2022, 1, "s2022a"}, {2022, 2, "s2022b"},
+		{2023, 1, "s2023a"}, {2023, 2, "s2023b"},
+		{2024, 1, "s2024a"}, {2024, 2, "s2024b"},
+	}
+	got := a.episodes(sr.ID)
+	if len(got) != len(want) {
+		t.Fatalf("episodes = %+v, want %d", got, len(want))
+	}
+	for i, w := range want {
+		if got[i].SeasonNumber != w.season || got[i].EpisodeNumber != w.number || got[i].StashID != w.stashID {
+			t.Errorf("episode %d = S%dE%d %s, want S%dE%d %s", i,
+				got[i].SeasonNumber, got[i].EpisodeNumber, got[i].StashID,
+				w.season, w.number, w.stashID)
+		}
+	}
+}
+
+// The re-walk the refresh sweep makes goes through the same streaming walk, and
+// still ends with today's semantics: a number already assigned is kept, and a
+// scene the provider back-filled is appended after the year's highest.
+func TestRewalkKeepsExistingNumbersAndAppendsBackfills(t *testing.T) {
+	a := newAdultHarness(t, true)
+	a.seedThreeYears()
+	ctx := context.Background()
+
+	sr := a.addSite("site-1")
+	before := map[string]int{}
+	for _, e := range a.episodes(sr.ID) {
+		before[e.StashID] = e.EpisodeNumber
+	}
+
+	// The provider gains a 2023 scene older than both it already published —
+	// the back-fill numberScenes' stability rule is written for.
+	a.adult.scenes["site-1"] = append(a.adult.scenes["site-1"], core.SceneMeta{
+		StashID: "s2023backfill", SiteStashID: "site-1", Title: "found later",
+		Date: date(2023, time.January, 2),
+	})
+	if err := a.mgr.SyncSite(ctx, sr.ID); err != nil {
+		t.Fatalf("SyncSite again: %v", err)
+	}
+
+	after := map[string]int{}
+	for _, e := range a.episodes(sr.ID) {
+		after[e.StashID] = e.EpisodeNumber
+	}
+	for id, number := range before {
+		if after[id] != number {
+			t.Errorf("scene %s renumbered %d -> %d on a re-walk", id, number, after[id])
+		}
+	}
+	// Appended after the year's highest rather than inserted at its date.
+	if after["s2023backfill"] != 3 {
+		t.Errorf("back-filled scene numbered %d, want 3 (after the year's highest)",
+			after["s2023backfill"])
+	}
+	if len(after) != 7 {
+		t.Errorf("episodes = %d, want the original 6 plus the back-fill", len(after))
+	}
+}
+
+// A walk that fails part-way keeps what it had already published. That is the
+// point of writing additively: writeScenes only ever upserts, so an interrupted
+// walk leaves a partial catalogue rather than none, and the job's retry fills
+// in the rest.
+func TestFailedWalkKeepsTheYearsItAlreadyPublished(t *testing.T) {
+	a := newAdultHarness(t, true)
+	a.seedThreeYears()
+	ctx := context.Background()
+
+	sr, err := a.mgr.AddSite(ctx, "site-1", nil)
+	if err != nil {
+		t.Fatalf("AddSite: %v", err)
+	}
+	// Fail once 2024 has been published — the third page, by which point page
+	// two has proven 2024 complete.
+	a.mgr.adult = &pageObserver{inner: a.adult, before: func(page int) {
+		if page >= 3 {
+			a.adult.searchErr = errors.New("provider went away")
+		}
+	}}
+	if err := a.mgr.SyncSite(ctx, sr.ID); err == nil {
+		t.Fatal("SyncSite succeeded against a provider that failed mid-walk")
+	}
+	if got := fmt.Sprint(a.stashIDsOf(sr.ID)); got != "[s2024a s2024b]" {
+		t.Errorf("a failed walk left %v, want the year it had already published", a.stashIDsOf(sr.ID))
+	}
+
+	// And the retry completes it, with the published year's numbers intact.
+	a.adult.searchErr = nil
+	a.mgr.adult = a.adult
+	if err := a.mgr.SyncSite(ctx, sr.ID); err != nil {
+		t.Fatalf("SyncSite retry: %v", err)
+	}
+	if got := fmt.Sprint(a.stashIDsOf(sr.ID)); got != "[s2022a s2022b s2023a s2023b s2024a s2024b]" {
+		t.Errorf("the retry left %v, want the whole catalogue", a.stashIDsOf(sr.ID))
+	}
+	for _, e := range a.episodes(sr.ID) {
+		if e.StashID == "s2024a" && e.EpisodeNumber != 1 {
+			t.Errorf("s2024a is episode %d after the retry, want 1", e.EpisodeNumber)
 		}
 	}
 }

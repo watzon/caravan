@@ -73,7 +73,16 @@ type siteDetailJSON struct {
 	// while this page is one a granted member reads. Deriving it in the SPA
 	// would mean either handing the setting to every reader or showing the link
 	// to admins alone, and a link off a record is not an admin fact.
-	ProviderURL string         `json:"provider_url"`
+	ProviderURL string `json:"provider_url"`
+	// Cataloguing is true while a catalogue walk for this site is queued or
+	// running (core.JobSyncSite).
+	//
+	// It exists because the walk is now something the reader can WATCH: the
+	// scenes land a release year at a time while the job runs, so the page
+	// polls itself until this goes false. Without it the page cannot tell a
+	// site that is still being indexed from one the provider has nothing for,
+	// and those two need opposite words on screen.
+	Cataloguing bool           `json:"cataloguing"`
 	Years       []siteYearJSON `json:"years"`
 }
 
@@ -216,8 +225,41 @@ func (s *server) handleGetSite(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, siteDetailJSON{
 		siteJSON:    dto,
 		ProviderURL: s.siteProviderURL(ctx, sr.StashID),
+		Cataloguing: s.siteCataloguing(ctx, sr.ID),
 		Years:       years,
 	})
+}
+
+// siteCataloguing reports whether a catalogue walk for this site is queued or
+// running.
+//
+// The match is on the payload's series id rather than on the payload string,
+// which is why this reads the open jobs instead of asking HasOpenJob: the
+// sync_site payload carries SearchNow too, so the same site has two possible
+// encodings and an exact-string match would miss one of them.
+//
+// A queue read that fails answers "not cataloguing" rather than failing the
+// page, exactly as siteProviderURL does with its setting. The cost of being
+// wrong is a page that stops polling a second early — against losing the whole
+// site view to a transient database error, that is not a trade worth making.
+func (s *server) siteCataloguing(ctx context.Context, seriesID int64) bool {
+	jobs, err := s.st.OpenJobsByKind(ctx, core.JobSyncSite)
+	if err != nil {
+		s.log.Error("read open catalogue walks", "series_id", seriesID, "error", err)
+		return false
+	}
+	for _, job := range jobs {
+		var payload core.JobSyncSitePayload
+		if err := json.Unmarshal([]byte(job.Payload), &payload); err != nil {
+			// A payload this process cannot read is a job it did not write.
+			// It is not evidence about this site either way.
+			continue
+		}
+		if payload.SeriesID == seriesID {
+			return true
+		}
+	}
+	return false
 }
 
 // siteProviderURL is the site's page on the configured endpoint's website.

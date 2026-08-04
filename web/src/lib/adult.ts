@@ -12,6 +12,21 @@ import type { Scene, SceneMeta, SessionUser, Site } from './api/types';
 import { UNKNOWN } from './format';
 
 /**
+ * How often a site's page re-reads itself while its catalogue walk is running.
+ *
+ * Three seconds rather than the Tasks board's five: this is watched, not
+ * glanced at — somebody has just added a site and is waiting to see it fill in
+ * — and the read is one site's own rows rather than the whole job queue.
+ *
+ * It lives here rather than in AdultSite.svelte's module block so the page and
+ * its test agree on one number. tsconfig compiles TypeScript files only, so a
+ * constant exported from a component resolves through the ambient `*.svelte`
+ * shim — which declares a default export and nothing else — and any named
+ * import of it fails to type-check.
+ */
+export const CATALOGUING_POLL_MS = 3000;
+
+/**
  * Whether the adult module exists for this browser.
  *
  * The server has already combined the two conditions — the server-wide switch

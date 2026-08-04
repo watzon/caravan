@@ -1411,6 +1411,12 @@ export interface SiteDetail extends Site {
    * configured, and that setting is admin-only while this page is not.
    */
   provider_url: string;
+  /**
+   * A catalogue walk for this site is queued or running, so `years` is still
+   * filling in. The walk publishes a whole release year at a time, so the page
+   * polls while this is true and the years appear as they land.
+   */
+  cataloguing: boolean;
   years: SiteYear[];
 }
 

@@ -1766,3 +1766,110 @@ func TestApproveSceneLandsTheEpisodeSynchronously(t *testing.T) {
 		t.Errorf("the approval queued %d catalogue walks, want the walk done inline", len(queued))
 	}
 }
+
+// ---- cataloguing: the site page can see the walk running -------------------
+
+// queueSiteSync puts an open sync_site job in the queue by hand, the way
+// POST /adult/sites does. searchNow varies the payload deliberately: the flag
+// is part of the encoding, which is exactly why the detail handler cannot ask
+// HasOpenJob for an exact payload match.
+func queueSiteSync(t *testing.T, st *store.Store, seriesID int64, searchNow bool) *core.Job {
+	t.Helper()
+	payload, err := json.Marshal(core.JobSyncSitePayload{SeriesID: seriesID, SearchNow: searchNow})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	job := &core.Job{Kind: core.JobSyncSite, Payload: string(payload)}
+	if err := st.EnqueueJob(context.Background(), job); err != nil {
+		t.Fatalf("EnqueueJob: %v", err)
+	}
+	return job
+}
+
+func siteCataloguingFlag(t *testing.T, h http.Handler, id int64) bool {
+	t.Helper()
+	rec := do(t, h, http.MethodGet, "/api/v1/adult/sites/"+itoa(id), "")
+	wantStatus(t, rec, http.StatusOK)
+	var body siteDetailJSON
+	decodeBody(t, rec, &body)
+	return body.Cataloguing
+}
+
+// The flag has to be true for BOTH payload spellings: the site is the subject,
+// and search_now is only a passenger. This fails against a HasOpenJob-style
+// exact-payload match, which would answer true for one of the two and false for
+// the other.
+func TestSiteDetailReportsCataloguingForEitherPayload(t *testing.T) {
+	for _, searchNow := range []bool{false, true} {
+		name := "search_now off"
+		if searchNow {
+			name = "search_now on"
+		}
+		t.Run(name, func(t *testing.T) {
+			h, st, _ := newTestServer(t)
+			enableAdult(t, st)
+			site := seedSite(t, st)
+
+			if siteCataloguingFlag(t, h, site.ID) {
+				t.Fatal("cataloguing is true with no job queued")
+			}
+			queueSiteSync(t, st, site.ID, searchNow)
+			if !siteCataloguingFlag(t, h, site.ID) {
+				t.Error("cataloguing is false while a walk for this site is queued")
+			}
+		})
+	}
+}
+
+// A running job counts as much as a pending one — the walk is publishing years
+// while it runs, which is precisely when the page most needs to keep polling.
+func TestSiteDetailReportsCataloguingWhileTheWalkRuns(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	enableAdult(t, st)
+	site := seedSite(t, st)
+	ctx := context.Background()
+
+	queueSiteSync(t, st, site.ID, false)
+	claimed, err := st.ClaimJob(ctx, []string{core.JobSyncSite}, time.Minute)
+	if err != nil {
+		t.Fatalf("ClaimJob: %v", err)
+	}
+	if claimed == nil {
+		t.Fatal("no job to claim")
+	}
+	if !siteCataloguingFlag(t, h, site.ID) {
+		t.Error("cataloguing is false while the walk is running")
+	}
+
+	if err := st.CompleteJob(ctx, claimed.ID); err != nil {
+		t.Fatalf("CompleteJob: %v", err)
+	}
+	if siteCataloguingFlag(t, h, site.ID) {
+		t.Error("cataloguing is still true after the walk finished")
+	}
+}
+
+// A walk of ANOTHER site says nothing about this one. Without the series-id
+// match, every site page would poll itself for as long as any site anywhere was
+// being indexed.
+func TestSiteDetailIgnoresAnotherSitesWalk(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	enableAdult(t, st)
+	ctx := context.Background()
+	site := seedSite(t, st)
+	other := &core.Series{
+		StashID: "site-other", Title: "Other", SortTitle: "other",
+		Kind: core.SeriesKindAdult, Monitored: true,
+	}
+	if err := st.UpsertSeries(ctx, other); err != nil {
+		t.Fatalf("UpsertSeries: %v", err)
+	}
+
+	queueSiteSync(t, st, other.ID, false)
+	if siteCataloguingFlag(t, h, site.ID) {
+		t.Error("a walk of another site marked this one as cataloguing")
+	}
+	if !siteCataloguingFlag(t, h, other.ID) {
+		t.Error("the site actually being walked does not read as cataloguing")
+	}
+}
