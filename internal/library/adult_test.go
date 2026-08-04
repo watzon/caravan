@@ -135,11 +135,16 @@ func (a *adultHarness) seedBrazzers() {
 	}
 }
 
+// addSite adds a site AND walks its catalogue, which is what the tests below
+// are almost always about. The ordinary AddSite defers the walk to a job (see
+// TestAddSiteDefersTheCatalogueWalk); this helper is the waiting variant so
+// that every test written against the old, always-walking AddSite still asserts
+// the same thing about the same walk.
 func (a *adultHarness) addSite(id string) *core.Series {
 	a.t.Helper()
-	sr, err := a.mgr.AddSite(context.Background(), id)
+	sr, err := a.mgr.AddSiteAndWait(context.Background(), id, nil)
 	if err != nil {
-		a.t.Fatalf("AddSite: %v", err)
+		a.t.Fatalf("AddSiteAndWait: %v", err)
 	}
 	return sr
 }
@@ -338,7 +343,7 @@ func TestAddSiteRefusesWhenTheModuleIsDisabled(t *testing.T) {
 	h := newAdultHarness(t, false)
 	h.seedBrazzers()
 
-	if _, err := h.mgr.AddSite(context.Background(), "site-1"); !errors.Is(err, ErrAdultDisabled) {
+	if _, err := h.mgr.AddSite(context.Background(), "site-1", nil); !errors.Is(err, ErrAdultDisabled) {
 		t.Errorf("AddSite error = %v, want ErrAdultDisabled", err)
 	}
 	if h.adult.calls != 0 {
@@ -349,7 +354,7 @@ func TestAddSiteRefusesWhenTheModuleIsDisabled(t *testing.T) {
 func TestAddSiteReportsAMissingProvider(t *testing.T) {
 	h := newAdultHarness(t, true)
 	h.mgr.adult = nil
-	if _, err := h.mgr.AddSite(context.Background(), "site-1"); !errors.Is(err, core.ErrNoAdultProvider) {
+	if _, err := h.mgr.AddSite(context.Background(), "site-1", nil); !errors.Is(err, core.ErrNoAdultProvider) {
 		t.Errorf("AddSite error = %v, want ErrNoAdultProvider", err)
 	}
 }
@@ -907,5 +912,182 @@ func TestObfuscatedSceneStaysParkedWhenTheTitleNamesAnotherScene(t *testing.T) {
 	}
 	if got := h.grabStatus(grab.GrabID); got != core.GrabStatusFailed {
 		t.Errorf("grab status = %q, want %q", got, core.GrabStatusFailed)
+	}
+}
+
+// ---- the deferred catalogue walk -------------------------------------------
+
+// AddSite is the modal's path and answers after ONE provider round trip. The
+// scenes arrive later, from the core.JobSyncSite the API queues; SyncSite is
+// that job's body, and running it lands exactly what the old synchronous
+// AddSite used to.
+func TestAddSiteDefersTheCatalogueWalk(t *testing.T) {
+	a := newAdultHarness(t, true)
+	a.seedBrazzers()
+	ctx := context.Background()
+
+	sr, err := a.mgr.AddSite(ctx, "site-1", nil)
+	if err != nil {
+		t.Fatalf("AddSite: %v", err)
+	}
+	if sr.ID == 0 || sr.Title != "Brazzers" || sr.Kind != core.SeriesKindAdult {
+		t.Fatalf("site row = %+v", sr)
+	}
+	// One call: GetSite. A page of SearchScenes would be the walk happening
+	// inside the request, which is the whole thing this split removed.
+	if a.adult.calls != 1 {
+		t.Fatalf("AddSite made %d provider calls, want only the GetSite", a.adult.calls)
+	}
+	if eps := a.episodes(sr.ID); len(eps) != 0 {
+		t.Fatalf("AddSite filed %d scenes, want the walk deferred: %+v", len(eps), eps)
+	}
+
+	if err := a.mgr.SyncSite(ctx, sr.ID); err != nil {
+		t.Fatalf("SyncSite: %v", err)
+	}
+	eps := a.episodes(sr.ID)
+	if len(eps) != 3 {
+		t.Fatalf("SyncSite filed %d scenes, want the seeded 3: %+v", len(eps), eps)
+	}
+	seasons, err := a.st.ListSeasons(ctx, sr.ID)
+	if err != nil {
+		t.Fatalf("ListSeasons: %v", err)
+	}
+	if len(seasons) != 2 {
+		t.Fatalf("years = %+v, want 2022 and 2023", seasons)
+	}
+}
+
+// A second add while the first walk is still pending is a metadata refresh of
+// the same row, not a second site. The queue's own dedupe is the API's half of
+// this (see TestAddSiteQueuesTheCatalogueWalkOnce); this is the row's half.
+func TestAddSiteTwiceIsOneSite(t *testing.T) {
+	a := newAdultHarness(t, true)
+	a.seedBrazzers()
+	ctx := context.Background()
+
+	first, err := a.mgr.AddSite(ctx, "site-1", nil)
+	if err != nil {
+		t.Fatalf("AddSite: %v", err)
+	}
+	second, err := a.mgr.AddSite(ctx, "site-1", nil)
+	if err != nil {
+		t.Fatalf("AddSite again: %v", err)
+	}
+	if first.ID != second.ID {
+		t.Fatalf("a second add made site %d beside %d", second.ID, first.ID)
+	}
+	sites, err := a.st.ListSeriesByKind(ctx, core.SeriesKindAdult)
+	if err != nil {
+		t.Fatalf("ListSeriesByKind: %v", err)
+	}
+	if len(sites) != 1 {
+		t.Fatalf("sites = %+v, want one row", sites)
+	}
+}
+
+// AddSiteAndWait is what approving a scene request calls, and it must have the
+// episode rows in place by the time it returns — the approval is granting one
+// of them.
+func TestAddSiteAndWaitLandsTheCatalogueBeforeReturning(t *testing.T) {
+	a := newAdultHarness(t, true)
+	a.seedBrazzers()
+
+	sr, err := a.mgr.AddSiteAndWait(context.Background(), "site-1", nil)
+	if err != nil {
+		t.Fatalf("AddSiteAndWait: %v", err)
+	}
+	eps := a.episodes(sr.ID)
+	if len(eps) != 3 {
+		t.Fatalf("episodes = %+v, want the whole catalogue filed", eps)
+	}
+}
+
+// A site the walk can no longer find is not a failure. The job outlives the
+// request that made it, so the site can be deleted, or the module switched off,
+// between the two — and a job that failed for either would retry forever.
+func TestSyncSiteIsANoOpWhenThereIsNothingToWalk(t *testing.T) {
+	a := newAdultHarness(t, true)
+	a.seedBrazzers()
+	ctx := context.Background()
+
+	if err := a.mgr.SyncSite(ctx, 4242); err != nil {
+		t.Errorf("SyncSite for an absent site = %v, want nil", err)
+	}
+	// A television series id is not a site, and walking it would file a stash
+	// catalogue under a TMDB show.
+	tv := &core.Series{TMDBID: 1396, Title: "Breaking Bad", SortTitle: "breaking bad", Monitored: true}
+	if err := a.st.UpsertSeries(ctx, tv); err != nil {
+		t.Fatalf("UpsertSeries: %v", err)
+	}
+	if err := a.mgr.SyncSite(ctx, tv.ID); err != nil {
+		t.Errorf("SyncSite for a television series = %v, want nil", err)
+	}
+	if eps := a.episodes(tv.ID); len(eps) != 0 {
+		t.Errorf("SyncSite filed %d scenes under a television series", len(eps))
+	}
+
+	sr, err := a.mgr.AddSite(ctx, "site-1", nil)
+	if err != nil {
+		t.Fatalf("AddSite: %v", err)
+	}
+	if err := a.st.SetAdultEnabled(ctx, false); err != nil {
+		t.Fatalf("SetAdultEnabled: %v", err)
+	}
+	before := a.adult.calls
+	if err := a.mgr.SyncSite(ctx, sr.ID); err != nil {
+		t.Errorf("SyncSite with the module off = %v, want a silent no-op", err)
+	}
+	if a.adult.calls != before {
+		t.Errorf("SyncSite reached the provider %d times with the module off", a.adult.calls-before)
+	}
+}
+
+// An unmonitored site's scenes land unmonitored, so nothing it publishes is
+// wanted. Without this the "Add and monitor" checkbox would be decorative: the
+// wanted list reads episodes.monitored, not the site's.
+func TestAddSiteUnmonitoredLeavesItsScenesUnmonitored(t *testing.T) {
+	a := newAdultHarness(t, true)
+	a.seedBrazzers()
+	ctx := context.Background()
+
+	sr, err := a.mgr.AddSiteAndWait(ctx, "site-1", ptr(false))
+	if err != nil {
+		t.Fatalf("AddSiteAndWait: %v", err)
+	}
+	if sr.Monitored {
+		t.Fatal("the site row is monitored after an unmonitored add")
+	}
+	eps := a.episodes(sr.ID)
+	if len(eps) != 3 {
+		t.Fatalf("episodes = %+v, want the catalogue filed", eps)
+	}
+	for _, e := range eps {
+		if e.Monitored {
+			t.Errorf("scene %q is monitored under an unmonitored site", e.StashID)
+		}
+	}
+	seasons, err := a.st.ListSeasons(ctx, sr.ID)
+	if err != nil {
+		t.Fatalf("ListSeasons: %v", err)
+	}
+	for _, se := range seasons {
+		if se.Monitored {
+			t.Errorf("year %d is monitored under an unmonitored site", se.Number)
+		}
+	}
+
+	// And the default is unchanged: no opinion is a monitored site with
+	// monitored scenes.
+	b := newAdultHarness(t, true)
+	b.seedBrazzers()
+	kept := b.addSite("site-1")
+	if !kept.Monitored {
+		t.Fatal("an add with no opinion left the site unmonitored")
+	}
+	for _, e := range b.episodes(kept.ID) {
+		if !e.Monitored {
+			t.Errorf("scene %q is unmonitored under a monitored site", e.StashID)
+		}
 	}
 }

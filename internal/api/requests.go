@@ -311,14 +311,17 @@ func (s *server) handleApproveRequest(w http.ResponseWriter, r *http.Request) {
 		if minAvailability == "" {
 			minAvailability = req.MinAvailability
 		}
-		m, err := s.addMovieToLibrary(ctx, req.TMDBID, body.SearchNow, minAvailability)
+		// An approval carries no monitored choice: granting somebody's request
+		// and then not following the title would be a strange thing to mean, so
+		// nil keeps the historical "monitored" answer.
+		m, err := s.addMovieToLibrary(ctx, req.TMDBID, body.SearchNow, minAvailability, nil)
 		if err != nil {
 			s.writeManagerError(w, "add movie", err)
 			return
 		}
 		out["movie"] = movieDTO(*m)
 	default:
-		sr, err := s.addSeriesToLibrary(ctx, req.TMDBID, body.SearchNow, body.Seasons)
+		sr, err := s.addSeriesToLibrary(ctx, req.TMDBID, body.SearchNow, body.Seasons, nil)
 		if err != nil {
 			s.writeManagerError(w, "add series", err)
 			return
@@ -441,7 +444,12 @@ func (s *server) approveScene(ctx context.Context, w http.ResponseWriter, r *htt
 		return nil, errNoSceneSite
 	}
 
-	sr, err := s.mgr.AddSite(ctx, scene.SiteStashID)
+	// AddSiteAndWait, not AddSite: the scenes have to exist by the time this
+	// returns. The ordinary add defers the catalogue walk to a durable job, and
+	// an approval that answered before the walk would close the request against
+	// an episode row that does not exist yet — so the granted scene would not
+	// be wanted, and the next sweep would search for nothing.
+	sr, err := s.mgr.AddSiteAndWait(ctx, scene.SiteStashID, nil)
 	if err != nil {
 		s.writeManagerError(w, "add site", err)
 		return nil, err

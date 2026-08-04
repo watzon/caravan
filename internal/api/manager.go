@@ -24,10 +24,17 @@ type Manager interface {
 	// metadata, and returns the stored movie. minAvailability is the release
 	// stage its automatic search waits for; an empty string keeps an existing
 	// row's choice and defaults a new one.
-	AddMovie(ctx context.Context, tmdbID int64, minAvailability string) (*core.Movie, error)
+	//
+	// monitored is the add dialog's "Add and monitor" checkbox. Nil is the
+	// historical behaviour — monitored — and is what every caller that has no
+	// opinion passes, including request approval. It applies to a NEW row only;
+	// re-adding something already in the library keeps the owner's flag.
+	AddMovie(ctx context.Context, tmdbID int64, minAvailability string, monitored *bool) (*core.Movie, error)
 
 	// AddSeries adds a series (with its seasons and episodes) by provider id.
-	AddSeries(ctx context.Context, tmdbID int64) (*core.Series, error)
+	// monitored is the series-level flag and reads exactly as AddMovie's; the
+	// season and episode rows keep their own monitored semantics.
+	AddSeries(ctx context.Context, tmdbID int64, monitored *bool) (*core.Series, error)
 
 	// RemoveMovie stops tracking a movie. With deleteFiles set it deletes the
 	// movie's files from disk first; without it, only the rows go and a rescan
@@ -53,7 +60,20 @@ type Manager interface {
 	// path is not reachable through the HTTP layer — every route that calls
 	// this sits behind requireAdult — but the manager is the thing that owns
 	// the invariant, and a second caller is one refactor away.
-	AddSite(ctx context.Context, stashID string) (*core.Series, error)
+	//
+	// It does NOT walk the site's scene catalogue: that is hundreds of provider
+	// round trips for a large site, and it is a core.JobSyncSite the caller
+	// queues (see handleAddSite). monitored reads as AddMovie's does.
+	AddSite(ctx context.Context, stashID string, monitored *bool) (*core.Series, error)
+
+	// AddSiteAndWait is AddSite with the catalogue walked before it returns.
+	//
+	// Approving a scene request is the one caller that needs it, and needs it
+	// for a reason the split makes easy to lose: the approval grants a specific
+	// scene, and a scene is an episode row that the walk is the only thing that
+	// creates. Queueing the walk instead would answer "approved" for a request
+	// that has, at that moment, made nothing wanted.
+	AddSiteAndWait(ctx context.Context, stashID string, monitored *bool) (*core.Series, error)
 
 	// Metadata returns the configured metadata provider, or nil when none is
 	// configured (no TMDB API key yet). The search endpoint reports that as a

@@ -530,7 +530,13 @@ export interface ScanSummary {
 /** Body for POST /library/movies and POST /library/series. */
 export interface AddItemRequest {
   tmdb_id: number;
-  monitored: boolean;
+  /**
+   * The "Add and monitor" checkbox. Omitting it means monitored, which is the
+   * behaviour these endpoints have always had and what request approval still
+   * relies on; sending false lands the new row unmonitored. A title already in
+   * the library keeps its owner's flag either way.
+   */
+  monitored?: boolean;
   quality_profile_id?: number;
   /** Movies only: queue the automatic search as soon as the add succeeds. */
   search_now?: boolean;
@@ -548,6 +554,22 @@ export interface AddItemRequest {
    * it defaults a new movie to 'released' and leaves a re-add's choice alone.
    */
   min_availability?: MinAvailability;
+}
+
+/**
+ * Body for POST /adult/sites. A site is named by its stash-box id and nothing
+ * else — there is no tmdb_id counterpart.
+ */
+export interface AddSiteRequest {
+  stash_id: string;
+  /** Reads exactly as AddItemRequest.monitored does. */
+  monitored?: boolean;
+  /**
+   * Queue a search for every wanted scene. It happens after the catalogue walk
+   * the add defers to a background job, because before the walk the site has no
+   * scenes to search for.
+   */
+  search_now?: boolean;
 }
 
 /**

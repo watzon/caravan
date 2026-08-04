@@ -22,7 +22,10 @@ import (
 // minAvailability is the release stage the movie's automatic search waits for
 // (a core.Availability* constant). Empty means "no opinion": a new row gets
 // the released default, an existing row keeps whatever it has.
-func (m *Manager) AddMovie(ctx context.Context, tmdbID int64, minAvailability string) (*core.Movie, error) {
+//
+// monitored is the "Add and monitor" choice and follows the same rule
+// (monitoredOrDefault): nil means monitored, and it decides a new row only.
+func (m *Manager) AddMovie(ctx context.Context, tmdbID int64, minAvailability string, monitored *bool) (*core.Movie, error) {
 	if m.provider == nil {
 		return nil, core.ErrNoMetadataProvider
 	}
@@ -38,7 +41,7 @@ func (m *Manager) AddMovie(ctx context.Context, tmdbID int64, minAvailability st
 		return nil, fmt.Errorf("library: movie %d not found", tmdbID)
 	}
 
-	mv, _, err := m.upsertMovieRow(ctx, meta, movieDir(meta.Title, meta.Year), "", minAvailability)
+	mv, _, err := m.upsertMovieRow(ctx, meta, movieDir(meta.Title, meta.Year), "", minAvailability, monitored)
 	return mv, err
 }
 
@@ -47,7 +50,13 @@ func (m *Manager) AddMovie(ctx context.Context, tmdbID int64, minAvailability st
 // The whole tree lands even though no episode is on disk: that is what makes
 // the series view able to show what is missing (see upsertSeriesTree). Like
 // AddMovie it touches no files.
-func (m *Manager) AddSeries(ctx context.Context, tmdbID int64) (*core.Series, error) {
+//
+// monitored is the series-level "Add and monitor" choice (monitoredOrDefault).
+// It is the flag that gates the wanted list, and it is the only one this
+// touches: the season and episode rows the tree writes keep the monitored
+// semantics they have always had, because unmonitoring a whole tree row by row
+// would be a different decision from not following the series.
+func (m *Manager) AddSeries(ctx context.Context, tmdbID int64, monitored *bool) (*core.Series, error) {
 	if m.provider == nil {
 		return nil, core.ErrNoMetadataProvider
 	}
@@ -63,11 +72,11 @@ func (m *Manager) AddSeries(ctx context.Context, tmdbID int64) (*core.Series, er
 		return nil, fmt.Errorf("library: series %d not found", tmdbID)
 	}
 
-	sr, _, err := m.upsertSeriesRow(ctx, meta, seriesDir(meta.Title, meta.Year), "")
+	sr, _, err := m.upsertSeriesRow(ctx, meta, seriesDir(meta.Title, meta.Year), "", monitored)
 	if err != nil {
 		return nil, err
 	}
-	if err := m.upsertSeriesTree(ctx, sr.ID, meta); err != nil {
+	if err := m.upsertSeriesTree(ctx, sr, meta); err != nil {
 		return nil, err
 	}
 	return sr, nil

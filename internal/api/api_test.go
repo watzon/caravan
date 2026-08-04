@@ -45,6 +45,11 @@ type stubManager struct {
 	// prove a scene approval added the SITE rather than something else.
 	addSiteCalls []string
 
+	// addSiteSceneStashID is the scene AddSiteAndWait files as an episode.
+	// Empty derives one from the site id; a test that approves a request for a
+	// named scene sets it so the row it looks for is the row it asked for.
+	addSiteSceneStashID string
+
 	// scanStarted receives once per Scan call; scanRelease, when non-nil,
 	// blocks Scan until the test lets it finish.
 	scanStarted chan struct{}
@@ -99,25 +104,28 @@ func (m *stubManager) Scan(ctx context.Context) error {
 	return m.scanErr
 }
 
-func (m *stubManager) AddMovie(ctx context.Context, tmdbID int64, minAvailability string) (*core.Movie, error) {
+func (m *stubManager) AddMovie(ctx context.Context, tmdbID int64, minAvailability string, monitored *bool) (*core.Movie, error) {
 	if m.addErr != nil {
 		return nil, m.addErr
 	}
-	// The stub persists minAvailability verbatim (the store defaults an empty
-	// one), so handler tests can read the row to prove the plumbing.
+	// The stub persists minAvailability and the monitored choice verbatim (the
+	// store defaults an empty availability), so handler tests can read the row
+	// back to prove the plumbing. It follows the real manager's rule for an
+	// absent choice: nil is monitored.
 	mv := &core.Movie{TMDBID: tmdbID, Title: "Stub Movie", SortTitle: "stub movie", Year: 2008,
-		Monitored: true, MinAvailability: minAvailability}
+		Monitored: monitored == nil || *monitored, MinAvailability: minAvailability}
 	if err := m.st.UpsertMovie(ctx, mv); err != nil {
 		return nil, err
 	}
 	return mv, nil
 }
 
-func (m *stubManager) AddSeries(ctx context.Context, tmdbID int64) (*core.Series, error) {
+func (m *stubManager) AddSeries(ctx context.Context, tmdbID int64, monitored *bool) (*core.Series, error) {
 	if m.addErr != nil {
 		return nil, m.addErr
 	}
-	sr := &core.Series{TMDBID: tmdbID, Title: "Stub Series", SortTitle: "stub series", Year: 2016, Monitored: true}
+	sr := &core.Series{TMDBID: tmdbID, Title: "Stub Series", SortTitle: "stub series", Year: 2016,
+		Monitored: monitored == nil || *monitored}
 	if err := m.st.UpsertSeries(ctx, sr); err != nil {
 		return nil, err
 	}
@@ -177,8 +185,10 @@ func (m *stubManager) MatchUnmatched(ctx context.Context, id int64, mediaType st
 }
 
 // AddSite writes an adult-kind series the way library.AddSite does, so the
-// handler tests read back the same shape a real manager produces.
-func (m *stubManager) AddSite(ctx context.Context, stashID string) (*core.Series, error) {
+// handler tests read back the same shape a real manager produces — and, like
+// the real one, it files NO scenes. The catalogue walk is a job now, and a stub
+// that quietly did it inline would hide the very split these tests defend.
+func (m *stubManager) AddSite(ctx context.Context, stashID string, monitored *bool) (*core.Series, error) {
 	m.mu.Lock()
 	m.addSiteCalls = append(m.addSiteCalls, stashID)
 	m.mu.Unlock()
@@ -187,10 +197,36 @@ func (m *stubManager) AddSite(ctx context.Context, stashID string) (*core.Series
 	}
 	sr := &core.Series{
 		StashID: stashID, Title: "Stub Site", SortTitle: "stub site",
-		Kind: core.SeriesKindAdult, Monitored: true,
+		Kind: core.SeriesKindAdult, Monitored: monitored == nil || *monitored,
 		Path: store.AdultLibraryRoot + "/Stub Site",
 	}
 	if err := m.st.UpsertSeries(ctx, sr); err != nil {
+		return nil, err
+	}
+	return sr, nil
+}
+
+// AddSiteAndWait is AddSite plus the one scene the walk would have filed.
+//
+// That scene is what makes the approve-a-scene-request regression real: it
+// exists only on this path, so a caller that switched to the deferred AddSite
+// would leave the request approved with no episode row behind it, and the test
+// would see exactly that.
+func (m *stubManager) AddSiteAndWait(ctx context.Context, stashID string, monitored *bool) (*core.Series, error) {
+	sr, err := m.AddSite(ctx, stashID, monitored)
+	if err != nil {
+		return nil, err
+	}
+	episode := &core.Episode{
+		SeriesID: sr.ID, SeasonNumber: 2022, EpisodeNumber: 1,
+		StashID: m.addSiteSceneStashID, Title: "Stub Scene",
+		AirDate:   time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC),
+		Monitored: true,
+	}
+	if episode.StashID == "" {
+		episode.StashID = "stub-scene-" + stashID
+	}
+	if err := m.st.UpsertEpisode(ctx, episode); err != nil {
 		return nil, err
 	}
 	return sr, nil

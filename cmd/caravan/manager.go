@@ -250,32 +250,55 @@ func (a *libraryAdapter) Scan(ctx context.Context) error {
 	return nil
 }
 
-func (a *libraryAdapter) AddMovie(ctx context.Context, tmdbID int64, minAvailability string) (*core.Movie, error) {
+func (a *libraryAdapter) AddMovie(ctx context.Context, tmdbID int64, minAvailability string, monitored *bool) (*core.Movie, error) {
 	mgr, err := a.current(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return mgr.AddMovie(ctx, tmdbID, minAvailability)
+	return mgr.AddMovie(ctx, tmdbID, minAvailability, monitored)
 }
 
-func (a *libraryAdapter) AddSeries(ctx context.Context, tmdbID int64) (*core.Series, error) {
+func (a *libraryAdapter) AddSeries(ctx context.Context, tmdbID int64, monitored *bool) (*core.Series, error) {
 	mgr, err := a.current(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return mgr.AddSeries(ctx, tmdbID)
+	return mgr.AddSeries(ctx, tmdbID, monitored)
 }
 
 // AddSite adds a site by stash-box id. It goes through current like every other
 // add, so the storage root and both providers are whatever the settings table
 // says right now — including "the module was switched off a moment ago", which
 // current resolves to a nil adult provider and library.AddSite refuses.
-func (a *libraryAdapter) AddSite(ctx context.Context, stashID string) (*core.Series, error) {
+func (a *libraryAdapter) AddSite(ctx context.Context, stashID string, monitored *bool) (*core.Series, error) {
 	mgr, err := a.current(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return mgr.AddSite(ctx, stashID)
+	return mgr.AddSite(ctx, stashID, monitored)
+}
+
+// AddSiteAndWait is AddSite with the catalogue walk inline, for the scene
+// approval path. Same current() resolution, same refusal when the module is off.
+func (a *libraryAdapter) AddSiteAndWait(ctx context.Context, stashID string, monitored *bool) (*core.Series, error) {
+	mgr, err := a.current(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return mgr.AddSiteAndWait(ctx, stashID, monitored)
+}
+
+// SyncSite walks one site's catalogue, and is what the core.JobSyncSite handler
+// runs. It resolves the manager per call like every other adapter method, so a
+// job queued before the module was switched off finds a Manager that refuses it
+// rather than one captured when the queue was still allowed to talk to
+// stash-box.
+func (a *libraryAdapter) SyncSite(ctx context.Context, seriesID int64) error {
+	mgr, err := a.current(ctx)
+	if err != nil {
+		return err
+	}
+	return mgr.SyncSite(ctx, seriesID)
 }
 
 // AdultMetadata is the provider the HTTP layer searches sites and scenes

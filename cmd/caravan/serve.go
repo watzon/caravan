@@ -242,7 +242,12 @@ func runServe(args []string) error {
 				logger.Info("metadata refresh complete",
 					"movies", res.Movies, "series", res.Series, "problems", len(res.Errors))
 				return nil
-			}))
+			}),
+		// The deferred catalogue walk POST /adult/sites queues instead of
+		// making its caller wait. Registered from here for the same reason the
+		// refresh is: the walk is the library manager's, and the queue is not
+		// allowed to know about it.
+		automation.WithHandler(core.JobSyncSite, automation.SyncSiteHandler(mgr.SyncSite)))
 
 	var watcher sync.WaitGroup
 	watcher.Add(2)

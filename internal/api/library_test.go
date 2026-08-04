@@ -837,3 +837,61 @@ func TestPatchMovieMinAvailability(t *testing.T) {
 		`{"min_availability":"released"}`)
 	wantStatus(t, rec, http.StatusBadRequest)
 }
+
+// ---- "Add and monitor" -----------------------------------------------------
+
+// The checkbox's contract on the wire: absent means monitored (which is what
+// every caller before it sent, and what request approval still sends), and an
+// explicit false lands the row unmonitored. It is a POINTER on the request
+// struct precisely so those two are different answers rather than the same one.
+func TestAddMonitoredContract(t *testing.T) {
+	for _, tt := range []struct {
+		name, path, body string
+		want             bool
+	}{
+		{name: "movie, omitted", path: "/api/v1/library/movies", body: `{"tmdb_id":78}`, want: true},
+		{name: "movie, true", path: "/api/v1/library/movies", body: `{"tmdb_id":78,"monitored":true}`, want: true},
+		{name: "movie, false", path: "/api/v1/library/movies", body: `{"tmdb_id":78,"monitored":false}`, want: false},
+		{name: "series, omitted", path: "/api/v1/library/series", body: `{"tmdb_id":1396}`, want: true},
+		{name: "series, true", path: "/api/v1/library/series", body: `{"tmdb_id":1396,"monitored":true}`, want: true},
+		{name: "series, false", path: "/api/v1/library/series", body: `{"tmdb_id":1396,"monitored":false}`, want: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h, _, _ := newTestServer(t)
+			rec := do(t, h, http.MethodPost, tt.path, tt.body)
+			wantStatus(t, rec, http.StatusCreated)
+			var created struct {
+				Monitored bool `json:"monitored"`
+			}
+			decodeBody(t, rec, &created)
+			if created.Monitored != tt.want {
+				t.Errorf("monitored = %v, want %v", created.Monitored, tt.want)
+			}
+		})
+	}
+}
+
+// Approving a request sends no monitored choice, so the title it grants stays
+// monitored. Granting somebody's ask and then not following the title would be
+// a strange thing to mean, and it is the compatibility this endpoint keeps.
+func TestApprovedRequestsStayMonitored(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	ctx := context.Background()
+
+	req := &core.Request{
+		MediaType: MediaTypeMovie, TMDBID: 78, Title: "Fight Club", Status: core.RequestPending,
+	}
+	if err := st.CreateRequest(ctx, req); err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+	rec := do(t, h, http.MethodPost, "/api/v1/requests/"+itoa(req.ID)+"/approve", "{}")
+	wantStatus(t, rec, http.StatusOK)
+
+	m, err := st.GetMovieByTMDBID(ctx, 78)
+	if err != nil {
+		t.Fatalf("GetMovieByTMDBID: %v", err)
+	}
+	if !m.Monitored {
+		t.Error("an approved request landed an unmonitored movie")
+	}
+}

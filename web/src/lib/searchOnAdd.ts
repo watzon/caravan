@@ -3,8 +3,10 @@
  * per-item decision, and Sonarr/Radarr users expect the box to remember. It
  * defaults on — adding something you do not want searched is the rarer case.
  *
- * Shared by every add flow (the ⌘K modal and the discover add/request modal)
- * so the habit is one preference rather than one per screen.
+ * The discover add/request modal is what still reads it. The ⌘K add dialog
+ * (AddItemModal) does not: its search box is nested under "Add and monitor",
+ * and both start off and are re-chosen per add — a remembered "monitor and
+ * search everything" is the accident that pairing is there to prevent.
  */
 
 const SEARCH_ON_ADD_KEY = 'caravan.searchOnAdd';

@@ -22,7 +22,7 @@ func TestAddMovieCreatesTheRowWithoutTouchingDisk(t *testing.T) {
 		PosterURL: h.posterURL,
 	}
 
-	mv, err := h.mgr.AddMovie(ctx, 10378, "")
+	mv, err := h.mgr.AddMovie(ctx, 10378, "", nil)
 	if err != nil {
 		t.Fatalf("AddMovie: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestAddMovieAgainKeepsUserIntent(t *testing.T) {
 	ctx := context.Background()
 	h.provider.movieByID[10378] = core.MovieMeta{TMDBID: 10378, Title: "Big Buck Bunny", Year: 2008}
 
-	first, err := h.mgr.AddMovie(ctx, 10378, "")
+	first, err := h.mgr.AddMovie(ctx, 10378, "", nil)
 	if err != nil {
 		t.Fatalf("AddMovie: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestAddMovieAgainKeepsUserIntent(t *testing.T) {
 	// Re-adding refreshes provider metadata; it must not undo the user's
 	// choices, exactly as a rescan does not.
 	h.provider.movieByID[10378] = core.MovieMeta{TMDBID: 10378, Title: "Big Buck Bunny", Year: 2008, Overview: "Updated."}
-	second, err := h.mgr.AddMovie(ctx, 10378, "")
+	second, err := h.mgr.AddMovie(ctx, 10378, "", nil)
 	if err != nil {
 		t.Fatalf("AddMovie again: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestAddSeriesWritesTheWholeTree(t *testing.T) {
 		}},
 	}
 
-	sr, err := h.mgr.AddSeries(ctx, 66732)
+	sr, err := h.mgr.AddSeries(ctx, 66732, nil)
 	if err != nil {
 		t.Fatalf("AddSeries: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestAddSeriesLeavesSpecialsUnmonitored(t *testing.T) {
 	}
 	h.provider.seriesByID[meta.TMDBID] = meta
 
-	sr, err := h.mgr.AddSeries(ctx, meta.TMDBID)
+	sr, err := h.mgr.AddSeries(ctx, meta.TMDBID, nil)
 	if err != nil {
 		t.Fatalf("AddSeries: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestAddSeriesLeavesSpecialsUnmonitored(t *testing.T) {
 	if err := h.st.UpsertSeason(ctx, &specials); err != nil {
 		t.Fatalf("UpsertSeason: %v", err)
 	}
-	if _, err := h.mgr.AddSeries(ctx, meta.TMDBID); err != nil {
+	if _, err := h.mgr.AddSeries(ctx, meta.TMDBID, nil); err != nil {
 		t.Fatalf("AddSeries again: %v", err)
 	}
 	seasons, err = h.st.ListSeasons(ctx, sr.ID)
@@ -228,10 +228,10 @@ func TestAddWithoutProviderIsRecognizable(t *testing.T) {
 	// a 503 that tells the user to add a key, so it must survive the call.
 	mgr := h.newManager(h.st, nil)
 
-	if _, err := mgr.AddMovie(context.Background(), 1, ""); !errors.Is(err, core.ErrNoMetadataProvider) {
+	if _, err := mgr.AddMovie(context.Background(), 1, "", nil); !errors.Is(err, core.ErrNoMetadataProvider) {
 		t.Fatalf("AddMovie error = %v, want core.ErrNoMetadataProvider", err)
 	}
-	if _, err := mgr.AddSeries(context.Background(), 1); !errors.Is(err, core.ErrNoMetadataProvider) {
+	if _, err := mgr.AddSeries(context.Background(), 1, nil); !errors.Is(err, core.ErrNoMetadataProvider) {
 		t.Fatalf("AddSeries error = %v, want core.ErrNoMetadataProvider", err)
 	}
 }
@@ -239,10 +239,10 @@ func TestAddWithoutProviderIsRecognizable(t *testing.T) {
 func TestAddRejectsInvalidProviderID(t *testing.T) {
 	h := newHarness(t)
 
-	if _, err := h.mgr.AddMovie(context.Background(), 0, ""); err == nil {
+	if _, err := h.mgr.AddMovie(context.Background(), 0, "", nil); err == nil {
 		t.Fatal("AddMovie(0) succeeded, want an error")
 	}
-	if _, err := h.mgr.AddSeries(context.Background(), -1); err == nil {
+	if _, err := h.mgr.AddSeries(context.Background(), -1, nil); err == nil {
 		t.Fatal("AddSeries(-1) succeeded, want an error")
 	}
 }
@@ -257,7 +257,7 @@ func TestAddMovieMinAvailability(t *testing.T) {
 	h.provider.movieByID[10378] = core.MovieMeta{TMDBID: 10378, Title: "Big Buck Bunny", Year: 2008,
 		DigitalRelease: digital}
 
-	mv, err := h.mgr.AddMovie(ctx, 10378, core.AvailabilityAnnounced)
+	mv, err := h.mgr.AddMovie(ctx, 10378, core.AvailabilityAnnounced, nil)
 	if err != nil {
 		t.Fatalf("AddMovie: %v", err)
 	}
@@ -269,7 +269,7 @@ func TestAddMovieMinAvailability(t *testing.T) {
 	}
 
 	// Re-adding with no opinion keeps the choice.
-	kept, err := h.mgr.AddMovie(ctx, 10378, "")
+	kept, err := h.mgr.AddMovie(ctx, 10378, "", nil)
 	if err != nil {
 		t.Fatalf("AddMovie again: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestAddMovieMinAvailability(t *testing.T) {
 	}
 
 	// Re-adding with a new choice is fresh user intent.
-	changed, err := h.mgr.AddMovie(ctx, 10378, core.AvailabilityInCinemas)
+	changed, err := h.mgr.AddMovie(ctx, 10378, core.AvailabilityInCinemas, nil)
 	if err != nil {
 		t.Fatalf("AddMovie with a new choice: %v", err)
 	}
@@ -294,11 +294,147 @@ func TestAddMovieDefaultsToReleased(t *testing.T) {
 	ctx := context.Background()
 	h.provider.movieByID[10378] = core.MovieMeta{TMDBID: 10378, Title: "Big Buck Bunny", Year: 2008}
 
-	mv, err := h.mgr.AddMovie(ctx, 10378, "")
+	mv, err := h.mgr.AddMovie(ctx, 10378, "", nil)
 	if err != nil {
 		t.Fatalf("AddMovie: %v", err)
 	}
 	if mv.MinAvailability != core.AvailabilityReleased {
 		t.Fatalf("MinAvailability = %q, want the %q default", mv.MinAvailability, core.AvailabilityReleased)
+	}
+}
+
+// ---- "Add and monitor", off by default in the dialog ------------------------
+
+// ptr is the shortest honest way to write an explicit monitored choice: the
+// parameter is a pointer precisely so that absent and false differ.
+func ptr[T any](v T) *T { return &v }
+
+// An explicit false lands the row unmonitored; absent still means monitored,
+// which is what every caller that predates the checkbox — and request approval
+// — relies on.
+func TestAddMovieHonoursTheMonitoredChoice(t *testing.T) {
+	ctx := context.Background()
+
+	for _, tt := range []struct {
+		name      string
+		monitored *bool
+		want      bool
+	}{
+		{name: "no opinion is monitored", monitored: nil, want: true},
+		{name: "an explicit yes", monitored: ptr(true), want: true},
+		{name: "an explicit no", monitored: ptr(false), want: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.provider.movieByID[10378] = core.MovieMeta{TMDBID: 10378, Title: "Big Buck Bunny", Year: 2008}
+			mv, err := h.mgr.AddMovie(ctx, 10378, "", tt.monitored)
+			if err != nil {
+				t.Fatalf("AddMovie: %v", err)
+			}
+			if mv.Monitored != tt.want {
+				t.Errorf("Monitored = %v, want %v", mv.Monitored, tt.want)
+			}
+		})
+	}
+}
+
+// A re-add is a metadata refresh, so the flag stays the owner's however
+// emphatically the request restates its own opinion.
+func TestAddMovieLeavesAnExistingRowsMonitoredFlagAlone(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.provider.movieByID[10378] = core.MovieMeta{TMDBID: 10378, Title: "Big Buck Bunny", Year: 2008}
+
+	if _, err := h.mgr.AddMovie(ctx, 10378, "", ptr(true)); err != nil {
+		t.Fatalf("AddMovie: %v", err)
+	}
+	again, err := h.mgr.AddMovie(ctx, 10378, "", ptr(false))
+	if err != nil {
+		t.Fatalf("AddMovie again: %v", err)
+	}
+	if !again.Monitored {
+		t.Error("a re-add overruled the owner's monitored flag")
+	}
+}
+
+// The series flag is not enough on its own: the wanted list is computed from
+// episodes.monitored, so an unmonitored add has to reach the tree — otherwise
+// "add without monitoring" downloads the whole series anyway.
+func TestAddSeriesUnmonitoredLeavesTheWholeTreeUnmonitored(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.provider.seriesByID[66732] = core.SeriesMeta{
+		TMDBID: 66732, Title: "Stranger Things", Year: 2016,
+		Seasons: []core.SeasonMeta{{
+			Number: 1, Title: "Season 1",
+			Episodes: []core.EpisodeMeta{
+				{Season: 1, Number: 1, Title: "Chapter One"},
+				{Season: 1, Number: 2, Title: "Chapter Two"},
+			},
+		}},
+	}
+
+	sr, err := h.mgr.AddSeries(ctx, 66732, ptr(false))
+	if err != nil {
+		t.Fatalf("AddSeries: %v", err)
+	}
+	if sr.Monitored {
+		t.Fatal("the series row is monitored after an unmonitored add")
+	}
+	seasons, err := h.st.ListSeasons(ctx, sr.ID)
+	if err != nil {
+		t.Fatalf("ListSeasons: %v", err)
+	}
+	if len(seasons) == 0 {
+		t.Fatal("no season rows: the tree must still land, only unmonitored")
+	}
+	for _, se := range seasons {
+		if se.Monitored {
+			t.Errorf("season %d is monitored under an unmonitored series", se.Number)
+		}
+	}
+	episodes, err := h.st.ListEpisodes(ctx, sr.ID)
+	if err != nil {
+		t.Fatalf("ListEpisodes: %v", err)
+	}
+	if len(episodes) != 2 {
+		t.Fatalf("episodes = %+v, want the whole tree", episodes)
+	}
+	for _, e := range episodes {
+		if e.Monitored {
+			t.Errorf("S%02dE%02d is monitored under an unmonitored series", e.SeasonNumber, e.EpisodeNumber)
+		}
+	}
+}
+
+// The default add is unchanged: monitored series, monitored tree, specials
+// still opted out of.
+func TestAddSeriesWithNoOpinionStillMonitorsTheTree(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	h.provider.seriesByID[66732] = core.SeriesMeta{
+		TMDBID: 66732, Title: "Stranger Things", Year: 2016,
+		Seasons: []core.SeasonMeta{
+			{Number: 0, Title: "Specials", Episodes: []core.EpisodeMeta{{Season: 0, Number: 1, Title: "Recap"}}},
+			{Number: 1, Title: "Season 1", Episodes: []core.EpisodeMeta{{Season: 1, Number: 1, Title: "Chapter One"}}},
+		},
+	}
+
+	sr, err := h.mgr.AddSeries(ctx, 66732, nil)
+	if err != nil {
+		t.Fatalf("AddSeries: %v", err)
+	}
+	if !sr.Monitored {
+		t.Fatal("an add with no opinion left the series unmonitored")
+	}
+	episodes, err := h.st.ListEpisodes(ctx, sr.ID)
+	if err != nil {
+		t.Fatalf("ListEpisodes: %v", err)
+	}
+	for _, e := range episodes {
+		want := e.SeasonNumber != 0
+		if e.Monitored != want {
+			t.Errorf("S%02dE%02d monitored = %v, want %v", e.SeasonNumber, e.EpisodeNumber, e.Monitored, want)
+		}
 	}
 }

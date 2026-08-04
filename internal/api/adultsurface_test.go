@@ -1580,3 +1580,189 @@ func (p *hangupProvider) SearchSites(ctx context.Context, q string) ([]core.Site
 	p.cancel()
 	return nil, context.Canceled
 }
+
+// ---- the deferred catalogue walk (POST /adult/sites) -----------------------
+
+// jobsOfKind is every queued job of one kind, newest first.
+func jobsOfKind(t *testing.T, st *store.Store, kind string) []core.Job {
+	t.Helper()
+	jobs, err := st.ListJobs(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("ListJobs: %v", err)
+	}
+	out := []core.Job{}
+	for _, job := range jobs {
+		if job.Kind == kind {
+			out = append(out, job)
+		}
+	}
+	return out
+}
+
+// The request answers with the site row and NOTHING filed under it: the
+// catalogue walk is a job. A large site is hundreds of provider round trips,
+// and the whole reason this is a job is that people gave up waiting and clicked
+// Add again.
+func TestAddSiteAnswersBeforeTheCatalogueIsWalked(t *testing.T) {
+	h, st, mgr := newTestServer(t)
+	mgr.adult = &fakeAdultProvider{}
+	enableAdult(t, st)
+	ctx := context.Background()
+
+	rec := do(t, h, http.MethodPost, "/api/v1/adult/sites", `{"stash_id":"site-9"}`)
+	wantStatus(t, rec, http.StatusCreated)
+	var site siteJSON
+	decodeBody(t, rec, &site)
+	if site.ID == 0 || site.StashID != "site-9" {
+		t.Fatalf("site = %+v", site)
+	}
+
+	episodes, err := st.ListEpisodes(ctx, site.ID)
+	if err != nil {
+		t.Fatalf("ListEpisodes: %v", err)
+	}
+	if len(episodes) != 0 {
+		t.Fatalf("the add filed %d scenes, want the walk deferred: %+v", len(episodes), episodes)
+	}
+
+	queued := jobsOfKind(t, st, core.JobSyncSite)
+	if len(queued) != 1 {
+		t.Fatalf("queued %d %s jobs, want 1", len(queued), core.JobSyncSite)
+	}
+	var payload core.JobSyncSitePayload
+	if err := json.Unmarshal([]byte(queued[0].Payload), &payload); err != nil {
+		t.Fatalf("decode %s payload %q: %v", core.JobSyncSite, queued[0].Payload, err)
+	}
+	if payload.SeriesID != site.ID {
+		t.Errorf("job names series %d, want the added site %d", payload.SeriesID, site.ID)
+	}
+	if payload.SearchNow {
+		t.Error("search_now is set on an add that did not ask for it")
+	}
+}
+
+// The double click. Two POSTs while the first walk is still pending are one
+// site and one job — the row upserts on the stash id, the job dedupes on its
+// payload — and neither is an error.
+func TestAddSiteQueuesTheCatalogueWalkOnce(t *testing.T) {
+	h, st, mgr := newTestServer(t)
+	mgr.adult = &fakeAdultProvider{}
+	enableAdult(t, st)
+
+	first := do(t, h, http.MethodPost, "/api/v1/adult/sites", `{"stash_id":"site-9"}`)
+	wantStatus(t, first, http.StatusCreated)
+	second := do(t, h, http.MethodPost, "/api/v1/adult/sites", `{"stash_id":"site-9"}`)
+	wantStatus(t, second, http.StatusCreated)
+
+	if queued := jobsOfKind(t, st, core.JobSyncSite); len(queued) != 1 {
+		t.Fatalf("queued %d %s jobs for two adds, want 1: %+v", len(queued), core.JobSyncSite, queued)
+	}
+	sites, err := st.ListSeriesByKind(context.Background(), core.SeriesKindAdult)
+	if err != nil {
+		t.Fatalf("ListSeriesByKind: %v", err)
+	}
+	if len(sites) != 1 {
+		t.Fatalf("two adds made %d sites, want 1", len(sites))
+	}
+}
+
+// search_now rides on the sync job rather than being queued here. Before the
+// walk the site has no episode rows, so a search queued now would queue
+// nothing — the flag has to survive until there is something to search for.
+func TestAddSiteCarriesSearchNowOnTheSyncJob(t *testing.T) {
+	h, st, mgr := newTestServer(t)
+	mgr.adult = &fakeAdultProvider{}
+	enableAdult(t, st)
+
+	wantStatus(t, do(t, h, http.MethodPost, "/api/v1/adult/sites",
+		`{"stash_id":"site-9","monitored":true,"search_now":true}`), http.StatusCreated)
+
+	queued := jobsOfKind(t, st, core.JobSyncSite)
+	if len(queued) != 1 {
+		t.Fatalf("queued %d %s jobs, want 1", len(queued), core.JobSyncSite)
+	}
+	var payload core.JobSyncSitePayload
+	if err := json.Unmarshal([]byte(queued[0].Payload), &payload); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	if !payload.SearchNow {
+		t.Error("search_now did not reach the sync job")
+	}
+	// And nothing was searched for yet: there is nothing to search for.
+	if searches := jobsOfKind(t, st, core.JobSearchEpisode); len(searches) != 0 {
+		t.Fatalf("queued %d searches before the walk: %+v", len(searches), searches)
+	}
+}
+
+// "Add and monitor", off. The row lands unmonitored; omitting the field is the
+// historical monitored answer, which is what request approval relies on.
+func TestAddSiteHonoursTheMonitoredChoice(t *testing.T) {
+	for _, tt := range []struct {
+		name, body string
+		want       bool
+	}{
+		{name: "omitted is monitored", body: `{"stash_id":"site-9"}`, want: true},
+		{name: "explicit true", body: `{"stash_id":"site-9","monitored":true}`, want: true},
+		{name: "explicit false", body: `{"stash_id":"site-9","monitored":false}`, want: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			h, st, mgr := newTestServer(t)
+			mgr.adult = &fakeAdultProvider{}
+			enableAdult(t, st)
+
+			rec := do(t, h, http.MethodPost, "/api/v1/adult/sites", tt.body)
+			wantStatus(t, rec, http.StatusCreated)
+			var site siteJSON
+			decodeBody(t, rec, &site)
+			if site.Monitored != tt.want {
+				t.Errorf("monitored = %v, want %v", site.Monitored, tt.want)
+			}
+		})
+	}
+}
+
+// The regression that guards the AddSite/AddSiteAndWait split.
+//
+// Approving a scene request grants ONE scene, and a scene is an episode row.
+// The ordinary add defers the walk that creates those rows to a job, so an
+// approval that used it would answer "approved" against a site with nothing
+// filed under it — the granted scene would not be wanted, and no search would
+// ever be made for it. This asserts the episode exists the moment the approval
+// returns, which is only true of the waiting variant.
+func TestApproveSceneLandsTheEpisodeSynchronously(t *testing.T) {
+	h, st, mgr := newTestServer(t)
+	mgr.adult = &fakeAdultProvider{
+		sites:  []core.SiteMeta{{StashID: "site-1", Name: "Brazzers"}},
+		scenes: fakeScenes(),
+	}
+	mgr.addSiteSceneStashID = "scene-1"
+	enableAdult(t, st)
+	ctx := context.Background()
+
+	createUser(t, st, testAdmin, testPassword, core.RoleAdmin)
+	cookie := login(t, h, testAdmin, testPassword)
+
+	rec := doAuth(t, h, http.MethodPost, "/api/v1/requests",
+		`{"media_type":"scene","stash_id":"scene-1","title":"Deep Impact"}`, withCookie(cookie))
+	wantStatus(t, rec, http.StatusCreated)
+	var created requestJSON
+	decodeBody(t, rec, &created)
+
+	rec = doAuth(t, h, http.MethodPost, "/api/v1/requests/"+itoa(created.ID)+"/approve",
+		"{}", withCookie(cookie))
+	wantStatus(t, rec, http.StatusOK)
+
+	// The scene the approval granted is a row, right now — not once some job
+	// gets around to running.
+	filed, err := st.EpisodeIDsByStashID(ctx, []string{"scene-1"})
+	if err != nil {
+		t.Fatalf("EpisodeIDsByStashID: %v", err)
+	}
+	if filed["scene-1"] == 0 {
+		t.Fatal("approving a scene request left no episode row: the approval used the deferred add")
+	}
+	// And it did not lean on the queue to get there.
+	if queued := jobsOfKind(t, st, core.JobSyncSite); len(queued) != 0 {
+		t.Errorf("the approval queued %d catalogue walks, want the walk done inline", len(queued))
+	}
+}

@@ -67,7 +67,7 @@ func (m *Manager) RefreshLibrary(ctx context.Context) (*RefreshResult, error) {
 		// The row's own path, not a recomputed one: the folder on disk is
 		// ground truth, and a provider retitle must not point the row at a
 		// directory that does not exist.
-		if _, _, err := m.upsertMovieRow(ctx, meta, mv.Path, "", ""); err != nil {
+		if _, _, err := m.upsertMovieRow(ctx, meta, mv.Path, "", "", nil); err != nil {
 			return res, err
 		}
 		res.Movies++
@@ -95,13 +95,13 @@ func (m *Manager) RefreshLibrary(ctx context.Context) (*RefreshResult, error) {
 		if meta == nil {
 			continue
 		}
-		row, _, err := m.upsertSeriesRow(ctx, meta, sr.Path, "")
+		row, _, err := m.upsertSeriesRow(ctx, meta, sr.Path, "", nil)
 		if err != nil {
 			return res, err
 		}
 		// The whole tree, so a season the provider just announced lands as
 		// rows the wanted list can see once its episodes air.
-		if err := m.upsertSeriesTree(ctx, row.ID, meta); err != nil {
+		if err := m.upsertSeriesTree(ctx, row, meta); err != nil {
 			return res, err
 		}
 		res.Series++

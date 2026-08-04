@@ -327,6 +327,20 @@ const (
 	// current for titles that have no files yet — nothing else ever revisits
 	// those, and the minimum-availability gate judges against their dates.
 	JobRefreshMetadata = "refresh_metadata"
+	// JobSyncSite walks one adult site's whole scene catalogue into season and
+	// episode rows.
+	//
+	// It is a durable job rather than part of the add because a big site is
+	// hundreds of provider round trips: doing it inside POST /adult/sites made
+	// the request hang long enough that people clicked Add twice. Deferring it
+	// buys two things the synchronous walk never had — a half-added site
+	// survives a restart, because the job outlives the request that made it,
+	// and a second click dedupes on the payload like every other queued search.
+	//
+	// It is NOT the metadata refresh under another name. The refresh sweep only
+	// visits MONITORED sites, and a site added unmonitored still needs its
+	// catalogue: the rows are what the site page shows as missing.
+	JobSyncSite = "sync_site"
 )
 
 // JobSearchMoviePayload is the search_movie job's arguments. The encoded form
@@ -341,6 +355,18 @@ type JobSearchMoviePayload struct {
 // JobSearchEpisodePayload is the search_episode job's arguments.
 type JobSearchEpisodePayload struct {
 	EpisodeID int64 `json:"episode_id"`
+}
+
+// JobSyncSitePayload is the sync_site job's arguments: the library id of the
+// adult series whose catalogue is to be walked.
+//
+// SearchNow rides along rather than being queued beside the sync because the
+// searches can only be made once the scenes exist — the wanted list is computed
+// from episode rows, and before the walk there are none. Queueing the search
+// first would reliably queue nothing.
+type JobSyncSitePayload struct {
+	SeriesID  int64 `json:"series_id"`
+	SearchNow bool  `json:"search_now"`
 }
 
 // Job states for the durable queue (SPEC §7).

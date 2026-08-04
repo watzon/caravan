@@ -204,6 +204,15 @@ func firstFileDTO(files []core.MediaFile, profile core.TVProfile) *mediaFileJSON
 // behaviour — add and wait for the next backlog sweep.
 type addRequest struct {
 	TMDBID int64 `json:"tmdb_id"`
+	// Monitored is the dialog's "Add and monitor" checkbox.
+	//
+	// It is a pointer so that ABSENT and false are different answers. Absent is
+	// what every caller that predates the checkbox sends — and what request
+	// approval still sends — and it means monitored, which is the behaviour
+	// this endpoint has always had. An explicit false lands the new row
+	// unmonitored. Either way a title already in the library keeps the flag its
+	// owner set: a re-add is a metadata refresh, not a chance to overrule them.
+	Monitored *bool `json:"monitored"`
 	// SearchNow queues the new movie's automatic search straight after the
 	// add. A movie that was just added has no file, so there is nothing to
 	// check it against the wanted list for.
@@ -272,7 +281,7 @@ func (s *server) handleAddMovie(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	m, err := s.addMovieToLibrary(r.Context(), body.TMDBID, body.SearchNow, body.MinAvailability)
+	m, err := s.addMovieToLibrary(r.Context(), body.TMDBID, body.SearchNow, body.MinAvailability, body.Monitored)
 	if err != nil {
 		s.writeManagerError(w, "add movie", err)
 		return
@@ -296,8 +305,8 @@ func validAvailability(w http.ResponseWriter, s string) bool {
 // is what makes "a pending request is absorbed when its title arrives" true
 // however the title arrived, and it is the one place a permission check goes
 // when Caravan grows more than one kind of user.
-func (s *server) addMovieToLibrary(ctx context.Context, tmdbID int64, searchNow bool, minAvailability string) (*core.Movie, error) {
-	m, err := s.mgr.AddMovie(ctx, tmdbID, minAvailability)
+func (s *server) addMovieToLibrary(ctx context.Context, tmdbID int64, searchNow bool, minAvailability string, monitored *bool) (*core.Movie, error) {
+	m, err := s.mgr.AddMovie(ctx, tmdbID, minAvailability, monitored)
 	if err != nil {
 		return nil, err
 	}
@@ -319,8 +328,8 @@ func (s *server) addMovieToLibrary(ctx context.Context, tmdbID int64, searchNow 
 // else the provider knows about lands unmonitored. It is the same season
 // selection the add dialog shows, and it is what makes a partial add absorb
 // only the part of a pending request it actually granted.
-func (s *server) addSeriesToLibrary(ctx context.Context, tmdbID int64, searchMissing bool, seasons []int) (*core.Series, error) {
-	sr, err := s.mgr.AddSeries(ctx, tmdbID)
+func (s *server) addSeriesToLibrary(ctx context.Context, tmdbID int64, searchMissing bool, seasons []int, monitored *bool) (*core.Series, error) {
+	sr, err := s.mgr.AddSeries(ctx, tmdbID, monitored)
 	if err != nil {
 		return nil, err
 	}
@@ -669,7 +678,7 @@ func (s *server) handleAddSeries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sr, err := s.addSeriesToLibrary(r.Context(), body.TMDBID, body.SearchMissing, body.Seasons)
+	sr, err := s.addSeriesToLibrary(r.Context(), body.TMDBID, body.SearchMissing, body.Seasons, body.Monitored)
 	if err != nil {
 		s.writeManagerError(w, "add series", err)
 		return

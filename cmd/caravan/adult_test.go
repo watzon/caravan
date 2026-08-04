@@ -240,7 +240,7 @@ func TestAdapterAddSiteRefusesWhileTheModuleIsOff(t *testing.T) {
 		t.Fatalf("set api key: %v", err)
 	}
 
-	if _, err := adapter.AddSite(ctx, "site-1"); err == nil {
+	if _, err := adapter.AddSite(ctx, "site-1", nil); err == nil {
 		t.Fatal("AddSite succeeded with the module off")
 	}
 	if n := fake.Count(); n != 0 {

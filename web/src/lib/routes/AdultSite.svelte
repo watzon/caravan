@@ -285,7 +285,7 @@
       <EmptyState
         icon="flame"
         title="No scenes yet"
-        message="Caravan knows this site but has no scenes filed under it. A metadata refresh fills the catalogue in." />
+        message="Caravan knows this site but has no scenes filed under it yet. Cataloguing runs in the background after a site is added — reload in a moment. A metadata refresh fills it in too." />
     {:else}
       <div class="flex flex-col gap-4">
         {#each years as year (year.year)}

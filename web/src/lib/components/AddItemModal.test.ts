@@ -10,7 +10,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import AddItemModal from './AddItemModal.svelte';
 import type { SessionUser } from '../api/types';
 import { session } from '../state/session.svelte';
-import { clearToasts } from '../state/toast.svelte';
+import { clearToasts, toasts } from '../state/toast.svelte';
 
 let host: HTMLElement | undefined;
 let app: Record<string, unknown> | undefined;
@@ -148,9 +148,13 @@ describe('AddItemModal', () => {
   });
 
   /**
-   * Search-on-add (SPEC §9). The checkbox is a sticky per-browser habit, so it
-   * is asserted through what the add request actually carries rather than
-   * through the DOM alone.
+   * The add options (owner decision: both OFF by default).
+   *
+   * They are asserted through what the add request actually carries rather than
+   * through the DOM alone: the checkbox is the affordance, the request body is
+   * the contract. They are deliberately NOT sticky — a remembered "monitor
+   * everything" is exactly the accident the off-by-default pair prevents — so
+   * each assertion mounts a fresh modal and expects the same defaults.
    */
   const MOVIES = [{ tmdb_id: 1, title: 'Dune', year: 2021, overview: '', poster_url: '' }];
   const SERIES = [{ tmdb_id: 2, title: 'Severance', year: 2022, overview: '', poster_url: '' }];
@@ -193,21 +197,83 @@ describe('AddItemModal', () => {
     flushSync();
   }
 
-  function checkbox(): HTMLInputElement | null {
-    return host!.querySelector('input[type="checkbox"]');
+  /** The options row, in the order they appear: monitor first, search second. */
+  function optionBoxes(): HTMLInputElement[] {
+    return [...host!.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
   }
 
-  it('defaults to searching on add and sends search_now for a movie', async () => {
+  function toggle(box: HTMLInputElement, next: boolean) {
+    box.checked = next;
+    box.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+  }
+
+  it('offers only the monitor box, unchecked, until monitoring is on', () => {
+    vi.useFakeTimers();
+    stubSearchAndAdd();
+    mountModal();
+
+    let boxes = optionBoxes();
+    expect(boxes).toHaveLength(1);
+    expect(boxes[0]!.checked).toBe(false);
+    expect(host!.textContent).toContain('Add and monitor');
+    expect(host!.textContent).not.toContain('Start searching immediately');
+
+    toggle(boxes[0]!, true);
+    boxes = optionBoxes();
+    expect(boxes).toHaveLength(2);
+    // Revealed, but not pre-answered: the second decision is its own.
+    expect(boxes[1]!.checked).toBe(false);
+    expect(host!.textContent).toContain('Start searching immediately');
+  });
+
+  it('unchecking monitor hides the search box and resets it', async () => {
     vi.useFakeTimers();
     const calls = stubSearchAndAdd();
     mountModal();
 
-    expect(checkbox()?.checked).toBe(true);
+    toggle(optionBoxes()[0]!, true);
+    toggle(optionBoxes()[1]!, true);
+    toggle(optionBoxes()[0]!, false);
+
+    expect(optionBoxes()).toHaveLength(1);
+    // The reset is the point: a hidden box that stayed true would search on the
+    // next add for a reason nothing on screen explains.
+    toggle(optionBoxes()[0]!, true);
+    expect(optionBoxes()[1]!.checked).toBe(false);
+
+    toggle(optionBoxes()[0]!, false);
+    await addFirstResult();
+    expect(calls.find((c) => c.method === 'POST')?.body).toMatchObject({
+      monitored: false,
+      search_now: false,
+    });
+  });
+
+  it('adds a movie unmonitored and unsearched by default', async () => {
+    vi.useFakeTimers();
+    const calls = stubSearchAndAdd();
+    mountModal();
+
     await addFirstResult();
 
     const post = calls.find((c) => c.method === 'POST');
     expect(post?.url).toBe('/api/v1/library/movies');
-    expect(post?.body).toMatchObject({ tmdb_id: 1, search_now: true });
+    expect(post?.body).toMatchObject({ tmdb_id: 1, monitored: false, search_now: false });
+  });
+
+  it('sends both flags for a movie once both boxes are checked', async () => {
+    vi.useFakeTimers();
+    const calls = stubSearchAndAdd();
+    mountModal();
+
+    toggle(optionBoxes()[0]!, true);
+    toggle(optionBoxes()[1]!, true);
+    await addFirstResult();
+
+    const post = calls.find((c) => c.method === 'POST');
+    expect(post?.url).toBe('/api/v1/library/movies');
+    expect(post?.body).toMatchObject({ tmdb_id: 1, monitored: true, search_now: true });
   });
 
   it('sends search_missing for a series, not search_now', async () => {
@@ -215,38 +281,34 @@ describe('AddItemModal', () => {
     const calls = stubSearchAndAdd();
     mountModal({ initialKind: 'series' });
 
+    toggle(optionBoxes()[0]!, true);
+    toggle(optionBoxes()[1]!, true);
     await addFirstResult('series');
 
     const post = calls.find((c) => c.method === 'POST');
     expect(post?.url).toBe('/api/v1/library/series');
-    expect(post?.body).toMatchObject({ tmdb_id: 2, search_missing: true });
+    expect(post?.body).toMatchObject({ tmdb_id: 2, monitored: true, search_missing: true });
     expect((post?.body as Record<string, unknown>).search_now).toBeUndefined();
   });
 
-  it('omits the search when the box is cleared, and remembers the choice', async () => {
+  it('forgets the choice between modals: the options are per-add, not a habit', async () => {
     vi.useFakeTimers();
-    const calls = stubSearchAndAdd();
+    stubSearchAndAdd();
     mountModal();
 
-    const box = checkbox()!;
-    box.checked = false;
-    box.dispatchEvent(new Event('change', { bubbles: true }));
-    flushSync();
+    toggle(optionBoxes()[0]!, true);
+    toggle(optionBoxes()[1]!, true);
 
-    await addFirstResult();
-    expect(calls.find((c) => c.method === 'POST')?.body).toMatchObject({ search_now: false });
-
-    // The next modal opens with the same answer: this is a habit, not a
-    // per-item decision.
     unmount(app!);
     host!.remove();
     mountModal();
-    expect(checkbox()?.checked).toBe(false);
+    expect(optionBoxes()).toHaveLength(1);
+    expect(optionBoxes()[0]!.checked).toBe(false);
   });
 
-  it('hides the checkbox in pick mode, where there is nothing to search for', () => {
+  it('hides both options in pick mode, where nothing is being added', () => {
     mountModal({ onpick: () => {} });
-    expect(checkbox()).toBeNull();
+    expect(optionBoxes()).toHaveLength(0);
   });
 });
 
@@ -576,11 +638,74 @@ describe('AddItemModal adult scope', () => {
     expect(host!.textContent).toContain('No site matches');
   });
 
-  it('drops the search-on-add habit, which a catalogue walk has no room for', async () => {
+  it('offers the same two options a movie or series add does', async () => {
+    vi.useFakeTimers();
+    const calls = stubProviders();
+    mountSiteScope();
+    await settle();
+
+    // A site is followed and searched exactly like a series, so it gets the
+    // pair rather than nothing: the catalogue walk is a background job now, and
+    // "start searching" happens once it has finished.
+    const boxes = () => [...host!.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
+    expect(boxes()).toHaveLength(1);
+    expect(boxes()[0]!.checked).toBe(false);
+
+    type('brazzers');
+    await settle(300);
+    (host!.querySelector('ul button') as HTMLButtonElement).click();
+    await settle(0);
+
+    const post = calls.find((c) => c.method === 'POST');
+    expect(post!.url).toContain('/adult/sites');
+    expect(post!.body).toMatchObject({
+      stash_id: 'site-1',
+      monitored: false,
+      search_now: false,
+    });
+  });
+
+  it('sends both flags for a site once both boxes are checked', async () => {
+    vi.useFakeTimers();
+    const calls = stubProviders();
+    mountSiteScope();
+    await settle();
+
+    const boxes = () => [...host!.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
+    const check = (box: HTMLInputElement) => {
+      box.checked = true;
+      box.dispatchEvent(new Event('change', { bubbles: true }));
+      flushSync();
+    };
+    check(boxes()[0]!);
+    check(boxes()[1]!);
+
+    type('brazzers');
+    await settle(300);
+    (host!.querySelector('ul button') as HTMLButtonElement).click();
+    await settle(0);
+
+    expect(calls.find((c) => c.method === 'POST')!.body).toMatchObject({
+      stash_id: 'site-1',
+      monitored: true,
+      search_now: true,
+    });
+  });
+
+  it('says the catalogue is still being filled in when a site is added', async () => {
     vi.useFakeTimers();
     stubProviders();
     mountSiteScope();
     await settle();
-    expect(host!.querySelector('input[type="checkbox"]')).toBeNull();
+    type('brazzers');
+    await settle(300);
+    (host!.querySelector('ul button') as HTMLButtonElement).click();
+    await settle(0);
+
+    // The add answers before the scenes exist, so the toast must not read as
+    // "done" — the site page it navigates to is empty for a moment.
+    expect(toasts.items.map((t) => t.message).join(' ')).toContain(
+      'Cataloguing scenes in the background',
+    );
   });
 });

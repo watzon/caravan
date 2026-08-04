@@ -2,7 +2,9 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -301,12 +303,27 @@ func (s *server) siteYears(ctx context.Context, seriesID int64) ([]siteYearJSON,
 // counterpart: a site is named by its stash-box id and nothing else.
 type addSiteRequest struct {
 	StashID string `json:"stash_id"`
+	// Monitored is the dialog's "Add and monitor" checkbox, and reads exactly
+	// as addRequest.Monitored does — absent means monitored.
+	Monitored *bool `json:"monitored"`
+	// SearchNow queues a search for every wanted scene once the catalogue is
+	// filed. It rides on the sync job rather than happening here (see
+	// core.JobSyncSitePayload): before the walk the site has no episode rows,
+	// so a search queued now would queue nothing.
+	SearchNow bool `json:"search_now"`
 }
 
-// handleAddSite adds a site to the library, walking its catalogue so the page
-// can show what is missing. Admin-only, by being absent from memberAllowed: a
-// member may ask for a scene (POST /requests), which is the request queue's
-// job, but adding to the library is a decision.
+// handleAddSite adds a site to the library and queues the walk of its
+// catalogue. Admin-only, by being absent from memberAllowed: a member may ask
+// for a scene (POST /requests), which is the request queue's job, but adding to
+// the library is a decision.
+//
+// It answers as soon as the site row exists, which is one provider round trip.
+// The catalogue behind it can be tens of thousands of scenes across two hundred
+// pages, and a request that waited for those was one people assumed had hung
+// and clicked Add on again. Both halves of that are handled: the row upsert
+// keys on the stash id, so a second POST is a refresh rather than a second
+// site, and the job dedupes on its payload, so it is not a second walk either.
 func (s *server) handleAddSite(w http.ResponseWriter, r *http.Request) {
 	var body addSiteRequest
 	if !decodeJSON(w, r, &body) {
@@ -318,12 +335,43 @@ func (s *server) handleAddSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sr, err := s.mgr.AddSite(r.Context(), stashID)
+	ctx := r.Context()
+	sr, err := s.mgr.AddSite(ctx, stashID, body.Monitored)
 	if err != nil {
 		s.writeManagerError(w, "add site", err)
 		return
 	}
+	if err := s.enqueueSiteSync(ctx, sr.ID, body.SearchNow); err != nil {
+		// Unlike the search-on-add flags elsewhere, this one is not logged and
+		// swallowed. The walk is what makes the site page anything other than
+		// empty, so a site added with no job behind it is a site that stays
+		// blank until somebody notices — better to report the failure and let
+		// the identical, idempotent re-add fix it.
+		s.writeStoreError(w, "queue site catalogue walk", err)
+		return
+	}
 	writeJSON(w, http.StatusCreated, siteDTO(*sr))
+}
+
+// enqueueSiteSync queues the catalogue walk for one site unless an identical
+// one is already pending or running.
+//
+// The dedupe is HasOpenJob on the encoded payload, the same one every search
+// job uses, which is why the payload is marshalled from core.JobSyncSitePayload
+// rather than assembled by hand: the encoded string IS the key.
+func (s *server) enqueueSiteSync(ctx context.Context, seriesID int64, searchNow bool) error {
+	payload, err := json.Marshal(core.JobSyncSitePayload{SeriesID: seriesID, SearchNow: searchNow})
+	if err != nil {
+		return fmt.Errorf("encode %s payload: %w", core.JobSyncSite, err)
+	}
+	open, err := s.st.HasOpenJob(ctx, core.JobSyncSite, string(payload))
+	if err != nil {
+		return err
+	}
+	if open {
+		return nil
+	}
+	return s.st.EnqueueJob(ctx, &core.Job{Kind: core.JobSyncSite, Payload: string(payload)})
 }
 
 // handleSearchSites queries the provider for sites to add. It is the adult

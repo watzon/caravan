@@ -15,7 +15,6 @@
   import type { MovieMeta, SearchResults, SeriesMeta, SiteMeta } from '../api/types';
   import { siteHref } from '../adult';
   import { navigate } from '../router.svelte';
-  import { readSearchOnAdd, writeSearchOnAdd } from '../searchOnAdd';
   import { session } from '../state/session.svelte';
   import { pushToast } from '../state/toast.svelte';
   import { focusFirstResult, moveResultFocus } from '../typeahead';
@@ -69,11 +68,31 @@
     onpick,
   }: Props = $props();
 
-  let searchOnAdd = $state(readSearchOnAdd());
+  /**
+   * The two add options, both OFF by default and both deliberately per-add
+   * rather than sticky.
+   *
+   * Adding something is now cheap and reversible; committing the server to
+   * following it, and to searching every indexer for it right away, is neither.
+   * So the safe answer is the default one, and it is re-chosen each time the
+   * dialog opens instead of being remembered — a habit that quietly monitors
+   * everything is the failure mode this replaces.
+   *
+   * Searching is nested under monitoring because it is meaningless without it:
+   * the wanted list is what a search reads, and nothing unmonitored is on it.
+   * The server agrees rather than trusting this (search_now on an unmonitored
+   * add queues nothing), but offering the combination would be offering a
+   * button that does nothing.
+   */
+  let monitorOnAdd = $state(false);
+  let searchOnAdd = $state(false);
 
-  function setSearchOnAdd(next: boolean) {
-    searchOnAdd = next;
-    writeSearchOnAdd(next);
+  function setMonitorOnAdd(next: boolean) {
+    monitorOnAdd = next;
+    // Unchecking hides the search box, so its value has to go with it:
+    // a hidden checkbox that is still true would search on the next add
+    // for a reason nothing on screen explains.
+    if (!next) searchOnAdd = false;
   }
 
   // Both props seed local state once: the modal is remounted per use, so
@@ -175,8 +194,16 @@
     if (busyStashID !== null) return;
     busyStashID = hit.stash_id;
     try {
-      const added = await api.addSite(hit.stash_id);
-      pushToast(`Added ${added.title}`, 'success');
+      const added = await api.addSite({
+        stash_id: hit.stash_id,
+        monitored: monitorOnAdd,
+        search_now: searchOnAdd,
+      });
+      // The site page it navigates to will be empty for a moment: the add
+      // answers as soon as the row exists and the scenes arrive from a
+      // background job. Saying so is the difference between "still working"
+      // and "this site has nothing".
+      pushToast(`Added ${added.title}. Cataloguing scenes in the background.`, 'success');
       onclose();
       navigate(siteHref(added));
     } catch (err) {
@@ -198,7 +225,7 @@
       if (scope === 'movie') {
         const added = await api.addMovie({
           tmdb_id: row.tmdb_id,
-          monitored: true,
+          monitored: monitorOnAdd,
           search_now: searchOnAdd,
         });
         pushToast(`Added ${added.title}`, 'success');
@@ -207,7 +234,7 @@
       } else {
         const added = await api.addSeries({
           tmdb_id: row.tmdb_id,
-          monitored: true,
+          monitored: monitorOnAdd,
           search_missing: searchOnAdd,
         });
         pushToast(`Added ${added.title}`, 'success');
@@ -364,19 +391,35 @@
       </ul>
     {/if}
 
-    {#if !onpick && scope !== 'site'}
+    {#if !onpick}
       <!-- Add-mode only: the manual-match picker re-points an existing file at
-           a different item, which is never something to search for. Adding a
-           site has no such switch either — POST /adult/sites walks the whole
-           catalogue, and searching for hundreds of scenes is not a checkbox. -->
-      <label class="flex items-center gap-3 rounded-md border border-border bg-raised px-3 py-2">
-        <input
-          type="checkbox"
-          checked={searchOnAdd}
-          onchange={(event) => setSearchOnAdd(event.currentTarget.checked)}
-          class="size-4 accent-accent" />
-        <span class="text-base text-ink">Start searching immediately</span>
-      </label>
+           an item that is already in the library, so neither option applies to
+           it. Every add scope gets the same pair, sites included — a site is
+           followed and searched exactly like a series.
+
+           The search box only exists while monitoring is on, because a search
+           reads the wanted list and nothing unmonitored is on it. -->
+      <div class="flex flex-col gap-2">
+        <label class="flex items-center gap-3 rounded-md border border-border bg-raised px-3 py-2">
+          <input
+            type="checkbox"
+            checked={monitorOnAdd}
+            onchange={(event) => setMonitorOnAdd(event.currentTarget.checked)}
+            class="size-4 accent-accent" />
+          <span class="text-base text-ink">Add and monitor</span>
+        </label>
+        {#if monitorOnAdd}
+          <label
+            class="ml-6 flex items-center gap-3 rounded-md border border-border bg-raised px-3 py-2">
+            <input
+              type="checkbox"
+              checked={searchOnAdd}
+              onchange={(event) => (searchOnAdd = event.currentTarget.checked)}
+              class="size-4 accent-accent" />
+            <span class="text-base text-ink">Start searching immediately</span>
+          </label>
+        {/if}
+      </div>
     {/if}
   </div>
 </Modal>

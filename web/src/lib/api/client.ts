@@ -8,6 +8,7 @@
 import type {
   ActivityEvent,
   AddItemRequest,
+  AddSiteRequest,
   AdultDiscoverPage,
   AdultUser,
   ApproveRequestResult,
@@ -958,9 +959,15 @@ export const api = {
   getSite: (id: number, signal?: AbortSignal) =>
     request<SiteDetail>(endpoints.adultSite(id), { signal }),
 
-  /** Add a site by stash-box id. The server walks its whole catalogue. */
-  addSite: (stashID: string) =>
-    request<Site>(endpoints.adultSites(), { method: 'POST', body: { stash_id: stashID } }),
+  /**
+   * Add a site by stash-box id.
+   *
+   * It answers as soon as the site row exists; the catalogue walk that fills in
+   * its scenes is a background job, so the caller's success message should say
+   * so rather than implying the site is complete.
+   */
+  addSite: (body: AddSiteRequest) =>
+    request<Site>(endpoints.adultSites(), { method: 'POST', body }),
 
   /** Ask the provider for sites to add — the adult twin of GET /search. */
   searchSites: (query: string, signal?: AbortSignal) =>

@@ -38,7 +38,7 @@ func (m *Manager) importMovie(ctx context.Context, meta *core.MovieMeta, rel str
 		warn("%v", err)
 	}
 
-	mv, created, err := m.upsertMovieRow(ctx, meta, dir, posterRel, "")
+	mv, created, err := m.upsertMovieRow(ctx, meta, dir, posterRel, "", nil)
 	if err != nil {
 		return "", 0, err
 	}
@@ -84,11 +84,11 @@ func (m *Manager) importEpisode(ctx context.Context, meta *core.SeriesMeta, rel 
 		warn("%v", err)
 	}
 
-	sr, created, err := m.upsertSeriesRow(ctx, meta, dir, posterRel)
+	sr, created, err := m.upsertSeriesRow(ctx, meta, dir, posterRel, nil)
 	if err != nil {
 		return "", 0, err
 	}
-	if err := m.upsertSeriesTree(ctx, sr.ID, meta); err != nil {
+	if err := m.upsertSeriesTree(ctx, sr, meta); err != nil {
 		return "", 0, err
 	}
 	if created {
@@ -199,14 +199,33 @@ func (m *Manager) absorbRequests(ctx context.Context, mediaType string, tmdbID i
 	}
 }
 
+// monitoredOrDefault renders an add's monitored choice.
+//
+// nil is "no opinion", which is monitored — that is what every caller that
+// predates the "Add and monitor" checkbox means, and what the request-approval
+// path still means: a title somebody asked for is not granted by adding it
+// unmonitored. A non-nil pointer is an explicit choice and applies verbatim.
+//
+// It only ever decides a NEW row. Both upserts below overwrite it from the
+// existing row when there is one, because a re-add is a metadata refresh and
+// the monitored flag is the owner's, not the request's.
+func monitoredOrDefault(monitored *bool) bool {
+	if monitored == nil {
+		return true
+	}
+	return *monitored
+}
+
 // upsertMovieRow refreshes provider metadata onto the movies row, creating it
 // when the TMDB id is new, and reports whether the row was created.
 //
 // A rescan must not overwrite user intent, so the monitored flag, the quality
 // profile assignment, the minimum availability, and the original add time
 // survive from any existing row. minAvailability, when non-empty, is fresh
-// user intent and overrides; the scan and import paths pass "".
-func (m *Manager) upsertMovieRow(ctx context.Context, meta *core.MovieMeta, dir, posterRel, minAvailability string) (*core.Movie, bool, error) {
+// user intent and overrides; the scan and import paths pass "". monitored is
+// the add's own choice for a new row and is ignored for an existing one — see
+// monitoredOrDefault.
+func (m *Manager) upsertMovieRow(ctx context.Context, meta *core.MovieMeta, dir, posterRel, minAvailability string, monitored *bool) (*core.Movie, bool, error) {
 	mv := &core.Movie{
 		TMDBID:          meta.TMDBID,
 		IMDBID:          meta.IMDBID,
@@ -217,7 +236,7 @@ func (m *Manager) upsertMovieRow(ctx context.Context, meta *core.MovieMeta, dir,
 		Path:            dir,
 		PosterPath:      posterRel,
 		PosterURL:       meta.PosterURL,
-		Monitored:       true,
+		Monitored:       monitoredOrDefault(monitored),
 		ReleaseDate:     meta.ReleaseDate,
 		DigitalRelease:  meta.DigitalRelease,
 		PhysicalRelease: meta.PhysicalRelease,
@@ -253,7 +272,7 @@ func (m *Manager) upsertMovieRow(ctx context.Context, meta *core.MovieMeta, dir,
 
 // upsertSeriesRow is upsertMovieRow's series twin, with the same
 // preserve-user-intent rule.
-func (m *Manager) upsertSeriesRow(ctx context.Context, meta *core.SeriesMeta, dir, posterRel string) (*core.Series, bool, error) {
+func (m *Manager) upsertSeriesRow(ctx context.Context, meta *core.SeriesMeta, dir, posterRel string, monitored *bool) (*core.Series, bool, error) {
 	sr := &core.Series{
 		TMDBID:     meta.TMDBID,
 		TVDBID:     meta.TVDBID,
@@ -266,7 +285,7 @@ func (m *Manager) upsertSeriesRow(ctx context.Context, meta *core.SeriesMeta, di
 		Path:       dir,
 		PosterPath: posterRel,
 		PosterURL:  meta.PosterURL,
-		Monitored:  true,
+		Monitored:  monitoredOrDefault(monitored),
 		FirstAired: meta.FirstAirDate,
 	}
 
@@ -297,7 +316,17 @@ func (m *Manager) upsertSeriesRow(ctx context.Context, meta *core.SeriesMeta, di
 // upsertSeriesTree writes the provider's seasons and episodes for a series.
 // The whole tree lands, not just the episodes on disk: the library UI needs to
 // show what is missing, which is the entire point of a wanted list.
-func (m *Manager) upsertSeriesTree(ctx context.Context, seriesID int64, meta *core.SeriesMeta) error {
+//
+// A row the tree writes for the first time inherits the SERIES' monitored flag.
+// That is the same rule PATCH /library/series/{id} enforces from the other
+// direction (store.CascadeSeriesMonitored, SPEC §7), and it is load-bearing
+// rather than tidy: the wanted list is computed from episodes.monitored, not
+// from the series', so a series added unmonitored whose episodes landed
+// monitored would be followed by the backlog sweep exactly as if it had been
+// added monitored. Rows that already exist keep their own flag, so a season
+// somebody toggled by hand survives every refresh.
+func (m *Manager) upsertSeriesTree(ctx context.Context, sr *core.Series, meta *core.SeriesMeta) error {
+	seriesID := sr.ID
 	existingSeasons, err := m.store.ListSeasons(ctx, seriesID)
 	if err != nil {
 		return err
@@ -323,7 +352,7 @@ func (m *Manager) upsertSeriesTree(ctx context.Context, seriesID int64, meta *co
 			// Specials (season 0) start unmonitored: they are typically promo
 			// shorts and recaps nobody wants automation hunting for. The user
 			// opts in per season or episode; existing flags are preserved above.
-			monitored = sm.Number != 0
+			monitored = sr.Monitored && sm.Number != 0
 		}
 		season := &core.Season{
 			SeriesID:  seriesID,
@@ -340,7 +369,7 @@ func (m *Manager) upsertSeriesTree(ctx context.Context, seriesID int64, meta *co
 		for _, em := range sm.Episodes {
 			monitored, ok := episodeMonitored[key{em.Season, em.Number}]
 			if !ok {
-				monitored = em.Season != 0
+				monitored = sr.Monitored && em.Season != 0
 			}
 			episode := &core.Episode{
 				SeriesID:      seriesID,

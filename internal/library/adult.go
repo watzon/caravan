@@ -83,13 +83,38 @@ func (m *Manager) adultReady(ctx context.Context) error {
 }
 
 // AddSite adds a site to the library by stash-box id, as a series of kind
-// adult, and files every scene the provider knows about as an episode.
+// adult, WITHOUT walking its catalogue.
 //
-// It is AddSeries' counterpart and behaves the same way: nothing is written to
-// disk, the whole catalogue lands as rows so the site view can show what is
-// missing, and adding a site that is already there refreshes it while keeping
-// the owner's monitored flag and profile assignment.
-func (m *Manager) AddSite(ctx context.Context, stashID string) (*core.Series, error) {
+// It is AddSeries' counterpart in everything except that: nothing is written to
+// disk, and adding a site that is already there refreshes its metadata while
+// keeping the owner's monitored flag and profile assignment. What it does not
+// do is file the site's scenes, because a big site is hundreds of provider
+// round trips and a request that waits for them is a request people give up on
+// and repeat. The caller is expected to queue core.JobSyncSite (see SyncSite);
+// the site page's empty state says so while the job is open.
+//
+// A caller that genuinely needs the scenes to exist the moment this returns —
+// the member-request approval, whose whole point is that the asked-for scene
+// becomes a wanted episode — wants AddSiteAndWait instead.
+//
+// monitored follows monitoredOrDefault: nil means monitored, and it decides a
+// new row only.
+func (m *Manager) AddSite(ctx context.Context, stashID string, monitored *bool) (*core.Series, error) {
+	return m.addSite(ctx, stashID, monitored, false)
+}
+
+// AddSiteAndWait is AddSite with the catalogue walk done before it returns.
+//
+// It exists for exactly one caller shape: one that must see the site's episode
+// rows immediately, because it is about to act on one of them. Approving a
+// scene request is that caller — the scene it granted has to be a wanted
+// episode by the time the approval answers, or the request is closed against
+// nothing.
+func (m *Manager) AddSiteAndWait(ctx context.Context, stashID string, monitored *bool) (*core.Series, error) {
+	return m.addSite(ctx, stashID, monitored, true)
+}
+
+func (m *Manager) addSite(ctx context.Context, stashID string, monitored *bool, walk bool) (*core.Series, error) {
 	if err := m.adultReady(ctx); err != nil {
 		return nil, err
 	}
@@ -105,14 +130,44 @@ func (m *Manager) AddSite(ctx context.Context, stashID string) (*core.Series, er
 		return nil, fmt.Errorf("library: site %s not found", stashID)
 	}
 
-	sr, _, err := m.upsertSiteRow(ctx, meta, adultSeriesDir(meta.Name), "")
+	sr, _, err := m.upsertSiteRow(ctx, meta, adultSeriesDir(meta.Name), "", monitored)
 	if err != nil {
 		return nil, err
 	}
-	if err := m.syncSiteScenes(ctx, sr); err != nil {
-		return nil, err
+	if walk {
+		if err := m.syncSiteScenes(ctx, sr); err != nil {
+			return nil, err
+		}
 	}
 	return sr, nil
+}
+
+// SyncSite walks one site's catalogue by library id. It is the core.JobSyncSite
+// handler's whole body, and the deferred half of AddSite.
+//
+// A site that has been removed since the job was queued is not an error: there
+// is nothing left to walk, and failing would retry a job that can never
+// succeed. Neither is the module having been switched off in the meantime —
+// that is refreshSites' rule, and it is what keeps a job queued before the
+// switch from being the one path that reaches stash-box after it.
+func (m *Manager) SyncSite(ctx context.Context, seriesID int64) error {
+	if err := m.adultReady(ctx); err != nil {
+		if errors.Is(err, ErrAdultDisabled) || errors.Is(err, core.ErrNoAdultProvider) {
+			return nil
+		}
+		return err
+	}
+	sr, err := m.store.GetSeries(ctx, seriesID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if sr.Kind != core.SeriesKindAdult || sr.StashID == "" {
+		return nil
+	}
+	return m.syncSiteScenes(ctx, sr)
 }
 
 // upsertSiteRow is upsertSeriesRow's adult twin: same preserve-user-intent
@@ -122,7 +177,7 @@ func (m *Manager) AddSite(ctx context.Context, stashID string) (*core.Series, er
 // none. Status stays empty for the same reason: stash-box has no notion of a
 // site having ended, and inventing "Continuing" would put a claim in the UI
 // that no provider made.
-func (m *Manager) upsertSiteRow(ctx context.Context, meta *core.SiteMeta, dir, posterRel string) (*core.Series, bool, error) {
+func (m *Manager) upsertSiteRow(ctx context.Context, meta *core.SiteMeta, dir, posterRel string, monitored *bool) (*core.Series, bool, error) {
 	sr := &core.Series{
 		StashID:    meta.StashID,
 		Title:      meta.Name,
@@ -131,7 +186,7 @@ func (m *Manager) upsertSiteRow(ctx context.Context, meta *core.SiteMeta, dir, p
 		Path:       dir,
 		PosterPath: posterRel,
 		PosterURL:  meta.ImageURL,
-		Monitored:  true,
+		Monitored:  monitoredOrDefault(monitored),
 	}
 
 	created := true
@@ -252,8 +307,12 @@ func (m *Manager) writeScenes(ctx context.Context, sr *core.Series, scenes []cor
 		monitored, ok := seasonMonitored[year]
 		if !ok {
 			// A release year has no specials equivalent, so unlike a television
-			// season there is no year that starts unmonitored.
-			monitored = true
+			// season there is no year that starts unmonitored on its own
+			// account. It follows the site, for the reason upsertSeriesTree's
+			// rows follow their series: the wanted list reads the EPISODE flag,
+			// so a site added unmonitored whose scenes landed monitored would
+			// be hunted for exactly as if it had been added monitored.
+			monitored = sr.Monitored
 		}
 		if err := m.store.UpsertSeason(ctx, &core.Season{
 			SeriesID:  sr.ID,
@@ -277,7 +336,7 @@ func (m *Manager) writeScenes(ctx context.Context, sr *core.Series, scenes []cor
 		episode.SeriesID = sr.ID
 		monitored, ok := episodeMonitored[episode.StashID]
 		if !ok {
-			monitored = true
+			monitored = sr.Monitored
 		}
 		episode.Monitored = monitored
 		if err := m.store.UpsertEpisode(ctx, episode); err != nil {
@@ -470,7 +529,7 @@ func (m *Manager) refreshSites(ctx context.Context, res *RefreshResult) error {
 		if meta == nil {
 			continue
 		}
-		row, _, err := m.upsertSiteRow(ctx, meta, sr.Path, "")
+		row, _, err := m.upsertSiteRow(ctx, meta, sr.Path, "", nil)
 		if err != nil {
 			return err
 		}
@@ -733,7 +792,7 @@ func (m *Manager) syncSiteFor(ctx context.Context, sr *core.Series, title string
 			park(reasonNoMatch)
 			return nil, nil
 		}
-		sr, _, err = m.upsertSiteRow(ctx, &sites[idx], adultSeriesDir(sites[idx].Name), "")
+		sr, _, err = m.upsertSiteRow(ctx, &sites[idx], adultSeriesDir(sites[idx].Name), "", nil)
 		if err != nil {
 			return nil, err
 		}
