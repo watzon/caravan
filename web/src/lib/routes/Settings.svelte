@@ -18,6 +18,7 @@
   import SecuritySettings from '../components/SecuritySettings.svelte';
   import SettingsCard from '../components/SettingsCard.svelte';
   import StorageSettings from '../components/StorageSettings.svelte';
+  import TasksSettings from '../components/TasksSettings.svelte';
   import UsersSettings from '../components/UsersSettings.svelte';
   import { UNKNOWN } from '../format';
   import { pushToast } from '../state/toast.svelte';
@@ -40,6 +41,7 @@
     | 'downloads'
     | 'playback'
     | 'users'
+    | 'tasks'
     | 'security';
 
   interface SectionDef {
@@ -140,6 +142,13 @@
           label: 'Users',
           title: 'Users',
           blurb: 'Who can sign in, and what each of them may do. With no accounts, Caravan is open to anyone who can reach it.',
+        },
+        {
+          key: 'tasks',
+          label: 'Tasks',
+          title: 'Tasks',
+          blurb:
+            'The work Caravan does on a timer: when each task last ran, how it went, and when the next one is due.',
         },
         {
           key: 'security',
@@ -289,6 +298,8 @@
       <QualityProfiles />
     {:else if tab === 'users'}
       <UsersSettings />
+    {:else if tab === 'tasks'}
+      <TasksSettings />
     {:else if error}
       <LoadError message={error} onretry={load} />
     {:else if loading && settings === null}

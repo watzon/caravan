@@ -47,6 +47,7 @@ import type {
   Release,
   RepointResult,
   RequestStatus,
+  RunTaskResult,
   ScanSummary,
   SearchQueued,
   SearchResults,
@@ -59,6 +60,7 @@ import type {
   StorageMigration,
   StorageMigrationStatus,
   SystemStatus,
+  SystemTask,
   TVProfile,
   UnmatchedFile,
   UsenetServer,
@@ -152,6 +154,9 @@ export const endpoints = {
   wantedSearch: () => `${API_BASE}/wanted/search`,
   events: () => `${API_BASE}/events`,
   jobs: () => `${API_BASE}/jobs`,
+  // The recurring background tasks, and the button that brings one forward.
+  tasks: () => `${API_BASE}/system/tasks`,
+  runTask: (kind: string) => `${API_BASE}/system/tasks/${encodeURIComponent(kind)}/run`,
   calendar: () => `${API_BASE}/calendar`,
   calendarFeed: (apiKey: string) => `${API_BASE}/calendar.ics?apikey=${encodeURIComponent(apiKey)}`,
   regenerateAPIKey: () => `${API_BASE}/settings/apikey`,
@@ -751,6 +756,15 @@ export const api = {
   listJobs: (limit = 100, signal?: AbortSignal) =>
     request<{ jobs: Job[] }>(endpoints.jobs(), { query: { limit }, signal })
       .then((payload) => payload?.jobs ?? []),
+
+  /** The recurring background tasks and where each one is in its cycle. */
+  listTasks: (signal?: AbortSignal) =>
+    request<{ tasks: SystemTask[] }>(endpoints.tasks(), { signal })
+      .then((payload) => payload?.tasks ?? []),
+
+  /** Bring a recurring task's next run forward to now. */
+  runTask: (kind: string) =>
+    request<RunTaskResult>(endpoints.runTask(kind), { method: 'POST' }),
 
   calendar: (start: string, end: string, signal?: AbortSignal) =>
     request<{ entries: CalendarEntry[] }>(endpoints.calendar(), {

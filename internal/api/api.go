@@ -199,6 +199,13 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	// The job queue's activity feed (PLAN phase 3, task 8).
 	api.HandleFunc("GET /jobs", s.handleListJobs)
 
+	// The recurring background tasks, as the Settings screen shows them: what
+	// runs on a timer, when it last ran and how that went, and a button that
+	// brings the next run forward. Admin-only by the ordinary rule —
+	// memberAllowed names neither.
+	api.HandleFunc("GET /system/tasks", s.handleListTasks)
+	api.HandleFunc("POST /system/tasks/{kind}/run", s.handleRunTask)
+
 	api.HandleFunc("GET /library/movies", s.handleListMovies)
 	api.HandleFunc("POST /library/movies", s.handleAddMovie)
 	api.HandleFunc("GET /library/movies/{id}", s.handleGetMovie)

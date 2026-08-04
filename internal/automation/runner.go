@@ -114,7 +114,7 @@ func Bootstrap(ctx context.Context, st *store.Store) error {
 	} else if n > 0 {
 		slog.Warn("jobs left running by a previous process were returned to the queue", "jobs", n)
 	}
-	for _, kind := range []string{core.JobRSSSync, core.JobBacklogSweep, core.JobRefreshMetadata} {
+	for _, kind := range store.RecurringKinds() {
 		open, err := st.HasOpenJob(ctx, kind, "{}")
 		if err != nil {
 			return fmt.Errorf("store: check %s bootstrap job: %w", kind, err)
@@ -129,8 +129,8 @@ func Bootstrap(ctx context.Context, st *store.Store) error {
 		// movie plus one per season, dates change on the scale of days, and a
 		// dev loop restarting the process must not hammer TMDB every time.
 		if kind == core.JobRefreshMetadata {
-			job.RunAfter = time.Now().Add(
-				time.Duration(settingMinutes(ctx, st, store.SettingRefreshIntervalMinutes, defaultRefreshInterval)) * time.Minute)
+			job.RunAfter = time.Now().Add(time.Duration(st.IntervalMinutes(ctx,
+				store.SettingRefreshIntervalMinutes, store.DefaultRefreshIntervalMinutes)) * time.Minute)
 		}
 		if err := st.EnqueueJob(ctx, job); err != nil {
 			return fmt.Errorf("store: enqueue %s bootstrap job: %w", kind, err)

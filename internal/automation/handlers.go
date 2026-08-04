@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -18,16 +17,13 @@ import (
 	"github.com/watzon/caravan/internal/wanted"
 )
 
+// The recurring cadences live in internal/store (RecurringIntervalFor), not
+// here: the Tasks screen reports the same numbers this scheduler runs on, and
+// a second copy of them is a screen that lies.
 const (
-	defaultRSSSyncInterval = 15
-	defaultBacklogInterval = 360
-	// defaultRefreshInterval is twelve hours, Radarr and Sonarr's cadence: a
-	// release date or a series status changes on the scale of days, and every
-	// sweep is one provider round trip per movie plus one per season.
-	defaultRefreshInterval = 720
-	searchTimeout          = 30 * time.Second
-	engineWaitTimeout      = 5 * time.Second
-	highTitleConfidence    = 0.9
+	searchTimeout       = 30 * time.Second
+	engineWaitTimeout   = 5 * time.Second
+	highTitleConfidence = 0.9
 )
 
 type movieSearcher interface {
@@ -790,21 +786,11 @@ func (r *Runner) grab(ctx context.Context, st *store.Store, kind string, release
 }
 
 func (r *Runner) scheduleRecurring(ctx context.Context, kind string) error {
-	var (
-		key            string
-		defaultMinutes int
-	)
-	switch kind {
-	case core.JobRSSSync:
-		key, defaultMinutes = store.SettingRSSSyncIntervalMinutes, defaultRSSSyncInterval
-	case core.JobBacklogSweep:
-		key, defaultMinutes = store.SettingBacklogIntervalMinutes, defaultBacklogInterval
-	case core.JobRefreshMetadata:
-		key, defaultMinutes = store.SettingRefreshIntervalMinutes, defaultRefreshInterval
-	default:
+	interval, ok := store.RecurringIntervalFor(kind)
+	if !ok {
 		return fmt.Errorf("unsupported recurring job kind %q", kind)
 	}
-	minutes := settingMinutes(ctx, r.st, key, defaultMinutes)
+	minutes := r.st.IntervalMinutes(ctx, interval.Key, interval.DefaultMinutes)
 	open, err := r.st.HasOpenJob(ctx, kind, "{}")
 	if err != nil {
 		return fmt.Errorf("store: check open %s job: %w", kind, err)
@@ -886,18 +872,6 @@ func emptyPayload(payload json.RawMessage) error {
 		return fmt.Errorf("payload must be an empty object")
 	}
 	return nil
-}
-
-func settingMinutes(ctx context.Context, st *store.Store, key string, fallback int) int {
-	value, err := st.GetSetting(ctx, key)
-	if err != nil {
-		return fallback
-	}
-	minutes, err := strconv.Atoi(value)
-	if err != nil || minutes <= 0 || int64(minutes) > int64(^uint64(0)>>1)/int64(time.Minute) {
-		return fallback
-	}
-	return minutes
 }
 
 func matchesMovie(release core.Release, movie core.Movie) bool {

@@ -103,6 +103,39 @@ export function formatAge(value: string | null | undefined, now: number = Date.n
 }
 
 /**
+ * The other half of formatAge: how long until something scheduled comes due.
+ * A time that has already passed reads as "now" rather than a negative wait —
+ * the queue polls on its own clock, so "due" and "started" are a moment apart.
+ */
+export function formatUntil(value: string | null | undefined, now: number = Date.now()): string {
+  if (!value) return UNKNOWN;
+  const ms = Date.parse(value);
+  if (Number.isNaN(ms)) return UNKNOWN;
+
+  const seconds = Math.round((ms - now) / 1000);
+  if (seconds <= 0) return 'now';
+  if (seconds < HOUR_S) return `in ${Math.max(1, Math.round(seconds / MINUTE_S))}m`;
+  if (seconds < DAY_S) return `in ${Math.round(seconds / HOUR_S)}h`;
+  return `in ${Math.round(seconds / DAY_S)}d`;
+}
+
+/**
+ * A recurring task's cadence. Minutes are how it is configured and stored, but
+ * "360 min" is not how anyone thinks about six hours.
+ */
+export function formatInterval(minutes: number): string {
+  if (!Number.isFinite(minutes) || minutes <= 0) return UNKNOWN;
+  if (minutes < 60) return `${Math.round(minutes)} min`;
+  const hours = minutes / 60;
+  if (hours < 24) {
+    const rounded = Math.round(hours * 10) / 10;
+    return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)} h`;
+  }
+  const days = Math.round((minutes / (24 * 60)) * 10) / 10;
+  return `${Number.isInteger(days) ? days : days.toFixed(1)} d`;
+}
+
+/**
  * Transfer rate. A rate of zero is real (a queued or paused download moves no
  * bytes) but renders as the unknown placeholder rather than "0 B/s", which
  * reads as broken.

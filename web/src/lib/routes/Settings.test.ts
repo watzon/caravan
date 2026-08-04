@@ -99,6 +99,7 @@ describe('Settings rail', () => {
       '/settings/downloads',
       '/settings/playback',
       '/settings/users',
+      '/settings/tasks',
       '/settings/security',
     ]);
     const active = host.querySelector('nav a[aria-current="page"]');

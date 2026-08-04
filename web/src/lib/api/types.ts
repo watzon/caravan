@@ -965,6 +965,36 @@ export interface Job {
   updated_at: string;
 }
 
+/**
+ * GET /system/tasks — one recurring background job as the Settings screen
+ * shows it. The name and description are server-authored, so a task added to
+ * the queue appears here without an SPA change.
+ */
+export interface SystemTask {
+  kind: string;
+  name: string;
+  description: string;
+  interval_minutes: number;
+  /** When the last run finished; empty when none ever has. */
+  last_run: string;
+  /** Empty means it has never finished. */
+  last_result: 'ok' | 'failed' | '';
+  /** Why the last run failed. Empty unless last_result is 'failed'. */
+  last_error: string;
+  /** When the queued successor comes due. Empty means "as soon as it is polled". */
+  next_run: string;
+  running: boolean;
+  /** False means nothing is queued — the chain broke, and Run now repairs it. */
+  queued: boolean;
+}
+
+/** POST /system/tasks/{kind}/run. */
+export interface RunTaskResult {
+  kind: string;
+  /** The task was already working, so there was nothing to bring forward. */
+  already_running: boolean;
+}
+
 export type CalendarStatus = 'downloaded' | 'downloading' | 'missing' | 'unaired';
 
 export interface CalendarEntry {

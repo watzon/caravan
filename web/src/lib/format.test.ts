@@ -7,7 +7,9 @@ import {
   formatConfidence,
   formatDate,
   formatDuration,
+  formatInterval,
   formatRate,
+  formatUntil,
   isFuture,
   seasonLabel,
   titleWithYear,
@@ -173,5 +175,60 @@ describe('formatDuration', () => {
   it('refuses to render a stalled torrent absurd ETA', () => {
     expect(formatDuration(400 * 86400)).toBe(UNKNOWN);
     expect(formatDuration(Number.POSITIVE_INFINITY)).toBe(UNKNOWN);
+  });
+});
+
+describe('formatUntil', () => {
+  const now = Date.parse('2026-08-04T12:00:00Z');
+  const ahead = (ms: number) => new Date(now + ms).toISOString();
+
+  const cases: [string, string][] = [
+    [ahead(5 * 60 * 1000), 'in 5m'],
+    [ahead(30 * 1000), 'in 1m'],
+    [ahead(6 * 60 * 60 * 1000), 'in 6h'],
+    [ahead(2 * 24 * 60 * 60 * 1000), 'in 2d'],
+  ];
+
+  for (const [input, want] of cases) {
+    it(`renders ${input} as ${want}`, () => {
+      expect(formatUntil(input, now)).toBe(want);
+    });
+  }
+
+  it('reads a time that has already passed as due now', () => {
+    // The queue polls on its own clock: overdue and starting are the same thing.
+    expect(formatUntil(ahead(-60_000), now)).toBe('now');
+    expect(formatUntil(ahead(0), now)).toBe('now');
+  });
+
+  it('has nothing to say about an unset or unparseable time', () => {
+    expect(formatUntil('', now)).toBe(UNKNOWN);
+    expect(formatUntil(null, now)).toBe(UNKNOWN);
+    expect(formatUntil('soon', now)).toBe(UNKNOWN);
+  });
+});
+
+describe('formatInterval', () => {
+  const cases: [number, string][] = [
+    [15, '15 min'],
+    [59, '59 min'],
+    [60, '1 h'],
+    [90, '1.5 h'],
+    [360, '6 h'],
+    [720, '12 h'],
+    [1440, '1 d'],
+    [10080, '7 d'],
+  ];
+
+  for (const [input, want] of cases) {
+    it(`renders ${input} minutes as ${want}`, () => {
+      expect(formatInterval(input)).toBe(want);
+    });
+  }
+
+  it('refuses to render a cadence that cannot be one', () => {
+    expect(formatInterval(0)).toBe(UNKNOWN);
+    expect(formatInterval(-5)).toBe(UNKNOWN);
+    expect(formatInterval(Number.NaN)).toBe(UNKNOWN);
   });
 });
