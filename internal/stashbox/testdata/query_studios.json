@@ -1,0 +1,42 @@
+{
+  "data": {
+    "queryStudios": {
+      "count": 3,
+      "studios": [
+        {
+          "id": "f1f1f1f1-1111-4111-8111-111111111111",
+          "name": "Tushy",
+          "aliases": ["TUSHY", "Tushy.com"],
+          "urls": [
+            { "url": "https://www.tushy.com" },
+            { "url": "https://twitter.com/tushy" }
+          ],
+          "images": [
+            { "url": "https://cdn.example.test/tushy-thumb.jpg", "width": 200, "height": 200 },
+            { "url": "https://cdn.example.test/tushy-logo.jpg", "width": 1000, "height": 1000 }
+          ],
+          "parent": {
+            "id": "aaaaaaaa-2222-4222-8222-222222222222",
+            "name": "Vixen Media Group"
+          }
+        },
+        {
+          "id": "f2f2f2f2-3333-4333-8333-333333333333",
+          "name": "Tushy Raw",
+          "aliases": [],
+          "urls": [],
+          "images": [],
+          "parent": null
+        },
+        {
+          "id": "f3f3f3f3-4444-4444-8444-444444444444",
+          "name": "Deeper",
+          "aliases": null,
+          "urls": null,
+          "images": null,
+          "parent": null
+        }
+      ]
+    }
+  }
+}

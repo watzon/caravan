@@ -188,7 +188,7 @@ describe('DiscoverTitle — facts', () => {
 
 describe('DiscoverTitle — who is asking', () => {
   it('offers an admin both the ask and the direct add', async () => {
-    session.user = { username: 'root', role: 'admin', open: false };
+    session.user = { username: 'root', role: 'admin', open: false, adult: false };
     await mountTitle(payload());
 
     expect(buttonLabels()).toContain('Request series');
@@ -201,7 +201,7 @@ describe('DiscoverTitle — who is asking', () => {
    * quality-profile choice is about a button they cannot see.
    */
   it('offers a member only the ask', async () => {
-    session.user = { username: 'ada', role: 'member', open: false };
+    session.user = { username: 'ada', role: 'member', open: false, adult: false };
     await mountTitle(payload());
 
     expect(buttonLabels()).toContain('Request series');
@@ -218,7 +218,7 @@ describe('DiscoverTitle — who is asking', () => {
    * rather than offer a door that closes in their face.
    */
   it('tells a member a title is in the library without linking into it', async () => {
-    session.user = { username: 'ada', role: 'member', open: false };
+    session.user = { username: 'ada', role: 'member', open: false, adult: false };
     await mountTitle(payload({ in_library: true, library_id: 7 }));
 
     expect(host.textContent).toContain('In library');
@@ -226,7 +226,7 @@ describe('DiscoverTitle — who is asking', () => {
   });
 
   it('keeps the link into the library for an admin', async () => {
-    session.user = { username: 'root', role: 'admin', open: false };
+    session.user = { username: 'root', role: 'admin', open: false, adult: false };
     await mountTitle(payload({ in_library: true, library_id: 7 }));
 
     expect(host.querySelector('a[href="/series/7"]')).not.toBeNull();

@@ -290,7 +290,12 @@
                  {active
             ? 'border-accent bg-accent-tint text-accent-text'
             : 'border-border bg-surface text-ink-secondary hover:bg-raised hover:text-ink'}">
-          <Icon name={option.kind === 'movie' ? 'film' : 'tv'} size={14} />
+          <!-- The Adult pill is here for the ordinary reason every pill is:
+               GET /libraries returned a row. The server omits that row while
+               the module is off, so this list needs no adult rule of its own. -->
+          <Icon
+            name={option.kind === 'movie' ? 'film' : option.kind === 'adult' ? 'flame' : 'tv'}
+            size={14} />
           <span>{option.name}</span>
         </button>
       {/each}

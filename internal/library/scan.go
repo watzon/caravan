@@ -48,6 +48,14 @@ const (
 	reasonNoEpisodeNum = "under TV/ but no season/episode in filename"
 	reasonNoMatch      = "no metadata match"
 	reasonProviderErr  = "metadata provider error"
+	// Adult park reasons (PLAN phase 9 task 4). They name the scene vocabulary
+	// rather than reusing the episode one, because "no season/episode in
+	// filename" would be advice nobody can act on for a file that is supposed
+	// to be identified by its date.
+	reasonNoSceneDate    = "under Adult/ but no release date in filename"
+	reasonNoSceneMatch   = "no scene released on that date"
+	reasonAmbiguousScene = "several scenes released on that date"
+	reasonSceneNotInGrab = "file is a different scene than the one grabbed"
 )
 
 // ScanResult summarizes one library scan.
@@ -83,6 +91,7 @@ func (r *ScanResult) addErr(format string, args ...any) {
 // aborts the scan.
 func (m *Manager) Scan(ctx context.Context) (*ScanResult, error) {
 	res := &ScanResult{}
+	m.syncedSites = map[int64]bool{}
 
 	libAbs := m.abs(LibraryDir)
 	info, err := os.Stat(libAbs)
@@ -98,6 +107,17 @@ func (m *Manager) Scan(ctx context.Context) (*ScanResult, error) {
 	case !info.IsDir():
 		return nil, fmt.Errorf("library: %s is not a directory", libAbs)
 	}
+
+	// A disabled adult module is not walked at all, which is stronger than
+	// walking it and refusing to match: a scene filename parked in the review
+	// queue is a UI trace of a module the owner turned off, and this phase
+	// promises there are none (PLAN phase 9 task 5). It is also the cheapest
+	// possible guarantee that a scan makes no stash-box request.
+	adultEnabled, err := m.store.AdultEnabled(ctx)
+	if err != nil {
+		return nil, err
+	}
+	adultAbs := m.abs(path.Join(LibraryDir, AdultDir))
 
 	// The pre-scan snapshots serve two purposes: they tell an added file from
 	// an updated one, and they are the removal candidates once the walk knows
@@ -139,6 +159,9 @@ func (m *Manager) Scan(ctx context.Context) (*ScanResult, error) {
 				if p != libAbs && strings.HasPrefix(name, ".") {
 					return fs.SkipDir
 				}
+				if !adultEnabled && p == adultAbs {
+					return fs.SkipDir
+				}
 				return nil
 			}
 			if !isVideo(name) {
@@ -167,7 +190,7 @@ func (m *Manager) Scan(ctx context.Context) (*ScanResult, error) {
 		return nil, fmt.Errorf("library: scan %s: %w", libAbs, walkErr)
 	}
 
-	if err := m.reconcileRemovals(ctx, res, before, beforeUnmatched, seenFiles, seenUnmatched); err != nil {
+	if err := m.reconcileRemovals(ctx, res, before, beforeUnmatched, seenFiles, seenUnmatched, adultEnabled); err != nil {
 		return nil, err
 	}
 	if err := m.healStaleArtwork(ctx, res); err != nil {
@@ -223,7 +246,15 @@ func fileExists(p string) bool {
 // scanFile matches and reconciles one video file. It never returns an error:
 // everything it can go wrong about is either a park reason or a scan error.
 func (m *Manager) scanFile(ctx context.Context, rel string, size int64, res *ScanResult, known, seenFiles, seenUnmatched map[string]bool) {
-	p := m.parse(path.Base(rel))
+	// Which parser reads the name is decided by where the file is, not by what
+	// the name looks like: a date under library/TV is a daily episode and a
+	// date under library/Adult is a scene, and the same string means both.
+	isScene := sectionOf(rel) == AdultDir
+	parse := m.parse
+	if isScene {
+		parse = m.parseScene
+	}
+	p := parse(path.Base(rel))
 
 	park := func(reason string) {
 		u := &core.UnmatchedFile{Path: rel, Size: size, Parsed: p, Reason: reason}
@@ -241,7 +272,11 @@ func (m *Manager) scanFile(ctx context.Context, rel string, size int64, res *Sca
 	}
 
 	isEpisode := p.IsEpisode()
-	if !isEpisode && sectionOf(rel) == TVDir {
+	switch {
+	case isScene && !p.IsScene():
+		park(reasonNoSceneDate)
+		return
+	case !isScene && !isEpisode && sectionOf(rel) == TVDir:
 		park(reasonNoEpisodeNum)
 		return
 	}
@@ -252,7 +287,10 @@ func (m *Manager) scanFile(ctx context.Context, rel string, size int64, res *Sca
 	case p.Confidence < m.minConfidence:
 		park(reasonLowParse)
 		return
-	case m.provider == nil:
+	case isScene && m.adult == nil:
+		park(reasonNoProvider)
+		return
+	case !isScene && m.provider == nil:
 		park(reasonNoProvider)
 		return
 	}
@@ -261,9 +299,12 @@ func (m *Manager) scanFile(ctx context.Context, rel string, size int64, res *Sca
 		finalRel string
 		err      error
 	)
-	if isEpisode {
+	switch {
+	case isScene:
+		finalRel, err = m.matchAndImportScene(ctx, rel, size, p, res, park)
+	case isEpisode:
 		finalRel, err = m.matchAndImportEpisode(ctx, rel, size, p, res, park)
-	} else {
+	default:
 		finalRel, err = m.matchAndImportMovie(ctx, rel, size, p, res, park)
 	}
 	if err != nil {
@@ -357,11 +398,18 @@ func (m *Manager) matchAndImportEpisode(ctx context.Context, rel string, size in
 // Movies and series rows deliberately survive a file's disappearance: an item
 // with no file is a legitimate wanted item (SPEC §9), and a rescan must never
 // delete user intent.
-func (m *Manager) reconcileRemovals(ctx context.Context, res *ScanResult, before []core.MediaFile, beforeUnmatched []core.UnmatchedFile, seenFiles, seenUnmatched map[string]bool) error {
+// A tree the walk deliberately skipped is not a tree whose files are gone, so
+// the adult rows survive a scan made with the module switched off. Disabling
+// deletes nothing (store.SetAdultEnabled says so about the library row); a
+// reconciliation that quietly dropped every adult media_files row would make
+// that promise false at the first rescan.
+func (m *Manager) reconcileRemovals(ctx context.Context, res *ScanResult, before []core.MediaFile, beforeUnmatched []core.UnmatchedFile, seenFiles, seenUnmatched map[string]bool, adultEnabled bool) error {
+	skipped := func(rel string) bool { return !adultEnabled && sectionOf(rel) == AdultDir }
+
 	for _, f := range before {
 		// A file that moved into the unmatched queue during this scan already
 		// had its row dropped; it vanished from the library, not from disk.
-		if seenFiles[f.Path] || seenUnmatched[f.Path] {
+		if seenFiles[f.Path] || seenUnmatched[f.Path] || skipped(f.Path) {
 			continue
 		}
 		if err := m.store.DeleteMediaFileByPath(ctx, f.Path); err != nil {
@@ -377,7 +425,7 @@ func (m *Manager) reconcileRemovals(ctx context.Context, res *ScanResult, before
 	// them for not turning up in a library walk would make the stuck-import
 	// queue disappear on the next rescan.
 	for _, u := range beforeUnmatched {
-		if seenUnmatched[u.Path] || seenFiles[u.Path] {
+		if seenUnmatched[u.Path] || seenFiles[u.Path] || skipped(u.Path) {
 			continue
 		}
 		if _, err := os.Stat(m.abs(u.Path)); err == nil {

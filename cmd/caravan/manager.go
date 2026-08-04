@@ -5,11 +5,13 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/watzon/caravan/internal/api"
 	"github.com/watzon/caravan/internal/core"
 	"github.com/watzon/caravan/internal/library"
+	"github.com/watzon/caravan/internal/stashbox"
 	"github.com/watzon/caravan/internal/store"
 	"github.com/watzon/caravan/internal/tmdb"
 )
@@ -43,6 +45,23 @@ type libraryAdapter struct {
 	// so an import made through the API notifies Jellyfin exactly as one made
 	// by the download watcher does.
 	notify library.Notifier
+
+	// adultMu guards adult, which is read and replaced from concurrent HTTP
+	// handlers.
+	adultMu sync.Mutex
+	// adult is the last stash-box client built, kept alongside the settings it
+	// was built from; see stashboxClient.
+	adult *cachedStashbox
+}
+
+// cachedStashbox is one stash-box client and the two settings that define it.
+// The settings are the cache key rather than a generation counter because they
+// are the whole of what New takes: if neither changed, the client that would be
+// built is the client already held.
+type cachedStashbox struct {
+	key      string
+	endpoint string
+	client   *stashbox.Client
 }
 
 func newLibraryAdapter(st *store.Store, fallbackRoot string, log *slog.Logger, notify library.Notifier) *libraryAdapter {
@@ -61,7 +80,75 @@ func (a *libraryAdapter) current(ctx context.Context) (*library.Manager, error) 
 	if err != nil {
 		return nil, err
 	}
-	return library.NewManager(a.st, a.metadata(ctx), root, library.WithNotifier(a.notify)), nil
+	return library.NewManager(a.st, a.metadata(ctx), root,
+		library.WithNotifier(a.notify),
+		library.WithAdultProvider(a.adultMetadata(ctx)),
+	), nil
+}
+
+// adultMetadata returns the stash-box provider, or nil.
+//
+// It is nil unless the module is switched on AND a credential has been entered,
+// and the order matters: the switch is read first, so a server with adult
+// content disabled builds no client at all. library.adultReady checks the same
+// switch, which makes this the second of two independent reasons the endpoint
+// cannot be reached when the module is off — the acceptance criterion is zero
+// requests, and one guard is one bug away from zero guards.
+//
+// The nil is a genuine untyped nil for the same reason Metadata's is: callers
+// test the interface value against nil, and a typed nil *stashbox.Client would
+// pass that test and then make a request.
+//
+// The settings are still read on every call — turning the module off has to take
+// effect at once — but the client built from them is reused; see stashboxClient.
+func (a *libraryAdapter) adultMetadata(ctx context.Context) core.AdultMetadataProvider {
+	enabled, err := a.st.AdultEnabled(ctx)
+	if err != nil {
+		a.log.Error("read adult setting", "error", err)
+		return nil
+	}
+	if !enabled {
+		return nil
+	}
+	key, err := a.setting(ctx, store.SettingStashboxAPIKey)
+	if err != nil {
+		a.log.Error("read stash-box api key", "error", err)
+		return nil
+	}
+	if key == "" {
+		return nil
+	}
+	endpoint, err := a.setting(ctx, store.SettingStashboxEndpoint)
+	if err != nil {
+		a.log.Error("read stash-box endpoint", "error", err)
+		return nil
+	}
+	return a.stashboxClient(key, endpoint)
+}
+
+// stashboxClient returns the client for these settings, reusing the last one
+// while they are unchanged.
+//
+// Unlike the TMDB client, a stash-box client learns something: the first search
+// against an endpoint discovers whether it implements queryStudios, and TPDB —
+// the default endpoint — does not. That memo lives on the client, so building a
+// fresh one per call threw the answer away and sent one doomed request per
+// search; a typeahead box did it per keystroke.
+//
+// A change to either setting still builds a new client, which is the point of
+// keying on them: pointing at a different endpoint must re-probe rather than
+// inherit what was true of the last one. Nothing is invalidated on a timer — a
+// restart is the re-check, the same rule the memo itself follows.
+func (a *libraryAdapter) stashboxClient(key, endpoint string) *stashbox.Client {
+	a.adultMu.Lock()
+	defer a.adultMu.Unlock()
+
+	if c := a.adult; c != nil && c.key == key && c.endpoint == endpoint {
+		return c.client
+	}
+	client := stashbox.New(key, endpoint, a.hc)
+	a.adult = &cachedStashbox{key: key, endpoint: endpoint, client: client}
+	return client
 }
 
 // watcherManager builds the one library.Manager the import watcher holds for
@@ -74,6 +161,13 @@ func (a *libraryAdapter) current(ctx context.Context) (*library.Manager, error) 
 // be the same. A watcher without the notifier is the phase-4 acceptance
 // criterion silently unmet: automatic imports would land files and never tell
 // Jellyfin to rescan.
+//
+// It carries no adult provider, deliberately. Importing a finished scene
+// download makes no stash-box call — the site's catalogue was walked when the
+// site was added, and a grab is only ever made against an episode row that
+// already exists — so handing the one long-lived Manager in the process a
+// client for the endpoint would create a path to it that nothing uses and the
+// zero-traffic acceptance would have to defend.
 func (a *libraryAdapter) watcherManager(root string) *library.Manager {
 	return library.NewManager(a.st, lateMetadata{adapter: a}, root, library.WithNotifier(a.notify))
 }
@@ -170,6 +264,26 @@ func (a *libraryAdapter) AddSeries(ctx context.Context, tmdbID int64) (*core.Ser
 		return nil, err
 	}
 	return mgr.AddSeries(ctx, tmdbID)
+}
+
+// AddSite adds a site by stash-box id. It goes through current like every other
+// add, so the storage root and both providers are whatever the settings table
+// says right now — including "the module was switched off a moment ago", which
+// current resolves to a nil adult provider and library.AddSite refuses.
+func (a *libraryAdapter) AddSite(ctx context.Context, stashID string) (*core.Series, error) {
+	mgr, err := a.current(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return mgr.AddSite(ctx, stashID)
+}
+
+// AdultMetadata is the provider the HTTP layer searches sites and scenes
+// through. It reads the settings table on every call, exactly as Metadata does,
+// so enabling the module or pasting a key takes effect without a restart — and,
+// more importantly, so does turning it off.
+func (a *libraryAdapter) AdultMetadata() core.AdultMetadataProvider {
+	return a.adultMetadata(context.Background())
 }
 
 func (a *libraryAdapter) RefreshLibrary(ctx context.Context) (*library.RefreshResult, error) {

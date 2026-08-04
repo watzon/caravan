@@ -25,21 +25,31 @@
     seasonLabel,
     truncateMiddle,
   } from '../format';
+  import { sceneNumber } from '../adult';
   import { isFlagged, releaseFlags, releaseScore, sortReleases } from '../release';
   import { compatBadge } from '../tvcompat';
   import { navigate } from '../router.svelte';
   import { pushToast } from '../state/toast.svelte';
 
   interface Props {
-    kind: 'movie' | 'series';
+    /**
+     * What is being searched for. A site is a series row with different nouns
+     * (its seasons are release years, its episodes are scenes), so it takes the
+     * same endpoints and the same season/episode narrowing — only the labels
+     * and the way back differ.
+     */
+    kind: 'movie' | 'series' | 'site';
     id: number;
-    /** Series only: the season being searched. -1 means "not a season search". */
+    /** Series/site only: the season, or release year. -1 means the whole item. */
     season?: number;
-    /** Series only: the episode number, or -1 for a whole-season search. */
+    /** Series/site only: the episode or scene number, -1 for a whole season. */
     episode?: number;
   }
 
   let { kind, id, season = -1, episode = -1 }: Props = $props();
+
+  /** Sites travel the series routes; only the screen's nouns are different. */
+  let asSeries = $derived(kind === 'series' || kind === 'site');
 
   let movie = $state<Movie | null>(null);
   let series = $state<Series | null>(null);
@@ -49,8 +59,12 @@
   /** Keyed by GUID, not row id: an uncached result has id 0. */
   let grabbingGUID = $state<string | null>(null);
 
-  /** Where the "back" link and the grab both point. */
-  let itemHref = $derived(kind === 'movie' ? `/movies/${id}` : `/series/${id}`);
+  /** Where the "back" link points. */
+  let itemHref = $derived.by(() => {
+    if (kind === 'movie') return `/movies/${id}`;
+    if (kind === 'site') return `/adult/sites/${id}`;
+    return `/series/${id}`;
+  });
 
   /**
    * The episodes this grab is expected to satisfy (core.AddOpts.EpisodeIDs).
@@ -58,7 +72,7 @@
    * whole season so a pack imports in one go.
    */
   let episodeIDs = $derived.by((): number[] => {
-    if (kind !== 'series' || season < 0) return [];
+    if (!asSeries || season < 0) return [];
     const found = series?.seasons?.find((s) => s.season_number === season);
     const eps = found?.episodes ?? [];
     if (episode < 0) return eps.map((e) => e.id);
@@ -67,8 +81,13 @@
 
   let heading = $derived.by((): string => {
     if (kind === 'movie') return movie?.title ?? 'Movie';
-    const title = series?.title ?? 'Series';
+    const title = series?.title ?? (kind === 'site' ? 'Site' : 'Series');
     if (season < 0) return title;
+    // A scene has no SxxEyy: it is numbered within its release year, which is
+    // exactly how the site's own page names it.
+    if (kind === 'site') {
+      return episode >= 0 ? `${title} · ${season} · ${sceneNumber(episode)}` : `${title} · ${season}`;
+    }
     if (episode >= 0) return `${title} · ${episodeCode(season, episode)}`;
     return `${title} · ${seasonLabel(season)}`;
   });
@@ -77,7 +96,7 @@
     loading = true;
     releases = null;
     try {
-      if (kind === 'movie') {
+      if (!asSeries) {
         // The item load is what gives the screen a title; the search is the
         // slow half, so they run together rather than in sequence.
         const [item, found] = await Promise.all([api.getMovie(id), api.movieReleases(id)]);
@@ -107,7 +126,7 @@
   async function grab(release: Release) {
     grabbingGUID = release.guid;
     try {
-      if (kind === 'movie') {
+      if (!asSeries) {
         await api.grabForMovie(id, { release_id: release.id });
       } else {
         await api.grabForSeries(id, {

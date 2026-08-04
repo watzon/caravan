@@ -36,6 +36,20 @@ export const ROUTES = [
   '/series/:id/search',
   '/series/:id/search/:season',
   '/series/:id/search/:season/:episode',
+  // The adult module (phase 9). Every one of these is behind `isAdultRoute`
+  // as well as the member allowlist: the module is invisible to an account it
+  // was not granted to, whatever that account's role is.
+  '/adult',
+  '/adult/scenes',
+  '/adult/sites/:id',
+  // The scene picker, under /adult on purpose: isAdultRoute is derived from the
+  // path, so a picker filed here is gated by having been added rather than by
+  // somebody remembering to name it. Filing it under /series/:id/search — which
+  // would work, since a site IS a series row — would put a scene screen behind a
+  // pattern the adult gate cannot see.
+  '/adult/sites/:id/search',
+  '/adult/sites/:id/search/:year',
+  '/adult/sites/:id/search/:year/:number',
   '/queue',
   '/convert',
   '/wanted',
@@ -64,11 +78,39 @@ export const MEMBER_ROUTES: readonly RoutePattern[] = [
   '/discover/movie/:tmdbId',
   '/discover/series/:tmdbId',
   '/requests',
+  // The adult screens, which a member reaches only with the grant — that
+  // second condition is `isAdultRoute` below, not this list. Being named here
+  // only says "a member is not barred from this by their role"; it mirrors
+  // internal/api/auth.go memberAllowed, which names the same three reads.
+  '/adult',
+  '/adult/scenes',
+  '/adult/sites/:id',
+  // The scene picker is deliberately absent: grabbing is an admin write, and
+  // the server answers a member's release search the same way it answers every
+  // other admin route.
 ];
 
 /** Whether a member may open this route. Pure — the guard lives in App.svelte. */
 export function memberAllowedRoute(pattern: RoutePattern): boolean {
   return MEMBER_ROUTES.includes(pattern);
+}
+
+/**
+ * The routes that only exist while the adult module is visible to the caller
+ * (SessionUser.adult).
+ *
+ * This is a second, independent guard rather than more entries in
+ * MEMBER_ROUTES, because the two answer different questions: the member
+ * allowlist is about a ROLE, and this is about a per-account grant that an
+ * admin also has to have been given (by switching the module on). An admin who
+ * turned it off must land nowhere near these screens either — which the member
+ * allowlist, being role-shaped, could never express.
+ *
+ * Derived from the path so a route added under /adult tomorrow is gated by
+ * having been added, not by somebody remembering to name it twice.
+ */
+export function isAdultRoute(pattern: RoutePattern): boolean {
+  return pattern === '/adult' || pattern.startsWith('/adult/');
 }
 
 export interface RouteMatch {

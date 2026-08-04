@@ -13,6 +13,10 @@ type RefreshResult struct {
 	// written back.
 	Movies int
 	Series int
+	// Sites counts adult series (sites) whose catalogue was re-walked. It is
+	// separate from Series because the two used different providers, and a
+	// single number would hide a stash-box sweep that did nothing.
+	Sites int
 	// Errors holds per-title provider failures. The sweep continues past all
 	// of them: one title TMDB cannot answer for must not stop the other two
 	// hundred from getting their dates.
@@ -69,7 +73,10 @@ func (m *Manager) RefreshLibrary(ctx context.Context) (*RefreshResult, error) {
 		res.Movies++
 	}
 
-	series, err := m.store.ListSeries(ctx)
+	// Television series only: an adult series is refreshed from stash-box, and
+	// asking TMDB about a site would be both wrong and a request the module's
+	// switch is supposed to be able to stop.
+	series, err := m.store.ListSeriesByKind(ctx, core.SeriesKindTV)
 	if err != nil {
 		return nil, err
 	}
@@ -98,6 +105,13 @@ func (m *Manager) RefreshLibrary(ctx context.Context) (*RefreshResult, error) {
 			return res, err
 		}
 		res.Series++
+	}
+
+	// The adult sweep runs last and answers for itself: it is a no-op, and
+	// makes no request at all, when the module is off or no stash-box
+	// credential is configured (see refreshSites).
+	if err := m.refreshSites(ctx, res); err != nil {
+		return res, err
 	}
 	return res, nil
 }

@@ -95,8 +95,14 @@ type EpisodeFileState struct {
 	// SeriesProfileID is the series' quality_profile_id: episodes carry no
 	// profile of their own, so the wanted computation resolves the series'.
 	SeriesProfileID int64
-	HasFile         bool
-	FileQuality     string
+	// SeriesKind is the series' core.SeriesKind* value. It rides along because
+	// every decision downstream of a wanted episode — which library's quality
+	// profile grades it, which indexers search for it, whether it may be shown
+	// at all — is a decision about the series it belongs to, and a second query
+	// per episode to find that out is a query per episode.
+	SeriesKind  string
+	HasFile     bool
+	FileQuality string
 }
 
 // EpisodeFileStates returns every monitored episode with its best file
@@ -106,7 +112,7 @@ type EpisodeFileState struct {
 func (s *Store) EpisodeFileStates(ctx context.Context) ([]EpisodeFileState, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT `+episodeStateColumns+`, s.title, s.poster_path, s.poster_url,
-			s.quality_profile_id, COALESCE(mf.quality, '')
+			s.quality_profile_id, s.kind, COALESCE(mf.quality, '')
 		FROM episodes e
 		JOIN series s ON s.id = e.series_id
 		LEFT JOIN episode_files ef ON ef.episode_id = e.id
@@ -122,10 +128,10 @@ func (s *Store) EpisodeFileStates(ctx context.Context) ([]EpisodeFileState, erro
 	order := []int64{}
 	for rows.Next() {
 		var (
-			seriesTitle, posterPath, posterURL, quality string
-			profileID                                   int64
+			seriesTitle, posterPath, posterURL, seriesKind, quality string
+			profileID                                               int64
 		)
-		e, err := scanEpisodeWith(rows, &seriesTitle, &posterPath, &posterURL, &profileID, &quality)
+		e, err := scanEpisodeWith(rows, &seriesTitle, &posterPath, &posterURL, &profileID, &seriesKind, &quality)
 		if err != nil {
 			return nil, fmt.Errorf("store: scan episode file state: %w", err)
 		}
@@ -134,7 +140,7 @@ func (s *Store) EpisodeFileStates(ctx context.Context) ([]EpisodeFileState, erro
 			st = &EpisodeFileState{
 				Episode: *e, SeriesTitle: seriesTitle,
 				SeriesPosterPath: posterPath, SeriesPosterURL: posterURL,
-				SeriesProfileID: profileID,
+				SeriesProfileID: profileID, SeriesKind: seriesKind,
 			}
 			byID[e.ID] = st
 			order = append(order, e.ID)

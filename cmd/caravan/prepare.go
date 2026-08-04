@@ -21,6 +21,12 @@ func runPrepare(args []string) error {
 	binDir := fs.String("bin-dir", "",
 		"directory holding release builds for the other operating systems "+
 			"(default: next to this binary)")
+	// Off by default, and asked for by name every time: a prepared drive leaves
+	// the house, and the adult library goes on one only when somebody says so
+	// (PLAN phase 9 task 6). There is deliberately no config key and no
+	// remembered answer — the flag is the consent.
+	includeAdult := fs.Bool("include-adult", false,
+		"also create the Adult library folder on the drive (off by default)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -30,9 +36,10 @@ func runPrepare(args []string) error {
 	}
 
 	res, err := prepare.Run(prepare.Options{
-		Target: fs.Arg(0),
-		Force:  *force,
-		BinDir: *binDir,
+		Target:       fs.Arg(0),
+		Force:        *force,
+		BinDir:       *binDir,
+		IncludeAdult: *includeAdult,
 	})
 	if err != nil {
 		return err

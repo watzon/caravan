@@ -622,10 +622,16 @@ func (s *server) cancelGrabs(w http.ResponseWriter, ctx context.Context, grabs [
 	return true
 }
 
+// handleListSeries answers the Series screen. It lists TELEVISION series only:
+// a site is stored as a series row (PLAN phase 9 task 3), and the Series screen
+// is not an adult surface — sites have their own, behind the /adult gate. An
+// unfiltered list would put them on the television shelf for every admin, and
+// on an install with the module switched off it would be a visible trace of a
+// module that is supposed to be absent.
 func (s *server) handleListSeries(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	series, err := s.st.ListSeries(ctx)
+	series, err := s.st.ListSeriesByKind(ctx, core.SeriesKindTV)
 	if err != nil {
 		s.writeStoreError(w, "list series", err)
 		return
@@ -671,13 +677,52 @@ func (s *server) handleAddSeries(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, seriesDTO(*sr))
 }
 
+// getVisibleSeries is GetSeries plus the adult gate, writing the refusal
+// itself.
+//
+// A site is stored as a series row (PLAN phase 9 task 3), so every by-id series
+// route can be handed a site's id. handleListSeries was narrowed to television
+// for the reason its comment gives; the by-id routes need the same rule, or an
+// install that enabled the module once and switched it off again still answers
+// GET /library/series/{siteID} with the site's title, its root under
+// library/Adult and its whole season/episode tree — scene titles and release
+// dates — which the SPA then renders as an ordinary television detail page.
+//
+// The refusal is 404 rather than 403, the answer getVisibleLibrary and
+// requireAdult both give: "this exists and you may not have it" is the worse
+// leak on a module whose promise is absence.
+func (s *server) getVisibleSeries(w http.ResponseWriter, r *http.Request, id int64) (*core.Series, bool) {
+	sr, err := s.st.GetSeries(r.Context(), id)
+	if err != nil {
+		s.writeStoreError(w, "get series", err)
+		return nil, false
+	}
+	if sr.Kind != core.SeriesKindAdult {
+		return sr, true
+	}
+	visible, err := s.adultVisible(r)
+	if err != nil {
+		s.writeStoreError(w, "read adult settings", err)
+		return nil, false
+	}
+	if !visible {
+		writeError(w, http.StatusNotFound, "not found")
+		return nil, false
+	}
+	return sr, true
+}
+
 func (s *server) handleGetSeries(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
 		return
 	}
+	sr, ok := s.getVisibleSeries(w, r, id)
+	if !ok {
+		return
+	}
 
-	dto, err := s.seriesDetail(r.Context(), id)
+	dto, err := s.seriesDetail(r.Context(), *sr)
 	if err != nil {
 		s.writeStoreError(w, "get series", err)
 		return
@@ -687,17 +732,17 @@ func (s *server) handleGetSeries(w http.ResponseWriter, r *http.Request) {
 
 // seriesDetail assembles one series with its season/episode tree, shared by
 // GET and PATCH so both answer with the identical shape.
-func (s *server) seriesDetail(ctx context.Context, id int64) (seriesDetailJSON, error) {
-	sr, err := s.st.GetSeries(ctx, id)
-	if err != nil {
-		return seriesDetailJSON{}, err
-	}
-	seasons, err := s.seasonDetail(ctx, id)
+//
+// It takes the row rather than the id so that the caller has already had to go
+// through getVisibleSeries to obtain one: a fetch inside here would be a second
+// path to the same data with no gate on it.
+func (s *server) seriesDetail(ctx context.Context, sr core.Series) (seriesDetailJSON, error) {
+	seasons, err := s.seasonDetail(ctx, sr.ID)
 	if err != nil {
 		return seriesDetailJSON{}, err
 	}
 
-	dto := seriesDTO(*sr)
+	dto := seriesDTO(sr)
 	for _, season := range seasons {
 		dto.EpisodeCount += len(season.Episodes)
 		for _, e := range season.Episodes {
@@ -731,9 +776,8 @@ func (s *server) handlePatchSeries(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 
-	sr, err := s.st.GetSeries(ctx, id)
-	if err != nil {
-		s.writeStoreError(w, "get series", err)
+	sr, ok := s.getVisibleSeries(w, r, id)
+	if !ok {
 		return
 	}
 	cascade := false
@@ -761,7 +805,7 @@ func (s *server) handlePatchSeries(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	dto, err := s.seriesDetail(ctx, id)
+	dto, err := s.seriesDetail(ctx, *sr)
 	if err != nil {
 		s.writeStoreError(w, "get series", err)
 		return
@@ -778,8 +822,7 @@ func (s *server) handleDeleteSeries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := s.st.GetSeries(r.Context(), id); err != nil {
-		s.writeStoreError(w, "get series", err)
+	if _, ok := s.getVisibleSeries(w, r, id); !ok {
 		return
 	}
 	episodes, err := s.st.ListEpisodes(r.Context(), id)
@@ -835,6 +878,9 @@ func (s *server) handlePatchSeason(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 
+	if _, ok := s.getVisibleSeries(w, r, id); !ok {
+		return
+	}
 	seasons, err := s.st.ListSeasons(ctx, id)
 	if err != nil {
 		s.writeStoreError(w, "list seasons", err)
@@ -877,6 +923,12 @@ func (s *server) handlePatchEpisode(w http.ResponseWriter, r *http.Request) {
 	e, err := s.st.GetEpisode(ctx, id)
 	if err != nil {
 		s.writeStoreError(w, "get episode", err)
+		return
+	}
+	// An episode's visibility is its series': a scene is an episode of a site
+	// (PLAN phase 9 task 3), and this route takes an episode id, so without the
+	// gate it is the one way left to reach an adult row by id.
+	if _, ok := s.getVisibleSeries(w, r, e.SeriesID); !ok {
 		return
 	}
 	e.Monitored = *body.Monitored
@@ -1029,6 +1081,13 @@ func (s *server) writeManagerError(w http.ResponseWriter, msg string, err error)
 	}
 	if errors.Is(err, core.ErrNoMetadataProvider) {
 		writeError(w, http.StatusServiceUnavailable, "no metadata provider configured")
+		return
+	}
+	// The adult twin. It is reachable only from behind requireAdult, so it can
+	// say plainly that the credential is missing: the caller has already been
+	// shown the module exists.
+	if errors.Is(err, core.ErrNoAdultProvider) {
+		writeError(w, http.StatusServiceUnavailable, "no adult metadata provider configured")
 		return
 	}
 	s.log.Error(msg, "error", err)

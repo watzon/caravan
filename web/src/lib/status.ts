@@ -65,7 +65,15 @@ export function seriesStatus(series: Series): StatusKey {
   return 'wanted';
 }
 
-export function episodeStatus(episode: Episode, now: number = Date.now()): StatusKey {
+/**
+ * The rule is stated over the three fields it actually reads rather than over a
+ * whole Episode, so a scene row — which carries the same three under different
+ * names — can be graded by this rule instead of by a copy of it.
+ */
+export function episodeStatus(
+  episode: Pick<Episode, 'file' | 'monitored' | 'air_date'>,
+  now: number = Date.now(),
+): StatusKey {
   if (episode.file) return 'downloaded';
   if (!episode.monitored) return 'unmonitored';
   if (!episode.air_date || isFuture(episode.air_date, now)) return 'unaired';

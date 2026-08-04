@@ -50,7 +50,7 @@ func (s *server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	entries, err := s.calendarEntries(r.Context(), start, end, today)
+	entries, err := s.calendarEntriesFor(r, start, end, today)
 	if err != nil {
 		s.writeStoreError(w, "list calendar entries", err)
 		return
@@ -64,6 +64,15 @@ func (s *server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 // It carries its own check because it is exempt from the password gate: a
 // calendar app subscribes to a URL and cannot hold a session cookie, so the API
 // key is the only credential it can present (SPEC §11).
+//
+// That exemption is also why the feed carries NO adult rows, for anybody, ever.
+// The URL is a bearer credential handed to Google Calendar, a wall display or a
+// housemate's phone, so the request has no account behind it — nobody's grant
+// can be consulted, and inheriting the API key's implicit-admin identity would
+// put every scene title and site name on a shared calendar the moment the
+// module was switched on. So the ICS path asks for the unfiltered-of-adult view
+// explicitly rather than resolving a caller (PLAN phase 9 task 3: an ungranted
+// reader sees nothing adult in the calendar).
 func (s *server) handleCalendarICS(w http.ResponseWriter, r *http.Request) {
 	authorized, err := s.calendarKeyAuthenticated(r)
 	if err != nil {
@@ -76,7 +85,8 @@ func (s *server) handleCalendarICS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	today := calendarDate(time.Now())
-	entries, err := s.calendarEntries(r.Context(), today.AddDate(0, 0, -30), today.AddDate(0, 0, 365), today)
+	entries, err := s.calendarEntries(r.Context(), false,
+		today.AddDate(0, 0, -30), today.AddDate(0, 0, 365), today)
 	if err != nil {
 		s.writeStoreError(w, "list calendar entries", err)
 		return
@@ -152,9 +162,30 @@ func calendarDate(t time.Time) time.Time {
 	return time.Date(year, month, day, 0, 0, 0, 0, time.UTC)
 }
 
+// calendarEntriesFor is calendarEntries for a request that has an identity
+// behind it: the calendar is a SHARED surface — the same grid holds movies,
+// television and, once the adult module is on, scenes — so what it may show
+// depends on who asked.
+//
+// Routes without an identity (the ICS feed, which authenticates with a bearer
+// URL and names no account) must NOT come through here: they call
+// calendarEntries with adultVisible false rather than inheriting currentUser's
+// implicit admin.
+func (s *server) calendarEntriesFor(r *http.Request, start, end, today time.Time) ([]calendarEntry, error) {
+	adultVisible, err := s.adultVisible(r)
+	if err != nil {
+		return nil, err
+	}
+	return s.calendarEntries(r.Context(), adultVisible, start, end, today)
+}
+
 // calendarEntries merges rows before assigning status so a grab can cover a
 // season pack and a single download lookup remains enough for every entry.
-func (s *server) calendarEntries(ctx context.Context, start, end, today time.Time) ([]calendarEntry, error) {
+//
+// adultVisible is a parameter rather than something resolved in here because
+// the answer is not always a property of the caller: on the ICS feed there is
+// no caller, and the honest answer there is a flat no (PLAN phase 9 task 5).
+func (s *server) calendarEntries(ctx context.Context, adultVisible bool, start, end, today time.Time) ([]calendarEntry, error) {
 	episodes, err := s.st.CalendarEpisodes(ctx, start, end)
 	if err != nil {
 		return nil, err
@@ -171,6 +202,9 @@ func (s *server) calendarEntries(ctx context.Context, start, end, today time.Tim
 
 	entries := make([]calendarEntry, 0, len(episodes)+len(movies))
 	for _, episode := range episodes {
+		if episode.SeriesKind == core.SeriesKindAdult && !adultVisible {
+			continue
+		}
 		entries = append(entries, calendarEntry{
 			ID:            episode.Episode.ID,
 			Kind:          "episode",

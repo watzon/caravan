@@ -90,6 +90,22 @@ type libraryIndexerRequest struct {
 	Categories []int `json:"categories"`
 }
 
+// libraryVisible reports whether this caller may see a library at all.
+//
+// Every library but one is visible to everybody who can reach this API. The
+// adult library is the exception, and not because of what it holds: its row is
+// never deleted (store.SetAdultEnabled), so an install that enabled the module
+// once and turned it off again would otherwise keep answering with an "Adult"
+// pill, its root path and its DLNA state forever. "Off" means the module is
+// absent, and a settings screen that still lists its shelf is the trace this
+// phase promises not to leave (PLAN phase 9 task 3).
+func (s *server) libraryVisible(r *http.Request, kind string) (bool, error) {
+	if kind != core.LibraryKindAdult {
+		return true, nil
+	}
+	return s.adultVisible(r)
+}
+
 func (s *server) handleListLibraries(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	libraries, err := s.st.ListLibraries(ctx)
@@ -105,6 +121,14 @@ func (s *server) handleListLibraries(w http.ResponseWriter, r *http.Request) {
 
 	out := make([]libraryJSON, 0, len(libraries))
 	for _, l := range libraries {
+		visible, err := s.libraryVisible(r, l.Kind)
+		if err != nil {
+			s.writeStoreError(w, "read adult settings", err)
+			return
+		}
+		if !visible {
+			continue
+		}
 		dto, err := s.libraryDTO(ctx, l, indexers)
 		if err != nil {
 			s.writeStoreError(w, "list library indexers", err)
@@ -113,6 +137,28 @@ func (s *server) handleListLibraries(w http.ResponseWriter, r *http.Request) {
 		out = append(out, dto)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"libraries": out})
+}
+
+// getVisibleLibrary is GetLibrary plus libraryVisible, writing the refusal
+// itself. A library the caller may not see is 404 rather than 403, for the
+// reason requireAdult gives: "this exists and you may not have it" is a worse
+// answer than "there is nothing here" on a module whose promise is absence.
+func (s *server) getVisibleLibrary(w http.ResponseWriter, r *http.Request, id int64) (*core.Library, bool) {
+	lib, err := s.st.GetLibrary(r.Context(), id)
+	if err != nil {
+		s.writeStoreError(w, "get library", err)
+		return nil, false
+	}
+	visible, err := s.libraryVisible(r, lib.Kind)
+	if err != nil {
+		s.writeStoreError(w, "read adult settings", err)
+		return nil, false
+	}
+	if !visible {
+		writeError(w, http.StatusNotFound, "not found")
+		return nil, false
+	}
+	return lib, true
 }
 
 // handleUpdateLibrary edits the settings a library may answer for itself. It is
@@ -129,9 +175,8 @@ func (s *server) handleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 
-	lib, err := s.st.GetLibrary(ctx, id)
-	if err != nil {
-		s.writeStoreError(w, "get library", err)
+	lib, ok := s.getVisibleLibrary(w, r, id)
+	if !ok {
 		return
 	}
 	// The routing values are the same values the global settings hold, so they
@@ -204,9 +249,8 @@ func (s *server) handleSetLibraryIndexer(w http.ResponseWriter, r *http.Request)
 
 	// Both rows are read first so an override against something that does not
 	// exist is a 404 rather than a row pointing at nothing.
-	lib, err := s.st.GetLibrary(ctx, id)
-	if err != nil {
-		s.writeStoreError(w, "get library", err)
+	lib, ok := s.getVisibleLibrary(w, r, id)
+	if !ok {
 		return
 	}
 	if _, err := s.st.GetIndexer(ctx, indexerID); err != nil {
@@ -262,14 +306,19 @@ func (s *server) libraryDTO(ctx context.Context, l core.Library, indexers []core
 
 	rows := make([]libraryIndexerJSON, 0, len(indexers))
 	for _, ix := range indexers {
+		// The default is asked for rather than assumed to be the indexer's own
+		// list: the Adult library's is the 6000 block instead (see
+		// store.DefaultLibraryCategories), and a screen that showed 5000 here
+		// would be describing a search that does not happen.
+		defaults := store.DefaultLibraryCategories(l.Kind, ix.Categories)
 		row := libraryIndexerJSON{
 			IndexerID:         ix.ID,
 			Name:              ix.Name,
 			Type:              ix.Type,
 			IndexerEnabled:    ix.Enabled,
 			Enabled:           true,
-			Categories:        categoryList(ix.Categories),
-			DefaultCategories: categoryList(ix.Categories),
+			Categories:        categoryList(defaults),
+			DefaultCategories: categoryList(defaults),
 		}
 		if o, ok := byIndexer[ix.ID]; ok {
 			row.Enabled = o.Enabled

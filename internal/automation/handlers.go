@@ -125,15 +125,33 @@ func (f rssFeed) kindsFor(release core.Release) map[string]bool {
 // indexers rate-limit. One fetch per indexer per cycle answers for every
 // library that enabled it, and the per-library decision moves to matching
 // (PLAN phase 8 task 5).
+//
+// A library the module it belongs to has switched off contributes nothing. That
+// matters for exactly one library: store.SetAdultEnabled deliberately does not
+// delete the Adult row when the module is disabled, so without this the adult
+// library's categories stay in the union forever and every RSS poll keeps
+// asking each indexer for `cat=…,6000`, once per sync interval, on an install
+// whose owner turned the module off. Nothing would be grabbed — wanted.Compute
+// drops adult items when disabled — but the request itself is a durable trace
+// of a module this phase promises is absent, visible in the indexer's own
+// request log, and it is a wider fetch than the enabled libraries asked for.
+// Scan skips the adult tree and refreshSites no-ops for the same reason.
 func rssFeeds(ctx context.Context, st *store.Store) ([]rssFeed, error) {
 	libraries, err := st.ListLibraries(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: list libraries: %w", err)
 	}
+	adultEnabled, err := st.AdultEnabled(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("store: read adult setting: %w", err)
+	}
 
 	feeds := []*rssFeed{}
 	byIndexer := map[int64]*rssFeed{}
 	for _, library := range libraries {
+		if library.Kind == core.LibraryKindAdult && !adultEnabled {
+			continue
+		}
 		settings, err := st.ResolveLibrarySettings(ctx, library.ID)
 		if err != nil {
 			return nil, fmt.Errorf("store: resolve settings of library %d: %w", library.ID, err)
@@ -193,9 +211,6 @@ func (r *Runner) matchRSSRelease(ctx context.Context, st *store.Store, release c
 	if !kinds[core.LibraryKindMovie] {
 		movies = nil
 	}
-	if !kinds[core.LibraryKindTV] {
-		episodes = nil
-	}
 	for _, target := range movies {
 		if !matchesMovie(release, target.Movie) {
 			continue
@@ -213,14 +228,20 @@ func (r *Runner) matchRSSRelease(ctx context.Context, st *store.Store, release c
 		}
 	}
 	for _, target := range episodes {
-		if !matchesRSSEpisode(release, target) || len(release.Parsed.Episodes) != 1 {
+		// The library an episode belongs to is its series' library, so a scene
+		// is only offered releases from a feed the ADULT library subscribed to
+		// with categories this release is in. A television library that shares
+		// the indexer sees the same fetch and never these releases, and the
+		// reverse holds too.
+		kind := core.LibraryKindForSeries(target.SeriesKind)
+		if !kinds[kind] || !matchesRSSEpisode(release, target) {
 			continue
 		}
 		series, err := st.GetSeries(ctx, target.SeriesID)
 		if err != nil {
 			return fmt.Errorf("store: get series for rss episode: %w", err)
 		}
-		profile, err := st.ResolveItemQualityProfile(ctx, core.LibraryKindTV, series.QualityProfileID)
+		profile, err := st.ResolveItemQualityProfile(ctx, kind, series.QualityProfileID)
 		if err != nil {
 			return fmt.Errorf("store: resolve episode profile: %w", err)
 		}
@@ -228,7 +249,7 @@ func (r *Runner) matchRSSRelease(ctx context.Context, st *store.Store, release c
 		if reject != "" || (target.Reason == wanted.ReasonBelowCutoff && !wanted.IsUpgrade(release.Parsed.Quality, target.FileQuality)) {
 			continue
 		}
-		if err := r.grabEpisode(ctx, st, target.Episode, release, score, "automatic rss"); err != nil {
+		if err := r.grabEpisode(ctx, st, kind, target.Episode, release, score, "automatic rss"); err != nil {
 			return err
 		}
 	}
@@ -324,7 +345,22 @@ func (r *Runner) handleSearchEpisode(ctx context.Context, st *store.Store, paylo
 	if err != nil {
 		return fmt.Errorf("store: get series: %w", err)
 	}
-	profile, err := st.ResolveItemQualityProfile(ctx, core.LibraryKindTV, series.QualityProfileID)
+	// A job queued before the module was switched off is the one path that can
+	// reach a scene search on a server with adult content disabled, so the
+	// switch is re-read here rather than trusted from when the job was made.
+	// Dropping the job is the right answer: the item is not wanted any more
+	// (wanted.Compute agrees), so there is nothing to retry.
+	if series.Kind == core.SeriesKindAdult {
+		enabled, err := st.AdultEnabled(ctx)
+		if err != nil {
+			return fmt.Errorf("store: read adult setting: %w", err)
+		}
+		if !enabled {
+			return nil
+		}
+	}
+	kind := core.LibraryKindForSeries(series.Kind)
+	profile, err := st.ResolveItemQualityProfile(ctx, kind, series.QualityProfileID)
 	if err != nil {
 		return fmt.Errorf("store: resolve episode profile: %w", err)
 	}
@@ -332,6 +368,10 @@ func (r *Runner) handleSearchEpisode(ctx context.Context, st *store.Store, paylo
 		return fmt.Errorf("store: find active episode grab: %w", err)
 	} else if active {
 		return nil
+	}
+
+	if series.Kind == core.SeriesKindAdult {
+		return r.searchScene(ctx, st, *series, *episode, profile)
 	}
 
 	candidates, err := r.searchEpisodes(ctx, st, series.Title, episode.SeasonNumber, episode.EpisodeNumber)
@@ -370,7 +410,227 @@ func (r *Runner) handleSearchEpisode(ctx context.Context, st *store.Store, paylo
 		return recordNoRelease(ctx, st, episode.Title, len(automatic), 0, series.ID)
 	}
 	score, _ := wanted.ScoreRelease(*best, profile)
-	return r.grabEpisode(ctx, st, *episode, *best, score, "automatic search")
+	return r.grabEpisode(ctx, st, kind, *episode, *best, score, "automatic search")
+}
+
+// searchScene is handleSearchEpisode's adult branch (PLAN phase 9 task 3).
+//
+// Two things differ from a television search and nothing else does. The queries
+// are built from the site and the scene rather than from a SxxEyy, because a
+// scene has no season/episode an indexer could filter on — Caravan's own are a
+// mapping (release year, sequence within that year) that no indexer has heard
+// of. And the candidate filter matches on the release DATE, or on a much
+// stricter title test for the fallback query. The scoring, the rejection record
+// and the grab are the shared ones.
+//
+// Two queries, in order. "Site YY.MM.DD" is how scene releases are named, so it
+// is asked first and its answers are matched on the date alone. When it yields
+// nothing grabbable, "Site Scene Title" follows — the releases named after
+// their title or their performers, which the date query cannot see at all. That
+// second query is where Whisparr stops (its issue #115 asks for exactly this),
+// and it is only safe because what comes back is held to matchesSceneTitle
+// rather than to the date.
+//
+// The fan-out itself is the adult library's: searchIndexers resolves that
+// library's indexers and the categories it asked each of them for, so a scene
+// search sends 6000-series categories and nothing else (PLAN phase 8 task 4).
+func (r *Runner) searchScene(ctx context.Context, st *store.Store, series core.Series, episode core.Episode, profile *core.QualityProfile) error {
+	searches := core.SceneSearches(series.Title, episode.AirDate, episode.Title)
+	if len(searches) == 0 {
+		// No date and no title is no query to make and no candidate to
+		// recognize. Nothing is wrong; there is simply nothing to search for.
+		return nil
+	}
+
+	info := core.GrabInfo{
+		SeriesID: series.ID, SeasonNum: episode.SeasonNumber, EpisodeIDs: []int64{episode.ID},
+	}
+	// Deduped across variants: the same release coming back from both queries
+	// is one candidate and, when it loses, one rejection record rather than two.
+	seen := map[string]bool{}
+	tried := make([]string, 0, len(searches))
+	matched := 0
+
+	for _, search := range searches {
+		candidates, err := r.searchIndexers(ctx, st, core.LibraryKindAdult,
+			func(ctx context.Context, client api.IndexerClient, cfg core.IndexerConfig) ([]core.Release, error) {
+				return client.Search(ctx, search.Query, cfg.Categories)
+			})
+		if err != nil {
+			return err
+		}
+		tried = append(tried, string(search.Variant))
+
+		automatic := make([]core.Release, 0, len(candidates))
+		for _, candidate := range candidates {
+			if candidate.GUID != "" && seen[candidate.GUID] {
+				continue
+			}
+			if !matchesScene(candidate, search.Variant, series, episode) {
+				continue
+			}
+			if candidate.GUID != "" {
+				seen[candidate.GUID] = true
+			}
+			automatic = append(automatic, candidate)
+		}
+		matched += len(automatic)
+
+		best, rejected := wanted.SelectBest(automatic, profile)
+		if err := recordRejections(ctx, st, rejected, profile, info); err != nil {
+			return err
+		}
+		if best != nil {
+			score, _ := wanted.ScoreRelease(*best, profile)
+			return r.grabEpisode(ctx, st, core.LibraryKindAdult, episode, *best, score, "automatic search")
+		}
+	}
+	return recordNoRelease(ctx, st, episode.Title, matched, 0, series.ID, tried...)
+}
+
+// matchesScene reports whether a candidate is the scene that was searched for.
+//
+// The date query's answers are matched on the date and nothing else: a scene
+// release named the standard way carries it, and that is an exact test.
+// The title query's answers cannot be — a release named after its title has no
+// date to compare — so they go through matchesSceneTitle, which is strict on
+// purpose.
+func matchesScene(release core.Release, variant core.SceneSearchVariant, series core.Series, episode core.Episode) bool {
+	if variant == core.SceneSearchByTitle {
+		return matchesSceneTitle(release, series, episode)
+	}
+	return sameReleaseDay(release.Parsed.SceneDate, episode.AirDate)
+}
+
+// matchesSceneTitle is the conservative test a title-named release has to pass.
+//
+// The rule it is written to: a false grab is worse than a miss. A wrong scene
+// downloaded under a right scene's name is a file somebody has to find and
+// delete, and the library will believe it is complete; a miss just leaves the
+// scene wanted, and the interactive picker is one click away.
+//
+// So all of the following must hold:
+//
+//   - The release does not CONTRADICT the date. A name that carries a scene
+//     date is a date-named release, and if that date is not the scene's then
+//     the release is a different scene however well its words line up.
+//   - The site's name appears in the release name. Compared with the
+//     separators removed, because release names weld words together
+//     ("RealityKings.Deep.Impact"), which no token comparison would match.
+//   - The scene's title appears the same way, and is substantial enough to
+//     mean something: two words or more, or one long word plus a performer
+//     also named in the release. A one-word title is the case that would
+//     otherwise match half a site's catalogue.
+//
+// The known miss is a sub-studio whose releases are named after the network
+// above it ("Brazzers.…" for a Brazzers Exxtra scene). Loosening the site test
+// to a partial match would take it, and would also take every other scene the
+// network released that day, so it stays strict.
+func matchesSceneTitle(release core.Release, series core.Series, episode core.Episode) bool {
+	if !release.Parsed.SceneDate.IsZero() && !sameReleaseDay(release.Parsed.SceneDate, episode.AirDate) {
+		return false
+	}
+
+	name := compactName(release.Title)
+	if name == "" {
+		return false
+	}
+	site := compactName(series.Title)
+	if site == "" || !strings.Contains(name, site) {
+		return false
+	}
+
+	title := compactName(episode.Title)
+	if title == "" || !strings.Contains(name, title) {
+		return false
+	}
+	if len(significantWords(episode.Title)) >= minSceneTitleWords {
+		return true
+	}
+	// One word carries too little on its own: "Impact" matches anything with
+	// that word in it. A performer named in the release is the second signal
+	// that makes it a scene rather than a coincidence.
+	return len(title) >= minSceneTitleRunes && hasScenePerformer(name, episode)
+}
+
+// The thresholds matchesSceneTitle uses. Both are deliberately blunt: they are
+// there to refuse a match, not to grade one.
+const (
+	// minSceneTitleWords is how many words a title needs before it can carry a
+	// match on its own.
+	minSceneTitleWords = 2
+	// minSceneTitleRunes is how long a single-word title must be to be worth
+	// testing at all, even with a performer beside it.
+	minSceneTitleRunes = 5
+)
+
+// hasScenePerformer reports whether any performer credited on the scene is
+// named in the release, compared the same welded way the title is.
+func hasScenePerformer(compactRelease string, episode core.Episode) bool {
+	if episode.Scene == nil {
+		return false
+	}
+	for _, performer := range episode.Scene.Performers {
+		name := compactName(performer)
+		// A one-name credit ("Anna") is too short to be evidence of anything.
+		if len(name) < minPerformerRunes {
+			continue
+		}
+		if strings.Contains(compactRelease, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// minPerformerRunes is the shortest performer name worth testing. A stage name
+// of four letters or fewer appears inside too many other words.
+const minPerformerRunes = 6
+
+// compactName lowercases a name and drops everything that is not a letter or a
+// digit, so "Reality Kings" and "RealityKings" and "Reality.Kings" are one
+// string. It is the comparison release names force: they weld words together
+// as often as they separate them.
+func compactName(value string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(value) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// significantWords are a title's words with the small connecting ones dropped:
+// release names leave them out as often as they keep them, so they say nothing
+// about whether two names are the same scene.
+func significantWords(value string) []string {
+	out := []string{}
+	for _, word := range strings.Fields(normalizeTitle(value)) {
+		if sceneTitleStopWords[word] {
+			continue
+		}
+		out = append(out, word)
+	}
+	return out
+}
+
+var sceneTitleStopWords = map[string]bool{
+	"a": true, "an": true, "the": true, "and": true, "or": true, "of": true,
+	"in": true, "on": true, "at": true, "to": true, "for": true, "with": true,
+	"my": true, "your": true, "his": true, "her": true, "part": true, "vol": true,
+}
+
+// sameReleaseDay compares a parsed scene date against an episode's air date by
+// calendar day in UTC. Both are stored as dates; this says so rather than
+// relying on both having been truncated identically.
+func sameReleaseDay(a, b time.Time) bool {
+	if a.IsZero() || b.IsZero() {
+		return false
+	}
+	ay, am, ad := a.UTC().Date()
+	by, bm, bd := b.UTC().Date()
+	return ay == by && am == bm && ad == bd
 }
 
 func (r *Runner) searchMovies(ctx context.Context, st *store.Store, query string) ([]core.Release, error) {
@@ -453,15 +713,20 @@ func (r *Runner) grabMovie(ctx context.Context, st *store.Store, movie core.Movi
 	})
 }
 
-func (r *Runner) grabEpisode(ctx context.Context, st *store.Store, episode core.Episode, release core.Release, score int, source string) error {
+// grabEpisode hands a release to the engine the episode's own library routes
+// to. kind is one of the core.LibraryKind* constants — the television library
+// for a television episode, the adult library for a scene — and it decides both
+// the download route and the client-side category, so a scene never lands in
+// the television library's download folder.
+func (r *Runner) grabEpisode(ctx context.Context, st *store.Store, kind string, episode core.Episode, release core.Release, score int, source string) error {
 	if _, active, err := st.ActiveGrabForEpisode(ctx, episode.ID); err != nil {
 		return fmt.Errorf("store: find active episode grab: %w", err)
 	} else if active {
 		return nil
 	}
 	info := core.GrabInfo{SeriesID: episode.SeriesID, SeasonNum: episode.SeasonNumber, EpisodeIDs: []int64{episode.ID}}
-	return r.grab(ctx, st, core.LibraryKindTV, release, score, source, info, core.AddOpts{
-		Category: "tv", SeriesID: episode.SeriesID, SeasonNum: episode.SeasonNumber, EpisodeIDs: []int64{episode.ID},
+	return r.grab(ctx, st, kind, release, score, source, info, core.AddOpts{
+		Category: kind, SeriesID: episode.SeriesID, SeasonNum: episode.SeasonNumber, EpisodeIDs: []int64{episode.ID},
 	})
 }
 
@@ -592,10 +857,21 @@ func recordRejections(ctx context.Context, st *store.Store, decisions []wanted.D
 	return nil
 }
 
-func recordNoRelease(ctx context.Context, st *store.Store, title string, candidates int, movieID, seriesID int64) error {
+// recordNoRelease writes the "searched, found nothing worth grabbing" event.
+//
+// tried names the search variants that were run, and is empty for the searches
+// that only have one. It is recorded because a scene search now asks two
+// different questions, and "no release" means something different depending on
+// which of them were asked.
+func recordNoRelease(ctx context.Context, st *store.Store, title string, candidates int, movieID, seriesID int64, tried ...string) error {
+	message := fmt.Sprintf("no acceptable release found for %s (%d candidates)", title, candidates)
+	if len(tried) > 0 {
+		message = fmt.Sprintf("no acceptable release found for %s (%d candidates; tried %s)",
+			title, candidates, strings.Join(tried, ", "))
+	}
 	if err := st.InsertEvent(ctx, &core.Event{
 		Category: "grab",
-		Message:  fmt.Sprintf("no acceptable release found for %s (%d candidates)", title, candidates),
+		Message:  message,
 		MovieID:  movieID,
 		SeriesID: seriesID,
 	}); err != nil {
@@ -634,8 +910,21 @@ func matchesMovie(release core.Release, movie core.Movie) bool {
 	return release.Parsed.Confidence >= highTitleConfidence
 }
 
+// matchesRSSEpisode reports whether a feed release is the episode Caravan is
+// looking for. The title test is shared; the identity test is not, because a
+// scene's season and episode numbers are Caravan's own mapping (release year,
+// sequence within that year) and no indexer publishes them. The release date is
+// what a scene name actually carries and what identifies it.
 func matchesRSSEpisode(release core.Release, episode wanted.Episode) bool {
-	return normalizeTitle(release.Parsed.Title) == normalizeTitle(episode.SeriesTitle) &&
+	if normalizeTitle(release.Parsed.Title) != normalizeTitle(episode.SeriesTitle) {
+		return false
+	}
+	if episode.SeriesKind == core.SeriesKindAdult {
+		return sameReleaseDay(release.Parsed.SceneDate, episode.AirDate)
+	}
+	// One episode only: a season pack matching by containment would be grabbed
+	// as if it were the single episode, which is the interactive path's job.
+	return len(release.Parsed.Episodes) == 1 &&
 		release.Parsed.Season == episode.SeasonNumber &&
 		contains(release.Parsed.Episodes, episode.EpisodeNumber)
 }

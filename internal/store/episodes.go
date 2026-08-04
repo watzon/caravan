@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -98,19 +99,30 @@ func scanSeason(sc scanner) (*core.Season, error) {
 	return &se, nil
 }
 
-const episodeColumns = `id, series_id, season_number, episode_number, tmdb_id, title, overview, air_date, monitored`
+const episodeColumns = `id, series_id, season_number, episode_number, tmdb_id, stash_id,
+	title, overview, air_date, monitored, scene`
 
 // UpsertEpisode inserts or updates an episode and writes back the assigned ID.
-// Identity is (SeriesID, SeasonNumber, EpisodeNumber).
+// Identity is (SeriesID, SeasonNumber, EpisodeNumber) — for a scene, that is
+// (site, release year, sequence within the year), which is the whole
+// site-as-series mapping expressed in the key the table already had.
 func (s *Store) UpsertEpisode(ctx context.Context, e *core.Episode) error {
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO episodes (series_id, season_number, episode_number, tmdb_id, title, overview, air_date, monitored)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	scene, err := encodeScene(e.Scene)
+	if err != nil {
+		return fmt.Errorf("store: upsert episode S%02dE%02d of series %d: %w",
+			e.SeasonNumber, e.EpisodeNumber, e.SeriesID, err)
+	}
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO episodes (series_id, season_number, episode_number, tmdb_id, stash_id,
+			title, overview, air_date, monitored, scene)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (series_id, season_number, episode_number) DO UPDATE SET
-			tmdb_id = excluded.tmdb_id, title = excluded.title, overview = excluded.overview,
-			air_date = excluded.air_date, monitored = excluded.monitored`,
-		e.SeriesID, e.SeasonNumber, e.EpisodeNumber, e.TMDBID, e.Title, e.Overview,
-		formatTime(e.AirDate), e.Monitored)
+			tmdb_id = excluded.tmdb_id, stash_id = excluded.stash_id,
+			title = excluded.title, overview = excluded.overview,
+			air_date = excluded.air_date, monitored = excluded.monitored,
+			scene = excluded.scene`,
+		e.SeriesID, e.SeasonNumber, e.EpisodeNumber, e.TMDBID, e.StashID, e.Title, e.Overview,
+		formatTime(e.AirDate), e.Monitored, scene)
 	if err != nil {
 		return fmt.Errorf("store: upsert episode S%02dE%02d of series %d: %w",
 			e.SeasonNumber, e.EpisodeNumber, e.SeriesID, err)
@@ -136,6 +148,28 @@ func (s *Store) GetEpisode(ctx context.Context, id int64) (*core.Episode, error)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("store: get episode %d: %w", id, err)
+	}
+	return e, nil
+}
+
+// GetEpisodeByStashID returns the episode whose scene has the given stash-box
+// id, or ErrNotFound. It is the lookup a scene refresh needs: the provider hands
+// back a scene by id, and the row it belongs to may already have moved season
+// or number if the release date was corrected upstream.
+//
+// A blank id matches nothing rather than matching every unmatched episode,
+// which is the same rule GetSeriesByStashID follows.
+func (s *Store) GetEpisodeByStashID(ctx context.Context, stashID string) (*core.Episode, error) {
+	if stashID == "" {
+		return nil, fmt.Errorf("store: episode stash %q: %w", stashID, ErrNotFound)
+	}
+	row := s.db.QueryRowContext(ctx, "SELECT "+episodeColumns+" FROM episodes WHERE stash_id = ?", stashID)
+	e, err := scanEpisode(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("store: episode stash %q: %w", stashID, ErrNotFound)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("store: get episode stash %q: %w", stashID, err)
 	}
 	return e, nil
 }
@@ -265,12 +299,44 @@ func scanEpisode(sc scanner) (*core.Episode, error) {
 	var (
 		e       core.Episode
 		airDate string
+		scene   string
 	)
-	err := sc.Scan(&e.ID, &e.SeriesID, &e.SeasonNumber, &e.EpisodeNumber, &e.TMDBID, &e.Title,
-		&e.Overview, &airDate, &e.Monitored)
+	err := sc.Scan(&e.ID, &e.SeriesID, &e.SeasonNumber, &e.EpisodeNumber, &e.TMDBID, &e.StashID,
+		&e.Title, &e.Overview, &airDate, &e.Monitored, &scene)
 	if err != nil {
 		return nil, err
 	}
 	e.AirDate = parseTime(airDate)
+	if e.Scene, err = decodeScene(scene); err != nil {
+		return nil, err
+	}
 	return &e, nil
+}
+
+// encodeScene renders an episode's scene metadata for the `scene` column. A nil
+// SceneInfo stores the empty string rather than the JSON literal "null", so
+// "has no scene metadata" reads the same whether the row predates the adult
+// module or simply is not a scene.
+func encodeScene(sc *core.SceneInfo) (string, error) {
+	if sc == nil {
+		return "", nil
+	}
+	b, err := json.Marshal(sc)
+	if err != nil {
+		return "", fmt.Errorf("store: encode scene: %w", err)
+	}
+	return string(b), nil
+}
+
+// decodeScene reads the `scene` column back. Empty is nil, and so is JSON's own
+// null: both mean the episode is not a scene.
+func decodeScene(raw string) (*core.SceneInfo, error) {
+	if raw == "" {
+		return nil, nil
+	}
+	var sc *core.SceneInfo
+	if err := json.Unmarshal([]byte(raw), &sc); err != nil {
+		return nil, fmt.Errorf("store: decode scene: %w", err)
+	}
+	return sc, nil
 }

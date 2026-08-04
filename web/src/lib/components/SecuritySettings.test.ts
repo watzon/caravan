@@ -43,7 +43,7 @@ beforeEach(() => {
   passwordSet = true;
   posted = [];
   system.status = null;
-  session.user = { username: 'ada', role: 'admin', open: false };
+  session.user = { username: 'ada', role: 'admin', open: false, adult: false };
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -129,7 +129,7 @@ describe('Security settings', () => {
    * account, which is the Users section's business.
    */
   it('offers Users instead of a password form when nothing is signed in', async () => {
-    session.user = { username: '', role: 'admin', open: true };
+    session.user = { username: '', role: 'admin', open: true, adult: false };
     passwordSet = false;
     await openSecurityTab();
 

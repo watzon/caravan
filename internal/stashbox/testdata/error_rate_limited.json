@@ -1,0 +1,9 @@
+{
+  "errors": [
+    {
+      "message": "too many requests",
+      "extensions": { "code": "RATE_LIMITED" }
+    }
+  ],
+  "data": null
+}

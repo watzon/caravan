@@ -72,12 +72,15 @@ function stubFetch() {
       return jsonResponse({ url: '', api_key: '', enabled: false });
     }
     if (url.endsWith('/tv-profiles')) return jsonResponse({ tv_profiles: [] });
+    // The DLNA card asks for the libraries to find out whether the adult
+    // module is on: no adult row means no "share the Adult library" sub-toggle.
+    if (url.endsWith('/libraries')) return jsonResponse({ libraries: [] });
     throw new Error(`unexpected fetch: ${url}`);
   }));
 }
 
 describe('Settings rail', () => {
-  it('groups the nine sections and links each as a route', async () => {
+  it('groups the ten sections and links each as a route', async () => {
     stubFetch();
     app = mount(Settings, { target: host, props: { section: 'playback' } });
     await settle();
@@ -91,6 +94,7 @@ describe('Settings rail', () => {
       '/settings/metadata',
       '/settings/quality-profiles',
       '/settings/storage',
+      '/settings/adult',
       '/settings/indexers',
       '/settings/downloads',
       '/settings/playback',

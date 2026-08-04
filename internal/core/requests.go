@@ -22,11 +22,20 @@ const (
 // the whole point is that no library row exists.
 type Request struct {
 	ID int64
-	// MediaType is MediaTypeMovie or MediaTypeSeries.
+	// MediaType is MediaTypeMovie, MediaTypeSeries or MediaTypeScene.
 	MediaType string
-	TMDBID    int64
-	Title     string
-	Year      int
+	// TMDBID identifies a movie or series request and is 0 on a scene one;
+	// StashID identifies a scene request and is empty on the other two.
+	// Exactly one of them is set, chosen by MediaType, and the requests table
+	// enforces that with a CHECK rather than trusting a caller (migration
+	// 0013). They are two columns rather than one because they are two
+	// different namespaces: a TMDB id is an integer, a stash-box id is a UUID,
+	// and a single "provider id" column would make every query that joins back
+	// to the library guess which it was holding.
+	TMDBID  int64
+	StashID string
+	Title   string
+	Year    int
 	// PosterPath is the provider's poster path ("/abc.jpg"), empty when the
 	// title has no artwork. It is a provider path, not a storage-root path:
 	// nothing has been downloaded yet.

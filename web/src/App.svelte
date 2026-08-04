@@ -14,12 +14,16 @@
   import Sidebar from './lib/layout/Sidebar.svelte';
   import TopBar from './lib/layout/TopBar.svelte';
   import {
+    isAdultRoute,
     memberAllowedRoute,
     numericParam,
     ordinalParam,
     type RoutePattern,
   } from './lib/router';
   import { navigate, router, startRouter } from './lib/router.svelte';
+  import Adult from './lib/routes/Adult.svelte';
+  import AdultScenes from './lib/routes/AdultScenes.svelte';
+  import AdultSite from './lib/routes/AdultSite.svelte';
   import Calendar from './lib/routes/Calendar.svelte';
   import Convert from './lib/routes/Convert.svelte';
   import Discover from './lib/routes/Discover.svelte';
@@ -64,6 +68,12 @@
     '/series/:id/search': 'Interactive Search',
     '/series/:id/search/:season': 'Interactive Search',
     '/series/:id/search/:season/:episode': 'Interactive Search',
+    '/adult': 'Adult',
+    '/adult/scenes': 'Adult',
+    '/adult/sites/:id': 'Adult',
+    '/adult/sites/:id/search': 'Interactive Search',
+    '/adult/sites/:id/search/:year': 'Interactive Search',
+    '/adult/sites/:id/search/:year/:number': 'Interactive Search',
     '/queue': 'Queue',
     '/convert': 'Convert',
     '/wanted': 'Wanted',
@@ -169,6 +179,29 @@
     const current = router.match;
     if (current && memberAllowedRoute(current.pattern)) return;
     navigate('/discover', { replace: true });
+  });
+
+  /**
+   * The adult module's screens exist only for an account it is visible to — the
+   * server-wide switch on AND this account granted (an admin is implicitly
+   * granted). Every one of those routes 404s otherwise, so a bookmark, a shared
+   * link, or a grant that was revoked under an open tab lands on the shelf the
+   * reader does have rather than on a screen whose every call answers "no such
+   * path".
+   *
+   * It waits for /auth/me: `session.adult` is false while the answer is in
+   * flight, and redirecting on that would bounce an admin off their own
+   * bookmark on every boot. This is the opposite of the member guard's
+   * treatment of an unknown identity, and deliberately so — that one guesses
+   * generously because a wrong guess costs a 403 screen, and this one refuses
+   * to guess at all because a wrong guess costs the phase's whole promise.
+   */
+  $effect(() => {
+    if (session.loading) return;
+    if (session.adult) return;
+    const current = router.match;
+    if (!current || !isAdultRoute(current.pattern)) return;
+    navigate(session.isAdmin ? '/movies' : '/discover', { replace: true });
   });
 
   function onKeydown(event: KeyboardEvent) {
@@ -298,6 +331,46 @@
               id={numericParam(match.params, 'id')}
               season={ordinalParam(match.params, 'season')}
               episode={ordinalParam(match.params, 'episode')} />
+          {/key}
+          <!-- `session.adult` gates the RENDER as well as the redirect above.
+               The guard effect runs after the DOM is updated, so without this
+               an ungranted browser would mount the screen for one tick and put
+               a request to /adult/sites on the wire before being sent away —
+               a trace, from a browser that is supposed to have none. -->
+        {:else if session.adult && match.pattern === '/adult'}
+          <Adult />
+        {:else if session.adult && match.pattern === '/adult/scenes'}
+          <AdultScenes />
+        {:else if session.adult && match.pattern === '/adult/sites/:id'}
+          {#key match.params.id}
+            <AdultSite id={numericParam(match.params, 'id')} />
+          {/key}
+          <!-- The picker is gated on isAdmin as well as on `session.adult`, and
+               for the same reason the adult routes are gated on render at all:
+               the member redirect below runs after the DOM is updated, so a
+               granted member would otherwise mount the screen for one tick and
+               put a release search for somebody else's site on the wire before
+               being sent away. Grabbing is an admin write; the server refuses
+               it, and this refuses to ask. -->
+        {:else if session.adult && session.isAdmin && match.pattern === '/adult/sites/:id/search'}
+          {#key router.path}
+            <!-- No year: ReleaseSearch reads -1 as "search the whole site". -->
+            <ReleaseSearch kind="site" id={numericParam(match.params, 'id')} />
+          {/key}
+        {:else if session.adult && session.isAdmin && match.pattern === '/adult/sites/:id/search/:year'}
+          {#key router.path}
+            <ReleaseSearch
+              kind="site"
+              id={numericParam(match.params, 'id')}
+              season={ordinalParam(match.params, 'year')} />
+          {/key}
+        {:else if session.adult && session.isAdmin && match.pattern === '/adult/sites/:id/search/:year/:number'}
+          {#key router.path}
+            <ReleaseSearch
+              kind="site"
+              id={numericParam(match.params, 'id')}
+              season={ordinalParam(match.params, 'year')}
+              episode={ordinalParam(match.params, 'number')} />
           {/key}
         {:else if match.pattern === '/queue'}
           <Queue />

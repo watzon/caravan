@@ -66,16 +66,50 @@ func ValidAvailability(s string) bool {
 	return s == AvailabilityAnnounced || s == AvailabilityInCinemas || s == AvailabilityReleased
 }
 
-// Series is a library TV series.
+// Series kinds (`series.kind`, migration 0013). A series is a television show
+// or — once the adult module is enabled — a site whose scenes are its episodes
+// (PLAN phase 9 task 3).
+//
+// The discriminator exists so the handful of places that genuinely differ can
+// ask: which metadata provider refreshes the title, which library root it
+// organizes into, and whether the caller is allowed to see it at all.
+// Everything else — the wanted list, the backlog sweep, RSS matching, the
+// calendar, the import pipeline — is reused unchanged, which is the whole
+// reason a site is modelled as a series rather than as a new table.
+const (
+	SeriesKindTV    = "tv"
+	SeriesKindAdult = "adult"
+)
+
+// ValidSeriesKind reports whether s names a series kind Caravan stores. Like
+// ValidRole, an unknown kind is a caller mistake rejected at the edge rather
+// than defaulted: defaulting it either hides a television series or files an
+// adult one where everybody can see it.
+func ValidSeriesKind(s string) bool {
+	return s == SeriesKindTV || s == SeriesKindAdult
+}
+
+// Series is a library TV series, or — when Kind is SeriesKindAdult — a site.
 type Series struct {
-	ID        int64
-	TMDBID    int64
+	ID     int64
+	TMDBID int64
+	// StashID is the stash-box id of the site behind an adult series, a UUID
+	// string. Empty on every television series and on an adult series that has
+	// not been matched to a site yet. It is unique among the rows that set it,
+	// exactly as TMDBID is (migration 0013).
+	StashID   string
 	TVDBID    int64
 	IMDBID    string
 	Title     string
 	SortTitle string
 	Year      int
 	Overview  string
+	// Kind is SeriesKindTV or SeriesKindAdult. The zero value is the empty
+	// string rather than SeriesKindTV, so a caller that builds a Series by
+	// hand and forgets it is rejected by the column's CHECK rather than
+	// quietly filed as television — see store.UpsertSeries, which defaults it
+	// once, in one place.
+	Kind string
 	// Status is the provider's series status ("Continuing", "Ended", …).
 	Status string
 	// Path is the series folder, relative to the storage root
@@ -123,11 +157,44 @@ type Episode struct {
 	SeasonNumber  int
 	EpisodeNumber int
 	TMDBID        int64
-	Title         string
-	Overview      string
-	// AirDate is the broadcast date, zero when unknown or unaired.
+	// StashID is the stash-box id of the scene behind an adult episode, a UUID
+	// string, empty everywhere else. Unique among the rows that set it
+	// (migration 0013).
+	StashID string
+	Title   string
+	// Overview is the long description. On a scene it is the studio's own
+	// synopsis.
+	Overview string
+	// AirDate is the broadcast date, zero when unknown or unaired. On a scene
+	// it is the release date, and its year is the season the scene lands in.
 	AirDate   time.Time
 	Monitored bool
+	// Scene is the scene-side metadata of an adult episode, nil on every
+	// television episode. It rides in one JSON column because nothing queries
+	// on it — it is rendered on a scene row and nowhere else.
+	Scene *SceneInfo
+}
+
+// SceneInfo is what an adult episode carries that a television episode has no
+// counterpart for: the studio that released the scene, who is in it, and where
+// it lives on the web (migration 0013, `episodes.scene`).
+//
+// It is a stored shape, deliberately separate from the provider-side SceneMeta
+// in adult.go: the database format must not move when a provider adds a field.
+type SceneInfo struct {
+	// Studio is the releasing studio's name. It is denormalized off the site
+	// for the same reason releases.indexer_name is denormalized off the
+	// indexer: a sub-studio can be retired upstream, and the scene row should
+	// still be able to say who put it out.
+	Studio string `json:"studio,omitempty"`
+	// Performers are the names credited on this scene, in the provider's
+	// billing order — the alias the scene credits somebody under when there is
+	// one, their canonical name otherwise. Names rather than ids because this
+	// is what the scene row renders and what a release filename contains; the
+	// provider's performer ids are a metadata concern, not a library one.
+	Performers []string `json:"performers,omitempty"`
+	// URL is the scene's page on the site, empty when unknown.
+	URL string `json:"url,omitempty"`
 }
 
 // MediaFile is one imported file on disk.

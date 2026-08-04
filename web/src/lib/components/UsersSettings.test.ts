@@ -43,7 +43,7 @@ beforeEach(() => {
   users = [user(1, 'root', 'admin'), user(2, 'ada', 'member')];
   calls = [];
   nextFailure = null;
-  session.user = { username: 'root', role: 'admin', open: false };
+  session.user = { username: 'root', role: 'admin', open: false, adult: false };
   system.status = null;
   host = document.createElement('div');
   document.body.appendChild(host);

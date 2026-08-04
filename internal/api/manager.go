@@ -44,17 +44,44 @@ type Manager interface {
 	// the parked file's parsed guess.
 	MatchUnmatched(ctx context.Context, unmatchedID int64, mediaType string, tmdbID int64) error
 
+	// AddSite adds an adult site by stash-box id, as a series of kind adult
+	// with its scenes as episodes. It is AddSeries' counterpart, and it is a
+	// separate method for the reason core.AdultMetadataProvider is a separate
+	// interface: a stash-box id is a UUID string, not the int64 TMDB hands out.
+	//
+	// It reports library.ErrAdultDisabled when the module is switched off. That
+	// path is not reachable through the HTTP layer — every route that calls
+	// this sits behind requireAdult — but the manager is the thing that owns
+	// the invariant, and a second caller is one refactor away.
+	AddSite(ctx context.Context, stashID string) (*core.Series, error)
+
 	// Metadata returns the configured metadata provider, or nil when none is
 	// configured (no TMDB API key yet). The search endpoint reports that as a
 	// 503 rather than pretending there are no results.
 	Metadata() core.MetadataProvider
+
+	// AdultMetadata returns the configured adult metadata provider, or nil.
+	//
+	// Nil is the answer both when no stash-box credential has been entered and
+	// when the module is switched off, and the second half is load-bearing: it
+	// is the wiring's own guard, independent of requireAdult and of
+	// library.adultReady, so the "zero stash-box traffic when disabled"
+	// acceptance survives any one of the three being got wrong. The nil must be
+	// a genuine untyped nil rather than a typed nil pointer, because callers
+	// test the interface value (see Metadata).
+	AdultMetadata() core.AdultMetadataProvider
 }
 
 // Media types accepted by POST /import/queue/{id}/match and POST /requests,
 // and reported by GET /search and the discover endpoints. They alias the core
-// constants because the same two strings are stored in requests.media_type:
-// one spelling, one place to change it.
+// constants because the same strings are stored in requests.media_type: one
+// spelling, one place to change it.
+//
+// MediaTypeScene is only ever accepted from a caller the adult gate would let
+// through; see handleCreateRequest for why an ungranted one is answered as
+// though the value did not exist at all.
 const (
 	MediaTypeMovie  = core.MediaTypeMovie
 	MediaTypeSeries = core.MediaTypeSeries
+	MediaTypeScene  = core.MediaTypeScene
 )

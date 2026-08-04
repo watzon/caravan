@@ -40,6 +40,11 @@
     compass: '<circle cx="12" cy="12" r="10"/><path d="m16.24 7.76-2.12 6.36-6.36 2.12 2.12-6.36z"/>',
     clock: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
     star: '<path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.2-5.4-2.9-5.4 2.9 1-6.2L3.2 9.5l6.1-.9z"/>',
+    // The adult module's mark (phase 9). Stroke-based and 24x24 like the rest;
+    // it is the one icon in the set that is not a noun from the media domain,
+    // which is the point — it reads as "this is a different kind of shelf".
+    flame:
+      '<path d="M12 21a6 6 0 0 0 6-6c0-4-3-6.5-4-9.5-1.5 1.5-2 3-2 4.5-1-1-1.5-2.5-1.5-4C8 8 6 10.5 6 15a6 6 0 0 0 6 6z"/><path d="M12 21a2.5 2.5 0 0 0 2.5-2.5c0-1.6-1.3-2.4-2.5-4-1.2 1.6-2.5 2.4-2.5 4A2.5 2.5 0 0 0 12 21z"/>',
   } as const;
 
   export type IconName = keyof typeof ICONS;

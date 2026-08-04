@@ -300,6 +300,18 @@ export interface SessionUser {
   username: string;
   role: UserRole;
   open: boolean;
+  /**
+   * Whether the adult module is visible to THIS caller: the server-wide switch
+   * is on and this account reaches it (an admin always does, a member needs the
+   * grant). It is the only field outside /adult that reports anything about the
+   * module, and it is false — never absent — for everybody else, so "off" and
+   * "not granted" are the same answer here as they are on the 404 from /adult.
+   *
+   * The SPA reads the nav item, the settings pill and the scene surfaces from
+   * this and nothing else. GET /settings cannot stand in for it: that route is
+   * admin-only, and a granted member has to be able to decide too.
+   */
+  adult: boolean;
 }
 
 /**
@@ -438,6 +450,32 @@ export const SETTING_TV_PROFILE = 'tv_profile';
  */
 export const SETTING_DLNA_ENABLED = 'dlna_enabled';
 export const SETTING_DLNA_FRIENDLY_NAME = 'dlna_friendly_name';
+
+/**
+ * The stash-box metadata source for the adult module (internal/store).
+ *
+ * These two ride on PUT /settings like every other key. The master switch does
+ * NOT — flipping `adult_enabled` creates the Adult library row on its first
+ * enable, which a key/value PUT cannot carry out, so it has an endpoint of its
+ * own (POST /settings/adult) and the server refuses it here.
+ *
+ * A blank endpoint is legal and means the TPDB preset below.
+ */
+export const SETTING_STASHBOX_ENDPOINT = 'stashbox_endpoint';
+export const SETTING_STASHBOX_API_KEY = 'stashbox_api_key';
+
+/** internal/stashbox.DefaultEndpoint — what a blank endpoint resolves to. */
+export const STASHBOX_TPDB_ENDPOINT = 'https://theporndb.net/graphql';
+
+/**
+ * The adult module's master switch, as GET /settings reports it.
+ *
+ * Readable here but NOT writable: PUT /settings rejects it, because the first
+ * enable also creates the Adult library row. `api.setAdultEnabled` is the only
+ * way to change it. Absent means off, exactly as the server reads it, so the
+ * Settings screen can seed its toggle without a second request.
+ */
+export const SETTING_ADULT_ENABLED = 'adult_enabled';
 
 /**
  * GET /dlna — what the media server is actually doing.
@@ -933,6 +971,15 @@ export interface Conversion {
 /** internal/api MediaTypeMovie/MediaTypeSeries. Never TMDB's "tv". */
 export type MediaType = 'movie' | 'series';
 
+/**
+ * What a request row can be about. It is deliberately NOT `MediaType` widened:
+ * `MediaType` addresses the TMDB half of the app — /discover/{type}/{tmdbID},
+ * /movies/:id, /series/:id — and a scene has none of those. Keeping them apart
+ * is what makes the compiler point at every place a scene row needs its own
+ * answer instead of silently building a link to a screen that does not exist.
+ */
+export type RequestMediaType = MediaType | 'scene';
+
 /** internal/api.discoverItemJSON — one provider title, decorated. */
 export interface DiscoverItem {
   media_type: MediaType;
@@ -1046,8 +1093,15 @@ export const MIN_PASSWORD_LENGTH = 8;
 /** internal/api.requestJSON — one row of the requests screen. */
 export interface MediaRequest {
   id: number;
-  media_type: MediaType;
+  media_type: RequestMediaType;
   tmdb_id: number;
+  /**
+   * The stash-box id of a requested scene, and "" on the other two kinds —
+   * whose `tmdb_id` is what names them. A scene row's `tmdb_id` is 0: the two
+   * ids are separate fields because they are separate id spaces, and the server
+   * enforces that exactly one of them is filled.
+   */
+  stash_id: string;
   title: string;
   year: number;
   poster_path: string;
@@ -1074,8 +1128,11 @@ export interface MediaRequest {
  * append.
  */
 export interface CreateRequestBody {
-  media_type: MediaType;
+  media_type: RequestMediaType;
+  /** 0 for a scene, and required (> 0) for the other two. */
   tmdb_id: number;
+  /** Scene only, and required there. The server refuses the two mixed. */
+  stash_id?: string;
   title: string;
   year: number;
   poster_path?: string;
@@ -1096,8 +1153,18 @@ export interface ApproveRequestResult {
  * Phase 8 — libraries as first-class objects (SPEC §7, §11 `/libraries`).
  * ------------------------------------------------------------------------- */
 
-/** internal/core.LibraryKind* — the whole item→library mapping. */
-export type LibraryKind = 'movie' | 'tv';
+/**
+ * internal/core.LibraryKind* — the whole item→library mapping.
+ *
+ * The `adult` row does not exist until the module is enabled for the first
+ * time, and it survives a later disable (nothing is deleted) — so the row
+ * outliving the module is exactly why GET /libraries filters rather than
+ * trusting the table. The server drops it for any caller the module is not
+ * visible to (internal/api.libraryVisible), which means its presence in a
+ * payload IS permission to render it, and the switcher needs no adult rule of
+ * its own. Enforced by TestLibrariesHideTheAdultRowWhenTheModuleIsOff.
+ */
+export type LibraryKind = 'movie' | 'tv' | 'adult';
 
 /**
  * One row of a library's indexer matrix (internal/api.libraryIndexerJSON).
@@ -1164,4 +1231,141 @@ export interface LibraryPatch {
 export interface LibraryIndexerOverride {
   enabled: boolean;
   categories: number[] | null;
+}
+
+/* ---------------------------------------------------------------------------
+ * Phase 9 — the adult module (SPEC §11 `/adult`).
+ *
+ * Every shape below comes off a route behind requireAdult, so a client that is
+ * not meant to see any of it never decodes any of it: the routes answer 404,
+ * byte-identical to a path that was never registered. Nothing here is filtered
+ * on the client — the client is told, once, by `SessionUser.adult`, whether the
+ * surface exists at all.
+ *
+ * A site IS a series row and a scene IS an episode row (release year = season,
+ * sequence within the year = episode number). These are separate interfaces
+ * anyway, because the DTOs are: a site carries no tmdb/tvdb/imdb id, no status
+ * and no first-aired date, and offering those fields would invite a card to
+ * render six permanently empty values.
+ * ------------------------------------------------------------------------- */
+
+/** internal/api.siteJSON — one card on the Adult grid. */
+export interface Site {
+  id: number;
+  title: string;
+  /** The provider id. It is what every /adult route accepts, never `id`. */
+  stash_id: string;
+  sort_title: string;
+  overview: string;
+  path: string;
+  poster_path: string;
+  poster_url: string;
+  monitored: boolean;
+  quality_profile_id: number;
+  added_at: string;
+  updated_at: string;
+  /** The grid's "18 / 240" badge — episode counts under this screen's nouns. */
+  scene_count: number;
+  scene_file_count: number;
+}
+
+/** internal/api.sceneJSON — one row on a site's page. */
+export interface Scene {
+  id: number;
+  series_id: number;
+  /** The release year, which is the season number. */
+  year: number;
+  /** The scene's sequence within its year — what the "#003" prefix renders. */
+  number: number;
+  stash_id: string;
+  title: string;
+  overview: string;
+  studio: string;
+  performers: string[];
+  url: string;
+  /** The air date under the name this screen uses: a scene is published. */
+  release_date: string;
+  monitored: boolean;
+  file?: MediaFile | null;
+}
+
+/** internal/api.siteYearJSON — a release year and its scenes. */
+export interface SiteYear {
+  year: number;
+  monitored: boolean;
+  scenes: Scene[];
+}
+
+/** GET /adult/sites/{id}. Years arrive newest first, scenes ascending. */
+export interface SiteDetail extends Site {
+  /**
+   * The site's page on the metadata endpoint's own website, "" when there is
+   * none. The server derives it: where it points depends on which endpoint is
+   * configured, and that setting is admin-only while this page is not.
+   */
+  provider_url: string;
+  years: SiteYear[];
+}
+
+/** internal/api.siteMetaJSON — a provider search hit, decorated. */
+export interface SiteMeta {
+  stash_id: string;
+  name: string;
+  /** The other names the provider knows this site by; [] when it knows none. */
+  aliases: string[];
+  parent_name: string;
+  url: string;
+  image_url: string;
+  in_library: boolean;
+  /** 0 when `in_library` is false. */
+  library_id: number;
+}
+
+/**
+ * internal/api.sceneMetaJSON — one provider scene on the discover screen.
+ * `in_library`/`requested` answer the same two questions a title card does.
+ */
+export interface SceneMeta {
+  media_type: 'scene';
+  stash_id: string;
+  site_stash_id: string;
+  site_name: string;
+  title: string;
+  overview: string;
+  /** The release date, "YYYY-MM-DD"; "" when the provider has none. */
+  date: string;
+  /** Run time in seconds; 0 when unknown. */
+  duration: number;
+  performers: string[];
+  url: string;
+  image_url: string;
+  in_library: boolean;
+  library_id: number;
+  requested: boolean;
+}
+
+/** GET /adult/discover — one page of provider scenes. */
+export interface AdultDiscoverPage {
+  page: number;
+  per_page: number;
+  total: number;
+  scenes: SceneMeta[];
+}
+
+/**
+ * internal/api.adultUserJSON — one row of the member-access card.
+ *
+ * It is a shape of its own rather than a field on `User` because GET /users
+ * carries no adult field at all: an `adult_access: false` on every row of an
+ * install that never enabled the module is exactly the trace this phase
+ * promises not to leave.
+ */
+export interface AdultUser {
+  id: number;
+  username: string;
+  role: UserRole;
+  /** The account's own grant. False and meaningless on an admin row. */
+  granted: boolean;
+  /** The account reaches the module through its role — every admin. */
+  always_granted: boolean;
 }

@@ -8,7 +8,9 @@
    *
    * A member sees the Explore group and nothing else: the other three lead to
    * screens the server answers 403 for (SPEC §11), and the status card below
-   * reads a status they may not fetch.
+   * reads a status they may not fetch. The one exception is the Adult shelf,
+   * which a granted member may read — so their Library group holds that row
+   * alone rather than being suppressed wholesale.
    */
   import { isActive } from '../router.svelte';
   import { auth } from '../state/auth.svelte';
@@ -30,6 +32,12 @@
     icon: IconName;
     /** Extra paths that also light this row up — Discover also owns `/`. */
     alsoActiveOn?: string[];
+    /**
+     * The row belongs to the adult module: it appears only while the module is
+     * visible to this account, and it is then the ONE Library row a granted
+     * member gets (the rest of that group is an admin's).
+     */
+    adult?: true;
   }
 
   const EXPLORE: NavItem[] = [
@@ -40,6 +48,10 @@
   const LIBRARY: NavItem[] = [
     { href: '/movies', label: 'Movies', icon: 'film' },
     { href: '/series', label: 'Series', icon: 'tv' },
+    // Between Series and Wanted (the Paper design). It is a shelf, so it sits
+    // with the shelves rather than in Explore, even for the granted member
+    // whose Library group holds nothing else.
+    { href: '/adult', label: 'Adult', icon: 'flame', adult: true },
     { href: '/wanted', label: 'Wanted', icon: 'search' },
     { href: '/calendar', label: 'Calendar', icon: 'inbox' },
   ];
@@ -75,6 +87,19 @@
   });
 
   let status = $derived(system.status);
+
+  /**
+   * The Library group's rows for whoever is reading.
+   *
+   * An adult row needs the module to be visible to this account; every other
+   * row needs the admin role. That is why the filter is per row rather than per
+   * group: a granted member's Library group holds the Adult shelf and nothing
+   * else, and an admin who switched the module off gets the group they had
+   * before it existed.
+   */
+  let libraryItems = $derived(
+    LIBRARY.filter((item) => (item.adult ? session.adult : session.isAdmin)),
+  );
 
   /**
    * What each nav item counts, and how loudly (DESIGN.md §5/§6: colored text,
@@ -193,14 +218,16 @@
       {/each}
     </div>
 
-    {#if session.isAdmin}
+    {#if libraryItems.length > 0}
       <div class="flex flex-col gap-1">
         <p class="micro-label px-2 pb-1">Library</p>
-        {#each LIBRARY as item (item.href)}
+        {#each libraryItems as item (item.href)}
           {@render navLink(item)}
         {/each}
       </div>
+    {/if}
 
+    {#if session.isAdmin}
       <div class="flex flex-col gap-1">
         <p class="micro-label px-2 pb-1">Activity</p>
         {#each ACTIVITY as item (item.href)}

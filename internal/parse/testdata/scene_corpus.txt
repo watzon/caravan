@@ -1,0 +1,77 @@
+# Caravan scene-release parser corpus (PLAN phase 9 task 4).
+#
+# Same standing rule as corpus.txt: this file only ever grows. Every scene
+# parser behavior — and every bug found in any later phase — lands an entry
+# here BEFORE the code that satisfies it.
+#
+# These names are driven through parse.Scene, not parse.Parse. The two differ
+# in one thing only: a scene release is identified by a DATE rather than by a
+# season/episode tag, so `scenedate` is the field that carries identity and
+# `title` is the SITE, which is the series a scene belongs to. Quality, source,
+# codec, audio, edition and group are parsed by exactly the same rules as a TV
+# or movie name, so the entries below exercise the mapping, not those rules
+# over again.
+#
+# Format is corpus.txt's, plus one key:
+#
+#   scenedate=YYYY-MM-DD   the release date the name carries
+#
+# Omitted keys assert the zero value; quality and source default to "unknown".
+# A line with no `scenedate` asserts the fall-through: a name in an adult
+# category that is not date-shaped is parsed as an ordinary release, so a
+# mis-filed TV or movie name still works.
+
+# --- The canonical shape: Site.YY.MM.DD.Performers.And.Title.tags-GROUP ------
+Brazzers.22.03.14.Abella.Danger.Deep.Impact.XXX.1080p.MP4-KTR | title=Brazzers; scenedate=2022-03-14; year=2022; season=2022; quality=1080p; group=KTR; minconf=0.8
+BangBros18.19.07.02.Katie.Kush.XXX.SD.MP4-KLEENEX | title=BangBros18; scenedate=2019-07-02; year=2019; season=2019; group=KLEENEX; minconf=0.7
+TeamSkeet.21.11.30.Alex.Coal.Room.For.Rent.XXX.720p.MP4-GALAXY | title=TeamSkeet; scenedate=2021-11-30; year=2021; season=2021; quality=720p; group=GALAXY; minconf=0.8
+Tushy.20.12.25.Emily.Willis.Christmas.Wish.XXX.2160p.MP4-XLEECH | title=Tushy; scenedate=2020-12-25; year=2020; season=2020; quality=2160p; group=XLEECH; minconf=0.8
+
+# --- Four-digit years, and the ISO form some sites publish --------------------
+Blacked.2021.05.15.Emily.Willis.2160p.MP4-GALAXY | title=Blacked; scenedate=2021-05-15; year=2021; season=2021; quality=2160p; group=GALAXY; minconf=0.8
+Vixen.2023-08-11.Scene.Title.Here.1080p.MP4-SEXORS | title=Vixen; scenedate=2023-08-11; year=2023; season=2023; quality=1080p; group=SEXORS; minconf=0.8
+Deeper.2019.01.04.Kira.Noir.1080p.mp4 | title=Deeper; scenedate=2019-01-04; year=2019; season=2019; quality=1080p; container=mp4; minconf=0.7
+
+# --- Separator variants: dashes, underscores, spaces --------------------------
+TeamSkeet - 23.01.09 - Alex Coal - Room For Rent - 1080p.mp4 | title=TeamSkeet; scenedate=2023-01-09; year=2023; season=2023; quality=1080p; container=mp4; minconf=0.7
+Sexy_Hub_22_06_18_Jane_Doe_XXX_1080p_MP4-WRB | title=Sexy Hub; scenedate=2022-06-18; year=2022; season=2022; quality=1080p; group=WRB; minconf=0.8
+MomsTeachSex 21 04 07 Some Title XXX 480p MP4-OATH | title=MomsTeachSex; scenedate=2021-04-07; year=2021; season=2021; quality=480p; group=OATH; minconf=0.8
+
+# --- A digit-suffixed site name must not be eaten by the date -----------------
+# "BangBros18" and "Girlsway69" end in digits; the date is the first
+# separator-delimited candidate, not the last two digits of the site.
+Girlsway69.18.02.05.Some.Scene.XXX.1080p.MP4-KTR | title=Girlsway69; scenedate=2018-02-05; year=2018; season=2018; quality=1080p; group=KTR; minconf=0.8
+21Naturals.20.09.09.Some.Scene.XXX.1080p.MP4-KTR | title=21Naturals; scenedate=2020-09-09; year=2020; season=2020; quality=1080p; group=KTR; minconf=0.8
+
+# --- Impossible dates are not dates ------------------------------------------
+# 13 is not a month and 32 is not a day, so these carry no date at all and fall
+# through to the ordinary parser rather than inventing one.
+Site.22.13.14.Some.Scene.XXX.1080p.MP4-KTR | title=Site 22 13 14 Some Scene XXX; quality=1080p; group=KTR
+Site.22.02.32.Some.Scene.XXX.1080p.MP4-KTR | title=Site 22 02 32 Some Scene XXX; quality=1080p; group=KTR
+# February 29th exists in 2020 and does not in 2021: the second one is skipped
+# and the parser keeps looking rather than rolling it forward to March 1st.
+LegalPorno.20.02.29.Gio1234.720p.mp4 | title=LegalPorno; scenedate=2020-02-29; year=2020; season=2020; quality=720p; container=mp4; minconf=0.7
+LegalPorno.21.02.29.Gio1234.720p.mp4 | title=LegalPorno 21 02 29 Gio1234; quality=720p; container=mp4
+
+# --- Full technical tag runs, shared with the ordinary parser -----------------
+Blacked.22.08.19.Some.Scene.XXX.2160p.WEB-DL.h265.10bit.AAC-XLEECH | title=Blacked; scenedate=2022-08-19; year=2022; season=2022; quality=2160p; source=webdl; codec=h265; audio=AAC; bitdepth=10; group=XLEECH; minconf=0.9
+NubileFilms.19.03.22.Some.Scene.XXX.1080p.HEVC.x265.PRT | title=NubileFilms; scenedate=2019-03-22; year=2019; season=2019; quality=1080p; codec=x265; minconf=0.7
+PureTaboo.23.06.01.Some.Scene.XXX.1080p.WEBRip.x264-GAYME | title=PureTaboo; scenedate=2023-06-01; year=2023; season=2023; quality=1080p; source=webrip; codec=x264; group=GAYME; minconf=0.9
+Wicked.18.10.31.Some.Scene.XXX.DVDRip.XviD-CiCXXX | title=Wicked; scenedate=2018-10-31; year=2018; season=2018; quality=480p; source=dvd; codec=xvid; group=CiCXXX; minconf=0.8
+
+# --- PROPER and REPACK re-releases -------------------------------------------
+Brazzers.22.03.14.Abella.Danger.Deep.Impact.PROPER.XXX.1080p.MP4-KTR | title=Brazzers; scenedate=2022-03-14; year=2022; season=2022; quality=1080p; proper=true; group=KTR; minconf=0.8
+Brazzers.22.03.14.Abella.Danger.Deep.Impact.REPACK.XXX.1080p.MP4-KTR | title=Brazzers; scenedate=2022-03-14; year=2022; season=2022; quality=1080p; repack=true; group=KTR; minconf=0.8
+
+# --- Fall-through: not date-shaped, so parsed as an ordinary release ----------
+# An indexer that files a television or movie release under an XXX category
+# still gets a correct parse; the caller tells the two apart with IsScene.
+Some.Show.S01E02.1080p.WEB-DL.x264-GROUP | title=Some Show; season=1; episodes=2; quality=1080p; source=webdl; codec=x264; group=GROUP
+Big.Buck.Bunny.2008.1080p.BluRay.x264-GROUP | title=Big Buck Bunny; year=2008; quality=1080p; source=bluray; codec=x264; group=GROUP
+Adult.Time.Compilation.XXX.1080p.MP4-KTR | title=Adult Time Compilation XXX; quality=1080p; group=KTR
+
+# --- Degenerate input never panics and never scores importable ---------------
+# A bare date names no site, so there is nothing to match it against: it must
+# stay under the 0.5 import threshold and park.
+.mp4 | container=mp4; maxconf=0
+22.03.14 | scenedate=2022-03-14; year=2022; season=2022; maxconf=0.45

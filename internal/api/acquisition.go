@@ -111,6 +111,12 @@ func WithDownloadClients(r *clients.Registry) Option {
 const (
 	engineCategoryMovies = "movies"
 	engineCategoryTV     = "tv"
+	// engineCategoryAdult labels a scene grab. It is the same string
+	// automation.grabEpisode hands the engine for an adult episode
+	// (core.LibraryKindAdult), so a scene lands under one label whether it was
+	// picked by hand or found by the backlog sweep — and never under "tv",
+	// which is the download folder the television library sorts.
+	engineCategoryAdult = core.LibraryKindAdult
 )
 
 // requireEngine resolves the download engine for an operation that belongs to

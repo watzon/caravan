@@ -54,6 +54,12 @@ const (
 )
 
 // dirs is every directory the layout needs, parents before children.
+//
+// library/Adult is deliberately NOT here. A prepared drive is carried to
+// another house and plugged into a television, and the layout it arrives with
+// is a statement about what is on it: a folder named Adult at the root of a
+// drive somebody borrowed is the disclosure this phase exists to prevent, even
+// empty. Opting in is layoutDirs' job (PLAN phase 9 task 6).
 var dirs = []string{
 	CaravanDir,
 	BinDir,
@@ -62,6 +68,24 @@ var dirs = []string{
 	library.LibraryDir,
 	library.LibraryDir + "/" + library.MoviesDir,
 	library.LibraryDir + "/" + library.TVDir,
+}
+
+// adultDir is the adult library's folder on a prepared drive. It is derived
+// from the same constants the organizer writes under, so a drive prepared with
+// --include-adult is a drive the scanner recognises.
+var adultDir = library.LibraryDir + "/" + library.AdultDir
+
+// layoutDirs is the directory list for one run.
+//
+// The adult root is appended rather than filtered out, so "excluded" is the
+// absence of a decision rather than a rule that has to keep working: a bug in
+// the flag handling leaves the drive with no adult folder, which is the safe
+// direction to fail in.
+func layoutDirs(includeAdult bool) []string {
+	if !includeAdult {
+		return dirs
+	}
+	return append(append([]string(nil), dirs...), adultDir)
 }
 
 // Options configures one prepare run.
@@ -90,6 +114,16 @@ type Options struct {
 	// build's own. They exist so the tests can drive every branch on one
 	// machine.
 	GOOS, GOARCH string
+
+	// IncludeAdult scaffolds library/Adult as well (PLAN phase 9 task 6). The
+	// default is off, and that is the whole point: a drive is a thing that
+	// leaves the house, so the adult library goes onto one only when somebody
+	// says so at the command line, every single time.
+	//
+	// It changes the layout and nothing else. prepare copies no media at all
+	// (SPEC §17.1: it scaffolds, it never moves the library), so the flag is
+	// the difference between an empty folder and no folder.
+	IncludeAdult bool
 }
 
 // Result is what a run did, in the order it did it.
@@ -131,7 +165,7 @@ func Run(opts Options) (*Result, error) {
 	res := &Result{Root: root}
 	res.Warnings, res.Notes = advise(root)
 
-	for _, dir := range dirs {
+	for _, dir := range layoutDirs(opts.IncludeAdult) {
 		if err := os.MkdirAll(filepath.Join(root, filepath.FromSlash(dir)), 0o755); err != nil {
 			return nil, fmt.Errorf("prepare: create %s: %w", dir, err)
 		}

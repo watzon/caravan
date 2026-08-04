@@ -60,12 +60,24 @@ const posterTimeout = 30 * time.Second
 type Manager struct {
 	store    *store.Store
 	provider core.MetadataProvider
-	root     string
+	// adult answers for series of kind adult, and is nil when no stash-box
+	// credential is configured. It is a second provider rather than a second
+	// implementation of the first because the two describe different worlds —
+	// see core.AdultMetadataProvider for why. Nothing here reaches it without
+	// going through adultReady, which is what makes "zero stash-box traffic
+	// when the module is off" a property of one function rather than of every
+	// call site.
+	adult core.AdultMetadataProvider
+	root  string
 
 	// parse turns a filename into a ParsedRelease. It is a field rather than a
 	// direct call so tests can drive matching and reconciliation with
 	// deterministic input instead of tracking the parser's heuristics.
 	parse func(name string) core.ParsedRelease
+	// parseScene is parse's date-based counterpart, used for files under the
+	// adult library root. Which parser reads a name is decided by where the
+	// file is, never by what the name looks like (see parse.Scene).
+	parseScene func(name string) core.ParsedRelease
 	// link is os.Link. Overridable so the no-hardlink fallback (exFAT,
 	// cross-device) is testable without a second filesystem.
 	link func(oldname, newname string) error
@@ -73,6 +85,11 @@ type Manager struct {
 	hc *http.Client
 	// minConfidence is the parking threshold described on defaultMinConfidence.
 	minConfidence float64
+	// syncedSites remembers which sites a single Scan has already walked the
+	// stash-box catalogue for. Without it, every scene file whose date the
+	// library does not know would walk the same catalogue again — see
+	// matchAndImportScene. It is scan-scoped state and Scan is the only writer.
+	syncedSites map[int64]bool
 	// notify is the playback handoff, or nil when none is configured.
 	notify Notifier
 }
@@ -98,6 +115,14 @@ func WithNotifier(n Notifier) Option {
 	return func(m *Manager) { m.notify = n }
 }
 
+// WithAdultProvider attaches the stash-box metadata provider. Without one,
+// every adult path reports core.ErrNoAdultProvider and the recurring sweeps
+// no-op, which is what a server with the module enabled but no credential
+// entered yet looks like.
+func WithAdultProvider(p core.AdultMetadataProvider) Option {
+	return func(m *Manager) { m.adult = p }
+}
+
 // NewManager returns a Manager rooted at the storage root.
 //
 // mp may be nil: without a metadata provider every scanned file parks in the
@@ -109,6 +134,7 @@ func NewManager(st *store.Store, mp core.MetadataProvider, root string, opts ...
 		provider:      mp,
 		root:          cleanRoot(root),
 		parse:         parse.Parse,
+		parseScene:    parse.Scene,
 		link:          osLink,
 		hc:            &http.Client{Timeout: posterTimeout},
 		minConfidence: defaultMinConfidence,

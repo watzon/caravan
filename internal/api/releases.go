@@ -12,6 +12,7 @@ import (
 	"github.com/watzon/caravan/internal/core"
 	"github.com/watzon/caravan/internal/download"
 	"github.com/watzon/caravan/internal/parse"
+	"github.com/watzon/caravan/internal/store"
 )
 
 // releaseSearchTimeout bounds one interactive fan-out. A user is waiting on
@@ -33,6 +34,10 @@ const (
 	flagWrongEpisode = "wrong-episode"
 	flagSeasonPack   = "season-pack"
 	flagNoSeeders    = "no-seeders"
+	// flagWrongDate is the scene equivalent of wrong-season/wrong-episode: a
+	// scene is addressed by its release date, so a release whose parsed date is
+	// not the searched scene's is the wrong scene (PLAN phase 9 task 3).
+	flagWrongDate = "wrong-date"
 )
 
 // releaseJSON is one row of the interactive picker: what the indexer said,
@@ -74,8 +79,13 @@ type indexerErrorJSON struct {
 
 type releasesResponse struct {
 	// Query is what was actually sent to the indexers, so a picker that comes
-	// back empty can show the user why.
-	Query    string             `json:"query"`
+	// back empty can show the user why. When a search sends several — a scene
+	// is looked for by date AND by title — this is the first of them and
+	// Queries is all of them.
+	Query string `json:"query"`
+	// Queries is every search that was run, in the order they were run. It has
+	// one entry for everything but a scene.
+	Queries  []string           `json:"queries"`
 	Releases []releaseJSON      `json:"releases"`
 	Errors   []indexerErrorJSON `json:"errors"`
 }
@@ -107,7 +117,7 @@ func (s *server) handleMovieReleases(w http.ResponseWriter, r *http.Request) {
 	if m.Year > 0 {
 		query = fmt.Sprintf("%s %d", m.Title, m.Year)
 	}
-	s.serveReleases(w, r, core.LibraryKindMovie, query, func(rel core.Release) []string {
+	s.serveReleases(w, r, core.LibraryKindMovie, []string{query}, func(rel core.Release) []string {
 		return movieReleaseFlags(rel, *m)
 	})
 }
@@ -121,9 +131,18 @@ func (s *server) handleSeriesReleases(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	sr, err := s.st.GetSeries(r.Context(), id)
-	if err != nil {
-		s.writeStoreError(w, "get series", err)
+	sr, ok := s.getVisibleSeries(w, r, id)
+	if !ok {
+		return
+	}
+
+	// A site is a series row too, and it must not be searched like one: the
+	// library kind decides which indexers answer and with which categories, so
+	// a hardcoded TV kind here would fan a scene search out over the television
+	// library's 5000-series categories — the exact thing searchScene exists to
+	// avoid (PLAN phase 9 task 3).
+	if core.LibraryKindForSeries(sr.Kind) == core.LibraryKindAdult {
+		s.serveSceneReleases(w, r, *sr, season, episode)
 		return
 	}
 
@@ -136,8 +155,58 @@ func (s *server) handleSeriesReleases(w http.ResponseWriter, r *http.Request) {
 	case season >= 0:
 		query = fmt.Sprintf("%s S%02d", sr.Title, season)
 	}
-	s.serveReleases(w, r, core.LibraryKindTV, query, func(rel core.Release) []string {
+	s.serveReleases(w, r, core.LibraryKindTV, []string{query}, func(rel core.Release) []string {
 		return seriesReleaseFlags(rel, season, episode)
+	})
+}
+
+// serveSceneReleases is handleSeriesReleases' adult branch, and it differs from
+// the television one exactly where searchScene differs from a television
+// search.
+//
+// The query is the site and the scene's RELEASE DATE, because a scene has no
+// SxxEyy an indexer could filter on — "Site YY.MM.DD" is how scene releases are
+// named and therefore how they are found. Caravan's season and episode numbers
+// are its own mapping (release year, sequence within that year) and no indexer
+// has ever heard of them, so putting an S22E07 in the query would return
+// nothing at all.
+//
+// A request that narrows no further than the site, or one whose scene has no
+// release date, searches the site's name alone. That is deliberately weaker
+// than searchScene's silent no-op: this is a human at the picker who asked to
+// see what the indexers have, and a list to choose from beats an empty table.
+func (s *server) serveSceneReleases(w http.ResponseWriter, r *http.Request, sr core.Series, season, episode int) {
+	var airDate time.Time
+	var title string
+	if season >= 0 && episode > 0 {
+		e, err := s.st.GetEpisodeByNumber(r.Context(), sr.ID, season, episode)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			s.writeStoreError(w, "get scene", err)
+			return
+		}
+		if e != nil {
+			airDate, title = e.AirDate, e.Title
+		}
+	}
+
+	// The same two questions the automatic search asks, from the same builder:
+	// a picker that searched differently would show a user candidates the
+	// automatic path never sees, and hide the ones it does.
+	queries := make([]string, 0, 2)
+	for _, search := range core.SceneSearches(sr.Title, airDate, title) {
+		queries = append(queries, search.Query)
+	}
+	if len(queries) == 0 {
+		// A request that narrows no further than the site, or a scene with
+		// neither a date nor a title, searches the site's name alone. That is
+		// deliberately weaker than searchScene's silent no-op: this is a human
+		// who asked to see what the indexers have, and a list to choose from
+		// beats an empty table.
+		queries = []string{sr.Title}
+	}
+
+	s.serveReleases(w, r, core.LibraryKindAdult, queries, func(rel core.Release) []string {
+		return sceneReleaseFlags(rel, airDate)
 	})
 }
 
@@ -145,7 +214,7 @@ func (s *server) handleSeriesReleases(w http.ResponseWriter, r *http.Request) {
 // fan out, merge, cache, flag, sort. kind is the core.LibraryKind* the searched
 // item belongs to, which decides which indexers answer and with which
 // categories (PLAN phase 8 task 4).
-func (s *server) serveReleases(w http.ResponseWriter, r *http.Request, kind, query string, flags func(core.Release) []string) {
+func (s *server) serveReleases(w http.ResponseWriter, r *http.Request, kind string, queries []string, flags func(core.Release) []string) {
 	newClient, ok := s.requireIndexerClients(w)
 	if !ok {
 		return
@@ -164,9 +233,14 @@ func (s *server) serveReleases(w http.ResponseWriter, r *http.Request, kind, que
 
 	ctx, cancel := context.WithTimeout(r.Context(), releaseSearchTimeout)
 	defer cancel()
-	releases, failures := searchIndexers(ctx, newClient, indexers, query)
+	releases, failures := searchIndexers(ctx, newClient, indexers, queries)
 
-	out := releasesResponse{Query: query, Releases: make([]releaseJSON, 0, len(releases)), Errors: failures}
+	out := releasesResponse{
+		Query:    queries[0],
+		Queries:  queries,
+		Releases: make([]releaseJSON, 0, len(releases)),
+		Errors:   failures,
+	}
 	for _, rel := range releases {
 		// Caching every result is what makes the grab endpoint a lookup by id
 		// rather than a second search, and it is the same table RSS sync
@@ -189,13 +263,49 @@ type indexerSearch struct {
 	err      error
 }
 
-// searchIndexers queries every indexer concurrently and merges the answers.
+// searchIndexers runs every query against every indexer and merges the answers.
 //
 // Indexers are independent network calls of wildly different latency, so they
 // run in parallel; the results are collected in the configured order rather
 // than the order they arrive, so the same set of answers always merges the same
 // way. A failing indexer costs its own results and nothing else.
-func searchIndexers(ctx context.Context, newClient IndexerFactory, indexers []core.IndexerConfig, query string) ([]core.Release, []indexerErrorJSON) {
+//
+// Several queries is how a scene is searched: by date and by title, because a
+// release named either way is the same scene and the picker should show both.
+// Results are deduplicated by GUID across all of them, and the queries run in
+// order so the first query's answers keep their place at the top.
+func searchIndexers(ctx context.Context, newClient IndexerFactory, indexers []core.IndexerConfig, queries []string) ([]core.Release, []indexerErrorJSON) {
+	merged := []core.Release{}
+	failures := []indexerErrorJSON{}
+	seenGUID := map[string]bool{}
+	// One failure per indexer however many queries it failed: the user is being
+	// told an indexer is down, and being told twice is not more true.
+	seenFailure := map[int64]bool{}
+
+	for _, query := range queries {
+		releases, errs := searchIndexersOnce(ctx, newClient, indexers, query)
+		for _, rel := range releases {
+			if rel.GUID != "" && seenGUID[rel.GUID] {
+				continue
+			}
+			if rel.GUID != "" {
+				seenGUID[rel.GUID] = true
+			}
+			merged = append(merged, rel)
+		}
+		for _, err := range errs {
+			if seenFailure[err.IndexerID] {
+				continue
+			}
+			seenFailure[err.IndexerID] = true
+			failures = append(failures, err)
+		}
+	}
+	return merged, failures
+}
+
+// searchIndexersOnce is one query against every indexer.
+func searchIndexersOnce(ctx context.Context, newClient IndexerFactory, indexers []core.IndexerConfig, query string) ([]core.Release, []indexerErrorJSON) {
 	results := make(chan indexerSearch, len(indexers))
 	for _, cfg := range indexers {
 		go func() {
@@ -344,6 +454,40 @@ func seriesReleaseFlags(rel core.Release, season, episode int) []string {
 	return flags
 }
 
+// sceneReleaseFlags reports what is visibly wrong with a release relative to
+// the scene it was searched for.
+//
+// It is seriesReleaseFlags' adult twin and deliberately not a call into it: a
+// scene release carries no season or episode number, so seriesReleaseFlags
+// would flag every single row "wrong-season" and "season-pack" and the picker
+// would grey out the whole table. The date is the comparison that exists, and
+// it is the same one searchScene matches candidates on.
+//
+// airDate is zero when the caller did not narrow to one scene, or when the
+// scene has no release date, in which case there is nothing to compare against.
+func sceneReleaseFlags(rel core.Release, airDate time.Time) []string {
+	flags := commonReleaseFlags(rel)
+	if airDate.IsZero() {
+		return flags
+	}
+	if !sameDay(rel.Parsed.SceneDate, airDate) {
+		flags = append(flags, flagWrongDate)
+	}
+	return flags
+}
+
+// sameDay compares two dates by calendar day in UTC. A zero date matches
+// nothing: "this release does not say when it came out" is exactly the case the
+// flag is for.
+func sameDay(a, b time.Time) bool {
+	if a.IsZero() || b.IsZero() {
+		return false
+	}
+	ay, am, ad := a.UTC().Date()
+	by, bm, bd := b.UTC().Date()
+	return ay == by && am == bm && ad == bd
+}
+
 // commonReleaseFlags are the flags that do not depend on the target item.
 func commonReleaseFlags(rel core.Release) []string {
 	flags := []string{}
@@ -390,9 +534,8 @@ func (s *server) handleSeriesGrab(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 
-	sr, err := s.st.GetSeries(ctx, id)
-	if err != nil {
-		s.writeStoreError(w, "get series", err)
+	sr, ok := s.getVisibleSeries(w, r, id)
+	if !ok {
 		return
 	}
 
@@ -426,12 +569,22 @@ func (s *server) handleSeriesGrab(w http.ResponseWriter, r *http.Request) {
 	if seasonNum < 0 {
 		seasonNum = 0
 	}
-	s.grab(w, r, core.LibraryKindTV, core.GrabInfo{
+	// The library a series belongs to decides which engine the download is
+	// routed to and which label it lands under, so a scene picked by hand goes
+	// exactly where automation.grabEpisode sends one found by the sweep — never
+	// into the television library's download folder under category "tv", which
+	// importDownloadedEpisodes would then have to un-guess.
+	kind := core.LibraryKindForSeries(sr.Kind)
+	category := engineCategoryTV
+	if kind == core.LibraryKindAdult {
+		category = engineCategoryAdult
+	}
+	s.grab(w, r, kind, core.GrabInfo{
 		SeriesID:   sr.ID,
 		SeasonNum:  seasonNum,
 		EpisodeIDs: episodeIDs,
 	}, core.AddOpts{
-		Category:   engineCategoryTV,
+		Category:   category,
 		SeriesID:   sr.ID,
 		SeasonNum:  seasonNum,
 		EpisodeIDs: episodeIDs,

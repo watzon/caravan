@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/watzon/caravan/internal/core"
 )
@@ -28,7 +29,16 @@ type expectation struct {
 }
 
 func TestCorpus(t *testing.T) {
-	path := filepath.Join("testdata", "corpus.txt")
+	runCorpus(t, "corpus.txt", "Parse", Parse, minCorpusEntries)
+}
+
+// runCorpus drives one corpus file through one parser entry point. Both
+// corpora share it so a field added to the expectation format is checked by
+// every corpus at once, instead of one of them silently ignoring it.
+func runCorpus(t *testing.T, file, fn string, parse func(string) core.ParsedRelease, minEntries int) {
+	t.Helper()
+
+	path := filepath.Join("testdata", file)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read corpus: %v", err)
@@ -52,67 +62,70 @@ func TestCorpus(t *testing.T) {
 		entries++
 
 		t.Run(fmt.Sprintf("line%d", lineNo), func(t *testing.T) {
-			got := Parse(name)
-			checkParsed(t, name, got, want)
+			got := parse(name)
+			checkParsed(t, fn, name, got, want)
 			if got := Container(name); got != want.container {
 				t.Errorf("Container(%q) = %q, want %q", name, got, want.container)
 			}
 		})
 	}
 
-	if entries < minCorpusEntries {
-		t.Errorf("corpus has %d entries, want at least %d (the corpus only grows)", entries, minCorpusEntries)
+	if entries < minEntries {
+		t.Errorf("%s has %d entries, want at least %d (the corpus only grows)", file, entries, minEntries)
 	}
 }
 
-func checkParsed(t *testing.T, name string, got core.ParsedRelease, want expectation) {
+func checkParsed(t *testing.T, fn, name string, got core.ParsedRelease, want expectation) {
 	t.Helper()
 
 	w := want.rel
 	if got.Title != w.Title {
-		t.Errorf("Parse(%q).Title = %q, want %q", name, got.Title, w.Title)
+		t.Errorf("%s(%q).Title = %q, want %q", fn, name, got.Title, w.Title)
 	}
 	if got.Year != w.Year {
-		t.Errorf("Parse(%q).Year = %d, want %d", name, got.Year, w.Year)
+		t.Errorf("%s(%q).Year = %d, want %d", fn, name, got.Year, w.Year)
 	}
 	if got.Season != w.Season {
-		t.Errorf("Parse(%q).Season = %d, want %d", name, got.Season, w.Season)
+		t.Errorf("%s(%q).Season = %d, want %d", fn, name, got.Season, w.Season)
 	}
 	if !slices.Equal(got.Episodes, w.Episodes) {
-		t.Errorf("Parse(%q).Episodes = %v, want %v", name, got.Episodes, w.Episodes)
+		t.Errorf("%s(%q).Episodes = %v, want %v", fn, name, got.Episodes, w.Episodes)
 	}
 	if got.Quality != w.Quality {
-		t.Errorf("Parse(%q).Quality = %q, want %q", name, got.Quality, w.Quality)
+		t.Errorf("%s(%q).Quality = %q, want %q", fn, name, got.Quality, w.Quality)
 	}
 	if got.Source != w.Source {
-		t.Errorf("Parse(%q).Source = %q, want %q", name, got.Source, w.Source)
+		t.Errorf("%s(%q).Source = %q, want %q", fn, name, got.Source, w.Source)
 	}
 	if got.Codec != w.Codec {
-		t.Errorf("Parse(%q).Codec = %q, want %q", name, got.Codec, w.Codec)
+		t.Errorf("%s(%q).Codec = %q, want %q", fn, name, got.Codec, w.Codec)
 	}
 	if got.Audio != w.Audio {
-		t.Errorf("Parse(%q).Audio = %q, want %q", name, got.Audio, w.Audio)
+		t.Errorf("%s(%q).Audio = %q, want %q", fn, name, got.Audio, w.Audio)
 	}
 	if got.BitDepth != w.BitDepth {
-		t.Errorf("Parse(%q).BitDepth = %d, want %d", name, got.BitDepth, w.BitDepth)
+		t.Errorf("%s(%q).BitDepth = %d, want %d", fn, name, got.BitDepth, w.BitDepth)
 	}
 	if got.Group != w.Group {
-		t.Errorf("Parse(%q).Group = %q, want %q", name, got.Group, w.Group)
+		t.Errorf("%s(%q).Group = %q, want %q", fn, name, got.Group, w.Group)
 	}
 	if got.Proper != w.Proper {
-		t.Errorf("Parse(%q).Proper = %v, want %v", name, got.Proper, w.Proper)
+		t.Errorf("%s(%q).Proper = %v, want %v", fn, name, got.Proper, w.Proper)
 	}
 	if got.Repack != w.Repack {
-		t.Errorf("Parse(%q).Repack = %v, want %v", name, got.Repack, w.Repack)
+		t.Errorf("%s(%q).Repack = %v, want %v", fn, name, got.Repack, w.Repack)
 	}
 	if got.Edition != w.Edition {
-		t.Errorf("Parse(%q).Edition = %q, want %q", name, got.Edition, w.Edition)
+		t.Errorf("%s(%q).Edition = %q, want %q", fn, name, got.Edition, w.Edition)
+	}
+	if !got.SceneDate.Equal(w.SceneDate) {
+		t.Errorf("%s(%q).SceneDate = %v, want %v", fn, name, got.SceneDate, w.SceneDate)
 	}
 	if want.hasMin && got.Confidence < want.minConf {
-		t.Errorf("Parse(%q).Confidence = %.2f, want >= %.2f", name, got.Confidence, want.minConf)
+		t.Errorf("%s(%q).Confidence = %.2f, want >= %.2f", fn, name, got.Confidence, want.minConf)
 	}
 	if want.hasMax && got.Confidence > want.maxConf {
-		t.Errorf("Parse(%q).Confidence = %.2f, want <= %.2f", name, got.Confidence, want.maxConf)
+		t.Errorf("%s(%q).Confidence = %.2f, want <= %.2f", fn, name, got.Confidence, want.maxConf)
 	}
 }
 
@@ -167,6 +180,8 @@ func parseExpectation(spec string) (expectation, error) {
 			want.rel.Group = value
 		case "edition":
 			want.rel.Edition = value
+		case "scenedate":
+			want.rel.SceneDate, err = time.Parse("2006-01-02", value)
 		case "proper":
 			want.rel.Proper, err = strconv.ParseBool(value)
 		case "repack":

@@ -1,0 +1,8 @@
+{
+  "errors": [
+    {
+      "message": "Cannot query field \"code\" on type \"Scene\".",
+      "extensions": { "code": "GRAPHQL_VALIDATION_FAILED" }
+    }
+  ]
+}

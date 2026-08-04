@@ -11,8 +11,20 @@ import (
 	"github.com/watzon/caravan/internal/core"
 )
 
-const requestColumns = `id, media_type, tmdb_id, title, year, poster_path, seasons,
+const requestColumns = `id, media_type, tmdb_id, stash_id, title, year, poster_path, seasons,
 	min_availability, status, requested_by, created_at, updated_at`
+
+// requestIdentity is the (column, value) pair that identifies a request of one
+// media type: a TMDB id for a movie or a series, a stash-box id for a scene. It
+// is what CreateRequest looks an existing pending row up by, and it mirrors the
+// pair of partial unique indexes the table enforces the same rule with — so the
+// merge below finds exactly the row an INSERT would have collided with.
+func requestIdentity(r *core.Request) (string, any) {
+	if r.MediaType == core.MediaTypeScene {
+		return "stash_id", r.StashID
+	}
+	return "tmdb_id", r.TMDBID
+}
 
 // CreateRequest records a wish for a title that is not in the library.
 //
@@ -51,10 +63,11 @@ func (s *Store) CreateRequest(ctx context.Context, r *core.Request) error {
 		existingAvailability string
 		existingRequestedBy  int64
 	)
+	idColumn, idValue := requestIdentity(r)
 	err = tx.QueryRowContext(ctx, `
 		SELECT id, title, year, poster_path, seasons, min_availability, requested_by FROM requests
-		WHERE media_type = ? AND tmdb_id = ? AND status = ?`,
-		r.MediaType, r.TMDBID, core.RequestPending).Scan(
+		WHERE media_type = ? AND `+idColumn+` = ? AND status = ?`,
+		r.MediaType, idValue, core.RequestPending).Scan(
 		&existingID, &existingTitle, &existingYear, &existingPoster, &existingSeasons,
 		&existingAvailability, &existingRequestedBy)
 	switch {
@@ -121,10 +134,10 @@ func (s *Store) CreateRequest(ctx context.Context, r *core.Request) error {
 		return fmt.Errorf("store: create request for %s %d: %w", r.MediaType, r.TMDBID, err)
 	}
 	res, err := tx.ExecContext(ctx, `
-		INSERT INTO requests (media_type, tmdb_id, title, year, poster_path, seasons,
+		INSERT INTO requests (media_type, tmdb_id, stash_id, title, year, poster_path, seasons,
 			min_availability, status, requested_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		r.MediaType, r.TMDBID, r.Title, r.Year, nullString(r.PosterPath), encoded,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		r.MediaType, r.TMDBID, r.StashID, r.Title, r.Year, nullString(r.PosterPath), encoded,
 		r.MinAvailability, r.Status, r.RequestedBy, formatTime(ts), formatTime(ts))
 	if err != nil {
 		return fmt.Errorf("store: create request for %s %d: %w", r.MediaType, r.TMDBID, err)
@@ -353,7 +366,7 @@ func scanRequest(sc scanner) (*core.Request, error) {
 		created    string
 		updated    string
 	)
-	if err := sc.Scan(&r.ID, &r.MediaType, &r.TMDBID, &r.Title, &r.Year, &posterPath,
+	if err := sc.Scan(&r.ID, &r.MediaType, &r.TMDBID, &r.StashID, &r.Title, &r.Year, &posterPath,
 		&seasons, &r.MinAvailability, &r.Status, &r.RequestedBy, &created, &updated); err != nil {
 		return nil, err
 	}

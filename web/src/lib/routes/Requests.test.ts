@@ -21,6 +21,7 @@ const ROWS: MediaRequest[] = [
     id: 11,
     media_type: 'series',
     tmdb_id: 1396,
+    stash_id: '',
     title: 'Severance',
     year: 2022,
     poster_path: '/p.jpg',
@@ -36,6 +37,7 @@ const ROWS: MediaRequest[] = [
     id: 12,
     media_type: 'movie',
     tmdb_id: 78,
+    stash_id: '',
     title: 'Blade Runner',
     year: 1982,
     poster_path: '',
@@ -52,6 +54,7 @@ const ROWS: MediaRequest[] = [
     id: 13,
     media_type: 'movie',
     tmdb_id: 79,
+    stash_id: '',
     title: 'Dismissed Movie',
     year: 1990,
     poster_path: '',
@@ -65,9 +68,40 @@ const ROWS: MediaRequest[] = [
   },
 ];
 
+/**
+ * A pending scene row, as a granted caller's list carries one: named by its
+ * stash id, `tmdb_id` 0, no seasons. The server withholds these entirely from a
+ * caller the adult module is not visible to, so a row reaching this screen at
+ * all already means the grant is in place.
+ *
+ * `poster_path` and `poster_url` are the SAME absolute url, which is the pair
+ * the server actually produces: a scene's cover comes from the stash-box
+ * provider already absolute (stashbox.coverURL), so unlike a movie or a series
+ * there is no CDN prefix to add. A fixture that paired a TMDB-shaped
+ * "/scene.jpg" with some other rendered url described a row no server can send.
+ */
+const SCENE_ROW: MediaRequest = {
+  id: 14,
+  media_type: 'scene',
+  tmdb_id: 0,
+  stash_id: 'a1b2c3',
+  title: 'Deep Impact',
+  year: 2022,
+  poster_path: 'https://cdn.example/scene.jpg',
+  poster_url: 'https://cdn.example/scene.jpg',
+  seasons: null,
+  min_availability: '',
+  requested_by_username: 'ada',
+  status: 'pending',
+  created_at: '2026-08-02T00:00:00Z',
+  updated_at: '2026-08-02T00:00:00Z',
+};
+
 let host: HTMLElement;
 let app: Record<string, unknown> | undefined;
 let calls: { url: string; method: string }[];
+/** What GET /requests answers; a test sets it before mounting. */
+let served: MediaRequest[] = ROWS;
 
 function json(body: unknown, status = 200): Response {
   if (status === 204) return new Response(null, { status });
@@ -91,6 +125,7 @@ function rowButtons(label: string): HTMLButtonElement[] {
 beforeEach(() => {
   clearToasts();
   calls = [];
+  served = ROWS;
   requests.items = null;
   requests.error = null;
   requests.loading = true;
@@ -100,7 +135,7 @@ beforeEach(() => {
       const url = String(input);
       const method = init?.method ?? 'GET';
       calls.push({ url, method });
-      if (url.endsWith('/requests') && method === 'GET') return json({ requests: ROWS });
+      if (url.endsWith('/requests') && method === 'GET') return json({ requests: served });
       if (method === 'DELETE') return json(null, 204);
       if (url.endsWith('/quality-profiles')) return json({ profiles: [] });
       return json(null, 204);
@@ -190,6 +225,24 @@ describe('Requests', () => {
     expect(rows[1]).not.toContain('by ');
   });
 
+  /**
+   * The ungranted half of the visibility matrix, and the module-off half too:
+   * both are the same list on the wire, because the server strips scene rows
+   * from a caller the module is not visible to. What must be true on this side
+   * is that the screen adds nothing back — no adult endpoint, and no adult
+   * vocabulary anywhere in the rendered output.
+   */
+  it('leaves no adult trace at all on a list with no scene rows', async () => {
+    app = mount(Requests, { target: host }) as Record<string, unknown>;
+    await settle();
+
+    expect(calls.some((c) => c.url.includes('/adult'))).toBe(false);
+    for (const word of ['SCENE', 'Adult', 'adult', 'Site', 'flame']) {
+      expect(host.innerHTML, word).not.toContain(word);
+    }
+    expect(host.querySelectorAll('li')).toHaveLength(2);
+  });
+
   it('shows the empty state when nothing is pending', async () => {
     vi.stubGlobal(
       'fetch',
@@ -203,9 +256,82 @@ describe('Requests', () => {
   });
 });
 
+/**
+ * Scene rows on the shared requests screen (PLAN phase 9 task 7d).
+ *
+ * They only ever reach a caller the adult module is visible to — the server
+ * strips them from everyone else's list — so what is proved here is that a row
+ * which HAS arrived renders as the thing it is, rather than as a television
+ * series with a dead link on it.
+ */
+describe('Requests — a scene row', () => {
+  beforeEach(() => {
+    served = [SCENE_ROW, ...ROWS];
+  });
+
+  it('renders as a scene, with its own badge and poster', async () => {
+    app = mount(Requests, { target: host }) as Record<string, unknown>;
+    await settle();
+
+    const row = [...host.querySelectorAll('li')].find((li) =>
+      li.textContent?.includes('Deep Impact'),
+    );
+    expect(row).toBeDefined();
+    expect(row!.textContent).toContain('Deep Impact (2022)');
+    expect(row!.textContent).toContain('SCENE');
+    // The two-way movie/series branch this replaced labelled it SERIES and gave
+    // it the television placeholder.
+    expect(row!.textContent).not.toContain('SERIES');
+    expect(row!.textContent).not.toContain('All seasons');
+    expect(row!.textContent).toContain('Scene');
+    expect(row!.querySelector('img')?.getAttribute('src')).toBe('https://cdn.example/scene.jpg');
+  });
+
+  /**
+   * A scene's tmdb id is 0 and there is no per-scene route, so the shared
+   * discover link built `/discover/scene/0` — and put it on both the poster and
+   * the title. The row is text now.
+   */
+  it('links nowhere rather than at a route that does not exist', async () => {
+    app = mount(Requests, { target: host }) as Record<string, unknown>;
+    await settle();
+
+    expect(host.querySelector('a[href="/discover/scene/0"]')).toBeNull();
+    const row = [...host.querySelectorAll('li')].find((li) =>
+      li.textContent?.includes('Deep Impact'),
+    );
+    expect(row!.querySelectorAll('a')).toHaveLength(0);
+    // The rows that DO have a destination keep it.
+    expect(host.querySelector('a[href="/discover/series/1396"]')).not.toBeNull();
+  });
+
+  /**
+   * Approving a scene adds the site the provider files it under, which the
+   * server resolves on its own. There is nothing for the TMDB-shaped modal to
+   * ask, so it must not open — it would fetch seasons for tmdb id 0.
+   */
+  it('approves straight through the API instead of opening the add modal', async () => {
+    app = mount(Requests, { target: host }) as Record<string, unknown>;
+    await settle();
+
+    const row = [...host.querySelectorAll('li')].find((li) =>
+      li.textContent?.includes('Deep Impact'),
+    );
+    const approve = [...row!.querySelectorAll('button')].find(
+      (b) => b.textContent?.trim() === 'Approve',
+    );
+    approve!.click();
+    await settle();
+
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    expect(calls).toContainEqual({ url: '/api/v1/requests/14/approve', method: 'POST' });
+    expect(toasts.items.map((t) => t.message)).toContain('Approved Deep Impact');
+  });
+});
+
 describe('Requests — as a member', () => {
   beforeEach(() => {
-    session.user = { username: 'ada', role: 'member', open: false };
+    session.user = { username: 'ada', role: 'member', open: false, adult: false };
   });
 
   /**

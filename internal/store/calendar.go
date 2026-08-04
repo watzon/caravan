@@ -14,7 +14,12 @@ import (
 type CalendarEpisode struct {
 	Episode     core.Episode
 	SeriesTitle string
-	HasFile     bool
+	// SeriesKind is the series' core.SeriesKind* value. The calendar is a
+	// shared surface — one grid holds movies, television and, once the module
+	// is on, scenes — so the row has to be able to say which it is: an
+	// ungranted viewer must see nothing adult here (PLAN phase 9 task 5).
+	SeriesKind string
+	HasFile    bool
 }
 
 // CalendarMovie is the movie counterpart of CalendarEpisode. Calendar rows
@@ -30,7 +35,7 @@ type CalendarMovie struct {
 // actionable nor historical enough to merit a calendar entry.
 func (s *Store) CalendarEpisodes(ctx context.Context, start, end time.Time) ([]CalendarEpisode, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT `+episodeStateColumns+`, s.title,
+		SELECT `+episodeStateColumns+`, s.title, s.kind,
 			EXISTS(SELECT 1 FROM episode_files ef WHERE ef.episode_id = e.id)
 		FROM episodes e
 		JOIN series s ON s.id = e.series_id
@@ -47,7 +52,7 @@ func (s *Store) CalendarEpisodes(ctx context.Context, start, end time.Time) ([]C
 	out := []CalendarEpisode{}
 	for rows.Next() {
 		var entry CalendarEpisode
-		episode, err := scanEpisodeWith(rows, &entry.SeriesTitle, &entry.HasFile)
+		episode, err := scanEpisodeWith(rows, &entry.SeriesTitle, &entry.SeriesKind, &entry.HasFile)
 		if err != nil {
 			return nil, fmt.Errorf("store: scan calendar episode: %w", err)
 		}

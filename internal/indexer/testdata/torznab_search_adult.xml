@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:torznab="http://torznab.com/schemas/2015/feed">
+  <channel>
+    <title>Example Tracker</title>
+    <item>
+      <!-- the shape a scene release is published in: XXX category, date-based
+           name -->
+      <title>Brazzers.22.03.14.Abella.Danger.Deep.Impact.XXX.1080p.MP4-KTR</title>
+      <guid>brazzers-2022-03-14</guid>
+      <torznab:attr name="category" value="6000" />
+      <torznab:attr name="category" value="6040" />
+      <torznab:attr name="magneturl" value="magnet:?xt=urn:btih:1111111111111111111111111111111111111111" />
+    </item>
+    <item>
+      <!-- an indexer that files a television release under XXX: the name is not
+           date-shaped, so it must still parse as the episode it is -->
+      <title>Some.Show.S01E02.1080p.WEB-DL.x264-GROUP</title>
+      <guid>some-show-s01e02</guid>
+      <torznab:attr name="category" value="6000" />
+      <torznab:attr name="magneturl" value="magnet:?xt=urn:btih:2222222222222222222222222222222222222222" />
+    </item>
+    <item>
+      <!-- the same date-shaped name under a TELEVISION category is a daily
+           episode, not a scene, and must not gain a scene date -->
+      <title>The.Daily.Show.2023.08.11.1080p.WEB.h264-GROUP</title>
+      <guid>daily-show-2023-08-11</guid>
+      <torznab:attr name="category" value="5000" />
+      <torznab:attr name="magneturl" value="magnet:?xt=urn:btih:3333333333333333333333333333333333333333" />
+    </item>
+  </channel>
+</rss>

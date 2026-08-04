@@ -1,0 +1,10 @@
+{
+  "errors": [
+    {
+      "message": "invalid or missing api key",
+      "path": ["findScene"],
+      "extensions": { "code": "UNAUTHENTICATED" }
+    }
+  ],
+  "data": null
+}

@@ -268,6 +268,7 @@ describe('App shell', () => {
         id: 1,
         media_type: 'series',
         tmdb_id: 1396,
+        stash_id: '',
         title: 'Severance',
         year: 2022,
         poster_path: '',

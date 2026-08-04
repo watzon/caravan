@@ -6,7 +6,28 @@ package core
 const (
 	LibraryKindMovie = "movie"
 	LibraryKindTV    = "tv"
+	// LibraryKindAdult is the adult module's library (PLAN phase 9). Unlike
+	// the other two it is not seeded by a migration: its row is created the
+	// first time the module is enabled (store.SetAdultEnabled), because a
+	// library row is a shelf in the UI and a container in the DLNA tree, and
+	// neither may exist on an install that never turned the module on.
+	LibraryKindAdult = "adult"
 )
+
+// LibraryKindForSeries maps a series kind onto the library it belongs to.
+//
+// The two vocabularies stay separate — `series.kind` says what a row IS,
+// `libraries.kind` says which shelf answers for it — but for series they line
+// up one-to-one, and this is the single place that says so. Everything that
+// resolves a quality profile, an indexer set or a download route for an
+// episode goes through it, so an adult episode cannot silently be graded
+// against the television library's settings.
+func LibraryKindForSeries(seriesKind string) string {
+	if seriesKind == SeriesKindAdult {
+		return LibraryKindAdult
+	}
+	return LibraryKindTV
+}
 
 // Library is one section of the media library — Movies, Series — as a row
 // rather than a constant.

@@ -307,6 +307,11 @@ type requestUser struct {
 	// its trusted-LAN default. It is what distinguishes "everyone is an admin
 	// because nobody has signed up" from "this person is an admin".
 	Open bool
+	// AdultAccess is the account's adult_access grant, carried here because
+	// requireAuth has already read the row and the adult gate would otherwise
+	// re-read it on every request. It is meaningless without Role and without
+	// the server-wide switch — read it through core.AdultVisible, never alone.
+	AdultAccess bool
 }
 
 // userContextKey is the private key requestUser is stored under. It is an
@@ -363,7 +368,25 @@ func memberAllowed(method, path string) bool {
 		// Changing your own password. It lives under /settings for historical
 		// reasons — it is the one settings route a member may reach — and
 		// handleSetPassword only ever touches the caller's own account.
-		http.MethodPost + " /settings/password":
+		http.MethodPost + " /settings/password",
+		// The adult module's read surface (PLAN phase 9 task 7). Naming a route
+		// here does NOT grant it: requireAuth runs first and only decides that
+		// a member may reach the path at all, and requireAdult then answers 404
+		// unless the server-wide switch is on AND this account was granted. So
+		// these three are "a member with the grant may see the Adult screens",
+		// and every other /adult route stays admin-only.
+		//
+		// The listing is also required in the other direction: requireAuth runs
+		// BEFORE requireAdult, so a granted member hitting an /adult path that
+		// is not named here is turned away with the generic 403 and never
+		// reaches the gate at all.
+		// Deliberately absent from this list, and therefore admin-only:
+		// POST /adult/sites and GET /adult/search (adding to the library is a
+		// decision, and searching the provider for a site has no other use),
+		// and the member-access card under /adult/users (handing out grants is
+		// the admin's job, and the roster is not a member's to read).
+		http.MethodGet + " /adult/sites",
+		http.MethodGet + " /adult/discover":
 		return true
 	}
 
@@ -371,6 +394,9 @@ func memberAllowed(method, path string) bool {
 	switch {
 	// GET /discover/{type}/{id}: one title's detail screen.
 	case method == http.MethodGet && len(seg) == 3 && seg[0] == "discover":
+		return true
+	// GET /adult/sites/{id}: one site's page.
+	case method == http.MethodGet && len(seg) == 3 && seg[0] == "adult" && seg[1] == "sites":
 		return true
 	// DELETE /requests/{id}: cancel my request. The handler is what insists on
 	// "mine" and "still pending"; the router only knows the shape.
@@ -428,54 +454,79 @@ func (s *server) requireAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		users, err := s.st.CountUsers(r.Context())
+		user, ok, err := s.resolveUser(r)
 		if err != nil {
-			s.writeStoreError(w, "count users", err)
+			s.writeStoreError(w, "resolve caller", err)
 			return
 		}
-		// No accounts: Caravan behaves exactly as a passwordless server always
-		// did, and the caller is an implicit admin.
-		if users == 0 {
-			next.ServeHTTP(w, withRequestUser(r, requestUser{Role: core.RoleAdmin, Open: true}))
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
-
-		if cookie, err := r.Cookie(sessionCookieName); err == nil {
-			if userID, ok := s.sessions.valid(cookie.Value); ok {
-				user, err := s.st.GetUser(r.Context(), userID)
-				if errors.Is(err, store.ErrNotFound) {
-					// The account was deleted while this browser held a live
-					// session. Tidy the rest of them away and make it log in.
-					s.sessions.revokeUser(userID)
-					writeError(w, http.StatusUnauthorized, "unauthorized")
-					return
-				}
-				if err != nil {
-					s.writeStoreError(w, "read user", err)
-					return
-				}
-				if user.Role != core.RoleAdmin && !memberAllowed(r.Method, r.URL.Path) {
-					writeError(w, http.StatusForbidden, "admins only")
-					return
-				}
-				next.ServeHTTP(w, withRequestUser(r, requestUser{ID: user.ID, Role: user.Role}))
-				return
-			}
-		}
-		// The API key is the owner's own credential, configured in the settings
-		// screen and pasted into tools they chose, so it carries admin. It
-		// names no account, which is why its ID is zero.
-		ok, err := s.apiKeyAuthenticated(r)
-		if err != nil {
-			s.writeStoreError(w, "read api key", err)
+		if user.Role != core.RoleAdmin && !memberAllowed(r.Method, r.URL.Path) {
+			writeError(w, http.StatusForbidden, "admins only")
 			return
 		}
-		if ok {
-			next.ServeHTTP(w, withRequestUser(r, requestUser{Role: core.RoleAdmin}))
-			return
-		}
-		writeError(w, http.StatusUnauthorized, "unauthorized")
+		next.ServeHTTP(w, withRequestUser(r, user))
 	})
+}
+
+// resolveUser works out who is calling from the credentials on the request. It
+// enforces nothing: requireAuth is what turns the answer into a 401 or a 403.
+//
+// It is split out because requireAuth is not the only caller that needs an
+// identity. GET /images is auth-EXEMPT, for televisions, so a request to it
+// never goes through the middleware and currentUser would report the implicit
+// admin — which is fine for library artwork and very much not fine for the
+// adult library's (see adultArtworkVisible). A surface that has to know
+// whether a real credential was presented asks here rather than trusting the
+// fallback identity.
+//
+// The three answers:
+//
+//   - (identity, true, nil) — a credential was presented and it is good, or
+//     this Caravan has no accounts at all and everyone who reaches it is the
+//     implicit admin, exactly as a passwordless server always behaved.
+//   - (zero, false, nil) — no usable credential. The zero requestUser has no
+//     role deliberately: it is nobody, not an admin.
+//   - (_, _, err) — the store could not be asked.
+func (s *server) resolveUser(r *http.Request) (requestUser, bool, error) {
+	users, err := s.st.CountUsers(r.Context())
+	if err != nil {
+		return requestUser{}, false, err
+	}
+	if users == 0 {
+		return requestUser{Role: core.RoleAdmin, Open: true}, true, nil
+	}
+
+	if cookie, cerr := r.Cookie(sessionCookieName); cerr == nil {
+		if userID, ok := s.sessions.valid(cookie.Value); ok {
+			user, err := s.st.GetUser(r.Context(), userID)
+			switch {
+			case errors.Is(err, store.ErrNotFound):
+				// The account was deleted while this browser held a live
+				// session. Tidy the rest of them away and make it log in.
+				s.sessions.revokeUser(userID)
+				return requestUser{}, false, nil
+			case err != nil:
+				return requestUser{}, false, err
+			}
+			return requestUser{
+				ID: user.ID, Role: user.Role, AdultAccess: user.AdultAccess,
+			}, true, nil
+		}
+	}
+	// The API key is the owner's own credential, configured in the settings
+	// screen and pasted into tools they chose, so it carries admin. It names no
+	// account, which is why its ID is zero.
+	ok, err := s.apiKeyAuthenticated(r)
+	if err != nil {
+		return requestUser{}, false, err
+	}
+	if ok {
+		return requestUser{Role: core.RoleAdmin}, true, nil
+	}
+	return requestUser{}, false, nil
 }
 
 // apiKeyAuthenticated reports whether the request carries the configured API
@@ -633,6 +684,16 @@ type meResponse struct {
 	// is an admin. The SPA renders the full navigation for it, exactly as it
 	// did before roles existed.
 	Open bool `json:"open"`
+	// Adult says the adult module is visible to this caller: the server-wide
+	// switch is on AND this account reaches it (core.AdultVisible). It is what
+	// the SPA renders the Adult nav item from, and it is false — not absent —
+	// for everyone else, so a client cannot tell "the module is off" from "I
+	// was not granted it", which is the same thing the 404 on /adult says.
+	//
+	// This is the only route outside /adult that reports anything about the
+	// module, and it has to be: the SPA must decide what to draw before it
+	// makes a request that would 404.
+	Adult bool `json:"adult"`
 }
 
 // handleMe reports the calling identity. It is inside the gate and reachable by
@@ -643,9 +704,14 @@ type meResponse struct {
 // truth: there is nobody to name, and whoever asked may do anything. So does
 // the API key, for the same reason.
 func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
+	adult, err := s.adultVisible(r)
+	if err != nil {
+		s.writeStoreError(w, "read adult settings", err)
+		return
+	}
 	user := currentUser(r)
 	if user.ID == 0 {
-		writeJSON(w, http.StatusOK, meResponse{Role: user.Role, Open: user.Open})
+		writeJSON(w, http.StatusOK, meResponse{Role: user.Role, Open: user.Open, Adult: adult})
 		return
 	}
 	row, err := s.st.GetUser(r.Context(), user.ID)
@@ -653,7 +719,7 @@ func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreError(w, "read user", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, meResponse{Username: row.Username, Role: row.Role})
+	writeJSON(w, http.StatusOK, meResponse{Username: row.Username, Role: row.Role, Adult: adult})
 }
 
 // handleLogout invalidates the presented session. It is exempt from the

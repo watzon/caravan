@@ -1,0 +1,54 @@
+{
+  "data": {
+    "queryScenes": {
+      "count": 412,
+      "scenes": [
+        {
+          "id": "5c5c5c5c-1111-4111-8111-aaaaaaaaaaaa",
+          "title": "The Long Way Home",
+          "details": "A scene description as the box stores it.",
+          "date": "2023-11-04",
+          "code": "TU-0412",
+          "duration": 2712,
+          "urls": [{ "url": "https://www.tushy.com/scene/the-long-way-home" }],
+          "images": [
+            { "url": "https://cdn.example.test/scene-412-thumb.jpg", "width": 320, "height": 180 },
+            { "url": "https://cdn.example.test/scene-412-cover.jpg", "width": 1920, "height": 1080 }
+          ],
+          "studio": {
+            "id": "f1f1f1f1-1111-4111-8111-111111111111",
+            "name": "Tushy"
+          },
+          "performers": [
+            {
+              "as": "Ava R.",
+              "performer": {
+                "id": "b1b1b1b1-1111-4111-8111-bbbbbbbbbbbb",
+                "name": "Ava Rivers"
+              }
+            },
+            {
+              "as": null,
+              "performer": {
+                "id": "b2b2b2b2-2222-4222-8222-cccccccccccc",
+                "name": "Mick Stone"
+              }
+            }
+          ]
+        },
+        {
+          "id": "5d5d5d5d-2222-4222-8222-dddddddddddd",
+          "title": null,
+          "details": null,
+          "date": "2019",
+          "code": null,
+          "duration": null,
+          "urls": [],
+          "images": [],
+          "studio": null,
+          "performers": []
+        }
+      ]
+    }
+  }
+}

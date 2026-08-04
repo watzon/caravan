@@ -362,6 +362,40 @@ describe('LibrariesSettings — switcher and reach', () => {
     ]);
   });
 
+  /**
+   * The Adult pill's conditional visibility (PLAN phase 9 track 5).
+   *
+   * It is conditional for the ordinary reason every pill is: GET /libraries
+   * returned a row. The server drops that row for any caller the module is not
+   * visible to (internal/api.libraryVisible, and the adult row outlives a
+   * disable, which is why it filters rather than trusting the table), so this
+   * screen needs no adult rule of its own — and cannot leak a pill the server
+   * did not send.
+   */
+  it('shows no Adult pill, and no trace of one, when the server sends no adult row', async () => {
+    libraries = [MOVIES, SERIES];
+    await mountLoaded();
+
+    expect(host.textContent).not.toContain('Adult');
+    expect([...host.querySelectorAll('button')].some((b) => b.textContent?.includes('Adult'))).toBe(
+      false,
+    );
+  });
+
+  it('shows the Adult pill exactly when the server sends the row', async () => {
+    libraries = [
+      MOVIES,
+      SERIES,
+      library({ id: 3, kind: 'adult', name: 'Adult', root_path: 'library/Adult' }),
+    ];
+    await mountLoaded();
+
+    button('Adult').click();
+    await settle();
+
+    expect(rootPath()).toBe('library/Adult');
+  });
+
   it('surfaces a failed load with a retry rather than an empty screen', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ error: 'boom' }, 500)));
     await mountLoaded();

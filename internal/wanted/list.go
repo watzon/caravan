@@ -32,6 +32,10 @@ type Episode struct {
 	// The series' artwork, since episodes have none of their own.
 	SeriesPosterPath string
 	SeriesPosterURL  string
+	// SeriesKind is the series' core.SeriesKind* value. Everything that acts
+	// on a wanted episode has to know it: the indexer fan-out, the quality
+	// profile, and whether the item may be shown to a given caller at all.
+	SeriesKind string
 	// Reason is one of the Reason* constants. An unaired episode is never
 	// wanted: there is nothing to find yet.
 	Reason string
@@ -56,6 +60,15 @@ func Compute(ctx context.Context, st *store.Store) (*Lists, error) {
 		return nil, err
 	}
 	episodeStates, err := st.EpisodeFileStates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	// With the module off, an adult episode is not wanted: it must not reach
+	// the backlog sweep, the RSS matcher or the wanted screen. This is where
+	// that is enforced rather than at each of those three, because the wanted
+	// list is what all three read — and an adult item that never enters it
+	// cannot leak out of any of them.
+	adultEnabled, err := st.AdultEnabled(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -103,6 +116,9 @@ func Compute(ctx context.Context, st *store.Store) (*Lists, error) {
 		out.Movies = append(out.Movies, Movie{Movie: ms.Movie, Reason: reason, FileQuality: ms.FileQuality})
 	}
 	for _, es := range episodeStates {
+		if es.SeriesKind == core.SeriesKindAdult && !adultEnabled {
+			continue
+		}
 		// An episode with no known air date is treated as aired: providers do
 		// not always publish one, and "we don't know" must not hide a hole in
 		// the library.
@@ -110,7 +126,10 @@ func Compute(ctx context.Context, st *store.Store) (*Lists, error) {
 		if !aired {
 			continue
 		}
-		p, err := resolve(core.LibraryKindTV, es.SeriesProfileID)
+		// The item's own library, not television's: a site's default quality
+		// profile is the adult library's, and grading a scene against the TV
+		// library's cutoff would search for releases nobody asked for.
+		p, err := resolve(core.LibraryKindForSeries(es.SeriesKind), es.SeriesProfileID)
 		if err != nil {
 			return nil, err
 		}
@@ -121,7 +140,8 @@ func Compute(ctx context.Context, st *store.Store) (*Lists, error) {
 		out.Episodes = append(out.Episodes, Episode{
 			Episode: es.Episode, SeriesTitle: es.SeriesTitle,
 			SeriesPosterPath: es.SeriesPosterPath, SeriesPosterURL: es.SeriesPosterURL,
-			Reason: reason, FileQuality: es.FileQuality,
+			SeriesKind: es.SeriesKind,
+			Reason:     reason, FileQuality: es.FileQuality,
 		})
 	}
 	return out, nil

@@ -18,6 +18,28 @@ const (
 	SettingStorageRoot = "storage_root"
 	// SettingTMDBAPIKey is the metadata provider credential.
 	SettingTMDBAPIKey = "tmdb_api_key"
+	// SettingStashboxEndpoint and SettingStashboxAPIKey configure the adult
+	// library's metadata provider (PLAN phase 9 task 1). "stash-box" is a
+	// protocol rather than a service, so the endpoint is a value: TPDB is the
+	// preset (stashbox.DefaultEndpoint), and StashDB, FansDB or a self-hosted
+	// box are the same code with a different URL. An unset endpoint means the
+	// preset, which is why "just paste a key" is the whole configuration.
+	//
+	// Neither key does anything on its own. The adult module is gated by its
+	// own enable flag and a per-user grant, and nothing reads these until both
+	// are satisfied — a stored endpoint is not a reason to talk to it.
+	SettingStashboxEndpoint = "stashbox_endpoint"
+	SettingStashboxAPIKey   = "stashbox_api_key"
+	// SettingAdultEnabled is the server-wide switch for the adult module (PLAN
+	// phase 9 task 5). Stored as "true"/"false"; absent and unparseable both
+	// read as OFF, which is the opposite default to SettingDLNAEnabled and for
+	// the opposite reason — a typo must never be what turns this on.
+	//
+	// It is deliberately NOT in the PUT /settings allowlist. Flipping it has
+	// consequences a key-value write cannot carry out (the Adult library row is
+	// created on first enable), so it has its own endpoint, exactly as
+	// SettingStorageRoot does. Read it through AdultEnabled, never by hand.
+	SettingAdultEnabled = "adult_enabled"
 	// SettingAPIKey is Caravan's own API credential, used by endpoints an
 	// external app subscribes to (the iCal feed, PLAN phase 3 task 9). It is
 	// generated from the settings screen, never hand-written.

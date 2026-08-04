@@ -1,6 +1,10 @@
 package core
 
-import "time"
+import (
+	"strings"
+	"time"
+	"unicode"
+)
 
 // Indexer types. Torznab carries torrent results, Newznab carries Usenet
 // results; both speak the same XML dialect, which is why one client covers
@@ -32,6 +36,125 @@ type IndexerConfig struct {
 	// Enabled excludes the indexer from search fan-out when false, without
 	// losing its configuration.
 	Enabled bool
+}
+
+// AdultCategoryBase is the Newznab/Torznab category block adult releases are
+// published in: 6000 is "XXX", and 6010–6090 are its subcategories.
+//
+// It is a constant here rather than a setting because it is not Caravan's
+// choice — it is the category id an indexer publishes an adult release under,
+// the same way 2000 is movies and 5000 is TV. What the owner configures is
+// which of those ids the adult library asks each indexer for (PLAN phase 8
+// task 4); what this constant answers is the different question of how to read
+// a release that came back.
+const AdultCategoryBase = 6000
+
+// SceneDateLayout is how a scene's release date is written in an indexer query.
+//
+// Scene releases are named "Site YY.MM.DD" rather than with a season and
+// episode number, so the date IS the identifier a search can use — Caravan's
+// own season (release year) and episode (sequence within that year) are a
+// mapping no indexer has heard of. Both search paths, the automatic one and
+// the interactive picker, have to spell the date the same way or they would
+// look for different releases for the same scene, so they spell it here.
+const SceneDateLayout = "06.01.02"
+
+// SceneSearchVariant names one way of asking an indexer for a scene.
+type SceneSearchVariant string
+
+const (
+	// SceneSearchByDate is "Site YY.MM.DD", how scene releases are named and
+	// therefore the query that finds them when they are.
+	SceneSearchByDate SceneSearchVariant = "date"
+	// SceneSearchByTitle is "Site Scene Title", the fallback for the releases
+	// the date query cannot find: a packager who named a release after its
+	// title or its performers rather than its date is invisible to the first
+	// query no matter how good the matching downstream is.
+	//
+	// This is the improvement Whisparr's own scene search does not have (its
+	// issue #115): it sends the date form and nothing else, so a title-named
+	// release is simply never seen.
+	SceneSearchByTitle SceneSearchVariant = "title"
+)
+
+// SceneSearch is one search to send for a scene, and which variant it is. It is
+// not SceneQuery, which is the provider-side scene lookup in adult.go: this one
+// is a string headed for an indexer.
+type SceneSearch struct {
+	Variant SceneSearchVariant
+	Query   string
+}
+
+// SceneSearches is every search worth making for one scene, best first.
+//
+// It lives here, next to SceneDateLayout and for the same reason: the automatic
+// search and the interactive picker have to ask the indexers the same questions
+// or the picker would show a user candidates the automatic path never sees, and
+// vice versa.
+//
+// The date query comes first because it is the one with an exact answer — a
+// scene release named the standard way carries the date, and matching it needs
+// no guessing. The title query is a fallback, and everything downstream treats
+// it as one: what it returns is accepted only on a much stricter test (see the
+// automation runner's matchesSceneTitle).
+//
+// A site with no name, a scene with no date and no title, or a title that is
+// nothing but punctuation all yield fewer queries — or none, which callers read
+// as "there is nothing to search for" rather than as "search for everything".
+func SceneSearches(site string, airDate time.Time, title string) []SceneSearch {
+	site = strings.TrimSpace(site)
+	if site == "" {
+		return nil
+	}
+	out := make([]SceneSearch, 0, 2)
+	if !airDate.IsZero() {
+		out = append(out, SceneSearch{
+			Variant: SceneSearchByDate,
+			Query:   site + " " + airDate.UTC().Format(SceneDateLayout),
+		})
+	}
+	if clean := sceneQueryText(title); clean != "" {
+		out = append(out, SceneSearch{Variant: SceneSearchByTitle, Query: site + " " + clean})
+	}
+	return out
+}
+
+// sceneQueryText strips a scene title down to the words an indexer can match.
+//
+// Release names separate words with dots and carry no punctuation, so a title's
+// apostrophes, colons and dashes are noise that only narrows the search — a
+// query for "Don't Look Back" finds nothing an indexer filed as
+// "Dont.Look.Back". Case is left alone: Torznab searches are case-insensitive,
+// and lowercasing a title would only make the query harder to read in a log.
+func sceneQueryText(title string) string {
+	var b strings.Builder
+	for _, r := range title {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(r)
+			continue
+		}
+		b.WriteByte(' ')
+	}
+	return strings.Join(strings.Fields(b.String()), " ")
+}
+
+// IsAdultCategory reports whether an indexer category id is in the adult
+// block, parent id or subcategory alike.
+func IsAdultCategory(id int) bool {
+	return id >= AdultCategoryBase && id < AdultCategoryBase+1000
+}
+
+// HasAdultCategory reports whether any of the ids is in the adult block. It is
+// what selects the date-based scene parser for a search result (PLAN phase 9
+// task 4): a release an indexer filed under XXX is named the way scenes are
+// named, whichever library asked for it.
+func HasAdultCategory(ids []int) bool {
+	for _, id := range ids {
+		if IsAdultCategory(id) {
+			return true
+		}
+	}
+	return false
 }
 
 // IndexerCategory is one node of the category tree an indexer advertises in

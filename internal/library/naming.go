@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // cleanRoot normalizes the storage root once, at construction, so every
@@ -123,6 +124,24 @@ func seasonFolderName(season int) string {
 func episodeFileName(title string, year, season int, episodes []int, episodeTitle, ext string) string {
 	name := titleYear(title, year) + " - " + episodeTag(season, episodes)
 	if t := sanitize(episodeTitle); episodeTitle != "" && t != "Unknown" {
+		name += " - " + t
+	}
+	return name + ext
+}
+
+// sceneFileName is an adult episode's file:
+// "Brazzers - 2022-03-14 - Deep Impact.mkv".
+//
+// The date rather than an SxxEyy tag, and that is load-bearing rather than
+// cosmetic. A scene's episode number is Caravan's own mapping — the sequence
+// within its release year — so the tag would be "S2022E01", which the release
+// parser cannot read back (its season is one or two digits, as every real
+// television season is). A rescan has to recognize the organizer's own output
+// or the database stops being disposable, and the date is both what parse.Scene
+// reads and what actually identifies the scene.
+func sceneFileName(site string, date time.Time, sceneTitle, ext string) string {
+	name := sanitize(site) + " - " + date.UTC().Format("2006-01-02")
+	if t := sanitize(sceneTitle); sceneTitle != "" && t != "Unknown" {
 		name += " - " + t
 	}
 	return name + ext

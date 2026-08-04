@@ -1,0 +1,42 @@
+{
+  "data": {
+    "searchScene": [
+      {
+        "id": "51515151-1111-4111-8111-aaaaaaaaaaaa",
+        "studio": {
+          "id": "eeeeeeee-2222-4222-8222-222222222222",
+          "name": "Brazzers Exxtra",
+          "parent": { "id": "bbbbbbbb-1111-4111-8111-111111111111", "name": "Brazzers" }
+        }
+      },
+      {
+        "id": "52525252-2222-4222-8222-bbbbbbbbbbbb",
+        "studio": {
+          "id": "11111111-3333-4333-8333-333333333333",
+          "name": "Brazzers Live",
+          "parent": { "id": "bbbbbbbb-1111-4111-8111-111111111111", "name": "Brazzers" }
+        }
+      },
+      {
+        "id": "53535353-3333-4333-8333-cccccccccccc",
+        "studio": {
+          "id": "eeeeeeee-2222-4222-8222-222222222222",
+          "name": "Brazzers Exxtra",
+          "parent": { "id": "bbbbbbbb-1111-4111-8111-111111111111", "name": "Brazzers" }
+        }
+      },
+      {
+        "id": "54545454-4444-4444-8444-dddddddddddd",
+        "studio": null
+      },
+      {
+        "id": "55555555-5555-4555-8555-eeeeeeeeeeee",
+        "studio": {
+          "id": "44444444-4444-4444-8444-444444444444",
+          "name": "Reality Kings",
+          "parent": null
+        }
+      }
+    ]
+  }
+}

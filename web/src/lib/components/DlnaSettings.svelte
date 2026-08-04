@@ -15,8 +15,10 @@
     SETTING_DLNA_ENABLED,
     SETTING_DLNA_FRIENDLY_NAME,
     type DlnaStatus,
+    type Library,
     type Settings,
   } from '../api/types';
+  import { pushToast } from '../state/toast.svelte';
   import Badge from './Badge.svelte';
   import Banner from './Banner.svelte';
   import Button from './Button.svelte';
@@ -43,6 +45,17 @@
   let enabled = $state(true);
   let friendlyName = $state('');
 
+  /**
+   * The Adult library row, when the module is on (PLAN phase 9 task 7b).
+   *
+   * GET /libraries omits it entirely while the module is off, so "did the
+   * response carry an adult row" IS the question "should the sub-toggle
+   * exist" — there is no second setting to consult and no way for the two
+   * answers to disagree.
+   */
+  let adultLibrary = $state<Library | null>(null);
+  let sharingAdult = $state(false);
+
   async function load() {
     loading = true;
     try {
@@ -58,6 +71,46 @@
       error = errorText(err);
     } finally {
       loading = false;
+    }
+    await loadAdultLibrary();
+  }
+
+  /**
+   * Best-effort on purpose: the DLNA card's own job is the status line, and a
+   * libraries request that fails must not turn this card into an error screen.
+   * No row means no sub-toggle, which is also what "the module is off" looks
+   * like — the safe reading either way.
+   */
+  async function loadAdultLibrary() {
+    try {
+      const libraries = await api.listLibraries();
+      adultLibrary = libraries.find((l) => l.kind === 'adult') ?? null;
+    } catch {
+      adultLibrary = null;
+    }
+  }
+
+  /**
+   * The sub-toggle writes the library row through the phase-8 libraries API
+   * rather than a DLNA setting of its own. That is the whole integration: the
+   * Adult shelf is advertised or not for exactly the reason Movies and Series
+   * are, and there is no adult-specific visibility rule in the DLNA server to
+   * get out of step with this switch.
+   */
+  async function shareAdult(next: boolean) {
+    const lib = adultLibrary;
+    if (!lib) return;
+    sharingAdult = true;
+    try {
+      adultLibrary = await api.updateLibrary(lib.id, { dlna_visible: next });
+      pushToast(
+        next ? 'The Adult library is now on the network.' : 'The Adult library is off the network.',
+        next ? 'warning' : 'neutral',
+      );
+    } catch (err) {
+      pushToast(errorText(err), 'danger');
+    } finally {
+      sharingAdult = false;
     }
   }
 
@@ -102,6 +155,32 @@
       checked={enabled}
       label="Advertise this library on the local network"
       onchange={(next) => (enabled = next)} />
+
+    <!-- Indented under the switch it depends on, because it is a second,
+         narrower decision about the same wire: what DLNA carries, not whether
+         DLNA runs. It saves on change rather than waiting for the card's Save
+         button — it writes a different resource (the library row), and a
+         sharing decision that sat unsaved next to a saved one would be the
+         worst of both. -->
+    {#if adultLibrary}
+      <div class="ml-6 flex flex-col gap-2 border-l border-border pl-4">
+        <Toggle
+          checked={adultLibrary.dlna_visible}
+          disabled={sharingAdult}
+          label="Also share the Adult library"
+          onchange={shareAdult} />
+        {#if adultLibrary.dlna_visible}
+          <Banner
+            tone="warning"
+            icon="warning"
+            message="DLNA has no accounts — every device on this network can browse anything shared here." />
+        {:else}
+          <p class="text-sm text-ink-secondary">
+            DLNA has no accounts — every device on this network can browse anything shared here.
+          </p>
+        {/if}
+      </div>
+    {/if}
 
     <Field
       label="Device name"

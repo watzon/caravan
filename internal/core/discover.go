@@ -11,6 +11,10 @@ import (
 const (
 	MediaTypeMovie  = "movie"
 	MediaTypeSeries = "series"
+	// MediaTypeScene is one adult scene (PLAN phase 9 task 7). A scene request
+	// is identified by a stash-box id rather than a TMDB one, which is a rule
+	// the requests table enforces itself — see migration 0013.
+	MediaTypeScene = "scene"
 )
 
 // DiscoverItem is one title in a browse list: a movie or a series that may or

@@ -216,6 +216,18 @@ func (m *Manager) importDownloadedMovie(ctx context.Context, files []downloadedF
 // on this), so each file is reconciled and imported on its own: an extra that
 // does not belong parks without taking the episodes down with it.
 func (m *Manager) importDownloadedEpisodes(ctx context.Context, files []downloadedFile, grab core.GrabInfo) (int, int, error) {
+	// A grab against a site is the same download shape with a different
+	// identity model behind it, so the branch is here rather than one level up:
+	// everything before this point — idempotency, the file walk, the outcome
+	// record — is shared.
+	sr, err := m.store.GetSeries(ctx, grab.SeriesID)
+	switch {
+	case err == nil && sr.Kind == core.SeriesKindAdult:
+		return m.importDownloadedScenes(ctx, files, grab, sr)
+	case err != nil && !errors.Is(err, store.ErrNotFound):
+		return 0, 0, err
+	}
+
 	meta, unresolvable, err := m.seriesMeta(ctx, grab.SeriesID)
 	if err != nil {
 		return 0, 0, err
@@ -267,7 +279,7 @@ func (m *Manager) importDownloadedEpisodes(ctx context.Context, files []download
 		if err != nil {
 			return imported, parked, err
 		}
-		if err := m.replaceEpisodeFiles(ctx, meta, file.rel, existing, newFile, grab, seriesID, p); err != nil {
+		if err := m.replaceEpisodeFiles(ctx, meta.Title, file.rel, existing, newFile, grab, seriesID, p); err != nil {
 			return imported, parked, err
 		}
 		if err := m.recordImport(ctx, rel, grab, 0, seriesID, warnings); err != nil {
@@ -401,8 +413,10 @@ func (m *Manager) replaceMovieFiles(ctx context.Context, meta *core.MovieMeta, s
 // replaceEpisodeFiles is the episode counterpart of replaceMovieFiles. Every
 // file covered by a multi-episode release is handled once, even though it can
 // have appeared in the old-file lookup for several episode links.
-func (m *Manager) replaceEpisodeFiles(ctx context.Context, meta *core.SeriesMeta, sourceRel string, existing []core.MediaFile, newFile *core.MediaFile, grab core.GrabInfo, seriesID int64, p core.ParsedRelease) error {
-	label := fmt.Sprintf("%s %s", meta.Title, episodeTag(p.Season, p.Episodes))
+// It takes the series' title rather than its provider metadata because that is
+// all it needs, and because a scene import has a series row but no SeriesMeta.
+func (m *Manager) replaceEpisodeFiles(ctx context.Context, title, sourceRel string, existing []core.MediaFile, newFile *core.MediaFile, grab core.GrabInfo, seriesID int64, p core.ParsedRelease) error {
+	label := fmt.Sprintf("%s %s", title, episodeTag(p.Season, p.Episodes))
 	return m.removeSupersededFiles(ctx, sourceRel, existing, newFile, func(old core.MediaFile) *core.Event {
 		return replacementEvent("file for "+label, old.Quality, newFile.Quality, grab, 0, seriesID)
 	})

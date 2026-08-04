@@ -32,6 +32,18 @@ func TestMain(m *testing.M) {
 type stubManager struct {
 	st       *store.Store
 	provider core.MetadataProvider
+	// adult is the stash-box seam. It is nil by default, which is what a
+	// server with the module switched off or no credential entered looks like,
+	// so every existing test keeps proving that the adult surfaces reach no
+	// provider unless a test deliberately gives them one.
+	adult core.AdultMetadataProvider
+
+	// addSiteErr, when set, is what AddSite reports instead of writing a row.
+	addSiteErr error
+
+	// addSiteCalls records the stash ids AddSite was asked for, so a test can
+	// prove a scene approval added the SITE rather than something else.
+	addSiteCalls []string
 
 	// scanStarted receives once per Scan call; scanRelease, when non-nil,
 	// blocks Scan until the test lets it finish.
@@ -164,7 +176,35 @@ func (m *stubManager) MatchUnmatched(ctx context.Context, id int64, mediaType st
 	return m.matchErr
 }
 
+// AddSite writes an adult-kind series the way library.AddSite does, so the
+// handler tests read back the same shape a real manager produces.
+func (m *stubManager) AddSite(ctx context.Context, stashID string) (*core.Series, error) {
+	m.mu.Lock()
+	m.addSiteCalls = append(m.addSiteCalls, stashID)
+	m.mu.Unlock()
+	if m.addSiteErr != nil {
+		return nil, m.addSiteErr
+	}
+	sr := &core.Series{
+		StashID: stashID, Title: "Stub Site", SortTitle: "stub site",
+		Kind: core.SeriesKindAdult, Monitored: true,
+		Path: store.AdultLibraryRoot + "/Stub Site",
+	}
+	if err := m.st.UpsertSeries(ctx, sr); err != nil {
+		return nil, err
+	}
+	return sr, nil
+}
+
+func (m *stubManager) siteCalls() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.addSiteCalls...)
+}
+
 func (m *stubManager) Metadata() core.MetadataProvider { return m.provider }
+
+func (m *stubManager) AdultMetadata() core.AdultMetadataProvider { return m.adult }
 
 func (m *stubManager) matchCalls() []matchCall {
 	m.mu.Lock()
@@ -378,6 +418,12 @@ func TestPutSettingsRejectsBadRequests(t *testing.T) {
 		{"unknown key", `{"nonsense":"1"}`},
 		{"malformed json", `{`},
 		{"wrong value type", `{"storage_root":42}`},
+		// An adult metadata endpoint that could never be dialled is rejected
+		// where the user can see it, not swallowed and re-surfaced much later
+		// as a request error inside a refresh nobody is watching.
+		{"stashbox endpoint with no scheme", `{"stashbox_endpoint":"theporndb.net/graphql"}`},
+		{"stashbox endpoint with an undialable scheme", `{"stashbox_endpoint":"ftp://theporndb.net/graphql"}`},
+		{"stashbox endpoint with no host", `{"stashbox_endpoint":"https:///graphql"}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -394,6 +440,35 @@ func TestPutSettingsRejectsBadRequests(t *testing.T) {
 	}
 	if len(settings) != 0 {
 		t.Fatalf("settings = %v, want no writes from rejected requests", settings)
+	}
+}
+
+func TestPutSettingsAcceptsStashboxCredentials(t *testing.T) {
+	h, _, _ := newTestServer(t)
+
+	// A blank endpoint is legal and means "the TPDB preset": pasting a key is
+	// the whole configuration for the default provider.
+	rec := do(t, h, http.MethodPut, "/api/v1/settings",
+		`{"stashbox_endpoint":"","stashbox_api_key":"sk-adult"}`)
+	wantStatus(t, rec, http.StatusOK)
+
+	var settings map[string]string
+	decodeBody(t, rec, &settings)
+	if settings[store.SettingStashboxAPIKey] != "sk-adult" {
+		t.Fatalf("stashbox_api_key = %q, want it stored", settings[store.SettingStashboxAPIKey])
+	}
+	if _, ok := settings[store.SettingStashboxEndpoint]; !ok {
+		t.Fatalf("stashbox_endpoint missing from %v, want the blank value stored", settings)
+	}
+
+	// Naming another box — StashDB, FansDB, a self-hosted one — is a config
+	// change, not a code change (PLAN phase 9 task 1).
+	rec = do(t, h, http.MethodPut, "/api/v1/settings",
+		`{"stashbox_endpoint":"https://stashdb.org/graphql"}`)
+	wantStatus(t, rec, http.StatusOK)
+	decodeBody(t, rec, &settings)
+	if settings[store.SettingStashboxEndpoint] != "https://stashdb.org/graphql" {
+		t.Fatalf("stashbox_endpoint = %q, want the new endpoint", settings[store.SettingStashboxEndpoint])
 	}
 }
 

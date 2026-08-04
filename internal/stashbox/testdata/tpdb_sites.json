@@ -1,0 +1,49 @@
+{
+  "data": [
+    {
+      "uuid": "11111111-aaaa-4aaa-8aaa-111111111111",
+      "id": 4101,
+      "name": "Brazzers Vault",
+      "short_name": "brazzersvault",
+      "url": "https://www.brazzers.com/vault",
+      "logo": "https://cdn.example.test/vault-logo.jpg",
+      "poster": "https://cdn.example.test/vault-poster.jpg",
+      "parent": { "uuid": "e3b61b3e-1111-4111-8111-111111111111", "name": "Brazzers" },
+      "network": { "uuid": "e3b61b3e-1111-4111-8111-111111111111", "name": "Brazzers" }
+    },
+    {
+      "uuid": "22222222-bbbb-4bbb-8bbb-222222222222",
+      "id": 220,
+      "name": "Nebraska Coeds",
+      "short_name": "nebraskacoeds",
+      "url": "https://www.nebraskacoeds.com",
+      "logo": null,
+      "poster": "https://cdn.example.test/nebraska-poster.jpg",
+      "parent": null,
+      "network": { "uuid": "33333333-cccc-4ccc-8ccc-333333333333", "name": "Coeds Network" }
+    },
+    {
+      "uuid": "e3b61b3e-1111-4111-8111-111111111111",
+      "id": 12,
+      "name": "Brazzers",
+      "short_name": "Brazzers",
+      "url": "https://www.brazzers.com",
+      "logo": "https://cdn.example.test/brazzers-logo.jpg",
+      "poster": null,
+      "parent": null,
+      "network": null
+    },
+    {
+      "uuid": "",
+      "id": 999,
+      "name": "A row with no uuid",
+      "short_name": null,
+      "url": null,
+      "logo": null,
+      "poster": null,
+      "parent": null,
+      "network": null
+    }
+  ],
+  "meta": { "current_page": 1, "last_page": 1, "total": 4 }
+}

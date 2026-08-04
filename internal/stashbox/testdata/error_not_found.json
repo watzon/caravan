@@ -1,0 +1,10 @@
+{
+  "errors": [
+    {
+      "message": "no scene with that id",
+      "path": ["findScene"],
+      "extensions": { "code": "NOT_FOUND" }
+    }
+  ],
+  "data": null
+}

@@ -154,6 +154,7 @@ func (c *Client) release(it feedItem) (core.Release, bool) {
 		}
 	}
 
+	cats := categories(it)
 	r := core.Release{
 		IndexerID:   c.cfg.ID,
 		Indexer:     c.cfg.Name,
@@ -166,10 +167,27 @@ func (c *Client) release(it feedItem) (core.Release, bool) {
 		Seeders:     seeders,
 		Leechers:    leechers,
 		PublishedAt: publishedAt(it, attrs),
-		Categories:  categories(it),
-		Parsed:      parse.Parse(title),
+		Categories:  cats,
+		Parsed:      parseTitle(title, cats),
 	}
 	return r, true
+}
+
+// parseTitle reads a result's name the way the category it was published under
+// says it is named (PLAN phase 9 task 4).
+//
+// The category is the selector rather than the shape of the name itself,
+// because a date in a television name is a daily episode and reading it as a
+// scene date would change what an existing release means. An item the indexer
+// filed under XXX is named the way scenes are named — and parse.Scene falls
+// back to parse.Parse when the name turns out not to be date-shaped, so an
+// indexer that mis-files a television release under 6000 still parses
+// correctly.
+func parseTitle(title string, cats []int) core.ParsedRelease {
+	if core.HasAdultCategory(cats) {
+		return parse.Scene(title)
+	}
+	return parse.Parse(title)
 }
 
 // protocol decides which engine a grab would route to. The configured type is

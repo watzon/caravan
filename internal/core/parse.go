@@ -1,5 +1,7 @@
 package core
 
+import "time"
+
 // ParsedRelease is what the release-name parser (internal/parse) extracts from
 // a scene name or an existing filename. It carries no I/O and no database
 // identity: it is a pure description of what a name claims to be.
@@ -36,6 +38,17 @@ type ParsedRelease struct {
 	// Edition is free-text movie edition ("Director's Cut", "Extended"), or
 	// empty. SPEC §7 keeps this unstructured for v1.
 	Edition string
+	// SceneDate is the release date a date-based adult release name carries
+	// ("Site.22.03.14.…"), zero on every other name. Only parse.Scene ever
+	// sets it (PLAN phase 9 task 4).
+	//
+	// It is a date rather than an episode number because the number an adult
+	// release lands on — the scene's sequence within its release year — is not
+	// in the filename and cannot be: it is a fact about the site's whole
+	// catalogue. The date is what the name actually claims, and the library
+	// layer turns it into (season, episode) once it knows which site the file
+	// belongs to.
+	SceneDate time.Time `json:",omitempty"`
 	// Confidence is the parser's self-assessment in [0,1]. Low-confidence
 	// results are what park files in the unmatched queue rather than being
 	// imported silently.
@@ -44,3 +57,8 @@ type ParsedRelease struct {
 
 // IsEpisode reports whether the parsed name describes a TV episode release.
 func (p ParsedRelease) IsEpisode() bool { return len(p.Episodes) > 0 }
+
+// IsScene reports whether the parsed name describes a dated scene release —
+// the adult module's release shape. A ParsedRelease is never both: Parse never
+// sets SceneDate and Scene never sets Episodes.
+func (p ParsedRelease) IsScene() bool { return !p.SceneDate.IsZero() }

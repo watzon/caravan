@@ -256,6 +256,41 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("PATCH /libraries/{id}", s.handleUpdateLibrary)
 	api.HandleFunc("PUT /libraries/{id}/indexers/{indexerID}", s.handleSetLibraryIndexer)
 
+	// The adult module (PLAN phase 9). Its routes are registered on a mux of
+	// their own and mounted behind requireAdult, so the gate is a property of
+	// where a route lives rather than of what its handler remembers to check:
+	// with the module off, or for a caller who was never granted it,
+	// everything under /adult is 404 before any handler runs.
+	//
+	// The subtree is mounted whether or not the module is enabled, because the
+	// alternative — building the routing table from a settings row — would
+	// make enabling it require a restart, and would make an unrouted /adult
+	// path answer differently from a gated one. Register adult routes here and
+	// nowhere else; the mux is not prefix-stripped, so the patterns read
+	// exactly as the URLs do.
+	// A member reaches only the routes memberAllowed also names; the rest are
+	// admin-only by being absent from it, which is the same rule the whole API
+	// runs on. Adding a route here without adding it there closes it to
+	// members, never opens it — the failure direction that is safe.
+	adult := http.NewServeMux()
+	adult.HandleFunc("GET /adult/sites", s.handleListSites)
+	adult.HandleFunc("POST /adult/sites", s.handleAddSite)
+	adult.HandleFunc("GET /adult/sites/{id}", s.handleGetSite)
+	adult.HandleFunc("GET /adult/search", s.handleSearchSites)
+	adult.HandleFunc("GET /adult/discover", s.handleAdultDiscover)
+	// The member-access card. It lives under /adult rather than beside
+	// GET /users so that the accounts API carries no adult field on an install
+	// that has never enabled the module.
+	adult.HandleFunc("GET /adult/users", s.handleListAdultUsers)
+	adult.HandleFunc("PUT /adult/users/{id}/access", s.handleSetAdultAccess)
+	api.Handle("/adult/", s.requireAdult(adult))
+
+	// The master switch. It is the one adult route that cannot live behind
+	// requireAdult, because turning the module ON is what it is for and the
+	// gate would refuse it forever. It is admin-only instead, by the ordinary
+	// rule: memberAllowed does not name it.
+	api.HandleFunc("POST /settings/adult", s.handleSetAdultEnabled)
+
 	api.HandleFunc("GET /indexers", s.handleListIndexers)
 	api.HandleFunc("POST /indexers", s.handleCreateIndexer)
 	api.HandleFunc("PUT /indexers/{id}", s.handleUpdateIndexer)

@@ -99,22 +99,34 @@ func (m *Manager) importEpisode(ctx context.Context, meta *core.SeriesMeta, rel 
 		return "", 0, err
 	}
 
-	file := mediaFileFrom(finalRel, size, 0, p)
-	if err := m.preserveKnownTags(ctx, file); err != nil {
-		return "", 0, err
-	}
-	if err := m.store.UpsertMediaFile(ctx, file); err != nil {
-		return "", 0, err
-	}
-	for _, id := range episodeIDs {
-		if err := m.store.LinkEpisodeFile(ctx, id, file.ID); err != nil {
-			return "", 0, err
-		}
-	}
-	if err := m.forgetOldPath(ctx, rel, finalRel); err != nil {
+	if err := m.linkImportedFile(ctx, rel, finalRel, size, p, episodeIDs); err != nil {
 		return "", 0, err
 	}
 	return finalRel, sr.ID, nil
+}
+
+// linkImportedFile is the database tail every episode-shaped import shares:
+// write the media_files row, link it to each episode the file covers, and drop
+// the rows that described where the file used to be.
+//
+// It is a function rather than repeated code because the adult import path
+// (importScene) differs from importEpisode only in where the file goes and
+// where the series row came from. Everything after placement is identical, and
+// a second copy of it is exactly how the two would drift.
+func (m *Manager) linkImportedFile(ctx context.Context, rel, finalRel string, size int64, p core.ParsedRelease, episodeIDs []int64) error {
+	file := mediaFileFrom(finalRel, size, 0, p)
+	if err := m.preserveKnownTags(ctx, file); err != nil {
+		return err
+	}
+	if err := m.store.UpsertMediaFile(ctx, file); err != nil {
+		return err
+	}
+	for _, id := range episodeIDs {
+		if err := m.store.LinkEpisodeFile(ctx, id, file.ID); err != nil {
+			return err
+		}
+	}
+	return m.forgetOldPath(ctx, rel, finalRel)
 }
 
 // forgetOldPath drops the database rows that referred to a file's pre-organize

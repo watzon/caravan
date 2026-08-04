@@ -8,6 +8,8 @@
 import type {
   ActivityEvent,
   AddItemRequest,
+  AdultDiscoverPage,
+  AdultUser,
   ApproveRequestResult,
   AuthState,
   CalendarEntry,
@@ -50,6 +52,9 @@ import type {
   Series,
   SessionUser,
   Settings,
+  Site,
+  SiteDetail,
+  SiteMeta,
   StorageMigration,
   StorageMigrationStatus,
   SystemStatus,
@@ -201,6 +206,22 @@ export const endpoints = {
   requests: () => `${API_BASE}/requests`,
   request: (id: number) => `${API_BASE}/requests/${id}`,
   requestApprove: (id: number) => `${API_BASE}/requests/${id}/approve`,
+
+  // Phase 9 — the adult module. Everything under /adult sits behind the
+  // server's router-level gate: with the module off, or for an account that
+  // was not granted it, each of these answers 404 with the body an unrouted
+  // path gets. The SPA is expected not to ask (SessionUser.adult says so), and
+  // a 404 from one of them is that answer arriving late, not an error to show.
+  adultSites: () => `${API_BASE}/adult/sites`,
+  adultSite: (id: number) => `${API_BASE}/adult/sites/${id}`,
+  adultSearch: () => `${API_BASE}/adult/search`,
+  adultDiscover: () => `${API_BASE}/adult/discover`,
+  adultUsers: () => `${API_BASE}/adult/users`,
+  adultUserAccess: (id: number) => `${API_BASE}/adult/users/${id}/access`,
+  // The master switch, and the one adult route outside the gated subtree: it
+  // has to be reachable while the module is off, because turning it on is what
+  // it is for.
+  settingsAdult: () => `${API_BASE}/settings/adult`,
 } as const;
 
 /**
@@ -908,4 +929,59 @@ export const api = {
       method: 'PATCH',
       body: { min_availability: minAvailability },
     }),
+
+  /* ------------------------------------------------------------------------
+   * Phase 9 — the adult module.
+   *
+   * 503 means no stash-box credential is configured (send the user to
+   * Settings → Adult content); 502 means the provider is unhappy. Both arrive
+   * as an ApiError, same as the TMDB-backed screens, so callers branch on
+   * `status`. A 404 means the module is not visible to this caller — which is
+   * indistinguishable from the route not existing, deliberately.
+   * --------------------------------------------------------------------- */
+
+  /**
+   * Turn the module on or off. The first enable creates the Adult library row
+   * (hidden from DLNA); a disable deletes nothing, so turning it back on finds
+   * the sites, the scenes and the files exactly as they were.
+   */
+  setAdultEnabled: (enabled: boolean) =>
+    request<{ enabled: boolean }>(endpoints.settingsAdult(), {
+      method: 'POST',
+      body: { enabled },
+    }),
+
+  /** Every site in the library, with the scene counts the grid badges. */
+  listSites: (signal?: AbortSignal) => listOf<Site>(endpoints.adultSites(), 'sites', signal),
+
+  /** One site's page: release years as seasons, each holding its scenes. */
+  getSite: (id: number, signal?: AbortSignal) =>
+    request<SiteDetail>(endpoints.adultSite(id), { signal }),
+
+  /** Add a site by stash-box id. The server walks its whole catalogue. */
+  addSite: (stashID: string) =>
+    request<Site>(endpoints.adultSites(), { method: 'POST', body: { stash_id: stashID } }),
+
+  /** Ask the provider for sites to add — the adult twin of GET /search. */
+  searchSites: (query: string, signal?: AbortSignal) =>
+    listOf<SiteMeta>(withQuery(endpoints.adultSearch(), { q: query }), 'sites', signal),
+
+  /** One page of provider scenes, decorated with owned/requested state. */
+  adultDiscover: (query: string, page = 1, signal?: AbortSignal) =>
+    request<AdultDiscoverPage>(endpoints.adultDiscover(), {
+      query: { q: query, page },
+      signal,
+    }),
+
+  /** The member-access card: every account and whether it reaches the module. */
+  listAdultUsers: (signal?: AbortSignal) =>
+    listOf<AdultUser>(endpoints.adultUsers(), 'users', signal),
+
+  /**
+   * Grant or revoke one account's access. It takes effect on that account's
+   * very next request — the grant is not a credential, so there is no session
+   * to invalidate and nobody gets signed out.
+   */
+  setAdultAccess: (id: number, granted: boolean) =>
+    request<AdultUser>(endpoints.adultUserAccess(id), { method: 'PUT', body: { granted } }),
 };

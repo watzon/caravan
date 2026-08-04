@@ -147,8 +147,15 @@ func (s *Service) searchScope(ctx context.Context, u urls, containerID string) (
 			}
 			out.Items = append(out.Items, movies.Items...)
 		}
-		if visible[core.LibraryKindTV] {
-			if err := s.tvScope(ctx, u, out); err != nil {
+		// One loop, so a shelf is searchable exactly when it is browsable. A
+		// root search that walked a shelf the root does not advertise would be
+		// the classic way an invisible library leaks: most clients prefer
+		// Search over walking Browse.
+		for _, sh := range shelves {
+			if !visible[sh.libraryKind] {
+				continue
+			}
+			if err := s.shelfScope(ctx, u, sh, out); err != nil {
 				return nil, err
 			}
 		}
@@ -158,46 +165,55 @@ func (s *Service) searchScope(ctx context.Context, u urls, containerID string) (
 			return nil, err
 		}
 		out.Items = append(out.Items, movies.Items...)
-	case containerID == tvID:
-		if err := s.tvScope(ctx, u, out); err != nil {
-			return nil, err
-		}
-	case strings.HasPrefix(containerID, seriesPrefix):
-		seriesID, season, hasSeason, err := parseSeriesID(containerID)
-		if err != nil {
-			return nil, err
-		}
-		if hasSeason {
-			episodes, err := s.episodeChildren(ctx, u, seriesID, season)
-			if err != nil {
-				return nil, err
-			}
-			out.Items = append(out.Items, episodes.Items...)
-		} else if err := s.seriesScope(ctx, u, seriesID, out); err != nil {
-			return nil, err
-		}
-	case strings.HasPrefix(containerID, movieItemPrefix), strings.HasPrefix(containerID, episodeItemPrefix):
+	case strings.HasPrefix(containerID, movieItemPrefix):
 		// Searching under an item is a well-formed question with an empty
 		// answer, exactly like browsing its children.
 	default:
-		return nil, errNoObject
+		sh, ok := shelfOf(containerID)
+		if !ok {
+			return nil, errNoObject
+		}
+		switch {
+		case containerID == sh.containerID:
+			if err := s.shelfScope(ctx, u, sh, out); err != nil {
+				return nil, err
+			}
+		case strings.HasPrefix(containerID, sh.seriesPrefix):
+			seriesID, season, hasSeason, err := sh.parseSeriesID(containerID)
+			if err != nil {
+				return nil, err
+			}
+			if hasSeason {
+				episodes, err := s.episodeChildren(ctx, u, sh, seriesID, season)
+				if err != nil {
+					return nil, err
+				}
+				out.Items = append(out.Items, episodes.Items...)
+			} else if err := s.seriesScope(ctx, u, sh, seriesID, out); err != nil {
+				return nil, err
+			}
+		}
 	}
 	return out, nil
 }
 
-// tvScope appends every series container, season container, and episode item.
-func (s *Service) tvScope(ctx context.Context, u urls, out *didlLite) error {
-	series, err := s.seriesChildren(ctx, u)
+// shelfScope appends one shelf's series containers, season containers, and
+// episode items.
+func (s *Service) shelfScope(ctx context.Context, u urls, sh shelf, out *didlLite) error {
+	series, err := s.seriesChildren(ctx, u, sh)
 	if err != nil {
 		return err
 	}
 	out.Containers = append(out.Containers, series.Containers...)
-	all, err := s.st.ListSeries(ctx)
+	// One kind only, for the reason seriesChildren gives: a site is a series
+	// row, and a search that walked every kind would answer the television
+	// shelf with scenes.
+	all, err := s.st.ListSeriesByKind(ctx, sh.seriesKind)
 	if err != nil {
 		return err
 	}
 	for _, sr := range all {
-		if err := s.seriesScope(ctx, u, sr.ID, out); err != nil {
+		if err := s.seriesScope(ctx, u, sh, sr.ID, out); err != nil {
 			return err
 		}
 	}
@@ -206,16 +222,16 @@ func (s *Service) tvScope(ctx context.Context, u urls, out *didlLite) error {
 
 // seriesScope appends one series' season containers and every episode item it
 // has a file for, across all seasons.
-func (s *Service) seriesScope(ctx context.Context, u urls, seriesID int64, out *didlLite) error {
-	seasons, err := s.seasonChildren(ctx, u, seriesID)
+func (s *Service) seriesScope(ctx context.Context, u urls, sh shelf, seriesID int64, out *didlLite) error {
+	seasons, err := s.seasonChildren(ctx, u, sh, seriesID)
 	if err != nil {
 		return err
 	}
 	out.Containers = append(out.Containers, seasons.Containers...)
 
-	sr, err := s.st.GetSeries(ctx, seriesID)
+	sr, err := s.insistShelfSeries(ctx, sh, seriesID)
 	if err != nil {
-		return notFound(err)
+		return err
 	}
 	episodes, err := s.st.ListEpisodes(ctx, seriesID)
 	if err != nil {
@@ -230,7 +246,7 @@ func (s *Service) seriesScope(ctx context.Context, u urls, seriesID int64, out *
 		return err
 	}
 	for _, p := range pairs {
-		out.Items = append(out.Items, episodeItem(u, sr, byID[p.EpisodeID], p.File))
+		out.Items = append(out.Items, episodeItem(u, sh, sr, byID[p.EpisodeID], p.File))
 	}
 	return nil
 }

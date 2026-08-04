@@ -228,12 +228,61 @@ func (s *Store) ResolveLibrarySettings(ctx context.Context, libraryID int64) (*c
 		if ok && !o.Enabled {
 			continue
 		}
-		if ok && o.Categories != nil {
+		switch {
+		case ok && o.Categories != nil:
 			ix.Categories = o.Categories
+		default:
+			ix.Categories = DefaultLibraryCategories(lib.Kind, ix.Categories)
 		}
 		resolved.Indexers = append(resolved.Indexers, ix)
 	}
 	return resolved, nil
+}
+
+// DefaultLibraryCategories is what a library asks an indexer for when nobody
+// has written it an override — given the library's kind and the indexer's own
+// categories.
+//
+// For every kind but one the answer is the indexer's own list, and for them
+// that is right: an indexer is configured with the categories its owner wants
+// Caravan to search, and a movie or television search wants exactly those.
+//
+// The adult library cannot inherit them, because by construction they are the
+// movie and television ones. An install that enables the module has an indexer
+// configured for 2000/5000 and a brand new Adult library with no override row,
+// so inheriting would send every scene search out under `cat=5000,2000` — and
+// that fails SILENTLY rather than loudly. indexer.parseTitle selects the
+// date-based scene parser only for a 6000-series result, so everything such a
+// search returns parses with a zero scene date and is then dropped by
+// searchScene's date match: the job records "no release found" forever, on an
+// indexer that carries the scene (PLAN phase 9 task 3).
+//
+// So the adult fallback is the adult category block itself. An indexer already
+// narrowed to specific adult subcategories keeps exactly those — that is its
+// owner naming which flavours of XXX this install wants — and one with no adult
+// category at all gets the parent 6000, which is what "XXX" is. Either way an
+// adult search sends only 6000-series categories, the invariant the whole
+// module rests on. An explicit per-library override still wins outright: it is
+// the owner's word, and phase 8's Libraries screen is where it is given.
+//
+// It is exported because the Libraries screen renders the per-library matrix
+// from ListLibraryIndexers — the raw table, where "no row" is a hole — and has
+// to fill that hole with the same answer a search would use, or the screen
+// would show a default the searches do not run.
+func DefaultLibraryCategories(kind string, own []int) []int {
+	if kind != core.LibraryKindAdult {
+		return own
+	}
+	adult := make([]int, 0, len(own))
+	for _, id := range own {
+		if core.IsAdultCategory(id) {
+			adult = append(adult, id)
+		}
+	}
+	if len(adult) == 0 {
+		return []int{core.AdultCategoryBase}
+	}
+	return adult
 }
 
 // ResolveLibrarySettingsByKind resolves the settings of the library that items

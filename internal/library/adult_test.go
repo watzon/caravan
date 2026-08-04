@@ -1,0 +1,816 @@
+package library
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"path"
+	"sort"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/watzon/caravan/internal/core"
+	"github.com/watzon/caravan/internal/store"
+)
+
+// stubAdultProvider is an in-memory core.AdultMetadataProvider that COUNTS
+// every call. The count is the point: "zero stash-box traffic when the module
+// is off" is an acceptance criterion, and a stub that only answers questions
+// cannot prove a question was never asked.
+type stubAdultProvider struct {
+	sites  []core.SiteMeta
+	scenes map[string][]core.SceneMeta
+
+	calls             int
+	pageSize          int
+	searchErr, getErr error
+}
+
+func (s *stubAdultProvider) SearchSites(_ context.Context, q string) ([]core.SiteMeta, error) {
+	s.calls++
+	if s.searchErr != nil {
+		return nil, s.searchErr
+	}
+	return s.sites, nil
+}
+
+func (s *stubAdultProvider) GetSite(_ context.Context, stashID string) (*core.SiteMeta, error) {
+	s.calls++
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
+	for _, site := range s.sites {
+		if site.StashID == stashID {
+			return &site, nil
+		}
+	}
+	return nil, errors.New("stub: no such site")
+}
+
+func (s *stubAdultProvider) SearchScenes(_ context.Context, q core.SceneQuery) (*core.ScenePage, error) {
+	s.calls++
+	if s.searchErr != nil {
+		return nil, s.searchErr
+	}
+	all := s.scenes[q.SiteStashID]
+	perPage := s.pageSize
+	if perPage <= 0 {
+		perPage = q.PerPage
+	}
+	if perPage <= 0 {
+		perPage = 25
+	}
+	page := max(q.Page, 1)
+	start := (page - 1) * perPage
+	if start > len(all) {
+		start = len(all)
+	}
+	end := min(start+perPage, len(all))
+	return &core.ScenePage{
+		Page: page, PerPage: perPage, Total: len(all), Scenes: all[start:end],
+	}, nil
+}
+
+func (s *stubAdultProvider) GetScene(_ context.Context, stashID string) (*core.SceneMeta, error) {
+	s.calls++
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
+	for _, scenes := range s.scenes {
+		for _, scene := range scenes {
+			if scene.StashID == stashID {
+				return &scene, nil
+			}
+		}
+	}
+	return nil, errors.New("stub: no such scene")
+}
+
+func date(y int, m time.Month, d int) time.Time {
+	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
+}
+
+// adultHarness is the library harness plus an adult provider and the module
+// switched on.
+type adultHarness struct {
+	*harness
+	adult *stubAdultProvider
+}
+
+func newAdultHarness(t *testing.T, enabled bool) *adultHarness {
+	t.Helper()
+	h := newHarness(t)
+	a := &adultHarness{harness: h, adult: &stubAdultProvider{scenes: map[string][]core.SceneMeta{}}}
+	if enabled {
+		if err := h.st.SetAdultEnabled(context.Background(), true); err != nil {
+			t.Fatalf("SetAdultEnabled: %v", err)
+		}
+	}
+	h.mgr = a.newManager(h.st, h.provider)
+	return a
+}
+
+// newManager overrides the harness' builder so every Manager it makes carries
+// the adult provider — and the REAL scene parser, because the adult path's
+// whole disposability story is that a rescan re-reads the organizer's own
+// filenames, and a fake parser cannot prove that.
+func (a *adultHarness) newManager(st *store.Store, mp core.MetadataProvider) *Manager {
+	a.t.Helper()
+	mgr := a.harness.newManager(st, mp)
+	mgr.adult = a.adult
+	return mgr
+}
+
+// seedBrazzers gives the provider one site with three scenes across two years,
+// deliberately returned newest-first the way a DATE/DESC query does.
+func (a *adultHarness) seedBrazzers() {
+	a.adult.sites = []core.SiteMeta{{StashID: "site-1", Name: "Brazzers", ImageURL: a.posterURL}}
+	a.adult.scenes["site-1"] = []core.SceneMeta{
+		{StashID: "scene-c", SiteStashID: "site-1", SiteName: "Brazzers", Title: "Third", Date: date(2023, time.February, 1)},
+		{StashID: "scene-b", SiteStashID: "site-1", SiteName: "Brazzers", Title: "Second", Date: date(2022, time.June, 9),
+			Performers: []core.ScenePerformer{{Name: "Jane Doe"}, {Name: "Legal Name", As: "Stage Name"}}},
+		{StashID: "scene-a", SiteStashID: "site-1", SiteName: "Brazzers", Title: "Deep Impact", Date: date(2022, time.March, 14),
+			URL: "https://example.test/scene-a"},
+	}
+}
+
+func (a *adultHarness) addSite(id string) *core.Series {
+	a.t.Helper()
+	sr, err := a.mgr.AddSite(context.Background(), id)
+	if err != nil {
+		a.t.Fatalf("AddSite: %v", err)
+	}
+	return sr
+}
+
+func (a *adultHarness) episodes(seriesID int64) []core.Episode {
+	a.t.Helper()
+	eps, err := a.st.ListEpisodes(context.Background(), seriesID)
+	if err != nil {
+		a.t.Fatalf("ListEpisodes: %v", err)
+	}
+	sort.Slice(eps, func(i, j int) bool {
+		if eps[i].SeasonNumber != eps[j].SeasonNumber {
+			return eps[i].SeasonNumber < eps[j].SeasonNumber
+		}
+		return eps[i].EpisodeNumber < eps[j].EpisodeNumber
+	})
+	return eps
+}
+
+// The organizer's adult root and the store's adult library root are the same
+// directory said twice. A test rather than a shared constant because the two
+// packages are deliberately independent — but a drift would file scenes
+// somewhere the DLNA filter and `caravan prepare` do not look.
+func TestAdultRootMatchesTheAdultLibraryRow(t *testing.T) {
+	if got := path.Join(LibraryDir, AdultDir); got != store.AdultLibraryRoot {
+		t.Errorf("library adult root = %q, store.AdultLibraryRoot = %q", got, store.AdultLibraryRoot)
+	}
+	if got := adultSeriesDir("Brazzers"); got != "library/Adult/Brazzers" {
+		t.Errorf("adultSeriesDir = %q, want library/Adult/Brazzers", got)
+	}
+	// A site with characters no filesystem accepts still lands under the adult
+	// root rather than escaping it.
+	if got := adultSeriesDir("Bad/Name:*"); !strings.HasPrefix(got, "library/Adult/") ||
+		strings.Count(got, "/") != 2 {
+		t.Errorf("adultSeriesDir(unsafe) = %q, want a single component under library/Adult", got)
+	}
+}
+
+func TestAddSiteMapsScenesOntoSeasonsAndEpisodes(t *testing.T) {
+	h := newAdultHarness(t, true)
+	h.seedBrazzers()
+
+	sr := h.addSite("site-1")
+	if sr.Kind != core.SeriesKindAdult {
+		t.Errorf("series kind = %q, want %q", sr.Kind, core.SeriesKindAdult)
+	}
+	if sr.StashID != "site-1" {
+		t.Errorf("series stash id = %q, want site-1", sr.StashID)
+	}
+	if sr.Path != "library/Adult/Brazzers" {
+		t.Errorf("series path = %q, want library/Adult/Brazzers", sr.Path)
+	}
+	if sr.TMDBID != 0 {
+		t.Errorf("series tmdb id = %d, want 0", sr.TMDBID)
+	}
+
+	seasons, err := h.st.ListSeasons(context.Background(), sr.ID)
+	if err != nil {
+		t.Fatalf("ListSeasons: %v", err)
+	}
+	gotYears := []int{}
+	for _, s := range seasons {
+		gotYears = append(gotYears, s.Number)
+	}
+	sort.Ints(gotYears)
+	if fmt.Sprint(gotYears) != "[2022 2023]" {
+		t.Errorf("seasons = %v, want the release years [2022 2023]", gotYears)
+	}
+
+	eps := h.episodes(sr.ID)
+	if len(eps) != 3 {
+		t.Fatalf("episodes = %d, want 3", len(eps))
+	}
+	// Oldest first within a year, whatever order the provider paged them back.
+	want := []struct {
+		season, number int
+		stashID, title string
+	}{
+		{2022, 1, "scene-a", "Deep Impact"},
+		{2022, 2, "scene-b", "Second"},
+		{2023, 1, "scene-c", "Third"},
+	}
+	for i, w := range want {
+		got := eps[i]
+		if got.SeasonNumber != w.season || got.EpisodeNumber != w.number ||
+			got.StashID != w.stashID || got.Title != w.title {
+			t.Errorf("episode %d = S%dE%d %s %q, want S%dE%d %s %q",
+				i, got.SeasonNumber, got.EpisodeNumber, got.StashID, got.Title,
+				w.season, w.number, w.stashID, w.title)
+		}
+	}
+	if got := eps[0].AirDate.UTC().Format("2006-01-02"); got != "2022-03-14" {
+		t.Errorf("air date = %s, want the scene's release date 2022-03-14", got)
+	}
+
+	// Scene-side metadata rides in the JSON column, performers credited under
+	// the alias the scene used.
+	if scene := eps[1].Scene; scene == nil {
+		t.Fatal("episode has no scene metadata")
+	} else if fmt.Sprint(scene.Performers) != "[Jane Doe Stage Name]" || scene.Studio != "Brazzers" {
+		t.Errorf("scene info = %+v, want studio Brazzers and the credited aliases", scene)
+	}
+	if got := eps[0].Scene.URL; got != "https://example.test/scene-a" {
+		t.Errorf("scene url = %q", got)
+	}
+}
+
+// Numbering has to survive a back-filled scene, because the number is the
+// address a file on disk was named after. Renumbering would rename every later
+// file in the year and orphan the ones already linked.
+func TestSceneNumbersAreStableWhenTheProviderBackFills(t *testing.T) {
+	h := newAdultHarness(t, true)
+	h.seedBrazzers()
+	sr := h.addSite("site-1")
+
+	before := h.episodes(sr.ID)
+
+	// A scene from the middle of 2022 turns up later than the ones around it.
+	h.adult.scenes["site-1"] = append(h.adult.scenes["site-1"], core.SceneMeta{
+		StashID: "scene-late", SiteStashID: "site-1", SiteName: "Brazzers",
+		Title: "Back Filled", Date: date(2022, time.April, 1),
+	})
+	if err := h.mgr.syncSiteScenes(context.Background(), sr); err != nil {
+		t.Fatalf("syncSiteScenes: %v", err)
+	}
+
+	after := h.episodes(sr.ID)
+	if len(after) != len(before)+1 {
+		t.Fatalf("episodes = %d, want %d", len(after), len(before)+1)
+	}
+	byStash := map[string]core.Episode{}
+	for _, e := range after {
+		byStash[e.StashID] = e
+	}
+	for _, prior := range before {
+		got := byStash[prior.StashID]
+		if got.SeasonNumber != prior.SeasonNumber || got.EpisodeNumber != prior.EpisodeNumber {
+			t.Errorf("scene %s moved from S%dE%d to S%dE%d", prior.StashID,
+				prior.SeasonNumber, prior.EpisodeNumber, got.SeasonNumber, got.EpisodeNumber)
+		}
+	}
+	// The new one is appended after the highest number that year already used,
+	// not inserted at its chronological position.
+	if got := byStash["scene-late"]; got.SeasonNumber != 2022 || got.EpisodeNumber != 3 {
+		t.Errorf("back-filled scene = S%dE%d, want S2022E03", got.SeasonNumber, got.EpisodeNumber)
+	}
+}
+
+// Numbering a catalogue from scratch has to be deterministic, or the DB is not
+// disposable: deleting it and re-walking the same catalogue would produce
+// different episode numbers than the filenames on disk were named after.
+func TestSceneNumberingIsDeterministicFromTheCatalogue(t *testing.T) {
+	scenes := []core.SceneMeta{
+		{StashID: "c", Date: date(2022, time.March, 14), Code: "B"},
+		{StashID: "a", Date: date(2022, time.March, 14), Code: "A"},
+		{StashID: "b", Date: date(2022, time.January, 2)},
+	}
+	render := func(eps []core.Episode) string {
+		var b strings.Builder
+		for _, e := range eps {
+			fmt.Fprintf(&b, "S%dE%d=%s ", e.SeasonNumber, e.EpisodeNumber, e.StashID)
+		}
+		return b.String()
+	}
+	first := render(numberScenes(scenes, nil))
+	// Same catalogue, different provider paging order.
+	shuffled := []core.SceneMeta{scenes[2], scenes[0], scenes[1]}
+	second := render(numberScenes(shuffled, nil))
+	if first != second {
+		t.Errorf("numbering depends on provider order:\n%s\n%s", first, second)
+	}
+
+	got := numberScenes(scenes, nil)
+	want := []string{"b", "a", "c"} // date, then code as the same-day tie-break
+	for i, stashID := range want {
+		if got[i].StashID != stashID || got[i].EpisodeNumber != i+1 {
+			t.Errorf("episode %d = %s E%d, want %s E%d", i, got[i].StashID, got[i].EpisodeNumber, stashID, i+1)
+		}
+	}
+}
+
+// A scene the provider cannot date cannot be filed: the date IS the season.
+func TestUndatedScenesAreDropped(t *testing.T) {
+	got := numberScenes([]core.SceneMeta{
+		{StashID: "dated", Date: date(2022, time.March, 14)},
+		{StashID: "undated"},
+	}, nil)
+	if len(got) != 1 || got[0].StashID != "dated" {
+		t.Errorf("numberScenes = %+v, want only the dated scene", got)
+	}
+}
+
+// ---- the gate -------------------------------------------------------------
+
+func TestAddSiteRefusesWhenTheModuleIsDisabled(t *testing.T) {
+	h := newAdultHarness(t, false)
+	h.seedBrazzers()
+
+	if _, err := h.mgr.AddSite(context.Background(), "site-1"); !errors.Is(err, ErrAdultDisabled) {
+		t.Errorf("AddSite error = %v, want ErrAdultDisabled", err)
+	}
+	if h.adult.calls != 0 {
+		t.Errorf("provider was called %d times with the module disabled, want 0", h.adult.calls)
+	}
+}
+
+func TestAddSiteReportsAMissingProvider(t *testing.T) {
+	h := newAdultHarness(t, true)
+	h.mgr.adult = nil
+	if _, err := h.mgr.AddSite(context.Background(), "site-1"); !errors.Is(err, core.ErrNoAdultProvider) {
+		t.Errorf("AddSite error = %v, want ErrNoAdultProvider", err)
+	}
+}
+
+// The refresh sweep is the recurring job that would otherwise reach the
+// endpoint on a schedule. With the module off it must make no request AND
+// report no error: a sweep that logged a failure about a disabled module every
+// twelve hours is its own kind of trace.
+func TestRefreshMakesNoAdultRequestWhenDisabled(t *testing.T) {
+	h := newAdultHarness(t, true)
+	h.seedBrazzers()
+	sr := h.addSite("site-1")
+
+	if err := h.st.SetAdultEnabled(context.Background(), false); err != nil {
+		t.Fatalf("SetAdultEnabled: %v", err)
+	}
+	h.adult.calls = 0
+
+	res := &RefreshResult{}
+	if err := h.mgr.refreshSites(context.Background(), res); err != nil {
+		t.Fatalf("refreshSites: %v", err)
+	}
+	if h.adult.calls != 0 {
+		t.Errorf("provider was called %d times, want 0", h.adult.calls)
+	}
+	if res.Sites != 0 || len(res.Errors) != 0 {
+		t.Errorf("result = %+v, want an untouched no-op", res)
+	}
+
+	// And the rows are all still there: disabling hides, it never deletes.
+	if eps := h.episodes(sr.ID); len(eps) != 3 {
+		t.Errorf("episodes after disabling = %d, want 3", len(eps))
+	}
+}
+
+func TestRefreshSitesRewalksTheCatalogue(t *testing.T) {
+	h := newAdultHarness(t, true)
+	h.seedBrazzers()
+	sr := h.addSite("site-1")
+
+	h.adult.scenes["site-1"] = append(h.adult.scenes["site-1"], core.SceneMeta{
+		StashID: "scene-new", SiteStashID: "site-1", SiteName: "Brazzers",
+		Title: "Brand New", Date: date(2023, time.December, 1),
+	})
+	res := &RefreshResult{}
+	if err := h.mgr.refreshSites(context.Background(), res); err != nil {
+		t.Fatalf("refreshSites: %v", err)
+	}
+	if res.Sites != 1 {
+		t.Errorf("refreshed %d sites, want 1", res.Sites)
+	}
+	if eps := h.episodes(sr.ID); len(eps) != 4 {
+		t.Errorf("episodes = %d, want 4", len(eps))
+	}
+}
+
+// A television refresh must not send a site to TMDB, whatever else changes.
+func TestRefreshLibraryDoesNotSendSitesToTMDB(t *testing.T) {
+	h := newAdultHarness(t, true)
+	h.seedBrazzers()
+	h.addSite("site-1")
+
+	// The stub answers no TMDB id, so a site reaching GetSeries would surface
+	// as a refresh error rather than as silence.
+	res, err := h.mgr.RefreshLibrary(context.Background())
+	if err != nil {
+		t.Fatalf("RefreshLibrary: %v", err)
+	}
+	if res.Series != 0 {
+		t.Errorf("refreshed %d television series, want 0", res.Series)
+	}
+	if res.Sites != 1 {
+		t.Errorf("refreshed %d sites, want 1", res.Sites)
+	}
+	if len(res.Errors) != 0 {
+		t.Errorf("refresh errors = %v, want none", res.Errors)
+	}
+}
+
+// ---- paging ---------------------------------------------------------------
+
+func TestSiteScenesPagesTheWholeCatalogue(t *testing.T) {
+	h := newAdultHarness(t, true)
+	h.adult.sites = []core.SiteMeta{{StashID: "site-1", Name: "Brazzers"}}
+	h.adult.pageSize = 2
+	for i := range 7 {
+		h.adult.scenes["site-1"] = append(h.adult.scenes["site-1"], core.SceneMeta{
+			StashID: fmt.Sprintf("scene-%d", i),
+			Date:    date(2022, time.January, i+1),
+		})
+	}
+
+	scenes, err := h.mgr.siteScenes(context.Background(), "site-1")
+	if err != nil {
+		t.Fatalf("siteScenes: %v", err)
+	}
+	if len(scenes) != 7 {
+		t.Errorf("scenes = %d, want 7", len(scenes))
+	}
+}
+
+// A provider that answers the same page forever must not be walked forever,
+// and must not multiply its catalogue into the numbering.
+func TestSiteScenesSurvivesAProviderThatNeverAdvances(t *testing.T) {
+	h := newAdultHarness(t, true)
+	h.adult.scenes["site-1"] = []core.SceneMeta{
+		{StashID: "scene-a", Date: date(2022, time.March, 14)},
+		{StashID: "scene-b", Date: date(2022, time.March, 15)},
+	}
+	// Total says there is much more, and every page returns the same two.
+	h.adult.pageSize = 2
+	stuck := &stuckPager{inner: h.adult}
+	h.mgr.adult = stuck
+
+	scenes, err := h.mgr.siteScenes(context.Background(), "site-1")
+	if err != nil {
+		t.Fatalf("siteScenes: %v", err)
+	}
+	if len(scenes) != 2 {
+		t.Errorf("scenes = %d, want 2 distinct", len(scenes))
+	}
+	if stuck.inner.calls > maxScenePages {
+		t.Errorf("walked %d pages, want at most %d", stuck.inner.calls, maxScenePages)
+	}
+}
+
+type stuckPager struct{ inner *stubAdultProvider }
+
+func (s *stuckPager) SearchSites(ctx context.Context, q string) ([]core.SiteMeta, error) {
+	return s.inner.SearchSites(ctx, q)
+}
+func (s *stuckPager) GetSite(ctx context.Context, id string) (*core.SiteMeta, error) {
+	return s.inner.GetSite(ctx, id)
+}
+func (s *stuckPager) GetScene(ctx context.Context, id string) (*core.SceneMeta, error) {
+	return s.inner.GetScene(ctx, id)
+}
+func (s *stuckPager) SearchScenes(ctx context.Context, q core.SceneQuery) (*core.ScenePage, error) {
+	q.Page = 1
+	page, err := s.inner.SearchScenes(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+	page.Total = 1000
+	return page, nil
+}
+
+// ---- scan and import ------------------------------------------------------
+
+func TestScanImportsASceneUnderTheAdultRoot(t *testing.T) {
+	h := newAdultHarness(t, true)
+	h.seedBrazzers()
+	h.writeVideo("library/Adult/Brazzers.22.03.14.Abella.Danger.Deep.Impact.XXX.1080p.MP4-KTR.mkv", "scene payload")
+
+	res := h.scan()
+	if res.Unmatched != 0 {
+		t.Fatalf("scan parked %d files: %v", res.Unmatched, res.Errors)
+	}
+	if res.Added != 1 {
+		t.Fatalf("added %d files, want 1 (errors: %v)", res.Added, res.Errors)
+	}
+
+	const want = "library/Adult/Brazzers/Season 2022/Brazzers - 2022-03-14 - Deep Impact.mkv"
+	if !h.exists(want) {
+		t.Fatalf("scene did not land at %s", want)
+	}
+	if h.read(want) != "scene payload" {
+		t.Error("imported file does not hold the payload")
+	}
+
+	// The row exists, is linked to the right episode, and kept the parsed tags.
+	file, err := h.st.GetMediaFileByPath(context.Background(), want)
+	if err != nil {
+		t.Fatalf("GetMediaFileByPath: %v", err)
+	}
+	if file.Quality != core.Quality1080p || file.ReleaseGroup != "KTR" {
+		t.Errorf("media file = %+v, want 1080p/KTR from the scene name", file)
+	}
+	sites, err := h.st.ListSeriesByKind(context.Background(), core.SeriesKindAdult)
+	if err != nil || len(sites) != 1 {
+		t.Fatalf("adult series = %v, %v", sites, err)
+	}
+	eps := h.episodes(sites[0].ID)
+	linked, err := h.st.ListMediaFilesForEpisode(context.Background(), eps[0].ID)
+	if err != nil {
+		t.Fatalf("ListMediaFilesForEpisode: %v", err)
+	}
+	if len(linked) != 1 || linked[0].ID != file.ID {
+		t.Errorf("episode links = %v, want the imported file", linked)
+	}
+}
+
+// The disposability rule, for the adult library: delete the database, rescan,
+// and the library comes back — same folder, same filename, same episode
+// numbers, with no file modified.
+func TestAdultLibrarySurvivesADatabaseWipe(t *testing.T) {
+	h := newAdultHarness(t, true)
+	h.seedBrazzers()
+	h.writeVideo("library/Adult/Brazzers.22.03.14.Abella.Danger.Deep.Impact.XXX.1080p.MP4-KTR.mkv", "scene payload")
+	h.scan()
+
+	const organized = "library/Adult/Brazzers/Season 2022/Brazzers - 2022-03-14 - Deep Impact.mkv"
+	if !h.exists(organized) {
+		t.Fatalf("first scan did not organize the scene")
+	}
+
+	fresh := h.openStore(t.TempDir() + "/caravan.db")
+	if err := fresh.SetAdultEnabled(context.Background(), true); err != nil {
+		t.Fatalf("SetAdultEnabled: %v", err)
+	}
+	mgr := h.newManager(fresh, h.provider)
+
+	res, err := mgr.Scan(context.Background())
+	if err != nil {
+		t.Fatalf("rescan: %v", err)
+	}
+	if res.Unmatched != 0 || res.Added != 1 {
+		t.Fatalf("rescan: added=%d unmatched=%d errors=%v", res.Added, res.Unmatched, res.Errors)
+	}
+	if !h.exists(organized) {
+		t.Errorf("rescan moved the already-organized file away from %s", organized)
+	}
+
+	sites, err := fresh.ListSeriesByKind(context.Background(), core.SeriesKindAdult)
+	if err != nil || len(sites) != 1 {
+		t.Fatalf("rebuilt adult series = %v, %v", sites, err)
+	}
+	if sites[0].StashID != "site-1" || sites[0].Path != "library/Adult/Brazzers" {
+		t.Errorf("rebuilt site = %+v", sites[0])
+	}
+	eps, err := fresh.ListEpisodes(context.Background(), sites[0].ID)
+	if err != nil {
+		t.Fatalf("ListEpisodes: %v", err)
+	}
+	if len(eps) != 3 {
+		t.Errorf("rebuilt episodes = %d, want the whole catalogue (3)", len(eps))
+	}
+	file, err := fresh.GetMediaFileByPath(context.Background(), organized)
+	if err != nil {
+		t.Fatalf("rebuilt media file: %v", err)
+	}
+	if file.Path != organized {
+		t.Errorf("rebuilt file path = %q", file.Path)
+	}
+}
+
+// With the module off the adult tree is not walked at all — so nothing is
+// imported, nothing is parked (a parked scene filename is a UI trace), and
+// nothing already there is reconciled away.
+func TestScanIgnoresTheAdultTreeWhenDisabled(t *testing.T) {
+	h := newAdultHarness(t, true)
+	h.seedBrazzers()
+	h.writeVideo("library/Adult/Brazzers.22.03.14.Abella.Danger.Deep.Impact.XXX.1080p.MP4-KTR.mkv", "scene payload")
+	h.scan()
+
+	const organized = "library/Adult/Brazzers/Season 2022/Brazzers - 2022-03-14 - Deep Impact.mkv"
+	if err := h.st.SetAdultEnabled(context.Background(), false); err != nil {
+		t.Fatalf("SetAdultEnabled: %v", err)
+	}
+	h.writeVideo("library/Adult/Brazzers.23.02.01.Third.XXX.1080p.MP4-KTR.mkv", "another scene")
+	h.adult.calls = 0
+
+	res := h.scan()
+	if h.adult.calls != 0 {
+		t.Errorf("scan made %d provider calls with the module disabled, want 0", h.adult.calls)
+	}
+	if res.Scanned != 0 || res.Unmatched != 0 || res.Removed != 0 {
+		t.Errorf("scan touched the adult tree: %+v", res)
+	}
+	if _, err := h.st.GetMediaFileByPath(context.Background(), organized); err != nil {
+		t.Errorf("the disabled scan dropped an already-imported adult file: %v", err)
+	}
+	parked, err := h.st.ListUnmatchedFiles(context.Background())
+	if err != nil {
+		t.Fatalf("ListUnmatchedFiles: %v", err)
+	}
+	if len(parked) != 0 {
+		t.Errorf("disabled scan parked %v — that is a UI trace of a disabled module", parked)
+	}
+}
+
+func TestScanParksASceneItCannotDate(t *testing.T) {
+	h := newAdultHarness(t, true)
+	h.seedBrazzers()
+	h.writeVideo("library/Adult/Brazzers.Some.Compilation.XXX.1080p.MP4-KTR.mkv", "x")
+
+	res := h.scan()
+	if res.Unmatched != 1 {
+		t.Fatalf("parked %d, want 1", res.Unmatched)
+	}
+	parked, err := h.st.ListUnmatchedFiles(context.Background())
+	if err != nil {
+		t.Fatalf("ListUnmatchedFiles: %v", err)
+	}
+	if parked[0].Reason != reasonNoSceneDate {
+		t.Errorf("park reason = %q, want %q", parked[0].Reason, reasonNoSceneDate)
+	}
+	if h.adult.calls != 0 {
+		t.Errorf("an undatable file cost %d provider calls, want 0", h.adult.calls)
+	}
+}
+
+func TestScanParksASceneTheSiteNeverReleased(t *testing.T) {
+	h := newAdultHarness(t, true)
+	h.seedBrazzers()
+	h.writeVideo("library/Adult/Brazzers.19.01.01.Unknown.XXX.1080p.MP4-KTR.mkv", "x")
+
+	res := h.scan()
+	if res.Unmatched != 1 {
+		t.Fatalf("parked %d, want 1 (errors %v)", res.Unmatched, res.Errors)
+	}
+	parked, _ := h.st.ListUnmatchedFiles(context.Background())
+	if parked[0].Reason != reasonNoSceneMatch {
+		t.Errorf("park reason = %q, want %q", parked[0].Reason, reasonNoSceneMatch)
+	}
+}
+
+// Two scenes on one day cannot be told apart by a filename, and guessing would
+// import one as the other and then supersede the right one's file.
+func TestScanParksAnAmbiguousSameDayScene(t *testing.T) {
+	h := newAdultHarness(t, true)
+	h.seedBrazzers()
+	h.adult.scenes["site-1"] = append(h.adult.scenes["site-1"], core.SceneMeta{
+		StashID: "scene-twin", SiteStashID: "site-1", SiteName: "Brazzers",
+		Title: "Same Day", Date: date(2022, time.March, 14),
+	})
+	h.writeVideo("library/Adult/Brazzers.22.03.14.Whichever.XXX.1080p.MP4-KTR.mkv", "x")
+
+	res := h.scan()
+	if res.Unmatched != 1 {
+		t.Fatalf("parked %d, want 1", res.Unmatched)
+	}
+	parked, _ := h.st.ListUnmatchedFiles(context.Background())
+	if parked[0].Reason != reasonAmbiguousScene {
+		t.Errorf("park reason = %q, want %q", parked[0].Reason, reasonAmbiguousScene)
+	}
+}
+
+// A scan walks the catalogue once per site, not once per unresolvable file.
+func TestScanWalksASiteCatalogueOncePerScan(t *testing.T) {
+	h := newAdultHarness(t, true)
+	h.seedBrazzers()
+	for i := range 4 {
+		h.writeVideo(fmt.Sprintf("library/Adult/Brazzers.19.01.0%d.Unknown.XXX.1080p.MP4-KTR.mkv", i+1), "x")
+	}
+
+	res := h.scan()
+	if res.Unmatched != 4 {
+		t.Fatalf("parked %d, want 4", res.Unmatched)
+	}
+	// SearchSites + SearchScenes pages for one site. Four files must not mean
+	// four catalogue walks.
+	if h.adult.calls > 3 {
+		t.Errorf("provider calls = %d, want the one site walked once", h.adult.calls)
+	}
+}
+
+// A television file must never be read with the scene parser, and a scene file
+// must never be read with the television one. The section decides, and this is
+// the test that says the section decides.
+func TestTheSectionDecidesWhichParserReadsTheName(t *testing.T) {
+	h := newAdultHarness(t, true)
+	h.seedBrazzers()
+
+	// The very same name in two places.
+	const name = "Brazzers.22.03.14.Abella.Danger.Deep.Impact.XXX.1080p.MP4-KTR.mkv"
+	h.parser[name] = episodeParse("Brazzers", 1, 4)
+	h.provider.series = []core.SeriesMeta{{TMDBID: 77, Title: "Brazzers", Year: 2000}}
+	h.provider.seriesByID[77] = core.SeriesMeta{
+		TMDBID: 77, Title: "Brazzers", Year: 2000,
+		Seasons: []core.SeasonMeta{{Number: 1, Episodes: []core.EpisodeMeta{{Season: 1, Number: 4, Title: "TV Four"}}}},
+	}
+	h.writeVideo("library/TV/"+name, "tv payload")
+	h.writeVideo("library/Adult/"+name, "scene payload")
+
+	h.scan()
+
+	if !h.exists("library/TV/Brazzers (2000)/Season 01/Brazzers (2000) - S01E04 - TV Four.mkv") {
+		t.Error("the file under TV/ was not read as a television episode")
+	}
+	if !h.exists("library/Adult/Brazzers/Season 2022/Brazzers - 2022-03-14 - Deep Impact.mkv") {
+		t.Error("the file under Adult/ was not read as a scene")
+	}
+}
+
+// stash-box models sub-studios and stashbox.SearchScenes asks with the INCLUDES
+// modifier, so a parent site's catalogue legitimately contains its sub-sites'
+// scenes and the two overlap. episodes.stash_id is globally unique
+// (0013_adult.sql), so adding the second site must not try to write the shared
+// scene again: that is a constraint violation, not a duplicate row, and it
+// aborts the catalogue walk.
+//
+// The failure it guards is permanent and unrecoverable through the UI —
+// upsertSiteRow has already written the second series before syncSiteScenes
+// fails, so every retry of POST /adult/sites fails identically — and because
+// numberScenes hands its output back oldest-first, the abort also stops the
+// sub-site's OWN, non-conflicting scenes from ever being written.
+func TestAddSiteToleratesASceneAnotherSiteAlreadyOwns(t *testing.T) {
+	h := newAdultHarness(t, true)
+	shared := core.SceneMeta{
+		StashID: "scene-shared", SiteStashID: "parent", SiteName: "Bang Bros",
+		Title: "Shared Scene", Date: date(2022, time.March, 14),
+	}
+	h.adult.sites = []core.SiteMeta{
+		{StashID: "parent", Name: "Bang Bros"},
+		{StashID: "sub", Name: "BangBros18"},
+	}
+	h.adult.scenes["parent"] = []core.SceneMeta{shared}
+	// The sub-site's catalogue carries the shared scene AND one of its own.
+	h.adult.scenes["sub"] = []core.SceneMeta{
+		shared,
+		{StashID: "scene-own", SiteStashID: "sub", SiteName: "BangBros18",
+			Title: "Own Scene", Date: date(2022, time.May, 2)},
+	}
+
+	parent := h.addSite("parent")
+	sub := h.addSite("sub")
+
+	// The scene stays with the site that filed it first.
+	parentEpisodes := h.episodes(parent.ID)
+	if len(parentEpisodes) != 1 || parentEpisodes[0].StashID != "scene-shared" {
+		t.Fatalf("parent site episodes = %+v, want the shared scene", parentEpisodes)
+	}
+
+	// And the sub-site keeps its own scene, which the aborted walk used to lose.
+	subEpisodes := h.episodes(sub.ID)
+	if len(subEpisodes) != 1 {
+		t.Fatalf("sub-site episodes = %+v, want only its own scene", subEpisodes)
+	}
+	if subEpisodes[0].StashID != "scene-own" {
+		t.Errorf("sub-site episode stash id = %q, want scene-own", subEpisodes[0].StashID)
+	}
+	if subEpisodes[0].SeasonNumber != 2022 || subEpisodes[0].EpisodeNumber != 1 {
+		t.Errorf("sub-site scene numbered S%dE%d, want S2022E01",
+			subEpisodes[0].SeasonNumber, subEpisodes[0].EpisodeNumber)
+	}
+}
+
+// A refresh of the site that DOES own the scene keeps it: dropForeignScenes
+// drops what another series owns, never what this one already holds.
+func TestRefreshKeepsASiteOwnScenesWhenAnotherSiteAlsoListsThem(t *testing.T) {
+	h := newAdultHarness(t, true)
+	shared := core.SceneMeta{
+		StashID: "scene-shared", SiteStashID: "parent", SiteName: "Bang Bros",
+		Title: "Shared Scene", Date: date(2022, time.March, 14),
+	}
+	h.adult.sites = []core.SiteMeta{
+		{StashID: "parent", Name: "Bang Bros"},
+		{StashID: "sub", Name: "BangBros18"},
+	}
+	h.adult.scenes["parent"] = []core.SceneMeta{shared}
+	h.adult.scenes["sub"] = []core.SceneMeta{shared}
+
+	parent := h.addSite("parent")
+	h.addSite("sub")
+
+	// Re-adding the parent walks its catalogue again. Its own scene is still
+	// its own, so it must survive a walk made after the sub-site listed it too.
+	h.addSite("parent")
+	parentEpisodes := h.episodes(parent.ID)
+	if len(parentEpisodes) != 1 || parentEpisodes[0].StashID != "scene-shared" {
+		t.Fatalf("parent site episodes after refresh = %+v, want the shared scene", parentEpisodes)
+	}
+}

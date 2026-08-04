@@ -7,6 +7,7 @@
  * kinder than letting somebody walk into it.
  */
 
+import { adultVisible } from '../adult';
 import { api, errorText } from '../api/client';
 import type { SessionUser, UserRole } from '../api/types';
 
@@ -42,6 +43,19 @@ class SessionState {
    */
   get isAdmin(): boolean {
     return this.user === null || this.user.role === 'admin';
+  }
+
+  /**
+   * Whether the adult module is on screen at all for this browser.
+   *
+   * Unlike `isAdmin`, an unknown identity reads as NOT visible. The costs are
+   * asymmetric in the other direction here: guessing "admin" wrong shows a nav
+   * group whose screens 403, while guessing "adult" wrong shows the module on a
+   * server where somebody switched it off — which is the one thing this phase
+   * promises never happens.
+   */
+  get adult(): boolean {
+    return adultVisible(this.user);
   }
 
   async refresh(): Promise<void> {

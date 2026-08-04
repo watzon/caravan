@@ -282,3 +282,127 @@ func putLibraryIndexer(t *testing.T, h http.Handler, libraryID, indexerID int64,
 	return do(t, h, http.MethodPut,
 		"/api/v1/libraries/"+itoa(libraryID)+"/indexers/"+itoa(indexerID), body)
 }
+
+// A disabled module leaves no library behind either.
+//
+// The Adult row is never deleted — that is deliberate, so turning the module
+// back on finds the sites, the scenes and the files as they were — but a row
+// that outlives the switch would keep GET /libraries answering with an "Adult"
+// pill, its root path and its DLNA state on an install whose owner turned the
+// whole thing off. The Libraries screen renders one pill per returned row, so
+// the response IS the UI trace.
+func TestLibrariesHideTheAdultRowWhenTheModuleIsOff(t *testing.T) {
+	ctx := context.Background()
+	h, st, _ := newTestServer(t)
+	seedIndexer(t, st, "jackett", []int{2000, 5000}, true)
+
+	if err := st.SetAdultEnabled(ctx, true); err != nil {
+		t.Fatalf("SetAdultEnabled: %v", err)
+	}
+
+	list := func() libraryListBody {
+		t.Helper()
+		rec := do(t, h, http.MethodGet, "/api/v1/libraries", "")
+		wantStatus(t, rec, http.StatusOK)
+		var body libraryListBody
+		decodeBody(t, rec, &body)
+		return body
+	}
+
+	// Enabled: the pill is there, which is what the phase asks for.
+	adult := libraryOfKind(t, list(), core.LibraryKindAdult)
+	if adult.Name != store.AdultLibraryName || adult.RootPath != store.AdultLibraryRoot {
+		t.Fatalf("adult library = %+v, want the seeded name and root", adult)
+	}
+	// The owner shares it on the LAN, so the row carries state worth hiding.
+	rec := do(t, h, http.MethodPatch, "/api/v1/libraries/"+itoa(adult.ID), `{"dlna_visible":true}`)
+	wantStatus(t, rec, http.StatusOK)
+
+	if err := st.SetAdultEnabled(ctx, false); err != nil {
+		t.Fatalf("SetAdultEnabled(false): %v", err)
+	}
+
+	body := list()
+	for _, l := range body.Libraries {
+		if l.Kind == core.LibraryKindAdult {
+			t.Fatalf("GET /libraries still names the adult library with the module off: %+v", l)
+		}
+	}
+	if len(body.Libraries) != 2 {
+		t.Errorf("libraries = %+v, want only Movies and Series", body.Libraries)
+	}
+
+	// And the row is not reachable by id either, or the pill would be gone
+	// while the card behind it stayed fully editable. 404, not 403: "there is
+	// nothing here" is the same answer every adult route gives.
+	for _, tc := range []struct{ method, target, body string }{
+		{http.MethodPatch, "/api/v1/libraries/" + itoa(adult.ID), `{"dlna_visible":false}`},
+		{http.MethodPut, "/api/v1/libraries/" + itoa(adult.ID) + "/indexers/1", `{"enabled":false}`},
+	} {
+		rec := do(t, h, tc.method, tc.target, tc.body)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s %s = %d, want 404", tc.method, tc.target, rec.Code)
+		}
+	}
+
+	// Turning it back on finds the row exactly as it was left.
+	if err := st.SetAdultEnabled(ctx, true); err != nil {
+		t.Fatalf("SetAdultEnabled(true): %v", err)
+	}
+	if back := libraryOfKind(t, list(), core.LibraryKindAdult); !back.DLNAVisible {
+		t.Errorf("re-enabling the module forgot the library's state: %+v", back)
+	}
+}
+
+// The Libraries screen renders the per-library matrix from the RAW override
+// table, where "no row" is a hole it fills with a default. That default has to
+// be the one a search would actually resolve, or the card describes a fan-out
+// that never happens: the Adult library falls back to the 6000 block rather
+// than to the indexer's own movie and television categories.
+func TestAdultLibraryCardShowsTheAdultCategoriesAsItsDefault(t *testing.T) {
+	ctx := context.Background()
+	h, st, _ := newTestServer(t)
+	cfg := seedIndexer(t, st, "jackett", []int{2000, 5000}, true)
+	if err := st.SetAdultEnabled(ctx, true); err != nil {
+		t.Fatalf("SetAdultEnabled: %v", err)
+	}
+
+	rec := do(t, h, http.MethodGet, "/api/v1/libraries", "")
+	wantStatus(t, rec, http.StatusOK)
+	var body libraryListBody
+	decodeBody(t, rec, &body)
+
+	adult := libraryOfKind(t, body, core.LibraryKindAdult)
+	if len(adult.Indexers) != 1 {
+		t.Fatalf("adult indexer rows = %+v, want one", adult.Indexers)
+	}
+	row := adult.Indexers[0]
+	if !reflect.DeepEqual(row.DefaultCategories, []int{core.AdultCategoryBase}) {
+		t.Errorf("adult default categories = %v, want the 6000 block", row.DefaultCategories)
+	}
+	if !reflect.DeepEqual(row.Categories, []int{core.AdultCategoryBase}) {
+		t.Errorf("adult effective categories = %v, want the 6000 block", row.Categories)
+	}
+	if row.CategoriesOverridden {
+		t.Error("the fallback was reported as an override the owner wrote")
+	}
+
+	// The television card is untouched: it still inherits the indexer's own.
+	tv := libraryOfKind(t, body, core.LibraryKindTV)
+	if len(tv.Indexers) != 1 || !reflect.DeepEqual(tv.Indexers[0].DefaultCategories, []int{2000, 5000}) {
+		t.Errorf("television default categories = %+v, want the indexer's own", tv.Indexers)
+	}
+
+	// And what the card claims is what the search resolves.
+	settings, err := st.ResolveLibrarySettingsByKind(ctx, core.LibraryKindAdult)
+	if err != nil {
+		t.Fatalf("ResolveLibrarySettingsByKind: %v", err)
+	}
+	if len(settings.Indexers) != 1 || settings.Indexers[0].ID != cfg.ID {
+		t.Fatalf("resolved indexers = %+v, want the one configured", settings.Indexers)
+	}
+	if !reflect.DeepEqual(settings.Indexers[0].Categories, row.Categories) {
+		t.Errorf("the card shows %v but a search sends %v",
+			row.Categories, settings.Indexers[0].Categories)
+	}
+}

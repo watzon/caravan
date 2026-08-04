@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/watzon/caravan/internal/core"
 	"github.com/watzon/caravan/internal/store"
 )
 
@@ -107,4 +108,138 @@ func TestImageWithoutStorageRootIs404(t *testing.T) {
 	rec := do(t, h, http.MethodGet, "/api/v1/images/library/Movies/x/poster.jpg", "")
 	wantStatus(t, rec, http.StatusNotFound)
 	wantErrorBody(t, rec)
+}
+
+// Adult artwork is the one thing GET /images will not hand to just anybody.
+//
+// The endpoint is auth-exempt so a television can fetch album art, and the
+// paths under it are guessable: importScene writes a site's poster to
+// <adult root>/<Site>/poster.jpg, derived from the site's public name. Left
+// open, a 200 versus a 404 on that URL is a yes/no oracle for "is this site in
+// this library" — answerable with no credential at all, by any device on the
+// LAN, and even with the module switched off.
+func TestImagesRefuseAdultArtworkWithoutAReasonToServeIt(t *testing.T) {
+	ctx := context.Background()
+	h, st, _ := newTestServer(t)
+	root := t.TempDir()
+	if err := st.SetSetting(ctx, store.SettingStorageRoot, root); err != nil {
+		t.Fatalf("SetSetting: %v", err)
+	}
+	writeFile(t, root, "library/Movies/Big Buck Bunny (2008)/poster.jpg", "movieposter")
+	writeFile(t, root, store.AdultLibraryRoot+"/Brazzers/poster.jpg", "siteposter")
+
+	const moviePath = "/api/v1/images/library/Movies/Big%20Buck%20Bunny%20(2008)/poster.jpg"
+	const sitePath = "/api/v1/images/library/Adult/Brazzers/poster.jpg"
+
+	get := func(target string, decorate func(*http.Request)) int {
+		t.Helper()
+		return doAuth(t, h, http.MethodGet, target, "", decorate).Code
+	}
+
+	createUser(t, st, testAdmin, "correct-horse", core.RoleAdmin)
+	member := createUser(t, st, testMember, "correct-horse", core.RoleMember)
+	adminCookie := withCookie(login(t, h, testAdmin, "correct-horse"))
+	memberCookie := withCookie(login(t, h, testMember, "correct-horse"))
+
+	// Module never enabled: there is no adult library row, so nothing changes
+	// for anyone — and the site path is a 404 for the ordinary reason.
+	if got := get(sitePath, nil); got != http.StatusNotFound {
+		t.Errorf("anonymous adult poster with the module never enabled = %d, want 404", got)
+	}
+
+	if err := st.SetAdultEnabled(ctx, true); err != nil {
+		t.Fatalf("SetAdultEnabled: %v", err)
+	}
+
+	// Televisions and the login screen still get ordinary library artwork with
+	// no credential: the hole this endpoint deliberately has must stay open.
+	if got := get(moviePath, nil); got != http.StatusOK {
+		t.Fatalf("anonymous movie poster = %d, want 200 — the TV hole was closed", got)
+	}
+
+	for _, tc := range []struct {
+		name     string
+		decorate func(*http.Request)
+		want     int
+	}{
+		{"anonymous", nil, http.StatusNotFound},
+		{"ungranted member", memberCookie, http.StatusNotFound},
+		{"admin", adminCookie, http.StatusOK},
+	} {
+		if got := get(sitePath, tc.decorate); got != tc.want {
+			t.Errorf("%s adult poster = %d, want %d", tc.name, got, tc.want)
+		}
+	}
+
+	// A grant opens it, which is what the SPA's Adult screens need.
+	if err := st.SetUserAdultAccess(ctx, member.ID, true); err != nil {
+		t.Fatalf("SetUserAdultAccess: %v", err)
+	}
+	if got := get(sitePath, memberCookie); got != http.StatusOK {
+		t.Errorf("granted member adult poster = %d, want 200", got)
+	}
+	if err := st.SetUserAdultAccess(ctx, member.ID, false); err != nil {
+		t.Fatalf("SetUserAdultAccess(false): %v", err)
+	}
+
+	// Case is not a way around it: APFS and NTFS would serve the same bytes
+	// for a path the check spelled differently.
+	if got := get("/api/v1/images/LIBRARY/adult/Brazzers/poster.jpg", nil); got != http.StatusNotFound {
+		t.Errorf("anonymous adult poster by a case variant = %d, want 404", got)
+	}
+
+	// Sharing the shelf on DLNA is the owner deciding every device on the
+	// network may browse it, so the television's album art works again.
+	lib, err := st.GetLibraryByKind(ctx, core.LibraryKindAdult)
+	if err != nil {
+		t.Fatalf("GetLibraryByKind: %v", err)
+	}
+	lib.DLNAVisible = true
+	if err := st.UpdateLibrary(ctx, lib); err != nil {
+		t.Fatalf("UpdateLibrary: %v", err)
+	}
+	if got := get(sitePath, nil); got != http.StatusOK {
+		t.Errorf("anonymous adult poster with the shelf shared on DLNA = %d, want 200", got)
+	}
+
+	// And switching the module off closes it for everyone, the admin and the
+	// LAN included — the dlna_visible the owner left behind does not apply.
+	if err := st.SetAdultEnabled(ctx, false); err != nil {
+		t.Fatalf("SetAdultEnabled(false): %v", err)
+	}
+	for _, tc := range []struct {
+		name     string
+		decorate func(*http.Request)
+	}{{"anonymous", nil}, {"member", memberCookie}, {"admin", adminCookie}} {
+		if got := get(sitePath, tc.decorate); got != http.StatusNotFound {
+			t.Errorf("%s adult poster with the module off = %d, want 404", tc.name, got)
+		}
+	}
+	if got := get(moviePath, nil); got != http.StatusOK {
+		t.Errorf("movie poster with the module off = %d, want 200", got)
+	}
+}
+
+// Dot segments are the other way into the adult root: os.Root confines the
+// lookup to the storage root, and the adult library is inside it, so a path
+// that walks there through a sibling library resolves to exactly the same file.
+func TestImagesRefuseAdultArtworkReachedThroughDotSegments(t *testing.T) {
+	ctx := context.Background()
+	h, st, _ := newTestServer(t)
+	root := t.TempDir()
+	if err := st.SetSetting(ctx, store.SettingStorageRoot, root); err != nil {
+		t.Fatalf("SetSetting: %v", err)
+	}
+	writeFile(t, root, store.AdultLibraryRoot+"/Brazzers/poster.jpg", "siteposter")
+	if err := st.SetAdultEnabled(ctx, true); err != nil {
+		t.Fatalf("SetAdultEnabled: %v", err)
+	}
+
+	// Percent-encoded, because http.ServeMux cleans and redirects a literal
+	// "/../" before any handler sees it.
+	rec := do(t, h, http.MethodGet,
+		"/api/v1/images/library/Movies/%2e%2e/Adult/Brazzers/poster.jpg", "")
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("adult poster through a dot segment = %d, want 404", rec.Code)
+	}
 }

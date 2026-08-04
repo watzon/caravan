@@ -3,6 +3,7 @@
   import { onMount } from 'svelte';
   import { api, errorText } from '../api/client';
   import { SETTING_TMDB_API_KEY, type Settings } from '../api/types';
+  import AdultSettings from '../components/AdultSettings.svelte';
   import Button from '../components/Button.svelte';
   import Field from '../components/Field.svelte';
   import Icon from '../components/Icon.svelte';
@@ -34,6 +35,7 @@
     | 'metadata'
     | 'quality-profiles'
     | 'storage'
+    | 'adult'
     | 'indexers'
     | 'downloads'
     | 'playback'
@@ -86,6 +88,18 @@
           label: 'Storage',
           title: 'Storage',
           blurb: 'The storage root — where the library, downloads and database live.',
+        },
+        // The module's own control plane. It is listed whatever the module's
+        // state, because turning it on is what this pane is FOR — it is the
+        // one adult surface that has to exist while the module does not, the
+        // same reason POST /settings/adult sits outside the gated route
+        // subtree. Only admins ever see the Settings screen.
+        {
+          key: 'adult',
+          label: 'Adult content',
+          title: 'Adult content',
+          blurb:
+            'An adult library with its own metadata source and its own access list. Off by default, and hidden from everyone — including DLNA and prepared drives — until you say otherwise.',
         },
       ],
     },
@@ -287,6 +301,8 @@
       <DownloadsSettings {settings} {saving} onsave={save} />
     {:else if tab === 'playback' && settings}
       <PlaybackSettings {settings} {saving} onsave={save} />
+    {:else if tab === 'adult' && settings}
+      <AdultSettings {settings} {saving} onsave={save} />
     {:else if tab === 'security' && settings}
       <SecuritySettings {settings} />
 

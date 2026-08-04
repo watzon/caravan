@@ -8,15 +8,33 @@ import type { MediaRequest, RequestStatus } from './api/types';
 import {
   pendingRequestCount,
   pendingRequests,
+  requestFallbackIcon,
+  requestHref,
+  requestMediaChip,
   requestSeasonsLabel,
   requestStatusChip,
 } from './requests';
+
+/**
+ * A scene request as the server hands one back: named by its stash id, with a
+ * `tmdb_id` of 0 and no seasons. Those two zeroes are what every case below
+ * turns on — a helper that forgets a scene builds a link to /discover/scene/0.
+ */
+function scene(id: number, extra: Partial<MediaRequest> = {}): MediaRequest {
+  return request(id, {
+    media_type: 'scene',
+    tmdb_id: 0,
+    stash_id: `stash-${id}`,
+    ...extra,
+  });
+}
 
 function request(id: number, extra: Partial<MediaRequest> = {}): MediaRequest {
   return {
     id,
     media_type: 'series',
     tmdb_id: 1000 + id,
+    stash_id: '',
     title: `Title ${id}`,
     year: 2020,
     poster_path: '',
@@ -63,6 +81,52 @@ describe('requestSeasonsLabel', () => {
     expect(requestSeasonsLabel(request(1, { seasons: [1, 2] }))).toBe(
       '2 seasons · Season 01, Season 02',
     );
+  });
+
+  /**
+   * A scene carries no seasons, so without its own case it falls through to the
+   * series branch and reads "All seasons" — which misdescribes both the ask and
+   * what approving it does (it adds the site).
+   */
+  it('calls a scene a scene rather than every season of one', () => {
+    expect(requestSeasonsLabel(scene(1))).toBe('Scene');
+    expect(requestSeasonsLabel(scene(1, { seasons: [] }))).toBe('Scene');
+  });
+});
+
+describe('requestMediaChip', () => {
+  it('gives each of the three kinds its own word', () => {
+    expect(requestMediaChip('movie')).toBe('MOVIE');
+    expect(requestMediaChip('series')).toBe('SERIES');
+    // The bug this pins: a two-way `movie ? … : 'SERIES'` labels a scene SERIES.
+    expect(requestMediaChip('scene')).toBe('SCENE');
+  });
+});
+
+describe('requestFallbackIcon', () => {
+  it('does not let a posterless scene pass for a television series', () => {
+    expect(requestFallbackIcon('movie')).toBe('film');
+    expect(requestFallbackIcon('series')).toBe('tv');
+    expect(requestFallbackIcon('scene')).toBe('flame');
+  });
+});
+
+describe('requestHref', () => {
+  it('links the TMDB kinds at their discover screen', () => {
+    expect(requestHref(request(1, { media_type: 'movie', tmdb_id: 78 }))).toBe('/discover/movie/78');
+    expect(requestHref(request(1, { media_type: 'series', tmdb_id: 1396 }))).toBe(
+      '/discover/series/1396',
+    );
+  });
+
+  /**
+   * The whole reason `RequestMediaType` is not `MediaType` widened. A scene's
+   * tmdb id is 0, so the old shared path built `/discover/scene/0` — a route
+   * that does not exist, on a row whose poster and title were both anchors to
+   * it. Null is "render this as text".
+   */
+  it('sends a scene nowhere, because there is nowhere to send it', () => {
+    expect(requestHref(scene(1))).toBeNull();
   });
 });
 

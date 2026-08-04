@@ -1,0 +1,212 @@
+/**
+ * The adult module's pure helpers — and above all `adultVisible`, which is the
+ * phase's whole safety property written as a truth table.
+ *
+ * adult.ts says of it: "a rule that can only be exercised by mounting four
+ * screens as six identities is a rule nobody re-checks. Here it is a truth
+ * table." This file is the half of that sentence that makes it true.
+ */
+import { describe, expect, it } from 'vitest';
+import type { Scene, SceneMeta, SessionUser, Site } from './api/types';
+import {
+  ADULT_TABS,
+  adultTabHref,
+  adultVisible,
+  sceneCountNote,
+  sceneDuration,
+  sceneLine,
+  sceneMetaLine,
+  sceneNumber,
+  sceneTitleLine,
+  sceneYear,
+  siteHref,
+} from './adult';
+import { UNKNOWN } from './format';
+
+function user(extra: Partial<SessionUser> = {}): SessionUser {
+  return { username: 'ada', role: 'member', open: false, adult: false, ...extra };
+}
+
+describe('adultVisible', () => {
+  /**
+   * The server has already ANDed the server-wide switch with this account's
+   * grant into `SessionUser.adult`, so there is exactly one input. Every case
+   * below is therefore about not consulting a second one.
+   */
+  it('reads the one field the server decided, and only that field', () => {
+    expect(adultVisible(user({ adult: true }))).toBe(true);
+    expect(adultVisible(user({ adult: false }))).toBe(false);
+  });
+
+  /**
+   * The asymmetry with `session.isAdmin`, which reads an unknown identity AS an
+   * admin. Guessing "admin" wrong shows a nav group whose screens 403; guessing
+   * "adult" wrong shows the module on a server where somebody switched it off,
+   * which is the one thing this phase promises never happens.
+   */
+  it('reads an unknown identity as not granted', () => {
+    expect(adultVisible(null)).toBe(false);
+  });
+
+  /**
+   * A role check must never stand in for the grant. An admin on a server with
+   * the module switched OFF gets `adult: false`, and that answer wins — this is
+   * the "no trace when disabled" rule at its most load-bearing point.
+   */
+  it('never lets the role override the grant', () => {
+    expect(adultVisible(user({ role: 'admin', adult: false }))).toBe(false);
+    expect(adultVisible(user({ role: 'admin', open: true, adult: false }))).toBe(false);
+    // …and a plain member with the grant does reach it.
+    expect(adultVisible(user({ role: 'member', adult: true }))).toBe(true);
+  });
+
+  /**
+   * The field is documented as false-never-absent, but a body from an older
+   * server would simply lack it. Missing must read as "not granted" rather than
+   * as truthy-by-accident.
+   */
+  it('reads a missing field as not granted', () => {
+    const legacy = { username: 'ada', role: 'admin', open: false } as unknown as SessionUser;
+    expect(adultVisible(legacy)).toBe(false);
+  });
+});
+
+describe('adult tabs', () => {
+  it('routes each tab at a linkable screen', () => {
+    expect(ADULT_TABS.map((t) => t.key)).toEqual(['sites', 'scenes']);
+    expect(adultTabHref('sites')).toBe('/adult');
+    expect(adultTabHref('scenes')).toBe('/adult/scenes');
+  });
+
+  it('points a site card at its own page by library id', () => {
+    expect(siteHref({ id: 12 } as Site)).toBe('/adult/sites/12');
+  });
+});
+
+describe('sceneNumber', () => {
+  it('pads to three so a year of scenes has a straight left edge', () => {
+    expect(sceneNumber(3)).toBe('#003');
+    expect(sceneNumber(42)).toBe('#042');
+    expect(sceneNumber(240)).toBe('#240');
+  });
+
+  // A number past 999 keeps its own width rather than being truncated.
+  it('lets a four-digit scene keep its width', () => {
+    expect(sceneNumber(1024)).toBe('#1024');
+  });
+
+  it('renders an unknown ordinal as a placeholder rather than #000', () => {
+    expect(sceneNumber(0)).toBe('#—');
+    expect(sceneNumber(-1)).toBe('#—');
+    expect(sceneNumber(Number.NaN)).toBe('#—');
+  });
+});
+
+describe('scene lines', () => {
+  function scene(extra: Partial<Scene> = {}): Scene {
+    return {
+      id: 1,
+      series_id: 2,
+      year: 2022,
+      number: 3,
+      stash_id: 's1',
+      title: 'Deep Impact',
+      overview: '',
+      studio: '',
+      performers: ['Ava Wells', 'Ivy Rain'],
+      url: '',
+      release_date: '2022-03-14',
+      monitored: true,
+      ...extra,
+    };
+  }
+
+  it('reads title then performers, which is what somebody is looking for', () => {
+    expect(sceneTitleLine(scene())).toBe('Deep Impact · Ava Wells, Ivy Rain');
+    expect(sceneLine(scene())).toBe('#003 Deep Impact · Ava Wells, Ivy Rain');
+  });
+
+  it('never collapses an untitled scene to a bare number', () => {
+    expect(sceneTitleLine(scene({ title: '' }))).toBe(`${UNKNOWN} · Ava Wells, Ivy Rain`);
+  });
+
+  it('drops the separator when the provider names nobody', () => {
+    expect(sceneTitleLine(scene({ performers: [] }))).toBe('Deep Impact');
+    // Blank names are holes in the provider's data, not performers.
+    expect(sceneTitleLine(scene({ performers: ['', ''] }))).toBe('Deep Impact');
+    expect(sceneTitleLine(scene({ performers: ['Ava Wells', ''] }))).toBe('Deep Impact · Ava Wells');
+  });
+});
+
+describe('sceneCountNote', () => {
+  function site(extra: Partial<Site> = {}): Site {
+    return { scene_count: 240, scene_file_count: 18, ...extra } as Site;
+  }
+
+  it('reads held over known', () => {
+    expect(sceneCountNote(site())).toBe('18 / 240 scenes');
+  });
+
+  // A site whose catalogue has not been walked yet would read "0 / 0 scenes",
+  // which is a number nobody can act on.
+  it('says nothing at all when the catalogue is unknown', () => {
+    expect(sceneCountNote(site({ scene_count: 0, scene_file_count: 0 }))).toBeNull();
+  });
+});
+
+describe('sceneYear', () => {
+  it('takes the leading year of a release date', () => {
+    expect(sceneYear('2022-03-14')).toBe(2022);
+  });
+
+  it('reads a missing or unparseable date as zero', () => {
+    expect(sceneYear('')).toBe(0);
+    expect(sceneYear(null)).toBe(0);
+    expect(sceneYear(undefined)).toBe(0);
+    expect(sceneYear('not-a-date')).toBe(0);
+  });
+});
+
+describe('sceneDuration', () => {
+  it('rounds seconds to whole minutes', () => {
+    expect(sceneDuration(1440)).toBe('24 min');
+    expect(sceneDuration(1470)).toBe('25 min');
+  });
+
+  /**
+   * The provider reports 0 far more often than it reports a real duration, so
+   * zero must render as nothing rather than as "0 min".
+   */
+  it('renders an unknown run time as nothing', () => {
+    expect(sceneDuration(0)).toBeNull();
+    expect(sceneDuration(-5)).toBeNull();
+    expect(sceneDuration(Number.NaN)).toBeNull();
+  });
+
+  // A scene shorter than a minute is still a scene; it must not read "0 min".
+  it('floors a very short scene at one minute', () => {
+    expect(sceneDuration(20)).toBe('1 min');
+  });
+});
+
+describe('sceneMetaLine', () => {
+  function meta(extra: Partial<SceneMeta> = {}): SceneMeta {
+    return {
+      site_name: 'Deep Blue',
+      date: '2022-03-14',
+      duration: 1440,
+      ...extra,
+    } as SceneMeta;
+  }
+
+  it('joins whichever of site, date and run time the provider knows', () => {
+    expect(sceneMetaLine(meta())).toBe('Deep Blue · 2022-03-14 · 24 min');
+  });
+
+  it('leaves no dangling separators when fields are missing', () => {
+    expect(sceneMetaLine(meta({ duration: 0 }))).toBe('Deep Blue · 2022-03-14');
+    expect(sceneMetaLine(meta({ date: '' }))).toBe('Deep Blue · 24 min');
+    expect(sceneMetaLine(meta({ site_name: '' }))).toBe('2022-03-14 · 24 min');
+    expect(sceneMetaLine(meta({ site_name: '', date: '', duration: 0 }))).toBe('');
+  });
+});

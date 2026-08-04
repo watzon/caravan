@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -37,6 +38,8 @@ const (
 // only way in (SPEC §10); see internal/api/storage.go.
 var writableSettings = map[string]bool{
 	store.SettingTMDBAPIKey:             true,
+	store.SettingStashboxEndpoint:       true,
+	store.SettingStashboxAPIKey:         true,
 	store.SettingRSSSyncIntervalMinutes: true,
 	store.SettingBacklogIntervalMinutes: true,
 	store.SettingRefreshIntervalMinutes: true,
@@ -128,6 +131,10 @@ func (s *server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if err := validateStashboxSettings(body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err := s.validateRouteSettings(r.Context(), body); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -167,6 +174,47 @@ func (s *server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, settings)
 }
 
+// adultEnabledRequest is the body of POST /settings/adult.
+type adultEnabledRequest struct {
+	// Enabled is a pointer so an absent field is a client bug rather than a
+	// silent switch-off, the way monitorRequest treats Monitored. Getting this
+	// wrong would be a module that turns itself off on a malformed save.
+	Enabled *bool `json:"enabled"`
+}
+
+// handleSetAdultEnabled flips the server-wide adult switch.
+//
+// It is a route of its own rather than a key in writableSettings because
+// enabling has a consequence a key-value PUT cannot carry out: the first enable
+// creates the Adult library row (store.SetAdultEnabled). storage_root is absent
+// from that allowlist for the same reason — a setting with rules attached needs
+// a door that knows them.
+//
+// Admin-only, and it must stay that way: memberAllowed does not name it, so a
+// member is refused by requireAuth before this runs. It is also the one
+// adult-shaped route that cannot sit behind requireAdult, because the gate
+// answers 404 while the module is off and turning it on is precisely what this
+// is for.
+//
+// Disabling deletes nothing (see store.SetAdultEnabled): the library row, the
+// sites, the scenes and the files all stay, and turning it back on finds them
+// as they were.
+func (s *server) handleSetAdultEnabled(w http.ResponseWriter, r *http.Request) {
+	var body adultEnabledRequest
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	if body.Enabled == nil {
+		writeError(w, http.StatusBadRequest, "enabled is required")
+		return
+	}
+	if err := s.st.SetAdultEnabled(r.Context(), *body.Enabled); err != nil {
+		s.writeStoreError(w, "set adult enabled", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": *body.Enabled})
+}
+
 // validateDLNASettings refuses values the media server would silently reinterpret.
 //
 // An unparseable dlna_enabled reads as off, and a friendly name that is only
@@ -188,6 +236,30 @@ func validateDLNASettings(settings map[string]string) error {
 		if len([]rune(name)) > 64 {
 			return fmt.Errorf("invalid %s", store.SettingDLNAFriendlyName)
 		}
+	}
+	return nil
+}
+
+// validateStashboxSettings refuses an adult metadata endpoint that could never
+// be called.
+//
+// The client falls back to its TPDB preset for a blank endpoint, so blank is
+// legal and means "the default". Anything else has to be an absolute http(s)
+// URL: a relative path or a scheme nothing dials would otherwise be stored
+// happily and only fail much later, inside a refresh, as a request error nobody
+// is watching (SPEC §13 — surprises belong where the user can see them).
+func validateStashboxSettings(settings map[string]string) error {
+	raw, ok := settings[store.SettingStashboxEndpoint]
+	if !ok {
+		return nil
+	}
+	endpoint := strings.TrimSpace(raw)
+	if endpoint == "" {
+		return nil
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return fmt.Errorf("invalid %s: expected an absolute http(s) URL", store.SettingStashboxEndpoint)
 	}
 	return nil
 }
@@ -387,7 +459,11 @@ func (s *server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreError(w, "count movies", err)
 		return
 	}
-	series, err := s.st.ListSeries(ctx)
+	// Television only, for the reason handleListSeries gives: the count on the
+	// status card is the television shelf's, and a number that silently
+	// included sites would report the adult library to a caller who cannot see
+	// it — including on an install where the module is off.
+	series, err := s.st.ListSeriesByKind(ctx, core.SeriesKindTV)
 	if err != nil {
 		s.writeStoreError(w, "count series", err)
 		return

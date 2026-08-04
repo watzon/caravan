@@ -35,7 +35,19 @@ type User struct {
 	// body or a log line (SPEC §12); the API's user DTO has no field for it.
 	PasswordHash string
 	// Role is RoleAdmin or RoleMember.
-	Role      string
-	CreatedAt time.Time
-	UpdatedAt time.Time
+	Role string
+	// AdultAccess is the admin-granted permission to see the adult module
+	// (PLAN phase 9 task 5). It is the one permission that does live on this
+	// row rather than in the API's allowlist, and the exception proves the rule
+	// above it: every other flag would WIDEN what an account may reach, which
+	// is why they are not stored. This one only ever narrows — it is checked in
+	// addition to the allowlist and to the server-wide adult_enabled setting
+	// (see AdultVisible), so a row somebody managed to flip still opens nothing
+	// the owner has not turned on server-wide.
+	//
+	// Meaningless on an admin, who is implicitly granted; it is stored anyway
+	// so a demoted admin does not silently keep access.
+	AdultAccess bool
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }

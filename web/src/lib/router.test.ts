@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
   ROUTES,
+  isAdultRoute,
   matchPath,
   matchRoutes,
+  memberAllowedRoute,
   normalizePath,
   numericParam,
   ordinalParam,
@@ -120,6 +122,71 @@ describe('matchRoutes', () => {
       pattern: '/discover/series/:tmdbId',
       params: { tmdbId: '1396' },
     });
+  });
+});
+
+/**
+ * The second, independent gate on the adult screens (PLAN phase 9 track 5).
+ *
+ * `memberAllowedRoute` answers a question about a ROLE; this answers one about
+ * a per-account grant that an admin also has to have been given. Both have to
+ * hold, and the pair is what keeps an admin who switched the module OFF away
+ * from screens their role would otherwise open.
+ */
+describe('isAdultRoute', () => {
+  it('names every adult screen, and is derived rather than listed', () => {
+    for (const pattern of ['/adult', '/adult/scenes', '/adult/sites/:id'] as const) {
+      expect(isAdultRoute(pattern), pattern).toBe(true);
+    }
+    // Derived from the path, so a route added under /adult tomorrow is gated by
+    // having been added rather than by somebody remembering to name it twice.
+    // The scene picker is filed here for exactly that reason: it could have
+    // lived under /series/:id/search, which works — a site IS a series row —
+    // and would have been a screen the adult gate could not see.
+    expect(ROUTES.filter(isAdultRoute)).toEqual([
+      '/adult',
+      '/adult/scenes',
+      '/adult/sites/:id',
+      '/adult/sites/:id/search',
+      '/adult/sites/:id/search/:year',
+      '/adult/sites/:id/search/:year/:number',
+    ]);
+  });
+
+  it('gates nothing else in the app', () => {
+    for (const pattern of ROUTES) {
+      if (pattern === '/adult' || pattern.startsWith('/adult/')) continue;
+      expect(isAdultRoute(pattern), pattern).toBe(false);
+    }
+  });
+
+  /**
+   * The two gates are independent and both are required. A member is not barred
+   * by their ROLE from the three adult READS — the server's own allowlist names
+   * the same three — which is exactly why the grant has to be checked
+   * separately.
+   */
+  it('is a separate question from the member allowlist', () => {
+    for (const pattern of ['/adult', '/adult/scenes', '/adult/sites/:id'] as const) {
+      expect(memberAllowedRoute(pattern), pattern).toBe(true);
+    }
+  });
+
+  /**
+   * The other half of the same point: being an adult route does not make a
+   * route a member's. The scene picker grabs releases, which is an admin write,
+   * and the server keeps the release and grab routes admin-only — so a granted
+   * member needs BOTH gates to say yes, and here one of them says no.
+   */
+  it('keeps the scene picker out of the member allowlist', () => {
+    for (const pattern of [
+      '/adult/sites/:id/search',
+      '/adult/sites/:id/search/:year',
+      '/adult/sites/:id/search/:year/:number',
+    ] as const) {
+      expect(isAdultRoute(pattern), pattern).toBe(true);
+      expect(memberAllowedRoute(pattern), pattern).toBe(false);
+    }
   });
 });
 

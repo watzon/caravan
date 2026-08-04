@@ -69,8 +69,7 @@ func (s *server) handleSearchSeriesNow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	if _, err := s.st.GetSeries(ctx, id); err != nil {
-		s.writeStoreError(w, "get series", err)
+	if _, ok := s.getVisibleSeries(w, r, id); !ok {
 		return
 	}
 
