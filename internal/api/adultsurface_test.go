@@ -974,19 +974,22 @@ func TestSiteSearchWithNoQueryAsksTheProviderForItsDefaultList(t *testing.T) {
 // is admin-only, and this page is one a granted member reads.
 func TestSiteDetailCarriesTheProviderLink(t *testing.T) {
 	tests := []struct {
-		name     string
-		endpoint string
-		want     string
+		name      string
+		endpoint  string
+		want      string
+		wantScene string
 	}{
 		{
 			// TPDB files a site under /sites; it is the default endpoint.
-			name: "the default endpoint",
-			want: "https://theporndb.net/sites/site-1",
+			name:      "the default endpoint",
+			want:      "https://theporndb.net/sites/site-1",
+			wantScene: "https://theporndb.net/scenes/scene-1",
 		},
 		{
-			name:     "a stash-box keeps the /studios convention",
-			endpoint: "https://stashdb.org/graphql",
-			want:     "https://stashdb.org/studios/site-1",
+			name:      "a stash-box keeps the /studios convention",
+			endpoint:  "https://stashdb.org/graphql",
+			want:      "https://stashdb.org/studios/site-1",
+			wantScene: "https://stashdb.org/scenes/scene-1",
 		},
 	}
 
@@ -1007,6 +1010,14 @@ func TestSiteDetailCarriesTheProviderLink(t *testing.T) {
 			decodeBody(t, rec, &body)
 			if body.ProviderURL != tt.want {
 				t.Errorf("provider_url = %q, want %q", body.ProviderURL, tt.want)
+			}
+			// The scene rows carry their own page on the same endpoint — the
+			// destination behind a scene's title.
+			if len(body.Years) != 1 || len(body.Years[0].Scenes) != 1 {
+				t.Fatalf("years = %+v, want the one seeded scene", body.Years)
+			}
+			if got := body.Years[0].Scenes[0].ProviderURL; got != tt.wantScene {
+				t.Errorf("scene provider_url = %q, want %q", got, tt.wantScene)
 			}
 		})
 	}

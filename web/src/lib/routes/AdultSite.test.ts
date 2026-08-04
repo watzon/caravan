@@ -48,6 +48,7 @@ const SITE = {
           studio: 'Brazzers',
           performers: ['Jane Doe'],
           url: 'https://www.brazzers.com/scene/deep-impact',
+          provider_url: 'https://theporndb.net/scenes/scene-3',
           release_date: '2022-03-14T00:00:00Z',
           monitored: true,
           file: null,
@@ -65,6 +66,7 @@ const SITE = {
           studio: 'Brazzers',
           performers: ['Ava Wells', 'Ivy Rain', 'Mia Stone', 'Nina Reed'],
           url: '',
+          provider_url: 'https://theporndb.net/scenes/scene-5',
           release_date: '2022-05-14T00:00:00Z',
           monitored: true,
           file: {
@@ -83,7 +85,7 @@ const SITE = {
           },
         },
         {
-          // No url: the link is offered only where the provider stored one.
+          // No provider page: the link is offered only where there is one.
           id: 12,
           series_id: 7,
           year: 2022,
@@ -94,6 +96,7 @@ const SITE = {
           studio: 'Brazzers',
           performers: [],
           url: '',
+          provider_url: '',
           release_date: '2022-04-14T00:00:00Z',
           monitored: true,
           file: null,
@@ -200,15 +203,18 @@ describe('AdultSite actions', () => {
     expect(hrefs()).toContain('/adult/sites/7/search/2022/4');
   });
 
-  it('links the provider id out to the endpoint the server named', async () => {
+  it('links out through a provider chip, the way the movie header does', async () => {
     stubFetch();
     await mountSite();
 
-    const link = links().find((a) => a.getAttribute('href') === SITE.provider_url);
-    expect(link, 'the provider id as a link').toBeTruthy();
-    expect(link!.textContent).toContain(SITE.stash_id);
-    expect(link!.getAttribute('target')).toBe('_blank');
-    expect(link!.getAttribute('rel')).toBe('noopener noreferrer');
+    const chip = links().find((a) => a.getAttribute('href') === SITE.provider_url);
+    expect(chip, 'the provider chip').toBeTruthy();
+    expect(chip!.textContent).toContain('TPDB');
+    expect(chip!.getAttribute('target')).toBe('_blank');
+    expect(chip!.getAttribute('rel')).toBe('noopener noreferrer');
+    // The id itself is plain text now, as the TMDB id is on a movie's page.
+    expect(host!.textContent).toContain(SITE.stash_id);
+    expect(chip!.textContent).not.toContain(SITE.stash_id);
   });
 
   it('renders the provider id as plain text when there is no page for it', async () => {
@@ -216,21 +222,24 @@ describe('AdultSite actions', () => {
     await mountSite();
 
     expect(host!.textContent).toContain(SITE.stash_id);
-    expect(hrefs().some((href) => href.includes('theporndb.net'))).toBe(false);
+    expect(hrefs().some((href) => href.includes('theporndb.net/sites'))).toBe(false);
   });
 
-  it('links a scene to its own page, and only when one is stored', async () => {
+  it('links a scene title to its provider page, never to the site itself', async () => {
     stubFetch();
     await mountSite();
 
     const scene = links().find(
-      (a) => a.getAttribute('href') === 'https://www.brazzers.com/scene/deep-impact',
+      (a) => a.getAttribute('href') === 'https://theporndb.net/scenes/scene-3',
     );
     expect(scene, 'the scene title as a link').toBeTruthy();
+    expect(scene!.textContent).toContain('Deep Impact');
     expect(scene!.getAttribute('rel')).toBe('noopener noreferrer');
-    // The second scene has no url, so its title is text — one link, not two.
+    // The scene's own site url is metadata, not a destination.
+    expect(hrefs().some((href) => href.includes('brazzers.com'))).toBe(false);
+    // A scene the provider has no page for stays plain text.
     expect(host!.textContent).toContain('Shallow Impact');
-    expect(links().filter((a) => a.getAttribute('href')?.includes('brazzers.com/scene'))).toHaveLength(1);
+    expect(links().filter((a) => a.getAttribute('href')?.includes('/scenes/'))).toHaveLength(2);
   });
 });
 
@@ -302,7 +311,7 @@ describe('AdultSite scene rows', () => {
     await mountSite();
 
     const link = [...host!.querySelectorAll('a')].find(
-      (a) => a.getAttribute('href') === 'https://www.brazzers.com/scene/deep-impact',
+      (a) => a.getAttribute('href') === 'https://theporndb.net/scenes/scene-3',
     );
     // The title is the title now — the performers moved to their own column.
     expect(link!.textContent?.trim()).toBe('Deep Impact');

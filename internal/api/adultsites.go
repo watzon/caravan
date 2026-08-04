@@ -95,6 +95,11 @@ type sceneJSON struct {
 	Studio     string   `json:"studio"`
 	Performers []string `json:"performers"`
 	URL        string   `json:"url"`
+	// ProviderURL is the scene's page on the metadata endpoint's own website —
+	// the site detail page links titles there, not to the scene's own site,
+	// because the provider page is the one that explains what Caravan thinks
+	// this scene is. Derived server-side for the reason siteJSON.ProviderURL is.
+	ProviderURL string `json:"provider_url"`
 	// ReleaseDate is the episode's air date under the name this screen uses: a
 	// scene is published, not broadcast.
 	ReleaseDate string `json:"release_date"`
@@ -239,6 +244,12 @@ func (s *server) siteYears(ctx context.Context, seriesID int64) ([]siteYearJSON,
 	}
 
 	profile := s.activeTVProfile(ctx)
+	// Read once for the whole page, tolerantly for the reason siteProviderURL
+	// is: scenes with no provider link render fine.
+	endpoint, err := s.st.GetSetting(ctx, store.SettingStashboxEndpoint)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		endpoint = ""
+	}
 	byYear := map[int][]sceneJSON{}
 	total, withFile := 0, 0
 	for _, e := range episodes {
@@ -250,7 +261,9 @@ func (s *server) siteYears(ctx context.Context, seriesID int64) ([]siteYearJSON,
 		if len(files) > 0 {
 			withFile++
 		}
-		byYear[e.SeasonNumber] = append(byYear[e.SeasonNumber], sceneDTO(e, firstFileDTO(files, profile)))
+		scene := sceneDTO(e, firstFileDTO(files, profile))
+		scene.ProviderURL = stashbox.SceneWebURL(endpoint, e.StashID)
+		byYear[e.SeasonNumber] = append(byYear[e.SeasonNumber], scene)
 	}
 
 	monitored := make(map[int]bool, len(seasons))

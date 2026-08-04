@@ -117,6 +117,7 @@ describe('scene lines', () => {
       studio: '',
       performers: ['Ava Wells', 'Ivy Rain'],
       url: '',
+      provider_url: '',
       release_date: '2022-03-14',
       monitored: true,
       ...extra,

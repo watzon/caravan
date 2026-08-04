@@ -42,6 +42,31 @@ export function seriesLinks(
 }
 
 /**
+ * The wordmarks for the stash-box endpoints Caravan suggests. Anything else
+ * gets its hostname, which is at least honest about where the link goes.
+ */
+const STASHBOX_WORDMARKS: Record<string, string> = {
+  'theporndb.net': 'TPDB',
+  'stashdb.org': 'StashDB',
+  'fansdb.cc': 'FansDB',
+};
+
+/**
+ * The provider chip for an adult site's header. The server derives the URL
+ * (which endpoint is configured is admin-only knowledge); this only names it.
+ */
+export function siteLinks(site: { provider_url: string }): MetadataLink[] {
+  if (!site.provider_url) return [];
+  let host: string;
+  try {
+    host = new URL(site.provider_url).hostname.replace(/^www\./, '');
+  } catch {
+    return [];
+  }
+  return [{ label: STASHBOX_WORDMARKS[host] ?? host, href: site.provider_url }];
+}
+
+/**
  * The TMDB page for one episode, or null when the series has no TMDB id.
  * TMDB routes episodes by season/episode number under the series, not by the
  * episode's own id.

@@ -1285,6 +1285,12 @@ export interface Scene {
   studio: string;
   performers: string[];
   url: string;
+  /**
+   * The scene's page on the metadata endpoint's own website, "" when there is
+   * none. Titles link here rather than to `url`: the provider page is the one
+   * that explains what Caravan thinks the scene is.
+   */
+  provider_url: string;
   /** The air date under the name this screen uses: a scene is published. */
   release_date: string;
   monitored: boolean;
@@ -1298,7 +1304,7 @@ export interface SiteYear {
   scenes: Scene[];
 }
 
-/** GET /adult/sites/{id}. Years arrive newest first, scenes ascending. */
+/** GET /adult/sites/{id}. Years and the scenes within them arrive newest first. */
 export interface SiteDetail extends Site {
   /**
    * The site's page on the metadata endpoint's own website, "" when there is

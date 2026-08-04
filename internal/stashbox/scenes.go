@@ -3,6 +3,7 @@ package stashbox
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/watzon/caravan/internal/core"
@@ -192,4 +193,32 @@ func sceneMeta(r sceneResult) core.SceneMeta {
 		})
 	}
 	return m
+}
+
+// SceneWebURL is where a human can read about this scene on the endpoint's own
+// website — the destination behind a scene's title on a site's page. It is
+// derived rather than stored for the reason SiteWebURL is: the page moves when
+// the endpoint setting does.
+//
+// Every stash-box files a scene under /scenes/{id}, and TPDB happens to agree —
+// but its configured endpoint is the api. host, which serves JSON, so the web
+// host still has to be special-cased.
+func SceneWebURL(endpoint, stashID string) string {
+	stashID = strings.TrimSpace(stashID)
+	if stashID == "" {
+		return ""
+	}
+	if isTPDBEndpoint(endpoint) {
+		return "https://" + tpdbHost + "/scenes/" + stashID
+	}
+
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		return ""
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return ""
+	}
+	return (&url.URL{Scheme: u.Scheme, Host: u.Host, Path: "/scenes/" + stashID}).String()
 }

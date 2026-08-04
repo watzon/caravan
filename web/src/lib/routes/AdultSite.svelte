@@ -33,6 +33,7 @@
   import EmptyState from '../components/EmptyState.svelte';
   import Icon from '../components/Icon.svelte';
   import LoadError from '../components/LoadError.svelte';
+  import MetadataLinks from '../components/MetadataLinks.svelte';
   import MonitorButton from '../components/MonitorButton.svelte';
   import OverflowMenu from '../components/OverflowMenu.svelte';
   import Poster from '../components/Poster.svelte';
@@ -42,6 +43,7 @@
   import Toggle from '../components/Toggle.svelte';
   import { performerSummary, sceneLine, sceneNumber, scenePerformers } from '../adult';
   import { UNKNOWN, formatDate } from '../format';
+  import { siteLinks } from '../metadataLinks';
   import { navigate } from '../router.svelte';
   import { session } from '../state/session.svelte';
   import { pushToast } from '../state/toast.svelte';
@@ -216,6 +218,9 @@
                 <Badge tone="neutral">Unmonitored</Badge>
               {/if}
             </p>
+            <div class="mt-2">
+              <MetadataLinks links={siteLinks(current)} />
+            </div>
           </div>
           {#if session.isAdmin}
             <div class="flex items-center gap-3">
@@ -262,22 +267,10 @@
           </div>
           <div class="min-w-0">
             <dt class="micro-label">Provider id</dt>
+            <!-- Plain text, as the movie and series pages keep their TMDB id:
+                 the header's provider chip is where the link lives. -->
             <dd class="mt-1 truncate font-mono text-sm text-ink" title={current.stash_id}>
-              {#if current.stash_id && current.provider_url}
-                <!-- Where it points depends on the configured endpoint, so the
-                     server derives it: this page is one a member can read, and
-                     the endpoint setting is not. -->
-                <a
-                  href={current.provider_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="inline-flex items-center gap-1 underline-offset-2 transition-colors duration-150 hover:text-accent-text hover:underline">
-                  {current.stash_id}
-                  <Icon name="link" size={12} />
-                </a>
-              {:else}
-                {current.stash_id || UNKNOWN}
-              {/if}
+              {current.stash_id || UNKNOWN}
             </dd>
           </div>
           <div>
@@ -380,12 +373,13 @@
                               <span class="font-mono text-ink-secondary">
                                 {sceneNumber(scene.number)}
                               </span>
-                              {#if scene.url}
-                                <!-- The scene's own page on the site, as the
-                                     provider stored it. Only shown when there
-                                     is one: a scene with no url is common. -->
+                              {#if scene.provider_url}
+                                <!-- The scene's page on the metadata provider,
+                                     not on the site itself: the provider page
+                                     is the one that explains what Caravan
+                                     thinks this row is. -->
                                 <a
-                                  href={scene.url}
+                                  href={scene.provider_url}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   class="underline-offset-2 transition-colors duration-150 hover:text-accent-text hover:underline">
