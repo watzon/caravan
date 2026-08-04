@@ -268,14 +268,14 @@ func (s *server) siteYears(ctx context.Context, seriesID int64) ([]siteYearJSON,
 			years = append(years, year)
 		}
 	}
-	// Newest first: an adult library is a publication feed, and the year
-	// somebody wants is almost always this one.
+	// Newest first, years and scenes alike: an adult library is a publication
+	// feed, and what somebody wants is almost always the latest release.
 	sort.Sort(sort.Reverse(sort.IntSlice(years)))
 
 	out := make([]siteYearJSON, 0, len(years))
 	for _, year := range years {
 		scenes := byYear[year]
-		sort.Slice(scenes, func(i, j int) bool { return scenes[i].Number < scenes[j].Number })
+		sort.Slice(scenes, func(i, j int) bool { return scenes[i].Number > scenes[j].Number })
 		if scenes == nil {
 			scenes = []sceneJSON{}
 		}

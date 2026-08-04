@@ -517,6 +517,58 @@ func TestGrantedMemberReadsTheAdultScreensButCannotWrite(t *testing.T) {
 	}
 }
 
+// A site page reads as a publication feed: the newest year sits on top, and
+// within a year the newest scene does too.
+func TestSitePageListsYearsAndScenesNewestFirst(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	enableAdult(t, st)
+	site := seedSite(t, st)
+	ctx := context.Background()
+	for _, e := range []struct {
+		number int
+		month  time.Month
+		day    int
+	}{{2, time.June, 2}, {3, time.November, 20}} {
+		if err := st.UpsertEpisode(ctx, &core.Episode{
+			SeriesID: site.ID, SeasonNumber: 2022, EpisodeNumber: e.number,
+			StashID: "scene-" + itoa(int64(e.number)), Title: "Scene " + itoa(int64(e.number)),
+			AirDate: time.Date(2022, e.month, e.day, 0, 0, 0, 0, time.UTC), Monitored: true,
+		}); err != nil {
+			t.Fatalf("UpsertEpisode: %v", err)
+		}
+	}
+	if err := st.UpsertSeason(ctx, &core.Season{
+		SeriesID: site.ID, Number: 2021, Title: "2021", Monitored: true,
+	}); err != nil {
+		t.Fatalf("UpsertSeason: %v", err)
+	}
+	if err := st.UpsertEpisode(ctx, &core.Episode{
+		SeriesID: site.ID, SeasonNumber: 2021, EpisodeNumber: 1, StashID: "scene-old",
+		Title: "Old Scene", AirDate: time.Date(2021, time.May, 5, 0, 0, 0, 0, time.UTC),
+		Monitored: true,
+	}); err != nil {
+		t.Fatalf("UpsertEpisode: %v", err)
+	}
+
+	createUser(t, st, testAdmin, testPassword, core.RoleAdmin)
+	cookie := login(t, h, testAdmin, testPassword)
+	rec := doAuth(t, h, http.MethodGet, "/api/v1/adult/sites/"+itoa(site.ID), "", withCookie(cookie))
+	wantStatus(t, rec, http.StatusOK)
+	var detail siteDetailJSON
+	decodeBody(t, rec, &detail)
+
+	if len(detail.Years) != 2 || detail.Years[0].Year != 2022 || detail.Years[1].Year != 2021 {
+		t.Fatalf("years = %+v, want 2022 before 2021", detail.Years)
+	}
+	got := make([]int, 0, len(detail.Years[0].Scenes))
+	for _, sc := range detail.Years[0].Scenes {
+		got = append(got, sc.Number)
+	}
+	if len(got) != 3 || got[0] != 3 || got[1] != 2 || got[2] != 1 {
+		t.Errorf("2022 scene order = %v, want [3 2 1]", got)
+	}
+}
+
 // A television series id handed to the adult site endpoint must not become a
 // second way to read the television library.
 func TestSiteEndpointRefusesATelevisionSeries(t *testing.T) {
