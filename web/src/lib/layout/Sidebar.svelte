@@ -122,6 +122,8 @@
         return quiet(counts?.movies);
       case '/series':
         return quiet(counts?.series);
+      case '/adult':
+        return quiet(counts?.sites);
       case '/wanted':
         return counts?.wanted ? { count: counts.wanted, kind: 'warning' } : null;
       case '/queue':

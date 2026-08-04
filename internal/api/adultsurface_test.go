@@ -1447,3 +1447,32 @@ func jsonString(s string) string {
 	}
 	return string(b)
 }
+
+// TestSystemStatusCountsSitesOnlyWhenTheModuleIsVisible: the sidebar's Adult
+// badge reads counts.sites, and the field must not exist at all — not even as
+// a zero — for a caller the module is invisible to, so a module-off response
+// stays byte-identical to one from an install that never enabled it.
+func TestSystemStatusCountsSitesOnlyWhenTheModuleIsVisible(t *testing.T) {
+	h, st, _ := newTestServer(t)
+
+	// Module off: no "sites" key anywhere in the body.
+	rec := do(t, h, http.MethodGet, "/api/v1/system/status", "")
+	wantStatus(t, rec, http.StatusOK)
+	if strings.Contains(rec.Body.String(), `"sites"`) {
+		t.Fatalf("module-off status body carries a sites key: %s", rec.Body.String())
+	}
+
+	enableAdult(t, st)
+	seedSite(t, st)
+
+	rec = do(t, h, http.MethodGet, "/api/v1/system/status", "")
+	wantStatus(t, rec, http.StatusOK)
+	var got statusResponse
+	decodeBody(t, rec, &got)
+	if got.Counts.Sites != 1 {
+		t.Fatalf("counts.sites = %d, want 1", got.Counts.Sites)
+	}
+	if got.Counts.Series != 0 {
+		t.Fatalf("counts.series = %d, want 0: a site must not count as television", got.Counts.Series)
+	}
+}

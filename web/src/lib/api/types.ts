@@ -210,6 +210,8 @@ export interface StatusCounts {
   wanted?: number;
   /** Open convert-for-TV queue: queued plus running. */
   converting?: number;
+  /** Adult site count — present only when the module is visible to the caller. */
+  sites?: number;
 }
 
 /**

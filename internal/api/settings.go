@@ -421,6 +421,10 @@ type statusCounts struct {
 	Wanted int `json:"wanted"`
 	// Converting is the open convert-for-TV queue: queued plus running.
 	Converting int `json:"converting"`
+	// Sites is the adult library's site count, present only for a caller the
+	// module is visible to — omitempty so a module-off response stays
+	// byte-identical to one from an install that never enabled it.
+	Sites int `json:"sites,omitempty"`
 }
 
 // handleSystemStatus reports what the UI needs to render the shell: build
@@ -467,6 +471,21 @@ func (s *server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		s.writeStoreError(w, "count series", err)
 		return
+	}
+	// The adult shelf's count, only for a caller the module is visible to —
+	// the same predicate that decides whether the nav item this badge sits on
+	// exists at all.
+	sites := 0
+	if visible, err := s.adultVisible(r); err != nil {
+		s.writeStoreError(w, "resolve adult visibility", err)
+		return
+	} else if visible {
+		adult, err := s.st.ListSeriesByKind(ctx, core.SeriesKindAdult)
+		if err != nil {
+			s.writeStoreError(w, "count sites", err)
+			return
+		}
+		sites = len(adult)
 	}
 	files, err := s.st.ListMediaFiles(ctx)
 	if err != nil {
@@ -519,6 +538,7 @@ func (s *server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 		Counts: statusCounts{
 			Movies:     len(movies),
 			Series:     len(series),
+			Sites:      sites,
 			MediaFiles: len(files),
 			Unmatched:  len(unmatched),
 			Wanted:     len(wantedLists.Movies) + len(wantedLists.Episodes),
