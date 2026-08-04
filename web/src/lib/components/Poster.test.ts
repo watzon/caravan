@@ -10,7 +10,12 @@ import Poster from './Poster.svelte';
 let target: HTMLElement | undefined;
 let app: Record<string, unknown> | undefined;
 
-function mountPoster(props: { path?: string | null; fallback?: string | null }): HTMLElement {
+function mountPoster(props: {
+  path?: string | null;
+  fallback?: string | null;
+  fit?: 'cover' | 'contain';
+  aspect?: 'poster' | 'video';
+}): HTMLElement {
   target = document.createElement('div');
   document.body.appendChild(target);
   app = mount(Poster, {
@@ -66,5 +71,30 @@ describe('Poster', () => {
   it('uses the provider URL directly when there is no local poster', () => {
     mountPoster({ path: '', fallback: 'https://image.tmdb.org/t/p/w500/abc.jpg' });
     expect(img()?.getAttribute('src')).toBe('https://image.tmdb.org/t/p/w500/abc.jpg');
+  });
+
+  it('contains mark-shaped artwork instead of cover-cropping it', () => {
+    // Site logos are square or wide; fit="contain" floats them padded on the
+    // surface rather than blur-stretching them into the 2:3 frame.
+    mountPoster({
+      path: '',
+      fallback: 'https://cdn.theporndb.net/sites/logo.png',
+      fit: 'contain',
+    });
+    const el = img()!;
+    expect(el.className).toContain('object-contain');
+    expect(el.className).not.toContain('object-cover');
+  });
+
+  it('cover-crops by default', () => {
+    mountPoster({ path: '', fallback: 'https://image.tmdb.org/t/p/w500/abc.jpg' });
+    expect(img()!.className).toContain('object-cover');
+  });
+
+  it('renders 16:9 for wide-mark tiles and 2:3 by default', () => {
+    mountPoster({ path: '', fallback: 'https://cdn.theporndb.net/sites/logo.png', aspect: 'video' });
+    expect(target!.querySelector('div')!.className).toContain('aspect-video');
+    mountPoster({ path: '', fallback: 'https://image.tmdb.org/t/p/w500/abc.jpg' });
+    expect(target!.querySelector('div')!.className).toContain('aspect-[2/3]');
   });
 });

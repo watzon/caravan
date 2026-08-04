@@ -64,19 +64,47 @@ export function sceneNumber(number: number): string {
 }
 
 /**
- * "Deep Impact · Ava Wells, Ivy Rain" — everything on a scene row after its
- * number.
+ * "Deep Impact · Ava Wells, Ivy Rain" — a scene named in one string.
  *
- * Performers are part of the line rather than a column of their own because on
- * a scene they are what a title is on an episode: the thing somebody is
- * actually looking for. An untitled scene falls back to the unknown placeholder
- * so the row never collapses to a bare number.
+ * The site page gives performers a column of their own, so this is no longer
+ * what its rows render; it stays because a single string is what a title
+ * attribute, a toast and a log line need, and those all want the whole scene in
+ * one piece. An untitled scene falls back to the unknown placeholder so the
+ * line never collapses to nothing.
  */
 export function sceneTitleLine(scene: Pick<Scene, 'title' | 'performers'>): string {
   const parts = [scene.title || UNKNOWN];
-  const performers = (scene.performers ?? []).filter((name) => name !== '');
+  const performers = scenePerformers(scene);
   if (performers.length > 0) parts.push(performers.join(', '));
   return parts.join(' · ');
+}
+
+/** A scene's credited performers, with the blanks a provider sometimes stores dropped. */
+export function scenePerformers(scene: Pick<Scene, 'performers'>): string[] {
+  return (scene.performers ?? []).filter((name) => name.trim() !== '');
+}
+
+/**
+ * How many performers fit in a row before the rest become a count. Two names
+ * are what the column's width holds at the table's density; a third would
+ * truncate mid-name, which reads as a bug rather than as a summary.
+ */
+const PERFORMERS_SHOWN = 2;
+
+/**
+ * The performers column: "Ava Wells & Ivy Rain", or "Ava Wells, Ivy Rain +3"
+ * when there are more than fit.
+ *
+ * A scene with a big cast is common and its row is not the place to read the
+ * whole list — the count says there is more without pushing the columns beside
+ * it off the screen, and the cell's title attribute carries the full list for
+ * anyone who wants it.
+ */
+export function performerSummary(names: string[]): string {
+  const cast = names.filter((name) => name.trim() !== '');
+  if (cast.length === 0) return '';
+  if (cast.length <= PERFORMERS_SHOWN) return cast.join(' & ');
+  return `${cast.slice(0, PERFORMERS_SHOWN).join(', ')} +${cast.length - PERFORMERS_SHOWN}`;
 }
 
 /** The whole row as one string — "#003 Deep Impact · Ava Wells". */

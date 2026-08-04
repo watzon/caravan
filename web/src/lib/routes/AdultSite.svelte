@@ -20,8 +20,10 @@
    * reports state — monitored flags, counts, statuses — is not: a member should
    * see what will happen next, and be offered nothing that would 403.
    *
-   * Monitor toggles are still absent. The routes for them exist and are gated
-   * the same way, so it is a gap rather than an impossibility.
+   * Monitoring is controllable at all three levels and the site can be removed,
+   * through the same routes and the same confirm SeriesDetail uses. A higher
+   * level's toggle cascades as a bulk update rather than a lock, so a site or
+   * year toggle reloads instead of guessing what happened to its children.
    */
   import { onMount } from 'svelte';
   import { api, errorText } from '../api/client';
@@ -32,10 +34,13 @@
   import Icon from '../components/Icon.svelte';
   import LoadError from '../components/LoadError.svelte';
   import Poster from '../components/Poster.svelte';
+  import RemoveItemModal from '../components/RemoveItemModal.svelte';
   import Skeleton from '../components/Skeleton.svelte';
   import StatusDot from '../components/StatusDot.svelte';
-  import { sceneLine, sceneNumber, sceneTitleLine } from '../adult';
-  import { UNKNOWN, formatBytes, formatDate } from '../format';
+  import Toggle from '../components/Toggle.svelte';
+  import { performerSummary, sceneLine, sceneNumber, scenePerformers } from '../adult';
+  import { UNKNOWN, formatDate } from '../format';
+  import { navigate } from '../router.svelte';
   import { session } from '../state/session.svelte';
   import { pushToast } from '../state/toast.svelte';
   import { episodeStatus } from '../status';
@@ -52,6 +57,10 @@
   let error = $state<string | null>(null);
   let collapsed = $state<Record<number, boolean>>({});
   let searching = $state(false);
+  /** A monitor write is in flight; every toggle on the page waits for it. */
+  let busy = $state(false);
+  let confirmingRemove = $state(false);
+  let removing = $state(false);
 
   async function load() {
     loading = true;
@@ -68,6 +77,12 @@
   onMount(load);
 
   let years = $derived<SiteYear[]>(site?.years ?? []);
+
+  // The detail response carries every year's scenes with their files, so the
+  // confirm can name a real count rather than a vague "its files".
+  let fileCount = $derived(
+    years.reduce((total, year) => total + year.scenes.filter((scene) => scene.file).length, 0),
+  );
 
   function ownedCount(year: SiteYear): number {
     return year.scenes.filter((scene) => scene.file).length;
@@ -103,6 +118,46 @@
     }
   }
 
+  /**
+   * Run a write, then reload. Reloading rather than patching in place is
+   * SeriesDetail's rule and it is here for the same reason: a site or year
+   * toggle cascades to its children on the server, so the only honest way to
+   * know what the page now says is to ask.
+   */
+  async function run(action: () => Promise<unknown>, failureNote: string) {
+    busy = true;
+    try {
+      await action();
+      await load();
+    } catch (err) {
+      pushToast(`${failureNote}: ${errorText(err)}`, 'danger');
+    } finally {
+      busy = false;
+    }
+  }
+
+  /** See SeriesDetail.remove: a successful removal leaves the page it emptied. */
+  async function remove(deleteFiles: boolean) {
+    const current = site;
+    if (!current) return;
+    removing = true;
+    try {
+      await api.deleteSeries(current.id, deleteFiles);
+      confirmingRemove = false;
+      pushToast(
+        deleteFiles
+          ? `Removed ${current.title} and its files`
+          : `Removed ${current.title} from the library`,
+        'neutral',
+      );
+      navigate('/adult');
+    } catch (err) {
+      pushToast(errorText(err), 'danger');
+    } finally {
+      removing = false;
+    }
+  }
+
   function sceneStatus(scene: Scene) {
     return episodeStatus({
       file: scene.file,
@@ -134,12 +189,14 @@
   {:else if site}
     {@const current = site}
     <div class="flex flex-col gap-6 md:flex-row">
-      <div class="w-40 shrink-0 md:w-52">
+      <div class="w-56 shrink-0 md:w-72">
         <Poster
           path={current.poster_path}
           fallback={current.poster_url}
           alt={current.title}
-          fallbackIcon="flame" />
+          fallbackIcon="flame"
+          fit="contain"
+          aspect="video" />
       </div>
 
       <div class="flex min-w-0 flex-1 flex-col gap-4">
@@ -166,6 +223,21 @@
               </Button>
               <Button variant="secondary" size="sm" href="/adult/sites/{current.id}/search">
                 Interactive search
+              </Button>
+              <Toggle
+                checked={current.monitored}
+                label="Monitored"
+                disabled={busy}
+                onchange={(next) =>
+                  run(() => api.setSeriesMonitored(current.id, next), 'Could not update the site')} />
+              <Button
+                variant="danger"
+                size="sm"
+                disabled={removing}
+                title="Remove this site from the library"
+                onclick={() => (confirmingRemove = true)}>
+                <Icon name="trash" size={14} />
+                <span class="sr-only">Remove {current.title}</span>
               </Button>
             </div>
           {/if}
@@ -252,6 +324,17 @@
                   <Icon name="search" size={14} />
                   Search
                 </Button>
+
+                <Toggle
+                  checked={year.monitored}
+                  label={`Monitor ${year.year}`}
+                  labelHidden
+                  disabled={busy}
+                  onchange={(next) =>
+                    run(
+                      () => api.setSeasonMonitored(current.id, year.year, next),
+                      'Could not update the year',
+                    )} />
               {/if}
             </header>
 
@@ -266,17 +349,24 @@
                     <thead>
                       <tr class="bg-surface text-left">
                         <th class="micro-label px-3 py-2 font-semibold">Scene</th>
+                        <!-- On a scene, the performers are what a title is on an
+                             episode: the thing somebody is actually looking for.
+                             They get a column rather than a suffix on the title.
+                             Quality and size left with them — a scene either has
+                             its file or does not, which the status says, and the
+                             picker is where a release's quality is chosen. -->
+                        <th class="micro-label px-3 py-2 font-semibold">Performers</th>
                         <th class="micro-label px-3 py-2 font-semibold">Released</th>
                         <th class="micro-label px-3 py-2 font-semibold">Status</th>
-                        <th class="micro-label px-3 py-2 font-semibold">Quality</th>
-                        <th class="micro-label px-3 py-2 text-right font-semibold">Size</th>
                         {#if session.isAdmin}
+                          <th class="micro-label px-3 py-2 text-right font-semibold">Monitored</th>
                           <th class="micro-label px-3 py-2 text-right font-semibold">Search</th>
                         {/if}
                       </tr>
                     </thead>
                     <tbody>
                       {#each year.scenes as scene (scene.id)}
+                        {@const cast = scenePerformers(scene)}
                         <tr
                           class="h-10 border-t border-border transition-colors duration-150 hover:bg-raised">
                           <td class="max-w-[420px] px-3 py-2 text-ink">
@@ -293,36 +383,54 @@
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   class="underline-offset-2 transition-colors duration-150 hover:text-accent-text hover:underline">
-                                  {sceneTitleLine(scene)}
+                                  {scene.title || UNKNOWN}
                                 </a>
                               {:else}
-                                {sceneTitleLine(scene)}
+                                {scene.title || UNKNOWN}
                               {/if}
+                            </span>
+                          </td>
+                          <td
+                            class="max-w-[220px] px-3 py-2 text-ink-secondary"
+                            title={cast.join(', ')}>
+                            <span class="block truncate">
+                              {cast.length > 0 ? performerSummary(cast) : UNKNOWN}
                             </span>
                           </td>
                           <td class="px-3 py-2 text-ink-secondary">
                             {formatDate(scene.release_date)}
                           </td>
                           <td class="px-3 py-2">
-                            <StatusDot status={sceneStatus(scene)} />
-                          </td>
-                          <td class="px-3 py-2">
-                            {#if scene.file}
-                              {@const tv = compatBadge(scene.file.compatibility)}
-                              <div class="flex flex-wrap items-center gap-1.5">
+                            <div class="flex flex-wrap items-center gap-1.5">
+                              <StatusDot status={sceneStatus(scene)} />
+                              <!-- A downloaded scene's quality rides with its
+                                   status, which is the only place it still says
+                                   something: "downloaded" and "downloaded at
+                                   1080p" are different answers. -->
+                              {#if scene.file}
+                                {@const tv = compatBadge(scene.file.compatibility)}
                                 <Badge mono>{scene.file.quality}</Badge>
                                 {#if tv}
                                   <Badge mono tone={tv.tone} title={tv.title}>{tv.label}</Badge>
                                 {/if}
-                              </div>
-                            {:else}
-                              <span class="text-ink-muted">{UNKNOWN}</span>
-                            {/if}
-                          </td>
-                          <td class="px-3 py-2 text-right font-mono text-ink-secondary">
-                            {scene.file ? formatBytes(scene.file.size) : UNKNOWN}
+                              {/if}
+                            </div>
                           </td>
                           {#if session.isAdmin}
+                            <td class="px-3 py-2">
+                              <div class="flex justify-end">
+                                <Toggle
+                                  checked={scene.monitored}
+                                  label={`Monitor ${sceneNumber(scene.number)}`}
+                                  labelHidden
+                                  disabled={busy}
+                                  onchange={(next) =>
+                                    run(
+                                      () => api.setEpisodeMonitored(scene.id, next),
+                                      'Could not update the scene',
+                                    )} />
+                              </div>
+                            </td>
                             <td class="px-3 py-2">
                               <div class="flex justify-end">
                                 <Button
@@ -348,6 +456,16 @@
           </section>
         {/each}
       </div>
+    {/if}
+
+    {#if confirmingRemove}
+      <RemoveItemModal
+        title="Remove {current.title}"
+        subject={current.title}
+        {fileCount}
+        busy={removing}
+        onconfirm={remove}
+        onclose={() => (confirmingRemove = false)} />
     {/if}
   {/if}
 </div>

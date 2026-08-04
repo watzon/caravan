@@ -60,14 +60,19 @@ func TestSceneSearchSendsOnlyTheAdultLibrarysCategories(t *testing.T) {
 
 	searchEpisodeJob(t, ctx, runner, st, scene.ID)
 	got := fake.recorded()
-	if len(got) != 1 {
-		t.Fatalf("scene search made %s, want one request", formatRequests(got))
+	// A scene search asks twice — by date, then by title — and the categories
+	// are the point here: every one of them carries the adult library's and
+	// only those.
+	if len(got) == 0 {
+		t.Fatal("scene search made no request")
 	}
-	if got[0].cats != "6000" {
-		t.Fatalf("scene search sent cat=%q, want only the adult library's 6000", got[0].cats)
-	}
-	if strings.Contains(got[0].cats, "5000") {
-		t.Fatalf("scene search leaked the TV categories: %s", formatRequests(got))
+	for _, req := range got {
+		if req.cats != "6000" {
+			t.Fatalf("scene search sent cat=%q, want only the adult library's 6000", req.cats)
+		}
+		if strings.Contains(req.cats, "5000") {
+			t.Fatalf("scene search leaked the TV categories: %s", formatRequests(got))
+		}
 	}
 
 	// And the television search is unaffected by the adult library existing.
@@ -250,11 +255,13 @@ func TestSceneSearchSendsAdultCategoriesWithNoOverrideConfigured(t *testing.T) {
 
 	searchEpisodeJob(t, ctx, runner, st, scene.ID)
 	got := fake.recorded()
-	if len(got) != 1 {
-		t.Fatalf("scene search made %s, want one request", formatRequests(got))
+	if len(got) == 0 {
+		t.Fatal("scene search made no request")
 	}
-	if got[0].cats != "6000" {
-		t.Fatalf("scene search sent cat=%q, want the adult block", formatRequests(got))
+	for _, req := range got {
+		if req.cats != "6000" {
+			t.Fatalf("scene search sent cat=%q, want the adult block", formatRequests(got))
+		}
 	}
 }
 
@@ -274,8 +281,13 @@ func TestSceneSearchKeepsTheIndexersOwnAdultSubcategories(t *testing.T) {
 
 	searchEpisodeJob(t, ctx, runner, st, scene.ID)
 	got := fake.recorded()
-	if len(got) != 1 || got[0].cats != "6040,6090" {
-		t.Fatalf("scene search made %s, want the indexer's own adult subcategories", formatRequests(got))
+	if len(got) == 0 {
+		t.Fatal("scene search made no request")
+	}
+	for _, req := range got {
+		if req.cats != "6040,6090" {
+			t.Fatalf("scene search made %s, want the indexer's own adult subcategories", formatRequests(got))
+		}
 	}
 }
 
@@ -323,5 +335,280 @@ func TestRSSSyncDropsTheAdultLibraryWhenTheModuleIsDisabled(t *testing.T) {
 	}
 	if strings.Contains(got[0].cats, "6000") {
 		t.Errorf("a disabled module still asks every indexer for 6000: %s", formatRequests(got))
+	}
+}
+
+// addSceneWithTitle puts a site and one scene with a known title and cast in
+// the library, which is what the title-variant search and its matcher read.
+func addSceneWithTitle(t *testing.T, ctx context.Context, st *store.Store, site, title string, released time.Time, performers ...string) (core.Series, core.Episode) {
+	t.Helper()
+	series := core.Series{
+		StashID: "site-" + site, Title: site, SortTitle: strings.ToLower(site),
+		Kind: core.SeriesKindAdult, Monitored: true,
+	}
+	if err := st.UpsertSeries(ctx, &series); err != nil {
+		t.Fatalf("upsert site: %v", err)
+	}
+	episode := core.Episode{
+		SeriesID: series.ID, SeasonNumber: released.Year(), EpisodeNumber: 1,
+		StashID: "scene-" + title, Title: title, AirDate: released, Monitored: true,
+		Scene: &core.SceneInfo{Studio: site, Performers: performers},
+	}
+	if err := st.UpsertEpisode(ctx, &episode); err != nil {
+		t.Fatalf("upsert scene: %v", err)
+	}
+	return series, episode
+}
+
+// grabbedTitles are the releases the runner actually grabbed.
+func grabbedTitles(t *testing.T, ctx context.Context, st *store.Store) []string {
+	t.Helper()
+	grabs, err := st.ListGrabs(ctx, 50)
+	if err != nil {
+		t.Fatalf("list grabs: %v", err)
+	}
+	out := []string{}
+	for _, grab := range grabs {
+		if grab.Status == core.GrabStatusGrabbed {
+			out = append(out, grab.ReleaseTitle)
+		}
+	}
+	return out
+}
+
+// The date query is the one that finds a scene release named the standard way,
+// and when it does there is no reason to ask anything else.
+func TestSceneSearchStopsAtTheDateVariantWhenItFinds(t *testing.T) {
+	ctx := context.Background()
+	st := openStore(t)
+	enableAdult(t, ctx, st)
+
+	fake := startFakeTorznab(t)
+	cfg := addTorznabIndexer(t, ctx, st, fake, "shared", 6000)
+	overrideLibraryIndexer(t, ctx, st, core.LibraryKindAdult, cfg.ID, true, []int{6000})
+
+	released := time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC)
+	_, scene := addSceneWithTitle(t, ctx, st, "Brazzers", "Deep Impact", released, "Abella Danger")
+	fake.serves("Brazzers 22.03.14", torznabItem{
+		title: "Brazzers.22.03.14.Abella.Danger.Deep.Impact.XXX.1080p.MP4-KTR",
+		guid:  "by-date",
+	})
+
+	runner := NewRunner(st, fake.factory(), func(context.Context, string) core.Engine { return &fakeEngine{} })
+	searchEpisodeJob(t, ctx, runner, st, scene.ID)
+
+	if got := fake.queries(); len(got) != 1 || got[0] != "Brazzers 22.03.14" {
+		t.Fatalf("queries = %v, want only the date variant", got)
+	}
+	if got := grabbedTitles(t, ctx, st); len(got) != 1 || !strings.Contains(got[0], "22.03.14") {
+		t.Fatalf("grabbed %v, want the date-named release", got)
+	}
+}
+
+// The improvement Whisparr does not have (its issue #115): when the date query
+// comes back with nothing grabbable, ask again by title. A release named after
+// its title and performers is invisible to the first query no matter how good
+// the matching is.
+func TestSceneSearchFallsBackToTheTitleVariant(t *testing.T) {
+	ctx := context.Background()
+	st := openStore(t)
+	enableAdult(t, ctx, st)
+
+	fake := startFakeTorznab(t)
+	cfg := addTorznabIndexer(t, ctx, st, fake, "shared", 6000)
+	overrideLibraryIndexer(t, ctx, st, core.LibraryKindAdult, cfg.ID, true, []int{6000})
+
+	released := time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC)
+	_, scene := addSceneWithTitle(t, ctx, st, "Brazzers", "Deep Impact", released, "Abella Danger")
+	// Nothing under the date query; the release exists, but its packager named
+	// it after the scene instead.
+	fake.serves("Brazzers Deep Impact", torznabItem{
+		title: "Brazzers.Deep.Impact.Abella.Danger.XXX.1080p.HEVC-GROUP",
+		guid:  "by-title",
+	})
+
+	runner := NewRunner(st, fake.factory(), func(context.Context, string) core.Engine { return &fakeEngine{} })
+	searchEpisodeJob(t, ctx, runner, st, scene.ID)
+
+	want := []string{"Brazzers 22.03.14", "Brazzers Deep Impact"}
+	if got := fake.queries(); len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("queries = %v, want %v in that order", got, want)
+	}
+	if got := grabbedTitles(t, ctx, st); len(got) != 1 || !strings.Contains(got[0], "Deep.Impact") {
+		t.Fatalf("grabbed %v, want the title-named release", got)
+	}
+}
+
+// A scene nobody released is still two searches, and the record says which were
+// tried — "no release" means something different depending on the question.
+func TestSceneSearchRecordsWhichVariantsItTried(t *testing.T) {
+	ctx := context.Background()
+	st := openStore(t)
+	enableAdult(t, ctx, st)
+
+	fake := startFakeTorznab(t)
+	cfg := addTorznabIndexer(t, ctx, st, fake, "shared", 6000)
+	overrideLibraryIndexer(t, ctx, st, core.LibraryKindAdult, cfg.ID, true, []int{6000})
+
+	released := time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC)
+	_, scene := addSceneWithTitle(t, ctx, st, "Brazzers", "Deep Impact", released)
+
+	runner := NewRunner(st, fake.factory(), func(context.Context, string) core.Engine { return &fakeEngine{} })
+	searchEpisodeJob(t, ctx, runner, st, scene.ID)
+
+	if got := fake.queries(); len(got) != 2 {
+		t.Fatalf("queries = %v, want both variants tried", got)
+	}
+	events, err := st.ListEvents(ctx, 50)
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	var message string
+	for _, event := range events {
+		if strings.Contains(event.Message, "no acceptable release") {
+			message = event.Message
+		}
+	}
+	if message == "" {
+		t.Fatal("no no-release event was recorded")
+	}
+	if !strings.Contains(message, "tried date, title") {
+		t.Errorf("event = %q, want it to name the variants that were tried", message)
+	}
+}
+
+// A scene with no date is still searchable by title — and a scene with neither
+// is not searchable at all, which stays a silent no-op rather than a query for
+// the whole site.
+func TestSceneSearchWithoutADateUsesTheTitleAlone(t *testing.T) {
+	ctx := context.Background()
+	st := openStore(t)
+	enableAdult(t, ctx, st)
+
+	fake := startFakeTorznab(t)
+	cfg := addTorznabIndexer(t, ctx, st, fake, "shared", 6000)
+	overrideLibraryIndexer(t, ctx, st, core.LibraryKindAdult, cfg.ID, true, []int{6000})
+
+	_, dated := addSceneWithTitle(t, ctx, st, "Brazzers", "Deep Impact", time.Time{})
+	runner := NewRunner(st, fake.factory(), func(context.Context, string) core.Engine { return &fakeEngine{} })
+	searchEpisodeJob(t, ctx, runner, st, dated.ID)
+
+	if got := fake.queries(); len(got) != 1 || got[0] != "Brazzers Deep Impact" {
+		t.Fatalf("queries = %v, want the title variant alone", got)
+	}
+
+	fake.reset()
+	_, untitled := addSceneWithTitle(t, ctx, st, "Vixen", "", time.Time{})
+	searchEpisodeJob(t, ctx, runner, st, untitled.ID)
+	if got := fake.queries(); len(got) != 0 {
+		t.Fatalf("queries = %v, want none: there is nothing to search for", got)
+	}
+}
+
+// The conservative matcher, which is what makes the title variant safe to have
+// at all. A false grab is worse than a miss: a wrong scene under a right
+// scene's name is a file somebody has to find and delete, and the library will
+// believe it is complete.
+func TestMatchesSceneTitle(t *testing.T) {
+	released := time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC)
+	series := core.Series{Title: "Brazzers"}
+	scene := core.Episode{
+		Title:   "Deep Impact",
+		AirDate: released,
+		Scene:   &core.SceneInfo{Performers: []string{"Abella Danger"}},
+	}
+
+	tests := []struct {
+		name    string
+		release string
+		parsed  core.ParsedRelease
+		series  core.Series
+		episode core.Episode
+		want    bool
+	}{
+		{
+			name:    "site and title, welded the way release names are",
+			release: "Brazzers.Deep.Impact.Abella.Danger.XXX.1080p.HEVC-GROUP",
+			want:    true,
+		},
+		{
+			name:    "the site written as one word still matches",
+			release: "RealityKings.Deep.Impact.XXX.1080p",
+			series:  core.Series{Title: "Reality Kings"},
+			want:    true,
+		},
+		{
+			name:    "a title match with the scene's own date is still a match",
+			release: "Brazzers.22.03.14.Deep.Impact.XXX.1080p",
+			parsed:  core.ParsedRelease{SceneDate: released},
+			want:    true,
+		},
+		{
+			// The rule that matters most: words can line up and the release
+			// still be a different scene, and the date says so.
+			name:    "a contradicting date beats any title match",
+			release: "Brazzers.22.09.01.Deep.Impact.XXX.1080p",
+			parsed: core.ParsedRelease{
+				SceneDate: time.Date(2022, time.September, 1, 0, 0, 0, 0, time.UTC),
+			},
+			want: false,
+		},
+		{
+			name:    "another site's release with the same title is refused",
+			release: "Tushy.Deep.Impact.XXX.1080p",
+			want:    false,
+		},
+		{
+			name:    "a different scene from the right site is refused",
+			release: "Brazzers.Shallow.Waters.XXX.1080p",
+			want:    false,
+		},
+		{
+			name:    "the title's words must be together, not merely present",
+			release: "Brazzers.Deep.In.The.Impact.Zone.XXX.1080p",
+			want:    false,
+		},
+		{
+			// A one-word title matches half a catalogue on its own, so it needs
+			// a performer named in the release as well.
+			name:    "a one-word title needs a performer beside it",
+			release: "Brazzers.Impact.XXX.1080p",
+			episode: core.Episode{Title: "Impact", AirDate: released, Scene: scene.Scene},
+			want:    false,
+		},
+		{
+			name:    "a one-word title with the performer is accepted",
+			release: "Brazzers.Impact.Abella.Danger.XXX.1080p",
+			episode: core.Episode{Title: "Impact", AirDate: released, Scene: scene.Scene},
+			want:    true,
+		},
+		{
+			name:    "a scene with no title matches nothing",
+			release: "Brazzers.Something.XXX.1080p",
+			episode: core.Episode{AirDate: released},
+			want:    false,
+		},
+		{
+			name:    "an empty release name matches nothing",
+			release: "",
+			want:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sr := tt.series
+			if sr.Title == "" {
+				sr = series
+			}
+			ep := tt.episode
+			if ep.Title == "" && ep.AirDate.IsZero() {
+				ep = scene
+			}
+			release := core.Release{Title: tt.release, Parsed: tt.parsed}
+			if got := matchesSceneTitle(release, sr, ep); got != tt.want {
+				t.Errorf("matchesSceneTitle(%q) = %v, want %v", tt.release, got, tt.want)
+			}
+		})
 	}
 }

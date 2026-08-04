@@ -1176,19 +1176,115 @@ func TestInteractiveReleaseSearchForASiteIsAnAdultSearch(t *testing.T) {
 	wantStatus(t, rec, http.StatusOK)
 
 	searches := fake.recorded()
-	if len(searches) != 1 {
-		t.Fatalf("searches = %+v, want one", searches)
+	// Two searches, the same pair the automatic path runs: the date form scene
+	// releases are named by, then the title form for the ones that are not.
+	if len(searches) != 2 {
+		t.Fatalf("searches = %+v, want the date and title variants", searches)
 	}
-	// "Brazzers 22.03.14" — the site and the scene's release date, the way
-	// scene releases are named and the same string searchScene builds.
 	if searches[0].query != "Brazzers 22.03.14" {
-		t.Errorf("query = %q, want the site and the scene's release date", searches[0].query)
+		t.Errorf("query = %q, want the site and the scene's release date first", searches[0].query)
 	}
-	if searches[0].cats != "6000" {
-		t.Errorf("cats = %q, want the adult library's categories", searches[0].cats)
+	if searches[1].query != "Brazzers Deep Impact" {
+		t.Errorf("query = %q, want the site and the scene's title second", searches[1].query)
 	}
-	if strings.Contains(searches[0].cats, "5000") || strings.Contains(searches[0].cats, "2000") {
-		t.Errorf("a scene search sent the television library's categories: %q", searches[0].cats)
+	for _, search := range searches {
+		if search.cats != "6000" {
+			t.Errorf("cats = %q, want the adult library's categories", search.cats)
+		}
+		if strings.Contains(search.cats, "5000") || strings.Contains(search.cats, "2000") {
+			t.Errorf("a scene search sent the television library's categories: %q", search.cats)
+		}
+	}
+}
+
+// The picker runs the same two searches the automatic path does, and shows one
+// table: a release both queries return is one row, not two.
+func TestInteractiveSceneSearchMergesBothVariants(t *testing.T) {
+	fake := newFakeIndexer(t)
+	h, st, _ := newTestServer(t, WithIndexerClients(fake.factory()))
+	enableAdult(t, st)
+	site := seedSite(t, st)
+	addIndexer(t, st, fake, "alpha", 6000)
+
+	// The date query finds the standard name and one release that both queries
+	// return; the title query finds a title-named release and that same shared
+	// one again.
+	// The fake answers with core.Release values directly, so the parse the real
+	// indexer client does for a 6000-category result is spelled out here — the
+	// site as the title and the release date, which is what parse.Scene reads
+	// off a date-named release.
+	dated := core.ParsedRelease{
+		Title:     "Brazzers",
+		SceneDate: time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC),
+	}
+	shared := core.Release{
+		GUID: "shared", Title: "Brazzers.22.03.14.Deep.Impact.XXX.1080p", Indexer: "alpha",
+		Parsed: dated,
+	}
+	fake.servesQuery("Brazzers 22.03.14", core.Release{
+		GUID: "by-date", Title: "Brazzers.22.03.14.XXX.1080p", Indexer: "alpha", Parsed: dated,
+	}, shared)
+	// A title-named release carries no date at all, which is the whole reason
+	// the automatic path will not take it on the date test alone.
+	fake.servesQuery("Brazzers Deep Impact", shared, core.Release{
+		GUID: "by-title", Title: "Brazzers.Deep.Impact.XXX.2160p", Indexer: "alpha",
+		Parsed: core.ParsedRelease{Title: "Brazzers Deep Impact"},
+	})
+
+	createUser(t, st, testAdmin, testPassword, core.RoleAdmin)
+	cookie := login(t, h, testAdmin, testPassword)
+
+	rec := doAuth(t, h, http.MethodGet,
+		"/api/v1/library/series/"+itoa(site.ID)+"/releases?season=2022&episode=1", "", withCookie(cookie))
+	wantStatus(t, rec, http.StatusOK)
+
+	var body struct {
+		Query    string   `json:"query"`
+		Queries  []string `json:"queries"`
+		Releases []struct {
+			GUID  string   `json:"guid"`
+			Flags []string `json:"flags"`
+		} `json:"releases"`
+	}
+	decodeBody(t, rec, &body)
+
+	want := []string{"Brazzers 22.03.14", "Brazzers Deep Impact"}
+	if len(body.Queries) != len(want) || body.Queries[0] != want[0] || body.Queries[1] != want[1] {
+		t.Errorf("queries = %v, want %v", body.Queries, want)
+	}
+	if body.Query != "Brazzers 22.03.14" {
+		t.Errorf("query = %q, want the first of them", body.Query)
+	}
+
+	seen := map[string]int{}
+	for _, rel := range body.Releases {
+		seen[rel.GUID]++
+	}
+	if len(body.Releases) != 3 {
+		t.Fatalf("releases = %+v, want three distinct rows", body.Releases)
+	}
+	if seen["shared"] != 1 {
+		t.Errorf("the release both queries returned appears %d times, want once", seen["shared"])
+	}
+
+	// The wrong-date flagging is unchanged, so the user can still see which
+	// candidates the automatic path would distrust: the title-named release
+	// carries no date at all, which is exactly that case.
+	byGUID := map[string][]string{}
+	for _, rel := range body.Releases {
+		byGUID[rel.GUID] = rel.Flags
+	}
+	if contains := func(flags []string) bool {
+		for _, f := range flags {
+			if f == flagWrongDate {
+				return true
+			}
+		}
+		return false
+	}; !contains(byGUID["by-title"]) {
+		t.Errorf("the title-named release is not flagged %s: %v", flagWrongDate, byGUID["by-title"])
+	} else if contains(byGUID["by-date"]) {
+		t.Errorf("the date-named release is flagged %s: %v", flagWrongDate, byGUID["by-date"])
 	}
 }
 

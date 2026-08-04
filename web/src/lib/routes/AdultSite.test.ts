@@ -16,6 +16,7 @@ import { clearToasts } from '../state/toast.svelte';
 interface Call {
   url: string;
   method: string;
+  body: Record<string, unknown> | null;
 }
 
 const SITE = {
@@ -27,8 +28,8 @@ const SITE = {
   poster_path: '',
   poster_url: '',
   monitored: true,
-  scene_count: 2,
-  scene_file_count: 0,
+  scene_count: 3,
+  scene_file_count: 1,
   added_at: '2024-01-01T00:00:00Z',
   provider_url: 'https://theporndb.net/sites/e3b61b3e-1111-4111-8111-111111111111',
   years: [
@@ -50,6 +51,36 @@ const SITE = {
           release_date: '2022-03-14T00:00:00Z',
           monitored: true,
           file: null,
+        },
+        {
+          // A big cast and a file: the performers column summarises, and the
+          // quality rides with the status.
+          id: 13,
+          series_id: 7,
+          year: 2022,
+          number: 5,
+          stash_id: 'scene-5',
+          title: 'Crowd Scene',
+          overview: '',
+          studio: 'Brazzers',
+          performers: ['Ava Wells', 'Ivy Rain', 'Mia Stone', 'Nina Reed'],
+          url: '',
+          release_date: '2022-05-14T00:00:00Z',
+          monitored: true,
+          file: {
+            id: 99,
+            path: 'Adult/Brazzers/2022/scene.mkv',
+            size: 1024,
+            movie_id: 0,
+            quality: '1080p',
+            source: 'webdl',
+            codec: 'h264',
+            audio: 'aac',
+            release_group: 'GROUP',
+            added_at: '2024-01-01T00:00:00Z',
+            modified_at: '2024-01-01T00:00:00Z',
+            compatibility: { verdict: 'compatible', reasons: [] },
+          },
         },
         {
           // No url: the link is offered only where the provider stored one.
@@ -87,7 +118,14 @@ function stubFetch(site: unknown = SITE): void {
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const method = init?.method ?? 'GET';
-      calls.push({ url, method });
+      calls.push({
+        url,
+        method,
+        body: typeof init?.body === 'string' ? JSON.parse(init.body) : null,
+      });
+      if (method === 'PATCH' || method === 'DELETE') {
+        return new Response(null, { status: 204 });
+      }
       const payload = method === 'POST' ? { queued: 4 } : site;
       return new Response(JSON.stringify(payload), {
         status: method === 'POST' ? 202 : 200,
@@ -213,9 +251,196 @@ describe('AdultSite for a granted member', () => {
 
     // The counts, the year, the scene rows and the provider link are all reads:
     // a member should see what will happen next, just not be able to start it.
-    expect(host!.textContent).toContain('0 / 2 scenes');
+    expect(host!.textContent).toContain('1 / 3 scenes');
     expect(host!.textContent).toContain('2022');
     expect(host!.textContent).toContain('Deep Impact');
     expect(hrefs()).toContain(SITE.provider_url);
+  });
+});
+
+describe('AdultSite scene rows', () => {
+  function headers(): string[] {
+    return [...host!.querySelectorAll('th')].map((th) => th.textContent?.trim() ?? '');
+  }
+
+  it('gives performers a column and drops quality and size', async () => {
+    stubFetch();
+    await mountSite();
+
+    const columns = headers();
+    expect(columns).toContain('Performers');
+    expect(columns).not.toContain('Quality');
+    expect(columns).not.toContain('Size');
+    // What is left is the scene, who is in it, when it came out, where it
+    // stands — and, for an admin, what it is watching for and the way to go
+    // looking for it.
+    expect(columns).toEqual([
+      'Scene',
+      'Performers',
+      'Released',
+      'Status',
+      'Monitored',
+      'Search',
+    ]);
+  });
+
+  it('summarises a big cast and keeps the whole list on hover', async () => {
+    stubFetch();
+    await mountSite();
+
+    const cell = [...host!.querySelectorAll('td')].find((td) =>
+      td.textContent?.includes('Ava Wells'),
+    );
+    expect(cell, 'a performers cell').toBeTruthy();
+    // Two names then a count: the column holds two at this density.
+    expect(cell!.textContent?.trim()).toBe('Ava Wells, Ivy Rain +2');
+    expect(cell!.getAttribute('title')).toBe('Ava Wells, Ivy Rain, Mia Stone, Nina Reed');
+  });
+
+  it('keeps the performers out of the title cell', async () => {
+    stubFetch();
+    await mountSite();
+
+    const link = [...host!.querySelectorAll('a')].find(
+      (a) => a.getAttribute('href') === 'https://www.brazzers.com/scene/deep-impact',
+    );
+    // The title is the title now — the performers moved to their own column.
+    expect(link!.textContent?.trim()).toBe('Deep Impact');
+  });
+
+  it("keeps a downloaded scene's quality beside its status", async () => {
+    stubFetch();
+    await mountSite();
+
+    const row = [...host!.querySelectorAll('tr')].find((tr) =>
+      tr.textContent?.includes('Crowd Scene'),
+    );
+    expect(row, 'the row for the scene with a file').toBeTruthy();
+    expect(row!.textContent).toContain('1080p');
+  });
+});
+
+describe('AdultSite monitoring and removal', () => {
+  /**
+   * The switch whose accessible name is `label`. A visible label lives in the
+   * button's own text; a hidden one is its aria-label.
+   */
+  function toggle(label: string): HTMLElement | undefined {
+    return [...host!.querySelectorAll<HTMLElement>('[role="switch"]')].find(
+      (el) => el.getAttribute('aria-label') === label || el.textContent?.trim() === label,
+    );
+  }
+
+  async function flip(label: string) {
+    const control = toggle(label);
+    expect(control, `a toggle labelled ${label}`).toBeTruthy();
+    control!.click();
+    await vi.waitFor(() => {
+      if (!calls.some((c) => c.method === 'PATCH')) throw new Error('no write yet');
+    });
+  }
+
+  it('turns the whole site off through the series route', async () => {
+    stubFetch();
+    await mountSite();
+
+    await flip('Monitored');
+    const patch = calls.find((c) => c.method === 'PATCH');
+    expect(patch?.url).toBe('/api/v1/library/series/7');
+    expect(patch?.body).toEqual({ monitored: false });
+  });
+
+  it('turns one release year off through the season route', async () => {
+    stubFetch();
+    await mountSite();
+
+    // A year IS a season; 2022 is both its label and its season number.
+    await flip('Monitor 2022');
+    const patch = calls.find((c) => c.method === 'PATCH');
+    expect(patch?.url).toBe('/api/v1/library/series/7/seasons/2022');
+    expect(patch?.body).toEqual({ monitored: false });
+  });
+
+  it('turns one scene off through the episode route', async () => {
+    stubFetch();
+    await mountSite();
+
+    await flip('Monitor #003');
+    const patch = calls.find((c) => c.method === 'PATCH');
+    expect(patch?.url).toBe('/api/v1/library/episodes/11');
+    expect(patch?.body).toEqual({ monitored: false });
+  });
+
+  it('reloads after a write rather than guessing what cascaded', async () => {
+    stubFetch();
+    await mountSite();
+    const before = calls.filter((c) => c.method === 'GET').length;
+
+    await flip('Monitored');
+    await vi.waitFor(() => {
+      if (calls.filter((c) => c.method === 'GET').length <= before) {
+        throw new Error('no reload yet');
+      }
+    });
+  });
+
+  it('removes the site without its files and goes back to the shelf', async () => {
+    stubFetch();
+    await mountSite();
+
+    buttonLabelled('Remove Brazzers')!.click();
+    flushSync();
+    const confirm = [...host!.querySelectorAll('button')].find(
+      (b) => b.textContent?.trim() === 'Remove',
+    );
+    expect(confirm, 'the confirm button').toBeTruthy();
+    confirm!.click();
+    await vi.waitFor(() => {
+      if (!calls.some((c) => c.method === 'DELETE')) throw new Error('no delete yet');
+    });
+
+    const del = calls.find((c) => c.method === 'DELETE');
+    // No files=true: untracking leaves the media alone, which is the default.
+    expect(del?.url).toBe('/api/v1/library/series/7');
+    await vi.waitFor(() => {
+      if (window.location.pathname !== '/adult') throw new Error('did not navigate');
+    });
+  });
+
+  it('removes the site with its files when the box is checked', async () => {
+    stubFetch();
+    await mountSite();
+
+    buttonLabelled('Remove Brazzers')!.click();
+    flushSync();
+    // The count comes off the detail response, so the confirm names it.
+    expect(host!.textContent).toContain('Also delete 1 file from disk');
+
+    const box = [...host!.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].at(-1)!;
+    box.checked = true;
+    box.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    [...host!.querySelectorAll('button')]
+      .find((b) => b.textContent?.trim() === 'Remove')!
+      .click();
+    await vi.waitFor(() => {
+      if (!calls.some((c) => c.method === 'DELETE')) throw new Error('no delete yet');
+    });
+
+    expect(calls.find((c) => c.method === 'DELETE')?.url).toBe(
+      '/api/v1/library/series/7?files=true',
+    );
+  });
+
+  it('offers a member no control over any of it', async () => {
+    stubFetch();
+    await mountSite('member');
+
+    expect(toggle('Monitored')).toBeUndefined();
+    expect(toggle('Monitor 2022')).toBeUndefined();
+    expect(toggle('Monitor #003')).toBeUndefined();
+    expect(buttonLabelled('Remove Brazzers')).toBeUndefined();
+    // But the state itself is still readable: an unmonitored year says so.
+    expect(host!.textContent).toContain('2022');
   });
 });

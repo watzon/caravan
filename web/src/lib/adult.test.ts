@@ -12,11 +12,13 @@ import {
   ADULT_TABS,
   adultTabHref,
   adultVisible,
+  performerSummary,
   sceneCountNote,
   sceneDuration,
   sceneLine,
   sceneMetaLine,
   sceneNumber,
+  scenePerformers,
   sceneTitleLine,
   sceneYear,
   siteHref,
@@ -208,5 +210,41 @@ describe('sceneMetaLine', () => {
     expect(sceneMetaLine(meta({ date: '' }))).toBe('Deep Blue · 24 min');
     expect(sceneMetaLine(meta({ site_name: '' }))).toBe('2022-03-14 · 24 min');
     expect(sceneMetaLine(meta({ site_name: '', date: '', duration: 0 }))).toBe('');
+  });
+});
+
+describe('performerSummary', () => {
+  it('is empty when nobody is credited', () => {
+    expect(performerSummary([])).toBe('');
+    expect(performerSummary(['', '  '])).toBe('');
+  });
+
+  it('names one performer plainly', () => {
+    expect(performerSummary(['Ava Wells'])).toBe('Ava Wells');
+  });
+
+  it('joins two with an ampersand, which is how a pairing reads', () => {
+    expect(performerSummary(['Ava Wells', 'Ivy Rain'])).toBe('Ava Wells & Ivy Rain');
+  });
+
+  it('counts the rest when a cast is bigger than the column', () => {
+    expect(performerSummary(['Ava Wells', 'Ivy Rain', 'Mia Stone'])).toBe('Ava Wells, Ivy Rain +1');
+    expect(performerSummary(['A One', 'B Two', 'C Three', 'D Four', 'E Five'])).toBe(
+      'A One, B Two +3',
+    );
+  });
+
+  it('does not count the blanks a provider sometimes stores', () => {
+    expect(performerSummary(['Ava Wells', '', 'Ivy Rain'])).toBe('Ava Wells & Ivy Rain');
+  });
+});
+
+describe('scenePerformers', () => {
+  it('drops blank credits', () => {
+    expect(scenePerformers({ performers: ['Ava Wells', '', ' '] })).toEqual(['Ava Wells']);
+  });
+
+  it('treats a missing list as nobody', () => {
+    expect(scenePerformers({ performers: undefined as unknown as string[] })).toEqual([]);
   });
 });

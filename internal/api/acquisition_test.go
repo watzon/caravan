@@ -142,6 +142,7 @@ type fakeIndexer struct {
 
 	mu         sync.Mutex
 	responses  map[string][]core.Release
+	byQuery    map[string][]core.Release
 	categories map[string][]core.IndexerCategory
 	broken     map[string]bool
 	searches   []fakeSearch
@@ -159,6 +160,7 @@ func newFakeIndexer(t *testing.T) *fakeIndexer {
 	t.Helper()
 	f := &fakeIndexer{
 		responses:  map[string][]core.Release{},
+		byQuery:    map[string][]core.Release{},
 		categories: map[string][]core.IndexerCategory{},
 		broken:     map[string]bool{},
 	}
@@ -173,7 +175,13 @@ func newFakeIndexer(t *testing.T) *fakeIndexer {
 			cats:  r.URL.Query().Get("cats"),
 		})
 		broken := f.broken[name]
-		releases := f.responses[name]
+		// A query-specific answer wins: a scene is searched for twice, and a
+		// test about the two variants has to be able to answer them
+		// differently.
+		releases, ok := f.byQuery[r.URL.Query().Get("q")]
+		if !ok {
+			releases = f.responses[name]
+		}
 		f.mu.Unlock()
 
 		if broken {
@@ -218,6 +226,15 @@ func (f *fakeIndexer) serve(name string, releases ...core.Release) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.responses[name] = releases
+}
+
+// servesQuery answers one exact query with these releases, whichever indexer is
+// asked. It is how a test drives the scene search's date and title variants
+// apart.
+func (f *fakeIndexer) servesQuery(query string, releases ...core.Release) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.byQuery[query] = releases
 }
 
 func (f *fakeIndexer) servesCategories(name string, cats ...core.IndexerCategory) {

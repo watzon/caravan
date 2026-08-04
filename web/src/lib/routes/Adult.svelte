@@ -25,9 +25,11 @@
   import PosterGrid from '../components/PosterGrid.svelte';
   import PosterGridSkeleton from '../components/PosterGridSkeleton.svelte';
   import PageTabs from '../components/PageTabs.svelte';
+  import SelectActions from '../components/SelectActions.svelte';
   import TextInput from '../components/TextInput.svelte';
   import { ADULT_TABS, adultTabHref, sceneCountNote, siteHref } from '../adult';
   import { navigate } from '../router.svelte';
+  import { createSelection } from '../selection.svelte';
   import { session } from '../state/session.svelte';
   import type { StatusKey } from '../status';
 
@@ -38,6 +40,17 @@
 
   /** The add-a-site picker. Admin-only: POST /adult/sites answers 403 to a member. */
   let picking = $state(false);
+
+  /**
+   * Grid selection, which is the Series shelf's and does the same three things
+   * to the same routes — a site is a series row, so searching, monitoring and
+   * removing one in bulk is the same call per id.
+   *
+   * It exists for an admin only: every action behind it is a write a member's
+   * session would be refused, and a selection whose action bar 403s is worse
+   * than no selection at all.
+   */
+  const selection = createSelection();
 
   async function load() {
     loading = true;
@@ -153,9 +166,27 @@
           posterUrl={site.poster_url}
           status={siteStatus(site)}
           note={sceneCountNote(site)}
-          fallbackIcon="flame" />
+          fallbackIcon="flame"
+          posterFit="contain"
+          posterAspect="video"
+          selectable={selection.active}
+          selected={selection.has(site.id)}
+          ontoggle={session.isAdmin ? () => selection.toggle(site.id) : undefined} />
       {/each}
     </PosterGrid>
+  {/if}
+
+  {#if session.isAdmin}
+    <SelectActions
+      {selection}
+      noun="site"
+      plural="sites"
+      actions={{
+        search: (id) => api.searchSeriesNow(id),
+        setMonitored: (id, monitored) => api.setSeriesMonitored(id, monitored),
+        remove: (id, deleteFiles) => api.deleteSeries(id, deleteFiles),
+      }}
+      onchanged={load} />
   {/if}
 </div>
 

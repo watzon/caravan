@@ -33,6 +33,10 @@
     quality?: string | null;
     note?: string | null;
     fallbackIcon?: IconName;
+    /** See Poster: 'contain' for mark-shaped artwork like site logos. */
+    posterFit?: 'cover' | 'contain';
+    /** See Poster: 'video' for tiles whose artwork is a wide mark. */
+    posterAspect?: 'poster' | 'video';
     /** A selection is active: render as its toggle rather than a link. */
     selectable?: boolean;
     selected?: boolean;
@@ -49,6 +53,8 @@
     quality,
     note,
     fallbackIcon = 'film',
+    posterFit = 'cover',
+    posterAspect = 'poster',
     selectable = false,
     selected = false,
     ontoggle,
@@ -66,7 +72,13 @@
            {selected
       ? 'ring-2 ring-accent'
       : 'ring-transparent group-hover/card:ring-border-strong group-focus-visible/card:ring-accent'}">
-    <Poster path={posterPath} fallback={posterUrl} alt="" {fallbackIcon} />
+    <Poster
+      path={posterPath}
+      fallback={posterUrl}
+      alt=""
+      {fallbackIcon}
+      fit={posterFit}
+      aspect={posterAspect} />
 
     <!-- flex, not inline: line-height would stretch the circle into a pill. -->
     <span

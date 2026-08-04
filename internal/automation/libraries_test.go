@@ -30,12 +30,26 @@ type fakeTorznab struct {
 
 	mu       sync.Mutex
 	requests []torznabRequest
+	// items answers one exact query with these releases. A query with no entry
+	// answers an empty channel, which is what a real indexer with no match
+	// does — and what every test that only cares about categories wants.
+	items map[string][]torznabItem
 }
 
 type torznabRequest struct {
 	indexer string
 	mode    string
 	cats    string
+	// query is the `q` parameter, which is what a test about the scene search's
+	// two variants is actually asserting on.
+	query string
+}
+
+// torznabItem is one release the fake publishes. Only the fields the client
+// reads to build a core.Release are here.
+type torznabItem struct {
+	title string
+	guid  string
 }
 
 func startFakeTorznab(t *testing.T) *fakeTorznab {
@@ -44,22 +58,61 @@ func startFakeTorznab(t *testing.T) *fakeTorznab {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{name}/api", func(w http.ResponseWriter, r *http.Request) {
+		query := r.URL.Query().Get("q")
 		f.mu.Lock()
 		f.requests = append(f.requests, torznabRequest{
 			indexer: r.PathValue("name"),
 			mode:    r.URL.Query().Get("t"),
 			cats:    r.URL.Query().Get("cat"),
+			query:   query,
 		})
+		items := f.items[query]
 		f.mu.Unlock()
 
 		w.Header().Set("Content-Type", "application/xml")
-		_, _ = io.WriteString(w, `<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0"><channel></channel></rss>`)
+		_, _ = io.WriteString(w, torznabFeed(items))
 	})
 
 	f.server = httptest.NewServer(mux)
 	t.Cleanup(f.server.Close)
 	return f
+}
+
+// torznabFeed renders items as the XML a Torznab indexer answers with. The
+// category is the adult block, which is what a scene search asks for.
+func torznabFeed(items []torznabItem) string {
+	var b strings.Builder
+	b.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
+	b.WriteString(`<rss version="2.0" xmlns:torznab="http://torznab.com/schemas/2015/feed"><channel>`)
+	for _, item := range items {
+		fmt.Fprintf(&b, `<item><title>%s</title><guid>%s</guid>`+
+			`<torznab:attr name="category" value="6000" />`+
+			`<torznab:attr name="magneturl" value="magnet:?xt=urn:btih:%040d" />`+
+			`</item>`, item.title, item.guid, len(item.guid))
+	}
+	b.WriteString(`</channel></rss>`)
+	return b.String()
+}
+
+// serves answers one exact query with these releases.
+func (f *fakeTorznab) serves(query string, items ...torznabItem) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.items == nil {
+		f.items = map[string][]torznabItem{}
+	}
+	f.items[query] = items
+}
+
+// queries are the `q` parameters the fake saw, in the order they arrived.
+func (f *fakeTorznab) queries() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, 0, len(f.requests))
+	for _, req := range f.requests {
+		out = append(out, req.query)
+	}
+	return out
 }
 
 func (f *fakeTorznab) url(name string) string { return f.server.URL + "/" + name }
@@ -183,7 +236,9 @@ func TestSearchSendsOnlyItsLibrarysCategories(t *testing.T) {
 		t.Fatalf("torznab requests = %s, want one movie and one tv search", formatRequests(got))
 	}
 	for i, req := range want {
-		if got[i] != req {
+		// The query itself is another test's business; this one is about which
+		// indexer was asked, in which mode, for which categories.
+		if got[i].indexer != req.indexer || got[i].mode != req.mode || got[i].cats != req.cats {
 			t.Fatalf("torznab requests = %s, want %s", formatRequests(got), formatRequests(want))
 		}
 	}

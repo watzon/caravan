@@ -9,6 +9,19 @@
     fallback?: string | null | undefined;
     alt: string;
     fallbackIcon?: IconName;
+    /**
+     * 'cover' fills the frame — right for real posters. 'contain' floats the
+     * image at its own aspect on the surface, padded — for artwork that is a
+     * mark rather than a poster (site logos are square or wide, and
+     * cover-cropping one into portrait produces a blurry stretch).
+     */
+    fit?: 'cover' | 'contain';
+    /**
+     * 'poster' is the 2:3 movie/series shape. 'video' is 16:9, for tiles whose
+     * artwork is a wide mark — a banner logo in a tall frame is mostly empty
+     * frame.
+     */
+    aspect?: 'poster' | 'video';
     class?: string;
   }
 
@@ -17,6 +30,8 @@
     fallback = undefined,
     alt,
     fallbackIcon = 'film',
+    fit = 'cover',
+    aspect = 'poster',
     class: klass = '',
   }: Props = $props();
 
@@ -37,14 +52,17 @@
   });
 </script>
 
-<div class="relative aspect-[2/3] w-full overflow-hidden rounded-md bg-raised {klass}">
+<div
+  class="relative {aspect === 'video'
+    ? 'aspect-video'
+    : 'aspect-[2/3]'} w-full overflow-hidden rounded-md bg-raised {klass}">
   {#if src}
     <img
       {src}
       {alt}
       loading="lazy"
       decoding="async"
-      class="size-full object-cover"
+      class="size-full {fit === 'contain' ? 'object-contain p-4' : 'object-cover'}"
       onerror={() => (stage += 1)} />
   {:else}
     <div class="flex size-full items-center justify-center text-ink-muted">
