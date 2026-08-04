@@ -149,17 +149,17 @@ func (s *server) handleDiscoverHome(w http.ResponseWriter, r *http.Request) {
 
 	trending, err := provider.TrendingWeek(ctx)
 	if err != nil {
-		s.writeDiscoverError(w, "trending", err)
+		s.writeDiscoverError(w, r, "trending", err)
 		return
 	}
 	movies, err := provider.PopularMovies(ctx)
 	if err != nil {
-		s.writeDiscoverError(w, "popular movies", err)
+		s.writeDiscoverError(w, r, "popular movies", err)
 		return
 	}
 	series, err := provider.PopularSeries(ctx)
 	if err != nil {
-		s.writeDiscoverError(w, "popular series", err)
+		s.writeDiscoverError(w, r, "popular series", err)
 		return
 	}
 
@@ -211,7 +211,7 @@ func (s *server) handleDiscoverBrowse(w http.ResponseWriter, r *http.Request) {
 		result, err = provider.MoviesByCompany(ctx, source.ID, page)
 	}
 	if err != nil {
-		s.writeDiscoverError(w, "browse", err)
+		s.writeDiscoverError(w, r, "browse", err)
 		return
 	}
 
@@ -257,7 +257,7 @@ func (s *server) handleDiscoverTitle(w http.ResponseWriter, r *http.Request) {
 		detail, err = provider.SeriesDetail(ctx, tmdbID)
 	}
 	if err != nil {
-		s.writeDiscoverError(w, "title detail", err)
+		s.writeDiscoverError(w, r, "title detail", err)
 		return
 	}
 
@@ -448,7 +448,14 @@ func (s *server) discovery(w http.ResponseWriter) (core.DiscoverProvider, bool) 
 
 // writeDiscoverError reports a provider failure as a bad gateway, matching
 // GET /search: the request was fine, the upstream was not.
-func (s *server) writeDiscoverError(w http.ResponseWriter, what string, err error) {
+func (s *server) writeDiscoverError(w http.ResponseWriter, r *http.Request, what string, err error) {
+	// See writeAdultProviderError: a canceled request is the ⌘K typeahead
+	// aborting, not TMDB failing.
+	if clientGone(r) {
+		s.log.Debug("discover request abandoned by the caller", "what", what, "error", err)
+		writeError(w, statusClientClosedRequest, "client closed request")
+		return
+	}
 	s.log.Error("discover request failed", "what", what, "error", err)
 	writeError(w, http.StatusBadGateway, "discover request failed")
 }

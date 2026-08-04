@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"sort"
 	"strings"
 	"sync"
@@ -1475,4 +1476,44 @@ func TestSystemStatusCountsSitesOnlyWhenTheModuleIsVisible(t *testing.T) {
 	if got.Counts.Series != 0 {
 		t.Fatalf("counts.series = %d, want 0: a site must not count as television", got.Counts.Series)
 	}
+}
+
+// A canceled request is the typeahead working — every keystroke aborts the one
+// before it — so the provider error it drags along must not become an ERROR
+// log and a 502. The same failure with the caller still on the line is a real
+// upstream error and stays one.
+func TestAbandonedSiteSearchIsNotAnUpstreamFailure(t *testing.T) {
+	h, st, mgr := newTestServer(t)
+	enableAdult(t, st)
+
+	// The abort happens MID provider call, the way a typeahead abort does: a
+	// context canceled before the request even authenticates never reaches the
+	// provider at all.
+	ctx, cancel := context.WithCancel(context.Background())
+	mgr.adult = &hangupProvider{cancel: cancel}
+
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/adult/search?q=braz", nil).WithContext(ctx)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, r)
+	if rec.Code != statusClientClosedRequest {
+		t.Fatalf("status = %d, want %d for a caller that hung up", rec.Code, statusClientClosedRequest)
+	}
+	mgr.adult = &fakeAdultProvider{err: context.Canceled}
+
+	// The caller still waiting gets the honest 502: the guard reads the
+	// request's state, not the error's text.
+	rec = do(t, h, http.MethodGet, "/api/v1/adult/search?q=braz", "")
+	wantStatus(t, rec, http.StatusBadGateway)
+}
+
+// hangupProvider cancels the caller's context mid-call — a typeahead abort —
+// and returns the error that cancellation produces.
+type hangupProvider struct {
+	fakeAdultProvider
+	cancel context.CancelFunc
+}
+
+func (p *hangupProvider) SearchSites(ctx context.Context, q string) ([]core.SiteMeta, error) {
+	p.cancel()
+	return nil, context.Canceled
 }

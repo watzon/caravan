@@ -331,7 +331,7 @@ func (s *server) handleSearchSites(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	sites, err := provider.SearchSites(ctx, query)
 	if err != nil {
-		s.writeAdultProviderError(w, "site search", err)
+		s.writeAdultProviderError(w, r, "site search", err)
 		return
 	}
 
@@ -387,7 +387,7 @@ func (s *server) handleAdultDiscover(w http.ResponseWriter, r *http.Request) {
 		Page: page,
 	})
 	if err != nil {
-		s.writeAdultProviderError(w, "scene search", err)
+		s.writeAdultProviderError(w, r, "scene search", err)
 		return
 	}
 	if result == nil {
@@ -601,7 +601,15 @@ func (s *server) adultProvider(w http.ResponseWriter) (core.AdultMetadataProvide
 // logged and not returned: a stash-box error can quote the query, and the query
 // is the one string on this surface nobody wants echoed into a shared log or a
 // browser's error console.
-func (s *server) writeAdultProviderError(w http.ResponseWriter, what string, err error) {
+func (s *server) writeAdultProviderError(w http.ResponseWriter, r *http.Request, what string, err error) {
+	// A canceled search is the typeahead working — every keystroke aborts the
+	// previous request — so it logs as debug and closes out as 499, not as an
+	// upstream failure.
+	if clientGone(r) {
+		s.log.Debug("adult provider request abandoned by the caller", "what", what, "error", err)
+		writeError(w, statusClientClosedRequest, "client closed request")
+		return
+	}
 	s.log.Error("adult provider request failed", "what", what, "error", err)
 	writeError(w, http.StatusBadGateway, "adult provider request failed")
 }

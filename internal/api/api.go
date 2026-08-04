@@ -411,6 +411,18 @@ func (w *jsonErrorWriter) Write(b []byte) (int, error) {
 	return w.ResponseWriter.Write(b)
 }
 
+// statusClientClosedRequest is nginx's 499: the caller hung up before the
+// answer existed. Nobody receives it — it exists so the request log records
+// "caller left" instead of a 5xx that pages someone.
+const statusClientClosedRequest = 499
+
+// clientGone reports whether the request's own context ended — a typeahead
+// abort or a closed tab. An upstream "failure" that is just that cancellation
+// propagating is normal operation, not an error worth an ERROR line.
+func clientGone(r *http.Request) bool {
+	return r.Context().Err() != nil
+}
+
 // logRequests logs one line per request. The query string is deliberately not
 // logged: SPEC §12 keeps credentials out of the logs, and query parameters are
 // where they would leak from.

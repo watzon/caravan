@@ -299,7 +299,7 @@ func (s *server) handleApproveRequest(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{}
 	switch {
 	case req.MediaType == MediaTypeScene:
-		sr, err := s.approveScene(ctx, w, req)
+		sr, err := s.approveScene(ctx, w, r, req)
 		if err != nil {
 			return
 		}
@@ -423,7 +423,7 @@ func (s *server) loadRequest(w http.ResponseWriter, r *http.Request, id int64) (
 // lands under the studio it actually belongs to now.
 //
 // It writes its own failures and returns the error only so the caller can stop.
-func (s *server) approveScene(ctx context.Context, w http.ResponseWriter, req *core.Request) (*core.Series, error) {
+func (s *server) approveScene(ctx context.Context, w http.ResponseWriter, r *http.Request, req *core.Request) (*core.Series, error) {
 	provider := s.mgr.AdultMetadata()
 	if provider == nil {
 		writeError(w, http.StatusServiceUnavailable, "no adult metadata provider configured")
@@ -431,13 +431,13 @@ func (s *server) approveScene(ctx context.Context, w http.ResponseWriter, req *c
 	}
 	scene, err := provider.GetScene(ctx, req.StashID)
 	if err != nil {
-		s.writeAdultProviderError(w, "get scene", err)
+		s.writeAdultProviderError(w, r, "get scene", err)
 		return nil, err
 	}
 	if scene == nil || scene.SiteStashID == "" {
 		// The provider answered, but with a scene it cannot name a studio for.
 		// Approving would have nowhere to put it.
-		s.writeAdultProviderError(w, "get scene", errNoSceneSite)
+		s.writeAdultProviderError(w, r, "get scene", errNoSceneSite)
 		return nil, errNoSceneSite
 	}
 
