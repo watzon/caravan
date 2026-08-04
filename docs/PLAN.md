@@ -285,6 +285,29 @@ Between v1.0 and v1.1, three unplanned tracks shipped and are treated as done: *
 
 ---
 
+## Phase 12 — Explore expansion
+
+**Hat:** Overseerr, then past it. Discover today is editorial-only (trending, popular, curated networks) plus a stray adult Scenes tab filed under the library; neither lets anyone *ask* for something specific. This phase makes Discover the one place all three catalogues are browsed, with real faceted filtering.
+**Deliverable:** one Discover surface with four scopes — Featured (today's home), Movies, Series, Adult — where the three catalogue scopes are filterable grids: movies/series by genre, cast/crew person, studio/network, keyword, year range, runtime, rating, and language; adult by site (widenable to its whole network), performers, tags (any/all), year, and duration. The Adult section's Scenes tab is retired; its job moves here. Paper pass done ("Explore — Movies (filter browse)", "Explore — Adult (scene browse)").
+
+### Tasks
+
+1. **TMDB discover client:** `DiscoverMovies`/`DiscoverSeries` over `/discover/{movie,tv}` with a filter struct covering genres, people (`with_cast`/`with_people`; TV has no cast param — document the seam), companies/networks, keywords, date ranges, runtime range, vote floor, language, and sort; typeahead passthroughs for person/company/keyword search and a cached `/genre/list`. Filters the API cannot serve are absent from the struct, not silently dropped.
+2. **Adult discover filters:** `core.SceneQuery` grows performers (id→name map), tags (id→name map) with any/all modes, site scoping with the Network/Parent widening operator, year, date + comparison operator, duration, and order. The TPDB REST dialect maps them verbatim (verified live: `performers[{id}]`, `tags[{id}]`, `site_operation`, `orderBy` enums); the generic stash-box GraphQL mapping covers what that protocol answers. Typeahead endpoints for performers and tags proxy the provider.
+3. **API:** scope-aware browse endpoints with the full filter surface as query params, decorated with in_library/requested exactly as `/discover` rows are today; adult browse and its typeaheads live on the adult mux (gate = visibility, as everywhere).
+4. **Scope routing + Scenes tab retirement:** `/discover` (Featured) plus `/discover/movies`, `/discover/series`, `/discover/adult`; the scope row renders Adult only for granted callers. The Adult section loses its Scenes tab; old links land on `/discover/adult`.
+5. **Filter UI:** a shared filter-rail kit — dropdown popovers, typeahead multi-select with removable applied chips, range and sort controls, the hide-in-library toggle — with filter state in the URL so every filtered view is shareable and survives reload. Scene results render as 16:9 duration-badged cards per the Paper boards; movies/series keep DiscoverCard.
+6. **Actions on results:** the same add/request affordances the discover rows have today, same member/admin split, same modals.
+
+### Acceptance criteria
+
+- Every filter offered in the UI round-trips to a provider query proven by fixture tests per dialect; nothing renders a control the provider cannot answer.
+- "Movies with this actor," "this whole network's scenes with these two tags (all)," and "series from this network under 45 minutes" each work end to end and survive a page reload via URL state.
+- The Scenes tab is gone; `/discover/adult` is 404-invisible with the module off or the caller ungranted, and no adult filter surface leaks into ⌘K, Featured, or the movie/series scopes.
+- Members can request and admins can add from any scope, with the existing flows.
+
+---
+
 ## Risks and long poles
 
 - **The release parser is the long pole.** It gates phase 1 matching quality and phase 3 automation quality. Mitigation: the corpus starts in phase 1 and grows forever; the interactive picker and unmatched queue are the designed graceful-degradation paths.
