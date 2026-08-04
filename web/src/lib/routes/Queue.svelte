@@ -26,6 +26,7 @@
     truncateMiddle,
   } from '../format';
   import {
+    canRetryDownload,
     downloadPhaseLabel,
     downloadStateMeta,
     engineLabel,
@@ -250,6 +251,20 @@
                   <span class="sr-only">{pauseLabel}</span>
                 </Button>
               {/if}
+              {#if canRetryDownload(download)}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  title="Try the failed stage again"
+                  disabled={busyID === download.id}
+                  onclick={(event) => {
+                    event.stopPropagation();
+                    void act(download, () => api.retryDownload(download.id), 'Retrying.');
+                  }}>
+                  <Icon name="refresh" size={14} />
+                  <span class="sr-only">Retry {download.name}</span>
+                </Button>
+              {/if}
               <Button
                 variant="ghost"
                 size="sm"
@@ -303,6 +318,7 @@
     onclose={() => (detailID = null)}
     onpause={() => void act(open, () => api.pauseDownload(open.id), 'Paused.')}
     onresume={() => void act(open, () => api.resumeDownload(open.id), 'Resumed.')}
+    onretry={() => void act(open, () => api.retryDownload(open.id), 'Retrying.')}
     onremove={openRemoveFromDetail}
     onlimitsapplied={() => downloads.refresh()} />
 {/if}

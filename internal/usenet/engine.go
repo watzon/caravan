@@ -182,12 +182,14 @@ type item struct {
 	downRate  int64
 }
 
-// Engine implements the interface every download backend speaks, plus the
-// optional insight extension — a Usenet download's detail is its file list and
-// its repair state, where a torrent's is peers and trackers.
+// Engine implements the interface every download backend speaks, plus two
+// optional extensions: insight, because a Usenet download's detail is its file
+// list and its repair state where a torrent's is peers and trackers, and retry,
+// because it is several stages and a failure belongs to one of them.
 var (
 	_ core.Engine        = (*Engine)(nil)
 	_ core.EngineInsight = (*Engine)(nil)
+	_ core.EngineRetry   = (*Engine)(nil)
 )
 
 // NewEngine starts the embedded Usenet engine, writing in-progress data under
@@ -623,6 +625,45 @@ func (e *Engine) Resume(ctx context.Context, id core.DownloadID) error {
 	if !it.finished {
 		e.start(it)
 	}
+	snapshot := e.refreshLocked(it)
+	e.mu.Unlock()
+
+	return e.save(ctx, snapshot)
+}
+
+// Retry puts a failed download back to work. See core.EngineRetry.
+//
+// It re-enters the stage machine from the top, which is what makes it pick up
+// where the failure left it rather than start over: every stage is written to
+// recognise work that is already done. The articles already fetched are in the
+// pipeline's resume sidecar and are not asked for a second time; a release
+// whose files are all on disk goes straight past the download stage; and one
+// that got as far as unpacking goes straight to unpacking, because that is the
+// first stage with anything left to do (see Engine.stages).
+//
+// The repair budget is the one thing deliberately reset. Within a single run a
+// download spends its recovery volumes once, so a failed extraction does not
+// ask par2 about damage it has already been asked about; a user pressing Retry
+// is asking for a genuinely fresh attempt, and the volumes are on disk by then
+// so the second pass costs cpu rather than a provider's quota.
+func (e *Engine) Retry(ctx context.Context, id core.DownloadID) error {
+	e.mu.Lock()
+	it, ok := e.items[id]
+	if !ok {
+		e.mu.Unlock()
+		return fmt.Errorf("usenet: retry %q: %w", id, download.ErrNotFound)
+	}
+	// Only a failure has something to retry. A running, paused or finished
+	// download reaching here means the caller acted on state it had misread,
+	// and quietly restarting one would be a worse answer than saying so.
+	if it.failure == "" {
+		e.mu.Unlock()
+		return fmt.Errorf("usenet: retry %q: %w", id, download.ErrNotRetryable)
+	}
+	it.failure = ""
+	it.paused = false
+	it.repaired = false
+	e.start(it)
 	snapshot := e.refreshLocked(it)
 	e.mu.Unlock()
 

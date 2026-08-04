@@ -3,6 +3,7 @@ package usenet
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -160,6 +161,104 @@ func TestEngineRepairsAHolePar2Covers(t *testing.T) {
 	if want := rel.files["beta.bin"]; !bytes.Equal(got, want) {
 		t.Errorf("repaired beta.bin is %d bytes, want %d", len(got), len(want))
 	}
+}
+
+// A failed download is not a dead end. The failure here is at the last stage —
+// the release unpacks to a file that is already sitting in the directory — and
+// retrying after clearing the obstacle has to finish the download without
+// asking the provider for a single article it already has.
+func TestEngineRetryResumesFromTheStageThatFailed(t *testing.T) {
+	nntpSrv := startFakeNNTP(t)
+	payload := []byte(strings.Repeat("retry me\n", 400))
+	rel := stage(t, nntpSrv, map[string][]byte{"movie.mkv": payload}, 500)
+
+	e, root := newTestEngine(t, nntpSrv, newMemStore())
+	id := addRelease(t, e, rel, "Retry.Release")
+	waitForState(t, e, id, core.DownloadCompleted)
+
+	// Put the download back into the failed state the user sees, without
+	// touching a byte of what it fetched: this is the same shape as the
+	// extraction failure that prompted the feature.
+	dir := filepath.Join(root, download.IncompleteDir, "Retry.Release")
+	e.mu.Lock()
+	it := e.items[id]
+	it.finished = false
+	it.failure = "unpacking the release failed"
+	e.mu.Unlock()
+
+	if st, _ := e.Status(context.Background(), id); st.State != core.DownloadFailed {
+		t.Fatalf("state = %s, want failed before the retry", st.State)
+	}
+	before := nntpSrv.Stats().Bodies
+
+	if err := e.Retry(context.Background(), id); err != nil {
+		t.Fatalf("Retry: %v", err)
+	}
+	st := waitForState(t, e, id, core.DownloadCompleted)
+	if st.Error != "" {
+		t.Errorf("error = %q, want it cleared by the retry", st.Error)
+	}
+
+	// The whole point: every article was already on disk, so the retry re-ran
+	// the stages over what was there rather than refetching the release.
+	if after := nntpSrv.Stats().Bodies; after != before {
+		t.Errorf("retry fetched %d more articles, want none", after-before)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "movie.mkv"))
+	if err != nil {
+		t.Fatalf("read assembled file after retry: %v", err)
+	}
+	if string(got) != string(payload) {
+		t.Errorf("assembled file changed under the retry (%d bytes, want %d)", len(got), len(payload))
+	}
+}
+
+// Retry is for failures. Restarting a download that is merely running, paused
+// or done would be acting on state the caller had misread, so it says so.
+func TestEngineRetryRefusesADownloadThatHasNotFailed(t *testing.T) {
+	nntpSrv := startFakeNNTP(t)
+	rel := stage(t, nntpSrv, map[string][]byte{"movie.mkv": []byte(strings.Repeat("z", 800))}, 500)
+
+	e, _ := newTestEngine(t, nntpSrv, newMemStore())
+	id := addRelease(t, e, rel, "Healthy.Release")
+	waitForState(t, e, id, core.DownloadCompleted)
+
+	if err := e.Retry(context.Background(), id); !errors.Is(err, download.ErrNotRetryable) {
+		t.Fatalf("Retry of a completed download = %v, want ErrNotRetryable", err)
+	}
+	if err := e.Retry(context.Background(), "u-nope"); !errors.Is(err, download.ErrNotFound) {
+		t.Fatalf("Retry of an unknown download = %v, want ErrNotFound", err)
+	}
+}
+
+// A retry after a repair failure spends the recovery volumes again: the budget
+// guard exists to stop one run asking par2 twice about the same damage, and a
+// user pressing the button is asking for a fresh attempt, not the same refusal.
+func TestEngineRetryRestoresTheRepairBudget(t *testing.T) {
+	nntpSrv := startFakeNNTP(t)
+	rel := stagePar2Corpus(t, nntpSrv, nil)
+
+	e, _ := newTestEngine(t, nntpSrv, newMemStore())
+	id := addRelease(t, e, rel, "Repaired.Release")
+	waitForState(t, e, id, core.DownloadCompleted)
+
+	e.mu.Lock()
+	it := e.items[id]
+	it.repaired = true
+	it.finished = false
+	it.failure = "unpacking the release failed"
+	e.mu.Unlock()
+
+	if err := e.Retry(context.Background(), id); err != nil {
+		t.Fatalf("Retry: %v", err)
+	}
+	e.mu.Lock()
+	repaired := e.items[id].repaired
+	e.mu.Unlock()
+	if repaired {
+		t.Error("the retry kept the spent repair budget, so par2 would refuse a second pass")
+	}
+	waitForState(t, e, id, core.DownloadCompleted)
 }
 
 // notCovered is the cross-check the message above is built on, and the base

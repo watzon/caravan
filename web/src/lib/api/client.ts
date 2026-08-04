@@ -142,6 +142,7 @@ export const endpoints = {
   downloads: () => `${API_BASE}/downloads`,
   downloadPause: (id: string) => `${API_BASE}/downloads/${encodeURIComponent(id)}/pause`,
   downloadResume: (id: string) => `${API_BASE}/downloads/${encodeURIComponent(id)}/resume`,
+  downloadRetry: (id: string) => `${API_BASE}/downloads/${encodeURIComponent(id)}/retry`,
   download: (id: string) => `${API_BASE}/downloads/${encodeURIComponent(id)}`,
   downloadInsight: (id: string) => `${API_BASE}/downloads/${encodeURIComponent(id)}/insight`,
   downloadLimits: (id: string) => `${API_BASE}/downloads/${encodeURIComponent(id)}/limits`,
@@ -705,6 +706,16 @@ export const api = {
 
   resumeDownload: (id: string) =>
     request<void>(endpoints.downloadResume(id), { method: 'POST' }),
+
+  /**
+   * Put a failed download back to work, picking up from whatever stage it got
+   * to. Only the built-in Usenet engine can: a Usenet download is several
+   * stages and a failure belongs to one of them, where a torrent's failures are
+   * about the swarm and resume already covers them. An engine that cannot
+   * answers 400, and a download that has not failed answers 409.
+   */
+  retryDownload: (id: string) =>
+    request<void>(endpoints.downloadRetry(id), { method: 'POST' }),
 
   /**
    * Remove a download. `deleteData` false leaves the payload on disk, which is

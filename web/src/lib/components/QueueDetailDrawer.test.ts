@@ -55,7 +55,7 @@ function button(label: string) {
   return found!;
 }
 
-function mountDrawer(overrides: Partial<DownloadStatus> = {}) {
+function mountDrawer(overrides: Partial<DownloadStatus> = {}, props: Record<string, unknown> = {}) {
   app = mount(QueueDetailDrawer, {
     target: host,
     props: {
@@ -64,6 +64,7 @@ function mountDrawer(overrides: Partial<DownloadStatus> = {}) {
       onpause: vi.fn(),
       onresume: vi.fn(),
       onremove: vi.fn(),
+      ...props,
     },
   });
 }
@@ -225,5 +226,47 @@ describe('QueueDetailDrawer (usenet)', () => {
     // interaction at all, so the poll cannot be gated on one.
     await vi.advanceTimersByTimeAsync(3000);
     expect(fetchMock.mock.calls.length).toBeGreaterThan(initial);
+  });
+});
+
+describe('QueueDetailDrawer retry', () => {
+  // A failed Usenet download has nothing to pause — it has a stage that went
+  // wrong and gigabytes already on disk, so Retry takes Pause's place rather
+  // than sitting beside a button that would do nothing.
+  it('offers retry instead of pause for a failed usenet download', async () => {
+    const onretry = vi.fn();
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(usenetInsight())));
+    mountDrawer({ protocol: 'usenet', state: 'failed', error: 'unpacking the release failed' }, { onretry });
+    await settle();
+
+    expect(host.textContent).toContain('Retry');
+    expect(host.textContent).not.toContain('Pause');
+
+    button('Retry').click();
+    flushSync();
+    expect(onretry).toHaveBeenCalledTimes(1);
+  });
+
+  // A torrent engine's failures are about the swarm and it implements no retry
+  // capability, so the drawer must not offer one.
+  it('does not offer retry for a failed torrent', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      jsonResponse({ insight: { peers: [], trackers: [], availability: 0 } }),
+    ));
+    mountDrawer({ state: 'failed', error: 'no peers' }, { onretry: vi.fn() });
+    await settle();
+
+    expect(host.textContent).not.toContain('Retry');
+    expect(host.textContent).toContain('Pause');
+  });
+
+  // And a usenet download that is merely downloading has nothing to retry.
+  it('does not offer retry for a healthy usenet download', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(usenetInsight())));
+    mountDrawer({ protocol: 'usenet', state: 'downloading' }, { onretry: vi.fn() });
+    await settle();
+
+    expect(host.textContent).not.toContain('Retry');
+    expect(host.textContent).toContain('Pause');
   });
 });

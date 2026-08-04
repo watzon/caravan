@@ -174,6 +174,71 @@ func TestDownloadInsight(t *testing.T) {
 	})
 }
 
+// retryEngine is an engine that can retry, so the capability-gated route has
+// something to reach.
+type retryEngine struct {
+	*stubEngine
+	retried []core.DownloadID
+	err     error
+}
+
+func (e *retryEngine) Retry(ctx context.Context, id core.DownloadID) error {
+	if e.err != nil {
+		return e.err
+	}
+	e.retried = append(e.retried, id)
+	return nil
+}
+
+// POST /downloads/{id}/retry, and the three ways it says no. The status codes
+// are the contract the queue reads: 400 is "this engine cannot", 409 is "this
+// download has nothing to retry", and they mean different things to a user.
+func TestRetryDownload(t *testing.T) {
+	t.Run("retries through the engine", func(t *testing.T) {
+		engine := &retryEngine{stubEngine: &stubEngine{}}
+		h, _, _ := newTestServer(t, WithEngine(&stubEngineProvider{engine: engine}))
+
+		rec := do(t, h, http.MethodPost, "/api/v1/downloads/u-abc/retry", "")
+		wantStatus(t, rec, http.StatusNoContent)
+		if len(engine.retried) != 1 || engine.retried[0] != "u-abc" {
+			t.Fatalf("retried = %v, want [u-abc]", engine.retried)
+		}
+	})
+
+	// The embedded torrent engine is exactly this case: its failures are about
+	// the swarm and Resume already covers them, so it does not implement the
+	// capability and the route says so rather than pretending.
+	t.Run("400 when the engine cannot retry", func(t *testing.T) {
+		h, _, _ := newTestServer(t, WithEngine(&stubEngineProvider{engine: &stubEngine{}}))
+		rec := do(t, h, http.MethodPost, "/api/v1/downloads/hash/retry", "")
+		wantStatus(t, rec, http.StatusBadRequest)
+		wantErrorBody(t, rec)
+	})
+
+	t.Run("409 when the download has not failed", func(t *testing.T) {
+		engine := &retryEngine{stubEngine: &stubEngine{}, err: download.ErrNotRetryable}
+		h, _, _ := newTestServer(t, WithEngine(&stubEngineProvider{engine: engine}))
+		rec := do(t, h, http.MethodPost, "/api/v1/downloads/u-abc/retry", "")
+		wantStatus(t, rec, http.StatusConflict)
+		wantErrorBody(t, rec)
+	})
+
+	t.Run("404 for an unknown download", func(t *testing.T) {
+		engine := &retryEngine{stubEngine: &stubEngine{}, err: download.ErrNotFound}
+		h, _, _ := newTestServer(t, WithEngine(&stubEngineProvider{engine: engine}))
+		rec := do(t, h, http.MethodPost, "/api/v1/downloads/missing/retry", "")
+		wantStatus(t, rec, http.StatusNotFound)
+		wantErrorBody(t, rec)
+	})
+
+	t.Run("503 without an engine", func(t *testing.T) {
+		h, _, _ := newTestServer(t)
+		rec := do(t, h, http.MethodPost, "/api/v1/downloads/u-abc/retry", "")
+		wantStatus(t, rec, http.StatusServiceUnavailable)
+		wantErrorBody(t, rec)
+	})
+}
+
 func TestSetDownloadLimitsPersistsAndApplies(t *testing.T) {
 	engine := &rateEngine{stubEngine: &stubEngine{}}
 	h, st, _ := newTestServer(t, WithEngine(&stubEngineProvider{engine: engine}))

@@ -169,14 +169,13 @@ func Extract(ctx context.Context, dir string) (*Result, error) {
 		// Only the first volume is opened; the decoders follow the rest of a
 		// multi-volume set themselves.
 		archive := s.Volumes[0]
-		first := filepath.Join(dir, archive)
 
 		var files []extracted
 		switch s.Kind {
 		case KindZip:
-			files, err = extractZip(ctx, first, archive, staging)
+			files, err = extractZip(ctx, filepath.Join(dir, archive), archive, staging)
 		case KindRAR:
-			files, err = extractRAR(ctx, first, archive, staging, newVolumeFS(dir, s.Volumes))
+			files, err = extractRAR(ctx, archive, staging, resolveVolumes(dir, s.Volumes))
 		default:
 			err = &Error{Archive: archive, Err: fmt.Errorf("extract: unknown archive kind %d", s.Kind)}
 		}

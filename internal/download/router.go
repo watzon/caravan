@@ -24,6 +24,12 @@ var ErrNoEngine = errors.New("download: no engine configured for the release pro
 // that does not implement the extension at all.
 var ErrUnsupported = errors.New("download: engine does not support this operation")
 
+// ErrNotRetryable is returned when a retry is asked for a download that has
+// not failed. It is separate from ErrUnsupported because the two are different
+// mistakes: the engine can retry, this download simply has nothing to retry,
+// and the API answers 409 rather than 400.
+var ErrNotRetryable = errors.New("download: only a failed download can be retried")
+
 // ErrClientUnreachable is returned by Add when the engine a release would go
 // to is an external download client the poller currently cannot reach
 // (PLAN phase 6 task 4).
@@ -236,6 +242,20 @@ func (r *Router) Insight(ctx context.Context, id core.DownloadID) (*core.Downloa
 	return insighter.Insight(ctx, native)
 }
 
+// Retry implements core.EngineRetry by delegating to the engine holding the
+// download, which may not support it.
+func (r *Router) Retry(ctx context.Context, id core.DownloadID) error {
+	engine, native, _, err := r.owner(ctx, id)
+	if err != nil {
+		return err
+	}
+	retrier, ok := engine.(core.EngineRetry)
+	if !ok {
+		return fmt.Errorf("%w: retrying a failed download", ErrUnsupported)
+	}
+	return retrier.Retry(ctx, native)
+}
+
 // SetGlobalRates implements half of core.EngineRateLimits. Global limits are
 // Caravan's own setting, so they are pushed to every engine that has them and
 // ignored by those that do not.
@@ -389,4 +409,5 @@ var (
 	_ core.EngineRouting    = (*Router)(nil)
 	_ core.EngineInsight    = (*Router)(nil)
 	_ core.EngineRateLimits = (*Router)(nil)
+	_ core.EngineRetry      = (*Router)(nil)
 )

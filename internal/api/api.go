@@ -334,6 +334,7 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("GET /downloads", s.handleListDownloads)
 	api.HandleFunc("POST /downloads/{id}/pause", s.handlePauseDownload)
 	api.HandleFunc("POST /downloads/{id}/resume", s.handleResumeDownload)
+	api.HandleFunc("POST /downloads/{id}/retry", s.handleRetryDownload)
 	api.HandleFunc("DELETE /downloads/{id}", s.handleDeleteDownload)
 	// Per-download insight and rate limits (PLAN phase 3, task 10).
 	api.HandleFunc("GET /downloads/{id}/insight", s.handleDownloadInsight)

@@ -127,6 +127,39 @@ func main() {
 	}
 	manifest["multi-old"] = fixture{Volumes: names, Files: files(old)}
 
+	// A RAR5 set whose filenames lie about which volume they hold, which is the
+	// only format that can: RAR5 records a volume number in every volume's main
+	// header, and RAR4 has no field for one. Both real-world defects are packed
+	// into four volumes:
+	//
+	//   - Mixed number width. part1 is one digit and the rest are two, so the
+	//     successor rardecode infers from "part1.rar" is "part2.rar", which is
+	//     not what the file is called.
+	//   - Swapped names. The file called part03 holds volume 4 and the file
+	//     called part04 holds volume 3, so reading them in name order silently
+	//     produces the wrong bytes.
+	//
+	// A poster's set really does arrive like this (a 30-volume release with the
+	// same swap twice and the width change at ten), and the extractor has to go
+	// by what each volume says it is.
+	mixed := []entry{
+		{name: "notes.nfo", data: content("notes", 90)},
+		{name: "feature.mkv", data: content("feature", 4000)},
+	}
+	vols5 := buildMulti5(mixed, 1, []int{1000, 1000, 1000, 1000})
+	// names[i] is the file the volume at index i is written to: volumes 3 and 4
+	// (indexes 2 and 3) swap names.
+	names = []string{"mixed.part1.rar", "mixed.part02.rar", "mixed.part04.rar", "mixed.part03.rar"}
+	for i, v := range vols5 {
+		write(dir, names[i], v)
+	}
+	// Detect reports a set in part-number order, which for this fixture is not
+	// the order the volumes were written in — that is the whole point of it.
+	manifest["multi-mixed"] = fixture{
+		Volumes: []string{"mixed.part1.rar", "mixed.part02.rar", "mixed.part03.rar", "mixed.part04.rar"},
+		Files:   files(mixed),
+	}
+
 	// A file flagged as encrypted. Extraction must stop at the header.
 	write(dir, "fileenc.rar", buildSingle([]entry{
 		{name: "secret.mkv", data: content("secret", 400), encrypted: true},
@@ -245,6 +278,149 @@ func buildMulti(entries []entry, splitIdx int, chunks []int, extraArcFlags uint1
 		off += c
 	}
 	return vols
+}
+
+// ---------------------------------------------------------------------------
+// RAR 5 ("rar5")
+//
+// A second, unrelated block layout, needed for one property RAR4 cannot carry:
+// a volume's own number. Every block is
+//
+//	crc32(sizeVarint || body) uint32le, sizeVarint, body, [data]
+//
+// where size is the length of body and every number inside it is a
+// little-endian base-128 varint. Stored files need no encoder here either — the
+// compression method lives in three bits of one varint and zero means stored.
+// ---------------------------------------------------------------------------
+
+// signature5 is the RAR 5 marker block.
+var signature5 = []byte{'R', 'a', 'r', '!', 0x1a, 0x07, 0x01, 0x00}
+
+// RAR5 block types and flags, mirroring archive50.go in rardecode.
+const (
+	block5Main = 1
+	block5File = 2
+	block5End  = 5
+
+	block5HasData      = 0x0002
+	block5DataNotFirst = 0x0008
+	block5DataNotLast  = 0x0010
+
+	arc5MultiVol = 0x0001
+	arc5VolNum   = 0x0002
+
+	endArc5NotLast = 0x0001
+
+	file5HasCRC32 = 0x0004
+
+	file5HostOSUnix = 1
+)
+
+// buildMulti5 assembles a RAR5 multi-volume archive, the same shape buildMulti
+// produces for RAR4: entries before splitIdx live whole in volume one, and
+// entries[splitIdx] is split across every volume using chunks.
+//
+// Every volume but the first records its own number, which is what real rar
+// does and is the whole point of this fixture.
+func buildMulti5(entries []entry, splitIdx int, chunks []int) [][]byte {
+	split := entries[splitIdx]
+	total := 0
+	for _, c := range chunks {
+		total += c
+	}
+	if total != len(split.data) {
+		log.Fatalf("chunks sum to %d, %s is %d bytes", total, split.name, len(split.data))
+	}
+
+	vols := make([][]byte, len(chunks))
+	off := 0
+	for i, c := range chunks {
+		var buf bytes.Buffer
+		buf.Write(signature5)
+		buf.Write(mainHeader5(i))
+		if i == 0 {
+			for _, e := range entries[:splitIdx] {
+				buf.Write(fileHeader5(e, 0, len(e.data), len(e.data)))
+				buf.Write(e.data)
+			}
+		}
+		var flags uint64
+		if i > 0 {
+			flags |= block5DataNotFirst
+		}
+		if i < len(chunks)-1 {
+			flags |= block5DataNotLast
+		}
+		buf.Write(fileHeader5(split, flags, c, len(split.data)))
+		buf.Write(split.data[off : off+c])
+		buf.Write(endHeader5(i < len(chunks)-1))
+		vols[i] = buf.Bytes()
+		off += c
+	}
+	return vols
+}
+
+// mainHeader5 is the archive block. volnum is 0-based, as the format records
+// it; volume one omits the field entirely, exactly as rar writes it.
+func mainHeader5(volnum int) []byte {
+	body := []byte{}
+	body = appendVarint(body, block5Main)
+	body = appendVarint(body, 0) // block flags: no extra area, no data
+	if volnum == 0 {
+		body = appendVarint(body, arc5MultiVol)
+		return seal5(body)
+	}
+	body = appendVarint(body, arc5MultiVol|arc5VolNum)
+	body = appendVarint(body, uint64(volnum))
+	return seal5(body)
+}
+
+// fileHeader5 is one stored file's block. unpacked is the whole file's length
+// and the CRC is the whole file's, repeated in every volume that carries part
+// of it; packed is this block's share.
+func fileHeader5(e entry, flags uint64, packed, unpacked int) []byte {
+	sum := crc32.ChecksumIEEE(e.data)
+	if e.crc != nil {
+		sum = *e.crc
+	}
+	body := []byte{}
+	body = appendVarint(body, block5File)
+	body = appendVarint(body, flags|block5HasData)
+	body = appendVarint(body, uint64(packed))
+	body = appendVarint(body, file5HasCRC32) // file flags
+	body = appendVarint(body, uint64(unpacked))
+	body = appendVarint(body, 0) // attributes
+	body = binary.LittleEndian.AppendUint32(body, sum)
+	body = appendVarint(body, 0) // compression flags: algorithm 0, method 0 (stored)
+	body = appendVarint(body, file5HostOSUnix)
+	body = appendVarint(body, uint64(len(e.name)))
+	body = append(body, e.name...)
+	return seal5(body)
+}
+
+// endHeader5 closes a volume. notLast tells the reader another volume follows.
+func endHeader5(notLast bool) []byte {
+	body := []byte{}
+	body = appendVarint(body, block5End)
+	body = appendVarint(body, 0) // block flags
+	var flags uint64
+	if notLast {
+		flags = endArc5NotLast
+	}
+	body = appendVarint(body, flags)
+	return seal5(body)
+}
+
+// seal5 frames a block body: its length, and the CRC32 over the length and the
+// body together.
+func seal5(body []byte) []byte {
+	sized := appendVarint(nil, uint64(len(body)))
+	sized = append(sized, body...)
+	return append(binary.LittleEndian.AppendUint32(nil, crc32.ChecksumIEEE(sized)), sized...)
+}
+
+func appendVarint(b []byte, v uint64) []byte {
+	return binary.AppendUvarint(b, v)
 }
 
 // mainHeader is the 13-byte archive block every volume opens with.

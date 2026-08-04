@@ -2,8 +2,8 @@ Origin of the fixtures in this directory
 ========================================
 
 The .rar files here are NOT third-party test data. They were written by
-gen/main.go in this directory, which hand-assembles RAR 1.5 ("rar4") archives
-containing stored (uncompressed) files.
+gen/main.go in this directory, which hand-assembles RAR 1.5 ("rar4") and RAR 5
+("rar5") archives containing stored (uncompressed) files.
 
 The original plan was to copy small archives out of github.com/nwaples/rardecode's
 own testdata, which is BSD-2-Clause licensed. That is not possible: the module
@@ -34,6 +34,14 @@ Fixture sets
   multi-new         multi.part01.rar .. multi.part03.rar — modern volume
                     naming, one file wholly inside volume one and one file
                     split across all three
+  multi-mixed       mixed.part1.rar, mixed.part02.rar, mixed.part03.rar,
+                    mixed.part04.rar — the only rar5 set here, because rar5 is
+                    the only format that records a volume's own number. Both
+                    real-world naming defects at once: part1 is a digit
+                    narrower than the rest, and the files called part03 and
+                    part04 hold each other's volumes. Reading the set by name
+                    produces rardecode's "bad volume number" partway through
+                    the payload
   multi-old         old.rar, old.r00, old.r01 — legacy volume naming, one file
                     split across all three
   file-encrypted    fileenc.rar — a file header flagged encrypted

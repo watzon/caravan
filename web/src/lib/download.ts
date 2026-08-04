@@ -98,6 +98,23 @@ export function isFinishedDownload(status: DownloadStatus): boolean {
   return status.state === 'completed' || (status.state === 'paused' && status.progress >= 1);
 }
 
+/**
+ * Whether the queue offers Retry for this download.
+ *
+ * Only a failed Usenet download: it is several stages — fetch, repair, unpack —
+ * and a failure belongs to one of them, so trying again resumes from the stage
+ * that broke rather than refetching gigabytes. A torrent has no such structure
+ * and its engine says so by not implementing the capability at all, which is
+ * why the protocol is the test here rather than a separate flag.
+ *
+ * The server is still the authority: it answers 400 for an engine that cannot
+ * retry and 409 for a download that is no longer failed, and the click surfaces
+ * whichever it gets.
+ */
+export function canRetryDownload(status: DownloadStatus): boolean {
+  return status.state === 'failed' && status.protocol === 'usenet';
+}
+
 /** The built-in torrent engine, and the answer when a row names no backend. */
 export const DEFAULT_ENGINE = 'embedded';
 

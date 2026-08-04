@@ -8,6 +8,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import type { DownloadStatus } from '../api/types';
 import Queue from './Queue.svelte';
 import { downloads } from '../state/downloads.svelte';
+import { toasts } from '../state/toast.svelte';
 
 function download(overrides: Partial<DownloadStatus>): DownloadStatus {
   return {
@@ -173,5 +174,99 @@ describe('Queue detail drawer', () => {
     flushSync();
 
     expect(host.querySelector('[role="dialog"]')).toBeNull();
+  });
+});
+
+describe('Queue retry', () => {
+  /**
+   * Failed downloads used to be dead ends: the only action offered was Remove,
+   * which for a Usenet release means throwing away everything it fetched.
+   */
+  const FAILED_USENET = download({
+    name: 'failed-usenet',
+    state: 'failed',
+    protocol: 'usenet',
+    error: 'unpacking the release failed',
+  });
+  const FAILED = [
+    FAILED_USENET,
+    download({ name: 'failed-torrent', state: 'failed', error: 'no peers' }),
+  ];
+
+  function retryButtons(): string[] {
+    return [...host.querySelectorAll('li button[title="Try the failed stage again"]')].map(
+      (el) => el.getAttribute('aria-label') ?? el.textContent?.trim() ?? '',
+    );
+  }
+
+  it('offers retry on a failed usenet row and not on a failed torrent', async () => {
+    queue = FAILED;
+    await mountQueue();
+    pill('All').click();
+    flushSync();
+
+    const labels = [...host.querySelectorAll('li button .sr-only')].map((el) => el.textContent?.trim());
+    expect(labels).toContain('Retry failed-usenet');
+    expect(labels).not.toContain('Retry failed-torrent');
+    expect(retryButtons()).toHaveLength(1);
+  });
+
+  it('posts to the retry endpoint and re-polls the queue', async () => {
+    queue = FAILED;
+    await mountQueue();
+    pill('All').click();
+    flushSync();
+
+    const retry = host.querySelector('li button[title="Try the failed stage again"]') as HTMLButtonElement;
+    retry.click();
+    for (let i = 0; i < 10; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      flushSync();
+    }
+
+    const calls = (globalThis.fetch as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    const posted = calls.find(
+      ([url, init]) =>
+        String(url).endsWith('/retry') && (init as RequestInit | undefined)?.method === 'POST',
+    );
+    expect(posted, 'a POST to the retry endpoint').toBeDefined();
+    expect(String(posted![0])).toContain(encodeURIComponent(FAILED_USENET.id));
+  });
+
+  it('surfaces the server refusing a retry', async () => {
+    queue = FAILED;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith('/retry') && init?.method === 'POST') {
+          return new Response(JSON.stringify({ error: 'only a failed download can be retried' }), {
+            status: 409,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        if (url.includes('/downloads')) {
+          return new Response(JSON.stringify({ downloads: queue }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      }),
+    );
+    await mountQueue();
+    pill('All').click();
+    flushSync();
+
+    const retry = host.querySelector('li button[title="Try the failed stage again"]') as HTMLButtonElement;
+    retry.click();
+    for (let i = 0; i < 10; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      flushSync();
+    }
+
+    expect(toasts.items.some((t) => t.message.includes('only a failed download can be retried'))).toBe(
+      true,
+    );
   });
 });

@@ -2,6 +2,7 @@ package extract
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -364,6 +365,154 @@ func TestExtractRARMixedWidthVolumeNames(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(dir, v)); !errors.Is(err, fs.ErrNotExist) {
 			t.Errorf("volume %s survived a verified extract", v)
 		}
+	}
+}
+
+// TestExtractRARScrambledVolumeNames is the failure a real release hit: the
+// name a volume was posted under is not the volume it holds. The multi-mixed
+// fixture packs both defects into four volumes — part1 is a digit narrower than
+// the rest, and part03/part04 hold each other's volumes.
+//
+// Reading them in name order does not fail cleanly. Each file exists and is a
+// valid rar volume, so the decoder gets several megabytes into the payload
+// before the volume number in a header contradicts the one it asked for, and
+// what it has written by then is the wrong bytes. The hash check below is the
+// assertion that matters; without volume-number resolution this test fails
+// with rardecode's "bad volume number".
+func TestExtractRARScrambledVolumeNames(t *testing.T) {
+	dir, m := stageFixture(t, "multi-mixed")
+	fix := m["multi-mixed"]
+
+	res, err := Extract(context.Background(), dir)
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	assertFixtureFiles(t, dir, fix.Files)
+
+	if !reflect.DeepEqual(res.Archives, fix.Volumes) {
+		t.Errorf("Archives = %v, want %v", res.Archives, fix.Volumes)
+	}
+	for _, v := range fix.Volumes {
+		if _, err := os.Stat(filepath.Join(dir, v)); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("volume %s survived a verified extract", v)
+		}
+	}
+}
+
+// The mapping under that, asserted directly: the archive's own record of which
+// volume it is beats the number in its name, and a set that records nothing
+// falls back to the names unchanged.
+func TestResolveVolumesPrefersTheNumberTheArchiveRecords(t *testing.T) {
+	t.Run("rar5 records its volume number", func(t *testing.T) {
+		dir, m := stageFixture(t, "multi-mixed")
+		vs := resolveVolumes(dir, m["multi-mixed"].Volumes)
+
+		want := map[int]string{
+			1: "mixed.part1.rar",
+			2: "mixed.part02.rar",
+			3: "mixed.part04.rar", // holds volume 3 despite its name
+			4: "mixed.part03.rar", // holds volume 4 despite its name
+		}
+		if !reflect.DeepEqual(vs.byNum, want) {
+			t.Fatalf("byNum = %v, want %v", vs.byNum, want)
+		}
+		if got, wantFirst := vs.first(), filepath.Join(dir, "mixed.part1.rar"); got != wantFirst {
+			t.Errorf("first() = %s, want %s", got, wantFirst)
+		}
+	})
+
+	t.Run("rar4 has no such field and keeps its names", func(t *testing.T) {
+		dir, m := stageFixture(t, "multi-new")
+		vs := resolveVolumes(dir, m["multi-new"].Volumes)
+
+		want := map[int]string{1: "multi.part01.rar", 2: "multi.part02.rar", 3: "multi.part03.rar"}
+		if !reflect.DeepEqual(vs.byNum, want) {
+			t.Fatalf("byNum = %v, want %v", vs.byNum, want)
+		}
+	})
+
+	t.Run("legacy naming is left entirely to the decoder", func(t *testing.T) {
+		dir, m := stageFixture(t, "multi-old")
+		vs := resolveVolumes(dir, m["multi-old"].Volumes)
+
+		// No part numbers to key on, so nothing is mapped and Open passes the
+		// decoder's own names straight through.
+		if len(vs.byNum) != 0 {
+			t.Fatalf("byNum = %v, want nothing mapped", vs.byNum)
+		}
+		if got, want := vs.first(), filepath.Join(dir, "old.rar"); got != want {
+			t.Errorf("first() = %s, want %s", got, want)
+		}
+	})
+}
+
+// A volume number this set does not have reads as "not there" rather than as
+// whichever file happens to bear the name. It is how the decoder learns a set
+// has ended, and handing it a wrong volume instead is what turned a misnamed
+// release into a corrupt file.
+func TestVolumeSetOpenRefusesANumberTheSetDoesNotHave(t *testing.T) {
+	dir, m := stageFixture(t, "multi-mixed")
+	vs := resolveVolumes(dir, m["multi-mixed"].Volumes)
+
+	if _, err := vs.Open(filepath.Join(dir, "mixed.part5.rar")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("Open(part5) = %v, want a not-exist error", err)
+	}
+	// And a number it does have opens the file that holds it, whatever that
+	// file is called.
+	f, err := vs.Open(filepath.Join(dir, "mixed.part3.rar"))
+	if err != nil {
+		t.Fatalf("Open(part3): %v", err)
+	}
+	defer f.Close()
+	got, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := os.ReadFile(filepath.Join(dir, "mixed.part04.rar"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, want) {
+		t.Error("Open(part3) did not return the file holding volume 3")
+	}
+}
+
+// The header parser on its own: it answers for a rar5 volume that records a
+// number, and declines — rather than guessing — for everything else.
+func TestRarVolumeNumber(t *testing.T) {
+	dir, _ := stageFixture(t, "multi-mixed")
+	for name, want := range map[string]int{
+		"mixed.part02.rar": 2,
+		"mixed.part03.rar": 4,
+		"mixed.part04.rar": 3,
+	} {
+		got, err := rarVolumeNumber(filepath.Join(dir, name))
+		if err != nil || got != want {
+			t.Errorf("rarVolumeNumber(%s) = %d, %v, want %d", name, got, err, want)
+		}
+	}
+
+	// The first volume of a rar5 set omits the field, as rar writes it.
+	if _, err := rarVolumeNumber(filepath.Join(dir, "mixed.part1.rar")); !errors.Is(err, errNoVolumeNumber) {
+		t.Errorf("rarVolumeNumber(volume one) = %v, want errNoVolumeNumber", err)
+	}
+
+	rar4, _ := stageFixture(t, "multi-new")
+	if _, err := rarVolumeNumber(filepath.Join(rar4, "multi.part02.rar")); !errors.Is(err, errNoVolumeNumber) {
+		t.Errorf("rarVolumeNumber(rar4) = %v, want errNoVolumeNumber", err)
+	}
+
+	// Not an archive at all, and a file that is not there: neither is a reason
+	// to guess a number.
+	junk := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(junk, []byte("this is not a rar"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rarVolumeNumber(junk); !errors.Is(err, errNoVolumeNumber) {
+		t.Errorf("rarVolumeNumber(text file) = %v, want errNoVolumeNumber", err)
+	}
+	if _, err := rarVolumeNumber(filepath.Join(t.TempDir(), "gone.rar")); err == nil {
+		t.Error("rarVolumeNumber of a missing file returned no error")
 	}
 }
 

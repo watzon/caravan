@@ -12,7 +12,7 @@
   import { api, ApiError, errorText } from '../api/client';
   import type { DownloadInsight, DownloadStatus } from '../api/types';
   import { UNKNOWN, formatBytes, formatDuration, formatRate, truncateMiddle } from '../format';
-  import { downloadPhaseLabel, downloadStateMeta, engineLabel } from '../download';
+  import { canRetryDownload, downloadPhaseLabel, downloadStateMeta, engineLabel } from '../download';
   import { QUEUE_POLL_MS } from '../state/downloads.svelte';
   import { pushToast } from '../state/toast.svelte';
   import Badge from './Badge.svelte';
@@ -28,6 +28,8 @@
     onclose: () => void;
     onpause: () => void;
     onresume: () => void;
+    /** Offered only for a failed download an engine can retry. */
+    onretry?: () => void;
     onremove: (deleteData: boolean) => void;
     onlimitsapplied?: () => Promise<void> | void;
   }
@@ -38,6 +40,7 @@
     onclose,
     onpause,
     onresume,
+    onretry,
     onremove,
     onlimitsapplied,
   }: Props = $props();
@@ -72,6 +75,7 @@
   });
   let meta = $derived(downloadStateMeta(download.state));
   let paused = $derived(download.state === 'paused');
+  let retryable = $derived(canRetryDownload(download) && onretry !== undefined);
   // A server older than the protocol field only ever ran a torrent engine, so
   // its downloads read as torrents — which is exactly what they were.
   let usenet = $derived(download.protocol === 'usenet');
@@ -478,10 +482,20 @@
     </div>
 
     <footer class="flex items-center gap-2 border-t border-border px-5 py-3">
-      <Button variant="secondary" size="sm" disabled={busy} onclick={paused ? onresume : onpause}>
-        <Icon name={paused ? 'play' : 'pause'} size={14} />
-        {paused ? 'Resume' : 'Pause'}
-      </Button>
+      <!-- A failed download has nothing to pause. What it has is a stage that
+           went wrong and the fifteen gigabytes it already fetched, so the one
+           action worth offering is trying that stage again. -->
+      {#if retryable}
+        <Button variant="primary" size="sm" disabled={busy} onclick={onretry}>
+          <Icon name="refresh" size={14} />
+          Retry
+        </Button>
+      {:else}
+        <Button variant="secondary" size="sm" disabled={busy} onclick={paused ? onresume : onpause}>
+          <Icon name={paused ? 'play' : 'pause'} size={14} />
+          {paused ? 'Resume' : 'Pause'}
+        </Button>
+      {/if}
       <span class="flex-1"></span>
       <Button variant="ghost" size="sm" disabled={busy} onclick={() => onremove(false)}>Remove</Button>
       <Button variant="danger" size="sm" disabled={busy} onclick={() => onremove(true)}>Remove + data</Button>

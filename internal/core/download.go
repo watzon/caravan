@@ -141,6 +141,24 @@ type EngineInsight interface {
 	Insight(ctx context.Context, id DownloadID) (*DownloadInsight, error)
 }
 
+// EngineRetry is an optional extension for engines that can put a failed
+// download back to work, picking up from whatever it had already achieved.
+//
+// It is capability-gated rather than folded into Resume because "try that
+// again" only means something where a download is several stages and a failure
+// can belong to one of them: a Usenet download that fetched fifteen gigabytes
+// and then failed to unpack them has one stage to redo, not the whole job. A
+// torrent has no such structure — its failures are about the swarm, and Resume
+// is already the whole of the answer — so the embedded torrent engine
+// deliberately does not implement this and the UI does not offer it.
+//
+// Retry is for failures only. Asking it to retry a download that has not
+// failed is an error, not a no-op, because the caller has misunderstood the
+// state it is acting on.
+type EngineRetry interface {
+	Retry(ctx context.Context, id DownloadID) error
+}
+
 // EngineRouting is an optional extension for an engine that is really several
 // engines behind one interface, dispatching a release by its protocol
 // (SPEC §5.1, PLAN phase 6, task 3).

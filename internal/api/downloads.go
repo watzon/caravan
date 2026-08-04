@@ -174,6 +174,47 @@ func (s *server) handleResumeDownload(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleRetryDownload puts a failed download back to work.
+//
+// A failed Usenet download is not a dead end: it fetched articles, it may have
+// repaired them, and whatever stage went wrong is one stage of several. The
+// engine re-enters its stage machine from the top and every stage skips work
+// that is already done, so a release that failed to unpack is unpacked again
+// rather than fetched again.
+//
+// Only engines that say they can do this are asked. A torrent engine's
+// failures are about the swarm and Resume is already the whole answer there,
+// so the capability is absent rather than a no-op — the UI reads the same
+// refusal and does not offer the button.
+func (s *server) handleRetryDownload(w http.ResponseWriter, r *http.Request) {
+	// The same guard Resume carries, for the same reason: after an unclean
+	// shutdown nothing may start writing to the library's filesystem until
+	// POST /system/verify has proved the database (SPEC §13).
+	if s.dirty.Load() {
+		writeError(w, http.StatusConflict,
+			"verify the library after the unclean shutdown before retrying downloads")
+		return
+	}
+	id, ok := downloadID(w, r)
+	if !ok {
+		return
+	}
+	engine, ok := s.requireEngine(w)
+	if !ok {
+		return
+	}
+	retrier, ok := engine.(core.EngineRetry)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "download engine cannot retry a failed download")
+		return
+	}
+	if err := retrier.Retry(r.Context(), id); err != nil {
+		s.writeDownloadEngineError(w, "retry download", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // controlDownload runs a pause/resume against the engine. It answers 204: the
 // engine's post-change state is whatever the next queue poll reports, and
 // echoing a guess here would only be wrong sooner.
