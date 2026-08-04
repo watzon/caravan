@@ -814,3 +814,98 @@ func TestRefreshKeepsASiteOwnScenesWhenAnotherSiteAlsoListsThem(t *testing.T) {
 		t.Fatalf("parent site episodes after refresh = %+v, want the shared scene", parentEpisodes)
 	}
 }
+
+// TestImportDownloadImportsObfuscatedSceneByReleaseTitle is the adult twin of
+// TestImportDownloadImportsObfuscatedEpisodeByReleaseTitle: usenet posts
+// obfuscate the payload's file name, the scene parser finds no date in the
+// noise, and the grab's release title — which does carry the date — must vouch
+// for the feature-sized file. Before the rescue existed this parked with
+// reasonNoSceneDate despite the grab naming the exact scene.
+func TestImportDownloadImportsObfuscatedSceneByReleaseTitle(t *testing.T) {
+	h := newAdultHarness(t, true)
+	h.seedBrazzers()
+	sr := h.addSite("site-1")
+
+	var target core.Episode
+	for _, ep := range h.episodes(sr.ID) {
+		if ep.Title == "Deep Impact" {
+			target = ep
+		}
+	}
+	if target.ID == 0 {
+		t.Fatal("seed scene not found")
+	}
+
+	const release = "Brazzers.22.03.14.Abella.Danger.Deep.Impact.XXX.1080p.MP4-KTR"
+	const dir = "incomplete/" + release
+	const obfuscated = dir + "/Lf1duvkV19P1TaODMYsyktStVJoeGEUf.mp4"
+	h.writeVideo(obfuscated, "the actual scene payload")
+	// A smaller obfuscated extra: the release title must not vouch for it.
+	h.writeVideo(dir+"/sample.mp4", "sample")
+
+	grab := h.grabFor(core.GrabInfo{
+		SeriesID:     sr.ID,
+		EpisodeIDs:   []int64{target.ID},
+		ReleaseTitle: release,
+	})
+	dl := core.DownloadStatus{ID: "u-scene", State: core.DownloadCompleted, SavePath: dir}
+
+	ctx := context.Background()
+	if err := h.mgr.ImportDownload(ctx, dl, grab); err != nil {
+		t.Fatalf("ImportDownload: %v", err)
+	}
+
+	const organized = "library/Adult/Brazzers/Season 2022/Brazzers - 2022-03-14 - Deep Impact.mp4"
+	if !h.exists(organized) {
+		t.Fatalf("obfuscated scene was not imported to %s", organized)
+	}
+	if !h.sameFile(obfuscated, organized) {
+		t.Errorf("import did not use the feature-sized file")
+	}
+	if got := h.grabStatus(grab.GrabID); got != core.GrabStatusImported {
+		t.Errorf("grab status = %q, want %q", got, core.GrabStatusImported)
+	}
+	parked := h.unmatched()
+	if len(parked) != 1 || !strings.Contains(parked[0].Path, "sample.mp4") {
+		t.Errorf("unmatched queue = %+v, want only the obfuscated extra", parked)
+	}
+}
+
+// The rescue must not fire when the grab's title resolves to a scene the grab
+// does not cover: a wrong-scene import would silently satisfy a different
+// wanted item.
+func TestObfuscatedSceneStaysParkedWhenTheTitleNamesAnotherScene(t *testing.T) {
+	h := newAdultHarness(t, true)
+	h.seedBrazzers()
+	sr := h.addSite("site-1")
+
+	var second core.Episode
+	for _, ep := range h.episodes(sr.ID) {
+		if ep.Title == "Second" {
+			second = ep
+		}
+	}
+
+	// The grab targets "Second" (2022-06-09) but its title carries Deep
+	// Impact's date.
+	const release = "Brazzers.22.03.14.Abella.Danger.Deep.Impact.XXX.1080p.MP4-KTR"
+	const dir = "incomplete/wrong-" + release
+	h.writeVideo(dir+"/Zq8LmNoise.mp4", "payload")
+
+	grab := h.grabFor(core.GrabInfo{
+		SeriesID:     sr.ID,
+		EpisodeIDs:   []int64{second.ID},
+		ReleaseTitle: release,
+	})
+	dl := core.DownloadStatus{ID: "u-wrong", State: core.DownloadCompleted, SavePath: dir}
+
+	if err := h.mgr.ImportDownload(context.Background(), dl, grab); err != nil {
+		t.Fatalf("ImportDownload: %v", err)
+	}
+	if parked := h.unmatched(); len(parked) != 1 {
+		t.Fatalf("unmatched = %+v, want the payload parked", parked)
+	}
+	if got := h.grabStatus(grab.GrabID); got != core.GrabStatusFailed {
+		t.Errorf("grab status = %q, want %q", got, core.GrabStatusFailed)
+	}
+}

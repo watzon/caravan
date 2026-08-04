@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/watzon/caravan/internal/core"
@@ -594,6 +595,7 @@ func (m *Manager) resolveScene(ctx context.Context, seriesID int64, p core.Parse
 // row that already exists.
 func (m *Manager) importDownloadedScenes(ctx context.Context, files []downloadedFile, grab core.GrabInfo, sr *core.Series) (int, int, error) {
 	var imported, parked int
+	largest := largestFile(files)
 	for _, file := range files {
 		p := m.parseScene(filepath.Base(file.rel))
 
@@ -606,6 +608,23 @@ func (m *Manager) importDownloadedScenes(ctx context.Context, files []downloaded
 			// would silently satisfy a different wanted item with a release
 			// nothing graded against that item's profile.
 			reason = reasonSceneNotInGrab
+		}
+		// The release title can vouch for one file only — the feature-sized
+		// one — exactly as importDownloadedEpisodes does: usenet posts
+		// routinely obfuscate the payload's name, the grab is the evidence of
+		// what was fetched, and its title still has to resolve to a scene this
+		// grab actually covers before it is believed.
+		if reason != "" && p.SceneDate.IsZero() && file.rel == largest.rel {
+			if title := strings.TrimSpace(grab.ReleaseTitle); title != "" {
+				rp := m.parseScene(title)
+				rescued, rresolved, rreason, rerr := m.resolveScene(ctx, sr.ID, rp)
+				if rerr != nil {
+					return imported, parked, rerr
+				}
+				if rreason == "" && grabCoversEpisode(grab, rescued.ID) {
+					episode, resolved, reason, p = rescued, rresolved, "", rp
+				}
+			}
 		}
 		if reason != "" {
 			if err := m.parkImport(ctx, file, p, grab, reason); err != nil {
