@@ -405,6 +405,36 @@ describe('App shell', () => {
     expect(host.textContent).not.toContain('unreachable');
   });
 
+  /**
+   * PLAN phase 11 task 4: Stash being down is a banner, never a blocker. The
+   * field is only on the payload for a caller the module is visible to, so its
+   * presence is what raises this — there is no second adult check to keep in
+   * step with the server's.
+   */
+  it('banners the adult library handoff when Stash is unreachable', async () => {
+    statusBody = {
+      ...STATUS,
+      stash_unreachable: { error: 'connection refused', since: '2026-08-01T09:30:00Z' },
+    };
+
+    app = mount(App, { target: host });
+    await settle();
+
+    expect(host.textContent).toContain('Stash is unreachable');
+    expect(host.textContent).toContain('connection refused');
+    // The promise the banner exists to make: imports are unaffected.
+    expect(host.textContent).toContain('Adult imports still complete');
+    // And the shell around it is untouched.
+    expect(host.textContent).toContain('CARAVAN');
+    expect(host.textContent).not.toContain('Caravan server unreachable');
+  });
+
+  it('says nothing about Stash when the status carries no outage', async () => {
+    app = mount(App, { target: host });
+    await settle();
+    expect(host.textContent).not.toContain('Stash');
+  });
+
   it('renders the release picker with the best release first', async () => {
     vi.stubGlobal(
       'fetch',

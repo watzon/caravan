@@ -27,7 +27,7 @@ func testAdapter(t *testing.T) (*libraryAdapter, *store.Store) {
 		t.Fatalf("open store: %v", err)
 	}
 	t.Cleanup(func() { st.Close() })
-	return newLibraryAdapter(st, "", slog.New(slog.NewTextHandler(io.Discard, nil)), nil), st
+	return newLibraryAdapter(st, "", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil), st
 }
 
 // The watcher holds one library.Manager for the life of the process, so the
@@ -160,7 +160,7 @@ func TestImportWatcherNotifiesTheHandoff(t *testing.T) {
 
 	root := t.TempDir()
 	notify := &watcherNotifier{}
-	adapter := newLibraryAdapter(st, root, slog.New(slog.NewTextHandler(io.Discard, nil)), notify)
+	adapter := newLibraryAdapter(st, root, slog.New(slog.NewTextHandler(io.Discard, nil)), notify, nil)
 
 	redirectTMDB(t, startFakeTMDB(t))
 	if err := st.SetSetting(ctx, store.SettingTMDBAPIKey, "key"); err != nil {

@@ -28,6 +28,9 @@ var adultRoutes = []struct{ method, path string }{
 	{http.MethodGet, "/api/v1/adult/discover"},
 	{http.MethodGet, "/api/v1/adult/users"},
 	{http.MethodPut, "/api/v1/adult/users/1/access"},
+	{http.MethodGet, "/api/v1/adult/stash"},
+	{http.MethodPost, "/api/v1/adult/stash"},
+	{http.MethodPost, "/api/v1/adult/stash/test"},
 }
 
 // fakeAdultProvider is a canned core.AdultMetadataProvider that records every

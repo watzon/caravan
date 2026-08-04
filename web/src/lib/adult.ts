@@ -8,8 +8,8 @@
  * is a rule nobody re-checks. Here it is a truth table.
  */
 
-import type { Scene, SceneMeta, SessionUser, Site } from './api/types';
-import { UNKNOWN } from './format';
+import type { Scene, SceneMeta, SessionUser, Site, StashHealth } from './api/types';
+import { formatAge, UNKNOWN } from './format';
 
 /**
  * How often a site's page re-reads itself while its catalogue walk is running.
@@ -40,6 +40,37 @@ export const CATALOGUING_POLL_MS = 3000;
  */
 export function adultVisible(user: SessionUser | null): boolean {
   return user?.adult === true;
+}
+
+/**
+ * The "Stash is unreachable" banner's text (PLAN phase 11 task 4).
+ *
+ * Null when the handoff is answering — and null is also what an absent field
+ * means, which is what every caller the module is not visible to receives. So
+ * this needs no adult check of its own: the server already made that decision
+ * by omitting the field.
+ *
+ * The wording follows unreachableClientBanner's: name the reason, then say what
+ * it does NOT mean. Stash being down never blocks an import, and the scan that
+ * could not be delivered is a queued job rather than a lost one — a banner that
+ * left that unsaid would read as "your imports are broken", which is the one
+ * thing this integration promises can't happen.
+ */
+export function stashUnreachableBanner(
+  health: StashHealth | undefined,
+  now: number = Date.now(),
+): { title: string; message: string } | null {
+  if (!health) return null;
+  const parts: string[] = [];
+  const reason = health.error.trim();
+  if (reason) parts.push(`${reason}.`);
+  const age = formatAge(health.since, now);
+  if (age !== UNKNOWN) parts.push(`Unreachable for ${age}.`);
+  parts.push(
+    'Adult imports still complete and their Stash scan stays queued — it is delivered when ' +
+      'Stash answers again.',
+  );
+  return { title: 'Stash is unreachable', message: parts.join(' ') };
 }
 
 /**

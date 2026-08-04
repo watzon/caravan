@@ -92,6 +92,10 @@ type Manager struct {
 	syncedSites map[int64]bool
 	// notify is the playback handoff, or nil when none is configured.
 	notify Notifier
+	// notifyAdult is the adult library's handoff (Stash), or nil. It is a
+	// separate field from notify because the two are told about disjoint sets of
+	// imports; see AdultNotifier.
+	notifyAdult AdultNotifier
 }
 
 // Notifier is told after an import puts new files in the library, so playback
@@ -106,6 +110,38 @@ type Notifier interface {
 	LibraryChanged(ctx context.Context) error
 }
 
+// AdultNotifier is Notifier's adult twin, told after scenes land in the adult
+// library (SPEC §1.2; PLAN phase 11: an adult import triggers a scoped Stash
+// scan and an identity push).
+//
+// It is a second interface rather than a kind argument on Notifier because the
+// two notifications go to different places for different reasons, and the split
+// is what makes the exposure rule structural — in the direction that matters.
+// Nothing adult reaches the Stash-specific push by accident, and nothing
+// television reaches it at all: only importDownloadedScenes calls this, and the
+// handoff re-checks the series kind before it pushes.
+//
+// The guarantee is one-directional, and the other direction is deliberate. An
+// adult import still fires the generic Notifier as well (ImportDownload's
+// libraryChanged runs on any import that landed a file), because "the library
+// changed" is true — Caravan does not know which of the user's Jellyfin
+// libraries covers which directory, and suppressing the refresh would leave a
+// television-shaped Jellyfin stale after a mixed download. Keeping adult files
+// out of a playback server is a matter of where that server's libraries are
+// rooted, not of which rescans Caravan skips.
+//
+// It carries the episode ids that were imported, because unlike "the library
+// changed" the identity push is per scene: Stash has to be told which scenes to
+// look at. Ids rather than rows for the reason the job payload carries ids —
+// the notifier records intent and the work happens later, so the values must be
+// re-read then rather than captured now.
+//
+// The contract is Notifier's: AdultLibraryChanged records intent and returns
+// promptly. It must not make the network call itself.
+type AdultNotifier interface {
+	AdultLibraryChanged(ctx context.Context, episodeIDs []int64) error
+}
+
 // Option configures a Manager at construction.
 type Option func(*Manager)
 
@@ -113,6 +149,12 @@ type Option func(*Manager)
 // notify anything.
 func WithNotifier(n Notifier) Option {
 	return func(m *Manager) { m.notify = n }
+}
+
+// WithAdultNotifier attaches the adult library's handoff. Without one, scene
+// imports simply do not notify anything.
+func WithAdultNotifier(n AdultNotifier) Option {
+	return func(m *Manager) { m.notifyAdult = n }
 }
 
 // WithAdultProvider attaches the stash-box metadata provider. Without one,
@@ -160,6 +202,24 @@ func (m *Manager) libraryChanged(ctx context.Context) {
 			Level:    core.EventLevelWarn,
 			Category: EventCategoryImport,
 			Message:  "Playback handoff could not be notified",
+			Detail:   err.Error(),
+		})
+	}
+}
+
+// adultLibraryChanged tells the adult handoff that new scenes landed, for the
+// reasons and with the failure model libraryChanged has: the files are in the
+// library either way, and failing a completed import because Stash could not be
+// told about it inverts what matters (SPEC §13).
+func (m *Manager) adultLibraryChanged(ctx context.Context, episodeIDs []int64) {
+	if m.notifyAdult == nil || len(episodeIDs) == 0 {
+		return
+	}
+	if err := m.notifyAdult.AdultLibraryChanged(ctx, episodeIDs); err != nil {
+		_ = m.store.InsertEvent(ctx, &core.Event{
+			Level:    core.EventLevelWarn,
+			Category: EventCategoryImport,
+			Message:  "Adult library handoff could not be notified",
 			Detail:   err.Error(),
 		})
 	}

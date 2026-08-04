@@ -45,6 +45,10 @@ type libraryAdapter struct {
 	// so an import made through the API notifies Jellyfin exactly as one made
 	// by the download watcher does.
 	notify library.Notifier
+	// notifyAdult is the adult library's handoff (Stash), carried for the same
+	// reason notify is. It is a separate seam because the two are told about
+	// disjoint sets of imports — see library.AdultNotifier.
+	notifyAdult library.AdultNotifier
 
 	// adultMu guards adult, which is read and replaced from concurrent HTTP
 	// handlers.
@@ -64,13 +68,14 @@ type cachedStashbox struct {
 	client   *stashbox.Client
 }
 
-func newLibraryAdapter(st *store.Store, fallbackRoot string, log *slog.Logger, notify library.Notifier) *libraryAdapter {
+func newLibraryAdapter(st *store.Store, fallbackRoot string, log *slog.Logger, notify library.Notifier, notifyAdult library.AdultNotifier) *libraryAdapter {
 	return &libraryAdapter{
 		st:           st,
 		fallbackRoot: fallbackRoot,
 		hc:           &http.Client{Timeout: metadataTimeout},
 		log:          log,
 		notify:       notify,
+		notifyAdult:  notifyAdult,
 	}
 }
 
@@ -82,6 +87,7 @@ func (a *libraryAdapter) current(ctx context.Context) (*library.Manager, error) 
 	}
 	return library.NewManager(a.st, a.metadata(ctx), root,
 		library.WithNotifier(a.notify),
+		library.WithAdultNotifier(a.notifyAdult),
 		library.WithAdultProvider(a.adultMetadata(ctx)),
 	), nil
 }
@@ -168,8 +174,15 @@ func (a *libraryAdapter) stashboxClient(key, endpoint string) *stashbox.Client {
 // already exists — so handing the one long-lived Manager in the process a
 // client for the endpoint would create a path to it that nothing uses and the
 // zero-traffic acceptance would have to defend.
+// The adult *notifier* is a different thing and is carried: it makes no
+// provider call either — it records that a scan and an identity push are owed —
+// and the watcher is the path a downloaded scene actually arrives by, so
+// leaving it out would make PLAN phase 11's acceptance silently unmet in
+// exactly the way a watcher without the playback handoff would.
 func (a *libraryAdapter) watcherManager(root string) *library.Manager {
-	return library.NewManager(a.st, lateMetadata{adapter: a}, root, library.WithNotifier(a.notify))
+	return library.NewManager(a.st, lateMetadata{adapter: a}, root,
+		library.WithNotifier(a.notify),
+		library.WithAdultNotifier(a.notifyAdult))
 }
 
 // StorageRoot is the storage root in force right now: the settings table's

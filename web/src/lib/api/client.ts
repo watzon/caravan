@@ -57,6 +57,8 @@ import type {
   Site,
   SiteDetail,
   SiteMeta,
+  StashConfig,
+  StashTestResult,
   StorageMigration,
   StorageMigrationStatus,
   SystemStatus,
@@ -229,6 +231,11 @@ export const endpoints = {
   adultDiscover: () => `${API_BASE}/adult/discover`,
   adultUsers: () => `${API_BASE}/adult/users`,
   adultUserAccess: (id: number) => `${API_BASE}/adult/users/${id}/access`,
+  // Phase 11 — the Stash handoff. Inside the gated subtree with the rest of
+  // /adult rather than beside /handoff/jellyfin, so an adult-module setting is
+  // absent for an ungranted caller rather than merely switched off.
+  adultStash: () => `${API_BASE}/adult/stash`,
+  adultStashTest: () => `${API_BASE}/adult/stash/test`,
   // The master switch, and the one adult route outside the gated subtree: it
   // has to be reachable while the module is off, because turning it on is what
   // it is for.
@@ -1074,4 +1081,23 @@ export const api = {
    */
   setAdultAccess: (id: number, granted: boolean) =>
     request<AdultUser>(endpoints.adultUserAccess(id), { method: 'PUT', body: { granted } }),
+
+  /* ------------------------------------------------------------------------
+   * Phase 11 — the Stash handoff (SPEC §5.2's adult twin). Like Jellyfin's,
+   * the scan is never triggered from here: an adult import queues it and the
+   * job queue runs it, so the UI only configures the connection and proves it.
+   * --------------------------------------------------------------------- */
+
+  stashConfig: (signal?: AbortSignal) => request<StashConfig>(endpoints.adultStash(), { signal }),
+
+  saveStashConfig: (body: StashConfig) =>
+    request<StashConfig>(endpoints.adultStash(), { method: 'POST', body }),
+
+  /**
+   * Talk to Stash with the values currently in the form, before they are
+   * saved. Blank fields fall back to what is stored, so `{}` tests the saved
+   * configuration.
+   */
+  testStash: (body: Partial<Pick<StashConfig, 'url' | 'api_key'>> = {}) =>
+    request<StashTestResult>(endpoints.adultStashTest(), { method: 'POST', body }),
 };

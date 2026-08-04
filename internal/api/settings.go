@@ -88,24 +88,53 @@ var hiddenSettings = map[string]bool{
 	store.SettingPasswordHash: true,
 }
 
-// visibleSettings is every setting a client is allowed to read. It is the only
-// path from the settings table to a response body, so a key added to
-// hiddenSettings is hidden everywhere at once.
-func (s *server) visibleSettings(ctx context.Context) (map[string]string, error) {
-	settings, err := s.st.AllSettings(ctx)
+// adultOnlySettings are readable only by a caller the adult module is visible
+// to. They are the Stash handoff's three keys (PLAN phase 11).
+//
+// The module's promise is to be *absent* when it is off, not merely disabled
+// (see requireAdult), and a settings object carrying a stash_url is a module
+// announcing itself. Their own endpoints already sit on the adult mux; this is
+// the same door on the one other path from the settings table to a response
+// body.
+//
+// The stash-box credential is deliberately not in here. It predates this rule
+// and is read by the first-run and metadata screens on an install where the
+// module has never been enabled, so hiding it would be a behaviour change
+// belonging to its own decision rather than to this one.
+var adultOnlySettings = map[string]bool{
+	store.SettingStashURL:     true,
+	store.SettingStashAPIKey:  true,
+	store.SettingStashEnabled: true,
+}
+
+// visibleSettings is every setting this caller is allowed to read. It is the
+// only path from the settings table to a response body, so a key added to
+// hiddenSettings is hidden everywhere at once, and a key added to
+// adultOnlySettings is gated everywhere at once.
+func (s *server) visibleSettings(r *http.Request) (map[string]string, error) {
+	settings, err := s.st.AllSettings(r.Context())
 	if err != nil {
 		return nil, err
 	}
 	for key := range hiddenSettings {
 		delete(settings, key)
 	}
+	visible, err := s.adultVisible(r)
+	if err != nil {
+		return nil, err
+	}
+	if !visible {
+		for key := range adultOnlySettings {
+			delete(settings, key)
+		}
+	}
 	return settings, nil
 }
 
 // handleGetSettings returns every setting as a flat object, minus the ones that
-// are never readable.
+// are never readable and the ones this caller may not see.
 func (s *server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
-	settings, err := s.visibleSettings(r.Context())
+	settings, err := s.visibleSettings(r)
 	if err != nil {
 		s.writeStoreError(w, "read settings", err)
 		return
@@ -183,7 +212,7 @@ func (s *server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		s.revalidateMetadataKey(r.Context(), strings.TrimSpace(key))
 	}
 
-	settings, err := s.visibleSettings(r.Context())
+	settings, err := s.visibleSettings(r)
 	if err != nil {
 		s.writeStoreError(w, "read settings", err)
 		return
@@ -601,6 +630,17 @@ type statusResponse struct {
 	// embedded engine is never in it — it is not a client, and one dead
 	// seedbox must not make Caravan look broken.
 	UnhealthyDownloadClients []unhealthyClientJSON `json:"unhealthy_download_clients"`
+	// StashUnreachable is the adult library handoff's twin of that list: the
+	// Stash server the last scan or identity push could not reach, absent while
+	// the handoff is healthy (PLAN phase 11 task 4). Absent, too, for a caller
+	// the adult module is not visible to — omitempty so a module-off response
+	// stays byte-identical to one from an install that never enabled it, exactly
+	// as Counts.Sites does.
+	//
+	// It is a banner and never a blocker: the scan and the push are durable jobs
+	// that deliver when Stash comes back, and the import that queued them
+	// completed regardless.
+	StashUnreachable *stashHealthJSON `json:"stash_unreachable,omitempty"`
 	// FFmpegAvailable reports whether ffmpeg and ffprobe are both on PATH.
 	// False hides the whole convert-for-TV affordance and degrades the
 	// TV-incompatible warning to informational (SPEC §8).
@@ -695,11 +735,13 @@ func (s *server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 	// The adult shelf's count, only for a caller the module is visible to —
 	// the same predicate that decides whether the nav item this badge sits on
 	// exists at all.
-	sites := 0
-	if visible, err := s.adultVisible(r); err != nil {
+	adultVisible, err := s.adultVisible(r)
+	if err != nil {
 		s.writeStoreError(w, "resolve adult visibility", err)
 		return
-	} else if visible {
+	}
+	sites := 0
+	if adultVisible {
 		adult, err := s.st.ListSeriesByKind(ctx, core.SeriesKindAdult)
 		if err != nil {
 			s.writeStoreError(w, "count sites", err)
@@ -777,6 +819,7 @@ func (s *server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 		MetadataCredentialReason:    credentialReason,
 		MetadataCredentialCheckedAt: jsonTime(credentialCheckedAt),
 		UnhealthyDownloadClients:    s.unhealthyDownloadClients(),
+		StashUnreachable:            s.stashHealth(adultVisible),
 		FFmpegAvailable:             s.ffmpegAvailable(),
 		PasswordSet:                 users > 0,
 		ListeningPublicly:           listeningPublicly(s.listenAddr),

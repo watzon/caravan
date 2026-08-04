@@ -45,6 +45,7 @@
   import Wanted from './lib/routes/Wanted.svelte';
   import SettingsScreen from './lib/routes/Settings.svelte';
   import Button from './lib/components/Button.svelte';
+  import { stashUnreachableBanner } from './lib/adult';
   import { unreachableClientBanner } from './lib/download';
   import { auth } from './lib/state/auth.svelte';
   import { session } from './lib/state/session.svelte';
@@ -122,6 +123,8 @@
   let unreachableClients = $derived(
     unreachableClientBanner(system.status?.unhealthy_download_clients),
   );
+
+  let unreachableStash = $derived(stashUnreachableBanner(system.status?.stash_unreachable));
 
   let showBindNag = $derived(
     !nagDismissed &&
@@ -263,6 +266,17 @@
               icon="warning"
               title={unreachableClients.title}
               message={unreachableClients.message} />
+          {/if}
+
+          <!-- The same shape for the adult library's handoff (PLAN phase 11
+               task 4). The field is only on the payload for a caller the module
+               is visible to, so there is no session check here. -->
+          {#if unreachableStash}
+            <Banner
+              tone="warning"
+              icon="warning"
+              title={unreachableStash.title}
+              message={unreachableStash.message} />
           {/if}
 
           {#if showBindNag}

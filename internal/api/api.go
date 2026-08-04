@@ -62,6 +62,10 @@ type server struct {
 	// not built in, which GET /dlna reports as off.
 	dlna DLNAService
 
+	// stash is the adult library's handoff (PLAN phase 11). Nil means the
+	// process wired none, which the status endpoint reports as no trouble.
+	stash StashService
+
 	// scanning is the single-flight guard for POST /library/rescan. A scan
 	// walks the whole storage root and reconciles the database; running two
 	// at once would have them fight over the same rows.
@@ -299,6 +303,17 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	// that has never enabled the module.
 	adult.HandleFunc("GET /adult/users", s.handleListAdultUsers)
 	adult.HandleFunc("PUT /adult/users/{id}/access", s.handleSetAdultAccess)
+	// The Stash handoff (PLAN phase 11), the adult twin of
+	// /handoff/jellyfin. It lives here rather than beside its twin because
+	// Stash is an adult-module feature: with the module off it must be absent,
+	// not merely disabled, and mounting it on this subtree is what makes that
+	// true without a check inside each handler. Admin-only by the ordinary
+	// rule — memberAllowed names none of these. The scan and the identity push
+	// are not endpoints: they are queued by the import pipeline and run by the
+	// job queue, so the API only configures and proves the connection.
+	adult.HandleFunc("GET /adult/stash", s.handleGetStash)
+	adult.HandleFunc("POST /adult/stash", s.handleSetStash)
+	adult.HandleFunc("POST /adult/stash/test", s.handleTestStash)
 	api.Handle("/adult/", s.requireAdult(adult))
 
 	// The master switch. It is the one adult route that cannot live behind

@@ -22,6 +22,7 @@ import {
   sceneTitleLine,
   sceneYear,
   siteHref,
+  stashUnreachableBanner,
 } from './adult';
 import { UNKNOWN } from './format';
 
@@ -247,5 +248,38 @@ describe('scenePerformers', () => {
 
   it('treats a missing list as nobody', () => {
     expect(scenePerformers({ performers: undefined as unknown as string[] })).toEqual([]);
+  });
+});
+
+describe('stashUnreachableBanner', () => {
+  const NOW = Date.parse('2026-08-03T12:00:00Z');
+
+  it('says nothing when the handoff is answering', () => {
+    expect(stashUnreachableBanner(undefined, NOW)).toBeNull();
+  });
+
+  it("names the reason and how long it has been going on", () => {
+    const banner = stashUnreachableBanner(
+      { error: 'connection refused', since: '2026-08-03T09:00:00Z' },
+      NOW,
+    );
+    expect(banner?.title).toBe('Stash is unreachable');
+    expect(banner?.message).toContain('connection refused');
+    expect(banner?.message).toContain('Unreachable for 3h');
+  });
+
+  it('promises the imports are unaffected, which is the point of the wording', () => {
+    const banner = stashUnreachableBanner({ error: 'i/o timeout', since: '' }, NOW);
+    expect(banner?.message).toContain('Adult imports still complete');
+    expect(banner?.message).toContain('queued');
+    // No parseable timestamp, no duration clause — never "Unreachable for —".
+    expect(banner?.message).not.toContain('Unreachable for');
+  });
+
+  it('still banners when the server sent no reason at all', () => {
+    const banner = stashUnreachableBanner({ error: '', since: '2026-08-03T11:00:00Z' }, NOW);
+    expect(banner).not.toBeNull();
+    // A stray leading space or a dangling "." would read as a truncated string.
+    expect(banner?.message.startsWith('Unreachable for 1h.')).toBe(true);
   });
 });

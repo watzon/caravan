@@ -24,6 +24,7 @@ import (
 	"github.com/watzon/caravan/internal/integrity"
 	"github.com/watzon/caravan/internal/jellyfin"
 	"github.com/watzon/caravan/internal/relocate"
+	"github.com/watzon/caravan/internal/stash"
 	"github.com/watzon/caravan/internal/store"
 	"github.com/watzon/caravan/web"
 )
@@ -166,7 +167,14 @@ func runServe(args []string) error {
 	// disabled handoff is a no-op, not an absent dependency.
 	handoff := jellyfin.NewService(st, nil, logger)
 
-	mgr := newLibraryAdapter(st, cfg.StorageRoot, logger, handoff)
+	// The adult library's handoff (PLAN phase 11), the same shape for Stash:
+	// a scene import records that a scoped scan and an identity push are owed,
+	// and the jobs carry them out. Always constructed for the reason the
+	// Jellyfin one is — an unconfigured handoff is a no-op — and doubly inert
+	// besides, because it also refuses to run while the adult module is off.
+	stashHandoff := stash.NewService(st, nil, logger)
+
+	mgr := newLibraryAdapter(st, cfg.StorageRoot, logger, handoff, stashHandoff)
 	engines := newEngineProvider(mgr, cfg.Portable, logger)
 	// Closed before the store (deferred later, so it runs first): the engine
 	// flushes the queue's state through the store on the way out.
@@ -222,6 +230,12 @@ func runServe(args []string) error {
 		automation.WithDedicatedWorker(convert.JobKind, converter.Handle),
 		automation.WithDedicatedWorker(relocate.JobKind, relocator.Handle),
 		automation.WithHandler(jellyfin.JobKind, handoff.Handle),
+		// The adult twin, in two kinds: one scoped scan per burst of scene
+		// imports, and one identity push per scene. The push retries on the
+		// queue's own backoff while Stash finishes indexing the file, which is
+		// why it is a job rather than a step inside the scan handler.
+		automation.WithHandler(stash.ScanJobKind, stashHandoff.HandleScan),
+		automation.WithHandler(stash.IdentifyJobKind, stashHandoff.HandleIdentify),
 		// The metadata refresh needs the library manager, which the automation
 		// package deliberately does not know about — same registration story
 		// as the Jellyfin handoff. A process with no TMDB key yet skips the
@@ -267,6 +281,9 @@ func runServe(args []string) error {
 			api.WithIndexerClients(indexers),
 			api.WithConverter(converter),
 			api.WithDLNA(dlnaServer),
+			// So GET /system/status can raise the unreachable-Stash banner for
+			// a caller the adult module is visible to.
+			api.WithStash(stashHandoff),
 			// So GET /system/status can tell the UI whether this process is
 			// reachable from other machines, which is half of the
 			// "no password on a public bind" nag (SPEC §11).

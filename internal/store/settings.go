@@ -93,6 +93,20 @@ const (
 	SettingJellyfinURL     = "jellyfin_url"
 	SettingJellyfinAPIKey  = "jellyfin_api_key"
 	SettingJellyfinEnabled = "jellyfin_enabled"
+	// SettingStashURL, SettingStashAPIKey and SettingStashEnabled configure the
+	// adult library's handoff (PLAN phase 11): where the user's Stash lives, the
+	// API key from its Security screen, and whether an adult import is allowed
+	// to tell it to rescan. They are the Jellyfin keys' adult twin, stored the
+	// same way — Enabled is "true"/"false" and anything else reads as off.
+	//
+	// Like the stash-box credential, none of them does anything on its own: the
+	// handoff also requires SettingAdultEnabled, so a stored Stash address is
+	// not a reason to talk to one. They are deliberately absent from the PUT
+	// /settings allowlist and from GET /settings for a caller the adult module
+	// is not visible to; POST /adult/stash is the only door.
+	SettingStashURL     = "stash_url"
+	SettingStashAPIKey  = "stash_api_key"
+	SettingStashEnabled = "stash_enabled"
 	// SettingDLNAEnabled, SettingDLNAFriendlyName and SettingDLNAUUID configure
 	// the built-in DLNA media server (SPEC §5.1, PLAN phase 4 task 2). Enabled
 	// is stored as "true"/"false" and defaults to ON when the key has never been

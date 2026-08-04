@@ -235,6 +235,17 @@ export interface UnhealthyDownloadClient {
   since: string;
 }
 
+/**
+ * The adult library's Stash handoff, when the last scan or identity push could
+ * not reach it (PLAN phase 11 task 4). Never carries a credential: `error` is
+ * the attempt's own failure, the same string the card's test button shows.
+ */
+export interface StashHealth {
+  error: string;
+  /** RFC3339 timestamp of when the outage started. */
+  since: string;
+}
+
 export interface SystemStatus {
   version: string;
   /** "server" | "portable" (SPEC §2). */
@@ -257,6 +268,15 @@ export interface SystemStatus {
    * reads as "everything is fine" rather than as a crash.
    */
   unhealthy_download_clients?: UnhealthyDownloadClient[];
+  /**
+   * The adult library's Stash handoff, when it is down (PLAN phase 11 task 4).
+   *
+   * Absent is healthy, and absent is also what a caller the adult module is not
+   * visible to always gets — the server strips it exactly as it strips
+   * `counts.sites`. So the field's presence IS permission to render the banner;
+   * there is no second adult check for this one to disagree with.
+   */
+  stash_unreachable?: StashHealth;
   /**
    * Whether ffmpeg and ffprobe are both on the server's PATH. False hides the
    * whole convert-for-TV affordance and degrades the TV-incompatible warning
@@ -527,6 +547,28 @@ export interface JellyfinConfig {
 export interface JellyfinTestResult {
   server_name: string;
   version: string;
+}
+
+/**
+ * GET/POST /adult/stash — the adult library's handoff (PLAN phase 11).
+ *
+ * Field for field the Jellyfin card's shape, because it is the same card for
+ * the other library. What differs is where it lives: this rides the /adult
+ * mux, so with the module off — or for an account that was not granted it —
+ * the route 404s like any unrouted path rather than answering with an empty
+ * configuration. That is why these are not three keys on PUT /settings.
+ */
+export interface StashConfig {
+  url: string;
+  api_key: string;
+  enabled: boolean;
+}
+
+/** POST /adult/stash/test — the build Stash identified itself as. */
+export interface StashTestResult {
+  version: string;
+  /** Git hash of that build; Stash reports it beside the version. */
+  hash: string;
 }
 
 /**

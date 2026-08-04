@@ -741,6 +741,11 @@ func (m *Manager) resolveScene(ctx context.Context, seriesID int64, p core.Parse
 // row that already exists.
 func (m *Manager) importDownloadedScenes(ctx context.Context, files []downloadedFile, grab core.GrabInfo, sr *core.Series) (int, int, error) {
 	var imported, parked int
+	// The scenes this download actually landed, for the adult handoff. It is
+	// collected here rather than derived by the caller because this is the only
+	// place that knows a file resolved to a scene *and* which scene: one level
+	// up, ImportDownload has a count and nothing else.
+	var landed []int64
 	largest := largestFile(files)
 	for _, file := range files {
 		p := m.parseScene(filepath.Base(file.rel))
@@ -805,7 +810,18 @@ func (m *Manager) importDownloadedScenes(ctx context.Context, files []downloaded
 			return imported, parked, err
 		}
 		imported++
+		landed = append(landed, episode.ID)
 	}
+	// One notification per download, matching ImportDownload's rule for the
+	// playback handoff: a download carrying six scenes owes Stash one scoped
+	// scan, not six. A download that landed nothing changed no files, and
+	// adultLibraryChanged treats an empty list as nothing to say.
+	//
+	// It is fired here, inside the adult branch, rather than beside
+	// ImportDownload's libraryChanged call — that is what makes "a television
+	// import never talks to Stash" a property of the routing rather than of a
+	// condition somebody has to keep correct.
+	m.adultLibraryChanged(ctx, landed)
 	return imported, parked, nil
 }
 
