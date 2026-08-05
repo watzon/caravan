@@ -22,3 +22,5 @@ web/node_modules/
 .agents
 .omp
 .codex
+
+/plans/

@@ -751,7 +751,8 @@ func TestBinaryBootsAndResumesDownloads(t *testing.T) {
 		t.Logf("caravan output:\n%s", logs.String())
 	})
 
-	base := "http://" + addr + "/api/v1"
+	origin := "http://" + addr
+	base := origin + "/api/v1"
 	waitFor(t, 60*time.Second, "the binary to start listening", func() string {
 		resp, err := http.Get(base + "/system/status")
 		if err != nil {
@@ -765,6 +766,29 @@ func TestBinaryBootsAndResumesDownloads(t *testing.T) {
 		return ""
 	})
 	t.Logf("binary listening on %s", addr)
+
+	resp, err := http.Get(origin + "/")
+	if err != nil {
+		t.Fatalf("GET / from binary: %v", err)
+	}
+	index, readErr := io.ReadAll(resp.Body)
+	closeErr := resp.Body.Close()
+	if readErr != nil {
+		t.Fatalf("read GET / response: %v", readErr)
+	}
+	if closeErr != nil {
+		t.Fatalf("close GET / response: %v", closeErr)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /: %s: %s", resp.Status, index)
+	}
+	indexHTML := string(index)
+	for _, marker := range []string{"<title>Caravan</title>", `<div id="app"></div>`, "/assets/"} {
+		if !strings.Contains(indexHTML, marker) {
+			t.Errorf("GET / response does not contain %q: %q", marker, indexHTML)
+		}
+	}
+	t.Log("binary served the embedded SPA at /")
 
 	// The engine is up (a missing one answers 503 here) and it re-added the
 	// remembered download.

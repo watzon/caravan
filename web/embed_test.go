@@ -7,15 +7,19 @@ import (
 )
 
 // The API server serves the SPA from DistFS, so index.html must be reachable
-// without the "dist/" prefix. A placeholder is committed precisely so this
-// holds on a checkout where the SPA was never built.
+// without the "dist/" prefix and must look like a real Vite build. Source-to-
+// dist freshness belongs to CI's generated-tree diff because this test can
+// only inspect files that are already embedded.
 func TestDistFSServesIndex(t *testing.T) {
 	data, err := fs.ReadFile(DistFS(), "index.html")
 	if err != nil {
 		t.Fatalf("read index.html from DistFS: %v", err)
 	}
-	if !strings.Contains(string(data), "<html") {
-		t.Errorf("index.html does not look like HTML: %q", string(data))
+	index := string(data)
+	for _, marker := range []string{"<html", `<div id="app"></div>`, "/assets/"} {
+		if !strings.Contains(index, marker) {
+			t.Errorf("index.html does not contain %q: %q", marker, index)
+		}
 	}
 }
 

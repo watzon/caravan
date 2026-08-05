@@ -11,6 +11,7 @@ permissions:
 jobs:
   go:
     name: Go
+    needs: web
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -66,8 +67,13 @@ jobs:
       - name: build
         run: npm run build
 
+      - name: verify embedded SPA is fresh
+        working-directory: .
+        run: git diff --exit-code -- web/dist
+
   cross-compile:
     name: Cross-compile ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: web
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
