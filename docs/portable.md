@@ -122,6 +122,37 @@ that matrix.
 - `.github/workflows/ci.yml` cross-compiles all five targets on every push, so
   a binary the launchers ask for always exists to copy.
 
+## Release artifact contract
+
+Tagged releases publish five reproducible archives:
+
+```text
+caravan-vMAJOR.MINOR.PATCH-linux-amd64.tar.gz
+caravan-vMAJOR.MINOR.PATCH-linux-arm64.tar.gz
+caravan-vMAJOR.MINOR.PATCH-windows-amd64.tar.gz
+caravan-vMAJOR.MINOR.PATCH-darwin-amd64.tar.gz
+caravan-vMAJOR.MINOR.PATCH-darwin-arm64.tar.gz
+```
+
+For tag `v0.0.0`, the first archive is
+`caravan-v0.0.0-linux-amd64.tar.gz` and the manifest is
+`caravan-v0.0.0.sha256`.
+
+Each archive contains one binary at its root, named `caravan` except for
+`caravan.exe` in the Windows archive. The release also includes
+`caravan-vMAJOR.MINOR.PATCH.sha256`, with one SHA-256 line per archive. To use
+the bundle offline, unpack each archive into a directory named for its target:
+`release-bins/linux-amd64/caravan`, `release-bins/windows-amd64/caravan.exe`,
+and the analogous Darwin paths. Then pass that directory to `prepare`:
+
+```sh
+caravan prepare /Volumes/CARAVAN -bin-dir ~/caravan-release-bins
+```
+
+The release workflow checks the embedded SPA freshness contract before building
+these archives. It also exercises this unpacked layout with `prepare` in CI.
+Those checks do not prove exFAT behavior or TV playback.
+
 ### Equipment
 
 | Item | Requirement |
@@ -213,3 +244,16 @@ Append the result here as a dated table: date, drive model, the three machines,
 the TV model, and the per-step outcome. A failure at step 10 on one TV is a
 documented client limitation (SPEC scopes DLNA and USB browsing to reference
 clients, not per-TV workarounds); a failure at step 6 is a blocking bug.
+
+### Evidence record
+
+The required hardware matrix has no dated run in this checkout. Keep these
+explicit `NOT RUN` rows until an operator records real hardware evidence. Do
+not replace them with an Actions result.
+
+| Date | Caravan version and checksum | Drive and filesystem | Host and launcher | TV make, model and firmware | Result |
+|---|---|---|---|---|---|
+| NOT RUN | NOT RUN | USB drive, exFAT on GPT | Apple Silicon Mac, `Start-Mac.command` | NOT RUN | NOT RUN |
+| NOT RUN | NOT RUN | USB drive, exFAT on GPT | Windows 11 x64, `Start-Windows.bat` | NOT RUN | NOT RUN |
+| NOT RUN | NOT RUN | USB drive, exFAT on GPT | Intel Mac or x64 Linux, matching launcher | NOT RUN | NOT RUN |
+| NOT RUN | NOT RUN | USB drive, exFAT on GPT | Safe shutdown and eject on a named host | Smart TV USB browser | NOT RUN |

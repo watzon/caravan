@@ -1,0 +1,205 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-tag:
+    name: Validate release tag
+    runs-on: ubuntu-latest
+    steps:
+      - name: validate tag
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release tag must match vMAJOR.MINOR.PATCH: $VERSION"
+            exit 1
+          fi
+
+  verify-targets:
+    name: Verify release target matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.targets.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: compare prepare targets with release contract
+        id: targets
+        run: |
+          expected=$(cat <<'EOF'
+          linux/amd64
+          linux/arm64
+          windows/amd64
+          darwin/amd64
+          darwin/arm64
+          EOF
+          )
+          actual=$(sed -n '/^var Targets = \[\]Target{$/,/^}/p' internal/prepare/binaries.go | sed -n 's/.*GOOS: "\([^"]*\)", GOARCH: "\([^"]*\)".*/\1\/\2/p')
+          if [ "$actual" != "$expected" ]; then
+            echo "Release target contract does not match internal/prepare.Targets"
+            printf 'Expected:\n%s\nActual:\n%s\n' "$expected" "$actual"
+            exit 1
+          fi
+          matrix="$(printf '%s\n' "$actual" | python3 -c 'import json, sys; print(json.dumps({"include": [{"goos": item.split("/")[0], "goarch": item.split("/")[1]} for item in sys.stdin.read().splitlines()]}))')"
+          printf 'matrix=%s\n' "$matrix" >> "$GITHUB_OUTPUT"
+
+  freshness:
+    name: Verify embedded SPA freshness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: install frontend dependencies
+        working-directory: web
+        run: npm ci
+      - name: build frontend
+        working-directory: web
+        run: npm run build
+      - name: reject stale embedded SPA
+        run: git diff --exit-code -- web/dist
+
+  build:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: [validate-tag, verify-targets, freshness]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.verify-targets.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: build reproducible archive
+        env:
+          CGO_ENABLED: "0"
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          slug="${GOOS}-${GOARCH}"
+          binary=caravan
+          if [ "$GOOS" = windows ]; then
+            binary=caravan.exe
+          fi
+          archive="caravan-${VERSION}-${slug}.tar.gz"
+          mkdir -p "stage/${slug}" dist
+          go build -trimpath -ldflags "-X main.version=${VERSION}" -o "stage/${slug}/${binary}" ./cmd/caravan
+          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner \
+            -cf - -C "stage/${slug}" "${binary}" | gzip -n > "dist/${archive}"
+          test -s "dist/${archive}"
+          tar -tzf "dist/${archive}" | grep -Fx "${binary}"
+          file "dist/${archive}"
+      - name: upload target archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: caravan-${{ github.ref_name }}-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
+  package:
+    name: Package release assets
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: download target archives
+        uses: actions/download-artifact@v4
+        with:
+          pattern: caravan-${{ github.ref_name }}-*
+          path: ${{ runner.temp }}/release-archives
+          merge-multiple: true
+      - name: verify archives and exercise prepare
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          archive_dir="${RUNNER_TEMP}/release-archives"
+          release_bins="${RUNNER_TEMP}/release-bins"
+          drive="${RUNNER_TEMP}/caravan-drive"
+          host_bin="${RUNNER_TEMP}/caravan"
+          mkdir -p "$release_bins" "$drive" dist
+          mapfile -t archives < <(find "$archive_dir" -maxdepth 1 -type f -name '*.tar.gz' -print | LC_ALL=C sort)
+          test "${#archives[@]}" -eq 5
+          for archive in "${archives[@]}"; do
+            name="$(basename "$archive")"
+            slug="${name#caravan-${VERSION}-}"
+            slug="${slug%.tar.gz}"
+            mkdir -p "$release_bins/$slug"
+            tar -xzf "$archive" -C "$release_bins/$slug"
+            test "$(find "$release_bins/$slug" -maxdepth 1 -type f | wc -l)" -eq 1
+            file "$archive"
+          done
+          cp "$archive_dir"/*.tar.gz dist/
+          (cd dist && LC_ALL=C printf '%s\n' *.tar.gz | LC_ALL=C sort | xargs sha256sum > "caravan-${VERSION}.sha256")
+          (cd dist && sha256sum -c "caravan-${VERSION}.sha256")
+
+          go build -trimpath -ldflags "-X main.version=${VERSION}" -o "$host_bin" ./cmd/caravan
+          test "$("$host_bin" version)" = "caravan ${VERSION}"
+          first_output="$($host_bin prepare "$drive" -bin-dir "$release_bins")"
+          printf '%s\n' "$first_output"
+          ! grep -q 'warning: no binary' <<<"$first_output"
+          for path in \
+            caravan/bin/linux-amd64/caravan \
+            caravan/bin/linux-arm64/caravan \
+            caravan/bin/windows-amd64/caravan.exe \
+            caravan/bin/darwin-amd64/caravan \
+            caravan/bin/darwin-arm64/caravan; do
+            test -s "$drive/$path"
+          done
+          test -f "$drive/Start-Mac.command"
+          test -f "$drive/Start-Windows.bat"
+          test -f "$drive/Start-Linux.sh"
+          grep -Fqx 'storage_root: "."' "$drive/caravan/caravan.yaml"
+          test ! -e "$drive/library/Adult"
+
+          second_output="$($host_bin prepare "$drive" -bin-dir "$release_bins")"
+          printf '%s\n' "$second_output"
+          grep -q '^  kept ' <<<"$second_output"
+
+          summary="${RUNNER_TEMP}/release-summary.md"
+          {
+            printf '# Caravan %s\n\n' "$VERSION"
+            printf '| Target | Archive | Checksum | Embedded version |\n'
+            printf '|---|---|---|---|\n'
+            for archive in dist/*.tar.gz; do
+              name="$(basename "$archive")"
+              checksum="$(sha256sum "$archive" | cut -d' ' -f1)"
+              target="${name#caravan-${VERSION}-}"
+              target="${target%.tar.gz}"
+              printf '| `%s` | `%s` | `%s` | `%s` |\n' "$target" "$name" "$checksum" "$VERSION"
+            done
+          } > "$summary"
+          cat "$summary" >> "$GITHUB_STEP_SUMMARY"
+      - name: publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          summary="${RUNNER_TEMP}/release-summary.md"
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            gh release upload "$VERSION" dist/* --clobber
+            gh release edit "$VERSION" --title "Caravan $VERSION" --notes-file "$summary"
+          else
+            gh release create "$VERSION" dist/* --verify-tag --title "Caravan $VERSION" --notes-file "$summary"
+          fi

@@ -27,7 +27,7 @@ func runPrepare(args []string) error {
 	// remembered answer — the flag is the consent.
 	includeAdult := fs.Bool("include-adult", false,
 		"also create the Adult library folder on the drive (off by default)")
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(normalizePrepareArgs(args)); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
@@ -46,4 +46,17 @@ func runPrepare(args []string) error {
 	}
 	res.Report(os.Stdout)
 	return nil
+}
+
+// normalizePrepareArgs also accepts the documented "prepare <drive> -flag"
+// spelling. The standard flag package stops parsing at the first positional
+// argument, but the drive-first form is the portable workflow's public command.
+func normalizePrepareArgs(args []string) []string {
+	if len(args) < 2 || args[0] == "" || args[0][0] == '-' {
+		return args
+	}
+	normalized := make([]string, 0, len(args))
+	normalized = append(normalized, args[1:]...)
+	normalized = append(normalized, args[0])
+	return normalized
 }

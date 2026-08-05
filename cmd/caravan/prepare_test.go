@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
@@ -101,7 +102,7 @@ func TestPrepareBinDirFlag(t *testing.T) {
 	}
 
 	root := t.TempDir()
-	if err := run([]string{"prepare", "-bin-dir", bundle, root}); err != nil {
+	if err := run([]string{"prepare", root, "-bin-dir", bundle}); err != nil {
 		t.Fatalf("run prepare: %v", err)
 	}
 	got, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(other.RelPath())))
@@ -110,6 +111,15 @@ func TestPrepareBinDirFlag(t *testing.T) {
 	}
 	if string(got) != "release build" {
 		t.Fatalf("%s = %q, want the build from -bin-dir", other.RelPath(), got)
+	}
+}
+
+func TestNormalizePrepareArgsMovesDriveAfterFlags(t *testing.T) {
+	args := []string{"/tmp/drive", "-bin-dir", "/tmp/release-bins"}
+	got := normalizePrepareArgs(args)
+	want := []string{"-bin-dir", "/tmp/release-bins", "/tmp/drive"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("normalizePrepareArgs(%v) = %v, want %v", args, got, want)
 	}
 }
 

@@ -19,9 +19,9 @@ gate, and update its status row when finished.
 | 008 | Make Jellyfin setting writes atomic | P2 | S | 006 | DONE |
 | 009 | Bound calendar status queries | P2 | M | — | DONE |
 | 010 | Add staged cursor pagination | P2 | L | 004, 009 | DONE |
-| 011 | Harden CI around behavioral contracts | P2 | M | 002 | TODO |
-| 012 | Publish portable release artifacts | P3 | L | 002, 011 | TODO |
-| 013 | Reconcile project and deployment documentation | P3 | M | — | TODO |
+| 011 | Harden CI around behavioral contracts | P2 | M | 002 | DONE |
+| 012 | Publish portable release artifacts | P3 | L | 002, 011 | DONE |
+| 013 | Reconcile project and deployment documentation | P3 | M | — | DONE |
 | 014 | Make route policies declarative and complete | P3 | M | 001 | DONE |
 | 015 | Extract the acquisition composition root incrementally | P3 | L | 003, 008 | DONE |
 | 016 | Spike a read-only live activity stream | P3 | M | 003, 010 | DONE |

@@ -3,7 +3,10 @@
 **Status:** v1.1 (companion to `SPEC.md` Draft v0.2)
 **Date:** 2026-08-03
 
-Eleven phases. Each absorbs one hat of the existing *arr ecosystem and ends with a deliverable a real user can run and test — no phase ends in scaffolding-only limbo.
+Twelve numbered phases. An unnumbered interlude between v1.0 and v1.1 records
+three tracks that shipped between revisions. Each numbered phase absorbs one
+hat of the existing *arr ecosystem and ends with a deliverable a real user can
+run and test - no phase ends in scaffolding-only limbo.
 
 A standing principle sharpened after phase 6: **Caravan is completely standalone; external clients are explicitly optional.** The embedded engines (torrent since phase 2, Usenet in phase 7) are the defaults, and nothing in the UI or docs may imply an external client is required for any workflow.
 
