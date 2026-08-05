@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/watzon/caravan/internal/core"
 )
@@ -175,29 +176,43 @@ func (s *Store) ListDownloadsForGrabs(ctx context.Context, grabIDs []int64) ([]c
 		return []core.Download{}, nil
 	}
 
-	args := make([]any, 0, len(grabIDs))
-	for _, id := range grabIDs {
-		args = append(args, id)
-	}
-	query := "SELECT " + downloadColumns + " FROM downloads WHERE grab_id IN (" +
-		placeholders(len(grabIDs)) + ") ORDER BY id DESC"
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("store: list downloads for grabs: %w", err)
-	}
-	defer rows.Close()
-
-	out := []core.Download{}
-	for rows.Next() {
-		d, err := scanDownload(rows)
-		if err != nil {
-			return nil, fmt.Errorf("store: scan download for grabs: %w", err)
+	byID := make(map[int64]core.Download)
+	for start := 0; start < len(grabIDs); start += sqliteIDQueryBatchSize {
+		end := min(start+sqliteIDQueryBatchSize, len(grabIDs))
+		args := make([]any, 0, end-start)
+		for _, id := range grabIDs[start:end] {
+			args = append(args, id)
 		}
-		out = append(out, *d)
+		query := "SELECT " + downloadColumns + " FROM downloads WHERE grab_id IN (" +
+			placeholders(end-start) + ") ORDER BY id DESC"
+		rows, err := s.db.QueryContext(ctx, query, args...)
+		if err != nil {
+			return nil, fmt.Errorf("store: list downloads for grabs: %w", err)
+		}
+		for rows.Next() {
+			d, err := scanDownload(rows)
+			if err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("store: scan download for grabs: %w", err)
+			}
+			byID[d.ID] = *d
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("store: list downloads for grabs: %w", err)
+		}
+		if err := rows.Close(); err != nil {
+			return nil, fmt.Errorf("store: list downloads for grabs: %w", err)
+		}
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: list downloads for grabs: %w", err)
+
+	out := make([]core.Download, 0, len(byID))
+	for _, d := range byID {
+		out = append(out, d)
 	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].ID > out[j].ID
+	})
 	return out, nil
 }
 

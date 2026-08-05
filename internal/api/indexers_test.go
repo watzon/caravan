@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/watzon/caravan/internal/core"
+	"github.com/watzon/caravan/internal/indexer"
 )
 
 func TestIndexerCRUD(t *testing.T) {
@@ -288,6 +290,38 @@ func TestIndexerCategories(t *testing.T) {
 	rec = do(t, h, http.MethodPost, "/api/v1/indexers/categories", `{"url":"","type":"torznab"}`)
 	wantStatus(t, rec, http.StatusBadRequest)
 	wantErrorBody(t, rec)
+}
+
+func TestIndexerCategoriesUsesSuppliedAPIKey(t *testing.T) {
+	const apiKey = "unsaved-indexer-key"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("t") != "caps" {
+			http.Error(w, "expected caps request", http.StatusBadRequest)
+			return
+		}
+		if r.URL.Query().Get("apikey") != apiKey {
+			http.Error(w, "bad api key", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/xml")
+		_, _ = w.Write([]byte(`<caps><searching><search available="yes"/></searching><categories><category id="5070" name="Anime"/></categories></caps>`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	h, _, _ := newTestServer(t, WithIndexerClients(func(cfg core.IndexerConfig) IndexerClient {
+		return indexer.New(cfg, upstream.Client())
+	}))
+	rec := do(t, h, http.MethodPost, "/api/v1/indexers/categories",
+		fmt.Sprintf(`{"url":%q,"type":"torznab","api_key":%q}`, upstream.URL, apiKey))
+	wantStatus(t, rec, http.StatusOK)
+
+	var body struct {
+		Categories []core.IndexerCategory `json:"categories"`
+	}
+	decodeBody(t, rec, &body)
+	if len(body.Categories) != 1 || body.Categories[0].ID != 5070 {
+		t.Fatalf("categories = %+v, want the protected indexer's advertised tree", body.Categories)
+	}
 }
 
 func TestIndexerCategoriesWithoutClientFactory(t *testing.T) {

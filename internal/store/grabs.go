@@ -6,10 +6,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/watzon/caravan/internal/core"
 )
+
+// sqliteIDQueryBatchSize leaves ample room below SQLite's conservative
+// bind-variable ceiling for any fixed query arguments.
+const sqliteIDQueryBatchSize = 500
 
 const grabColumns = `id, release_id, movie_id, series_id, season_number, episode_ids,
 	release_title, reason, status, created_at`
@@ -151,42 +156,65 @@ func (s *Store) ListCalendarGrabs(ctx context.Context, movieIDs, episodeIDs []in
 		return []core.Grab{}, nil
 	}
 
-	targets := make([]string, 0, 2)
-	args := []any{core.GrabStatusGrabbed}
-	if len(movieIDs) > 0 {
-		targets = append(targets, "movie_id IN ("+placeholders(len(movieIDs))+")")
-		for _, id := range movieIDs {
-			args = append(args, id)
+	byID := make(map[int64]core.Grab)
+	list := func(movieBatch, episodeBatch []int64) error {
+		targets := make([]string, 0, 2)
+		args := []any{core.GrabStatusGrabbed}
+		if len(movieBatch) > 0 {
+			targets = append(targets, "movie_id IN ("+placeholders(len(movieBatch))+")")
+			for _, id := range movieBatch {
+				args = append(args, id)
+			}
 		}
-	}
-	if len(episodeIDs) > 0 {
-		targets = append(targets,
-			"EXISTS (SELECT 1 FROM json_each(grabs.episode_ids) WHERE value IN ("+
-				placeholders(len(episodeIDs))+"))")
-		for _, id := range episodeIDs {
-			args = append(args, id)
+		if len(episodeBatch) > 0 {
+			targets = append(targets,
+				"EXISTS (SELECT 1 FROM json_each(grabs.episode_ids) WHERE value IN ("+
+					placeholders(len(episodeBatch))+"))")
+			for _, id := range episodeBatch {
+				args = append(args, id)
+			}
 		}
-	}
 
-	query := "SELECT " + grabColumns + " FROM grabs WHERE status = ? AND (" +
-		strings.Join(targets, " OR ") + ") ORDER BY id DESC"
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("store: list calendar grabs: %w", err)
-	}
-	defer rows.Close()
-
-	out := []core.Grab{}
-	for rows.Next() {
-		g, err := scanGrab(rows)
+		query := "SELECT " + grabColumns + " FROM grabs WHERE status = ? AND (" +
+			strings.Join(targets, " OR ") + ") ORDER BY id DESC"
+		rows, err := s.db.QueryContext(ctx, query, args...)
 		if err != nil {
-			return nil, fmt.Errorf("store: scan calendar grab: %w", err)
+			return fmt.Errorf("store: list calendar grabs: %w", err)
 		}
-		out = append(out, *g)
+		defer rows.Close()
+
+		for rows.Next() {
+			g, err := scanGrab(rows)
+			if err != nil {
+				return fmt.Errorf("store: scan calendar grab: %w", err)
+			}
+			byID[g.GrabID] = *g
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("store: list calendar grabs: %w", err)
+		}
+		return nil
 	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: list calendar grabs: %w", err)
+	for start := 0; start < len(movieIDs); start += sqliteIDQueryBatchSize {
+		end := min(start+sqliteIDQueryBatchSize, len(movieIDs))
+		if err := list(movieIDs[start:end], nil); err != nil {
+			return nil, err
+		}
 	}
+	for start := 0; start < len(episodeIDs); start += sqliteIDQueryBatchSize {
+		end := min(start+sqliteIDQueryBatchSize, len(episodeIDs))
+		if err := list(nil, episodeIDs[start:end]); err != nil {
+			return nil, err
+		}
+	}
+
+	out := make([]core.Grab, 0, len(byID))
+	for _, g := range byID {
+		out = append(out, g)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].GrabID > out[j].GrabID
+	})
 	return out, nil
 }
 

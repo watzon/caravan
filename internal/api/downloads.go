@@ -88,7 +88,7 @@ func (s *server) handleListDownloads(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = min(n, maxDownloadLimit)
 	}
-	storedBefore, orphanCursor, err := parseDownloadCursor(rawCursor)
+	cursor, err := parseDownloadCursor(rawCursor)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -104,7 +104,11 @@ func (s *server) handleListDownloads(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, nextStored, err := s.st.ListDownloadsPage(r.Context(), limit, storedBefore)
+	rows := []core.Download(nil)
+	var nextStored int64
+	if cursor.stage == downloadCursorStored {
+		rows, nextStored, err = s.st.ListDownloadsPage(r.Context(), limit, cursor.storedBefore)
+	}
 	if err != nil {
 		s.writeStoreError(w, "list download page", err)
 		return
@@ -121,32 +125,19 @@ func (s *server) handleListDownloads(w http.ResponseWriter, r *http.Request) {
 
 	nextCursor := ""
 	if nextStored != 0 {
-		nextCursor = "stored:" + strconv.FormatInt(nextStored, 10)
+		nextCursor = (downloadCursor{
+			stage:        downloadCursorStored,
+			storedBefore: nextStored,
+		}).encode()
 	} else {
 		remaining := limit - len(out)
 		if remaining == 0 {
-			statuses, _, supported, err := pager.ListPage(r.Context(), 1, orphanCursor)
-			if err != nil {
-				s.writeEngineError(w, "list download page", err)
-				return
-			}
-			if !supported {
-				s.writeLegacyDownloads(w, r)
-				return
-			}
-			for _, status := range statuses {
-				_, lookupErr := s.st.GetDownloadByEngineID(r.Context(), status.ID)
-				if errors.Is(lookupErr, store.ErrNotFound) {
-					nextCursor = encodeOrphanCursor(orphanCursor)
-					break
-				}
-				if lookupErr != nil {
-					s.writeStoreError(w, "check orphan download", lookupErr)
-					return
-				}
-			}
+			nextCursor = (downloadCursor{
+				stage:        downloadCursorOrphan,
+				orphanCursor: cursor.orphanCursor,
+			}).encode()
 		} else {
-			orphans, nextRaw, err := s.pageOrphans(r.Context(), pager, remaining, orphanCursor)
+			orphans, nextRaw, err := s.pageOrphans(r.Context(), pager, remaining, cursor.orphanCursor)
 			if err != nil {
 				s.writeEngineError(w, "list download page", err)
 				return
@@ -161,7 +152,10 @@ func (s *server) handleListDownloads(w http.ResponseWriter, r *http.Request) {
 				out = append(out, dto)
 			}
 			if nextRaw != "" {
-				nextCursor = encodeOrphanCursor(nextRaw)
+				nextCursor = (downloadCursor{
+					stage:        downloadCursorOrphan,
+					orphanCursor: nextRaw,
+				}).encode()
 			}
 		}
 	}
@@ -256,45 +250,71 @@ func (s *server) pageOrphans(ctx context.Context, pager downloadPager, limit int
 	return out, raw, nil
 }
 
-func parseDownloadCursor(raw string) (int64, string, error) {
+type downloadCursorStage uint8
+
+const (
+	downloadCursorStored downloadCursorStage = iota
+	downloadCursorOrphan
+)
+
+type downloadCursor struct {
+	stage        downloadCursorStage
+	storedBefore int64
+	orphanCursor string
+}
+
+func parseDownloadCursor(raw string) (downloadCursor, error) {
 	if raw == "" {
-		return 0, "", nil
+		return downloadCursor{stage: downloadCursorStored}, nil
 	}
 	if strings.HasPrefix(raw, "stored:") {
 		id, err := strconv.ParseInt(strings.TrimPrefix(raw, "stored:"), 10, 64)
 		if err != nil || id <= 0 {
-			return 0, "", errors.New("cursor must be a valid stored download cursor")
+			return downloadCursor{}, errors.New("cursor must be a valid stored download cursor")
 		}
-		return id, "", nil
+		return downloadCursor{stage: downloadCursorStored, storedBefore: id}, nil
 	}
 	if raw == "orphan:start" {
-		return 0, "", nil
+		return downloadCursor{stage: downloadCursorOrphan}, nil
 	}
 	parts := strings.Split(raw, ":")
 	if len(parts) != 3 || parts[0] != "orphan" {
-		return 0, "", errors.New("cursor must be a tagged download cursor")
+		return downloadCursor{}, errors.New("cursor must be a tagged download cursor")
 	}
 	route, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil || len(route) == 0 {
-		return 0, "", errors.New("cursor has an invalid orphan route")
+		return downloadCursor{}, errors.New("cursor has an invalid orphan route")
 	}
 	id, err := base64.RawURLEncoding.DecodeString(parts[2])
 	if err != nil || len(id) == 0 {
-		return 0, "", errors.New("cursor has an invalid orphan id")
+		return downloadCursor{}, errors.New("cursor has an invalid orphan id")
 	}
-	return 0, string(route) + "\x00" + string(id), nil
+	return downloadCursor{
+		stage:        downloadCursorOrphan,
+		orphanCursor: string(route) + "\x00" + string(id),
+	}, nil
 }
 
-func encodeOrphanCursor(raw string) string {
-	if raw == "" {
-		return "orphan:start"
-	}
-	route, id, ok := strings.Cut(raw, "\x00")
-	if !ok || route == "" || id == "" {
+func (c downloadCursor) encode() string {
+	switch c.stage {
+	case downloadCursorStored:
+		if c.storedBefore <= 0 {
+			return ""
+		}
+		return "stored:" + strconv.FormatInt(c.storedBefore, 10)
+	case downloadCursorOrphan:
+		if c.orphanCursor == "" {
+			return "orphan:start"
+		}
+		route, id, ok := strings.Cut(c.orphanCursor, "\x00")
+		if !ok || route == "" || id == "" {
+			return ""
+		}
+		return "orphan:" + base64.RawURLEncoding.EncodeToString([]byte(route)) + ":" +
+			base64.RawURLEncoding.EncodeToString([]byte(id))
+	default:
 		return ""
 	}
-	return "orphan:" + base64.RawURLEncoding.EncodeToString([]byte(route)) + ":" +
-		base64.RawURLEncoding.EncodeToString([]byte(id))
 }
 
 func storedDownloadDTO(d core.Download) downloadJSON {

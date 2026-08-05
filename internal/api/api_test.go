@@ -483,6 +483,9 @@ func TestSettingsRoundTrip(t *testing.T) {
 	if err := st.SetSetting(ctx, store.SettingTMDBAPIKey, "tmdb-secret"); err != nil {
 		t.Fatalf("seed TMDB key: %v", err)
 	}
+	if err := st.SetSetting(ctx, store.SettingJellyfinAPIKey, "jellyfin-secret"); err != nil {
+		t.Fatalf("seed Jellyfin key: %v", err)
+	}
 	if err := st.SetSetting(ctx, store.SettingRSSSyncIntervalMinutes, "20"); err != nil {
 		t.Fatalf("seed interval: %v", err)
 	}
@@ -490,10 +493,15 @@ func TestSettingsRoundTrip(t *testing.T) {
 	rec = do(t, h, http.MethodGet, "/api/v1/settings", "")
 	wantStatus(t, rec, http.StatusOK)
 	if strings.Contains(rec.Body.String(), "tmdb-secret") ||
-		strings.Contains(rec.Body.String(), `"tmdb_api_key"`) {
+		strings.Contains(rec.Body.String(), "jellyfin-secret") ||
+		strings.Contains(rec.Body.String(), `"tmdb_api_key"`) ||
+		strings.Contains(rec.Body.String(), `"jellyfin_api_key"`) {
 		t.Fatalf("settings GET leaked credential: %s", rec.Body.String())
 	}
 	decodeBody(t, rec, &settings)
+	if _, ok := settings[store.SettingJellyfinAPIKey]; ok {
+		t.Fatalf("settings exposed jellyfin_api_key: %v", settings)
+	}
 	if settings["tmdb_api_key_set"] != "true" || settings[store.SettingRSSSyncIntervalMinutes] != "20" {
 		t.Fatalf("settings = %v, want redacted key flag and interval", settings)
 	}

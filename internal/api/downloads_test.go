@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"sort"
+	"strings"
 	"testing"
 
 	"github.com/watzon/caravan/internal/clients"
@@ -29,6 +31,58 @@ func storeDownload(t *testing.T, st *store.Store, engineID core.DownloadID, titl
 		t.Fatalf("UpsertDownload: %v", err)
 	}
 	return d
+}
+
+type routeCursorStubEngine struct {
+	*stubEngine
+	pageLimits []int
+}
+
+func (e *routeCursorStubEngine) ListPage(_ context.Context, limit int, before string) ([]core.DownloadStatus, string, bool, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.listErr != nil {
+		return nil, "", true, e.listErr
+	}
+	e.pageLimits = append(e.pageLimits, limit)
+
+	statuses := append([]core.DownloadStatus(nil), e.statuses...)
+	sort.Slice(statuses, func(i, j int) bool { return statuses[i].ID < statuses[j].ID })
+	beforeID := ""
+	if before != "" {
+		route, id, ok := strings.Cut(before, "\x00")
+		if !ok || route != "stub" || id == "" {
+			return nil, "", true, errors.New("stub engine: invalid page cursor")
+		}
+		beforeID = id
+	}
+
+	start := 0
+	for start < len(statuses) && beforeID != "" && string(statuses[start].ID) <= beforeID {
+		start++
+	}
+	if start == len(statuses) {
+		return []core.DownloadStatus{}, "", true, nil
+	}
+	end := min(start+limit, len(statuses))
+	next := ""
+	if end < len(statuses) {
+		next = "stub\x00" + string(statuses[end-1].ID)
+	}
+	return statuses[start:end], next, true, nil
+}
+
+func (e *routeCursorStubEngine) recordedPageLimits() []int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return append([]int(nil), e.pageLimits...)
+}
+
+func newRouteCursorDownloadServer(t *testing.T) (http.Handler, *store.Store, *routeCursorStubEngine) {
+	t.Helper()
+	engine := &routeCursorStubEngine{stubEngine: &stubEngine{}}
+	h, st, _ := newTestServer(t, WithEngine(&stubEngineProvider{engine: engine}))
+	return h, st, engine
 }
 
 func TestListDownloadsMergesEngineAndStore(t *testing.T) {
@@ -117,6 +171,127 @@ func TestListDownloadsUsesStableCursorPages(t *testing.T) {
 	for _, id := range []string{"a", "b", "c", "orphan"} {
 		if !seen[id] {
 			t.Errorf("paged downloads omitted %q: %v", id, all)
+		}
+	}
+}
+
+func TestListDownloadsCursorDrainsStoredAndOrphanPages(t *testing.T) {
+	h, st, engine := newRouteCursorDownloadServer(t)
+	for _, id := range []core.DownloadID{"stored-a", "stored-b", "stored-c"} {
+		storeDownload(t, st, id, string(id))
+	}
+	engine.statuses = []core.DownloadStatus{
+		{ID: "orphan-a", Name: "orphan-a", Engine: "stub"},
+		{ID: "orphan-b", Name: "orphan-b", Engine: "stub"},
+		{ID: "orphan-c", Name: "orphan-c", Engine: "stub"},
+		{ID: "stored-a", Name: "stored-a", Engine: "stub"},
+		{ID: "stored-b", Name: "stored-b", Engine: "stub"},
+		{ID: "stored-c", Name: "stored-c", Engine: "stub"},
+	}
+
+	want := map[string]bool{
+		"stored-a": true, "stored-b": true, "stored-c": true,
+		"orphan-a": true, "orphan-b": true, "orphan-c": true,
+	}
+	seen := map[string]bool{}
+	seenCursors := map[string]bool{}
+	cursor := ""
+	terminated := false
+	for page := range 8 {
+		path := "/api/v1/downloads?limit=2"
+		if cursor != "" {
+			if seenCursors[cursor] {
+				t.Fatalf("pagination repeated cursor %q", cursor)
+			}
+			seenCursors[cursor] = true
+			path += "&cursor=" + url.QueryEscape(cursor)
+		}
+		rec := do(t, h, http.MethodGet, path, "")
+		wantStatus(t, rec, http.StatusOK)
+		var body struct {
+			Downloads []downloadJSON `json:"downloads"`
+			Next      string         `json:"next_cursor"`
+		}
+		decodeBody(t, rec, &body)
+		if len(body.Downloads) == 0 {
+			if body.Next != "" {
+				t.Fatalf("empty page %d next_cursor = %q, want exhaustion", page, body.Next)
+			}
+			terminated = true
+			break
+		}
+		if len(body.Downloads) > 2 {
+			t.Fatalf("page %d downloads = %+v, want at most two rows", page, body.Downloads)
+		}
+		for _, row := range body.Downloads {
+			if seen[row.ID] {
+				t.Fatalf("pagination repeated download %q", row.ID)
+			}
+			seen[row.ID] = true
+		}
+		if body.Next == "" {
+			terminated = true
+			break
+		}
+		cursor = body.Next
+	}
+	if !terminated {
+		t.Fatal("pagination did not terminate")
+	}
+	if len(seen) != len(want) {
+		t.Fatalf("downloads = %v, want %v", seen, want)
+	}
+	for id := range want {
+		if !seen[id] {
+			t.Errorf("pagination omitted %q", id)
+		}
+	}
+}
+
+func TestListDownloadsExactStoredPageFindsLaterOrphan(t *testing.T) {
+	h, st, engine := newRouteCursorDownloadServer(t)
+	for _, id := range []core.DownloadID{"persisted-a", "persisted-b"} {
+		storeDownload(t, st, id, string(id))
+	}
+	engine.statuses = []core.DownloadStatus{
+		{ID: "persisted-a", Name: "persisted-a", Engine: "stub"},
+		{ID: "persisted-b", Name: "persisted-b", Engine: "stub"},
+		{ID: "z-live-only", Name: "z-live-only", Engine: "stub"},
+	}
+
+	rec := do(t, h, http.MethodGet, "/api/v1/downloads?limit=2", "")
+	wantStatus(t, rec, http.StatusOK)
+	var first struct {
+		Downloads []downloadJSON `json:"downloads"`
+		Next      string         `json:"next_cursor"`
+	}
+	decodeBody(t, rec, &first)
+	if len(first.Downloads) != 2 {
+		t.Fatalf("first page downloads = %+v, want two persisted rows", first.Downloads)
+	}
+	if first.Next == "" {
+		t.Fatal("first page omitted continuation for later live-only download")
+	}
+	if calls := engine.recordedPageLimits(); len(calls) != 0 {
+		t.Fatalf("stored-to-orphan boundary pager calls = %v, want none", calls)
+	}
+
+	rec = do(t, h, http.MethodGet, "/api/v1/downloads?limit=2&cursor="+url.QueryEscape(first.Next), "")
+	wantStatus(t, rec, http.StatusOK)
+	var second struct {
+		Downloads []downloadJSON `json:"downloads"`
+		Next      string         `json:"next_cursor"`
+	}
+	decodeBody(t, rec, &second)
+	if len(second.Downloads) != 1 || second.Downloads[0].ID != "z-live-only" {
+		t.Fatalf("second page downloads = %+v, want the later live-only download", second.Downloads)
+	}
+	if second.Next != "" {
+		t.Fatalf("second page next_cursor = %q, want exhaustion", second.Next)
+	}
+	for _, limit := range engine.recordedPageLimits() {
+		if limit != 2 {
+			t.Fatalf("orphan-stage pager limit = %d, want 2", limit)
 		}
 	}
 }

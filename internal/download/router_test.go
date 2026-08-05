@@ -852,6 +852,40 @@ func TestRouterListPageMergesRoutesWithOpaqueBoundary(t *testing.T) {
 	}
 }
 
+// A route can return a full native page even though the router's global limit
+// only admits part of it. Its last admitted native ID must remain the boundary,
+// regardless of whether the provider supplied a native continuation.
+func TestRouterListPageRetainsPartiallyConsumedRoute(t *testing.T) {
+	a := newFakeEngine("a", "1")
+	b := newFakeEngine("b", "1", "2")
+	r := NewRouter(staticTable(
+		Route{Name: "a", IDPrefix: "a-", Engine: a},
+		Route{Name: "b", IDPrefix: "b-", Engine: b},
+	))
+
+	first, cursor, supported, err := r.ListPage(context.Background(), 2, "")
+	if err != nil || !supported {
+		t.Fatalf("first page = %v, %v, supported=%v", first, err, supported)
+	}
+	if got := []core.DownloadID{first[0].ID, first[1].ID}; !equalDownloadIDs(got, []core.DownloadID{"a-1", "b-1"}) {
+		t.Fatalf("first page IDs = %v", got)
+	}
+	if cursor == "" {
+		t.Fatal("first page returned no continuation cursor")
+	}
+
+	second, next, supported, err := r.ListPage(context.Background(), 2, cursor)
+	if err != nil || !supported {
+		t.Fatalf("second page = %v, %v, supported=%v", second, err, supported)
+	}
+	if got := []core.DownloadID{second[0].ID}; !equalDownloadIDs(got, []core.DownloadID{"b-2"}) {
+		t.Fatalf("second page IDs = %v", got)
+	}
+	if next != "" {
+		t.Fatalf("second page cursor = %q, want exhausted", next)
+	}
+}
+
 func equalDownloadIDs(a, b []core.DownloadID) bool {
 	if len(a) != len(b) {
 		return false

@@ -88,10 +88,12 @@ type engineSettingsApplier interface {
 // UI has any use for, and a credential the API hands back is a credential that
 // ends up in a browser cache, a screenshot or a bug report (SPEC §12).
 //
-// The other secrets in this table (the TMDB and Jellyfin keys) are values the
-// user typed into a form and has to be able to see and correct, so they stay.
+// The TMDB key is redacted separately to expose only its presence. The Jellyfin
+// key has its own handoff endpoint that likewise exposes only whether a key is
+// stored, so neither secret belongs in the generic response.
 var hiddenSettings = map[string]bool{
-	store.SettingPasswordHash: true,
+	store.SettingPasswordHash:   true,
+	store.SettingJellyfinAPIKey: true,
 }
 
 // adultOnlySettings are readable only by a caller the adult module is visible

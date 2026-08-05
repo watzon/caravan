@@ -106,6 +106,59 @@ func TestListDownloadsForGrabsFiltersAndOrders(t *testing.T) {
 	}
 }
 
+func TestCalendarLookupsBatchSQLiteBindVariables(t *testing.T) {
+	ctx := context.Background()
+	st, _ := openTemp(t)
+
+	// 1,002 values are above SQLite's historical 999-variable ceiling. Repeat
+	// one ID across batches to defend the one-row-per-grab contract too.
+	const count = sqliteIDQueryBatchSize*2 + 1
+	movieIDs := make([]int64, 0, count+1)
+	for id := int64(1); id <= count; id++ {
+		movieIDs = append(movieIDs, id)
+		insertCalendarGrab(t, st, core.Grab{
+			GrabInfo: core.GrabInfo{MovieID: id, ReleaseTitle: "calendar movie"},
+			Status:   core.GrabStatusGrabbed,
+		})
+	}
+	movieIDs = append(movieIDs, movieIDs[0])
+
+	grabs, err := st.ListCalendarGrabs(ctx, movieIDs, nil)
+	if err != nil {
+		t.Fatalf("ListCalendarGrabs with %d IDs: %v", len(movieIDs), err)
+	}
+	if len(grabs) != count {
+		t.Fatalf("ListCalendarGrabs returned %d rows, want %d", len(grabs), count)
+	}
+	grabIDs := make([]int64, 0, len(grabs)+1)
+	for i, grab := range grabs {
+		wantID := count - int64(i)
+		if grab.GrabID != wantID || grab.MovieID != wantID {
+			t.Fatalf("grab %d = %+v, want newest-first id and movie %d", i, grab, wantID)
+		}
+		grabIDs = append(grabIDs, grab.GrabID)
+	}
+	grabIDs = append(grabIDs, grabIDs[0])
+
+	first := insertCalendarDownload(t, st, core.Download{
+		GrabID: grabIDs[0], EngineID: "newest", State: core.DownloadQueued,
+	})
+	second := insertCalendarDownload(t, st, core.Download{
+		GrabID: grabIDs[len(grabs)-1], EngineID: "oldest", State: core.DownloadQueued,
+	})
+	downloads, err := st.ListDownloadsForGrabs(ctx, grabIDs)
+	if err != nil {
+		t.Fatalf("ListDownloadsForGrabs with %d IDs: %v", len(grabIDs), err)
+	}
+	if len(downloads) != 2 {
+		t.Fatalf("ListDownloadsForGrabs returned %d rows, want 2: %#v", len(downloads), downloads)
+	}
+	if downloads[0].ID != second.ID || downloads[1].ID != first.ID {
+		t.Fatalf("download IDs = %d, %d, want newest-first %d, %d",
+			downloads[0].ID, downloads[1].ID, second.ID, first.ID)
+	}
+}
+
 func insertCalendarGrab(t *testing.T, st *Store, grab core.Grab) core.Grab {
 	t.Helper()
 	if err := st.InsertGrab(context.Background(), &grab); err != nil {

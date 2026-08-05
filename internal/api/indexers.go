@@ -231,7 +231,11 @@ func (s *server) handleIndexerCategories(w http.ResponseWriter, r *http.Request)
 	if strings.TrimSpace(body.Name) == "" {
 		body.Name = "indexer"
 	}
-	cfg, problem := body.config("")
+	apiKey := ""
+	if body.APIKey != nil {
+		apiKey = *body.APIKey
+	}
+	cfg, problem := body.config(apiKey)
 	if problem != "" {
 		writeError(w, http.StatusBadRequest, problem)
 		return

@@ -383,9 +383,11 @@ func (r *Router) ListPage(ctx context.Context, limit int, cursor string) ([]core
 	out := make([]core.DownloadStatus, 0, limit)
 	lastKey := ""
 	lastNative := core.DownloadID("")
+	partiallyConsumed := false
 	for _, result := range results {
 		for _, status := range result.statuses {
 			if len(out) == limit {
+				partiallyConsumed = true
 				break
 			}
 			out = append(out, status)
@@ -400,7 +402,7 @@ func (r *Router) ListPage(ctx context.Context, limit int, cursor string) ([]core
 	if len(out) == 0 {
 		return out, "", true, nil
 	}
-	more := false
+	more := partiallyConsumed
 	for _, result := range results {
 		if result.key > lastKey && len(result.statuses) > 0 {
 			more = true
