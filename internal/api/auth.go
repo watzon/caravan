@@ -360,6 +360,16 @@ func memberAllowed(method, path string) bool {
 	switch method + " " + path {
 	case http.MethodGet + " /discover",
 		http.MethodGet + " /discover/browse",
+		// The filtered scopes and the controls that drive them (PLAN phase 12).
+		// Finding something specific is exactly a member's job, so the filter
+		// rail is theirs too; every one of these is read-only against the
+		// metadata provider and touches no library row.
+		http.MethodGet + " /discover/movies",
+		http.MethodGet + " /discover/series",
+		http.MethodGet + " /discover/people",
+		http.MethodGet + " /discover/companies",
+		http.MethodGet + " /discover/keywords",
+		http.MethodGet + " /discover/genres",
 		http.MethodGet + " /requests",
 		http.MethodPost + " /requests",
 		http.MethodGet + " /auth/me",
@@ -381,12 +391,24 @@ func memberAllowed(method, path string) bool {
 		// is not named here is turned away with the generic 403 and never
 		// reaches the gate at all.
 		// Deliberately absent from this list, and therefore admin-only:
-		// POST /adult/sites and GET /adult/search (adding to the library is a
-		// decision, and searching the provider for a site has no other use),
-		// and the member-access card under /adult/users (handing out grants is
-		// the admin's job, and the roster is not a member's to read).
+		// POST /adult/sites (adding to the library is a decision), and the
+		// member-access card under /adult/users (handing out grants is the
+		// admin's job, and the roster is not a member's to read).
 		http.MethodGet + " /adult/sites",
-		http.MethodGet + " /adult/discover":
+		http.MethodGet + " /adult/discover",
+		// The scene filter rail's three typeaheads, which are part of the
+		// browse screen above rather than surfaces of their own: they read the
+		// provider's site, performer and tag vocabulary and touch no library
+		// row. /adult/search is the Site pill's — the widening ladder only
+		// appears once a site is picked, so without it PLAN phase 12's "this
+		// whole network's scenes with these two tags" is unreachable for the
+		// members the rail is for, and a control that 403s is worse than no
+		// control. Reading the provider's site names is not adding one: that
+		// is POST /adult/sites, which stays above.
+		http.MethodGet + " /adult/search",
+
+		http.MethodGet + " /adult/performers",
+		http.MethodGet + " /adult/tags":
 		return true
 	}
 
@@ -694,6 +716,58 @@ type meResponse struct {
 	// module, and it has to be: the SPA must decide what to draw before it
 	// makes a request that would 404.
 	Adult bool `json:"adult"`
+	// SceneFilters says which controls the Explore rail's Adult scope may
+	// draw, because "stash-box" is a protocol with dialects and the configured
+	// endpoint decides: TPDB serves a release year, a runtime, a widened site
+	// scope and two extra orderings, and a StashDB or FansDB install refuses
+	// every one of them (internal/stashbox/scenes.go). Without this the rail
+	// had no way to know, and touching Year on the wrong endpoint replaced the
+	// whole grid with a 400 — the exact "control the provider cannot answer"
+	// PLAN phase 12's first acceptance criterion forbids.
+	//
+	// It rides here rather than on the scene answer for one reason: it must be
+	// readable BEFORE the first scene request, or a URL naming an unsupported
+	// filter fails and the rail never learns why. `omitempty` on a pointer, so
+	// it is absent — not a block of `false` — for a caller who cannot see the
+	// module at all, and absent likewise when no credential is configured,
+	// where the screen's own 503 has the better answer.
+	SceneFilters *sceneFiltersJSON `json:"scene_filters,omitempty"`
+}
+
+// sceneFiltersJSON is core.SceneFilterSupport on the wire. Positive: true is
+// "this control works", so a client reading an older server's answer — where
+// the block is absent — falls back to drawing everything and letting the
+// refusal explain, which is what it did before this existed.
+type sceneFiltersJSON struct {
+	Year          bool `json:"year"`
+	Duration      bool `json:"duration"`
+	SiteScope     bool `json:"site_scope"`
+	DateOp        bool `json:"date_op"`
+	SortDuration  bool `json:"sort_duration"`
+	SortRelevance bool `json:"sort_relevance"`
+	AnyOf         bool `json:"any_of"`
+}
+
+// sceneFilters reports what the configured adult provider can serve, or nil
+// when there is nothing to report: an ungranted caller, or no credential.
+func (s *server) sceneFilters(adult bool) *sceneFiltersJSON {
+	if !adult {
+		return nil
+	}
+	provider := s.mgr.AdultMetadata()
+	if provider == nil {
+		return nil
+	}
+	f := core.SceneFiltersOf(provider)
+	return &sceneFiltersJSON{
+		Year:          f.Year,
+		Duration:      f.Duration,
+		SiteScope:     f.SiteScope,
+		DateOp:        f.DateOp,
+		SortDuration:  f.SortDuration,
+		SortRelevance: f.SortRelevance,
+		AnyOf:         f.AnyOf,
+	}
 }
 
 // handleMe reports the calling identity. It is inside the gate and reachable by
@@ -709,9 +783,12 @@ func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreError(w, "read adult settings", err)
 		return
 	}
+	filters := s.sceneFilters(adult)
 	user := currentUser(r)
 	if user.ID == 0 {
-		writeJSON(w, http.StatusOK, meResponse{Role: user.Role, Open: user.Open, Adult: adult})
+		writeJSON(w, http.StatusOK, meResponse{
+			Role: user.Role, Open: user.Open, Adult: adult, SceneFilters: filters,
+		})
 		return
 	}
 	row, err := s.st.GetUser(r.Context(), user.ID)
@@ -719,7 +796,9 @@ func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreError(w, "read user", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, meResponse{Username: row.Username, Role: row.Role, Adult: adult})
+	writeJSON(w, http.StatusOK, meResponse{
+		Username: row.Username, Role: row.Role, Adult: adult, SceneFilters: filters,
+	})
 }
 
 // handleLogout invalidates the presented session. It is exempt from the

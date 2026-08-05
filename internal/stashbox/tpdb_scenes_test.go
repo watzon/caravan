@@ -111,8 +111,13 @@ func TestSearchScenesOnTPDBWalksTheRESTSceneIndex(t *testing.T) {
 		t.Fatalf("scene index requests = %d, want 1", len(scenes))
 	}
 	q := scenes[0]
+	// orderBy, not the sort/order pair this walk used to send: the pair is not
+	// in TPDB's scene-index parameter list at all and was therefore ignored,
+	// while orderBy=recently_released is the enum that actually asks for the
+	// newest-first order SearchScenes documents (verified against the live
+	// endpoint and its OpenAPI spec, 2026-08-03).
 	for param, want := range map[string]string{
-		"site_id": "94", "page": "1", "per_page": "25", "sort": "date", "order": "desc",
+		"site_id": "94", "page": "1", "per_page": "25", "orderBy": "recently_released",
 	} {
 		if got := valueOf(t, q.RawQuery, param); got != want {
 			t.Errorf("%s = %q, want %q (query %q)", param, got, want, q.RawQuery)

@@ -1,0 +1,20 @@
+{
+  "page": 1,
+  "results": [
+    {
+      "id": 3,
+      "name": "Harrison Ford",
+      "known_for_department": "Acting",
+      "profile_path": "/zVnHagUvXkR2StdOtquEwsiwSVt.jpg",
+      "popularity": 41.2
+    },
+    {
+      "id": 525,
+      "name": "Christopher Nolan",
+      "known_for_department": "Directing",
+      "profile_path": null
+    }
+  ],
+  "total_pages": 1,
+  "total_results": 2
+}

@@ -256,6 +256,19 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	// requested, so the SPA never has to cross-reference two calls.
 	api.HandleFunc("GET /discover", s.handleDiscoverHome)
 	api.HandleFunc("GET /discover/browse", s.handleDiscoverBrowse)
+	// The filtered scopes (PLAN phase 12 tasks 1 and 3). One per media type
+	// rather than one endpoint with a ?type=, because the filter surfaces are
+	// not the same shape: only movies can be filtered by a person, and a
+	// single endpoint would have to accept the parameter and then refuse it.
+	// Their query strings are the whole filter, so a filtered view is a URL.
+	api.HandleFunc("GET /discover/movies", s.handleDiscoverMovies)
+	api.HandleFunc("GET /discover/series", s.handleDiscoverSeries)
+	// What the filter rail's controls are populated from: three typeaheads
+	// onto the provider's own indexes, and the fixed genre vocabularies.
+	api.HandleFunc("GET /discover/people", s.handleDiscoverPeople)
+	api.HandleFunc("GET /discover/companies", s.handleDiscoverCompanies)
+	api.HandleFunc("GET /discover/keywords", s.handleDiscoverKeywords)
+	api.HandleFunc("GET /discover/genres", s.handleDiscoverGenres)
 	api.HandleFunc("GET /discover/{type}/{id}", s.handleDiscoverTitle)
 
 	// Requests: a wish for something not in the library. Approving one takes
@@ -298,6 +311,14 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	adult.HandleFunc("GET /adult/sites/{id}", s.handleGetSite)
 	adult.HandleFunc("GET /adult/search", s.handleSearchSites)
 	adult.HandleFunc("GET /adult/discover", s.handleAdultDiscover)
+	// The scene filter rail's typeaheads (PLAN phase 12 task 3). They are on
+	// this mux and member-allowed for the same reason /adult/discover is: the
+	// rail is part of the browse screen a granted member reads, and a control
+	// that 403s is worse than no control. They read the provider only — no
+	// library row is involved — so there is nothing here an admin has that a
+	// granted member does not.
+	adult.HandleFunc("GET /adult/performers", s.handleAdultPerformers)
+	adult.HandleFunc("GET /adult/tags", s.handleAdultTags)
 	// The member-access card. It lives under /adult rather than beside
 	// GET /users so that the accounts API carries no adult field on an install
 	// that has never enabled the module.

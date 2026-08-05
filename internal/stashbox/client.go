@@ -164,6 +164,13 @@ type Client struct {
 	// tpdb.go.
 	restScenes string
 
+	// restPerformers and restTags are the TPDB REST typeahead indexes behind
+	// the scene filter rail, set alongside restScenes. They follow the scene
+	// index rather than the GraphQL side because the ids that index filters on
+	// are TPDB's own numeric ones, and nothing else serves them.
+	restPerformers string
+	restTags       string
+
 	// siteIDs caches TPDB's numeric site id per stash-box uuid. The REST scene
 	// index filters by the numeric id, a site's catalogue walk pages the same
 	// site many times, and the mapping never changes — one lookup per site per
@@ -209,6 +216,8 @@ func New(apiKey, endpoint string, hc *http.Client) *Client {
 	}
 	if c.restSites != "" {
 		c.restScenes = tpdbScenesURL
+		c.restPerformers = tpdbPerformersURL
+		c.restTags = tpdbTagsURL
 	}
 	return c
 }

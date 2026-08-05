@@ -128,26 +128,6 @@ func (c *Client) PopularSeries(ctx context.Context) ([]core.DiscoverItem, error)
 	return c.list(ctx, "/tv/popular", nil, core.MediaTypeSeries)
 }
 
-// MoviesByCompany browses one production company's catalogue, most popular
-// first. companyID is a TMDB company id (A24 is 41077).
-func (c *Client) MoviesByCompany(ctx context.Context, companyID int64, page int) (*core.DiscoverPage, error) {
-	q := url.Values{
-		"with_companies": {strconv.FormatInt(companyID, 10)},
-		"sort_by":        {"popularity.desc"},
-	}
-	return c.page(ctx, "/discover/movie", q, core.MediaTypeMovie, page)
-}
-
-// SeriesByNetwork browses one network's catalogue, most popular first.
-// networkID is a TMDB network id (Netflix is 213).
-func (c *Client) SeriesByNetwork(ctx context.Context, networkID int64, page int) (*core.DiscoverPage, error) {
-	q := url.Values{
-		"with_networks": {strconv.FormatInt(networkID, 10)},
-		"sort_by":       {"popularity.desc"},
-	}
-	return c.page(ctx, "/discover/tv", q, core.MediaTypeSeries, page)
-}
-
 // MovieDetail returns one movie with its cast, its recommendations and its
 // external ids, in a single request.
 func (c *Client) MovieDetail(ctx context.Context, tmdbID int64) (*core.TitleDetail, error) {

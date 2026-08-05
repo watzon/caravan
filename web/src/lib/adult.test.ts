@@ -9,12 +9,13 @@
 import { describe, expect, it } from 'vitest';
 import type { Scene, SceneMeta, SessionUser, Site } from './api/types';
 import {
-  ADULT_TABS,
-  adultTabHref,
+  ADULT_EXPLORE_HREF,
   adultVisible,
+  EVERY_SCENE_FILTER,
   performerSummary,
   sceneCountNote,
   sceneDuration,
+  sceneFiltersOf,
   sceneLine,
   sceneMetaLine,
   sceneNumber,
@@ -74,11 +75,40 @@ describe('adultVisible', () => {
   });
 });
 
-describe('adult tabs', () => {
-  it('routes each tab at a linkable screen', () => {
-    expect(ADULT_TABS.map((t) => t.key)).toEqual(['sites', 'scenes']);
-    expect(adultTabHref('sites')).toBe('/adult');
-    expect(adultTabHref('scenes')).toBe('/adult/scenes');
+describe('sceneFiltersOf', () => {
+  it('reads the block the server sent', () => {
+    const thin = { ...EVERY_SCENE_FILTER, year: false, site_scope: false };
+    expect(sceneFiltersOf(user({ adult: true, scene_filters: thin }))).toEqual(thin);
+  });
+
+  /**
+   * The asymmetry with `adultVisible`, and the one worth spelling out: absence
+   * here is EVERY filter, not none.
+   *
+   * Three things produce an absent block — an ungranted caller, a server with
+   * no stash-box credential, and a server older than the field — and in all
+   * three the rail drawing a control that turns out to be unserved is the
+   * behaviour that already existed: the request refuses with a 400 that names
+   * the filter and offers Clear filters. Reading absence as "none" would hide
+   * two thirds of the rail on a perfectly capable TPDB server whose credential
+   * had merely not been set yet, which is both a worse answer and one nobody
+   * could diagnose from the screen.
+   */
+  it('reads an absent block as every filter, not none', () => {
+    expect(sceneFiltersOf(user({ adult: true }))).toEqual(EVERY_SCENE_FILTER);
+    expect(sceneFiltersOf(null)).toEqual(EVERY_SCENE_FILTER);
+  });
+});
+
+describe('adult shelf links', () => {
+  /**
+   * The Scenes tab is retired (PLAN phase 12 task 4): browsing the provider's
+   * catalogue moved to Explore, beside the other two catalogues, and the shelf
+   * is sites only. The tab vocabulary went with it — this is what is left, and
+   * it is a link INTO Explore rather than a second tab.
+   */
+  it('sends "browse scenes" to the explore scope, not to a tab', () => {
+    expect(ADULT_EXPLORE_HREF).toBe('/discover/adult');
   });
 
   it('points a site card at its own page by library id', () => {

@@ -107,6 +107,10 @@ type Client struct {
 	// sleep is the delay used between a throttled request and its retry.
 	// It is a field so tests can observe the wait without taking it.
 	sleep func(ctx context.Context, d time.Duration) error
+	// genres memoises the fixed genre vocabularies. It is the one thing this
+	// client caches, and it earns the exception by being a table that changes
+	// every few years and is needed to render every filter rail.
+	genres genreCache
 }
 
 // Compile-time proof that the client satisfies the seam the library layer

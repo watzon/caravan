@@ -1,0 +1,19 @@
+{
+  "page": 1,
+  "results": [
+    {
+      "id": 41077,
+      "logo_path": "/1ZXsGaFPgrgS6ZZGS37AqD5uU12.png",
+      "name": "A24",
+      "origin_country": "US"
+    },
+    {
+      "id": 10342,
+      "logo_path": null,
+      "name": "Studio Ghibli",
+      "origin_country": "JP"
+    }
+  ],
+  "total_pages": 1,
+  "total_results": 2
+}

@@ -3,11 +3,13 @@
  * fallback to index.html, so real paths work on reload.
  */
 
-import { matchRoutes, normalizePath, ROUTES, type RouteMatch } from './router';
+import { matchRoutes, normalizePath, ROUTES, splitLocation, type RouteMatch } from './router';
 
 let path = $state(normalizePath(window.location.pathname));
+/** The query string without its leading '?'; "" when there is none. */
+let search = $state(window.location.search.replace(/^\?/, ''));
 
-/** Current normalized path and its route match. */
+/** Current normalized path, its query string, and its route match. */
 export const router = {
   get path(): string {
     return path;
@@ -15,24 +17,46 @@ export const router = {
   get match(): RouteMatch | null {
     return matchRoutes(ROUTES, path);
   },
+  get search(): string {
+    return search;
+  },
+  /**
+   * The query string, parsed. A fresh object on every read, so a screen that
+   * mutates it cannot corrupt the router's own state — and reading it registers
+   * a dependency on `search`, which is what makes a filter change re-run the
+   * screen that owns it.
+   */
+  get params(): URLSearchParams {
+    return new URLSearchParams(search);
+  },
 };
 
-/** Push a new path; replaces the entry when `replace` is set. */
+/**
+ * Push a new path; replaces the entry when `replace` is set.
+ *
+ * `to` may carry a query string, which is how the filtered explore scopes keep
+ * their state addressable. Scrolling to the top is tied to the PATH changing: a
+ * new screen starts at the top, but narrowing a filter on the screen you are
+ * already reading must not throw you back to the top of it.
+ */
 export function navigate(to: string, options: { replace?: boolean } = {}): void {
-  const next = normalizePath(to);
-  if (next === path) return;
+  const next = splitLocation(to);
+  if (next.path === path && next.search === search) return;
+  const url = next.search === '' ? next.path : `${next.path}?${next.search}`;
   if (options.replace) {
-    window.history.replaceState({}, '', next);
+    window.history.replaceState({}, '', url);
   } else {
-    window.history.pushState({}, '', next);
+    window.history.pushState({}, '', url);
   }
-  path = next;
-  window.scrollTo(0, 0);
+  const moved = next.path !== path;
+  path = next.path;
+  search = next.search;
+  if (moved) window.scrollTo(0, 0);
 }
 
 /** True when `href` is the active route (used for nav highlighting). */
 export function isActive(href: string, exact = false): boolean {
-  const target = normalizePath(href);
+  const target = splitLocation(href).path;
   return exact ? path === target : path === target || path.startsWith(`${target}/`);
 }
 
@@ -65,11 +89,15 @@ export function startRouter(): () => void {
     if (url.origin !== window.location.origin) return;
 
     event.preventDefault();
-    navigate(url.pathname);
+    // The search is carried over: a filtered view's link IS its query string,
+    // so dropping it here would make every shared explore URL in the app open
+    // the unfiltered screen.
+    navigate(`${url.pathname}${url.search}`);
   };
 
   const onPop = () => {
     path = normalizePath(window.location.pathname);
+    search = window.location.search.replace(/^\?/, '');
   };
 
   document.addEventListener('click', onClick);

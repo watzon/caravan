@@ -46,8 +46,10 @@ const apiKeyHeader = "ApiKey"
 // duplicated from the client for the same reason apiKeyHeader is: this package
 // depends on nothing of Caravan's, and the client's own tests assert they agree.
 const (
-	restSitesPath  = "/sites"
-	restScenesPath = "/scenes"
+	restSitesPath      = "/sites"
+	restScenesPath     = "/scenes"
+	restPerformersPath = "/performers"
+	restTagsPath       = "/tags"
 )
 
 // maxRequestBody bounds how much of a request body is read. A GraphQL query
@@ -134,6 +136,10 @@ type Options struct {
 	// semantics. It is separate from SiteIndex because a test asserting "one
 	// lookup, then cached" must tell the two apart.
 	SiteLookup []Response
+	// PerformerIndex and TagIndex answer TPDB's REST typeahead indexes at
+	// GET /performers and GET /tags, with SiteIndex's queue-and-404 semantics.
+	PerformerIndex []Response
+	TagIndex       []Response
 }
 
 // Server is a fake stash-box endpoint.
@@ -148,6 +154,8 @@ type Server struct {
 	siteIndex      []Response
 	sceneIndex     []Response
 	siteLookup     []Response
+	performerIndex []Response
+	tagIndex       []Response
 	requests       []Request
 }
 
@@ -162,6 +170,8 @@ func New(opts Options) *Server {
 		siteIndex:      append([]Response(nil), opts.SiteIndex...),
 		sceneIndex:     append([]Response(nil), opts.SceneIndex...),
 		siteLookup:     append([]Response(nil), opts.SiteLookup...),
+		performerIndex: append([]Response(nil), opts.PerformerIndex...),
+		tagIndex:       append([]Response(nil), opts.TagIndex...),
 	}
 	for op, queue := range opts.Operations {
 		s.operations[op] = append([]Response(nil), queue...)
@@ -213,6 +223,22 @@ func (s *Server) SetSiteLookup(responses ...Response) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.siteLookup = append([]Response(nil), responses...)
+}
+
+// SetPerformerIndex replaces the REST performer index queue, with
+// SetSiteIndex's semantics.
+func (s *Server) SetPerformerIndex(responses ...Response) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.performerIndex = append([]Response(nil), responses...)
+}
+
+// SetTagIndex replaces the REST tag index queue, with SetSiteIndex's
+// semantics.
+func (s *Server) SetTagIndex(responses ...Response) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.tagIndex = append([]Response(nil), responses...)
 }
 
 // serveQueue pops the next response from a queue, repeating its last entry, or
@@ -337,6 +363,12 @@ func (s *Server) record(req Request) Response {
 	}
 	if req.Path == restScenesPath {
 		return serveQueue(&s.sceneIndex, "REST scene index")
+	}
+	if req.Path == restPerformersPath {
+		return serveQueue(&s.performerIndex, "REST performer index")
+	}
+	if req.Path == restTagsPath {
+		return serveQueue(&s.tagIndex, "REST tag index")
 	}
 
 	queue := s.operations[req.OperationName]

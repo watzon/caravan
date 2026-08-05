@@ -27,6 +27,21 @@ type stubDiscoverProvider struct {
 
 	// browseCalls records what the browse endpoint forwarded.
 	browseCalls []browseCall
+
+	// The filtered scopes (PLAN phase 12) and what they forwarded. The filters
+	// are recorded rather than acted on: what the provider does with them is
+	// internal/tmdb's business, and what the API must get right is that the
+	// query string became exactly this struct.
+	movieFilters  []core.MovieFilter
+	seriesFilters []core.SeriesFilter
+
+	people    []core.DiscoverPerson
+	companies []core.DiscoverCompany
+	keywords  []core.DiscoverKeyword
+	genres    map[string][]core.DiscoverGenre
+	// typeaheadQueries and genreCalls record what each passthrough was asked.
+	typeaheadQueries []string
+	genreCalls       []string
 }
 
 type browseCall struct {
@@ -55,6 +70,42 @@ func (p *stubDiscoverProvider) MoviesByCompany(_ context.Context, companyID int6
 func (p *stubDiscoverProvider) SeriesByNetwork(_ context.Context, networkID int64, page int) (*core.DiscoverPage, error) {
 	p.browseCalls = append(p.browseCalls, browseCall{kind: SourceNetwork, id: networkID, page: page})
 	return p.page, p.err
+}
+
+func (p *stubDiscoverProvider) DiscoverMovies(_ context.Context, f core.MovieFilter) (*core.DiscoverPage, error) {
+	p.movieFilters = append(p.movieFilters, f)
+	if p.err != nil {
+		return nil, p.err
+	}
+	return p.page, nil
+}
+
+func (p *stubDiscoverProvider) DiscoverSeries(_ context.Context, f core.SeriesFilter) (*core.DiscoverPage, error) {
+	p.seriesFilters = append(p.seriesFilters, f)
+	if p.err != nil {
+		return nil, p.err
+	}
+	return p.page, nil
+}
+
+func (p *stubDiscoverProvider) SearchPeople(_ context.Context, query string) ([]core.DiscoverPerson, error) {
+	p.typeaheadQueries = append(p.typeaheadQueries, query)
+	return p.people, p.err
+}
+
+func (p *stubDiscoverProvider) SearchCompanies(_ context.Context, query string) ([]core.DiscoverCompany, error) {
+	p.typeaheadQueries = append(p.typeaheadQueries, query)
+	return p.companies, p.err
+}
+
+func (p *stubDiscoverProvider) SearchKeywords(_ context.Context, query string) ([]core.DiscoverKeyword, error) {
+	p.typeaheadQueries = append(p.typeaheadQueries, query)
+	return p.keywords, p.err
+}
+
+func (p *stubDiscoverProvider) Genres(_ context.Context, mediaType string) ([]core.DiscoverGenre, error) {
+	p.genreCalls = append(p.genreCalls, mediaType)
+	return p.genres[mediaType], p.err
 }
 
 func (p *stubDiscoverProvider) MovieDetail(context.Context, int64) (*core.TitleDetail, error) {

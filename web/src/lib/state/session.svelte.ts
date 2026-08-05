@@ -7,9 +7,9 @@
  * kinder than letting somebody walk into it.
  */
 
-import { adultVisible } from '../adult';
+import { adultVisible, sceneFiltersOf } from '../adult';
 import { api, errorText } from '../api/client';
-import type { SessionUser, UserRole } from '../api/types';
+import type { SceneFilterSupport, SessionUser, UserRole } from '../api/types';
 
 class SessionState {
   /** Null until /auth/me answers, and again after a logout. */
@@ -56,6 +56,16 @@ class SessionState {
    */
   get adult(): boolean {
     return adultVisible(this.user);
+  }
+
+  /**
+   * Which controls the Explore rail's Adult scope may draw, decided by the
+   * stash-box dialect the server is configured against. An unknown identity
+   * reads as "everything", because the refusal still explains — see
+   * sceneFiltersOf.
+   */
+  get sceneFilters(): SceneFilterSupport {
+    return sceneFiltersOf(this.user);
   }
 
   async refresh(): Promise<void> {

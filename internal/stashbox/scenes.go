@@ -84,23 +84,9 @@ func (c *Client) SearchScenes(ctx context.Context, q core.SceneQuery) (*core.Sce
 
 	page, perPage := clampPaging(q.Page, q.PerPage)
 
-	input := map[string]any{
-		"page":      page,
-		"per_page":  perPage,
-		"sort":      "DATE",
-		"direction": "DESC",
-	}
-	if text := strings.TrimSpace(q.Text); text != "" {
-		input["text"] = text
-	}
-	if site := strings.TrimSpace(q.SiteStashID); site != "" {
-		// MultiIDCriterionInput. INCLUDES rather than EQUALS: EQUALS asks for a
-		// scene whose studio set is exactly this one, which is not what "scenes
-		// from this site" means on an endpoint that models sub-studios.
-		input["studios"] = map[string]any{
-			"value":    []string{site},
-			"modifier": "INCLUDES",
-		}
+	input, err := sceneQueryInput(q, page, perPage)
+	if err != nil {
+		return nil, err
 	}
 
 	var resp struct {
@@ -123,6 +109,152 @@ func (c *Client) SearchScenes(ctx context.Context, q core.SceneQuery) (*core.Sce
 		out.Scenes = append(out.Scenes, sceneMeta(s))
 	}
 	return out, nil
+}
+
+// SceneFilterSupport reports which scene filters this endpoint can express, so
+// the filter rail can leave out a control the answer would only refuse (PLAN
+// phase 12, acceptance criterion 1). It is core.SceneFilterReporter.
+//
+// The dialect decides it and nothing else, the same single fact SearchScenes
+// branches on: the TPDB REST index serves every one of these, and the generic
+// stash-box GraphQL scene query serves none of them (see sceneQueryInput for
+// each refusal, and TestSceneFilterSupportAgreesWithWhatTheQueryRefuses for the
+// proof that these two lists cannot drift apart).
+func (c *Client) SceneFilterSupport() core.SceneFilterSupport {
+	if c.restScenes != "" {
+		return core.EverySceneFilter()
+	}
+	// Everything false. Spelled as the zero value rather than field by field
+	// because the honest summary of this dialect is "none of them", and a list
+	// of `false`s invites somebody to flip one without changing the query.
+	return core.SceneFilterSupport{}
+}
+
+// sceneQueryInput builds stash-box's SceneQueryInput from a SceneQuery, and
+// REFUSES — with a *core.SceneFilterUnsupportedError — anything this protocol
+// has no field for.
+//
+// The refusal is the whole point. stash-box's scene query answers text,
+// studios, performers, tags and an exact date; it has no release year, no
+// runtime and no way to widen a studio to its network. Sending a query that
+// silently omitted one of those would answer a wider question than the caller
+// asked, which on this surface means putting scenes on screen that the filter
+// existed to keep off it. TPDB, which is the default endpoint, serves all of
+// them through the REST dialect in tpdb.go; this path is what a StashDB or
+// FansDB install gets, and it says what it cannot do.
+func sceneQueryInput(q core.SceneQuery, page, perPage int) (map[string]any, error) {
+	sort, err := sceneSortEnum(q.Sort)
+	if err != nil {
+		return nil, err
+	}
+	direction := "DESC"
+	if q.Order == core.OrderAsc {
+		direction = "ASC"
+	}
+	input := map[string]any{
+		"page":      page,
+		"per_page":  perPage,
+		"sort":      sort,
+		"direction": direction,
+	}
+
+	if text := strings.TrimSpace(q.Text); text != "" {
+		input["text"] = text
+	}
+	if site := strings.TrimSpace(q.SiteStashID); site != "" {
+		// The widening operator has no equivalent here: a stash-box studio
+		// filter is the set of ids you name, and the parent chain is not one
+		// of them.
+		if q.SiteScope != "" && q.SiteScope != core.SceneSiteOnly {
+			return nil, &core.SceneFilterUnsupportedError{Filter: "a widened site scope"}
+		}
+		// MultiIDCriterionInput. INCLUDES rather than EQUALS: EQUALS asks for a
+		// scene whose studio set is exactly this one, which is not what "scenes
+		// from this site" means on an endpoint that models sub-studios.
+		input["studios"] = map[string]any{
+			"value":    []string{site},
+			"modifier": "INCLUDES",
+		}
+	}
+
+	performers, err := sceneCriterion("performers", q.Performers, q.PerformersAll)
+	if err != nil {
+		return nil, err
+	}
+	if performers != nil {
+		input["performers"] = performers
+	}
+	tags, err := sceneCriterion("tags", q.Tags, q.TagsAll)
+	if err != nil {
+		return nil, err
+	}
+	if tags != nil {
+		input["tags"] = tags
+	}
+
+	if q.Year > 0 {
+		return nil, &core.SceneFilterUnsupportedError{Filter: "release year"}
+	}
+	if !q.Date.IsZero() {
+		// `date` is an exact day and carries no operator, so the four
+		// comparisons have nowhere to go.
+		if q.DateOp != "" && q.DateOp != core.SceneDateOn {
+			return nil, &core.SceneFilterUnsupportedError{Filter: "a date comparison"}
+		}
+		input["date"] = q.Date.Format(sceneDateLayout)
+	}
+	if q.Duration > 0 {
+		return nil, &core.SceneFilterUnsupportedError{Filter: "duration"}
+	}
+	return input, nil
+}
+
+// sceneDateLayout is how stash-box spells a date in a query, the same way it
+// spells one in an answer (see parseDate).
+const sceneDateLayout = "2006-01-02"
+
+// sceneSortEnum maps Caravan's sort vocabulary onto SceneSortEnum. Duration
+// and relevance are not orderings this protocol offers, so they are refused
+// rather than quietly answered in date order.
+func sceneSortEnum(sort core.SceneSort) (string, error) {
+	switch sort {
+	case "", core.SceneSortReleased:
+		return "DATE", nil
+	case core.SceneSortCreated:
+		return "CREATED_AT", nil
+	case core.SceneSortUpdated:
+		return "UPDATED_AT", nil
+	}
+	return "", &core.SceneFilterUnsupportedError{Filter: "that ordering"}
+}
+
+// sceneCriterion builds a MultiIDCriterionInput for a performer or tag filter,
+// or nil when there is nothing to filter on.
+//
+// INCLUDES is "carries all of these" — the same reading the studio filter
+// documents — so the ALL half of the any/all switch is exactly this modifier
+// and the ANY half has no spelling at all. With a single id the two questions
+// are identical, which is why one chip works either way and two do not.
+func sceneCriterion(what string, refs []core.SceneFilterRef, all bool) (map[string]any, error) {
+	if len(refs) == 0 {
+		return nil, nil
+	}
+	if !all && len(refs) > 1 {
+		return nil, &core.SceneFilterUnsupportedError{Filter: "any-of " + what}
+	}
+	value := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		// A ref carrying only a numeric id came from TPDB's typeahead — a
+		// filter URL copied between installs. See tpdbRefFilter for the
+		// mirror image, for why the id is not in the message, and for why a
+		// caller-side filter problem is unsupported-filter rather than an
+		// upstream failure.
+		if strings.TrimSpace(ref.StashID) == "" {
+			return nil, &core.SceneFilterUnsupportedError{Filter: what + " by numeric id"}
+		}
+		value = append(value, ref.StashID)
+	}
+	return map[string]any{"value": value, "modifier": "INCLUDES"}, nil
 }
 
 // GetScene returns full details for one scene by provider id.

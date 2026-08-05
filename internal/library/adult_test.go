@@ -48,6 +48,20 @@ func (s *stubAdultProvider) GetSite(_ context.Context, stashID string) (*core.Si
 	return nil, errors.New("stub: no such site")
 }
 
+// The filter rail's typeaheads are part of the provider interface but nothing
+// in the library layer reaches them: a refresh walks a site's catalogue, it
+// does not browse. They count a call like every other method so that "zero
+// stash-box traffic" keeps meaning zero.
+func (s *stubAdultProvider) SearchPerformers(_ context.Context, q string) ([]core.ScenePerformerMeta, error) {
+	s.calls++
+	return nil, s.searchErr
+}
+
+func (s *stubAdultProvider) SearchTags(_ context.Context, q string) ([]core.SceneFilterRef, error) {
+	s.calls++
+	return nil, s.searchErr
+}
+
 func (s *stubAdultProvider) SearchScenes(_ context.Context, q core.SceneQuery) (*core.ScenePage, error) {
 	s.calls++
 	if s.searchErr != nil {
@@ -499,6 +513,12 @@ func (s *stuckPager) GetSite(ctx context.Context, id string) (*core.SiteMeta, er
 }
 func (s *stuckPager) GetScene(ctx context.Context, id string) (*core.SceneMeta, error) {
 	return s.inner.GetScene(ctx, id)
+}
+func (s *stuckPager) SearchPerformers(ctx context.Context, q string) ([]core.ScenePerformerMeta, error) {
+	return s.inner.SearchPerformers(ctx, q)
+}
+func (s *stuckPager) SearchTags(ctx context.Context, q string) ([]core.SceneFilterRef, error) {
+	return s.inner.SearchTags(ctx, q)
 }
 func (s *stuckPager) SearchScenes(ctx context.Context, q core.SceneQuery) (*core.ScenePage, error) {
 	q.Page = 1
@@ -1119,6 +1139,12 @@ func (p *pageObserver) GetSite(ctx context.Context, id string) (*core.SiteMeta, 
 }
 func (p *pageObserver) GetScene(ctx context.Context, id string) (*core.SceneMeta, error) {
 	return p.inner.GetScene(ctx, id)
+}
+func (p *pageObserver) SearchPerformers(ctx context.Context, q string) ([]core.ScenePerformerMeta, error) {
+	return p.inner.SearchPerformers(ctx, q)
+}
+func (p *pageObserver) SearchTags(ctx context.Context, q string) ([]core.SceneFilterRef, error) {
+	return p.inner.SearchTags(ctx, q)
 }
 func (p *pageObserver) SearchScenes(ctx context.Context, q core.SceneQuery) (*core.ScenePage, error) {
 	if p.before != nil {

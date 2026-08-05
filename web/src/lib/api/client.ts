@@ -18,7 +18,12 @@ import type {
   CreateRequestBody,
   CreateUserBody,
   DiscoverBrowse,
+  DiscoverCompany,
+  DiscoverGenres,
   DiscoverHome,
+  DiscoverNamed,
+  DiscoverPerson,
+  DiscoverScopePage,
   DiscoverSourceType,
   DiscoverTitle,
   DownloadClient,
@@ -51,6 +56,8 @@ import type {
   ScanSummary,
   SearchQueued,
   SearchResults,
+  SceneFilterRef,
+  ScenePerformerMeta,
   Series,
   SessionUser,
   Settings,
@@ -212,6 +219,14 @@ export const endpoints = {
   // block is a TMDB id; library ids only appear in the decorated payloads.
   discover: () => `${API_BASE}/discover`,
   discoverBrowse: () => `${API_BASE}/discover/browse`,
+  // The filtered scopes and the typeaheads that fill their rails (phase 12).
+  // Plural, so they cannot collide with /discover/{type}/{id} below.
+  discoverScope: (mediaType: MediaType) =>
+    `${API_BASE}/discover/${mediaType === 'movie' ? 'movies' : 'series'}`,
+  discoverPeople: () => `${API_BASE}/discover/people`,
+  discoverCompanies: () => `${API_BASE}/discover/companies`,
+  discoverKeywords: () => `${API_BASE}/discover/keywords`,
+  discoverGenres: () => `${API_BASE}/discover/genres`,
   discoverTitle: (type: MediaType, tmdbID: number) => `${API_BASE}/discover/${type}/${tmdbID}`,
 
   // Requests — a wish for a title that is not in the library yet. Adding the
@@ -229,6 +244,8 @@ export const endpoints = {
   adultSite: (id: number) => `${API_BASE}/adult/sites/${id}`,
   adultSearch: () => `${API_BASE}/adult/search`,
   adultDiscover: () => `${API_BASE}/adult/discover`,
+  adultPerformers: () => `${API_BASE}/adult/performers`,
+  adultTags: () => `${API_BASE}/adult/tags`,
   adultUsers: () => `${API_BASE}/adult/users`,
   adultUserAccess: (id: number) => `${API_BASE}/adult/users/${id}/access`,
   // Phase 11 — the Stash handoff. Inside the gated subtree with the rest of
@@ -258,15 +275,27 @@ export function onUnauthorized(handler: (() => void) | null): void {
 interface RequestOptions {
   method?: string;
   body?: unknown;
-  query?: Record<string, string | number | undefined>;
+  query?: Record<string, string | number | string[] | undefined>;
   signal?: AbortSignal;
 }
 
+/**
+ * Build a query string. An array value becomes one REPEATED parameter rather
+ * than a comma-joined list — the scene filters are spelled that way because a
+ * value there carries a name and a name may contain a comma.
+ */
 function withQuery(path: string, query: RequestOptions['query']): string {
   if (!query) return path;
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {
-    if (value !== undefined && value !== '') params.set(key, String(value));
+    if (value === undefined || value === '') continue;
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (item !== '') params.append(key, item);
+      }
+      continue;
+    }
+    params.set(key, String(value));
   }
   const qs = params.toString();
   return qs ? `${path}?${qs}` : path;
@@ -936,6 +965,49 @@ export const api = {
       signal,
     }),
 
+  /**
+   * One page of a filtered scope (phase 12).
+   *
+   * The query is built by lib/explore.ts and passed through: the endpoint
+   * ALLOWLISTS its parameters and answers 400 to anything else, including a
+   * filter the other scope serves, so nothing may be added here that the
+   * filter model did not decide to send.
+   */
+  discoverScope: (
+    mediaType: MediaType,
+    query: Record<string, string | number | string[] | undefined>,
+    signal?: AbortSignal,
+  ) => request<DiscoverScopePage>(endpoints.discoverScope(mediaType), { query, signal }),
+
+  /** The filter rail's typeaheads. Pure passthroughs — nothing is decorated. */
+  discoverPeople: (query: string, signal?: AbortSignal) =>
+    listOf<DiscoverPerson>(withQuery(endpoints.discoverPeople(), { q: query }), 'people', signal),
+
+  discoverCompanies: (query: string, signal?: AbortSignal) =>
+    listOf<DiscoverCompany>(
+      withQuery(endpoints.discoverCompanies(), { q: query }),
+      'companies',
+      signal,
+    ),
+
+  discoverKeywords: (query: string, signal?: AbortSignal) =>
+    listOf<DiscoverNamed>(
+      withQuery(endpoints.discoverKeywords(), { q: query }),
+      'keywords',
+      signal,
+    ),
+
+  /**
+   * One media type's genre vocabulary. `type` is required by the server: the
+   * two lists differ and neither is a subset of the other, so a rail showing
+   * the movie genres over a series scope would offer filters matching nothing.
+   */
+  discoverGenres: (mediaType: MediaType, signal?: AbortSignal) =>
+    request<DiscoverGenres>(endpoints.discoverGenres(), {
+      query: { type: mediaType === 'movie' ? 'movie' : 'series' },
+      signal,
+    }),
+
   /** One title's acquisition screen, addressed by TMDB id (never a library id). */
   discoverTitle: (type: MediaType, tmdbID: number, signal?: AbortSignal) =>
     request<DiscoverTitle>(endpoints.discoverTitle(type, tmdbID), { signal }),
@@ -1063,12 +1135,30 @@ export const api = {
   searchSites: (query: string, signal?: AbortSignal) =>
     listOf<SiteMeta>(withQuery(endpoints.adultSearch(), { q: query }), 'sites', signal),
 
-  /** One page of provider scenes, decorated with owned/requested state. */
-  adultDiscover: (query: string, page = 1, signal?: AbortSignal) =>
-    request<AdultDiscoverPage>(endpoints.adultDiscover(), {
-      query: { q: query, page },
+  /**
+   * One page of provider scenes, decorated with owned/requested state.
+   *
+   * The query is built by lib/explore.ts. As on the title scopes it is an
+   * allowlist server-side, and there is a second refusal beyond that one: a
+   * filter the CONFIGURED endpoint cannot express (a widened site scope off
+   * TPDB, say) answers 400 naming the filter rather than a quietly unfiltered
+   * page. Callers render that message.
+   */
+  adultDiscover: (
+    query: Record<string, string | number | string[] | undefined>,
+    signal?: AbortSignal,
+  ) => request<AdultDiscoverPage>(endpoints.adultDiscover(), { query, signal }),
+
+  /** The scene rail's typeaheads. Ids are opaque strings — echo them back. */
+  adultPerformers: (query: string, signal?: AbortSignal) =>
+    listOf<ScenePerformerMeta>(
+      withQuery(endpoints.adultPerformers(), { q: query }),
+      'performers',
       signal,
-    }),
+    ),
+
+  adultTags: (query: string, signal?: AbortSignal) =>
+    listOf<SceneFilterRef>(withQuery(endpoints.adultTags(), { q: query }), 'tags', signal),
 
   /** The member-access card: every account and whether it reaches the module. */
   listAdultUsers: (signal?: AbortSignal) =>

@@ -625,6 +625,13 @@ func TestMemberAllowlist(t *testing.T) {
 		{http.MethodGet, "/discover/browse", true},
 		{http.MethodGet, "/discover/movie/27205", true},
 		{http.MethodGet, "/discover/series/1396", true},
+		// The filtered scopes and the controls that drive them (PLAN phase 12).
+		{http.MethodGet, "/discover/movies", true},
+		{http.MethodGet, "/discover/series", true},
+		{http.MethodGet, "/discover/people", true},
+		{http.MethodGet, "/discover/companies", true},
+		{http.MethodGet, "/discover/keywords", true},
+		{http.MethodGet, "/discover/genres", true},
 		// Asking for it, and taking the ask back.
 		{http.MethodPost, "/requests", true},
 		{http.MethodGet, "/requests", true},

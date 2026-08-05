@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/watzon/caravan/internal/core"
@@ -479,17 +478,25 @@ func (s *server) handleAdultDiscover(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	query := r.URL.Query()
-	// An unparseable page is page 1, as it is on /discover/browse: it is how a
-	// client that has not paged yet spells "the beginning".
-	page, _ := strconv.Atoi(query.Get("page"))
+	query, err := parseSceneQuery(r.URL.Query())
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 
 	ctx := r.Context()
-	result, err := provider.SearchScenes(ctx, core.SceneQuery{
-		Text: strings.TrimSpace(query.Get("q")),
-		Page: page,
-	})
+	result, err := provider.SearchScenes(ctx, query)
 	if err != nil {
+		// A filter this endpoint cannot express is the CALLER's problem, not
+		// an upstream failure: the provider refused rather than answering the
+		// wider question, and the rail has a control it must stop offering.
+		// The filter is named; the value never is.
+		var unsupported *core.SceneFilterUnsupportedError
+		if errors.As(err, &unsupported) {
+			writeError(w, http.StatusBadRequest,
+				"the metadata endpoint cannot filter scenes by "+unsupported.Filter)
+			return
+		}
 		s.writeAdultProviderError(w, r, "scene search", err)
 		return
 	}

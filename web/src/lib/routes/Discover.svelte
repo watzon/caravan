@@ -15,6 +15,7 @@
   import DiscoverError from '../components/DiscoverError.svelte';
   import DiscoverShelf from '../components/DiscoverShelf.svelte';
   import EmptyState from '../components/EmptyState.svelte';
+  import ExploreScopes from '../components/ExploreScopes.svelte';
   import Icon from '../components/Icon.svelte';
   import Skeleton from '../components/Skeleton.svelte';
   import {
@@ -85,6 +86,11 @@
 {/snippet}
 
 <div class="flex flex-col gap-8">
+  <!-- Featured is one of four scopes now (PLAN phase 12 task 4), so the row is
+       here too: this screen is where somebody arrives, and it is the only place
+       the other three are announced. -->
+  <ExploreScopes active="featured" />
+
   {#if discover.error}
     <DiscoverError
       message={discover.error}

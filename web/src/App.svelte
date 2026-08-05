@@ -22,13 +22,14 @@
   } from './lib/router';
   import { navigate, router, startRouter } from './lib/router.svelte';
   import Adult from './lib/routes/Adult.svelte';
-  import AdultScenes from './lib/routes/AdultScenes.svelte';
   import AdultSite from './lib/routes/AdultSite.svelte';
   import Calendar from './lib/routes/Calendar.svelte';
   import Convert from './lib/routes/Convert.svelte';
   import Discover from './lib/routes/Discover.svelte';
   import DiscoverBrowse from './lib/routes/DiscoverBrowse.svelte';
   import DiscoverTitle from './lib/routes/DiscoverTitle.svelte';
+  import ExploreAdult from './lib/routes/ExploreAdult.svelte';
+  import ExploreTitles from './lib/routes/ExploreTitles.svelte';
   import Requests from './lib/routes/Requests.svelte';
   import History from './lib/routes/History.svelte';
   import FirstRun from './lib/routes/FirstRun.svelte';
@@ -45,7 +46,7 @@
   import Wanted from './lib/routes/Wanted.svelte';
   import SettingsScreen from './lib/routes/Settings.svelte';
   import Button from './lib/components/Button.svelte';
-  import { stashUnreachableBanner } from './lib/adult';
+  import { ADULT_EXPLORE_HREF, stashUnreachableBanner } from './lib/adult';
   import { unreachableClientBanner } from './lib/download';
   import { auth } from './lib/state/auth.svelte';
   import { session } from './lib/state/session.svelte';
@@ -56,6 +57,9 @@
     '/first-run': 'Welcome',
     '/': 'Discover',
     '/discover': 'Discover',
+    '/discover/movies': 'Discover',
+    '/discover/series': 'Discover',
+    '/discover/adult': 'Discover',
     '/discover/network/:id': 'Discover',
     '/discover/studio/:id': 'Discover',
     '/discover/movie/:tmdbId': 'Discover',
@@ -207,6 +211,22 @@
     navigate(session.isAdmin ? '/movies' : '/discover', { replace: true });
   });
 
+  /**
+   * The retired Scenes tab (PLAN phase 12 task 4). Its job is Explore's adult
+   * scope now, and an old bookmark lands there rather than on Not found.
+   *
+   * It is gated on the grant for the same reason the effect above exists: an
+   * ungranted reader must be sent to their own shelf, not forwarded to another
+   * adult URL. Checking `session.adult` here is what keeps the two effects from
+   * chasing each other — for an ungranted reader only the one above fires, and
+   * for a granted one only this.
+   */
+  $effect(() => {
+    if (session.loading || !session.adult) return;
+    if (router.match?.pattern !== '/adult/scenes') return;
+    navigate(ADULT_EXPLORE_HREF, { replace: true });
+  });
+
   function onKeydown(event: KeyboardEvent) {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
       // Adding straight to the library is an admin's to do; a member's ⌘K
@@ -296,6 +316,20 @@
           <NotFound />
         {:else if match.pattern === '/' || match.pattern === '/discover'}
           <Discover />
+        {:else if match.pattern === '/discover/movies' || match.pattern === '/discover/series'}
+          <!-- Keyed on the PATH, not the query string: a scope switch is a new
+               screen and starts empty, while a filter change is the same screen
+               asking a narrower question and must not tear down its grid. -->
+          {#key match.pattern}
+            <ExploreTitles mediaType={match.pattern === '/discover/movies' ? 'movie' : 'series'} />
+          {/key}
+          <!-- Gated on the grant for the RENDER as well as the redirect, exactly
+               as the /adult screens below are: the guard effect runs after the
+               DOM is updated, so without this an ungranted browser would mount
+               the scope for one tick and put a request to /adult/discover on the
+               wire before being sent away. -->
+        {:else if session.adult && match.pattern === '/discover/adult'}
+          <ExploreAdult />
         {:else if match.pattern === '/discover/network/:id' || match.pattern === '/discover/studio/:id'}
           {#key router.path}
             <DiscoverBrowse
@@ -353,8 +387,6 @@
                a trace, from a browser that is supposed to have none. -->
         {:else if session.adult && match.pattern === '/adult'}
           <Adult />
-        {:else if session.adult && match.pattern === '/adult/scenes'}
-          <AdultScenes />
         {:else if session.adult && match.pattern === '/adult/sites/:id'}
           {#key match.params.id}
             <AdultSite id={numericParam(match.params, 'id')} />

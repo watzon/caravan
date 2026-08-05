@@ -26,6 +26,8 @@ var adultRoutes = []struct{ method, path string }{
 	{http.MethodGet, "/api/v1/adult/sites/1"},
 	{http.MethodGet, "/api/v1/adult/search?q=brazzers"},
 	{http.MethodGet, "/api/v1/adult/discover"},
+	{http.MethodGet, "/api/v1/adult/performers?q=mia"},
+	{http.MethodGet, "/api/v1/adult/tags?q=anal"},
 	{http.MethodGet, "/api/v1/adult/users"},
 	{http.MethodPut, "/api/v1/adult/users/1/access"},
 	{http.MethodGet, "/api/v1/adult/stash"},
@@ -38,12 +40,22 @@ var adultRoutes = []struct{ method, path string }{
 // assertions are made against — a nil provider would prove only that a nil
 // provider is quiet.
 type fakeAdultProvider struct {
-	sites  []core.SiteMeta
-	scenes []core.SceneMeta
-	err    error
+	sites      []core.SiteMeta
+	scenes     []core.SceneMeta
+	performers []core.ScenePerformerMeta
+	tags       []core.SceneFilterRef
+	err        error
+	// sceneErr, when set, is what SearchScenes fails with instead of err. It is
+	// how the "this endpoint cannot serve that filter" path is exercised
+	// without failing every other call too.
+	sceneErr error
 
-	mu    sync.Mutex
-	calls []string
+	mu sync.Mutex
+	// lastQuery is the SceneQuery the last SearchScenes was handed. The filter
+	// surface is asserted against it: what reaches the provider is the only
+	// proof a parameter was not dropped.
+	lastQuery core.SceneQuery
+	calls     []string
 }
 
 func (p *fakeAdultProvider) record(call string) {
@@ -75,10 +87,33 @@ func (p *fakeAdultProvider) GetSite(ctx context.Context, stashID string) (*core.
 
 func (p *fakeAdultProvider) SearchScenes(ctx context.Context, q core.SceneQuery) (*core.ScenePage, error) {
 	p.record("SearchScenes " + q.Text)
+	p.mu.Lock()
+	p.lastQuery = q
+	p.mu.Unlock()
+	if p.sceneErr != nil {
+		return nil, p.sceneErr
+	}
 	if p.err != nil {
 		return nil, p.err
 	}
 	return &core.ScenePage{Page: 1, PerPage: 25, Total: len(p.scenes), Scenes: p.scenes}, nil
+}
+
+func (p *fakeAdultProvider) SearchPerformers(ctx context.Context, q string) ([]core.ScenePerformerMeta, error) {
+	p.record("SearchPerformers " + q)
+	return p.performers, p.err
+}
+
+func (p *fakeAdultProvider) SearchTags(ctx context.Context, q string) ([]core.SceneFilterRef, error) {
+	p.record("SearchTags " + q)
+	return p.tags, p.err
+}
+
+// sceneQuery is the last SceneQuery the provider was handed.
+func (p *fakeAdultProvider) sceneQuery() core.SceneQuery {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.lastQuery
 }
 
 func (p *fakeAdultProvider) GetScene(ctx context.Context, stashID string) (*core.SceneMeta, error) {
@@ -508,11 +543,23 @@ func TestGrantedMemberReadsTheAdultScreensButCannotWrite(t *testing.T) {
 		t.Errorf("performers = %v", scene.Performers)
 	}
 
+	// The Explore rail's Site pill (PLAN phase 12 task 5) drives this one, and
+	// the widening ladder only appears once a site is picked — so a member who
+	// cannot search sites cannot ask for "this whole network's scenes" at all.
+	rec = doAuth(t, h, http.MethodGet, "/api/v1/adult/search?q=brazzers", "", withCookie(cookie))
+	wantStatus(t, rec, http.StatusOK)
+	var found struct {
+		Sites []siteMetaJSON `json:"sites"`
+	}
+	decodeBody(t, rec, &found)
+	if len(found.Sites) != 1 || found.Sites[0].StashID != "site-1" {
+		t.Fatalf("site search = %+v, want the provider's hit", found.Sites)
+	}
+
 	// Writes and the admin-only screens are refused, with the generic member
 	// answer rather than one that mentions the module.
 	for _, route := range []struct{ method, path, body string }{
 		{http.MethodPost, "/api/v1/adult/sites", `{"stash_id":"site-1"}`},
-		{http.MethodGet, "/api/v1/adult/search?q=brazzers", ""},
 		{http.MethodGet, "/api/v1/adult/users", ""},
 		{http.MethodPut, "/api/v1/adult/users/" + itoa(member.ID) + "/access", `{"granted":true}`},
 		{http.MethodPost, "/api/v1/settings/adult", `{"enabled":false}`},
@@ -773,11 +820,16 @@ func TestMemberAllowlistNamesExactlyTheAdultReadRoutes(t *testing.T) {
 		http.MethodGet + " /adult/sites",
 		http.MethodGet + " /adult/sites/7",
 		http.MethodGet + " /adult/discover",
+		// The filter rail's three typeaheads. Site search is a provider read
+		// like the other two: without it the Site pill 403s for exactly the
+		// granted members the rail exists for.
+		http.MethodGet + " /adult/search",
+		http.MethodGet + " /adult/performers",
+		http.MethodGet + " /adult/tags",
 	}
 	refused := []string{
 		http.MethodPost + " /adult/sites",
 		http.MethodDelete + " /adult/sites/7",
-		http.MethodGet + " /adult/search",
 		http.MethodGet + " /adult/users",
 		http.MethodPut + " /adult/users/7/access",
 		http.MethodPost + " /settings/adult",
@@ -808,6 +860,9 @@ func TestEveryMemberAllowedAdultRouteIsRegistered(t *testing.T) {
 		"/api/v1/adult/sites",
 		"/api/v1/adult/sites/" + itoa(site.ID),
 		"/api/v1/adult/discover",
+		"/api/v1/adult/search?q=brazzers",
+		"/api/v1/adult/performers?q=mia",
+		"/api/v1/adult/tags?q=anal",
 	} {
 		rec := do(t, h, http.MethodGet, target, "")
 		if rec.Code == http.StatusNotFound {
@@ -909,7 +964,12 @@ func TestAdultProviderScreensReportAMissingCredential(t *testing.T) {
 	h, st, _ := newTestServer(t)
 	enableAdult(t, st)
 
-	for _, target := range []string{"/api/v1/adult/search?q=x", "/api/v1/adult/discover"} {
+	for _, target := range []string{
+		"/api/v1/adult/search?q=x",
+		"/api/v1/adult/discover",
+		"/api/v1/adult/performers?q=x",
+		"/api/v1/adult/tags?q=x",
+	} {
 		rec := do(t, h, http.MethodGet, target, "")
 		wantStatus(t, rec, http.StatusServiceUnavailable)
 	}

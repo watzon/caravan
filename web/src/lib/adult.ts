@@ -8,7 +8,14 @@
  * is a rule nobody re-checks. Here it is a truth table.
  */
 
-import type { Scene, SceneMeta, SessionUser, Site, StashHealth } from './api/types';
+import type {
+  Scene,
+  SceneFilterSupport,
+  SceneMeta,
+  SessionUser,
+  Site,
+  StashHealth,
+} from './api/types';
 import { formatAge, UNKNOWN } from './format';
 
 /**
@@ -43,6 +50,37 @@ export function adultVisible(user: SessionUser | null): boolean {
 }
 
 /**
+ * Every scene filter, which is what a rail assumes when nobody has told it
+ * otherwise. See sceneFiltersOf for when that happens and why it is the right
+ * default rather than the reckless one.
+ */
+export const EVERY_SCENE_FILTER: SceneFilterSupport = {
+  year: true,
+  duration: true,
+  site_scope: true,
+  date_op: true,
+  sort_duration: true,
+  sort_relevance: true,
+  any_of: true,
+};
+
+/**
+ * Which scene filters the configured endpoint serves, for this caller.
+ *
+ * An absent block is EVERY filter, not none. Three things produce one — the
+ * module being invisible, no stash-box credential, and a server older than the
+ * field — and in all three the rail drawing a control that turns out to be
+ * unserved is the behaviour that already existed: the request refuses with a
+ * 400 that names the filter and offers Clear filters. Reading absence as "none"
+ * would instead hide two thirds of the rail on a perfectly capable TPDB server
+ * whose credential had merely not been set yet, which is a worse wrong answer
+ * and one nobody could diagnose from the screen.
+ */
+export function sceneFiltersOf(user: SessionUser | null): SceneFilterSupport {
+  return user?.scene_filters ?? EVERY_SCENE_FILTER;
+}
+
+/**
  * The "Stash is unreachable" banner's text (PLAN phase 11 task 4).
  *
  * Null when the handoff is answering — and null is also what an absent field
@@ -74,23 +112,16 @@ export function stashUnreachableBanner(
 }
 
 /**
- * The two halves of the Adult shelf: what is on it, and what could be.
+ * Where the retired Scenes tab's job went (PLAN phase 12 task 4).
  *
- * They are separate routes rather than in-page state so each is linkable and
- * survives a reload, and the tab strip navigates between them — the same
- * arrangement the interactive release picker uses for the same reason.
+ * The Adult shelf had two tabs — what is on it, and what could be — and the
+ * second one was browsing a provider catalogue, which is Explore's job. It now
+ * lives beside the other two catalogues at /discover/adult, so the shelf is
+ * sites and only sites and has no tab strip at all. `AdultTab`, `ADULT_TABS`
+ * and `adultTabHref` are gone with it rather than left behind as a one-entry
+ * list; App.svelte redirects the old /adult/scenes here.
  */
-export type AdultTab = 'sites' | 'scenes';
-
-export const ADULT_TABS: { key: AdultTab; label: string }[] = [
-  { key: 'sites', label: 'Sites' },
-  { key: 'scenes', label: 'Scenes' },
-];
-
-/** Where an Adult tab points. */
-export function adultTabHref(tab: AdultTab): string {
-  return tab === 'sites' ? '/adult' : '/adult/scenes';
-}
+export const ADULT_EXPLORE_HREF = '/discover/adult';
 
 /** One site's page. */
 export function siteHref(site: Pick<Site, 'id'>): string {

@@ -347,6 +347,37 @@ export interface SessionUser {
    * admin-only, and a granted member has to be able to decide too.
    */
   adult: boolean;
+  /**
+   * Which controls the Explore rail's Adult scope may draw. Absent for a caller
+   * the module is invisible to, for a server with no stash-box credential, and
+   * for a server too old to send it — see `sceneFiltersOf`, which is the only
+   * thing that should read it.
+   */
+  scene_filters?: SceneFilterSupport;
+}
+
+/**
+ * Which scene filters the configured stash-box endpoint can actually express
+ * (internal/api.sceneFiltersJSON).
+ *
+ * "stash-box" is a protocol with dialects: TPDB serves a release year, a
+ * runtime, a widened site scope and two extra orderings, and a StashDB or
+ * FansDB install refuses every one of them with a 400 that blanks the grid. The
+ * rail draws each of these pills only when the endpoint behind it says yes,
+ * which is PLAN phase 12's "nothing renders a control the provider cannot
+ * answer".
+ *
+ * Positive: true is "this works". So an absent block is not "nothing works" —
+ * see `sceneFiltersOf`.
+ */
+export interface SceneFilterSupport {
+  year: boolean;
+  duration: boolean;
+  site_scope: boolean;
+  date_op: boolean;
+  sort_duration: boolean;
+  sort_relevance: boolean;
+  any_of: boolean;
 }
 
 /**
@@ -1189,6 +1220,51 @@ export interface DiscoverBrowse {
   items: DiscoverItem[];
 }
 
+/**
+ * GET /discover/movies and /discover/series — one page of a FILTERED scope
+ * (phase 12).
+ *
+ * It carries no `source` block, unlike the curated shelf above: there is no
+ * shelf behind it, the filter itself is the description, and the client already
+ * holds that in its URL.
+ */
+export interface DiscoverScopePage {
+  media_type: MediaType;
+  page: number;
+  total_pages: number;
+  items: DiscoverItem[];
+}
+
+/** internal/api.discoverPersonJSON — one row of the cast & crew typeahead. */
+export interface DiscoverPerson {
+  tmdb_id: number;
+  name: string;
+  /** What the provider says they are best known for; "" when it does not say. */
+  department: string;
+  profile_url: string;
+}
+
+/** internal/api.discoverCompanyJSON — one row of the studio typeahead. */
+export interface DiscoverCompany {
+  tmdb_id: number;
+  name: string;
+  /** ISO 3166-1 country code; "" when unknown. */
+  country: string;
+  logo_url: string;
+}
+
+/** internal/api.discoverNamedJSON — what a keyword and a genre both are. */
+export interface DiscoverNamed {
+  tmdb_id: number;
+  name: string;
+}
+
+/** GET /discover/genres?type= — one media type's genre vocabulary. */
+export interface DiscoverGenres {
+  media_type: MediaType;
+  genres: DiscoverNamed[];
+}
+
 /** internal/api.castMemberJSON. */
 export interface CastMember {
   tmdb_id: number;
@@ -1518,6 +1594,33 @@ export interface AdultDiscoverPage {
   per_page: number;
   total: number;
   scenes: SceneMeta[];
+}
+
+/**
+ * internal/api.sceneFilterRefJSON — one performer or tag, as the typeahead
+ * hands it over and as the filter sends it back.
+ *
+ * `id` is a STRING and opaque: it is a numeric id on a TPDB endpoint and a
+ * uuid on a stash-box one, and a client that echoes back exactly what it was
+ * given never has to learn which dialect it is talking to.
+ */
+export interface SceneFilterRef {
+  id: string;
+  name: string;
+}
+
+export interface ScenePerformerMeta extends SceneFilterRef {
+  image_url: string;
+}
+
+/** GET /adult/performers?q= */
+export interface ScenePerformersPage {
+  performers: ScenePerformerMeta[];
+}
+
+/** GET /adult/tags?q= */
+export interface SceneTagsPage {
+  tags: SceneFilterRef[];
 }
 
 /**

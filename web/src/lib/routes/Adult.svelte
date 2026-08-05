@@ -24,11 +24,9 @@
   import PosterCard from '../components/PosterCard.svelte';
   import PosterGrid from '../components/PosterGrid.svelte';
   import PosterGridSkeleton from '../components/PosterGridSkeleton.svelte';
-  import PageTabs from '../components/PageTabs.svelte';
   import SelectActions from '../components/SelectActions.svelte';
   import TextInput from '../components/TextInput.svelte';
-  import { ADULT_TABS, adultTabHref, sceneCountNote, siteHref } from '../adult';
-  import { navigate } from '../router.svelte';
+  import { ADULT_EXPLORE_HREF, sceneCountNote, siteHref } from '../adult';
   import { createSelection } from '../selection.svelte';
   import { session } from '../state/session.svelte';
   import type { StatusKey } from '../status';
@@ -96,12 +94,9 @@
 </script>
 
 <div class="flex flex-col gap-6">
-  <PageTabs
-    tabs={ADULT_TABS}
-    active="sites"
-    ariaLabel="Adult sections"
-    onchange={(key) => navigate(adultTabHref(key))} />
-
+  <!-- No tab strip: the Scenes tab was retired in phase 12 and its job moved
+       to Explore's adult scope, so this shelf is sites and only sites. A strip
+       with one tab in it is a strip that says nothing. -->
   <div class="flex flex-wrap items-center gap-3">
     <div class="ml-auto flex items-center gap-2">
       <div class="w-56">
@@ -134,7 +129,7 @@
       title="No sites yet"
       message={session.isAdmin
         ? 'Add a site and Caravan walks its whole catalogue, filing each scene under its release year.'
-        : 'Nothing has been added to this shelf yet. Ask for a scene from Scenes and it shows up here once it is approved.'}>
+        : 'Nothing has been added to this shelf yet. Ask for a scene from Explore and it shows up here once it is approved.'}>
       {#snippet action()}
         {#if session.isAdmin}
           <Button variant="primary" onclick={() => (picking = true)}>
@@ -142,7 +137,7 @@
             Add site
           </Button>
         {:else}
-          <Button variant="primary" href="/adult/scenes">Browse scenes</Button>
+          <Button variant="primary" href={ADULT_EXPLORE_HREF}>Browse scenes</Button>
         {/if}
       {/snippet}
     </EmptyState>

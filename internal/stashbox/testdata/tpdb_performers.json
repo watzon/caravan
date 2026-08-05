@@ -1,0 +1,22 @@
+{
+  "data": [
+    {
+      "id": "60416988-eb25-4517-9914-4aa1915a3e43",
+      "_id": 84060,
+      "name": "Mia Malkova",
+      "image": "https://cdn.example.test/performers/84060.jpg",
+      "thumbnail": "https://cdn.example.test/performers/84060-thumb.jpg"
+    },
+    {
+      "id": "8bd0a0e1-2b1c-4f27-9f4a-1f1d9f8f2a11",
+      "_id": 90211,
+      "name": "Riley Reid",
+      "image": "https://cdn.example.test/performers/90211.jpg"
+    },
+    {
+      "id": "e0d2f9c4-3f2e-4a55-9c6a-2b3c4d5e6f70",
+      "_id": 0,
+      "name": "No Numeric Id"
+    }
+  ]
+}

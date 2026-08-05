@@ -7,10 +7,15 @@
 /**
  * Every route the SPA serves, in match order.
  *
- * The interactive release picker is a screen, not a modal (DESIGN.md §5), so
- * its target lives in the path rather than a query string: the router
- * deliberately drops query strings, and a picker you cannot link to or reload
- * is not a first-class screen.
+ * WHAT lives in the path and WHAT lives in the query string is a deliberate
+ * split. A screen is a path — the interactive release picker is a screen, not a
+ * modal (DESIGN.md §5), so its target is `/movies/:id/search` and not
+ * `?picker=`. A *filter over* a screen is a query string: the explore scopes
+ * below all render the same screen and differ only in what has been asked of
+ * the provider, and there is no sane path spelling of "sci-fi, this actor,
+ * under 100 minutes". `matchRoutes` therefore never sees a query string
+ * (`normalizePath` cuts it), and the screens read it themselves through
+ * `router.params`.
  */
 export const ROUTES = [
   '/first-run',
@@ -19,6 +24,13 @@ export const ROUTES = [
   // screen under its own name, so the nav entry has a canonical href.
   '/',
   '/discover',
+  // The filtered scopes (phase 12). One screen each, all of their state in the
+  // query string so a filtered view is shareable and survives a reload.
+  // /discover/adult is an adult route despite not living under /adult — see
+  // isAdultRoute, which names it explicitly for that reason.
+  '/discover/movies',
+  '/discover/series',
+  '/discover/adult',
   '/discover/network/:id',
   '/discover/studio/:id',
   // TMDB ids, not library ids — a discover detail is about a title Caravan may
@@ -40,6 +52,11 @@ export const ROUTES = [
   // as well as the member allowlist: the module is invisible to an account it
   // was not granted to, whatever that account's role is.
   '/adult',
+  // Retired in phase 12: scene browsing moved to /discover/adult, where the
+  // other two catalogues are browsed. The pattern stays so an old bookmark
+  // lands somewhere on purpose rather than on Not found — App.svelte redirects
+  // it — and it stays an ADULT route while it does, so an ungranted caller is
+  // still sent away from it rather than through it.
   '/adult/scenes',
   '/adult/sites/:id',
   // The scene picker, under /adult on purpose: isAdultRoute is derived from the
@@ -73,6 +90,12 @@ export type RoutePattern = (typeof ROUTES)[number];
 export const MEMBER_ROUTES: readonly RoutePattern[] = [
   '/',
   '/discover',
+  '/discover/movies',
+  '/discover/series',
+  // The adult scope. Named here for the same reason /adult is: a member is not
+  // barred from it by their ROLE. The grant is the second gate (isAdultRoute),
+  // and both have to say yes.
+  '/discover/adult',
   '/discover/network/:id',
   '/discover/studio/:id',
   '/discover/movie/:tmdbId',
@@ -108,9 +131,38 @@ export function memberAllowedRoute(pattern: RoutePattern): boolean {
  *
  * Derived from the path so a route added under /adult tomorrow is gated by
  * having been added, not by somebody remembering to name it twice.
+ *
+ * /discover/adult is the one exception, and it is named rather than derived
+ * because its path cannot be: phase 12 moved scene browsing next to the other
+ * two catalogues, so the adult scope's URL reads like its siblings' and the
+ * prefix rule no longer reaches it. router.test.ts pins the FULL list this
+ * returns true for, so a future adult screen filed outside /adult fails that
+ * test rather than shipping ungated.
  */
+export const ADULT_SCOPE_ROUTE = '/discover/adult' as const;
+
 export function isAdultRoute(pattern: RoutePattern): boolean {
-  return pattern === '/adult' || pattern.startsWith('/adult/');
+  return (
+    pattern === '/adult' || pattern.startsWith('/adult/') || pattern === ADULT_SCOPE_ROUTE
+  );
+}
+
+/**
+ * Split a link target into the path the router matches and the query string
+ * the screen reads. The hash is dropped: nothing in the SPA uses one.
+ *
+ * `search` is stored without its leading '?', so "" is unambiguously "no query
+ * string" — `?` and no query are the same URL and must compare equal, or
+ * navigate() would push a history entry for a no-op.
+ */
+export function splitLocation(to: string): { path: string; search: string } {
+  const withoutHash = to.replace(/#.*$/, '');
+  const mark = withoutHash.indexOf('?');
+  if (mark === -1) return { path: normalizePath(withoutHash), search: '' };
+  return {
+    path: normalizePath(withoutHash.slice(0, mark)),
+    search: withoutHash.slice(mark + 1),
+  };
 }
 
 export interface RouteMatch {

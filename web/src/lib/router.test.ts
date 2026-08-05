@@ -8,6 +8,7 @@ import {
   normalizePath,
   numericParam,
   ordinalParam,
+  splitLocation,
 } from './router';
 
 describe('normalizePath', () => {
@@ -100,6 +101,30 @@ describe('matchRoutes', () => {
     expect(matchRoutes(ROUTES, '/requests')?.pattern).toBe('/requests');
   });
 
+  /**
+   * The filtered scopes (phase 12). They are two-segment paths and the title
+   * screens are three-segment ones, so /discover/movies can never be read as
+   * "the movie whose id is 'movies'".
+   */
+  it('resolves the filtered scopes without shadowing the title screens', () => {
+    expect(matchRoutes(ROUTES, '/discover/movies')?.pattern).toBe('/discover/movies');
+    expect(matchRoutes(ROUTES, '/discover/series')?.pattern).toBe('/discover/series');
+    expect(matchRoutes(ROUTES, '/discover/adult')?.pattern).toBe('/discover/adult');
+    expect(matchRoutes(ROUTES, '/discover/movie/78')?.pattern).toBe('/discover/movie/:tmdbId');
+  });
+
+  /**
+   * A filter is a query string, and the router matches paths. A scope's
+   * filtered URL therefore resolves to the same screen as its bare one — which
+   * is the whole reason filters can live there without a route per filter.
+   */
+  it('matches a filtered scope as the scope it is', () => {
+    expect(matchRoutes(ROUTES, '/discover/movies?genres=878&people=1245')).toEqual({
+      pattern: '/discover/movies',
+      params: {},
+    });
+  });
+
   it('keeps the browse shelves apart from the title screens', () => {
     expect(matchRoutes(ROUTES, '/discover/network/213')).toEqual({
       pattern: '/discover/network/:id',
@@ -135,7 +160,14 @@ describe('matchRoutes', () => {
  */
 describe('isAdultRoute', () => {
   it('names every adult screen, and is derived rather than listed', () => {
-    for (const pattern of ['/adult', '/adult/scenes', '/adult/sites/:id'] as const) {
+    for (const pattern of [
+      '/adult',
+      '/adult/scenes',
+      '/adult/sites/:id',
+      // Phase 12: scene browsing moved next to the other two catalogues, so an
+      // adult screen now lives outside /adult for the first time.
+      '/discover/adult',
+    ] as const) {
       expect(isAdultRoute(pattern), pattern).toBe(true);
     }
     // Derived from the path, so a route added under /adult tomorrow is gated by
@@ -143,7 +175,13 @@ describe('isAdultRoute', () => {
     // The scene picker is filed here for exactly that reason: it could have
     // lived under /series/:id/search, which works — a site IS a series row —
     // and would have been a screen the adult gate could not see.
+    //
+    // /discover/adult is the ONE route the prefix rule cannot reach, so it is
+    // named in router.ts and pinned here: this list is the whole gate, and a
+    // future adult screen filed somewhere the rule misses fails this test
+    // rather than shipping ungated.
     expect(ROUTES.filter(isAdultRoute)).toEqual([
+      '/discover/adult',
       '/adult',
       '/adult/scenes',
       '/adult/sites/:id',
@@ -156,6 +194,19 @@ describe('isAdultRoute', () => {
   it('gates nothing else in the app', () => {
     for (const pattern of ROUTES) {
       if (pattern === '/adult' || pattern.startsWith('/adult/')) continue;
+      if (pattern === '/discover/adult') continue;
+      expect(isAdultRoute(pattern), pattern).toBe(false);
+    }
+  });
+
+  /**
+   * The sibling scopes are NOT adult routes. /discover/adult being named by
+   * hand is the risk this covers: a rule spelled out rather than derived is a
+   * rule that can be spelled too widely, and gating /discover/movies would put
+   * the whole of Explore behind a grant nobody has.
+   */
+  it('leaves the other explore scopes alone', () => {
+    for (const pattern of ['/discover', '/discover/movies', '/discover/series'] as const) {
       expect(isAdultRoute(pattern), pattern).toBe(false);
     }
   });
@@ -167,7 +218,12 @@ describe('isAdultRoute', () => {
    * separately.
    */
   it('is a separate question from the member allowlist', () => {
-    for (const pattern of ['/adult', '/adult/scenes', '/adult/sites/:id'] as const) {
+    for (const pattern of [
+      '/adult',
+      '/adult/scenes',
+      '/adult/sites/:id',
+      '/discover/adult',
+    ] as const) {
       expect(memberAllowedRoute(pattern), pattern).toBe(true);
     }
   });
@@ -214,5 +270,41 @@ describe('numericParam', () => {
     expect(numericParam({ id: '-1' }, 'id')).toBe(0);
     expect(numericParam({ id: '1.5' }, 'id')).toBe(0);
     expect(numericParam({}, 'id')).toBe(0);
+  });
+});
+
+/**
+ * The path/query split (PLAN phase 12 task 5). `normalizePath` cuts the query
+ * string because the ROUTE table has no room for one; `splitLocation` is where
+ * it is kept, so a filtered view can be addressed at all.
+ */
+describe('splitLocation', () => {
+  const cases: [string, { path: string; search: string }][] = [
+    ['/discover/movies', { path: '/discover/movies', search: '' }],
+    // '?' with nothing after it is the same URL as no query string at all, and
+    // must compare equal or navigate() would push a history entry for a no-op.
+    ['/discover/movies?', { path: '/discover/movies', search: '' }],
+    [
+      '/discover/movies?genres=878&people=1245',
+      { path: '/discover/movies', search: 'genres=878&people=1245' },
+    ],
+    // Repeated keys survive: two people is two parameters, not one joined.
+    [
+      '/discover/movies?people=1&people=2',
+      { path: '/discover/movies', search: 'people=1&people=2' },
+    ],
+    ['/discover/movies#top', { path: '/discover/movies', search: '' }],
+    ['/discover/movies/?genres=878', { path: '/discover/movies', search: 'genres=878' }],
+    ['/adult/scenes', { path: '/adult/scenes', search: '' }],
+  ];
+
+  for (const [input, want] of cases) {
+    it(`splits ${JSON.stringify(input)}`, () => {
+      expect(splitLocation(input)).toEqual(want);
+    });
+  }
+
+  it('leaves normalizePath dropping the query, which is what routing wants', () => {
+    expect(normalizePath('/discover/movies?genres=878')).toBe('/discover/movies');
   });
 });

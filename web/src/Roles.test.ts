@@ -130,6 +130,10 @@ beforeEach(() => {
       if (url.includes('/adult/discover')) {
         return jsonResponse({ page: 1, per_page: 20, total: 0, scenes: [] });
       }
+      if (url.includes('/discover/genres')) return jsonResponse({ media_type: 'movie', genres: [] });
+      if (url.includes('/discover/movies') || url.includes('/discover/series')) {
+        return jsonResponse({ media_type: 'movie', page: 1, total_pages: 1, items: [] });
+      }
       throw new Error(`unexpected fetch: ${url}`);
     }),
   );
@@ -272,7 +276,28 @@ describe('the adult module — not visible', () => {
 
       expect(host.querySelector('a[href="/adult"]')).toBeNull();
       expect(host.querySelector('a[href="/adult/scenes"]')).toBeNull();
+      // The Explore scope row is on this screen, and its Adult pill is ABSENT
+      // rather than disabled: a greyed-out pill announces the module exists.
+      expect(host.querySelector('a[href="/discover/adult"]')).toBeNull();
       expect(host.textContent).not.toContain('Adult');
+      expect(requested.some((url) => url.includes('/adult'))).toBe(false);
+    });
+
+    it(`shows ${who} the other explore scopes, which are not gated`, async () => {
+      me = identity;
+      await open('/discover');
+
+      expect(host.querySelector('a[href="/discover/movies"]')).not.toBeNull();
+      expect(host.querySelector('a[href="/discover/series"]')).not.toBeNull();
+    });
+
+    it(`refuses ${who} the adult scope, without asking the provider`, async () => {
+      me = identity;
+      await open('/discover/adult');
+
+      expect(router.path).toBe(identity.role === 'admin' ? '/movies' : '/discover');
+      // The render is gated as well as the redirect, so the scope never mounted
+      // and never put a scene query on the wire on its way past.
       expect(requested.some((url) => url.includes('/adult'))).toBe(false);
     });
 
@@ -289,7 +314,13 @@ describe('the adult module — not visible', () => {
       expect(host.textContent).not.toContain('Adult');
     });
 
-    it(`sends ${who} away from the scene search too`, async () => {
+    /**
+     * The retired Scenes tab redirects to /discover/adult — but only for a
+     * reader who may be there. An ungranted one is sent to their OWN shelf
+     * instead: forwarding them from one adult URL to another would be the
+     * module announcing itself, which is the trace this phase forbids.
+     */
+    it(`sends ${who} away from the retired scene tab, not on to its replacement`, async () => {
       me = identity;
       await open('/adult/scenes');
 
@@ -336,11 +367,30 @@ describe('the adult module — visible', () => {
       expect(requested.some((url) => url.includes('/adult/sites'))).toBe(true);
     });
 
-    it(`lets ${who} open the scene search`, async () => {
+    it(`gives ${who} the Adult pill on the explore scope row`, async () => {
+      me = identity;
+      await open('/discover');
+
+      expect(host.querySelector('a[href="/discover/adult"]')).not.toBeNull();
+    });
+
+    it(`lets ${who} open the adult scope`, async () => {
+      me = identity;
+      await open('/discover/adult');
+
+      expect(router.path).toBe('/discover/adult');
+      expect(requested.some((url) => url.includes('/adult/discover'))).toBe(true);
+    });
+
+    /**
+     * The Scenes tab is retired (PLAN phase 12 task 4). An old bookmark lands
+     * on the scope that replaced it rather than on Not found.
+     */
+    it(`forwards ${who} from the retired scene tab to the adult scope`, async () => {
       me = identity;
       await open('/adult/scenes');
 
-      expect(router.path).toBe('/adult/scenes');
+      expect(router.path).toBe('/discover/adult');
       expect(requested.some((url) => url.includes('/adult/discover'))).toBe(true);
     });
 

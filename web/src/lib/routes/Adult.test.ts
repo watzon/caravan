@@ -115,3 +115,20 @@ describe('the Adult shelf grid', () => {
     expect(calls.every((c) => c.method === 'GET')).toBe(true);
   });
 });
+
+/**
+ * The Scenes tab is retired (PLAN phase 12 task 4). Browsing the provider's
+ * catalogue moved to Explore, beside the other two catalogues, so the shelf is
+ * what Caravan HOLDS and nothing else — and a tab strip with one tab in it is a
+ * strip that says nothing, so there is no strip at all.
+ */
+describe('the retired Scenes tab', () => {
+  it('leaves the shelf with no tab strip and no link to the old route', async () => {
+    stubFetch();
+    await mountShelf('admin');
+
+    expect(host!.querySelector('[role="tablist"]')).toBeNull();
+    expect(host!.textContent).not.toContain('Scenes');
+    expect(host!.querySelector('a[href="/adult/scenes"]')).toBeNull();
+  });
+});

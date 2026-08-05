@@ -1,0 +1,672 @@
+/**
+ * Explore's filter model: the scope row, the two filter shapes, and the
+ * translation between a filter, the URL that addresses it, and the query the
+ * API is asked. Pure — no DOM, no I/O, unit-tested in explore.test.ts.
+ *
+ * THE URL IS THE STATE. Every control on the filter rail writes here and the
+ * screens read back from here, so a filtered view is a link somebody can send
+ * and a reload restores exactly what was on screen. That is why this module
+ * exists at all: three screens, two dialects and a shareable URL is four places
+ * a filter could drift apart, and here it is one.
+ *
+ * A filter value that names something — a genre, an actor, a performer — is a
+ * `FilterRef`: an opaque id plus the name the typeahead handed over. The name
+ * travels in the URL (`878:Sci-Fi`) so a reloaded chip is labelled without a
+ * second lookup, and it is stripped on the way to TMDB, whose id lists have no
+ * room for one. The adult endpoint takes the pair verbatim — its provider
+ * filters on `performers[84060]=Mia Malkova` — so there it is sent as written.
+ */
+
+import { languageName } from './discover';
+import type { MediaType } from './api/types';
+
+/* ---------------------------------------------------------------------------
+ * The scope row.
+ * ------------------------------------------------------------------------ */
+
+export type ExploreScope = 'featured' | 'movies' | 'series' | 'adult';
+
+/**
+ * The four scopes, in the order the row renders them. `adult` carries the flag
+ * rather than being appended by the caller, so "which pills exist" is one
+ * filtered list rather than a conditional in every screen that draws the row.
+ */
+export const EXPLORE_SCOPES: { key: ExploreScope; label: string; adult?: true }[] = [
+  { key: 'featured', label: 'Featured' },
+  { key: 'movies', label: 'Movies' },
+  { key: 'series', label: 'Series' },
+  { key: 'adult', label: 'Adult', adult: true },
+];
+
+/** Featured is /discover itself — the screen this row was added to. */
+export function exploreScopeHref(scope: ExploreScope): string {
+  return scope === 'featured' ? '/discover' : `/discover/${scope}`;
+}
+
+/**
+ * The pills this reader gets. An ungranted reader is not shown a disabled
+ * Adult pill — the module is invisible, not switched off (SPEC §12), and a
+ * greyed-out pill announces it exists.
+ */
+export function visibleScopes(adultVisible: boolean): typeof EXPLORE_SCOPES {
+  return EXPLORE_SCOPES.filter((scope) => !scope.adult || adultVisible);
+}
+
+/* ---------------------------------------------------------------------------
+ * Refs — an id with the name it was picked under.
+ * ------------------------------------------------------------------------ */
+
+export interface FilterRef {
+  /** Opaque. A TMDB integer as a string, or a stash-box uuid. */
+  id: string;
+  /** "" when the URL carried a bare id; the chip then shows the id. */
+  name: string;
+}
+
+/** Read one `id` or `id:Name`; null when there is no id to read. */
+export function parseRef(raw: string): FilterRef | null {
+  const cut = raw.indexOf(':');
+  const id = (cut === -1 ? raw : raw.slice(0, cut)).trim();
+  if (id === '') return null;
+  return { id, name: cut === -1 ? '' : raw.slice(cut + 1).trim() };
+}
+
+/** The URL spelling of a ref. */
+export function refParam(ref: FilterRef): string {
+  return ref.name === '' ? ref.id : `${ref.id}:${ref.name}`;
+}
+
+/** What a chip shows. A ref with no name has only its id to offer. */
+export function refLabel(ref: FilterRef): string {
+  return ref.name === '' ? ref.id : ref.name;
+}
+
+/** Refs are a set keyed by id: picking the same person twice is one filter. */
+export function toggleRef(refs: readonly FilterRef[], ref: FilterRef): FilterRef[] {
+  return refs.some((r) => r.id === ref.id)
+    ? refs.filter((r) => r.id !== ref.id)
+    : [...refs, ref];
+}
+
+export function hasRef(refs: readonly FilterRef[], id: string): boolean {
+  return refs.some((r) => r.id === id);
+}
+
+/* ---------------------------------------------------------------------------
+ * Sorting. One list per scope, each entry a (sort, order) pair under a name a
+ * reader recognises — "Newest" rather than "release_date, descending".
+ * ------------------------------------------------------------------------ */
+
+export type SortOrder = 'asc' | 'desc';
+
+export interface SortChoice {
+  key: string;
+  label: string;
+  sort: string;
+  order: SortOrder;
+}
+
+/**
+ * The title scopes' sorts. `revenue` is deliberately absent: TMDB serves it for
+ * movies and not for series, and a control that works in one scope and silently
+ * does nothing in the other is the exact failure this phase is built to avoid.
+ */
+export const TITLE_SORTS: SortChoice[] = [
+  { key: 'popularity', label: 'Popularity', sort: 'popularity', order: 'desc' },
+  { key: 'newest', label: 'Newest', sort: 'release_date', order: 'desc' },
+  { key: 'oldest', label: 'Oldest', sort: 'release_date', order: 'asc' },
+  { key: 'rating', label: 'Highest rated', sort: 'rating', order: 'desc' },
+  { key: 'votes', label: 'Most voted', sort: 'votes', order: 'desc' },
+  { key: 'title', label: 'Title A–Z', sort: 'title', order: 'asc' },
+];
+
+/**
+ * The scene scope's sorts. "Relevance" only means anything beside a text query
+ * and ignores the direction — the provider says so, and the rail says so too
+ * rather than offering a control that quietly does nothing.
+ */
+export const SCENE_SORTS: SortChoice[] = [
+  { key: 'newest', label: 'Newest', sort: 'released', order: 'desc' },
+  { key: 'oldest', label: 'Oldest', sort: 'released', order: 'asc' },
+  { key: 'added', label: 'Recently added', sort: 'created', order: 'desc' },
+  { key: 'updated', label: 'Recently updated', sort: 'updated', order: 'desc' },
+  { key: 'duration', label: 'Longest', sort: 'duration', order: 'desc' },
+  { key: 'relevance', label: 'Relevance', sort: 'relevance', order: 'desc' },
+];
+
+/** Read a (sort, order) pair back to its key; the default when it is neither. */
+function sortKeyOf(choices: SortChoice[], sort: string, order: string): string {
+  const first = choices[0] as SortChoice;
+  if (sort === '') return first.key;
+  const match = choices.find((c) => c.sort === sort && (order === '' ? c.order === 'desc' : c.order === order));
+  return match?.key ?? first.key;
+}
+
+function sortChoice(choices: SortChoice[], key: string): SortChoice {
+  return choices.find((c) => c.key === key) ?? (choices[0] as SortChoice);
+}
+
+/* ---------------------------------------------------------------------------
+ * The title filter (movies and series).
+ * ------------------------------------------------------------------------ */
+
+export interface TitleFilter {
+  genres: FilterRef[];
+  keywords: FilterRef[];
+  /** Production companies. "Studio" on the rail — TMDB calls them companies. */
+  companies: FilterRef[];
+  /** Series only. The API refuses it on /discover/movies. */
+  networks: FilterRef[];
+  /**
+   * Movies only, and the seam this phase documents: TMDB's /discover/tv has no
+   * with_cast, with_crew or with_people, so the API answers 400 rather than
+   * ignoring one. The rail therefore renders this pill on movies alone.
+   */
+  people: FilterRef[];
+  /** Release/first-air window, "YYYY-MM-DD"; "" when open-ended. */
+  from: string;
+  to: string;
+  /** Minutes; 0 is "unset", which is why a negative is never stored. */
+  runtimeMin: number;
+  runtimeMax: number;
+  /** 0-10; 0 is unset. */
+  ratingMin: number;
+  /** ISO 639-1 original language; "" for any. */
+  language: string;
+  sort: string;
+  /**
+   * Client-side, as it is on every other discover screen: there is no server
+   * parameter for "skip what I already have", and inventing one would page
+   * differently from every other shelf.
+   */
+  hideOwned: boolean;
+}
+
+export const EMPTY_TITLE_FILTER: TitleFilter = {
+  genres: [],
+  keywords: [],
+  companies: [],
+  networks: [],
+  people: [],
+  from: '',
+  to: '',
+  runtimeMin: 0,
+  runtimeMax: 0,
+  ratingMin: 0,
+  language: '',
+  sort: 'popularity',
+  hideOwned: false,
+};
+
+/* ---------------------------------------------------------------------------
+ * The scene filter.
+ * ------------------------------------------------------------------------ */
+
+export type SceneSiteScope = 'site' | 'parent' | 'network';
+
+export const SCENE_SITE_SCOPES: { key: SceneSiteScope; label: string; hint: string }[] = [
+  { key: 'site', label: 'This site', hint: 'Only scenes released under this site.' },
+  { key: 'parent', label: 'Parent studio', hint: "The site's parent studio as well." },
+  { key: 'network', label: 'Whole network', hint: 'Every site on the same network.' },
+];
+
+export interface SceneFilter {
+  /** Free text. A blank one is legal and asks for the provider's newest. */
+  text: string;
+  /** The site to scope to; null for the whole catalogue. */
+  site: FilterRef | null;
+  /** Widening ladder. Meaningless — and a 400 — without a site. */
+  scope: SceneSiteScope;
+  performers: FilterRef[];
+  /** true asks for scenes with ALL of them; false, any. */
+  performersAll: boolean;
+  tags: FilterRef[];
+  tagsAll: boolean;
+  /** Release year; 0 unset. */
+  year: number;
+  /**
+   * Minutes. ONE value, not a range: the provider serves a single `duration`
+   * with no comparison operator, so a min/max pair would be a control that
+   * cannot be honoured.
+   */
+  duration: number;
+  sort: string;
+  hideOwned: boolean;
+}
+
+export const EMPTY_SCENE_FILTER: SceneFilter = {
+  text: '',
+  site: null,
+  scope: 'site',
+  performers: [],
+  performersAll: false,
+  tags: [],
+  tagsAll: false,
+  year: 0,
+  duration: 0,
+  sort: 'newest',
+  hideOwned: false,
+};
+
+/* ---------------------------------------------------------------------------
+ * URL ⇄ filter.
+ *
+ * `hide` is the one client-only parameter. It is stripped on the way to the
+ * API, which allowlists its query string and answers 400 to anything it does
+ * not serve — so a parameter that only the browser understands must never be
+ * forwarded.
+ * ------------------------------------------------------------------------ */
+
+const HIDE_PARAM = 'hide';
+
+function readRefs(params: URLSearchParams, key: string): FilterRef[] {
+  const out: FilterRef[] = [];
+  for (const raw of params.getAll(key)) {
+    const ref = parseRef(raw);
+    if (ref && !hasRef(out, ref.id)) out.push(ref);
+  }
+  return out;
+}
+
+/** A whole number of `min` or more; the fallback when the value is not one. */
+function readNumber(params: URLSearchParams, key: string, min: number, fallback: number): number {
+  const raw = (params.get(key) ?? '').trim();
+  if (raw === '') return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= min ? n : fallback;
+}
+
+/** "YYYY-MM-DD" or "". Anything else is dropped rather than sent on to 400. */
+function readDate(params: URLSearchParams, key: string): string {
+  const raw = (params.get(key) ?? '').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : '';
+}
+
+function readFlag(params: URLSearchParams, key: string): boolean {
+  return (params.get(key) ?? '') === 'true';
+}
+
+/**
+ * The scope is a parameter because two of these filters belong to one scope
+ * each: `people` is a 400 on the series scope and `networks` is a 400 on the
+ * movie scope (see titleApiQuery). Dropping the inapplicable one HERE — rather
+ * than on the way to the API — is what keeps the URL, the chip row and the wire
+ * query saying the same thing. Read without the scope, /discover/series?people=…
+ * parsed into a filter that was re-emitted on every apply, sent to nobody, and
+ * drawn as no chip: an invisible filter with no way to remove it.
+ */
+export function parseTitleFilter(mediaType: MediaType, params: URLSearchParams): TitleFilter {
+  return {
+    genres: readRefs(params, 'genres'),
+    keywords: readRefs(params, 'keywords'),
+    companies: readRefs(params, 'companies'),
+    networks: mediaType === 'series' ? readRefs(params, 'networks') : [],
+    people: mediaType === 'movie' ? readRefs(params, 'people') : [],
+    from: readDate(params, 'from'),
+    to: readDate(params, 'to'),
+    runtimeMin: Math.trunc(readNumber(params, 'runtime_min', 0, 0)),
+    runtimeMax: Math.trunc(readNumber(params, 'runtime_max', 0, 0)),
+    ratingMin: Math.min(10, readNumber(params, 'rating_min', 0, 0)),
+    language: (params.get('language') ?? '').trim(),
+    sort: sortKeyOf(TITLE_SORTS, (params.get('sort') ?? '').trim(), (params.get('order') ?? '').trim()),
+    hideOwned: params.get(HIDE_PARAM) === '1',
+  };
+}
+
+/**
+ * The URL for a filter, as a query string without its leading '?'.
+ *
+ * Only what is set is written: an empty filter is an empty string, so
+ * /discover/movies and /discover/movies? are the same address and the scope
+ * pill's plain href is the canonical one.
+ */
+export function titleFilterQuery(mediaType: MediaType, filter: TitleFilter): string {
+  const params = new URLSearchParams();
+  // The mirror of parseTitleFilter: the scope that cannot serve a list does not
+  // write one either, so a stale parameter is gone after the next apply rather
+  // than being copied forward forever.
+  const refs: [string, FilterRef[]][] = [
+    ['genres', filter.genres],
+    ['keywords', filter.keywords],
+    ['companies', filter.companies],
+    ['networks', mediaType === 'series' ? filter.networks : []],
+    ['people', mediaType === 'movie' ? filter.people : []],
+  ];
+  for (const [key, list] of refs) {
+    for (const ref of list) params.append(key, refParam(ref));
+  }
+  if (filter.from) params.set('from', filter.from);
+  if (filter.to) params.set('to', filter.to);
+  if (filter.runtimeMin > 0) params.set('runtime_min', String(filter.runtimeMin));
+  if (filter.runtimeMax > 0) params.set('runtime_max', String(filter.runtimeMax));
+  if (filter.ratingMin > 0) params.set('rating_min', String(filter.ratingMin));
+  if (filter.language) params.set('language', filter.language);
+  const choice = sortChoice(TITLE_SORTS, filter.sort);
+  if (choice.key !== (TITLE_SORTS[0] as SortChoice).key) {
+    params.set('sort', choice.sort);
+    params.set('order', choice.order);
+  }
+  if (filter.hideOwned) params.set(HIDE_PARAM, '1');
+  return params.toString();
+}
+
+export function parseSceneFilter(params: URLSearchParams): SceneFilter {
+  const site = parseRef(params.get('site') ?? '');
+  const scopeRaw = (params.get('scope') ?? '').trim();
+  const scope = SCENE_SITE_SCOPES.some((s) => s.key === scopeRaw)
+    ? (scopeRaw as SceneSiteScope)
+    : 'site';
+  return {
+    text: (params.get('q') ?? '').trim(),
+    site,
+    // A widened scope with no site to widen is a 400 at the API, so it is
+    // narrowed back here rather than carried into a request that cannot work.
+    scope: site === null ? 'site' : scope,
+    performers: readRefs(params, 'performers'),
+    performersAll: readFlag(params, 'performers_all'),
+    tags: readRefs(params, 'tags'),
+    tagsAll: readFlag(params, 'tags_all'),
+    year: Math.trunc(readNumber(params, 'year', 0, 0)),
+    duration: Math.trunc(readNumber(params, 'duration', 0, 0)),
+    sort: sortKeyOf(SCENE_SORTS, (params.get('sort') ?? '').trim(), (params.get('order') ?? '').trim()),
+    hideOwned: params.get(HIDE_PARAM) === '1',
+  };
+}
+
+export function sceneFilterQuery(filter: SceneFilter): string {
+  const params = new URLSearchParams();
+  if (filter.text) params.set('q', filter.text);
+  if (filter.site) {
+    params.set('site', refParam(filter.site));
+    if (filter.scope !== 'site') params.set('scope', filter.scope);
+  }
+  for (const ref of filter.performers) params.append('performers', refParam(ref));
+  if (filter.performersAll && filter.performers.length > 0) params.set('performers_all', 'true');
+  for (const ref of filter.tags) params.append('tags', refParam(ref));
+  if (filter.tagsAll && filter.tags.length > 0) params.set('tags_all', 'true');
+  if (filter.year > 0) params.set('year', String(filter.year));
+  if (filter.duration > 0) params.set('duration', String(filter.duration));
+  const choice = sortChoice(SCENE_SORTS, filter.sort);
+  if (choice.key !== (SCENE_SORTS[0] as SortChoice).key) {
+    params.set('sort', choice.sort);
+    params.set('order', choice.order);
+  }
+  if (filter.hideOwned) params.set(HIDE_PARAM, '1');
+  return params.toString();
+}
+
+/** The full link for a filtered scope — what the rail pushes into history. */
+export function titleFilterHref(mediaType: MediaType, filter: TitleFilter): string {
+  const query = titleFilterQuery(mediaType, filter);
+  const path = mediaType === 'movie' ? '/discover/movies' : '/discover/series';
+  return query === '' ? path : `${path}?${query}`;
+}
+
+export function sceneFilterHref(filter: SceneFilter): string {
+  const query = sceneFilterQuery(filter);
+  return query === '' ? '/discover/adult' : `/discover/adult?${query}`;
+}
+
+/* ---------------------------------------------------------------------------
+ * Filter → API query.
+ *
+ * The two dialects differ in one way that matters: TMDB takes comma-joined
+ * bare ids, and the adult endpoint takes one repeated parameter per ref with
+ * the name attached, because a performer's name may contain a comma and its
+ * provider filters on the name as well as the id.
+ * ------------------------------------------------------------------------ */
+
+export type ApiQuery = Record<string, string | number | string[] | undefined>;
+
+const SECONDS_PER_MINUTE = 60;
+
+function idList(refs: readonly FilterRef[]): string | undefined {
+  return refs.length === 0 ? undefined : refs.map((r) => r.id).join(',');
+}
+
+/**
+ * What GET /discover/{movies,series} is asked. `hideOwned` is absent by
+ * design — it is a view over the answer, not a question for the provider.
+ *
+ * The scope decides which of the two exclusive filters is sent: `people` is a
+ * 400 on the series scope and `networks` is a 400 on the movie scope, so
+ * neither is ever sent to the one that refuses it.
+ */
+export function titleApiQuery(
+  mediaType: MediaType,
+  filter: TitleFilter,
+  page: number,
+): ApiQuery {
+  const choice = sortChoice(TITLE_SORTS, filter.sort);
+  return {
+    genres: idList(filter.genres),
+    keywords: idList(filter.keywords),
+    companies: idList(filter.companies),
+    networks: mediaType === 'series' ? idList(filter.networks) : undefined,
+    people: mediaType === 'movie' ? idList(filter.people) : undefined,
+    from: filter.from || undefined,
+    to: filter.to || undefined,
+    runtime_min: filter.runtimeMin > 0 ? filter.runtimeMin : undefined,
+    runtime_max: filter.runtimeMax > 0 ? filter.runtimeMax : undefined,
+    rating_min: filter.ratingMin > 0 ? filter.ratingMin : undefined,
+    language: filter.language || undefined,
+    sort: choice.sort,
+    order: choice.order,
+    page,
+  };
+}
+
+/** What GET /adult/discover is asked. */
+export function sceneApiQuery(filter: SceneFilter, page: number): ApiQuery {
+  const choice = sortChoice(SCENE_SORTS, filter.sort);
+  return {
+    q: filter.text || undefined,
+    site: filter.site?.id,
+    scope: filter.site && filter.scope !== 'site' ? filter.scope : undefined,
+    performers: filter.performers.map(refParam),
+    performers_all: filter.performersAll && filter.performers.length > 0 ? 'true' : undefined,
+    tags: filter.tags.map(refParam),
+    tags_all: filter.tagsAll && filter.tags.length > 0 ? 'true' : undefined,
+    year: filter.year > 0 ? filter.year : undefined,
+    // Minutes on the rail and in the URL, because that is what a run time is
+    // read in; seconds on the wire, because that is what the provider counts.
+    duration: filter.duration > 0 ? filter.duration * SECONDS_PER_MINUTE : undefined,
+    sort: choice.sort,
+    order: choice.order,
+    page,
+  };
+}
+
+/* ---------------------------------------------------------------------------
+ * Applied chips.
+ *
+ * One chip is one removable fact. A range is a single chip because "runtime
+ * 60-120" is one thought, and two chips for it would let somebody remove half
+ * a bound and be left with a filter they did not choose.
+ * ------------------------------------------------------------------------ */
+
+export interface AppliedChip {
+  /** Stable, and the argument `removeTitleChip`/`removeSceneChip` takes back. */
+  key: string;
+  label: string;
+}
+
+function refChips(prefix: string, noun: string, refs: readonly FilterRef[]): AppliedChip[] {
+  return refs.map((ref) => ({ key: `${prefix}:${ref.id}`, label: `${noun}: ${refLabel(ref)}` }));
+}
+
+/** "60–120 min", "from 60 min", "under 120 min". */
+function rangeText(min: number, max: number, unit: string): string {
+  if (min > 0 && max > 0) return `${min}–${max} ${unit}`;
+  if (min > 0) return `from ${min} ${unit}`;
+  return `under ${max} ${unit}`;
+}
+
+/** "2019–2024", "from 2019", "until 2024" — a date window read as years. */
+function dateWindowText(from: string, to: string): string {
+  const a = from.slice(0, 4);
+  const b = to.slice(0, 4);
+  if (a && b) return a === b ? a : `${a}–${b}`;
+  return a ? `from ${a}` : `until ${b}`;
+}
+
+export function titleChips(mediaType: MediaType, filter: TitleFilter): AppliedChip[] {
+  const chips: AppliedChip[] = [
+    ...refChips('genres', 'Genre', filter.genres),
+    ...(mediaType === 'movie' ? refChips('people', 'Cast & crew', filter.people) : []),
+    ...(mediaType === 'series' ? refChips('networks', 'Network', filter.networks) : []),
+    ...refChips('companies', 'Studio', filter.companies),
+    ...refChips('keywords', 'Keyword', filter.keywords),
+  ];
+  if (filter.from || filter.to) {
+    chips.push({ key: 'dates', label: `Year: ${dateWindowText(filter.from, filter.to)}` });
+  }
+  if (filter.runtimeMin > 0 || filter.runtimeMax > 0) {
+    chips.push({
+      key: 'runtime',
+      label: `Runtime: ${rangeText(filter.runtimeMin, filter.runtimeMax, 'min')}`,
+    });
+  }
+  if (filter.ratingMin > 0) {
+    chips.push({ key: 'rating', label: `Rating: ${filter.ratingMin}+` });
+  }
+  if (filter.language) {
+    chips.push({ key: 'language', label: `Language: ${languageName(filter.language)}` });
+  }
+  return chips;
+}
+
+export function removeTitleChip(filter: TitleFilter, key: string): TitleFilter {
+  const [group, id] = splitChipKey(key);
+  switch (group) {
+    case 'genres':
+      return { ...filter, genres: filter.genres.filter((r) => r.id !== id) };
+    case 'people':
+      return { ...filter, people: filter.people.filter((r) => r.id !== id) };
+    case 'networks':
+      return { ...filter, networks: filter.networks.filter((r) => r.id !== id) };
+    case 'companies':
+      return { ...filter, companies: filter.companies.filter((r) => r.id !== id) };
+    case 'keywords':
+      return { ...filter, keywords: filter.keywords.filter((r) => r.id !== id) };
+    case 'dates':
+      return { ...filter, from: '', to: '' };
+    case 'runtime':
+      return { ...filter, runtimeMin: 0, runtimeMax: 0 };
+    case 'rating':
+      return { ...filter, ratingMin: 0 };
+    case 'language':
+      return { ...filter, language: '' };
+    default:
+      return filter;
+  }
+}
+
+export function sceneChips(filter: SceneFilter): AppliedChip[] {
+  const chips: AppliedChip[] = [];
+  if (filter.text) chips.push({ key: 'q', label: `Search: ${filter.text}` });
+  if (filter.site) {
+    const widened = SCENE_SITE_SCOPES.find((s) => s.key === filter.scope);
+    const suffix = filter.scope === 'site' ? '' : ` · ${(widened?.label ?? '').toLowerCase()}`;
+    chips.push({ key: 'site', label: `Site: ${refLabel(filter.site)}${suffix}` });
+  }
+  chips.push(...refChips('performers', 'Performer', filter.performers));
+  chips.push(...refChips('tags', 'Tag', filter.tags));
+  if (filter.year > 0) chips.push({ key: 'year', label: `Year: ${filter.year}` });
+  if (filter.duration > 0) {
+    chips.push({ key: 'duration', label: `Duration: ${filter.duration} min` });
+  }
+  return chips;
+}
+
+export function removeSceneChip(filter: SceneFilter, key: string): SceneFilter {
+  const [group, id] = splitChipKey(key);
+  switch (group) {
+    case 'q':
+      return { ...filter, text: '' };
+    case 'site':
+      // Dropping the site drops the widening with it: `scope` without a site is
+      // a 400, and silently keeping it would break the next search.
+      return { ...filter, site: null, scope: 'site' };
+    case 'performers': {
+      const performers = filter.performers.filter((r) => r.id !== id);
+      return { ...filter, performers, performersAll: performers.length > 1 && filter.performersAll };
+    }
+    case 'tags': {
+      const tags = filter.tags.filter((r) => r.id !== id);
+      return { ...filter, tags, tagsAll: tags.length > 1 && filter.tagsAll };
+    }
+    case 'year':
+      return { ...filter, year: 0 };
+    case 'duration':
+      return { ...filter, duration: 0 };
+    default:
+      return filter;
+  }
+}
+
+/** "genres:878" → ["genres", "878"]; "runtime" → ["runtime", ""]. */
+function splitChipKey(key: string): [string, string] {
+  const cut = key.indexOf(':');
+  return cut === -1 ? [key, ''] : [key.slice(0, cut), key.slice(cut + 1)];
+}
+
+/**
+ * What "Clear all" leaves behind. Sort and the hide toggle survive: neither is
+ * a chip, so clearing them would remove something the button does not appear to
+ * be about.
+ */
+export function clearedTitleFilter(filter: TitleFilter): TitleFilter {
+  return { ...EMPTY_TITLE_FILTER, sort: filter.sort, hideOwned: filter.hideOwned };
+}
+
+export function clearedSceneFilter(filter: SceneFilter): SceneFilter {
+  return { ...EMPTY_SCENE_FILTER, sort: filter.sort, hideOwned: filter.hideOwned };
+}
+
+/* ---------------------------------------------------------------------------
+ * The language pill.
+ *
+ * A short list rather than TMDB's several hundred: the pill is a filter, not a
+ * catalogue, and every code here is one the provider has a meaningful amount of
+ * in. The labels come from the runtime, so they arrive in the reader's own
+ * language.
+ * ------------------------------------------------------------------------ */
+
+export const FILTER_LANGUAGES = [
+  'en', 'es', 'fr', 'de', 'it', 'pt', 'nl', 'sv', 'da', 'no', 'pl', 'ru',
+  'ja', 'ko', 'zh', 'hi', 'ar', 'tr', 'th',
+] as const;
+
+export function languageOptions(): { code: string; label: string }[] {
+  return FILTER_LANGUAGES.map((code) => ({ code, label: languageName(code) })).sort((a, b) =>
+    a.label.localeCompare(b.label),
+  );
+}
+
+/**
+ * "24,861 movies match" — the line under the scope row. The verb agrees with
+ * the noun, so the singular reads "1 scene matches" rather than the
+ * ungrammatical "1 scene match".
+ */
+export function matchCountLine(total: number, noun: string): string {
+  if (!Number.isFinite(total) || total <= 0) return '';
+  const one = total === 1;
+  return `${total.toLocaleString()} ${noun}${one ? '' : 's'} match${one ? 'es' : ''}`;
+}
+
+/** The placeholder in the scene year box — this year, so the shape is obvious. */
+export function sceneYearNow(): number {
+  return new Date().getFullYear();
+}
+
+/** A scene card's duration badge — "41:12". Null when the provider has none. */
+export function durationBadge(seconds: number): string | null {
+  if (!Number.isFinite(seconds) || seconds <= 0) return null;
+  const whole = Math.trunc(seconds);
+  const hours = Math.trunc(whole / 3600);
+  const minutes = Math.trunc((whole % 3600) / 60);
+  const rest = whole % 60;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return hours > 0 ? `${hours}:${pad(minutes)}:${pad(rest)}` : `${minutes}:${pad(rest)}`;
+}
