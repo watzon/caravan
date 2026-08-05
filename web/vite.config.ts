@@ -22,5 +22,13 @@ export default defineConfig(({ mode }) => ({
   test: {
     environment: 'jsdom',
     include: ['src/**/*.test.ts'],
+    // jsdom reports this known test-environment gap on stderr; the router
+    // behavior is covered by the tests and the exact line is not actionable.
+    onConsoleLog(log, type) {
+      if (type === 'stderr' && log.includes("Not implemented: Window's scrollTo() method")) {
+        return false;
+      }
+      return true;
+    },
   },
 }));

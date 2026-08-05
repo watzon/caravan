@@ -40,6 +40,14 @@ jobs:
 
       - name: build
         run: go build ./...
+      - name: vulnerability scan
+        run: |
+          GOBIN="${RUNNER_TEMP}/bin" go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
+          echo "${RUNNER_TEMP}/bin" >> "$GITHUB_PATH"
+          govulncheck ./...
+
+      - name: embedded binary smoke
+        run: go test -count=1 -run '^TestBinaryServesEmbeddedSPA$' ./cmd/caravan
 
   web:
     name: Web
@@ -62,7 +70,21 @@ jobs:
         run: npm run check
 
       - name: test
-        run: npm test
+        run: |
+          stderr_file="${RUNNER_TEMP}/caravan-web-test-stderr"
+          set +e
+          npm test 2>"$stderr_file"
+          status=$?
+          set -e
+          if [ "$status" -ne 0 ]; then
+            cat "$stderr_file"
+            exit "$status"
+          fi
+          if [ -s "$stderr_file" ]; then
+            echo "Unexpected stderr from frontend tests:"
+            cat "$stderr_file"
+            exit 1
+          fi
 
       - name: build
         run: npm run build
@@ -104,6 +126,19 @@ jobs:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
         run: go build ./...
+
+  race:
+    name: Focused race coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: race test
+        run: go test -race -short -count=1 ./internal/api ./internal/automation ./internal/download ./internal/store ./cmd/caravan
 
   docker:
     name: Docker image
