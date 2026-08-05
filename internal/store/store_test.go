@@ -3,8 +3,11 @@ package store
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"syscall"
 	"testing"
 	"time"
 
@@ -67,6 +70,98 @@ func TestOpenEnablesWALAndForeignKeys(t *testing.T) {
 	}
 	if fk != 1 {
 		t.Errorf("foreign_keys = %d, want 1", fk)
+	}
+}
+
+func TestNewSQLiteFilesArePrivate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX file modes are not Windows ACL semantics")
+	}
+
+	oldUmask := syscall.Umask(0)
+	defer syscall.Umask(oldUmask)
+
+	path := filepath.Join(t.TempDir(), "caravan.db")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open(%q): %v", path, err)
+	}
+	defer st.Close()
+
+	if err := st.SetSetting(context.Background(), "permission-test", "value"); err != nil {
+		t.Fatalf("SetSetting: %v", err)
+	}
+	assertSQLiteFilesPrivate(t, path)
+}
+
+func TestExistingSQLiteFilesAreHardened(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "caravan.db")
+	first, err := Open(path)
+	if err != nil {
+		t.Fatalf("first Open(%q): %v", path, err)
+	}
+	if err := first.SetSetting(context.Background(), "permission-test", "value"); err != nil {
+		first.Close()
+		t.Fatalf("SetSetting: %v", err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatalf("first Close: %v", err)
+	}
+
+	artifacts := sqliteFiles(t, path)
+	for _, artifact := range artifacts {
+		if runtime.GOOS == "windows" {
+			continue
+		}
+		if err := os.Chmod(artifact, 0o644); err != nil {
+			t.Fatalf("Chmod(%q): %v", artifact, err)
+		}
+	}
+
+	second, err := Open(path)
+	if err != nil {
+		t.Fatalf("reopen %q: %v", path, err)
+	}
+	defer second.Close()
+
+	got, err := second.GetSetting(context.Background(), "permission-test")
+	if err != nil {
+		t.Fatalf("GetSetting after reopen: %v", err)
+	}
+	if got != "value" {
+		t.Errorf("setting after reopen = %q, want %q", got, "value")
+	}
+	assertSQLiteFilesPrivate(t, path)
+}
+
+func sqliteFiles(t *testing.T, path string) []string {
+	t.Helper()
+	files := []string{path}
+	for _, suffix := range []string{"-wal", "-shm"} {
+		sidecar := path + suffix
+		if _, err := os.Stat(sidecar); err == nil {
+			files = append(files, sidecar)
+		} else if !os.IsNotExist(err) {
+			t.Fatalf("Stat(%q): %v", sidecar, err)
+		}
+	}
+	return files
+}
+
+func assertSQLiteFilesPrivate(t *testing.T, path string) {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Log("skipping POSIX mode assertions on Windows")
+		return
+	}
+	for _, artifact := range sqliteFiles(t, path) {
+		info, err := os.Stat(artifact)
+		if err != nil {
+			t.Fatalf("Stat(%q): %v", artifact, err)
+		}
+		if got := info.Mode().Perm(); got != 0o600 {
+			t.Errorf("%s mode = %04o, want 0600", artifact, got)
+		}
 	}
 }
 
