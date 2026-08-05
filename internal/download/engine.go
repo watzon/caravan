@@ -156,6 +156,11 @@ type Embedded struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	done   chan struct{}
+	// watchers counts the watchInfo goroutines. Close waits on it: a watcher
+	// past its select still writes the metainfo sidecar, and a Close that
+	// returns while files are still landing is a lie — the caller may be about
+	// to remove the directory.
+	watchers sync.WaitGroup
 
 	mu     sync.Mutex
 	items  map[core.DownloadID]*item
@@ -406,6 +411,7 @@ func (e *Embedded) add(ctx context.Context, spec *torrent.TorrentSpec, rec core.
 	e.mu.Unlock()
 
 	if !existing {
+		e.watchers.Add(1)
 		go e.watchInfo(id, t)
 	}
 	if err := e.save(ctx, snapshot); err != nil {
@@ -428,6 +434,7 @@ func (e *Embedded) add(ctx context.Context, spec *torrent.TorrentSpec, rec core.
 // info dict until a peer sends one, so everything that needs the file list has
 // to wait here.
 func (e *Embedded) watchInfo(id core.DownloadID, t *torrent.Torrent) {
+	defer e.watchers.Done()
 	select {
 	case <-t.GotInfo():
 	case <-t.Closed():
@@ -892,6 +899,10 @@ func (e *Embedded) Close() error {
 
 	e.cancel()
 	<-e.done
+	// The metadata watchers too: one past its select is still writing the
+	// metainfo sidecar, and returning while it does hands the caller a
+	// directory that is still changing.
+	e.watchers.Wait()
 
 	// A final flush, with a fresh context: e.ctx is cancelled by now, and the
 	// last state change is exactly the one worth keeping.
