@@ -69,7 +69,12 @@ func (e *Engine) Add(ctx context.Context, r core.Release, opts core.AddOpts) (co
 	// The release title is sent as the job name so SABnzbd's queue, its
 	// directory names and Caravan's grab all say the same thing — an indexer's
 	// download link is usually named after a numeric id.
-	id, err := e.c.AddURL(ctx, AddRequest{URL: link, Name: r.Title, Category: e.cfg.Category})
+	id, err := e.c.AddURL(ctx, AddRequest{
+		URL: link, Name: r.Title, Category: e.cfg.Category,
+		// Over the concurrency cap: SABnzbd holds the job at paused priority
+		// and fetches nothing until Caravan resumes it.
+		Paused: opts.Paused,
+	})
 	if err != nil {
 		return "", err
 	}

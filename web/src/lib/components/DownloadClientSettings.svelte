@@ -24,7 +24,8 @@
     DEFAULT_DOWNLOAD_CLIENT_PRIORITY,
     FALLBACK_DOWNLOAD_CLIENT_TYPES,
     describeType,
-    parsePriority,
+    parseCount,
+  parsePriority,
     validateDownloadClient,
   } from '../downloadClient';
   import { pushToast } from '../state/toast.svelte';
@@ -68,6 +69,7 @@
   let apiKey = $state('');
   let category = $state('');
   let priority = $state(String(DEFAULT_DOWNLOAD_CLIENT_PRIORITY));
+  let maxConcurrent = $state('0');
   let enabled = $state(true);
 
   /**
@@ -111,6 +113,7 @@
     apiKey = '';
     category = '';
     priority = String(DEFAULT_DOWNLOAD_CLIENT_PRIORITY);
+    maxConcurrent = '0';
     enabled = true;
     storedPassword = false;
     storedAPIKey = false;
@@ -129,6 +132,7 @@
     apiKey = '';
     category = client.category;
     priority = String(client.priority);
+    maxConcurrent = String(client.max_concurrent ?? 0);
     enabled = client.enabled;
     storedPassword = client.has_password;
     storedAPIKey = client.has_api_key;
@@ -152,6 +156,7 @@
       username: typeInfo.uses_login ? username.trim() : '',
       category: category.trim(),
       priority: parsePriority(priority),
+      max_concurrent: parseCount(maxConcurrent),
       enabled,
     };
     if (typeInfo.uses_login && password !== '') body.password = password;
@@ -439,6 +444,13 @@
         for="client-priority"
         help="Lowest wins when more than one enabled client can take a release.">
         <TextInput id="client-priority" bind:value={priority} mono placeholder="25" />
+      </Field>
+
+      <Field
+        label="Max concurrent downloads"
+        for="client-max-concurrent"
+        help="How many downloads Caravan runs here at once. 0 is unlimited — the client's own limits still apply. Anything over it is handed over paused and started when a slot frees.">
+        <TextInput id="client-max-concurrent" bind:value={maxConcurrent} mono placeholder="0" />
       </Field>
 
       <Toggle checked={enabled} label="Enabled" onchange={(next) => (enabled = next)} />

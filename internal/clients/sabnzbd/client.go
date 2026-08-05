@@ -211,7 +211,15 @@ type AddRequest struct {
 	// Category is the SABnzbd category to file the job under, empty for the
 	// client's own default.
 	Category string
+	// Paused files the job at SABnzbd's paused priority, so it sits in the
+	// queue without being fetched until something resumes it.
+	Paused bool
 }
+
+// priorityPaused is SABnzbd's own value for "in the queue, not running". It is
+// a priority rather than a flag because that is how SABnzbd models it: -2 is
+// PAUSED, below LOW and above DUPLICATE.
+const priorityPaused = "-2"
 
 // AddURL hands SABnzbd an NZB link and returns the nzo_id it filed it under.
 //
@@ -226,6 +234,9 @@ func (c *Client) AddURL(ctx context.Context, req AddRequest) (string, error) {
 	}
 	if req.Category != "" {
 		params.Set("cat", req.Category)
+	}
+	if req.Paused {
+		params.Set("priority", priorityPaused)
 	}
 	body, err := c.call(ctx, params)
 	if err != nil {

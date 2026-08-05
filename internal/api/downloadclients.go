@@ -36,21 +36,25 @@ type downloadClientJSON struct {
 	HasAPIKey   bool   `json:"has_api_key"`
 	Category    string `json:"category"`
 	Priority    int    `json:"priority"`
-	Enabled     bool   `json:"enabled"`
+	// MaxConcurrent caps how many downloads Caravan runs at this client at
+	// once. Zero is unlimited.
+	MaxConcurrent int  `json:"max_concurrent"`
+	Enabled       bool `json:"enabled"`
 }
 
 func downloadClientDTO(c core.DownloadClientConfig) downloadClientJSON {
 	return downloadClientJSON{
-		ID:          c.ID,
-		Type:        c.Type,
-		Name:        c.Name,
-		URL:         c.URL,
-		Username:    c.Username,
-		HasPassword: c.Password != "",
-		HasAPIKey:   c.APIKey != "",
-		Category:    c.Category,
-		Priority:    c.Priority,
-		Enabled:     c.Enabled,
+		ID:            c.ID,
+		Type:          c.Type,
+		Name:          c.Name,
+		URL:           c.URL,
+		Username:      c.Username,
+		HasPassword:   c.Password != "",
+		HasAPIKey:     c.APIKey != "",
+		Category:      c.Category,
+		Priority:      c.Priority,
+		MaxConcurrent: c.MaxConcurrent,
+		Enabled:       c.Enabled,
 	}
 }
 
@@ -70,16 +74,17 @@ type downloadClientRequest struct {
 	// ID is read only by POST /download-clients/test, where it names the
 	// stored row a blank credential falls back to. It is ignored elsewhere:
 	// the path segment is the identity for PUT.
-	ID       int64   `json:"id"`
-	Type     string  `json:"type"`
-	Name     string  `json:"name"`
-	URL      string  `json:"url"`
-	Username string  `json:"username"`
-	Password *string `json:"password"`
-	APIKey   *string `json:"api_key"`
-	Category string  `json:"category"`
-	Priority *int    `json:"priority"`
-	Enabled  *bool   `json:"enabled"`
+	ID            int64   `json:"id"`
+	Type          string  `json:"type"`
+	Name          string  `json:"name"`
+	URL           string  `json:"url"`
+	Username      string  `json:"username"`
+	Password      *string `json:"password"`
+	APIKey        *string `json:"api_key"`
+	Category      string  `json:"category"`
+	Priority      *int    `json:"priority"`
+	MaxConcurrent *int    `json:"max_concurrent"`
+	Enabled       *bool   `json:"enabled"`
 }
 
 // defaultDownloadClientPriority matches the column default, so a client added
@@ -107,6 +112,12 @@ func (b downloadClientRequest) config(stored *core.DownloadClientConfig) (core.D
 	}
 	if b.Priority != nil {
 		cfg.Priority = *b.Priority
+	}
+	if b.MaxConcurrent != nil {
+		if *b.MaxConcurrent < 0 {
+			return core.DownloadClientConfig{}, "max_concurrent must not be negative"
+		}
+		cfg.MaxConcurrent = *b.MaxConcurrent
 	}
 	if b.Enabled != nil {
 		cfg.Enabled = *b.Enabled

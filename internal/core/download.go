@@ -108,6 +108,16 @@ type AddOpts struct {
 	// EpisodeIDs are the episodes.id values the grab is expected to satisfy.
 	// A season pack lists all of them.
 	EpisodeIDs []int64
+	// Paused adds the download without starting it.
+	//
+	// It is how a concurrency cap reaches an external download client. Caravan
+	// cannot hold an NZB back and hand it over later without inventing a second
+	// identity for a download that has no client-side id yet, so it hands the
+	// release over immediately and tells the client not to start: the client
+	// does no work, transfers nothing, and Caravan unpauses it when a slot
+	// frees. The built-in engines have their own way of holding a download and
+	// ignore this.
+	Paused bool
 }
 
 // Engine is a download backend (SPEC §5.1). The embedded torrent engine is the

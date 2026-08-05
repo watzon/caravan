@@ -49,12 +49,17 @@ var writableSettings = map[string]bool{
 	store.SettingEngineMaxUpKBps:        true,
 	store.SettingEngineSeedRatio:        true,
 	store.SettingEngineSeedDays:         true,
-	store.SettingRouteTorrent:           true,
-	store.SettingRouteUsenet:            true,
-	store.SettingTVProfile:              true,
-	store.SettingDLNAEnabled:            true,
-	store.SettingDLNAFriendlyName:       true,
-	SettingMode:                         true,
+
+	store.SettingMaxConcurrentDownloads:       true,
+	store.SettingEmbeddedTorrentMaxConcurrent: true,
+	store.SettingEmbeddedUsenetMaxConcurrent:  true,
+
+	store.SettingRouteTorrent:     true,
+	store.SettingRouteUsenet:      true,
+	store.SettingTVProfile:        true,
+	store.SettingDLNAEnabled:      true,
+	store.SettingDLNAFriendlyName: true,
+	SettingMode:                   true,
 }
 
 // trimmedSettings are written with their surrounding whitespace removed.
@@ -575,7 +580,12 @@ func validateEngineSettings(settings map[string]string) error {
 			if err != nil || port < 0 || port > 65535 {
 				return fmt.Errorf("invalid %s", key)
 			}
-		case store.SettingEngineMaxConnections, store.SettingEngineSeedDays:
+		case store.SettingEngineMaxConnections, store.SettingEngineSeedDays,
+			store.SettingMaxConcurrentDownloads,
+			store.SettingEmbeddedTorrentMaxConcurrent,
+			store.SettingEmbeddedUsenetMaxConcurrent:
+			// Every cap is a count, and zero is unlimited. A negative one would
+			// be a ceiling nothing could ever be under.
 			n, err := strconv.Atoi(strings.TrimSpace(value))
 			if err != nil || n < 0 {
 				return fmt.Errorf("invalid %s", key)

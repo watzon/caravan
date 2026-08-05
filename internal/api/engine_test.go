@@ -10,6 +10,7 @@ import (
 
 	"github.com/watzon/caravan/internal/core"
 	"github.com/watzon/caravan/internal/download"
+	"github.com/watzon/caravan/internal/store"
 )
 
 type insightEngine struct {
@@ -267,6 +268,61 @@ func TestDownloadInsightEngineErrorIsNotNotFound(t *testing.T) {
 	rec := do(t, h, http.MethodGet, "/api/v1/downloads/hash/insight", "")
 	wantStatus(t, rec, http.StatusBadGateway)
 	wantErrorBody(t, rec)
+}
+
+// The concurrency caps round-trip like any other setting, and every one of
+// them is a count: negative or non-numeric is a ceiling nothing could be under.
+func TestPutSettingsConcurrencyCaps(t *testing.T) {
+	t.Run("round-trips every cap", func(t *testing.T) {
+		h, st, _ := newTestServer(t)
+		rec := do(t, h, http.MethodPut, "/api/v1/settings",
+			`{"max_concurrent_downloads":"3","embedded_torrent_max_concurrent":"2","embedded_usenet_max_concurrent":"1"}`)
+		wantStatus(t, rec, http.StatusOK)
+
+		settings, err := st.AllSettings(context.Background())
+		if err != nil {
+			t.Fatalf("AllSettings: %v", err)
+		}
+		for key, want := range map[string]string{
+			store.SettingMaxConcurrentDownloads:       "3",
+			store.SettingEmbeddedTorrentMaxConcurrent: "2",
+			store.SettingEmbeddedUsenetMaxConcurrent:  "1",
+		} {
+			if settings[key] != want {
+				t.Errorf("%s = %q, want %q", key, settings[key], want)
+			}
+		}
+	})
+
+	// Zero is unlimited and has to stay writable: it is how a user turns a cap
+	// back off without the setting disappearing.
+	t.Run("accepts zero", func(t *testing.T) {
+		h, _, _ := newTestServer(t)
+		rec := do(t, h, http.MethodPut, "/api/v1/settings", `{"max_concurrent_downloads":"0"}`)
+		wantStatus(t, rec, http.StatusOK)
+	})
+
+	t.Run("rejects a cap that is not a count", func(t *testing.T) {
+		for _, body := range []string{
+			`{"max_concurrent_downloads":"-1"}`,
+			`{"max_concurrent_downloads":"lots"}`,
+			`{"embedded_torrent_max_concurrent":"-2"}`,
+			`{"embedded_usenet_max_concurrent":"2.5"}`,
+		} {
+			h, st, _ := newTestServer(t)
+			rec := do(t, h, http.MethodPut, "/api/v1/settings", body)
+			wantStatus(t, rec, http.StatusBadRequest)
+			wantErrorBody(t, rec)
+
+			settings, err := st.AllSettings(context.Background())
+			if err != nil {
+				t.Fatalf("AllSettings: %v", err)
+			}
+			if len(settings) != 0 {
+				t.Fatalf("%s wrote %v, want nothing", body, settings)
+			}
+		}
+	})
 }
 
 func TestPutSettingsAppliesEngineSettings(t *testing.T) {

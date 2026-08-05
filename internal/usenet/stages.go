@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -31,6 +32,13 @@ import (
 // after Pause work rather than silently do nothing.
 func (e *Engine) start(it *item) {
 	if !e.shouldRunLocked(it) || it.cancel != nil {
+		return
+	}
+	// The concurrency cap is the last gate before a worker exists. A download
+	// that cannot have a slot simply has no worker, which is already what this
+	// engine reports as "queued" — see statusLocked — so being over the cap
+	// needs no state of its own.
+	if !e.admitLocked(it) {
 		return
 	}
 	ctx, cancel := context.WithCancel(e.ctx)
@@ -63,6 +71,10 @@ func (e *Engine) run(ctx context.Context, it *item, cancel context.CancelFunc, s
 	e.mu.Lock()
 	it.cancel, it.stopped = nil, nil
 	it.downRate = 0
+	// The worker is over, whatever happened to it: completed, failed, or
+	// cancelled by a pause. The slot goes back to the queue behind it, and the
+	// e.start below re-asks for one if this download still wants to run.
+	e.release(it)
 	// Whatever the tracker last saw is the download's byte count from here on:
 	// the stage that owned it is over, and Status must not read a tracker
 	// nobody is updating.
@@ -99,6 +111,59 @@ func (e *Engine) run(ctx context.Context, it *item, cancel context.CancelFunc, s
 	// paths, and the final state is exactly the one worth keeping.
 	if err := e.save(context.WithoutCancel(ctx), snapshot); err != nil {
 		e.logger.Warn("persisting download", "download", snapshot.EngineID, "err", err)
+	}
+}
+
+// admitLocked asks the coordinator for a slot and records the answer. It must
+// be called with e.mu held.
+//
+// No coordinator means no caps, which is what every Caravan did before this
+// existed: nothing is asked and nothing waits.
+func (e *Engine) admitLocked(it *item) bool {
+	if e.opts.Admitter == nil || e.opts.Admitter.Request(EngineName, it.rec.EngineID) {
+		it.admitted = true
+		return true
+	}
+	it.admitted = false
+	return false
+}
+
+// release gives back the slot a download was holding, if any.
+func (e *Engine) release(it *item) {
+	if !it.admitted {
+		return
+	}
+	it.admitted = false
+	if e.opts.Admitter != nil {
+		e.opts.Admitter.Release(it.rec.EngineID)
+	}
+}
+
+// wake re-asks for every download this engine is holding back, oldest first.
+//
+// The coordinator calls it when a slot frees anywhere, the other engine
+// included — that is the whole point of a ceiling that spans both. FIFO by
+// creation time, so the queue is a line rather than a lottery.
+func (e *Engine) wake() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return
+	}
+	waiting := make([]*item, 0, len(e.items))
+	for _, it := range e.items {
+		if !it.admitted && it.cancel == nil && e.shouldRunLocked(it) {
+			waiting = append(waiting, it)
+		}
+	}
+	sort.Slice(waiting, func(i, j int) bool {
+		if a, b := waiting[i].rec.CreatedAt, waiting[j].rec.CreatedAt; !a.Equal(b) {
+			return a.Before(b)
+		}
+		return waiting[i].rec.EngineID < waiting[j].rec.EngineID
+	})
+	for _, it := range waiting {
+		e.start(it)
 	}
 }
 

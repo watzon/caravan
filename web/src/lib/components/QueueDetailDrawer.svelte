@@ -244,6 +244,17 @@
           </dl>
         {/if}
 
+        <!-- Why nothing is moving. A queued download whose size is already
+             known is waiting on the concurrency cap rather than on a magnet's
+             metadata, and saying so is the difference between "my queue works"
+             and "my queue is stuck". -->
+        {#if download.state === 'queued' && (usenet || download.size > 0)}
+          <p class="rounded-sm border border-border bg-raised px-3 py-2 text-sm text-ink-secondary">
+            Waiting for a free download slot. Raise the limit under Settings →
+            Downloads → Concurrency, or pause something that is running.
+          </p>
+        {/if}
+
         <!-- Which stage the engine is in, when it is one the state badge cannot
              express. par2 reports no live progress, so repair is described by
              what it is working on rather than by a percentage nothing

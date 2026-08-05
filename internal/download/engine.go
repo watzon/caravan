@@ -29,6 +29,14 @@ import (
 	"github.com/watzon/caravan/internal/core"
 )
 
+// admissionRegistrar is the half of the concurrency coordinator an engine needs
+// beyond core.Admitter: a way to be told that a slot has freed somewhere, so it
+// can re-ask for the downloads it is holding back. It is an interface rather
+// than the concrete *Admission so the engine keeps depending on behaviour.
+type admissionRegistrar interface {
+	Register(method string, wake func())
+}
+
 // ErrNotFound is returned for a download id the engine does not know. It is a
 // sentinel so the API layer can map it to a 404 rather than a 500.
 var ErrNotFound = errors.New("download: download not found")
@@ -117,6 +125,10 @@ type EmbeddedOpts struct {
 	// background failures, which have no caller to return an error to. Nil
 	// discards both rather than writing to stderr behind the caller's back.
 	Logger *slog.Logger
+	// Admitter decides whether a download may transfer, so a global ceiling
+	// across every engine can exist. Nil is unlimited and is the path that
+	// predates concurrency caps: no call is made and nothing is held back.
+	Admitter core.Admitter
 }
 
 // Embedded is the built-in BitTorrent engine.
@@ -160,6 +172,14 @@ type item struct {
 	// pausing is "stop the transfer", and only the engine knows it was asked
 	// for rather than merely happening.
 	paused bool
+	// admitted is whether the concurrency coordinator has given this download
+	// a slot. It is deliberately separate from paused: both stop the transfer,
+	// but one was asked for by the user and reads as "paused", and the other is
+	// the queue doing its job and reads as "queued".
+	admitted bool
+	// stopped mirrors what was actually done to the torrent, so the two reasons
+	// above can be set independently without double-applying to anacrolix.
+	stopped bool
 	// maxConns is the connection limit to restore on resume.
 	maxConns int
 	// failure is the last write error. anacrolix reports a failed chunk write
@@ -263,6 +283,13 @@ func NewEmbedded(dataDir string, opts EmbeddedOpts) (*Embedded, error) {
 		items:          make(map[core.DownloadID]*item),
 	}
 
+	// The coordinator has to be able to reach back when a slot frees anywhere,
+	// including in another engine. A nil Admitter fails the assertion, which is
+	// the uncapped path.
+	if reg, ok := opts.Admitter.(admissionRegistrar); ok {
+		reg.Register(EngineName, e.wake)
+	}
+
 	if err := e.restore(ctx); err != nil {
 		cancel()
 		client.Close()
@@ -288,6 +315,15 @@ func (e *Embedded) restore(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("download: load downloads: %w", err)
 	}
+	// Oldest first, so a restart hands out the slots the caps allow in the same
+	// order the queue would have: the row order the store returns is not the
+	// order these were grabbed in.
+	sort.Slice(recs, func(i, j int) bool {
+		if a, b := recs[i].CreatedAt, recs[j].CreatedAt; !a.Equal(b) {
+			return a.Before(b)
+		}
+		return recs[i].EngineID < recs[j].EngineID
+	})
 	for _, rec := range recs {
 		if rec.Engine != "" && rec.Engine != EngineName {
 			continue
@@ -361,8 +397,10 @@ func (e *Embedded) add(ctx context.Context, spec *torrent.TorrentSpec, rec core.
 	}
 	if paused {
 		pauseItem(it)
+		e.release(it)
 	} else {
-		resumeItem(it)
+		it.paused = false
+		e.admitLocked(it)
 	}
 	snapshot := e.refreshLocked(it)
 	e.mu.Unlock()
@@ -610,14 +648,71 @@ func (e *Embedded) setPaused(ctx context.Context, id core.DownloadID, paused boo
 		return fmt.Errorf("download: %s %q: %w", verb, id, ErrNotFound)
 	}
 	if paused {
+		// A paused download does not hold a slot. That is the whole reason
+		// pausing one thing starts the next: the queue is about what is
+		// transferring, and a paused download is not.
 		pauseItem(it)
+		e.release(it)
 	} else {
+		// Resuming re-enters the queue rather than jumping it. A resume into a
+		// full queue is queued, not running.
 		resumeItem(it)
+		e.admitLocked(it)
 	}
 	snapshot := e.refreshLocked(it)
 	e.mu.Unlock()
 
 	return e.save(ctx, snapshot)
+}
+
+// admitLocked asks the coordinator for a slot and applies the answer. It must
+// be called with e.mu held.
+//
+// No coordinator means no caps, which is the configuration every Caravan had
+// before this existed: nothing is asked and nothing is held back.
+func (e *Embedded) admitLocked(it *item) {
+	if e.opts.Admitter == nil || e.opts.Admitter.Request(EngineName, it.rec.EngineID) {
+		admitItem(it)
+		return
+	}
+	holdItem(it)
+}
+
+// release gives back the slot a download was holding, if any. It is safe to
+// call for a download that never had one.
+func (e *Embedded) release(it *item) {
+	it.admitted = false
+	if e.opts.Admitter != nil {
+		e.opts.Admitter.Release(it.rec.EngineID)
+	}
+}
+
+// wake re-asks for every download this engine is holding back, oldest first.
+//
+// It is what the coordinator calls when a slot frees anywhere — including in
+// the other engine, which is the whole point of a global ceiling. FIFO by the
+// download's creation time, so the queue is a line rather than a lottery.
+func (e *Embedded) wake() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.closed {
+		return
+	}
+	waiting := make([]*item, 0, len(e.items))
+	for _, it := range e.items {
+		if !it.admitted && !it.paused && it.failure == "" && !it.t.Complete().Bool() {
+			waiting = append(waiting, it)
+		}
+	}
+	sort.Slice(waiting, func(i, j int) bool {
+		if a, b := waiting[i].rec.CreatedAt, waiting[j].rec.CreatedAt; !a.Equal(b) {
+			return a.Before(b)
+		}
+		return waiting[i].rec.EngineID < waiting[j].rec.EngineID
+	})
+	for _, it := range waiting {
+		e.admitLocked(it)
+	}
 }
 
 // pauseItem stops a download without unregistering it.
@@ -631,33 +726,70 @@ func (e *Embedded) setPaused(ctx context.Context, id core.DownloadID, paused boo
 // connection cap is remembered so resume restores the configured value rather
 // than a hardcoded one.
 func pauseItem(it *item) {
-	if it.paused {
-		return
-	}
 	it.paused = true
-	it.maxConns = it.t.SetMaxEstablishedConns(0)
-	it.t.DisallowDataDownload()
-	it.t.DisallowDataUpload()
-	// Rates are a delta between samples; a paused download's rate is zero now,
-	// not two seconds from now.
-	it.downRate, it.upRate = 0, 0
+	applyTransfer(it)
 }
 
-// resumeItem undoes pauseItem, and makes sure the transfer is actually wanted:
-// a torrent whose metadata arrived while it was paused was never told to
-// download anything.
-func resumeItem(it *item) {
-	if it.paused {
-		it.paused = false
-		if it.maxConns > 0 {
-			it.t.SetMaxEstablishedConns(it.maxConns)
+// holdItem and releaseItem are the concurrency coordinator's half of the same
+// switch: a download with no slot must not transfer, but it was not paused by
+// anyone and must not read as though it were.
+func holdItem(it *item) {
+	it.admitted = false
+	applyTransfer(it)
+}
+
+func admitItem(it *item) {
+	it.admitted = true
+	applyTransfer(it)
+}
+
+// applyTransfer makes the torrent match the two reasons it might be stopped.
+//
+// The mechanism is deliberate. Dropping the torrent (Torrent.Drop) would also
+// stop the transfer, but it forgets the torrent: the queue entry disappears
+// from the client, the metadata a magnet spent time fetching is lost, and
+// resuming re-hashes every piece on disk. Capping connections at zero and
+// disallowing data instead leaves the torrent registered and verified, so
+// stopping and starting is instant and Status keeps answering for it. The old
+// connection cap is remembered so starting restores the configured value rather
+// than a hardcoded one.
+func applyTransfer(it *item) {
+	want := !it.paused && it.admitted
+	if want == !it.stopped {
+		// Already in the right state, but a torrent whose metadata arrived
+		// while it was stopped was never told to download anything.
+		if want && it.t.Info() != nil {
+			it.t.DownloadAll()
 		}
-		it.t.AllowDataDownload()
-		it.t.AllowDataUpload()
+		return
 	}
+	if !want {
+		it.stopped = true
+		it.maxConns = it.t.SetMaxEstablishedConns(0)
+		it.t.DisallowDataDownload()
+		it.t.DisallowDataUpload()
+		// Rates are a delta between samples; a stopped download's rate is zero
+		// now, not two seconds from now.
+		it.downRate, it.upRate = 0, 0
+		return
+	}
+	it.stopped = false
+	if it.maxConns > 0 {
+		it.t.SetMaxEstablishedConns(it.maxConns)
+	}
+	it.t.AllowDataDownload()
+	it.t.AllowDataUpload()
 	if it.t.Info() != nil {
 		it.t.DownloadAll()
 	}
+}
+
+// resumeItem undoes pauseItem. It does not decide admission: the caller asks
+// the coordinator, because resuming into a full queue means queued, not
+// running.
+func resumeItem(it *item) {
+	it.paused = false
+	applyTransfer(it)
 }
 
 // Remove drops the download, and its data when deleteData is set. It never
@@ -693,6 +825,8 @@ func (e *Embedded) drop(id core.DownloadID, deleteData bool) error {
 		return nil
 	}
 	delete(e.items, id)
+	// Whatever it was holding goes back to the queue behind it.
+	e.release(it)
 	// The data name comes from the info dict, never from a display name: a
 	// display name is attacker-supplied text from a magnet link, and the info
 	// dict is what the storage layer actually wrote under. No info means
@@ -813,6 +947,12 @@ func (e *Embedded) sample() []core.Download {
 		before := it.rec
 		after := e.refreshLocked(it)
 		if after.State == core.DownloadSeeding {
+			// Slots are about the downloading phase. A torrent that has
+			// finished and is only uploading is not competing for bandwidth
+			// with the queue behind it, so it gives its slot back.
+			if it.admitted {
+				e.release(it)
+			}
 			if it.seedingStarted.IsZero() {
 				it.seedingStarted = now
 			}
@@ -842,7 +982,7 @@ func (it *item) sample(now time.Time) {
 		it.upRate = int64(float64(written-it.lastWritten) / elapsed)
 	}
 	it.sampledAt, it.lastRead, it.lastWritten = now, read, written
-	if it.paused {
+	if it.stopped {
 		it.downRate, it.upRate = 0, 0
 	}
 }
@@ -881,6 +1021,8 @@ func (e *Embedded) fail(id core.DownloadID, cause error) {
 	}
 	it.failure = cause.Error()
 	pauseItem(it)
+	// A dead download holds nothing: its slot goes to the queue behind it.
+	e.release(it)
 	snapshot := e.refreshLocked(it)
 	e.mu.Unlock()
 
@@ -955,6 +1097,11 @@ func (e *Embedded) statusLocked(it *item) core.DownloadStatus {
 		// honest state.
 		st.State = core.DownloadSeeding
 		st.ETASeconds = 0
+	case !it.admitted:
+		// Over the concurrency cap: registered, waiting its turn, and not
+		// transferring a byte. "Queued" is exactly what that is, and it is a
+		// state the queue already renders — the user sees a line, not a stall.
+		st.State = core.DownloadQueued
 	case info == nil:
 		// No metadata yet: nothing can be requested, so nothing is downloading.
 		st.State = core.DownloadQueued

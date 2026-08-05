@@ -161,6 +161,9 @@ type AddRequest struct {
 	Category string
 	// Tags are the qBittorrent tags to mark the torrent with.
 	Tags []string
+	// Paused adds the torrent stopped, so qBittorrent registers it and
+	// connects to nothing until it is resumed.
+	Paused bool
 }
 
 // Add hands qBittorrent a torrent by URL or magnet link.
@@ -184,6 +187,14 @@ func (c *Client) Add(ctx context.Context, req AddRequest) error {
 	}
 	if len(req.Tags) > 0 {
 		form.Set("tags", strings.Join(req.Tags, ","))
+	}
+	if req.Paused {
+		// "paused" is the long-standing WebAPI spelling. qBittorrent 5 renamed
+		// it to "stopped" and still accepts this one, and both are sent so a
+		// cap is honoured on either version rather than silently ignored on
+		// one of them — an unknown form field is discarded, not an error.
+		form.Set("paused", "true")
+		form.Set("stopped", "true")
 	}
 	body, err := c.post(ctx, "/torrents/add", form)
 	if err != nil {

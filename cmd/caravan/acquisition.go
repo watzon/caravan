@@ -120,6 +120,14 @@ type engineProvider struct {
 	// shared by every router the provider hands out — the routers themselves
 	// are rebuilt per operation and cannot remember anything.
 	health *download.Health
+	// seedOnce guards the one-time rebuild of what the external clients are
+	// holding paused for us, which only the persisted rows can answer.
+	seedOnce sync.Once
+	// admission rations download slots across every engine. Like health it is
+	// provider-owned and shared: a ceiling that spans the torrent engine and
+	// the Usenet engine cannot live inside either of them, and the routers are
+	// rebuilt per operation so it cannot live there either.
+	admission *download.Admission
 
 	mu     sync.Mutex
 	engine *download.Embedded
@@ -156,6 +164,7 @@ func newEngineProvider(adapter *libraryAdapter, paused bool, log *slog.Logger) *
 		newClientEngine: newDownloadClientEngine,
 		external:        map[int64]*clientEngine{},
 		health:          download.NewHealth(download.DefaultUnhealthyAfter),
+		admission:       download.NewAdmission(download.Caps{}),
 	}
 }
 
@@ -270,6 +279,16 @@ func (p *engineProvider) routesFor(ctx context.Context, kind string) ([]download
 		return nil, err
 	}
 	engines := p.syncClientEngines(configured)
+	// A client's own cap lives on its row, so the ledger is refreshed here
+	// rather than only on a settings save: editing a client has to take effect
+	// on the next queue operation, exactly as its credentials do.
+	if settings, err := p.adapter.st.AllSettings(ctx); err == nil {
+		p.applyCaps(ctx, settings, configured)
+	}
+	for _, pick := range engines {
+		p.registerClientWake(pick)
+	}
+	p.seedWaiting(ctx, configured)
 
 	// The torrent default is the embedded engine unless a torrent client is
 	// picked: a stock Caravan downloads torrents with nothing configured, and
@@ -348,8 +367,16 @@ func (p *engineProvider) clientRoute(pick routedEngine, protocol string) downloa
 		IDPrefix:  clientIDPrefix(pick.id),
 		Unhealthy: p.health.Reason(pick.id),
 		Report:    func(err error) { p.observeClient(pick, err) },
+		// Per row, not per kind: two SABnzbd clients are two machines with two
+		// sets of connections, and one budget between them would cap the wrong
+		// thing. The row id is the same stable identity the handle prefix uses.
+		Method:    clientMethod(pick.id),
+		Admission: p.admission,
 	}
 }
+
+// clientMethod is one external client's key in the concurrency ledger.
+func clientMethod(id int64) string { return "client:" + strconv.FormatInt(id, 10) }
 
 // clientIDPrefix namespaces one external client's download handles by the
 // `download_clients` row that configured it.
@@ -545,6 +572,11 @@ func (p *engineProvider) embedded() core.Engine {
 		return nil
 	}
 	opts.Store = downloadPersistence{st: p.adapter.st}
+	opts.Admitter = p.admission
+	// The caps have to be live before the engine restores its queue, or a
+	// restart would start everything at once for the moment before the first
+	// settings read.
+	p.admission.SetCaps(capsFrom(settings))
 	engine, err := download.NewEmbedded(root, opts)
 	if err != nil {
 		p.reportLocked("start download engine", err)
@@ -588,10 +620,11 @@ func (p *engineProvider) embeddedUsenet() *usenet.Engine {
 		return nil
 	}
 	engine, err := usenet.NewEngine(root, usenet.EngineOpts{
-		Servers: usenet.ServerConfigs(servers),
-		Store:   downloadPersistence{st: p.adapter.st},
-		Paused:  p.paused,
-		Logger:  p.log,
+		Servers:  usenet.ServerConfigs(servers),
+		Store:    downloadPersistence{st: p.adapter.st},
+		Paused:   p.paused,
+		Logger:   p.log,
+		Admitter: p.admission,
 	})
 	if err != nil {
 		p.reportLocked("start usenet engine", err)
@@ -667,6 +700,11 @@ func (p *engineProvider) Close() error {
 // Listen port and connection count are ClientConfig fields, so they apply when
 // the next engine starts rather than disrupting active peer connections.
 func (p *engineProvider) ApplyEngineSettings(ctx context.Context, settings map[string]string) error {
+	// The caps reach the coordinator whether or not an engine has been built:
+	// it is the thing every engine will ask, and a cap saved before the first
+	// grab has to be in force when that grab arrives.
+	p.admission.SetCaps(capsFrom(settings))
+
 	opts, err := engineOptions(settings, p.paused, p.log)
 	if err != nil {
 		return err
@@ -681,6 +719,100 @@ func (p *engineProvider) ApplyEngineSettings(ctx context.Context, settings map[s
 		return err
 	}
 	return engine.SetSeedingTargets(opts.SeedRatio, opts.SeedDays)
+}
+
+// capsFrom reads the concurrency ceilings out of the settings map.
+//
+// Absent or unparseable is zero, which is unlimited: a cap is the one setting
+// where guessing high is safe and guessing low stops downloads, so anything
+// this cannot read means "no ceiling" rather than a number nobody chose. The
+// API validated these on the way in; this is the read side.
+// applyCaps pushes the whole concurrency configuration — the settings keys and
+// every client's own column — into the coordinator, and makes sure each client
+// has a way to be told that one of its slots has freed.
+//
+// It runs on every settings save and every routing rebuild, because a client's
+// cap lives on its row and a row can change without the settings map moving.
+func (p *engineProvider) applyCaps(ctx context.Context, settings map[string]string, clients []core.DownloadClientConfig) {
+	caps := capsFrom(settings)
+	for _, c := range clients {
+		caps.Method[clientMethod(c.ID)] = c.MaxConcurrent
+	}
+	p.admission.SetCaps(caps)
+}
+
+// seedWaiting rebuilds, once per process, the set of downloads an external
+// client is holding paused on Caravan's behalf.
+//
+// It is what makes a restart safe. The client cannot tell Caravan why a
+// download is paused — it has one kind of paused — so without this every
+// download that was waiting for a slot would come back reading as one a person
+// paused, and nothing would ever start it again. The persisted row is the
+// record: Caravan wrote "queued" for exactly these, and the handle carries the
+// prefix that says which client row it belongs to.
+func (p *engineProvider) seedWaiting(ctx context.Context, clients []core.DownloadClientConfig) {
+	p.seedOnce.Do(func() {
+		rows, err := p.adapter.st.ListDownloads(ctx)
+		if err != nil {
+			p.log.Warn("rebuilding the queued-download set", "err", err)
+			return
+		}
+		for _, row := range rows {
+			if row.State != core.DownloadQueued {
+				continue
+			}
+			for _, c := range clients {
+				if strings.HasPrefix(string(row.EngineID), clientIDPrefix(c.ID)) {
+					p.admission.Wait(clientMethod(c.ID), row.EngineID)
+					break
+				}
+			}
+		}
+	})
+}
+
+// registerClientWake teaches the coordinator how to start this client's queue
+// moving again.
+//
+// The built-in engines hold their own waiting downloads and re-ask for
+// themselves. A client cannot: what is waiting is paused inside it, and only
+// Caravan knows that it was Caravan that paused it. So the wake takes as many
+// waiting downloads as the caps now allow and unpauses each one at the client.
+func (p *engineProvider) registerClientWake(pick routedEngine) {
+	method := clientMethod(pick.id)
+	engine := pick.engine
+	p.admission.Register(method, func() {
+		for _, id := range p.admission.TakeWaiting(method, nil) {
+			native := strings.TrimPrefix(string(id), clientIDPrefix(pick.id))
+			if err := engine.Resume(context.Background(), core.DownloadID(native)); err != nil {
+				// The slot was granted and the client would not take it. Give
+				// the slot back and put the download back in line, so the next
+				// freed slot tries again — the one outcome that must not happen
+				// here is a row that reads "queued" forever because the thing
+				// that would have started it gave up silently.
+				p.admission.Release(id)
+				p.admission.Wait(method, id)
+				p.log.Error("starting a queued download at its client",
+					"client", pick.label, "download", id, "err", err)
+				p.recordClientEvent(core.EventLevelWarn,
+					fmt.Sprintf("Could not start a queued download at %s", pick.label),
+					fmt.Sprintf("%s: it stays queued and Caravan will try again when the next download slot frees", err))
+			}
+		}
+	})
+}
+
+func capsFrom(settings map[string]string) download.Caps {
+	global, _ := engineSettingInt(settings, store.SettingMaxConcurrentDownloads)
+	torrent, _ := engineSettingInt(settings, store.SettingEmbeddedTorrentMaxConcurrent)
+	news, _ := engineSettingInt(settings, store.SettingEmbeddedUsenetMaxConcurrent)
+	return download.Caps{
+		Global: global,
+		Method: map[string]int{
+			download.EngineName: torrent,
+			usenet.EngineName:   news,
+		},
+	}
 }
 
 func engineOptions(settings map[string]string, paused bool, log *slog.Logger) (download.EmbeddedOpts, error) {

@@ -38,6 +38,7 @@ const QBIT: DownloadClient = {
   username: 'admin',
   has_password: true,
   has_api_key: false,
+  max_concurrent: 0,
   category: 'caravan',
   priority: 25,
   enabled: true,
@@ -285,5 +286,35 @@ describe('DownloadClientSettings', () => {
     const del = writeCalls().find((c) => c.method === 'DELETE');
     expect(del!.url).toContain('/download-clients/7');
     expect(host.textContent).toContain('No download clients yet');
+  });
+});
+
+describe('DownloadClientSettings concurrency', () => {
+  // The per-client cap is what stops one seedbox taking every slot, so it has
+  // to round-trip through the form like any other field.
+  it('sends the per-client cap', async () => {
+    answers = [() => jsonResponse(QBIT)];
+    await mountAndEdit();
+
+    type('client-max-concurrent', '2');
+    clickButton('Save', editor());
+    await settle();
+
+    const save = writeCalls().find((c) => c.method === 'PUT');
+    expect(save, 'a PUT to the client').toBeDefined();
+    expect(save!.body).toMatchObject({ max_concurrent: 2 });
+  });
+
+  // Blank means "no limit", never "one at a time": a cap the user did not set
+  // must not be able to stop downloads.
+  it('sends a cleared cap as unlimited', async () => {
+    answers = [() => jsonResponse(QBIT)];
+    await mountAndEdit();
+
+    type('client-max-concurrent', '');
+    clickButton('Save', editor());
+    await settle();
+
+    expect(writeCalls().find((c) => c.method === 'PUT')!.body).toMatchObject({ max_concurrent: 0 });
   });
 });

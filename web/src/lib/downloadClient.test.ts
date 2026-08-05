@@ -4,6 +4,7 @@ import {
   DEFAULT_DOWNLOAD_CLIENT_PRIORITY,
   FALLBACK_DOWNLOAD_CLIENT_TYPES,
   describeType,
+  parseCount,
   parsePriority,
   validateDownloadClient,
 } from './downloadClient';
@@ -116,5 +117,22 @@ describe('FALLBACK_DOWNLOAD_CLIENT_TYPES', () => {
     for (const t of FALLBACK_DOWNLOAD_CLIENT_TYPES) {
       expect(t.uses_login || t.uses_api_key).toBe(true);
     }
+  });
+});
+
+describe('parseCount', () => {
+  it('reads a cap', () => {
+    expect(parseCount(' 3 ')).toBe(3);
+    expect(parseCount('0')).toBe(0);
+  });
+
+  // A cap the user has not set, or typed wrong, must never stop a download
+  // from starting — so everything unreadable is unlimited, not 1.
+  it('treats blank and nonsense as unlimited', () => {
+    expect(parseCount('')).toBe(0);
+    expect(parseCount('   ')).toBe(0);
+    expect(parseCount('lots')).toBe(0);
+    expect(parseCount('-2')).toBe(0);
+    expect(parseCount('2.5')).toBe(0);
   });
 });

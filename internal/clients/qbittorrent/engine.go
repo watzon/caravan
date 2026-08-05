@@ -114,7 +114,10 @@ func (e *Engine) Add(ctx context.Context, r core.Release, opts core.AddOpts) (co
 		}
 	}
 
-	if err := e.c.Add(ctx, AddRequest{URL: link, Category: e.cfg.Category, Tags: []string{Tag}}); err != nil {
+	if err := e.c.Add(ctx, AddRequest{
+		URL: link, Category: e.cfg.Category, Tags: []string{Tag},
+		Paused: opts.Paused,
+	}); err != nil {
 		return "", err
 	}
 	if want != "" {

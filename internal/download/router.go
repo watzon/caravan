@@ -82,7 +82,27 @@ type Route struct {
 	// per-client health is tracked without the router holding state, which it
 	// cannot: it is rebuilt from its table on every operation.
 	Report func(error)
+	// Method is this route's key in the concurrency ledger, and is set only for
+	// routes the router itself must ration — the external clients.
+	//
+	// The built-in engines leave it empty and ration themselves: they can hold
+	// a download without telling anyone, so they ask the coordinator directly
+	// and the router stays out of it. A client cannot. Its downloads exist
+	// only once it has accepted them, so the only way to hold one is to hand it
+	// over paused and unpause it when a slot frees, and that is the router's
+	// job because it is the thing that does the handing over.
+	//
+	// The key is per configured row rather than per kind: two SABnzbd clients
+	// are two machines with two sets of connections, and one budget between
+	// them would be a cap on the wrong thing.
+	Method string
+	// Admission rations this route. Nil is unlimited, which is what every
+	// route was before caps existed.
+	Admission *Admission
 }
+
+// gated reports whether the router must ration this route itself.
+func (r Route) gated() bool { return r.Admission != nil && r.Method != "" }
 
 // Table resolves the engines that are configured right now.
 //
@@ -141,11 +161,36 @@ func (r *Router) Add(ctx context.Context, rel core.Release, opts core.AddOpts) (
 	if route.Unhealthy != "" {
 		return "", fmt.Errorf("%w: %s: %s", ErrClientUnreachable, route.Name, route.Unhealthy)
 	}
+
+	// The concurrency decision has to come before the handoff, because after it
+	// the client has already started. A refused release is still handed over —
+	// there is no way to hold an NZB back and give it the same identity later —
+	// but it is handed over paused, so the client registers it and does no work
+	// until a slot frees.
+	reserved := false
+	if route.gated() {
+		reserved = route.Admission.Reserve(route.Method)
+		opts.Paused = !reserved
+	}
+
 	id, err := route.Engine.Add(ctx, rel, opts)
 	if err != nil {
+		if reserved {
+			route.Admission.Cancel(route.Method)
+		}
 		return "", err
 	}
-	return route.qualify(id), nil
+	qualified := route.qualify(id)
+	if route.gated() {
+		if reserved {
+			route.Admission.Commit(route.Method, qualified)
+		} else {
+			// Paused at the client and waiting its turn. This is what makes it
+			// read as queued rather than as something a person paused.
+			route.Admission.Wait(route.Method, qualified)
+		}
+	}
+	return qualified, nil
 }
 
 // Status returns the snapshot from whichever engine holds id.
@@ -155,6 +200,49 @@ func (r *Router) Status(ctx context.Context, id core.DownloadID) (*core.Download
 		return nil, err
 	}
 	return status, nil
+}
+
+// reconcile squares one client-reported status with the concurrency ledger.
+//
+// A client has one idea of "paused" and Caravan has two: the user asked for it,
+// or Caravan is holding the download until a slot frees. They look identical
+// over the client's API and mean opposite things to the person reading the
+// queue, so the ledger is what tells them apart.
+//
+// It also takes the chance to keep the ledger honest about downloads nobody
+// told it about — one added out of band, or one already running when a cap was
+// first configured — because the global ceiling is only as good as its count.
+//
+// # Somebody reaching into the client directly
+//
+// A person who unpauses a Caravan-held download in SABnzbd's own web UI is
+// making a clear request, and Caravan does not fight it: the download stops
+// being held, is counted if there is room, and simply runs. The cap is honoured
+// again from the next admission onward rather than by pausing something a human
+// just started. The reverse — pausing a running download at the client — reads
+// exactly as a pause here, which is what it is.
+func (route Route) reconcile(status *core.DownloadStatus) {
+	adm, id := route.Admission, status.ID
+	switch {
+	case adm.Waiting(id):
+		if status.State == core.DownloadPaused {
+			// Held by Caravan, not by anyone. It is waiting in line.
+			status.State = core.DownloadQueued
+			return
+		}
+		// Somebody started it at the client. Take the slot if there is one and
+		// stop holding it either way.
+		adm.Request(route.Method, id)
+		adm.Unwait(id)
+	case status.State == core.DownloadDownloading:
+		// Count it. Request is idempotent, so this is free for the downloads
+		// that already hold a slot.
+		adm.Request(route.Method, id)
+	default:
+		// Paused, finished, failed: whatever it is, it is not transferring, and
+		// a slot it may have held belongs to the queue behind it.
+		adm.Release(id)
+	}
 }
 
 // List returns every engine's downloads.
@@ -188,6 +276,9 @@ func (r *Router) List(ctx context.Context) ([]core.DownloadStatus, error) {
 		for _, status := range statuses {
 			status.Engine = route.Name
 			status.ID = route.qualify(status.ID)
+			if route.gated() {
+				route.reconcile(&status)
+			}
 			out = append(out, status)
 		}
 	}
@@ -199,29 +290,53 @@ func (r *Router) List(ctx context.Context) ([]core.DownloadStatus, error) {
 
 // Pause stops the download on the engine holding it.
 func (r *Router) Pause(ctx context.Context, id core.DownloadID) error {
-	engine, native, _, err := r.owner(ctx, id)
+	route, native, _, err := r.owner(ctx, id)
 	if err != nil {
 		return err
 	}
-	return engine.Pause(ctx, native)
+	if err := route.Engine.Pause(ctx, native); err != nil {
+		return err
+	}
+	if route.gated() {
+		// A person asked for this, so it stops being Caravan's hold and starts
+		// being theirs: it reads as paused from here, and its slot goes to the
+		// queue behind it.
+		route.Admission.Unwait(id)
+		route.Admission.Release(id)
+	}
+	return nil
 }
 
 // Resume restarts the download on the engine holding it.
 func (r *Router) Resume(ctx context.Context, id core.DownloadID) error {
-	engine, native, _, err := r.owner(ctx, id)
+	route, native, _, err := r.owner(ctx, id)
 	if err != nil {
 		return err
 	}
-	return engine.Resume(ctx, native)
+	if route.gated() && !route.Admission.Request(route.Method, id) {
+		// Resuming into a full queue is queued, not running: it stays paused at
+		// the client and Caravan starts holding it, so it reads as waiting its
+		// turn rather than as a button that did nothing.
+		route.Admission.Wait(route.Method, id)
+		return nil
+	}
+	return route.Engine.Resume(ctx, native)
 }
 
 // Remove drops the download from the engine holding it.
 func (r *Router) Remove(ctx context.Context, id core.DownloadID, deleteData bool) error {
-	engine, native, _, err := r.owner(ctx, id)
+	route, native, _, err := r.owner(ctx, id)
 	if err != nil {
 		return err
 	}
-	return engine.Remove(ctx, native, deleteData)
+	if err := route.Engine.Remove(ctx, native, deleteData); err != nil {
+		return err
+	}
+	if route.gated() {
+		route.Admission.Unwait(id)
+		route.Admission.Release(id)
+	}
+	return nil
 }
 
 // Close is a no-op. The router borrows its engines; whoever built the table
@@ -231,11 +346,11 @@ func (r *Router) Close() error { return nil }
 // Insight implements core.EngineInsight by delegating to the engine holding
 // the download, which may not support it.
 func (r *Router) Insight(ctx context.Context, id core.DownloadID) (*core.DownloadInsight, error) {
-	engine, native, _, err := r.owner(ctx, id)
+	route, native, _, err := r.owner(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	insighter, ok := engine.(core.EngineInsight)
+	insighter, ok := route.Engine.(core.EngineInsight)
 	if !ok {
 		return nil, fmt.Errorf("%w: peer insight", ErrUnsupported)
 	}
@@ -245,11 +360,11 @@ func (r *Router) Insight(ctx context.Context, id core.DownloadID) (*core.Downloa
 // Retry implements core.EngineRetry by delegating to the engine holding the
 // download, which may not support it.
 func (r *Router) Retry(ctx context.Context, id core.DownloadID) error {
-	engine, native, _, err := r.owner(ctx, id)
+	route, native, _, err := r.owner(ctx, id)
 	if err != nil {
 		return err
 	}
-	retrier, ok := engine.(core.EngineRetry)
+	retrier, ok := route.Engine.(core.EngineRetry)
 	if !ok {
 		return fmt.Errorf("%w: retrying a failed download", ErrUnsupported)
 	}
@@ -279,30 +394,30 @@ func (r *Router) SetGlobalRates(ctx context.Context, downKbps, upKbps int64) err
 
 // SetDownloadRates implements the per-download half of core.EngineRateLimits.
 func (r *Router) SetDownloadRates(ctx context.Context, id core.DownloadID, downKbps, upKbps int64) error {
-	engine, native, _, err := r.owner(ctx, id)
+	route, native, _, err := r.owner(ctx, id)
 	if err != nil {
 		return err
 	}
-	limiter, ok := engine.(core.EngineRateLimits)
+	limiter, ok := route.Engine.(core.EngineRateLimits)
 	if !ok {
 		return fmt.Errorf("%w: per-download rate limits", ErrUnsupported)
 	}
 	return limiter.SetDownloadRates(ctx, native, downKbps, upKbps)
 }
 
-// owner finds the engine holding id, the engine-native handle to address it
-// with, and the status it reported while doing so — the lookup is a Status
-// call, so returning it saves the caller a second one.
-//
 // Every engine's "I do not have this" is a different sentinel, so an error is
 // simply read as "not this one". When nobody claims the download the first
 // engine's own error is returned rather than a manufactured one, which keeps
 // the single-engine case — a stock Caravan with only the embedded engine —
 // reporting exactly what it reported before there was a router.
-func (r *Router) owner(ctx context.Context, id core.DownloadID) (core.Engine, core.DownloadID, *core.DownloadStatus, error) {
+// owner finds the route holding id, and returns it alongside the engine's own
+// handle and the status that proved ownership. The Route comes back because
+// what the caller may do next — ration it, hold it — is the route's business,
+// not the engine's.
+func (r *Router) owner(ctx context.Context, id core.DownloadID) (Route, core.DownloadID, *core.DownloadStatus, error) {
 	routes, err := r.table(ctx)
 	if err != nil {
-		return nil, "", nil, err
+		return Route{}, "", nil, err
 	}
 	var firstErr error
 	for _, route := range candidates(routes, id) {
@@ -316,16 +431,16 @@ func (r *Router) owner(ctx context.Context, id core.DownloadID) (core.Engine, co
 				// so the engine's bare handle must not leak back out here.
 				status.ID = id
 			}
-			return route.Engine, native, status, nil
+			return route, native, status, nil
 		}
 		if firstErr == nil {
 			firstErr = err
 		}
 	}
 	if firstErr != nil {
-		return nil, "", nil, firstErr
+		return Route{}, "", nil, firstErr
 	}
-	return nil, "", nil, fmt.Errorf("download: status %q: %w", id, ErrNotFound)
+	return Route{}, "", nil, fmt.Errorf("download: status %q: %w", id, ErrNotFound)
 }
 
 // candidates narrows the routes a handle may belong to.

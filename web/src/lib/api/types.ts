@@ -488,6 +488,17 @@ export const SETTING_ENGINE_SEED_RATIO = 'engine_seed_ratio';
 export const SETTING_ENGINE_SEED_DAYS = 'engine_seed_days';
 
 /**
+ * Concurrency ceilings. Zero is unlimited everywhere, which is what Caravan did
+ * before these existed: every grab started at once and they starved each other.
+ *
+ * A download over a ceiling is not refused — it waits in the queue's existing
+ * 'queued' state until a slot frees, oldest first.
+ */
+export const SETTING_MAX_CONCURRENT_DOWNLOADS = 'max_concurrent_downloads';
+export const SETTING_EMBEDDED_TORRENT_MAX_CONCURRENT = 'embedded_torrent_max_concurrent';
+export const SETTING_EMBEDDED_USENET_MAX_CONCURRENT = 'embedded_usenet_max_concurrent';
+
+/**
  * The default download engine per release protocol (SPEC §5.1). A grab is
  * routed on the release's protocol, never on a per-grab choice, so these two
  * keys are the whole routing configuration.
@@ -751,6 +762,8 @@ export interface DownloadClient {
   category: string;
   /** Lowest wins when more than one enabled client can take a release. */
   priority: number;
+  /** How many downloads Caravan runs at this client at once; 0 is unlimited. */
+  max_concurrent: number;
   enabled: boolean;
 }
 
@@ -771,6 +784,7 @@ export interface DownloadClientInput {
   api_key?: string;
   category: string;
   priority: number;
+  max_concurrent?: number;
   enabled: boolean;
 }
 

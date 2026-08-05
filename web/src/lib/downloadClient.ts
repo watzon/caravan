@@ -90,13 +90,28 @@ export function validateDownloadClient(input: {
   return null;
 }
 
+export const DEFAULT_DOWNLOAD_CLIENT_PRIORITY = 25;
+
+/**
+ * A count field where blank and nonsense both mean "no limit".
+ *
+ * Unlike priority there is no sensible default other than zero: a cap the user
+ * has not set must never stop a download from starting, so anything unreadable
+ * reads as unlimited rather than as the smallest number.
+ */
+export function parseCount(text: string): number {
+  const trimmed = text.trim();
+  if (trimmed === '') return 0;
+  const n = Number(trimmed);
+  if (!Number.isInteger(n) || n < 0) return 0;
+  return n;
+}
+
 /**
  * Turn the priority field's text into a number. Anything unparseable or
  * negative falls back to the server's own default rather than blocking a save
  * on a typo — the same forgiveness parseCategories shows.
  */
-export const DEFAULT_DOWNLOAD_CLIENT_PRIORITY = 25;
-
 export function parsePriority(text: string): number {
   const trimmed = text.trim();
   // Guarded explicitly: Number('') is 0, and a cleared field means "I did not

@@ -58,6 +58,21 @@ function button(label: string) {
   return found!;
 }
 
+/**
+ * The button with this label inside the settings card that owns `selector`.
+ *
+ * The Downloads pane holds several cards and each has its own Save, so a bare
+ * label is ambiguous there — it used to be unique only by accident of there
+ * being one card.
+ */
+function cardButton(selector: string, label: string) {
+  const card = host.querySelector(selector)?.closest('section');
+  expect(card, `card containing ${selector}`).not.toBeNull();
+  const found = [...card!.querySelectorAll('button')].find((b) => b.textContent?.includes(label));
+  expect(found, `button labelled ${label} in ${selector}'s card`).toBeDefined();
+  return found!;
+}
+
 /** Everything the merged Downloads and Playback panes ask for on mount. */
 function stubFetch() {
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
@@ -194,7 +209,7 @@ describe('Settings engine tab', () => {
     down.value = '2048';
     down.dispatchEvent(new Event('input', { bubbles: true }));
     flushSync();
-    button('Save changes').click();
+    cardButton('#engine-listen-port', 'Save changes').click();
     await settle();
 
     expect(savedPatch).toEqual({

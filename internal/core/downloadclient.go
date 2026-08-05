@@ -51,6 +51,15 @@ type DownloadClientConfig struct {
 	// Enabled excludes the client from routing when false, without losing its
 	// configuration.
 	Enabled bool
+	// MaxConcurrent caps how many downloads Caravan will have in flight at
+	// this client at once. Zero is unlimited, which is what every client did
+	// before the column existed.
+	//
+	// It is a cap on Caravan's own handoff, not a second opinion about the
+	// client's internal scheduling: these clients all have their own limits,
+	// and the point of this one is that a shared global ceiling can see across
+	// every client and both built-in engines, which none of them can.
+	MaxConcurrent int
 }
 
 // DownloadClientHealth is one external client the queue poller cannot reach

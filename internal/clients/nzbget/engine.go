@@ -92,6 +92,9 @@ func (e *Engine) Add(ctx context.Context, r core.Release, opts core.AddOpts) (co
 		Filename: nzbFilename(r.Title),
 		Content:  content,
 		Category: e.cfg.Category,
+		// Over the concurrency cap: NZBGet takes the NZB and does nothing with
+		// it until Caravan resumes it.
+		Paused: opts.Paused,
 	})
 	if err != nil {
 		return "", err

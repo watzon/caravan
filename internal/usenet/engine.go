@@ -59,6 +59,13 @@ const defaultPollInterval = 2 * time.Second
 // external clients, whose small integer handles genuinely do collide).
 const handlePrefix = "u"
 
+// admissionRegistrar is the half of the concurrency coordinator this engine
+// needs beyond core.Admitter: a way to be told a slot has freed somewhere, so
+// it can re-ask for the downloads it is holding back.
+type admissionRegistrar interface {
+	Register(method string, wake func())
+}
+
 // EngineOpts configures the embedded Usenet engine.
 type EngineOpts struct {
 	// Servers are the news servers to fetch from, in priority order. An empty
@@ -91,6 +98,15 @@ type EngineOpts struct {
 	// SkipSpaceCheck turns the preflight off. Tests that stage kilobyte
 	// releases on a full CI disk want it; production does not.
 	SkipSpaceCheck bool
+	// Admitter decides whether a download may run, so a ceiling across every
+	// engine can exist. Nil is unlimited and is the path that predates
+	// concurrency caps: nothing is asked and no download is held back.
+	//
+	// It matters more here than for torrents. Parallel NZBs share one pool of
+	// connections to the same news servers, so two at once do not go twice as
+	// fast — they halve each other and both take twice as long to become
+	// importable.
+	Admitter core.Admitter
 }
 
 // Engine is the built-in Usenet engine: NZB in, imported media out, with no
@@ -144,6 +160,10 @@ type item struct {
 	phase   core.DownloadPhase
 	paused  bool
 	failure string
+	// admitted is whether the concurrency coordinator has given this download
+	// a slot. Without one no worker starts, which is already the engine's
+	// "queued" — see statusLocked.
+	admitted bool
 	// finished marks a download that has been through every stage. It is
 	// separate from the record's state so a completed download that the user
 	// pauses (they cannot, but Remove races) does not restart its worker.
@@ -241,6 +261,13 @@ func NewEngine(root string, opts EngineOpts) (*Engine, error) {
 		servers:    fingerprintServers(opts.Servers),
 	}
 
+	// The coordinator has to be able to reach back when a slot frees anywhere,
+	// including in the torrent engine. A nil Admitter fails the assertion,
+	// which is the uncapped path.
+	if reg, ok := opts.Admitter.(admissionRegistrar); ok {
+		reg.Register(EngineName, e.wake)
+	}
+
 	if err := e.restore(ctx); err != nil {
 		cancel()
 		e.fetch.close()
@@ -329,6 +356,14 @@ func (e *Engine) restore(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("usenet: load downloads: %w", err)
 	}
+	// Oldest first, so a restart hands out the slots the caps allow in the same
+	// order the queue would have: the store returns rows in no useful order.
+	sort.Slice(recs, func(i, j int) bool {
+		if a, b := recs[i].CreatedAt, recs[j].CreatedAt; !a.Equal(b) {
+			return a.Before(b)
+		}
+		return recs[i].EngineID < recs[j].EngineID
+	})
 	for _, rec := range recs {
 		if rec.Engine != EngineName {
 			continue
@@ -681,6 +716,9 @@ func (e *Engine) Remove(ctx context.Context, id core.DownloadID, deleteData bool
 	}
 	dir, stop, stopped := it.dir, it.cancel, it.stopped
 	delete(e.items, id)
+	// It is leaving entirely, so its slot goes back now rather than when the
+	// worker finishes unwinding.
+	e.release(it)
 	e.mu.Unlock()
 
 	// Wait for the worker before touching the directory. Deleting files a

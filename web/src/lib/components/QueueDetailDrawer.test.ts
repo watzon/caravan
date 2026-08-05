@@ -270,3 +270,37 @@ describe('QueueDetailDrawer retry', () => {
     expect(host.textContent).toContain('Pause');
   });
 });
+
+describe('QueueDetailDrawer queued-by-cap', () => {
+  // A queued download whose size is already known is waiting on the
+  // concurrency cap, not on a magnet's metadata. Saying so is the difference
+  // between "my queue works" and "my queue is stuck".
+  it('says a queued download is waiting for a slot', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(usenetInsight())));
+    mountDrawer({ protocol: 'usenet', state: 'queued', down_rate: 0 });
+    await settle();
+
+    expect(host.textContent).toContain('Waiting for a free download slot');
+    expect(host.textContent).toContain('Concurrency');
+  });
+
+  // A torrent with no metadata yet is queued for a different reason, and
+  // blaming the cap there would send the user to the wrong screen.
+  it('stays quiet for a torrent that has no metadata yet', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () =>
+      jsonResponse({ insight: { peers: [], trackers: [], availability: 0 } }),
+    ));
+    mountDrawer({ state: 'queued', size: 0, bytes_done: 0 });
+    await settle();
+
+    expect(host.textContent).not.toContain('Waiting for a free download slot');
+  });
+
+  it('stays quiet while a download is actually running', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(usenetInsight())));
+    mountDrawer({ protocol: 'usenet', state: 'downloading' });
+    await settle();
+
+    expect(host.textContent).not.toContain('Waiting for a free download slot');
+  });
+});

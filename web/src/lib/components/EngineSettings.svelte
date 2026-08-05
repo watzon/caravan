@@ -29,21 +29,30 @@
   let maxUpKbps = $state('');
   let seedRatio = $state('');
   let seedDays = $state('');
-  let initializedSettings = $state<Settings | null>(null);
   let restartNotice = $state(false);
+  // Deliberately a plain box rather than $state: this marks which settings
+  // object the fields were last filled from, and tracking it would make the
+  // effect below depend on something it writes on every run — which trips
+  // Svelte's update-depth guard.
+  const filledFrom: { settings: Settings | null } = { settings: null };
 
   $effect(() => {
-    if (initializedSettings === settings) return;
+    if (filledFrom.settings === settings) return;
+    filledFrom.settings = settings;
     listenPort = settings[SETTING_ENGINE_LISTEN_PORT] ?? '0';
     maxConnections = settings[SETTING_ENGINE_MAX_CONNECTIONS] ?? '0';
     maxDownKbps = settings[SETTING_ENGINE_MAX_DOWN_KBPS] ?? '0';
     maxUpKbps = settings[SETTING_ENGINE_MAX_UP_KBPS] ?? '0';
     seedRatio = settings[SETTING_ENGINE_SEED_RATIO] ?? '0';
     seedDays = settings[SETTING_ENGINE_SEED_DAYS] ?? '0';
-    initializedSettings = settings;
   });
 
-  function valueOrZero(value: string | number): string {
+  // A number input the user has cleared binds null, not '': String(null) is
+  // the four characters "null", and the server rejects that as an invalid
+  // setting. Every field here is "0 means off", so clearing one is a
+  // legitimate way to say "no limit" and has to reach the server as 0.
+  function valueOrZero(value: string | number | null | undefined): string {
+    if (value === null || value === undefined) return '0';
     return String(value).trim() || '0';
   }
 

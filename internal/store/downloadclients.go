@@ -12,7 +12,7 @@ import (
 // The `kind` column holds core.DownloadClientConfig.Type: 0001 named it, and
 // it is exactly what Type selects.
 const downloadClientColumns = `id, kind, name, url, username, password, api_key,
-	category, priority, enabled`
+	category, priority, enabled, max_concurrent`
 
 // UpsertDownloadClient inserts or updates c and writes back the assigned ID.
 // Identity is c.ID when set; otherwise a new client is inserted.
@@ -23,10 +23,10 @@ func (s *Store) UpsertDownloadClient(ctx context.Context, c *core.DownloadClient
 		res, err := s.db.ExecContext(ctx, `
 			UPDATE download_clients SET kind = ?, name = ?, url = ?, username = ?,
 				password = ?, api_key = ?, category = ?, priority = ?, enabled = ?,
-				updated_at = ?
+				max_concurrent = ?, updated_at = ?
 			WHERE id = ?`,
 			c.Type, c.Name, c.URL, c.Username, c.Password, c.APIKey,
-			c.Category, c.Priority, c.Enabled, ts, c.ID)
+			c.Category, c.Priority, c.Enabled, c.MaxConcurrent, ts, c.ID)
 		if err != nil {
 			return fmt.Errorf("store: update download client %d: %w", c.ID, err)
 		}
@@ -42,10 +42,10 @@ func (s *Store) UpsertDownloadClient(ctx context.Context, c *core.DownloadClient
 
 	res, err := s.db.ExecContext(ctx, `
 		INSERT INTO download_clients (kind, name, url, username, password, api_key,
-			category, priority, enabled, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			category, priority, enabled, max_concurrent, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		c.Type, c.Name, c.URL, c.Username, c.Password, c.APIKey,
-		c.Category, c.Priority, c.Enabled, ts, ts)
+		c.Category, c.Priority, c.Enabled, c.MaxConcurrent, ts, ts)
 	if err != nil {
 		return fmt.Errorf("store: insert download client %q: %w", c.Name, err)
 	}
@@ -120,7 +120,7 @@ func (s *Store) DeleteDownloadClient(ctx context.Context, id int64) error {
 func scanDownloadClient(sc scanner) (*core.DownloadClientConfig, error) {
 	var c core.DownloadClientConfig
 	if err := sc.Scan(&c.ID, &c.Type, &c.Name, &c.URL, &c.Username, &c.Password,
-		&c.APIKey, &c.Category, &c.Priority, &c.Enabled); err != nil {
+		&c.APIKey, &c.Category, &c.Priority, &c.Enabled, &c.MaxConcurrent); err != nil {
 		return nil, err
 	}
 	return &c, nil

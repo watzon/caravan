@@ -68,6 +68,24 @@ const (
 	// configured target is reached. Zero disables that target.
 	SettingEngineSeedRatio = "engine_seed_ratio"
 	SettingEngineSeedDays  = "engine_seed_days"
+	// SettingMaxConcurrentDownloads is the ceiling on downloads transferring at
+	// once across every engine and client together. Zero is unlimited, which is
+	// what Caravan did before there were caps at all: ten grabs all started at
+	// once and starved each other.
+	//
+	// A download over the ceiling is not refused and not paused — it waits in
+	// the queue's existing `queued` state until a slot frees, oldest first.
+	SettingMaxConcurrentDownloads = "max_concurrent_downloads"
+	// SettingEmbeddedTorrentMaxConcurrent and SettingEmbeddedUsenetMaxConcurrent
+	// are the per-method ceilings for the two built-in engines. Zero is
+	// unlimited for that method; the global ceiling still applies.
+	//
+	// The Usenet one deserves a small number. Parallel NZBs share one pool of
+	// connections to the same news servers, so a second simultaneous download
+	// does not make articles arrive faster — it splits the same bandwidth and
+	// doubles how long it takes either release to become importable.
+	SettingEmbeddedTorrentMaxConcurrent = "embedded_torrent_max_concurrent"
+	SettingEmbeddedUsenetMaxConcurrent  = "embedded_usenet_max_concurrent"
 	// SettingRouteTorrent and SettingRouteUsenet name the default download
 	// engine per release protocol (SPEC §5.1, PLAN phase 6 task 3). A grab is
 	// routed on the release's protocol, never on the user's last choice, so

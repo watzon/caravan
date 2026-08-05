@@ -6,6 +6,7 @@
    * list of things still to configure.
    */
   import type { Settings } from '../api/types';
+  import ConcurrencySettings from './ConcurrencySettings.svelte';
   import DownloadClientSettings from './DownloadClientSettings.svelte';
   import EngineSettings from './EngineSettings.svelte';
   import UsenetServerSettings from './UsenetServerSettings.svelte';
@@ -20,6 +21,10 @@
 </script>
 
 <div class="flex flex-col gap-5">
+  <ConcurrencySettings
+    {settings}
+    {saving}
+    onsave={(patch) => onsave(patch, 'Concurrency limits saved.')} />
   <EngineSettings
     {settings}
     {saving}
