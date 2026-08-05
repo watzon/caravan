@@ -295,11 +295,39 @@ describe('grab', () => {
   });
 });
 
+describe('history pagination', () => {
+  it('passes cursor and preserves page metadata for events and jobs', async () => {
+    stubFetch({ events: [{ id: 3 }], next_cursor: '2' });
+    await expect(api.listEventsPage(1, '2')).resolves.toEqual({
+      events: [{ id: 3 }],
+      next_cursor: '2',
+    });
+    expect(only().url).toBe('/api/v1/events?limit=1&cursor=2');
+
+    calls = [];
+    stubFetch({ jobs: [{ id: 4 }], next_cursor: '' });
+    await expect(api.listJobsPage(1, '3')).resolves.toEqual({
+      jobs: [{ id: 4 }],
+      next_cursor: '',
+    });
+    expect(only().url).toBe('/api/v1/jobs?limit=1&cursor=3');
+  });
+});
+
 describe('downloads', () => {
+  it('fetches the first cursor page and preserves metadata', async () => {
+    stubFetch({ downloads: [{ id: 'abc' }], next_cursor: 'stored:7' });
+    await expect(api.listDownloadsPage(1)).resolves.toEqual({
+      downloads: [{ id: 'abc' }],
+      next_cursor: 'stored:7',
+    });
+    expect(only().url).toBe('/api/v1/downloads?limit=1');
+  });
+
   it('unwraps the queue envelope', async () => {
     stubFetch({ downloads: [{ id: 'abc' }] });
     expect(await api.listDownloads()).toHaveLength(1);
-    expect(only().url).toBe('/api/v1/downloads');
+    expect(only().url).toBe('/api/v1/downloads?limit=100');
   });
 
   it('pauses and resumes by engine id', async () => {

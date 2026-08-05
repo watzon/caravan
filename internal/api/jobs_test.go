@@ -22,7 +22,8 @@ func TestHandleListJobsReturnsNewestFeed(t *testing.T) {
 	rec := do(t, h, http.MethodGet, "/api/v1/jobs?limit=1", "")
 	wantStatus(t, rec, http.StatusOK)
 	var body struct {
-		Jobs []jobJSON `json:"jobs"`
+		Jobs       []jobJSON `json:"jobs"`
+		NextCursor string    `json:"next_cursor"`
 	}
 	decodeBody(t, rec, &body)
 	if len(body.Jobs) != 1 {
@@ -37,5 +38,25 @@ func TestHandleListJobsReturnsNewestFeed(t *testing.T) {
 	}
 	if err := json.Unmarshal(job.Payload, &payload); err != nil || payload.MovieID != 42 {
 		t.Fatalf("payload = %s, want movie id 42: %v", job.Payload, err)
+	}
+
+	if body.NextCursor == "" {
+		t.Fatal("paged job response has empty continuation cursor")
+	}
+	cursor := body.NextCursor
+	rec = do(t, h, http.MethodGet, "/api/v1/jobs?limit=1&cursor="+cursor, "")
+	wantStatus(t, rec, http.StatusOK)
+	decodeBody(t, rec, &body)
+	if len(body.Jobs) != 1 || body.Jobs[0].Kind != "rss_sync" || body.NextCursor != "" {
+		t.Fatalf("final job page = %+v cursor %q, want rss_sync and no cursor", body.Jobs, body.NextCursor)
+	}
+
+	for _, bad := range []string{"", "0", "-1", "many"} {
+		if bad == "" {
+			continue
+		}
+		rec = do(t, h, http.MethodGet, "/api/v1/jobs?cursor="+bad, "")
+		wantStatus(t, rec, http.StatusBadRequest)
+		wantErrorBody(t, rec)
 	}
 }

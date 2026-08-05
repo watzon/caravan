@@ -715,7 +715,8 @@ func TestEvents(t *testing.T) {
 	rec := do(t, h, http.MethodGet, "/api/v1/events", "")
 	wantStatus(t, rec, http.StatusOK)
 	var body struct {
-		Events []eventJSON `json:"events"`
+		Events     []eventJSON `json:"events"`
+		NextCursor string      `json:"next_cursor"`
 	}
 	decodeBody(t, rec, &body)
 	if len(body.Events) != 3 {
@@ -734,6 +735,27 @@ func TestEvents(t *testing.T) {
 	if len(body.Events) != 1 {
 		t.Fatalf("events with limit=1 = %d, want 1", len(body.Events))
 	}
+
+	if body.NextCursor == "" {
+		t.Fatal("paged event response has empty continuation cursor")
+	}
+	cursor := body.NextCursor
+	rec = do(t, h, http.MethodGet, "/api/v1/events?limit=1&cursor="+cursor, "")
+	wantStatus(t, rec, http.StatusOK)
+	decodeBody(t, rec, &body)
+	if len(body.Events) != 1 || body.Events[0].Message != "second" {
+		t.Fatalf("second event page = %+v, want second event", body.Events)
+	}
+
+	if body.NextCursor == "" {
+		t.Fatal("second event page has empty continuation cursor")
+	}
+	rec = do(t, h, http.MethodGet, "/api/v1/events?limit=1&cursor="+body.NextCursor, "")
+	wantStatus(t, rec, http.StatusOK)
+	decodeBody(t, rec, &body)
+	if len(body.Events) != 1 || body.Events[0].Message != "first" || body.NextCursor != "" {
+		t.Fatalf("final event page = %+v cursor %q, want first event and no cursor", body.Events, body.NextCursor)
+	}
 }
 
 func TestEventsRejectsBadLimit(t *testing.T) {
@@ -741,6 +763,14 @@ func TestEventsRejectsBadLimit(t *testing.T) {
 
 	for _, limit := range []string{"0", "-1", "many"} {
 		rec := do(t, h, http.MethodGet, "/api/v1/events?limit="+limit, "")
+		wantStatus(t, rec, http.StatusBadRequest)
+		wantErrorBody(t, rec)
+	}
+	for _, cursor := range []string{"", "0", "-1", "many"} {
+		if cursor == "" {
+			continue
+		}
+		rec := do(t, h, http.MethodGet, "/api/v1/events?cursor="+cursor, "")
 		wantStatus(t, rec, http.StatusBadRequest)
 		wantErrorBody(t, rec)
 	}

@@ -537,6 +537,29 @@ func (e *Engine) List(ctx context.Context) ([]core.DownloadStatus, error) {
 	return out, nil
 }
 
+// ListPage returns a deterministic page for the optional cursor seam. The
+// legacy List order remains oldest first for queue consumers.
+func (e *Engine) ListPage(ctx context.Context, limit int, before core.DownloadID) ([]core.DownloadStatus, core.DownloadID, error) {
+	statuses, err := e.List(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	sort.Slice(statuses, func(i, j int) bool { return statuses[i].ID < statuses[j].ID })
+	start := 0
+	for start < len(statuses) && before != "" && statuses[start].ID <= before {
+		start++
+	}
+	if start == len(statuses) || limit <= 0 {
+		return []core.DownloadStatus{}, "", nil
+	}
+	end := min(start+limit, len(statuses))
+	next := core.DownloadID("")
+	if end < len(statuses) {
+		next = statuses[end-1].ID
+	}
+	return statuses[start:end], next, nil
+}
+
 // Insight returns the Usenet-shaped detail the queue drawer shows in place of
 // a torrent's peers and trackers: which files the NZB indexes, how much of each
 // one is on disk, and what the repair stage is working on when it is running.

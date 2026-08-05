@@ -961,6 +961,11 @@ export interface DownloadStatus {
   engine?: string;
 }
 
+export interface DownloadPage {
+  downloads: DownloadStatus[];
+  next_cursor: string;
+}
+
 /**
  * Protocol-specific diagnostics from GET /downloads/{id}/insight.
  *
@@ -1063,6 +1068,11 @@ export interface ActivityEvent {
   created_at: string;
 }
 
+export interface EventPage {
+  events: ActivityEvent[];
+  next_cursor: string;
+}
+
 export type JobState = 'pending' | 'running' | 'done' | 'failed';
 
 export interface Job {
@@ -1072,10 +1082,16 @@ export interface Job {
   state: JobState;
   attempts: number;
   run_after: string;
+
   lease_expires_at: string;
   last_error: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface JobPage {
+  jobs: Job[];
+  next_cursor: string;
 }
 
 /**

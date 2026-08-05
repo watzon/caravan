@@ -40,32 +40,79 @@
   let tab = $state<Tab>('events');
   let events = $state<ActivityEvent[] | null>(null);
   let jobs = $state<Job[] | null>(null);
+  let eventsNextCursor = $state('');
+  let jobsNextCursor = $state('');
+  let eventsLoadedOlder = $state(false);
+  let jobsLoadedOlder = $state(false);
   let eventsError = $state<string | null>(null);
   let jobsError = $state<string | null>(null);
   let eventsLoading = $state(true);
   let jobsLoading = $state(false);
+  let eventsLoadingOlder = $state(false);
+  let jobsLoadingOlder = $state(false);
 
-  async function loadEvents() {
-    eventsLoading = true;
+  function mergeByID<T extends { id: number }>(current: T[], incoming: T[]): T[] {
+    const seen = new Set<number>();
+    return [...incoming, ...current]
+      .filter((item) => !seen.has(item.id) && seen.add(item.id))
+      .sort((a, b) => b.id - a.id);
+  }
+
+  async function loadEvents(older = false) {
+    if (older) {
+      if (!eventsNextCursor || eventsLoadingOlder) return;
+      eventsLoadingOlder = true;
+    } else {
+      eventsLoading = true;
+    }
     try {
-      events = await api.listEvents();
+      const page = await api.listEventsPage(100, older ? eventsNextCursor : undefined);
+      if (older) {
+        events = mergeByID(events ?? [], page.events);
+        eventsNextCursor = page.next_cursor;
+        eventsLoadedOlder = true;
+      } else if (events === null) {
+        events = page.events;
+        eventsNextCursor = page.next_cursor;
+      } else {
+        events = mergeByID(events, page.events);
+        if (!eventsLoadedOlder) eventsNextCursor = page.next_cursor;
+      }
       eventsError = null;
     } catch (err) {
       eventsError = errorText(err);
     } finally {
-      eventsLoading = false;
+      if (older) eventsLoadingOlder = false;
+      else eventsLoading = false;
     }
   }
 
-  async function loadJobs() {
-    jobsLoading = true;
+  async function loadJobs(older = false) {
+    if (older) {
+      if (!jobsNextCursor || jobsLoadingOlder) return;
+      jobsLoadingOlder = true;
+    } else {
+      jobsLoading = true;
+    }
     try {
-      jobs = await api.listJobs();
+      const page = await api.listJobsPage(100, older ? jobsNextCursor : undefined);
+      if (older) {
+        jobs = mergeByID(jobs ?? [], page.jobs);
+        jobsNextCursor = page.next_cursor;
+        jobsLoadedOlder = true;
+      } else if (jobs === null) {
+        jobs = page.jobs;
+        jobsNextCursor = page.next_cursor;
+      } else {
+        jobs = mergeByID(jobs, page.jobs);
+        if (!jobsLoadedOlder) jobsNextCursor = page.next_cursor;
+      }
       jobsError = null;
     } catch (err) {
       jobsError = errorText(err);
     } finally {
-      jobsLoading = false;
+      if (older) jobsLoadingOlder = false;
+      else jobsLoading = false;
     }
   }
 
@@ -81,8 +128,8 @@
   $effect(() => {
     if (tab === 'jobs' && jobs === null && !jobsLoading) loadJobs();
   });
-</script>
 
+</script>
 <div class="flex max-w-4xl flex-col gap-6">
   <div class="flex items-center gap-2">
     <div class="flex-1">
@@ -127,6 +174,13 @@
           </li>
         {/each}
       </ol>
+      {#if eventsNextCursor || eventsLoadingOlder}
+        <div class="mt-3 flex justify-center">
+          <Button size="sm" disabled={eventsLoadingOlder || !eventsNextCursor} onclick={() => loadEvents(true)}>
+            {eventsLoadingOlder ? 'Loading...' : 'Load older'}
+          </Button>
+        </div>
+      {/if}
     {/if}
   {:else if jobsError && jobs === null}
     <LoadError message={jobsError} onretry={loadJobs} />
@@ -150,5 +204,12 @@
         </li>
       {/each}
     </ul>
+    {#if jobsNextCursor || jobsLoadingOlder}
+      <div class="mt-3 flex justify-center">
+        <Button size="sm" disabled={jobsLoadingOlder || !jobsNextCursor} onclick={() => loadJobs(true)}>
+          {jobsLoadingOlder ? 'Loading...' : 'Load older'}
+        </Button>
+      </div>
+    {/if}
   {/if}
 </div>

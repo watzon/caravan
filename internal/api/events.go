@@ -3,6 +3,8 @@ package api
 import (
 	"net/http"
 	"strconv"
+
+	"github.com/watzon/caravan/internal/core"
 )
 
 // Bounds on GET /events?limit=. The feed is a UI convenience, not an export
@@ -25,8 +27,14 @@ type eventJSON struct {
 
 // handleEvents returns the activity feed, newest first.
 func (s *server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	_, hasLimit := query["limit"]
+	rawCursor := query.Get("cursor")
+	_, hasCursor := query["cursor"]
+	cursorMode := hasLimit || hasCursor
+
 	limit := defaultEventLimit
-	if raw := r.URL.Query().Get("limit"); raw != "" {
+	if raw := query.Get("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
 		if err != nil || n <= 0 {
 			writeError(w, http.StatusBadRequest, "limit must be a positive integer")
@@ -35,12 +43,37 @@ func (s *server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		limit = min(n, maxEventLimit)
 	}
 
-	events, err := s.st.ListEvents(r.Context(), limit)
-	if err != nil {
-		s.writeStoreError(w, "list events", err)
+	if !cursorMode {
+		events, err := s.st.ListEvents(r.Context(), limit)
+		if err != nil {
+			s.writeStoreError(w, "list events", err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"events": eventJSONs(events)})
 		return
 	}
 
+	var beforeID int64
+	if rawCursor != "" {
+		parsed, err := strconv.ParseInt(rawCursor, 10, 64)
+		if err != nil || parsed <= 0 {
+			writeError(w, http.StatusBadRequest, "cursor must be a positive integer")
+			return
+		}
+		beforeID = parsed
+	}
+	events, nextID, err := s.st.ListEventsPage(r.Context(), int64(limit), beforeID)
+	if err != nil {
+		s.writeStoreError(w, "list event page", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"events":      eventJSONs(events),
+		"next_cursor": cursorString(nextID),
+	})
+}
+
+func eventJSONs(events []core.Event) []eventJSON {
 	out := make([]eventJSON, 0, len(events))
 	for _, e := range events {
 		out = append(out, eventJSON{
@@ -54,5 +87,12 @@ func (s *server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			CreatedAt: jsonTime(e.CreatedAt),
 		})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"events": out})
+	return out
+}
+
+func cursorString(id int64) string {
+	if id == 0 {
+		return ""
+	}
+	return strconv.FormatInt(id, 10)
 }

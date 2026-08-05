@@ -3,6 +3,7 @@ package download
 import (
 	"context"
 	"errors"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -57,6 +58,31 @@ func (e *fakeEngine) List(context.Context) ([]core.DownloadStatus, error) {
 		out = append(out, core.DownloadStatus{ID: id, Name: e.name})
 	}
 	return out, nil
+}
+
+func (e *fakeEngine) ListPage(_ context.Context, limit int, before core.DownloadID) ([]core.DownloadStatus, core.DownloadID, error) {
+	if e.listErr != nil {
+		return nil, "", e.listErr
+	}
+	ids := make([]core.DownloadID, 0, len(e.holds))
+	for id := range e.holds {
+		ids = append(ids, id)
+	}
+	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	start := 0
+	for start < len(ids) && before != "" && ids[start] <= before {
+		start++
+	}
+	end := min(start+limit, len(ids))
+	out := make([]core.DownloadStatus, 0, end-start)
+	for _, id := range ids[start:end] {
+		out = append(out, core.DownloadStatus{ID: id, Name: e.name})
+	}
+	next := core.DownloadID("")
+	if end < len(ids) {
+		next = ids[end-1]
+	}
+	return out, next, nil
 }
 
 func (e *fakeEngine) Pause(_ context.Context, id core.DownloadID) error {
@@ -769,6 +795,7 @@ func TestRouterLeavesEmbeddedHandlesBare(t *testing.T) {
 	ctx := context.Background()
 	embedded := newFakeEngine(EngineName, "hash_embedded")
 	client := newFakeEngine("nzbget", "5")
+
 	router := NewRouter(staticTable(
 		Route{Name: EngineName, Protocol: core.ProtocolTorrent, Engine: embedded},
 		Route{Name: "nzbget", Protocol: core.ProtocolUsenet, Engine: client, IDPrefix: "c1."},
@@ -792,4 +819,47 @@ func TestRouterLeavesEmbeddedHandlesBare(t *testing.T) {
 	if len(embedded.paused) != 1 || embedded.paused[0] != "hash_embedded" {
 		t.Fatalf("embedded paused %v, want its own untouched handle", embedded.paused)
 	}
+}
+
+func TestRouterListPageMergesRoutesWithOpaqueBoundary(t *testing.T) {
+	a := newFakeEngine("a", "1", "2", "3")
+	z := newFakeEngine("z", "1")
+	r := NewRouter(staticTable(
+		Route{Name: "z", IDPrefix: "z-", Engine: z},
+		Route{Name: "a", IDPrefix: "a-", Engine: a},
+	))
+
+	first, cursor, supported, err := r.ListPage(context.Background(), 2, "")
+	if err != nil || !supported {
+		t.Fatalf("first page = %v, %v, supported=%v", first, err, supported)
+	}
+	if got := []core.DownloadID{first[0].ID, first[1].ID}; !equalDownloadIDs(got, []core.DownloadID{"a-1", "a-2"}) {
+		t.Fatalf("first page IDs = %v", got)
+	}
+	if cursor == "" {
+		t.Fatal("first page returned no continuation cursor")
+	}
+
+	second, next, supported, err := r.ListPage(context.Background(), 2, cursor)
+	if err != nil || !supported {
+		t.Fatalf("second page = %v, %v, supported=%v", second, err, supported)
+	}
+	if got := []core.DownloadID{second[0].ID, second[1].ID}; !equalDownloadIDs(got, []core.DownloadID{"a-3", "z-1"}) {
+		t.Fatalf("second page IDs = %v", got)
+	}
+	if next != "" {
+		t.Fatalf("second page cursor = %q, want exhausted", next)
+	}
+}
+
+func equalDownloadIDs(a, b []core.DownloadID) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

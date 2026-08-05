@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"testing"
 
 	"github.com/watzon/caravan/internal/clients"
@@ -67,6 +68,69 @@ func TestListDownloadsMergesEngineAndStore(t *testing.T) {
 	// A download the engine knows about and Caravan does not is still shown.
 	if body.Downloads[1].ID != "orphan" || body.Downloads[1].GrabID != 0 || body.Downloads[1].Engine != "stub" {
 		t.Fatalf("orphan = %+v, want it surfaced", body.Downloads[1])
+	}
+}
+
+func TestListDownloadsUsesStableCursorPages(t *testing.T) {
+	h, st, engine, _ := newAcquisitionServer(t)
+	for _, id := range []core.DownloadID{"a", "b", "c"} {
+		storeDownload(t, st, id, string(id))
+		engine.statuses = append(engine.statuses, core.DownloadStatus{ID: id, Name: string(id), State: core.DownloadDownloading, Engine: "stub"})
+	}
+	engine.statuses = append(engine.statuses, core.DownloadStatus{ID: "orphan", Name: "orphan", Engine: "stub"})
+
+	var all []string
+	cursor := ""
+	for page := 0; page < 3; page++ {
+		path := "/api/v1/downloads?limit=2"
+		if cursor != "" {
+			path += "&cursor=" + url.QueryEscape(cursor)
+		}
+		rec := do(t, h, http.MethodGet, path, "")
+		wantStatus(t, rec, http.StatusOK)
+		var body struct {
+			Downloads []downloadJSON `json:"downloads"`
+			Next      string         `json:"next_cursor"`
+		}
+		decodeBody(t, rec, &body)
+		if len(body.Downloads) == 0 || len(body.Downloads) > 2 {
+			t.Fatalf("page %d downloads = %+v, want one or two rows", page, body.Downloads)
+		}
+		for _, row := range body.Downloads {
+			all = append(all, row.ID)
+		}
+		cursor = body.Next
+		if cursor == "" {
+			break
+		}
+	}
+	if len(all) != 4 {
+		t.Fatalf("paged downloads = %v, want three stored rows and one orphan", all)
+	}
+	seen := map[string]bool{}
+	for _, id := range all {
+		if seen[id] {
+			t.Fatalf("paged downloads repeated %q: %v", id, all)
+		}
+		seen[id] = true
+	}
+	for _, id := range []string{"a", "b", "c", "orphan"} {
+		if !seen[id] {
+			t.Errorf("paged downloads omitted %q: %v", id, all)
+		}
+	}
+}
+
+func TestListDownloadsRejectsInvalidCursorParameters(t *testing.T) {
+	h, _, _, _ := newAcquisitionServer(t)
+	for _, path := range []string{
+		"/api/v1/downloads?limit=0",
+		"/api/v1/downloads?limit=nope",
+		"/api/v1/downloads?cursor=stored:nope",
+		"/api/v1/downloads?cursor=orphan:bad",
+	} {
+		rec := do(t, h, http.MethodGet, path, "")
+		wantStatus(t, rec, http.StatusBadRequest)
 	}
 }
 

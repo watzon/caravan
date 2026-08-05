@@ -107,6 +107,43 @@ func (s *Store) ListDownloads(ctx context.Context) ([]core.Download, error) {
 	return out, nil
 }
 
+// ListDownloadsPage returns one persisted download page, newest first.
+func (s *Store) ListDownloadsPage(ctx context.Context, limit int, beforeID int64) ([]core.Download, int64, error) {
+	if limit <= 0 {
+		return []core.Download{}, 0, nil
+	}
+	query := "SELECT " + downloadColumns + " FROM downloads"
+	args := []any{}
+	if beforeID > 0 {
+		query += " WHERE id < ?"
+		args = append(args, beforeID)
+	}
+	query += " ORDER BY id DESC LIMIT ?"
+	args = append(args, limit+1)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("store: list download page: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]core.Download, 0, limit)
+	for rows.Next() {
+		d, err := scanDownload(rows)
+		if err != nil {
+			return nil, 0, fmt.Errorf("store: scan download page: %w", err)
+		}
+		if len(out) < limit {
+			out = append(out, *d)
+			continue
+		}
+		return out, out[len(out)-1].ID, nil
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("store: list download page: %w", err)
+	}
+	return out, 0, nil
+}
+
 // ListDownloadsForGrab returns the downloads a grab started. Usually zero or
 // one row; it is what an item removal walks to withdraw the in-flight work.
 func (s *Store) ListDownloadsForGrab(ctx context.Context, grabID int64) ([]core.Download, error) {
@@ -127,6 +164,39 @@ func (s *Store) ListDownloadsForGrab(ctx context.Context, grabID int64) ([]core.
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("store: list downloads for grab %d: %w", grabID, err)
+	}
+	return out, nil
+}
+
+// ListDownloadsForGrabs returns downloads linked to the supplied grab IDs,
+// newest first.
+func (s *Store) ListDownloadsForGrabs(ctx context.Context, grabIDs []int64) ([]core.Download, error) {
+	if len(grabIDs) == 0 {
+		return []core.Download{}, nil
+	}
+
+	args := make([]any, 0, len(grabIDs))
+	for _, id := range grabIDs {
+		args = append(args, id)
+	}
+	query := "SELECT " + downloadColumns + " FROM downloads WHERE grab_id IN (" +
+		placeholders(len(grabIDs)) + ") ORDER BY id DESC"
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: list downloads for grabs: %w", err)
+	}
+	defer rows.Close()
+
+	out := []core.Download{}
+	for rows.Next() {
+		d, err := scanDownload(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: scan download for grabs: %w", err)
+		}
+		out = append(out, *d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list downloads for grabs: %w", err)
 	}
 	return out, nil
 }

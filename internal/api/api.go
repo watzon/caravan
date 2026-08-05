@@ -131,7 +131,7 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 
 	// Registered without the /api/v1 prefix and mounted below, so the prefix
 	// lives in exactly one place.
-	api := http.NewServeMux()
+	api := newPolicyMux()
 	api.HandleFunc("GET /settings", s.handleGetSettings)
 	api.HandleFunc("PUT /settings", s.handlePutSettings)
 	api.HandleFunc("POST /settings/apikey", s.handleGenerateAPIKey)
@@ -305,7 +305,7 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	// admin-only by being absent from it, which is the same rule the whole API
 	// runs on. Adding a route here without adding it there closes it to
 	// members, never opens it — the failure direction that is safe.
-	adult := http.NewServeMux()
+	adult := newPolicyMux()
 	adult.HandleFunc("GET /adult/sites", s.handleListSites)
 	adult.HandleFunc("POST /adult/sites", s.handleAddSite)
 	adult.HandleFunc("GET /adult/sites/{id}", s.handleGetSite)

@@ -357,75 +357,8 @@ func currentUser(r *http.Request) requestUser {
 // not here because it never reaches this function — it is exempt from
 // authentication entirely, for televisions (see authExempt).
 func memberAllowed(method, path string) bool {
-	switch method + " " + path {
-	case http.MethodGet + " /discover",
-		http.MethodGet + " /discover/browse",
-		// The filtered scopes and the controls that drive them (PLAN phase 12).
-		// Finding something specific is exactly a member's job, so the filter
-		// rail is theirs too; every one of these is read-only against the
-		// metadata provider and touches no library row.
-		http.MethodGet + " /discover/movies",
-		http.MethodGet + " /discover/series",
-		http.MethodGet + " /discover/people",
-		http.MethodGet + " /discover/companies",
-		http.MethodGet + " /discover/keywords",
-		http.MethodGet + " /discover/genres",
-		http.MethodGet + " /requests",
-		http.MethodPost + " /requests",
-		http.MethodGet + " /auth/me",
-		http.MethodPost + " /auth/login",
-		http.MethodPost + " /auth/logout",
-		// Changing your own password. It lives under /settings for historical
-		// reasons — it is the one settings route a member may reach — and
-		// handleSetPassword only ever touches the caller's own account.
-		http.MethodPost + " /settings/password",
-		// The adult module's read surface (PLAN phase 9 task 7). Naming a route
-		// here does NOT grant it: requireAuth runs first and only decides that
-		// a member may reach the path at all, and requireAdult then answers 404
-		// unless the server-wide switch is on AND this account was granted. So
-		// these three are "a member with the grant may see the Adult screens",
-		// and every other /adult route stays admin-only.
-		//
-		// The listing is also required in the other direction: requireAuth runs
-		// BEFORE requireAdult, so a granted member hitting an /adult path that
-		// is not named here is turned away with the generic 403 and never
-		// reaches the gate at all.
-		// Deliberately absent from this list, and therefore admin-only:
-		// POST /adult/sites (adding to the library is a decision), and the
-		// member-access card under /adult/users (handing out grants is the
-		// admin's job, and the roster is not a member's to read).
-		http.MethodGet + " /adult/sites",
-		http.MethodGet + " /adult/discover",
-		// The scene filter rail's three typeaheads, which are part of the
-		// browse screen above rather than surfaces of their own: they read the
-		// provider's site, performer and tag vocabulary and touch no library
-		// row. /adult/search is the Site pill's — the widening ladder only
-		// appears once a site is picked, so without it PLAN phase 12's "this
-		// whole network's scenes with these two tags" is unreachable for the
-		// members the rail is for, and a control that 403s is worse than no
-		// control. Reading the provider's site names is not adding one: that
-		// is POST /adult/sites, which stays above.
-		http.MethodGet + " /adult/search",
-
-		http.MethodGet + " /adult/performers",
-		http.MethodGet + " /adult/tags":
-		return true
-	}
-
-	seg := pathSegments(path)
-	switch {
-	// GET /discover/{type}/{id}: one title's detail screen.
-	case method == http.MethodGet && len(seg) == 3 && seg[0] == "discover":
-		return true
-	// GET /adult/sites/{id}: one site's page.
-	case method == http.MethodGet && len(seg) == 3 && seg[0] == "adult" && seg[1] == "sites":
-		return true
-	// DELETE /requests/{id}: cancel my request. The handler is what insists on
-	// "mine" and "still pending"; the router only knows the shape.
-	case method == http.MethodDelete && len(seg) == 2 && seg[0] == "requests":
-		return true
-	}
-	return false
+	policy, ok := policyForRequest(method, path)
+	return ok && policy.Member
 }
 
 // pathSegments splits a routed path into its segments: "/requests/12" becomes
@@ -453,9 +386,10 @@ func pathSegments(path string) []string {
 //     under the storage root, so what leaks is library artwork — never a media
 //     file, never a path outside the root.
 func authExempt(path string) bool {
-	switch path {
-	case "/auth/login", "/auth/logout", "/calendar.ics":
-		return true
+	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete} {
+		if policy, ok := policyForRequest(method, path); ok && policy.Access == routeExempt {
+			return true
+		}
 	}
 	return strings.HasPrefix(path, "/images/")
 }

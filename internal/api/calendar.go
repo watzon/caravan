@@ -195,7 +195,15 @@ func (s *server) calendarEntries(ctx context.Context, adultVisible bool, start, 
 		return nil, err
 	}
 
-	downloadingMovies, downloadingEpisodes, err := s.downloadingCalendarItems(ctx)
+	movieIDs := make([]int64, 0, len(movies))
+	for _, movie := range movies {
+		movieIDs = append(movieIDs, movie.Movie.ID)
+	}
+	episodeIDs := make([]int64, 0, len(episodes))
+	for _, episode := range episodes {
+		episodeIDs = append(episodeIDs, episode.Episode.ID)
+	}
+	downloadingMovies, downloadingEpisodes, err := s.downloadingCalendarItems(ctx, movieIDs, episodeIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -268,12 +276,16 @@ func calendarStatus(hasFile, downloading bool, date, today time.Time) string {
 // downloadingCalendarItems translates durable grab and download history into
 // the small status predicate the calendar needs. A freshly inserted grab has
 // no download row briefly, and must still render as downloading.
-func (s *server) downloadingCalendarItems(ctx context.Context) (map[int64]bool, map[int64]bool, error) {
-	grabs, err := s.st.ListGrabs(ctx, 0)
+func (s *server) downloadingCalendarItems(ctx context.Context, movieIDs, episodeIDs []int64) (map[int64]bool, map[int64]bool, error) {
+	grabs, err := s.st.ListCalendarGrabs(ctx, movieIDs, episodeIDs)
 	if err != nil {
 		return nil, nil, err
 	}
-	downloads, err := s.st.ListDownloads(ctx)
+	grabIDs := make([]int64, 0, len(grabs))
+	for _, grab := range grabs {
+		grabIDs = append(grabIDs, grab.GrabID)
+	}
+	downloads, err := s.st.ListDownloadsForGrabs(ctx, grabIDs)
 	if err != nil {
 		return nil, nil, err
 	}
