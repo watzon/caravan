@@ -25,8 +25,12 @@ func TestIndexerCRUD(t *testing.T) {
 	}
 
 	rec = do(t, h, http.MethodPost, "/api/v1/indexers",
-		`{"name":"nyaa","url":"https://nyaa.example/api/","api_key":"k","type":"torznab","categories":[5000]}`)
+		`{"name":"nyaa","url":"https://nyaa.example/api/","api_key":"index-secret","type":"torznab","categories":[5000]}`)
 	wantStatus(t, rec, http.StatusCreated)
+	if strings.Contains(rec.Body.String(), "index-secret") ||
+		strings.Contains(rec.Body.String(), `"api_key"`) {
+		t.Fatalf("indexer response leaked credential: %s", rec.Body.String())
+	}
 	var created indexerJSON
 	decodeBody(t, rec, &created)
 	if created.ID == 0 {
@@ -35,27 +39,85 @@ func TestIndexerCRUD(t *testing.T) {
 	if created.URL != "https://nyaa.example/api" {
 		t.Fatalf("url = %q, want the trailing slash trimmed", created.URL)
 	}
-	if !created.Enabled {
-		t.Fatalf("enabled = false, want an omitted flag to mean enabled")
+	if !created.Enabled || !created.HasAPIKey {
+		t.Fatalf("created indexer = %+v, want enabled with a stored-key flag", created)
 	}
-	if created.APIKey != "k" || created.Type != core.IndexerTypeTorznab || len(created.Categories) != 1 {
+	if created.Type != core.IndexerTypeTorznab || len(created.Categories) != 1 {
 		t.Fatalf("created indexer = %+v, want the submitted configuration", created)
 	}
 
 	rec = do(t, h, http.MethodGet, "/api/v1/indexers", "")
 	wantStatus(t, rec, http.StatusOK)
+	if strings.Contains(rec.Body.String(), "index-secret") ||
+		strings.Contains(rec.Body.String(), `"api_key"`) {
+		t.Fatalf("indexer list leaked credential: %s", rec.Body.String())
+	}
 	decodeBody(t, rec, &list)
-	if len(list.Indexers) != 1 || list.Indexers[0].Name != "nyaa" {
-		t.Fatalf("indexers = %+v, want the one just created", list.Indexers)
+	if len(list.Indexers) != 1 || list.Indexers[0].Name != "nyaa" || !list.Indexers[0].HasAPIKey {
+		t.Fatalf("indexers = %+v, want the one row with a stored-key flag", list.Indexers)
 	}
 
+	// An omitted key preserves the stored value.
 	rec = do(t, h, http.MethodPut, "/api/v1/indexers/"+itoa(created.ID),
-		`{"name":"nyaa","url":"https://nyaa.example/api","api_key":"k2","type":"newznab","enabled":false}`)
+		`{"name":"nyaa","url":"https://nyaa.example/api","type":"newznab","enabled":false}`)
 	wantStatus(t, rec, http.StatusOK)
+	if strings.Contains(rec.Body.String(), "index-secret") ||
+		strings.Contains(rec.Body.String(), `"api_key"`) {
+		t.Fatalf("indexer update leaked credential: %s", rec.Body.String())
+	}
 	var updated indexerJSON
 	decodeBody(t, rec, &updated)
-	if updated.ID != created.ID || updated.APIKey != "k2" || updated.Type != core.IndexerTypeNewznab || updated.Enabled {
-		t.Fatalf("updated indexer = %+v, want the replacement configuration", updated)
+	if updated.ID != created.ID || !updated.HasAPIKey || updated.Type != core.IndexerTypeNewznab || updated.Enabled {
+		t.Fatalf("updated indexer = %+v, want replacement fields and preserved key state", updated)
+	}
+	stored, err := st.GetIndexer(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetIndexer after omitted key: %v", err)
+	}
+	if stored.APIKey != "index-secret" {
+		t.Fatalf("stored API key after omitted update = %q, want preserved secret", stored.APIKey)
+	}
+
+	// A non-empty key replaces the stored value.
+	rec = do(t, h, http.MethodPut, "/api/v1/indexers/"+itoa(created.ID),
+		`{"name":"nyaa","url":"https://nyaa.example/api","api_key":"index-secret-2","type":"newznab","enabled":false}`)
+	wantStatus(t, rec, http.StatusOK)
+	if strings.Contains(rec.Body.String(), "index-secret-2") ||
+		strings.Contains(rec.Body.String(), `"api_key"`) {
+		t.Fatalf("indexer replacement leaked credential: %s", rec.Body.String())
+	}
+	var replaced indexerJSON
+	decodeBody(t, rec, &replaced)
+	if !replaced.HasAPIKey {
+		t.Fatalf("replaced indexer = %+v, want has_api_key", replaced)
+	}
+
+	// A rejected update must not mutate the stored credential.
+	rec = do(t, h, http.MethodPut, "/api/v1/indexers/"+itoa(created.ID),
+		`{"name":"nyaa","url":"ftp://bad","api_key":"rejected-secret","type":"newznab"}`)
+	wantStatus(t, rec, http.StatusBadRequest)
+	stored, err = st.GetIndexer(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetIndexer after rejected update: %v", err)
+	}
+	if stored.APIKey != "index-secret-2" {
+		t.Fatalf("stored API key after rejected update = %q, want unchanged", stored.APIKey)
+	}
+
+	// An explicit empty key clears the stored value.
+	rec = do(t, h, http.MethodPut, "/api/v1/indexers/"+itoa(created.ID),
+		`{"name":"nyaa","url":"https://nyaa.example/api","api_key":"","type":"newznab","enabled":false}`)
+	wantStatus(t, rec, http.StatusOK)
+	decodeBody(t, rec, &updated)
+	if updated.HasAPIKey {
+		t.Fatalf("cleared indexer = %+v, want has_api_key false", updated)
+	}
+	stored, err = st.GetIndexer(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetIndexer after clear: %v", err)
+	}
+	if stored.APIKey != "" {
+		t.Fatalf("stored API key after clear = %q, want empty", stored.APIKey)
 	}
 
 	// A disabled indexer keeps its configuration but drops out of search.

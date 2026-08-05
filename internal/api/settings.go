@@ -20,6 +20,7 @@ import (
 // report it. The serving process writes it at startup from the bootstrap
 // config; an unset value reports ModeServer.
 const SettingMode = "mode"
+const settingTMDBAPIKeySet = "tmdb_api_key_set"
 
 // Deployment modes reported by GET /system/status.
 const (
@@ -124,6 +125,10 @@ func (s *server) visibleSettings(r *http.Request) (map[string]string, error) {
 	for key := range hiddenSettings {
 		delete(settings, key)
 	}
+	tmdbSet := settings[store.SettingTMDBAPIKey] != ""
+	delete(settings, store.SettingTMDBAPIKey)
+	settings[settingTMDBAPIKeySet] = strconv.FormatBool(tmdbSet)
+
 	visible, err := s.adultVisible(r)
 	if err != nil {
 		return nil, err

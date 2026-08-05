@@ -37,6 +37,7 @@ import type {
   IndexerCategory,
   IndexerInput,
   JellyfinConfig,
+  JellyfinConfigInput,
   JellyfinTestResult,
   Job,
   Library,
@@ -512,7 +513,7 @@ export const api = {
   jellyfinConfig: (signal?: AbortSignal) =>
     request<JellyfinConfig>(endpoints.jellyfin(), { signal }),
 
-  saveJellyfinConfig: (body: JellyfinConfig) =>
+  saveJellyfinConfig: (body: JellyfinConfigInput) =>
     request<JellyfinConfig>(endpoints.jellyfin(), { method: 'POST', body }),
 
   /**
@@ -520,7 +521,7 @@ export const api = {
    * before they are saved. Blank fields fall back to what is stored, so `{}`
    * tests the saved configuration.
    */
-  testJellyfin: (body: Partial<Pick<JellyfinConfig, 'url' | 'api_key'>> = {}) =>
+  testJellyfin: (body: Partial<Pick<JellyfinConfigInput, 'url' | 'api_key'>> = {}) =>
     request<JellyfinTestResult>(endpoints.jellyfinTest(), { method: 'POST', body }),
 
   /* ------------------------------------------------------------------------
@@ -670,7 +671,10 @@ export const api = {
    * values rather than a stored id so the picker works while the indexer is
    * still being typed in, before it is saved.
    */
-  indexerCategories: (body: Pick<IndexerInput, 'url' | 'api_key' | 'type'>, signal?: AbortSignal) =>
+  indexerCategories: (
+    body: Pick<IndexerInput, 'url' | 'type'> & { api_key: string },
+    signal?: AbortSignal,
+  ) =>
     request<{ categories: IndexerCategory[] }>(endpoints.indexerCategories(), {
       method: 'POST',
       body,

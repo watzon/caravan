@@ -9,18 +9,13 @@ import (
 	"github.com/watzon/caravan/internal/core"
 )
 
-// indexerJSON is a configured search source (SPEC §5.1).
-//
-// The API key is echoed back, as GET /settings does with the TMDB key: the API
-// is single-user and unauthenticated until phase 5, and the settings screen has
-// to be able to render the value the user typed. SPEC §12's rule is that
-// credentials stay out of the logs and out of caravan.yaml, which the access
-// log (path only, never the query string) and the store both honor.
+// indexerJSON is a configured search source (SPEC §5.1). Stored credentials
+// are write-only; HasAPIKey tells the editor whether one is already present.
 type indexerJSON struct {
 	ID         int64  `json:"id"`
 	Name       string `json:"name"`
 	URL        string `json:"url"`
-	APIKey     string `json:"api_key"`
+	HasAPIKey  bool   `json:"has_api_key"`
 	Type       string `json:"type"`
 	Categories []int  `json:"categories"`
 	Enabled    bool   `json:"enabled"`
@@ -31,7 +26,7 @@ func indexerDTO(c core.IndexerConfig) indexerJSON {
 		ID:         c.ID,
 		Name:       c.Name,
 		URL:        c.URL,
-		APIKey:     c.APIKey,
+		HasAPIKey:  c.APIKey != "",
 		Type:       c.Type,
 		Categories: categoryList(c.Categories),
 		Enabled:    c.Enabled,
@@ -39,24 +34,20 @@ func indexerDTO(c core.IndexerConfig) indexerJSON {
 }
 
 // indexerRequest is the body of POST /indexers and PUT /indexers/{id}. PUT
-// replaces the whole configuration rather than patching it, which is why every
-// field is read on both.
-//
-// Enabled is a pointer so an omitted flag means "enabled": a user who just
-// added an indexer wants it searched, and requiring the flag would make the
-// common request longer than it needs to be.
+// replaces the whole configuration apart from the write-only credential:
+// omitted or null keeps the stored key, while an explicit empty string clears it.
 type indexerRequest struct {
-	Name       string `json:"name"`
-	URL        string `json:"url"`
-	APIKey     string `json:"api_key"`
-	Type       string `json:"type"`
-	Categories []int  `json:"categories"`
-	Enabled    *bool  `json:"enabled"`
+	Name       string  `json:"name"`
+	URL        string  `json:"url"`
+	APIKey     *string `json:"api_key"`
+	Type       string  `json:"type"`
+	Categories []int   `json:"categories"`
+	Enabled    *bool   `json:"enabled"`
 }
 
 // config validates the body and turns it into a store-ready configuration. The
 // returned message is empty when the body is valid.
-func (b indexerRequest) config() (core.IndexerConfig, string) {
+func (b indexerRequest) config(apiKey string) (core.IndexerConfig, string) {
 	name := strings.TrimSpace(b.Name)
 	if name == "" {
 		return core.IndexerConfig{}, "name is required"
@@ -88,7 +79,7 @@ func (b indexerRequest) config() (core.IndexerConfig, string) {
 	return core.IndexerConfig{
 		Name:       name,
 		URL:        strings.TrimRight(raw, "/"),
-		APIKey:     strings.TrimSpace(b.APIKey),
+		APIKey:     strings.TrimSpace(apiKey),
 		Type:       b.Type,
 		Categories: b.Categories,
 		Enabled:    enabled,
@@ -114,7 +105,11 @@ func (s *server) handleCreateIndexer(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	cfg, msg := body.config()
+	apiKey := ""
+	if body.APIKey != nil {
+		apiKey = *body.APIKey
+	}
+	cfg, msg := body.config(apiKey)
 	if msg != "" {
 		writeError(w, http.StatusBadRequest, msg)
 		return
@@ -140,19 +135,25 @@ func (s *server) handleUpdateIndexer(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	cfg, msg := body.config()
+	ctx := r.Context()
+
+	// Read first so updating an indexer that never existed is a 404 rather than
+	// a silent insert, and so an omitted credential can preserve the stored one.
+	stored, err := s.st.GetIndexer(ctx, id)
+	if err != nil {
+		s.writeStoreError(w, "get indexer", err)
+		return
+	}
+	apiKey := stored.APIKey
+	if body.APIKey != nil {
+		apiKey = *body.APIKey
+	}
+	cfg, msg := body.config(apiKey)
 	if msg != "" {
 		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
-	ctx := r.Context()
 
-	// Read first so updating an indexer that never existed is a 404 rather than
-	// a silent insert.
-	if _, err := s.st.GetIndexer(ctx, id); err != nil {
-		s.writeStoreError(w, "get indexer", err)
-		return
-	}
 	if !s.indexerNameFree(ctx, w, cfg.Name, id) {
 		return
 	}
@@ -230,7 +231,7 @@ func (s *server) handleIndexerCategories(w http.ResponseWriter, r *http.Request)
 	if strings.TrimSpace(body.Name) == "" {
 		body.Name = "indexer"
 	}
-	cfg, problem := body.config()
+	cfg, problem := body.config("")
 	if problem != "" {
 		writeError(w, http.StatusBadRequest, problem)
 		return

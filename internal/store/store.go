@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -34,6 +35,10 @@ type Store struct {
 //
 // The returned Store must be closed with Close.
 func Open(path string) (*Store, error) {
+	if err := hardenSQLiteArtifacts(path, true); err != nil {
+		return nil, err
+	}
+
 	db, err := sql.Open("sqlite", dsn(path))
 	if err != nil {
 		return nil, fmt.Errorf("store: open %s: %w", path, err)
@@ -54,7 +59,36 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
+	if err := hardenSQLiteArtifacts(path, false); err != nil {
+		db.Close()
+		return nil, err
+	}
 	return s, nil
+}
+
+// hardenSQLiteArtifacts creates the main database with a private mode and
+// repairs the main database and SQLite's WAL/SHM sidecars on every open.
+func hardenSQLiteArtifacts(path string, createMain bool) error {
+	if createMain {
+		file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+		if err != nil {
+			return fmt.Errorf("store: create database %s: %w", path, err)
+		}
+		if err := file.Close(); err != nil {
+			return fmt.Errorf("store: close database bootstrap %s: %w", path, err)
+		}
+	}
+
+	if err := os.Chmod(path, 0o600); err != nil {
+		return fmt.Errorf("store: chmod database %s: %w", path, err)
+	}
+	for _, suffix := range []string{"-wal", "-shm"} {
+		sidecar := path + suffix
+		if err := os.Chmod(sidecar, 0o600); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("store: chmod SQLite sidecar %s: %w", sidecar, err)
+		}
+	}
+	return nil
 }
 
 // dsn builds the modernc.org/sqlite connection string. The pragmas must travel
