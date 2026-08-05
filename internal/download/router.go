@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/watzon/caravan/internal/core"
 )
@@ -257,23 +258,37 @@ func (r *Router) List(ctx context.Context) ([]core.DownloadStatus, error) {
 	if err != nil {
 		return nil, err
 	}
+	type pollResult struct {
+		statuses []core.DownloadStatus
+		err      error
+	}
+	results := make([]pollResult, len(routes))
+	var wg sync.WaitGroup
+	for i := range routes {
+		wg.Go(func() {
+			statuses, err := routes[i].Engine.List(ctx)
+			results[i] = pollResult{statuses: statuses, err: err}
+		})
+	}
+	wg.Wait()
+
 	out := []core.DownloadStatus{}
 	var failures []error
 	ok := false
-	for _, route := range routes {
-		statuses, err := route.Engine.List(ctx)
+	for i, result := range results {
+		route := routes[i]
 		// List is the poll: it runs every watcher tick against every engine,
 		// which makes it the one operation whose success or failure is a fair
 		// reading of whether the client is up.
 		if route.Report != nil {
-			route.Report(err)
+			route.Report(result.err)
 		}
-		if err != nil {
-			failures = append(failures, fmt.Errorf("%s: %w", route.Name, err))
+		if result.err != nil {
+			failures = append(failures, fmt.Errorf("%s: %w", route.Name, result.err))
 			continue
 		}
 		ok = true
-		for _, status := range statuses {
+		for _, status := range result.statuses {
 			status.Engine = route.Name
 			status.ID = route.qualify(status.ID)
 			if route.gated() {

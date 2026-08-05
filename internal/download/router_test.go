@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/watzon/caravan/internal/core"
 )
@@ -77,6 +79,102 @@ func (e *fakeEngine) Remove(_ context.Context, id core.DownloadID, _ bool) error
 }
 
 func (e *fakeEngine) Close() error { return nil }
+
+type pollActivity struct {
+	mu      sync.Mutex
+	active  int
+	maximum int
+}
+
+func (a *pollActivity) begin() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.active++
+	if a.active > a.maximum {
+		a.maximum = a.active
+	}
+}
+
+func (a *pollActivity) end() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.active--
+}
+
+func (a *pollActivity) max() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.maximum
+}
+
+type controlledListEngine struct {
+	*fakeEngine
+	entered   chan<- string
+	completed chan<- string
+	release   <-chan struct{}
+	statuses  []core.DownloadStatus
+	listErr   error
+	activity  *pollActivity
+}
+
+func (e *controlledListEngine) List(ctx context.Context) ([]core.DownloadStatus, error) {
+	if e.activity != nil {
+		e.activity.begin()
+		defer e.activity.end()
+	}
+	if e.entered != nil {
+		e.entered <- e.name
+	}
+	if e.release != nil {
+		select {
+		case <-e.release:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	if e.completed != nil {
+		e.completed <- e.name
+	}
+	return e.statuses, e.listErr
+}
+
+type listCallResult struct {
+	statuses []core.DownloadStatus
+	err      error
+}
+
+func awaitListCall(t *testing.T, result <-chan listCallResult) listCallResult {
+	t.Helper()
+	select {
+	case got := <-result:
+		return got
+	case <-time.After(2 * time.Second):
+		t.Fatal("Router.List did not return")
+		return listCallResult{}
+	}
+}
+
+func awaitString(t *testing.T, values <-chan string) string {
+	t.Helper()
+	select {
+	case value := <-values:
+		return value
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for poll signal")
+		return ""
+	}
+}
+
+func awaitError(t *testing.T, values <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-values:
+		return err
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for reported poll error")
+		return nil
+	}
+}
 
 // staticTable is a download.Table over a fixed set of routes.
 func staticTable(routes ...Route) Table {
@@ -273,6 +371,246 @@ func TestRouterListSurvivesAnUnreachableClient(t *testing.T) {
 	embedded.listErr = errors.New("engine closed")
 	if _, err := router.List(ctx); err == nil {
 		t.Error("List with every client down = nil error, want a failure")
+	}
+}
+
+func TestRouterListPollsConcurrently(t *testing.T) {
+	const routeCount = 3
+	entered := make(chan string, routeCount)
+	release := make(chan struct{})
+	activity := &pollActivity{}
+	routes := make([]Route, 0, routeCount)
+	names := []string{"first", "second", "third"}
+	for i, name := range names {
+		id := core.DownloadID(name)
+		routes = append(routes, Route{
+			Name: name,
+			Engine: &controlledListEngine{
+				fakeEngine: newFakeEngine(name),
+				entered:    entered,
+				release:    release,
+				statuses:   []core.DownloadStatus{{ID: id}},
+				activity:   activity,
+			},
+			IDPrefix: string(rune('a'+i)) + ".",
+		})
+	}
+	router := NewRouter(staticTable(routes...))
+	result := make(chan listCallResult, 1)
+	go func() {
+		statuses, err := router.List(context.Background())
+		result <- listCallResult{statuses: statuses, err: err}
+	}()
+
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	seen := make(map[string]int, routeCount)
+	for i := 0; i < routeCount; i++ {
+		select {
+		case name := <-entered:
+			seen[name]++
+		case <-timer.C:
+			close(release)
+			awaitListCall(t, result)
+			t.Fatalf("only %d of %d route polls started before release", i, routeCount)
+		}
+	}
+	for _, name := range names {
+		if seen[name] != 1 {
+			t.Fatalf("route %q entered %d times, want once", name, seen[name])
+		}
+	}
+	close(release)
+
+	got := awaitListCall(t, result)
+	if got.err != nil {
+		t.Fatalf("List: %v", got.err)
+	}
+	if len(got.statuses) != routeCount {
+		t.Fatalf("List returned %d statuses, want %d", len(got.statuses), routeCount)
+	}
+	for i, status := range got.statuses {
+		wantID := core.DownloadID(string(rune('a'+i)) + "." + names[i])
+		if status.ID != wantID || status.Engine != names[i] {
+			t.Errorf("status %d = %+v, want id %q from %q", i, status, wantID, names[i])
+		}
+	}
+	if activity.max() <= 1 {
+		t.Errorf("maximum active polls = %d, want greater than 1", activity.max())
+	}
+}
+
+func TestRouterListPreservesRouteOrder(t *testing.T) {
+	t.Run("statuses", func(t *testing.T) {
+		entered := make(chan string, 3)
+		completed := make(chan string, 3)
+		releases := []chan struct{}{make(chan struct{}), make(chan struct{}), make(chan struct{})}
+		names := []string{"first", "second", "third"}
+		routes := make([]Route, 0, len(names))
+		for i, name := range names {
+			routes = append(routes, Route{
+				Name: name,
+				Engine: &controlledListEngine{
+					fakeEngine: newFakeEngine(name),
+					entered:    entered,
+					completed:  completed,
+					release:    releases[i],
+					statuses:   []core.DownloadStatus{{ID: "item"}},
+				},
+				IDPrefix: string(rune('a'+i)) + ".",
+			})
+		}
+		router := NewRouter(staticTable(routes...))
+		result := make(chan listCallResult, 1)
+		go func() {
+			statuses, err := router.List(context.Background())
+			result <- listCallResult{statuses: statuses, err: err}
+		}()
+
+		for range routes {
+			awaitString(t, entered)
+		}
+		for i := len(releases) - 1; i >= 0; i-- {
+			close(releases[i])
+			if got := awaitString(t, completed); got != names[i] {
+				t.Fatalf("completed route = %q, want %q", got, names[i])
+			}
+		}
+
+		got := awaitListCall(t, result)
+		if got.err != nil {
+			t.Fatalf("List: %v", got.err)
+		}
+		wantIDs := []core.DownloadID{"a.item", "b.item", "c.item"}
+		if len(got.statuses) != len(wantIDs) {
+			t.Fatalf("List returned %d statuses, want %d", len(got.statuses), len(wantIDs))
+		}
+		for i, status := range got.statuses {
+			if status.ID != wantIDs[i] || status.Engine != names[i] {
+				t.Errorf("status %d = %+v, want id %q from %q", i, status, wantIDs[i], names[i])
+			}
+		}
+	})
+
+	t.Run("errors", func(t *testing.T) {
+		entered := make(chan string, 3)
+		completed := make(chan string, 3)
+		releases := []chan struct{}{make(chan struct{}), make(chan struct{}), make(chan struct{})}
+		names := []string{"first", "second", "third"}
+		routes := make([]Route, 0, len(names))
+		for i, name := range names {
+			routes = append(routes, Route{
+				Name: name,
+				Engine: &controlledListEngine{
+					fakeEngine: newFakeEngine(name),
+					entered:    entered,
+					completed:  completed,
+					release:    releases[i],
+					listErr:    errors.New(name + " failed"),
+				},
+			})
+		}
+		router := NewRouter(staticTable(routes...))
+		result := make(chan listCallResult, 1)
+		go func() {
+			statuses, err := router.List(context.Background())
+			result <- listCallResult{statuses: statuses, err: err}
+		}()
+
+		for range routes {
+			awaitString(t, entered)
+		}
+		for i := len(releases) - 1; i >= 0; i-- {
+			close(releases[i])
+			if got := awaitString(t, completed); got != names[i] {
+				t.Fatalf("completed route = %q, want %q", got, names[i])
+			}
+		}
+
+		got := awaitListCall(t, result)
+		if got.err == nil {
+			t.Fatal("List with every route failed = nil error")
+		}
+		message := got.err.Error()
+		first := strings.Index(message, "first: first failed")
+		second := strings.Index(message, "second: second failed")
+		third := strings.Index(message, "third: third failed")
+		if first < 0 || second <= first || third <= second {
+			t.Errorf("joined error order = %q, want first, second, third", message)
+		}
+	})
+}
+
+func TestRouterListHonorsCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	entered := make(chan string, 1)
+	reported := make(chan error, 2)
+	router := NewRouter(staticTable(Route{
+		Name: "blocked",
+		Engine: &controlledListEngine{
+			fakeEngine: newFakeEngine("blocked"),
+			entered:    entered,
+			release:    make(chan struct{}),
+		},
+		Report: func(err error) { reported <- err },
+	}))
+	result := make(chan listCallResult, 1)
+	go func() {
+		statuses, err := router.List(ctx)
+		result <- listCallResult{statuses: statuses, err: err}
+	}()
+
+	awaitString(t, entered)
+	cancel()
+	got := awaitListCall(t, result)
+	if !errors.Is(got.err, context.Canceled) {
+		t.Fatalf("List error = %v, want context cancellation", got.err)
+	}
+	if err := awaitError(t, reported); !errors.Is(err, context.Canceled) {
+		t.Fatalf("reported error = %v, want context cancellation", err)
+	}
+	select {
+	case err := <-reported:
+		t.Fatalf("Report called more than once; extra error %v", err)
+	default:
+	}
+}
+
+func TestRouterListReturnsPartialResultsAfterCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	entered := make(chan string, 1)
+	reported := make(chan error, 2)
+	blocked := &controlledListEngine{
+		fakeEngine: newFakeEngine("blocked"),
+		entered:    entered,
+		release:    make(chan struct{}),
+	}
+	router := NewRouter(staticTable(
+		Route{Name: "healthy", Engine: newFakeEngine("healthy", "ready")},
+		Route{Name: "blocked", Engine: blocked, Report: func(err error) { reported <- err }},
+	))
+	result := make(chan listCallResult, 1)
+	go func() {
+		statuses, err := router.List(ctx)
+		result <- listCallResult{statuses: statuses, err: err}
+	}()
+
+	awaitString(t, entered)
+	cancel()
+	got := awaitListCall(t, result)
+	if got.err != nil {
+		t.Fatalf("List with one successful route: %v", got.err)
+	}
+	if len(got.statuses) != 1 || got.statuses[0].ID != "ready" || got.statuses[0].Engine != "healthy" {
+		t.Fatalf("List = %+v, want healthy route status", got.statuses)
+	}
+	if err := awaitError(t, reported); !errors.Is(err, context.Canceled) {
+		t.Fatalf("reported error = %v, want context cancellation", err)
+	}
+	select {
+	case err := <-reported:
+		t.Fatalf("Report called more than once; extra error %v", err)
+	default:
 	}
 }
 
