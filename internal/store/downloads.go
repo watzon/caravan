@@ -131,6 +131,39 @@ func (s *Store) ListDownloadsForGrab(ctx context.Context, grabID int64) ([]core.
 	return out, nil
 }
 
+// ListDownloadsForGrabs returns downloads linked to the supplied grab IDs,
+// newest first.
+func (s *Store) ListDownloadsForGrabs(ctx context.Context, grabIDs []int64) ([]core.Download, error) {
+	if len(grabIDs) == 0 {
+		return []core.Download{}, nil
+	}
+
+	args := make([]any, 0, len(grabIDs))
+	for _, id := range grabIDs {
+		args = append(args, id)
+	}
+	query := "SELECT " + downloadColumns + " FROM downloads WHERE grab_id IN (" +
+		placeholders(len(grabIDs)) + ") ORDER BY id DESC"
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: list downloads for grabs: %w", err)
+	}
+	defer rows.Close()
+
+	out := []core.Download{}
+	for rows.Next() {
+		d, err := scanDownload(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: scan download for grabs: %w", err)
+		}
+		out = append(out, *d)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list downloads for grabs: %w", err)
+	}
+	return out, nil
+}
+
 // DeleteDownloadByEngineID forgets a download. It removes a row and nothing
 // else: deleting downloaded data is the engine's job, and the library is never
 // touched by a download removal (SPEC §13). Deleting an absent handle is not an

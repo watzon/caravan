@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/watzon/caravan/internal/core"
 )
@@ -139,6 +140,52 @@ func (s *Store) ListGrabs(ctx context.Context, limit int) ([]core.Grab, error) {
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("store: list grabs: %w", err)
+	}
+	return out, nil
+}
+
+// ListCalendarGrabs returns grabbed rows targeting the supplied calendar
+// movie or episode IDs, newest first.
+func (s *Store) ListCalendarGrabs(ctx context.Context, movieIDs, episodeIDs []int64) ([]core.Grab, error) {
+	if len(movieIDs) == 0 && len(episodeIDs) == 0 {
+		return []core.Grab{}, nil
+	}
+
+	targets := make([]string, 0, 2)
+	args := []any{core.GrabStatusGrabbed}
+	if len(movieIDs) > 0 {
+		targets = append(targets, "movie_id IN ("+placeholders(len(movieIDs))+")")
+		for _, id := range movieIDs {
+			args = append(args, id)
+		}
+	}
+	if len(episodeIDs) > 0 {
+		targets = append(targets,
+			"EXISTS (SELECT 1 FROM json_each(grabs.episode_ids) WHERE value IN ("+
+				placeholders(len(episodeIDs))+"))")
+		for _, id := range episodeIDs {
+			args = append(args, id)
+		}
+	}
+
+	query := "SELECT " + grabColumns + " FROM grabs WHERE status = ? AND (" +
+		strings.Join(targets, " OR ") + ") ORDER BY id DESC"
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: list calendar grabs: %w", err)
+	}
+	defer rows.Close()
+
+	out := []core.Grab{}
+	for rows.Next() {
+		g, err := scanGrab(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: scan calendar grab: %w", err)
+		}
+		out = append(out, *g)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list calendar grabs: %w", err)
 	}
 	return out, nil
 }

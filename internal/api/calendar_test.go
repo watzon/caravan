@@ -58,6 +58,17 @@ func TestCalendarMergesEntriesAndAssignsStatuses(t *testing.T) {
 		t.Fatalf("UpsertDownload failed: %v", err)
 	}
 
+	unrelatedMovie := storeCalendarMovie(t, st, "Unrelated History", 2023, today.AddDate(0, 0, -30), true)
+	unrelatedGrab := &core.Grab{GrabInfo: core.GrabInfo{MovieID: unrelatedMovie.ID}}
+	if err := st.InsertGrab(ctx, unrelatedGrab); err != nil {
+		t.Fatalf("InsertGrab unrelated: %v", err)
+	}
+	if err := st.UpsertDownload(ctx, &core.Download{
+		GrabID: unrelatedGrab.GrabID, Engine: "test", EngineID: "unrelated-active", State: core.DownloadQueued,
+	}); err != nil {
+		t.Fatalf("UpsertDownload unrelated: %v", err)
+	}
+
 	start := today.AddDate(0, 0, -7).Format(calendarDateFormat)
 	end := today.AddDate(0, 0, 7).Format(calendarDateFormat)
 	rec := do(t, h, http.MethodGet, "/api/v1/calendar?start="+start+"&end="+end, "")
