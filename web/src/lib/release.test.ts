@@ -89,6 +89,18 @@ describe('releaseScore', () => {
     const clean = release({ parsed: parsed({ quality: '480p', source: 'dvd' }) });
     expect(releaseScore(clean)).toBeGreaterThan(releaseScore(cam));
   });
+
+  it('scores compatible 1080p above incompatible 2160p', () => {
+    const compatible = release({
+      parsed: parsed({ quality: '1080p' }),
+      compatibility: { verdict: 'compatible', reasons: [] },
+    });
+    const incompatible = release({
+      parsed: parsed({ quality: '2160p' }),
+      compatibility: { verdict: 'incompatible', reasons: ['2160p video'] },
+    });
+    expect(releaseScore(compatible)).toBeGreaterThan(releaseScore(incompatible));
+  });
 });
 
 describe('releaseFlags', () => {
@@ -170,5 +182,37 @@ describe('sortReleases', () => {
       release({ guid: 'ok', parsed: parsed({ quality: '720p' }) }),
     ];
     expect(sortReleases(input)[0]?.guid).toBe('ok');
+  });
+
+  it('puts incompatible 2160p after compatible 1080p', () => {
+    const input = [
+      release({
+        guid: 'uhd',
+        parsed: parsed({ quality: '2160p' }),
+        compatibility: { verdict: 'incompatible', reasons: ['2160p video'] },
+      }),
+      release({
+        guid: 'hd',
+        parsed: parsed({ quality: '1080p' }),
+        compatibility: { verdict: 'compatible', reasons: [] },
+      }),
+    ];
+    expect(sortReleases(input).map((r) => r.guid)).toEqual(['hd', 'uhd']);
+  });
+
+  it('keeps 2160p first when both releases are compatible', () => {
+    const input = [
+      release({
+        guid: 'hd',
+        parsed: parsed({ quality: '1080p' }),
+        compatibility: { verdict: 'compatible', reasons: [] },
+      }),
+      release({
+        guid: 'uhd',
+        parsed: parsed({ quality: '2160p' }),
+        compatibility: { verdict: 'compatible', reasons: [] },
+      }),
+    ];
+    expect(sortReleases(input).map((r) => r.guid)).toEqual(['uhd', 'hd']);
   });
 });

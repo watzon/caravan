@@ -10,8 +10,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import AdultSite from './AdultSite.svelte';
 import { CATALOGUING_POLL_MS } from '../adult';
-import type { SessionUser } from '../api/types';
+import type { SessionUser, SystemStatus } from '../api/types';
 import { session } from '../state/session.svelte';
+import { system } from '../state/system.svelte';
 import { clearToasts } from '../state/toast.svelte';
 
 interface Call {
@@ -19,6 +20,19 @@ interface Call {
   method: string;
   body: Record<string, unknown> | null;
 }
+
+const STATUS: SystemStatus = {
+  version: '0.1.0',
+  mode: 'server',
+  storage_root: '/data',
+  schema_version: 14,
+  scanning: false,
+  counts: { movies: 0, series: 0, media_files: 1, unmatched: 0 },
+  disk_free_bytes: 1,
+  disk_total_bytes: 2,
+  engine_health: 'ok',
+  ffmpeg_available: true,
+};
 
 const SITE = {
   id: 7,
@@ -83,7 +97,10 @@ const SITE = {
             release_group: 'GROUP',
             added_at: '2024-01-01T00:00:00Z',
             modified_at: '2024-01-01T00:00:00Z',
-            compatibility: { verdict: 'compatible', reasons: [] },
+            compatibility: {
+              verdict: 'incompatible',
+              reasons: ['HEVC video (profile allows H.264)'],
+            },
           },
         },
         {
@@ -140,8 +157,12 @@ function stubFetch(site: unknown = SITE): void {
   );
 }
 
-async function mountSite(role: 'admin' | 'member' = 'admin'): Promise<HTMLElement> {
+async function mountSite(
+  role: 'admin' | 'member' = 'admin',
+  ffmpeg = true,
+): Promise<HTMLElement> {
   session.user = user(role);
+  system.status = { ...STATUS, ffmpeg_available: ffmpeg };
   host = document.createElement('div');
   document.body.appendChild(host);
   app = mount(AdultSite, { target: host, props: { id: 7 } }) as Record<string, unknown>;
@@ -172,6 +193,7 @@ afterEach(() => {
   app = undefined;
   host = undefined;
   session.user = null;
+  system.status = null;
   clearToasts();
   vi.unstubAllGlobals();
   vi.useRealTimers();
@@ -243,6 +265,43 @@ describe('AdultSite actions', () => {
     expect(host!.textContent).toContain('Shallow Impact');
     expect(links().filter((a) => a.getAttribute('href')?.includes('/scenes/'))).toHaveLength(2);
   });
+
+  it('queues a downloaded scene for conversion', async () => {
+    stubFetch();
+    await mountSite();
+
+    const row = [...host!.querySelectorAll('tr')].find((tr) =>
+      tr.textContent?.includes('Crowd Scene'),
+    );
+    const button = [...row!.querySelectorAll('button')].find((candidate) =>
+      candidate.textContent?.includes('Convert for TV'),
+    );
+    expect(button?.title).toContain('HEVC video');
+
+    button!.click();
+    await vi.waitFor(() => {
+      if (!calls.some((call) => call.url === '/api/v1/convert')) {
+        throw new Error('conversion was not queued');
+      }
+    });
+    const post = calls.find((call) => call.url === '/api/v1/convert');
+    expect(post).toMatchObject({
+      method: 'POST',
+      body: { media_file_id: 99 },
+    });
+    await vi.waitFor(() => {
+      if (!row!.textContent?.includes('In the convert queue')) {
+        throw new Error('conversion action did not enter its queued state');
+      }
+    });
+  });
+
+  it('hides conversion when ffmpeg is unavailable', async () => {
+    stubFetch();
+    await mountSite('admin', false);
+
+    expect(buttonLabelled('Convert for TV')).toBeUndefined();
+  });
 });
 
 describe('AdultSite for a granted member', () => {
@@ -251,6 +310,7 @@ describe('AdultSite for a granted member', () => {
     await mountSite('member');
 
     expect(buttonLabelled('Search monitored')).toBeUndefined();
+    expect(buttonLabelled('Convert for TV')).toBeUndefined();
     expect(hrefs().some((href) => href.includes('/search'))).toBe(false);
     // Nothing was written, and nothing was even asked for beyond the page load.
     expect(calls.every((c) => c.method === 'GET')).toBe(true);

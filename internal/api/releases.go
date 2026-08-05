@@ -62,8 +62,8 @@ type releaseJSON struct {
 	Parsed  parsedJSON `json:"parsed"`
 	Flags   []string   `json:"flags"`
 	// Compatibility is the active TV profile's verdict on the parsed tags
-	// (SPEC §8). It is advisory: a flagged release is still grabbable, and
-	// nothing here changes the ordering.
+	// (SPEC §8). It remains grabbable, but an incompatible release sorts after
+	// releases with every other verdict.
 	Compatibility compatibilityJSON `json:"compatibility"`
 }
 
@@ -406,14 +406,23 @@ func ageDays(t time.Time) int {
 	return days
 }
 
-// sortReleases orders the picker: best quality first, then the healthiest
-// swarm. This is presentation only — scoring a release against a quality
-// profile is phase 3, and this ordering must not be mistaken for it. The title
-// is the final tiebreak so a fan-out that finishes in a different order still
-// renders the same table.
+// releaseIsIncompatible reports whether rel cannot play natively on the active
+// TV profile. Other verdicts retain the normal picker ordering.
+func releaseIsIncompatible(rel releaseJSON) bool {
+	return rel.Compatibility.Verdict == core.TVCompatIncompatible
+}
+
+// sortReleases orders the picker: incompatible releases last, then best quality,
+// then the healthiest swarm. This is presentation only, scoring a release
+// against a quality profile is phase 3, and this ordering must not be mistaken
+// for it. The title is the final tiebreak so a fan-out that finishes in a
+// different order still renders the same table.
 func sortReleases(releases []releaseJSON) {
 	sort.Slice(releases, func(i, j int) bool {
 		a, b := releases[i], releases[j]
+		if aIncompatible, bIncompatible := releaseIsIncompatible(a), releaseIsIncompatible(b); aIncompatible != bIncompatible {
+			return !aIncompatible
+		}
 		if ra, rb := core.QualityRank(a.Parsed.Quality), core.QualityRank(b.Parsed.Quality); ra != rb {
 			return ra < rb
 		}

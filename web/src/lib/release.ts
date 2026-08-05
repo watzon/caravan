@@ -41,13 +41,16 @@ function rank(ladder: readonly string[], value: string): number {
  */
 const FLAG_PENALTY = 1000;
 
+/** Larger than the entire quality ladder, so the score reflects incompatibility. */
+const INCOMPATIBILITY_PENALTY = 1000;
+
 /**
  * Sort score for the picker, higher being better.
  *
  * Quality dominates, then source, then swarm health, with small bonuses for a
- * PROPER/REPACK. A danger flag (a cinema recording, a dead swarm) outweighs the
- * entire ladder, so a flagged result sorts below every clean one no matter what
- * it claims — which is precisely the claim not to trust.
+ * PROPER/REPACK. A danger flag or active-profile incompatibility outweighs the
+ * entire quality ladder, so a flagged or incompatible result scores below a
+ * clean, compatible one no matter what it claims.
  */
 export function releaseScore(release: Release): number {
   const parsed = release.parsed;
@@ -63,9 +66,12 @@ export function releaseScore(release: Release): number {
       : 0;
 
   const proper = (parsed.proper ? 25 : 0) + (parsed.repack ? 25 : 0);
-  const penalty = releaseFlags(release).filter((f) => f.tone === 'danger').length * FLAG_PENALTY;
+  const flagPenalty =
+    releaseFlags(release).filter((f) => f.tone === 'danger').length * FLAG_PENALTY;
+  const incompatibilityPenalty =
+    release.compatibility.verdict === 'incompatible' ? INCOMPATIBILITY_PENALTY : 0;
 
-  return quality + source + swarm + proper - penalty;
+  return quality + source + swarm + proper - flagPenalty - incompatibilityPenalty;
 }
 
 /** One warning badge on a release row. */
@@ -141,12 +147,16 @@ export function isFlagged(release: Release): boolean {
 }
 
 /**
- * Picker order: score descending, then seeders, then title, so two runs over
- * the same results always agree. The server sorts too; sorting here is what
- * makes the visible score column and the visible order the same fact.
+ * Picker order: incompatible releases last, then score descending, seeders, and
+ * title, so two runs over the same results always agree. The server sorts too;
+ * sorting here keeps the visible score column and visible order aligned.
  */
 export function sortReleases(releases: readonly Release[]): Release[] {
   return [...releases].sort((a, b) => {
+    const byCompatibility =
+      Number(a.compatibility.verdict === 'incompatible') -
+      Number(b.compatibility.verdict === 'incompatible');
+    if (byCompatibility !== 0) return byCompatibility;
     const byScore = releaseScore(b) - releaseScore(a);
     if (byScore !== 0) return byScore;
     const bySeeders = b.seeders - a.seeders;

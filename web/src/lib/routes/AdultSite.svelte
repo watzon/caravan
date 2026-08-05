@@ -31,6 +31,7 @@
   import Badge from '../components/Badge.svelte';
   import Banner from '../components/Banner.svelte';
   import Button from '../components/Button.svelte';
+  import ConvertFileButton from '../components/ConvertFileButton.svelte';
   import EmptyState from '../components/EmptyState.svelte';
   import Icon from '../components/Icon.svelte';
   import LoadError from '../components/LoadError.svelte';
@@ -492,7 +493,10 @@
                               </div>
                             </td>
                             <td class="px-3 py-2">
-                              <div class="flex justify-end">
+                              <div class="flex justify-end gap-1">
+                                {#if scene.file}
+                                  <ConvertFileButton file={scene.file} compact />
+                                {/if}
                                 <Button
                                   variant="ghost"
                                   size="sm"

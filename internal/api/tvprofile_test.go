@@ -135,6 +135,69 @@ func TestReleasePickerFlagsAgainstTheActiveTVProfile(t *testing.T) {
 	}
 }
 
+func TestReleasePickerPrefersNativeResolutionForActiveTVProfile(t *testing.T) {
+	h, st, _, fake := newAcquisitionServer(t)
+	m := addMovie(t, st, "Big Buck Bunny", 2008)
+	addIndexer(t, st, fake, "alpha")
+	fake.serve(
+		"alpha",
+		torrentRelease(
+			"Big.Buck.Bunny.2008.2160p.WEB-DL.x264.AAC-GRP",
+			"uhd",
+			50,
+			core.ParsedRelease{},
+		),
+		torrentRelease(
+			"Big.Buck.Bunny.2008.1080p.WEB-DL.x264.AAC-GRP",
+			"hd",
+			50,
+			core.ParsedRelease{},
+		),
+	)
+
+	search := func() releasesResponse {
+		rec := do(
+			t,
+			h,
+			http.MethodGet,
+			"/api/v1/library/movies/"+itoa(m.ID)+"/releases",
+			"",
+		)
+		wantStatus(t, rec, http.StatusOK)
+		var body releasesResponse
+		decodeBody(t, rec, &body)
+		return body
+	}
+
+	safe := search()
+	if len(safe.Releases) != 2 {
+		t.Fatalf("safe-profile releases = %d, want 2", len(safe.Releases))
+	}
+	if safe.Releases[0].GUID != "hd" {
+		t.Fatalf("safe-profile order = %v, want compatible 1080p first", titlesOf(safe.Releases))
+	}
+	if safe.Releases[1].Compatibility.Verdict != core.TVCompatIncompatible {
+		t.Fatalf("2160p compatibility = %+v, want incompatible on safe profile", safe.Releases[1].Compatibility)
+	}
+
+	rec := do(
+		t,
+		h,
+		http.MethodPut,
+		"/api/v1/settings",
+		`{"tv_profile":"capable"}`,
+	)
+	wantStatus(t, rec, http.StatusOK)
+
+	capable := search()
+	if capable.Releases[0].GUID != "uhd" {
+		t.Fatalf("capable-profile order = %v, want compatible 2160p first", titlesOf(capable.Releases))
+	}
+	if capable.Releases[0].Compatibility.Verdict != core.TVCompatCompatible {
+		t.Fatalf("2160p compatibility = %+v, want compatible on capable profile", capable.Releases[0].Compatibility)
+	}
+}
+
 func TestMovieFileCarriesTVCompatibility(t *testing.T) {
 	h, st, _ := newTestServer(t)
 	ctx := context.Background()
