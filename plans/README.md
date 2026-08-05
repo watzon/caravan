@@ -24,7 +24,7 @@ gate, and update its status row when finished.
 | 013 | Reconcile project and deployment documentation | P3 | M | — | TODO |
 | 014 | Make route policies declarative and complete | P3 | M | 001 | DONE |
 | 015 | Extract the acquisition composition root incrementally | P3 | L | 003, 008 | TODO |
-| 016 | Spike a read-only live activity stream | P3 | M | 003, 010 | TODO |
+| 016 | Spike a read-only live activity stream | P3 | M | 003, 010 | DONE |
 
 Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED: <reason>`, or
 `REJECTED: <reason>`.
