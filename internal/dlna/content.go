@@ -177,9 +177,8 @@ func libraryKindOf(objectID string) (string, bool) {
 // to "no such object", so a client cannot keep browsing a shelf the owner took
 // down by holding on to a cached id.
 //
-// This is a visibility switch, not an access control: the media endpoint still
-// serves any file by id, exactly as it did before libraries existed. What the
-// user is choosing here is which shelves the television lists.
+// The same policy gates direct media URLs, so a renderer cannot keep playing
+// files from a shelf the owner has hidden by holding on to a cached URL.
 //
 // The adult library carries a second condition: the module's own master switch.
 // Disabling the module deletes nothing (store.SetAdultEnabled), so its

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/watzon/caravan/internal/core"
+	"github.com/watzon/caravan/internal/store"
 )
 
 // soapPost issues a control request the way a renderer does: a SOAPACTION
@@ -477,15 +478,26 @@ func writeMedia(t *testing.T, root, rel string, body []byte) {
 		t.Fatalf("write: %v", err)
 	}
 }
+func seedMovieMedia(t *testing.T, st *store.Store, rel string, size int64) *core.MediaFile {
+	t.Helper()
+	movie := &core.Movie{
+		TMDBID: 1, Title: "Film", SortTitle: "film", Path: "Movies/Film",
+	}
+	if err := st.UpsertMovie(t.Context(), movie); err != nil {
+		t.Fatalf("UpsertMovie: %v", err)
+	}
+	file := &core.MediaFile{Path: rel, Size: size, MovieID: movie.ID}
+	if err := st.UpsertMediaFile(t.Context(), file); err != nil {
+		t.Fatalf("UpsertMediaFile: %v", err)
+	}
+	return file
+}
 
 func TestServeMediaWithRange(t *testing.T) {
 	svc, st, root := newTestService(t)
 	body := []byte("0123456789abcdef")
 	writeMedia(t, root, "Movies/film.mkv", body)
-	file := &core.MediaFile{Path: "Movies/film.mkv", Size: int64(len(body))}
-	if err := st.UpsertMediaFile(t.Context(), file); err != nil {
-		t.Fatalf("UpsertMediaFile: %v", err)
-	}
+	seedMovieMedia(t, st, "Movies/film.mkv", int64(len(body)))
 	h := svc.Handler()
 
 	// Whole file: the container's own MIME type wins over net/http's table,
@@ -558,9 +570,7 @@ func TestServeMediaWithRange(t *testing.T) {
 func TestServeMediaOmitsContentFeaturesUnlessAsked(t *testing.T) {
 	svc, st, root := newTestService(t)
 	writeMedia(t, root, "Movies/film.mp4", []byte("x"))
-	if err := st.UpsertMediaFile(t.Context(), &core.MediaFile{Path: "Movies/film.mp4", Size: 1}); err != nil {
-		t.Fatalf("UpsertMediaFile: %v", err)
-	}
+	seedMovieMedia(t, st, "Movies/film.mp4", 1)
 
 	req := httptest.NewRequest(http.MethodGet, MountPath+"/media/1.mp4", nil)
 	rec := httptest.NewRecorder()
@@ -573,14 +583,10 @@ func TestServeMediaOmitsContentFeaturesUnlessAsked(t *testing.T) {
 func TestServeMediaRejectsUnknownAndUnsafeIDs(t *testing.T) {
 	svc, st, root := newTestService(t)
 	writeMedia(t, root, "Movies/film.mkv", []byte("x"))
-	if err := st.UpsertMediaFile(t.Context(), &core.MediaFile{Path: "Movies/film.mkv", Size: 1}); err != nil {
-		t.Fatalf("UpsertMediaFile: %v", err)
-	}
+	seedMovieMedia(t, st, "Movies/film.mkv", 1)
 	// A row whose file is not on disk: the database is a cache, so this is a
 	// normal state, not a server error.
-	if err := st.UpsertMediaFile(t.Context(), &core.MediaFile{Path: "Movies/gone.mkv", Size: 1}); err != nil {
-		t.Fatalf("UpsertMediaFile: %v", err)
-	}
+	seedMovieMedia(t, st, "Movies/gone.mkv", 1)
 	h := svc.Handler()
 
 	for _, name := range []string{"9999.mkv", "nope.mkv", "0.mkv", "-1.mkv", "2.mkv"} {
@@ -601,9 +607,7 @@ func TestServeMediaIsConfinedToStorageRoot(t *testing.T) {
 	if err := os.WriteFile(outside, []byte("secret"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if err := st.UpsertMediaFile(t.Context(), &core.MediaFile{Path: "../secret.mkv", Size: 6}); err != nil {
-		t.Fatalf("UpsertMediaFile: %v", err)
-	}
+	seedMovieMedia(t, st, "../secret.mkv", 6)
 
 	req := httptest.NewRequest(http.MethodGet, MountPath+"/media/1.mkv", nil)
 	rec := httptest.NewRecorder()

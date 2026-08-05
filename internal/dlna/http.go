@@ -353,6 +353,16 @@ func (s *Service) handleMedia(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+	kind, err := s.st.GetMediaFileLibraryKind(ctx, id)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	visible, err := s.visibleLibraries(ctx)
+	if err != nil || !visible[kind] {
+		http.NotFound(w, r)
+		return
+	}
 	file, err := s.st.GetMediaFile(ctx, id)
 	if err != nil {
 		http.NotFound(w, r)

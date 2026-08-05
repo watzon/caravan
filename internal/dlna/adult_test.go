@@ -3,6 +3,9 @@ package dlna
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -14,7 +17,7 @@ import (
 // seedSite puts a site in the library the way library.AddSite does — a series
 // of kind adult with a release year for a season and one scene with a file on
 // disk — plus the Adult library row, which is what SetAdultEnabled creates.
-func seedSite(t *testing.T, st *store.Store) {
+func seedSite(t *testing.T, st *store.Store) *core.MediaFile {
 	t.Helper()
 	ctx := context.Background()
 
@@ -49,6 +52,7 @@ func seedSite(t *testing.T, st *store.Store) {
 	if err := st.LinkEpisodeFile(ctx, episode.ID, file.ID); err != nil {
 		t.Fatalf("LinkEpisodeFile: %v", err)
 	}
+	return file
 }
 
 // A site is stored as a series row, so an unfiltered series listing would hang
@@ -155,6 +159,84 @@ func showAdultOnDLNA(t *testing.T, st *store.Store, visible bool) {
 	lib.DLNAVisible = visible
 	if err := st.UpdateLibrary(ctx, lib); err != nil {
 		t.Fatalf("UpdateLibrary: %v", err)
+	}
+}
+
+func requestDirectMedia(t *testing.T, svc *Service, id int64) *httptest.ResponseRecorder {
+	t.Helper()
+	req := httptest.NewRequest(
+		http.MethodGet,
+		MountPath+"/media/"+strconv.FormatInt(id, 10)+".mkv",
+		nil,
+	)
+	rec := httptest.NewRecorder()
+	svc.Handler().ServeHTTP(rec, req)
+	return rec
+}
+
+func TestDirectAdultMediaRequiresVisibleEnabledLibrary(t *testing.T) {
+	svc, st, root := newTestService(t)
+	file := seedSite(t, st)
+	body := []byte("adult-media-bytes")
+	writeMedia(t, root, file.Path, body)
+
+	unknown := requestDirectMedia(t, svc, file.ID+9999)
+	if unknown.Code != http.StatusNotFound {
+		t.Fatalf("unknown media status = %d, want 404", unknown.Code)
+	}
+	rec := requestDirectMedia(t, svc, file.ID)
+	if rec.Code != unknown.Code || rec.Body.String() != unknown.Body.String() {
+		t.Fatalf(
+			"hidden Adult media differs from unknown media: status = %d, body = %q",
+			rec.Code,
+			rec.Body.String(),
+		)
+	}
+
+	showAdultOnDLNA(t, st, true)
+	rec = requestDirectMedia(t, svc, file.ID)
+	if rec.Code != http.StatusOK || rec.Body.String() != string(body) {
+		t.Fatalf("visible Adult media: status = %d, body = %q", rec.Code, rec.Body.String())
+	}
+
+	if err := st.SetAdultEnabled(t.Context(), false); err != nil {
+		t.Fatalf("SetAdultEnabled(false): %v", err)
+	}
+	rec = requestDirectMedia(t, svc, file.ID)
+	if rec.Code != unknown.Code || rec.Body.String() != unknown.Body.String() {
+		t.Fatalf(
+			"disabled Adult media differs from unknown media: status = %d, body = %q",
+			rec.Code,
+			rec.Body.String(),
+		)
+	}
+	library, err := st.GetLibraryByKind(t.Context(), core.LibraryKindAdult)
+	if err != nil {
+		t.Fatalf("GetLibraryByKind: %v", err)
+	}
+	if !library.DLNAVisible {
+		t.Fatal("disabling Adult forgot the remembered DLNA visibility toggle")
+	}
+
+	if err := st.SetAdultEnabled(t.Context(), true); err != nil {
+		t.Fatalf("SetAdultEnabled(true): %v", err)
+	}
+	rec = requestDirectMedia(t, svc, file.ID)
+	if rec.Code != http.StatusOK || rec.Body.String() != string(body) {
+		t.Fatalf("re-enabled Adult media: status = %d, body = %q", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDirectOrdinaryMediaRemainsAvailable(t *testing.T) {
+	svc, st, root := newTestService(t)
+	body := []byte("ordinary-media-bytes")
+	path := "Movies/ordinary.mkv"
+	writeMedia(t, root, path, body)
+	file := seedMovieMedia(t, st, path, int64(len(body)))
+
+	rec := requestDirectMedia(t, svc, file.ID)
+	if rec.Code != http.StatusOK || rec.Body.String() != string(body) {
+		t.Fatalf("ordinary media: status = %d, body = %q", rec.Code, rec.Body.String())
 	}
 }
 

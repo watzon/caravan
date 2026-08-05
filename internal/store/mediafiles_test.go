@@ -2,10 +2,111 @@ package store
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/watzon/caravan/internal/core"
 )
+
+func TestMediaFileLibraryKind(t *testing.T) {
+	st, _ := openTemp(t)
+	ctx := context.Background()
+
+	movie := &core.Movie{TMDBID: 1, Title: "Movie", SortTitle: "movie"}
+	if err := st.UpsertMovie(ctx, movie); err != nil {
+		t.Fatalf("UpsertMovie: %v", err)
+	}
+	tv := &core.Series{TMDBID: 2, Title: "Show", SortTitle: "show"}
+	if err := st.UpsertSeries(ctx, tv); err != nil {
+		t.Fatalf("UpsertSeries(tv): %v", err)
+	}
+	adult := &core.Series{
+		Kind: core.SeriesKindAdult, StashID: "site-1", Title: "Site", SortTitle: "site",
+	}
+	if err := st.UpsertSeries(ctx, adult); err != nil {
+		t.Fatalf("UpsertSeries(adult): %v", err)
+	}
+
+	tvEpisode := &core.Episode{SeriesID: tv.ID, SeasonNumber: 1, EpisodeNumber: 1}
+	adultEpisodes := []*core.Episode{
+		{SeriesID: adult.ID, SeasonNumber: 2025, EpisodeNumber: 1},
+		{SeriesID: adult.ID, SeasonNumber: 2025, EpisodeNumber: 2},
+	}
+	if err := st.UpsertEpisode(ctx, tvEpisode); err != nil {
+		t.Fatalf("UpsertEpisode(tv): %v", err)
+	}
+	for _, episode := range adultEpisodes {
+		if err := st.UpsertEpisode(ctx, episode); err != nil {
+			t.Fatalf("UpsertEpisode(adult): %v", err)
+		}
+	}
+
+	movieFile := &core.MediaFile{Path: "Movies/movie.mkv", MovieID: movie.ID}
+	tvFile := &core.MediaFile{Path: "TV/show.mkv"}
+	adultFile := &core.MediaFile{Path: "Adult/scene.mkv"}
+	multiAdultFile := &core.MediaFile{Path: "Adult/double-scene.mkv"}
+	unownedFile := &core.MediaFile{Path: "unowned.mkv"}
+	mixedKindFile := &core.MediaFile{Path: "mixed-kind.mkv"}
+	movieEpisodeFile := &core.MediaFile{Path: "movie-episode.mkv", MovieID: movie.ID}
+	for _, file := range []*core.MediaFile{
+		movieFile, tvFile, adultFile, multiAdultFile, unownedFile, mixedKindFile, movieEpisodeFile,
+	} {
+		if err := st.UpsertMediaFile(ctx, file); err != nil {
+			t.Fatalf("UpsertMediaFile(%q): %v", file.Path, err)
+		}
+	}
+	for _, link := range []struct {
+		episodeID int64
+		fileID    int64
+	}{
+		{tvEpisode.ID, tvFile.ID},
+		{adultEpisodes[0].ID, adultFile.ID},
+		{adultEpisodes[0].ID, multiAdultFile.ID},
+		{adultEpisodes[1].ID, multiAdultFile.ID},
+		{tvEpisode.ID, mixedKindFile.ID},
+		{adultEpisodes[0].ID, mixedKindFile.ID},
+		{tvEpisode.ID, movieEpisodeFile.ID},
+	} {
+		if err := st.LinkEpisodeFile(ctx, link.episodeID, link.fileID); err != nil {
+			t.Fatalf("LinkEpisodeFile: %v", err)
+		}
+	}
+
+	tests := []struct {
+		name string
+		id   int64
+		want string
+	}{
+		{name: "movie", id: movieFile.ID, want: core.LibraryKindMovie},
+		{name: "television", id: tvFile.ID, want: core.LibraryKindTV},
+		{name: "adult", id: adultFile.ID, want: core.LibraryKindAdult},
+		{name: "multi-episode adult", id: multiAdultFile.ID, want: core.LibraryKindAdult},
+		{name: "unowned", id: unownedFile.ID},
+		{name: "mixed television and adult", id: mixedKindFile.ID},
+		{name: "movie and episode", id: movieEpisodeFile.ID},
+		{name: "missing", id: 9999},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := st.GetMediaFileLibraryKind(ctx, tt.id)
+			if tt.want == "" {
+				if !errors.Is(err, ErrNotFound) {
+					t.Fatalf("GetMediaFileLibraryKind(%d) error = %v, want ErrNotFound", tt.id, err)
+				}
+				if got != "" {
+					t.Fatalf("GetMediaFileLibraryKind(%d) = %q, want empty", tt.id, got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("GetMediaFileLibraryKind(%d): %v", tt.id, err)
+			}
+			if got != tt.want {
+				t.Fatalf("GetMediaFileLibraryKind(%d) = %q, want %q", tt.id, got, tt.want)
+			}
+		})
+	}
+}
 
 // A multi-episode file has to come back once per episode it covers: the DLNA
 // browse counts these rows as "playable things under this season", and

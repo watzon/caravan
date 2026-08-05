@@ -81,6 +81,56 @@ func (s *Store) GetMediaFile(ctx context.Context, id int64) (*core.MediaFile, er
 	return f, nil
 }
 
+// GetMediaFileLibraryKind resolves the one library that owns a media file.
+// Files with no owner, or with conflicting movie/episode or TV/Adult owners,
+// return ErrNotFound so callers fail closed instead of choosing one link.
+func (s *Store) GetMediaFileLibraryKind(ctx context.Context, id int64) (string, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT DISTINCT mf.movie_id, s.kind
+		FROM media_files mf
+		LEFT JOIN episode_files ef ON ef.media_file_id = mf.id
+		LEFT JOIN episodes e ON e.id = ef.episode_id
+		LEFT JOIN series s ON s.id = e.series_id
+		WHERE mf.id = ?`, id)
+	if err != nil {
+		return "", fmt.Errorf("store: get media file %d library: %w", id, err)
+	}
+	defer rows.Close()
+
+	found := false
+	movieOwned := false
+	episodeKind := ""
+	for rows.Next() {
+		found = true
+		var (
+			movieID    int64
+			seriesKind sql.NullString
+		)
+		if err := rows.Scan(&movieID, &seriesKind); err != nil {
+			return "", fmt.Errorf("store: scan media file %d library: %w", id, err)
+		}
+		movieOwned = movieID != 0
+		if !seriesKind.Valid {
+			continue
+		}
+		kind := core.LibraryKindForSeries(seriesKind.String)
+		if episodeKind != "" && episodeKind != kind {
+			return "", fmt.Errorf("store: media file %d library: %w", id, ErrNotFound)
+		}
+		episodeKind = kind
+	}
+	if err := rows.Err(); err != nil {
+		return "", fmt.Errorf("store: get media file %d library: %w", id, err)
+	}
+	if !found || (movieOwned && episodeKind != "") || (!movieOwned && episodeKind == "") {
+		return "", fmt.Errorf("store: media file %d library: %w", id, ErrNotFound)
+	}
+	if movieOwned {
+		return core.LibraryKindMovie, nil
+	}
+	return episodeKind, nil
+}
+
 // UpdateMediaFileConverted repoints a media file at the file ffmpeg produced
 // (PLAN phase 4, task 4).
 //
