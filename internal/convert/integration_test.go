@@ -46,8 +46,14 @@ func TestRealFFmpegRemuxAndTranscode(t *testing.T) {
 	}
 
 	out := filepath.Join(dir, "out.mp4")
-	if err := tools.Run(ctx, Args(plan, source, out)...); err != nil {
+	var live []RunProgress
+	if err := tools.Run(ctx, func(progress RunProgress) {
+		live = append(live, progress)
+	}, Args(plan, DefaultEncodingSettings(), source, out)...); err != nil {
 		t.Fatalf("transcode: %v", err)
+	}
+	if len(live) == 0 || live[len(live)-1].ProcessedSeconds <= 0 {
+		t.Fatalf("ffmpeg reported no media progress: %+v", live)
 	}
 	info, err := os.Stat(out)
 	if err != nil {
@@ -78,7 +84,7 @@ func TestRealFFmpegRemuxAndTranscode(t *testing.T) {
 	}
 
 	remuxed := filepath.Join(dir, "remuxed.mp4")
-	if err := tools.Run(ctx, Args(remuxPlan, remuxSource, remuxed)...); err != nil {
+	if err := tools.Run(ctx, nil, Args(remuxPlan, DefaultEncodingSettings(), remuxSource, remuxed)...); err != nil {
 		t.Fatalf("remux: %v", err)
 	}
 	remuxInfo, err := os.Stat(remuxed)

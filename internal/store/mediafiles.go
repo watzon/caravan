@@ -157,6 +157,85 @@ func (s *Store) ListMediaFiles(ctx context.Context) ([]core.MediaFile, error) {
 	return s.queryMediaFiles(ctx, "SELECT "+mediaFileColumns+" FROM media_files ORDER BY path")
 }
 
+// ConversionCandidate is a current library file with no queued or running
+// conversion. LibraryKind lets shared API surfaces apply the adult visibility
+// rule without an ownership query per file.
+type ConversionCandidate struct {
+	File        core.MediaFile
+	LibraryKind string
+}
+
+// ListConversionCandidates returns owned media files that are free to queue,
+// ordered by path. Compatibility is profile-dependent and belongs to the API;
+// this query only resolves ownership and excludes open conversion rows.
+//
+// Ownership fails closed, matching GetMediaFileLibraryKind: unowned files,
+// files attached to both a movie and an episode, and files attached across TV
+// and adult series do not become shared-surface candidates.
+func (s *Store) ListConversionCandidates(ctx context.Context) ([]ConversionCandidate, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT `+mediaFileColumnsQualified+`,
+			COUNT(ef.episode_id),
+			COUNT(DISTINCT CASE WHEN s.kind = ? THEN ? ELSE ? END),
+			MAX(CASE WHEN s.kind = ? THEN 1 ELSE 0 END)
+		FROM media_files mf
+		LEFT JOIN episode_files ef ON ef.media_file_id = mf.id
+		LEFT JOIN episodes e ON e.id = ef.episode_id
+		LEFT JOIN series s ON s.id = e.series_id
+		WHERE NOT EXISTS (
+			SELECT 1
+			FROM conversions c
+			WHERE c.media_file_id = mf.id AND c.status IN (?, ?)
+		)
+		GROUP BY mf.id
+		ORDER BY mf.path`,
+		core.SeriesKindAdult, core.LibraryKindAdult, core.LibraryKindTV,
+		core.SeriesKindAdult, core.ConversionQueued, core.ConversionRunning)
+	if err != nil {
+		return nil, fmt.Errorf("store: list conversion candidates: %w", err)
+	}
+	defer rows.Close()
+
+	out := []ConversionCandidate{}
+	for rows.Next() {
+		var (
+			candidate        ConversionCandidate
+			addedAt          string
+			modifiedAt       string
+			episodeCount     int
+			libraryKindCount int
+			hasAdult         int
+		)
+		err := rows.Scan(
+			&candidate.File.ID, &candidate.File.Path, &candidate.File.Size,
+			&candidate.File.MovieID, &candidate.File.Quality, &candidate.File.Source,
+			&candidate.File.Codec, &candidate.File.Audio, &candidate.File.ReleaseGroup,
+			&addedAt, &modifiedAt, &episodeCount, &libraryKindCount, &hasAdult,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("store: scan conversion candidate: %w", err)
+		}
+		switch {
+		case candidate.File.MovieID != 0 && episodeCount == 0:
+			candidate.LibraryKind = core.LibraryKindMovie
+		case candidate.File.MovieID == 0 && episodeCount > 0 && libraryKindCount == 1:
+			candidate.LibraryKind = core.LibraryKindTV
+			if hasAdult != 0 {
+				candidate.LibraryKind = core.LibraryKindAdult
+			}
+		default:
+			continue
+		}
+		candidate.File.AddedAt = parseTime(addedAt)
+		candidate.File.ModifiedAt = parseTime(modifiedAt)
+		out = append(out, candidate)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list conversion candidates: %w", err)
+	}
+	return out, nil
+}
+
 // ListMediaFilesForMovie returns a movie's files ordered by path.
 func (s *Store) ListMediaFilesForMovie(ctx context.Context, movieID int64) ([]core.MediaFile, error) {
 	return s.queryMediaFiles(ctx,

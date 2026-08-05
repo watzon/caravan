@@ -151,16 +151,20 @@ describe('jellyfin handoff', () => {
 });
 
 describe('convert queue', () => {
-  it('unwraps the conversions envelope and passes the limit', async () => {
-    stubFetch({ conversions: [{ id: 1, status: 'queued' }] });
-    const rows = await api.listConversions(25);
-    expect(rows).toHaveLength(1);
+  it('unwraps pending files and conversions and passes the limit', async () => {
+    stubFetch({
+      pending: [{ id: 2, path: 'library/Movies/B.mkv' }],
+      conversions: [{ id: 1, status: 'queued' }],
+    });
+    const queue = await api.listConversionQueue(25);
+    expect(queue.pending).toHaveLength(1);
+    expect(queue.conversions).toHaveLength(1);
     expect(only().url).toBe('/api/v1/convert?limit=25');
   });
 
-  it('reads an ffmpeg-less server as an empty queue, not as a crash', async () => {
+  it('reads an empty envelope as empty pending and conversion lists', async () => {
     stubFetch({});
-    await expect(api.listConversions()).resolves.toEqual([]);
+    await expect(api.listConversionQueue()).resolves.toEqual({ pending: [], conversions: [] });
   });
 
   it('queues a file by media file id', async () => {

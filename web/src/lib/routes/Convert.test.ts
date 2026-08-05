@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import Convert from './Convert.svelte';
-import type { Conversion, SystemStatus } from '../api/types';
+import type { Conversion, MediaFile, SystemStatus } from '../api/types';
 import { system } from '../state/system.svelte';
 
 function jsonResponse(body: unknown): Response {
@@ -63,11 +63,48 @@ const ROWS: Conversion[] = [
   },
 ];
 
+const PENDING: MediaFile[] = [
+  {
+    id: 20,
+    path: 'library/Movies/Blade Runner (1982)/Blade Runner (1982).mkv',
+    size: 1_000_000,
+    movie_id: 20,
+    quality: '2160p',
+    source: 'BluRay',
+    codec: 'x265',
+    audio: 'DTS',
+    release_group: 'GROUP',
+    added_at: '2026-08-01T00:00:00Z',
+    modified_at: '2026-08-01T00:00:00Z',
+    compatibility: {
+      verdict: 'incompatible',
+      reasons: ['HEVC video', 'DTS audio'],
+    },
+  },
+  {
+    id: 21,
+    path: 'library/Movies/Alien (1979)/Alien (1979).mkv',
+    size: 2_000_000,
+    movie_id: 21,
+    quality: '1080p',
+    source: 'BluRay',
+    codec: 'x264',
+    audio: 'AAC',
+    release_group: 'GROUP',
+    added_at: '2026-08-01T00:00:00Z',
+    modified_at: '2026-08-01T00:00:00Z',
+    compatibility: {
+      verdict: 'needs-remux',
+      reasons: ['MKV container'],
+    },
+  },
+];
+
 let host: HTMLElement;
 let app: Record<string, unknown>;
-let posts: string[];
+let posts: { url: string; body: unknown }[];
 let rows: Conversion[];
-
+let pending: MediaFile[];
 function stub(ffmpeg: boolean) {
   posts = [];
   system.status = { ...STATUS, ffmpeg_available: ffmpeg };
@@ -76,10 +113,29 @@ function stub(ffmpeg: boolean) {
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if ((init?.method ?? 'GET') === 'POST') {
-        posts.push(url);
+        const body = init?.body ? JSON.parse(String(init.body)) : null;
+        posts.push({ url, body });
+        if (url.endsWith('/convert')) {
+          const file = pending.find((candidate) => candidate.id === body.media_file_id)!;
+          pending = pending.filter((candidate) => candidate.id !== body.media_file_id);
+          const queued: Conversion = {
+            id: 4,
+            media_file_id: file.id,
+            source_path: file.path,
+            output_path: '',
+            strategy: '',
+            profile_id: 'safe',
+            status: 'queued',
+            error: '',
+            created_at: '2026-08-01T00:03:00Z',
+            updated_at: '2026-08-01T00:03:00Z',
+          };
+          rows = [queued, ...rows];
+          return jsonResponse(queued);
+        }
         return jsonResponse({ ...rows[2], status: 'cancelled' });
       }
-      if (url.includes('/convert')) return jsonResponse({ conversions: rows });
+      if (url.includes('/convert')) return jsonResponse({ pending, conversions: rows });
       throw new Error(`unexpected fetch: ${url}`);
     }),
   );
@@ -87,6 +143,10 @@ function stub(ffmpeg: boolean) {
 
 beforeEach(() => {
   rows = ROWS.map((r) => ({ ...r }));
+  pending = PENDING.map((file) => ({
+    ...file,
+    compatibility: { ...file.compatibility, reasons: [...file.compatibility.reasons] },
+  }));
   vi.useFakeTimers();
   host = document.createElement('div');
   document.body.appendChild(host);
@@ -112,38 +172,201 @@ function buttonWith(text: string): HTMLButtonElement | undefined {
     | undefined;
 }
 
+function tabWith(text: string): HTMLButtonElement | undefined {
+  return [...host.querySelectorAll<HTMLButtonElement>('button[role="tab"]')].find((button) =>
+    button.textContent?.includes(text),
+  );
+}
+
 describe('Convert route', () => {
-  it('renders the queue with the strategy and failure spelled out', async () => {
+  it('shows pending files first and queues them from the page', async () => {
     stub(true);
     app = mount(Convert, { target: host });
     await settle();
 
-    expect(host.textContent).toContain('Arrival (2016).mkv');
-    // The strategy label has to say what it costs, not just its name.
-    expect(host.textContent).toContain('Remux (stream copy)');
-    expect(host.textContent).toContain('Transcode (re-encode)');
-    // A queued row has not been probed yet, so no strategy is claimed.
+    expect(host.textContent).toContain('Blade Runner (1982).mkv');
+    expect(host.textContent).toContain('HEVC video');
+    expect(host.textContent).not.toContain('Arrival (2016).mkv');
+    expect(tabWith('Pending')?.textContent).toContain('2');
+    expect(tabWith('Active')?.textContent).toContain('1');
+    expect(tabWith('Finished')?.textContent).toContain('2');
+
+    buttonWith('Convert for TV')!.click();
+    await settle();
+    await settle();
+
+    expect(posts).toContainEqual({
+      url: '/api/v1/convert',
+      body: { media_file_id: 20 },
+    });
+    expect(host.textContent).not.toContain('Blade Runner (1982).mkv');
+    expect(tabWith('Pending')?.textContent).toContain('1');
+
+    tabWith('Active')!.click();
+    flushSync();
+    expect(host.textContent).toContain('Blade Runner (1982).mkv');
     expect(host.textContent).toContain('Deciding…');
-    // SPEC §13: failures are visible, with the reason attached.
-    expect(host.textContent).toContain('ffmpeg: Invalid data found when processing input');
   });
 
-  it('offers cancel on a queued row and retry on a failed one', async () => {
+  it('separates active work from finished history and keeps their actions', async () => {
     stub(true);
     app = mount(Convert, { target: host });
     await settle();
 
-    const cancel = buttonWith('Cancel');
-    expect(cancel).toBeDefined();
-    cancel!.click();
+    tabWith('Active')!.click();
+    flushSync();
+    expect(host.textContent).toContain('Heat (1995).avi');
+    expect(host.textContent).not.toContain('Arrival (2016).mkv');
+    buttonWith('Cancel')!.click();
     await settle();
-    expect(posts).toContain('/api/v1/convert/3/cancel');
+    expect(posts.map((post) => post.url)).toContain('/api/v1/convert/3/cancel');
 
-    const retry = buttonWith('Retry');
-    expect(retry).toBeDefined();
-    retry!.click();
+    tabWith('Finished')!.click();
+    flushSync();
+    expect(host.textContent).toContain('Arrival (2016).mkv');
+    expect(host.textContent).toContain('Remux (stream copy)');
+    expect(host.textContent).toContain('Transcode (re-encode)');
+    expect(host.textContent).toContain('ffmpeg: Invalid data found when processing input');
+    expect(host.textContent).not.toContain('Heat (1995).avi');
+    const finishedOpen = host.querySelector<HTMLButtonElement>(
+      'button[aria-label^="Open conversion details for Arrival"]',
+    );
+    expect(finishedOpen, 'the finished row opens its detail drawer').not.toBeNull();
+    finishedOpen!.click();
+    flushSync();
+    expect(host.querySelector('[role="dialog"]')?.textContent).toContain('Done');
+    expect(host.querySelector('[role="dialog"]')?.textContent).toContain(
+      'Arrival (2016).mp4',
+    );
+    buttonWith('Close')!.click();
+    flushSync();
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+
+    buttonWith('Retry')!.click();
     await settle();
-    expect(posts).toContain('/api/v1/convert/2/retry');
+    expect(posts.map((post) => post.url)).toContain('/api/v1/convert/2/retry');
+  });
+
+  it('opens live job details and keeps them current across polls', async () => {
+    rows[2] = {
+      ...rows[2]!,
+      status: 'running',
+      strategy: 'transcode',
+      stage: 'converting',
+      started_at: '2026-08-05T12:00:00Z',
+      progress: 0.5,
+      processed_seconds: 60,
+      duration_seconds: 120,
+      speed: 1.5,
+      eta_seconds: 40,
+    };
+    stub(true);
+    app = mount(Convert, { target: host });
+    await settle();
+
+    tabWith('Active')!.click();
+    flushSync();
+    const open = host.querySelector<HTMLButtonElement>(
+      'button[aria-label^="Open conversion details for Heat"]',
+    );
+    expect(open, 'the active row opens its detail drawer').not.toBeNull();
+    open!.click();
+    flushSync();
+
+    const drawer = () => host.querySelector('[role="dialog"]')!;
+    expect(drawer().textContent).toContain('Encoding media');
+    expect(drawer().textContent).toContain('50%');
+    expect(drawer().textContent).toContain('40s');
+
+    rows = rows.map((row) =>
+      row.id === 3
+        ? { ...row, progress: 0.75, processed_seconds: 90, eta_seconds: 20 }
+        : row,
+    );
+    await vi.advanceTimersByTimeAsync(5000);
+    flushSync();
+
+    expect(drawer().textContent).toContain('75%');
+    expect(drawer().textContent).toContain('20s');
+
+    rows = rows.filter((row) => row.id !== 3);
+    await vi.advanceTimersByTimeAsync(5000);
+    flushSync();
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('keeps the newest conversion response when requests finish out of order', async () => {
+    const active: Conversion = {
+      ...ROWS[2]!,
+      status: 'running',
+      strategy: 'transcode',
+      stage: 'converting',
+      started_at: '2026-08-05T12:00:00Z',
+      progress: 0.25,
+      processed_seconds: 30,
+      duration_seconds: 120,
+      speed: 1,
+      eta_seconds: 90,
+    };
+    const deferred: Array<(body: {
+      pending: MediaFile[];
+      conversions: Conversion[];
+    }) => void> = [];
+    let requestCount = 0;
+    system.status = { ...STATUS };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((input: RequestInfo | URL) => {
+        if (!String(input).includes('/convert')) {
+          return Promise.reject(new Error(`unexpected fetch: ${String(input)}`));
+        }
+        requestCount += 1;
+        if (requestCount === 1) {
+          return Promise.resolve(jsonResponse({ pending: [], conversions: [active] }));
+        }
+        return new Promise<Response>((resolve) => {
+          deferred.push((body) => resolve(jsonResponse(body)));
+        });
+      }),
+    );
+
+    app = mount(Convert, { target: host });
+    await settle();
+    tabWith('Active')!.click();
+    flushSync();
+    host.querySelector<HTMLButtonElement>(
+      'button[aria-label^="Open conversion details for Heat"]',
+    )!.click();
+    flushSync();
+
+    buttonWith('Refresh')!.click();
+    buttonWith('Refresh')!.click();
+    expect(deferred).toHaveLength(2);
+
+    deferred[1]!({
+      pending: [],
+      conversions: [{
+        ...active,
+        progress: 0.75,
+        processed_seconds: 90,
+        eta_seconds: 30,
+      }],
+    });
+    await settle();
+    expect(host.querySelector('[role="dialog"]')?.textContent).toContain('75%');
+
+    deferred[0]!({
+      pending: [],
+      conversions: [{
+        ...active,
+        progress: 0.5,
+        processed_seconds: 60,
+        eta_seconds: 60,
+      }],
+    });
+    await settle();
+    expect(host.querySelector('[role="dialog"]')?.textContent).toContain('75%');
+    expect(host.querySelector('[role="dialog"]')?.textContent).not.toContain('50%');
   });
 
   it('degrades to an informational banner when ffmpeg is missing', async () => {
@@ -152,18 +375,31 @@ describe('Convert route', () => {
     await settle();
 
     expect(host.textContent).toContain('ffmpeg is not installed');
-    // History stays readable — uninstalling ffmpeg must not erase it.
+    expect(host.textContent).toContain('Blade Runner (1982).mkv');
+    expect(buttonWith('Convert for TV')).toBeUndefined();
+
+    tabWith('Finished')!.click();
+    flushSync();
+    // History stays readable - uninstalling ffmpeg must not erase it.
     expect(host.textContent).toContain('Arrival (2016).mkv');
-    // But nothing can be re-queued.
     expect(buttonWith('Retry')?.disabled).toBe(true);
+    host.querySelector<HTMLButtonElement>(
+      'button[aria-label^="Open conversion details for Dune"]',
+    )!.click();
+    flushSync();
+    const drawerRetry = [...host.querySelectorAll<HTMLButtonElement>(
+      '[role="dialog"] button',
+    )].find((button) => button.textContent?.includes('Retry'));
+    expect(drawerRetry?.disabled).toBe(true);
   });
 
   it('shows an empty state rather than a blank screen', async () => {
     rows = [];
+    pending = [];
     stub(true);
     app = mount(Convert, { target: host });
     await settle();
 
-    expect(host.textContent).toContain('Nothing to convert');
+    expect(host.textContent).toContain('No files need conversion');
   });
 });

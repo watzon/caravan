@@ -1,6 +1,7 @@
 package convert
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -18,8 +19,16 @@ import (
 type FFmpeg interface {
 	// Probe reads what the container claims about itself.
 	Probe(ctx context.Context, path string) (Probe, error)
-	// Run executes one ffmpeg command line, built by Args.
-	Run(ctx context.Context, args ...string) error
+	// Run executes one ffmpeg command line, built by Args. report receives
+	// snapshots when ffmpeg completes a progress block.
+	Run(ctx context.Context, report func(RunProgress), args ...string) error
+}
+
+// RunProgress is one ffmpeg -progress snapshot. ProcessedSeconds is media time,
+// not wall time. Speed is relative to real time, where 1 means real time.
+type RunProgress struct {
+	ProcessedSeconds float64
+	Speed            float64
 }
 
 // Detect finds ffmpeg and ffprobe on PATH, returning nil when either is
@@ -48,14 +57,67 @@ type execTools struct {
 	ffprobe string
 }
 
-func (t *execTools) Run(ctx context.Context, args ...string) error {
+func (t *execTools) Run(ctx context.Context, report func(RunProgress), args ...string) error {
+	commandArgs := make([]string, 0, len(args)+3)
+	commandArgs = append(commandArgs, "-progress", "pipe:1", "-nostats")
+	commandArgs = append(commandArgs, args...)
 	var stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, t.ffmpeg, args...)
+	cmd := exec.CommandContext(ctx, t.ffmpeg, commandArgs...)
+	progressOutput, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("ffmpeg: read progress: %w", err)
+	}
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("ffmpeg: %w: %s", err, lastLines(stderr.String(), 3))
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("ffmpeg: start: %w", err)
+	}
+
+	var progress RunProgress
+	scanner := bufio.NewScanner(progressOutput)
+	scanner.Buffer(make([]byte, 4096), 1024*1024)
+	for scanner.Scan() {
+		_, emit := applyProgressLine(strings.TrimSpace(scanner.Text()), &progress)
+		if emit && report != nil {
+			report(progress)
+		}
+	}
+	scanErr := scanner.Err()
+	waitErr := cmd.Wait()
+	if scanErr != nil {
+		return fmt.Errorf("ffmpeg: read progress: %w", scanErr)
+	}
+	if waitErr != nil {
+		return fmt.Errorf("ffmpeg: %w: %s", waitErr, lastLines(stderr.String(), 3))
 	}
 	return nil
+}
+
+func applyProgressLine(line string, progress *RunProgress) (recognized, emit bool) {
+	key, value, found := strings.Cut(line, "=")
+	if !found {
+		return false, false
+	}
+	switch key {
+	case "out_time_us", "out_time_ms":
+		microseconds, err := strconv.ParseInt(value, 10, 64)
+		if err == nil && microseconds >= 0 {
+			progress.ProcessedSeconds = float64(microseconds) / 1_000_000
+		}
+		return true, false
+	case "speed":
+		speed, err := strconv.ParseFloat(strings.TrimSuffix(value, "x"), 64)
+		if err == nil && speed >= 0 {
+			progress.Speed = speed
+		}
+		return true, false
+	case "progress":
+		return true, true
+	case "bitrate", "drop_frames", "dup_frames", "fps", "frame", "out_time",
+		"stream_0_0_q", "total_size":
+		return true, false
+	default:
+		return false, false
+	}
 }
 
 func (t *execTools) Probe(ctx context.Context, path string) (Probe, error) {

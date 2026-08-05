@@ -518,6 +518,11 @@ export const ROUTE_EMBEDDED = 'embedded';
 /** Active core.TVProfile id (SPEC §8). Unset resolves to the safe default. */
 export const SETTING_TV_PROFILE = 'tv_profile';
 
+/** Defaults for required video/audio re-encoding (internal/store/settings.go). */
+export const SETTING_CONVERT_VIDEO_PRESET = 'convert_video_preset';
+export const SETTING_CONVERT_VIDEO_CRF = 'convert_video_crf';
+export const SETTING_CONVERT_AUDIO_BITRATE_KBPS = 'convert_audio_bitrate_kbps';
+
 /**
  * The built-in DLNA media server (SPEC §5.1). Unlike the Jellyfin handoff these
  * are plain settings keys: there is nothing to validate across them and nothing
@@ -1173,6 +1178,9 @@ export type ConversionStatus = 'queued' | 'running' | 'done' | 'failed' | 'cance
  */
 export type ConversionStrategy = '' | 'none' | 'remux' | 'transcode';
 
+/** Process-local stage reported while this Caravan process runs the job. */
+export type ConversionStage = 'probing' | 'converting' | 'verifying' | 'installing';
+
 /** internal/core.Conversion — one row of the convert queue. */
 export interface Conversion {
   id: number;
@@ -1188,6 +1196,22 @@ export interface Conversion {
   error: string;
   created_at: string;
   updated_at: string;
+  /** Optional live ffmpeg detail. Missing after restart and after completion. */
+  stage?: ConversionStage;
+  started_at?: string;
+  /** Completed media time as a fraction from 0 through 1. */
+  progress?: number;
+  processed_seconds?: number;
+  duration_seconds?: number;
+  /** Relative encoding speed, where 1 is real time. */
+  speed?: number;
+  eta_seconds?: number;
+}
+
+/** GET /convert: current candidates plus queued and terminal jobs. */
+export interface ConversionQueue {
+  pending: MediaFile[];
+  conversions: Conversion[];
 }
 
 /* ---------------------------------------------------------------------------

@@ -106,6 +106,47 @@ func TestMediaFileLibraryKind(t *testing.T) {
 			}
 		})
 	}
+
+	// Conversion candidates use the same fail-closed ownership rule in one
+	// batched query. A multi-episode file appears once.
+	assertCandidates := func(want []struct{ path, kind string }) {
+		t.Helper()
+		got, err := st.ListConversionCandidates(ctx)
+		if err != nil {
+			t.Fatalf("ListConversionCandidates: %v", err)
+		}
+		if len(got) != len(want) {
+			t.Fatalf("candidates = %+v, want %+v", got, want)
+		}
+		for i, candidate := range got {
+			if candidate.File.Path != want[i].path || candidate.LibraryKind != want[i].kind {
+				t.Fatalf("candidate %d = %+v, want path %q kind %q",
+					i, candidate, want[i].path, want[i].kind)
+			}
+		}
+	}
+	allCandidates := []struct{ path, kind string }{
+		{"Adult/double-scene.mkv", core.LibraryKindAdult},
+		{"Adult/scene.mkv", core.LibraryKindAdult},
+		{"Movies/movie.mkv", core.LibraryKindMovie},
+		{"TV/show.mkv", core.LibraryKindTV},
+	}
+	assertCandidates(allCandidates)
+
+	conversion := &core.Conversion{
+		MediaFileID: tvFile.ID, SourcePath: tvFile.Path, Status: core.ConversionQueued,
+	}
+	if err := st.CreateConversion(ctx, conversion); err != nil {
+		t.Fatalf("CreateConversion: %v", err)
+	}
+	assertCandidates(allCandidates[:3])
+
+	// Terminal history does not hide a file that still needs work.
+	conversion.Status = core.ConversionCancelled
+	if err := st.UpdateConversion(ctx, conversion); err != nil {
+		t.Fatalf("UpdateConversion(cancelled): %v", err)
+	}
+	assertCandidates(allCandidates)
 }
 
 // A multi-episode file has to come back once per episode it covers: the DLNA

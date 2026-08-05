@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/watzon/caravan/internal/convert"
 	"github.com/watzon/caravan/internal/core"
@@ -16,20 +17,20 @@ const (
 	maxConversionLimit     = 1000
 )
 
-// Converter is the slice of internal/convert the HTTP layer needs: whether
-// ffmpeg is installed at all. Everything else a conversion needs is a store
-// write plus a durable job, both of which this package already does.
+// Converter is the slice of internal/convert the HTTP layer needs: ffmpeg
+// availability and optional process-local progress for running jobs.
 //
-// It is an interface for the same reason EngineProvider is — a server built
-// without one still serves the rest of the API, and answers /convert with a
-// 503 the UI turns into "install ffmpeg" rather than an error (SPEC §8:
-// ffmpeg missing degrades, it does not break).
+// It is an interface for the same reason EngineProvider is. A server built
+// without one still serves the rest of the API. Conversion writes return 503
+// so the UI can explain that ffmpeg is not installed (SPEC §8).
 type Converter interface {
 	// Available reports whether ffmpeg and ffprobe were both found.
 	Available() bool
+	// Progress returns live detail when this process is running the job.
+	Progress(id int64) (convert.LiveProgress, bool)
 }
 
-// WithConverter supplies the convert-for-TV queue's ffmpeg availability.
+// WithConverter supplies the convert-for-TV runtime.
 func WithConverter(c Converter) Option {
 	return func(s *server) { s.converter = c }
 }
@@ -45,11 +46,18 @@ type conversionJSON struct {
 	Strategy string `json:"strategy"`
 	// ProfileID is the TV profile this conversion targets, recorded at queue
 	// time so a later profile change does not rewrite history.
-	ProfileID string `json:"profile_id"`
-	Status    string `json:"status"`
-	Error     string `json:"error"`
-	CreatedAt string `json:"created_at"`
-	UpdatedAt string `json:"updated_at"`
+	ProfileID        string                `json:"profile_id"`
+	Status           string                `json:"status"`
+	Error            string                `json:"error"`
+	CreatedAt        string                `json:"created_at"`
+	UpdatedAt        string                `json:"updated_at"`
+	Stage            convert.ProgressStage `json:"stage,omitempty"`
+	StartedAt        *time.Time            `json:"started_at,omitempty"`
+	Progress         float64               `json:"progress,omitempty"`
+	ProcessedSeconds float64               `json:"processed_seconds,omitempty"`
+	DurationSeconds  float64               `json:"duration_seconds,omitempty"`
+	Speed            float64               `json:"speed,omitempty"`
+	ETASeconds       float64               `json:"eta_seconds,omitempty"`
 }
 
 func conversionDTO(c core.Conversion) conversionJSON {
@@ -67,6 +75,28 @@ func conversionDTO(c core.Conversion) conversionJSON {
 	}
 }
 
+func (s *server) conversionDTOWithProgress(c core.Conversion) conversionJSON {
+	dto := conversionDTO(c)
+	if c.Status != core.ConversionRunning || s.converter == nil {
+		return dto
+	}
+	progress, ok := s.converter.Progress(c.ID)
+	if !ok {
+		return dto
+	}
+	startedAt := progress.StartedAt
+	dto.Stage = progress.Stage
+	dto.StartedAt = &startedAt
+	dto.Progress = progress.Fraction()
+	dto.ProcessedSeconds = progress.ProcessedSeconds
+	dto.DurationSeconds = progress.DurationSeconds
+	if progress.Stage == convert.ProgressStageConverting {
+		dto.Speed = progress.Speed
+		dto.ETASeconds = progress.ETASeconds()
+	}
+	return dto
+}
+
 // ffmpegAvailable is what GET /system/status reports and what every mutating
 // convert endpoint gates on.
 func (s *server) ffmpegAvailable() bool {
@@ -82,10 +112,13 @@ func (s *server) requireFFmpeg(w http.ResponseWriter) bool {
 	return false
 }
 
-// handleListConversions returns the convert queue, newest first.
+// handleListConversions returns pending files plus conversion jobs, newest
+// first. Pending files use the same active-profile verdict as library rows and
+// exclude anything already queued or running.
 //
 // It is readable without ffmpeg on purpose: uninstalling ffmpeg must not erase
-// the record of what it did while it was there.
+// the record of what it did while it was there or hide files that still need
+// work.
 func (s *server) handleListConversions(w http.ResponseWriter, r *http.Request) {
 	limit := defaultConversionLimit
 	if raw := r.URL.Query().Get("limit"); raw != "" {
@@ -102,11 +135,36 @@ func (s *server) handleListConversions(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreError(w, "list conversions", err)
 		return
 	}
-	out := make([]conversionJSON, 0, len(rows))
+	conversions := make([]conversionJSON, 0, len(rows))
 	for _, c := range rows {
-		out = append(out, conversionDTO(c))
+		conversions = append(conversions, s.conversionDTOWithProgress(c))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"conversions": out})
+
+	candidates, err := s.st.ListConversionCandidates(r.Context())
+	if err != nil {
+		s.writeStoreError(w, "list conversion candidates", err)
+		return
+	}
+	adultAllowed, err := s.adultVisible(r)
+	if err != nil {
+		s.writeStoreError(w, "read adult settings", err)
+		return
+	}
+	profile := s.activeTVProfile(r.Context())
+	pending := make([]mediaFileJSON, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate.LibraryKind == core.LibraryKindAdult && !adultAllowed {
+			continue
+		}
+		file := mediaFileDTO(candidate.File, profile)
+		if file.Compatibility.Verdict == core.TVCompatNeedsRemux ||
+			file.Compatibility.Verdict == core.TVCompatIncompatible {
+			pending = append(pending, file)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"pending": pending, "conversions": conversions,
+	})
 }
 
 // convertRequest is the body of POST /convert.

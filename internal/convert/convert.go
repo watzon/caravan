@@ -29,6 +29,8 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/watzon/caravan/internal/core"
 	"github.com/watzon/caravan/internal/parse"
@@ -57,12 +59,59 @@ const tempPrefix = ".caravan-convert-"
 // it per call: the root is editable from the settings screen at runtime.
 type RootFunc func(ctx context.Context) (string, error)
 
+// ProgressStage is the current phase of one live conversion.
+type ProgressStage string
+
+const (
+	ProgressStageProbing    ProgressStage = "probing"
+	ProgressStageConverting ProgressStage = "converting"
+	ProgressStageVerifying  ProgressStage = "verifying"
+	ProgressStageInstalling ProgressStage = "installing"
+)
+
+// LiveProgress is process-local detail for a conversion that is running now.
+// It is intentionally not durable. A restart keeps the conversion status but
+// reports no percent or estimate until the job starts again.
+type LiveProgress struct {
+	Stage            ProgressStage
+	StartedAt        time.Time
+	DurationSeconds  float64
+	ProcessedSeconds float64
+	Speed            float64
+}
+
+// Fraction returns completed media time as a value from 0 through 1.
+func (p LiveProgress) Fraction() float64 {
+	if p.DurationSeconds <= 0 || p.ProcessedSeconds <= 0 {
+		return 0
+	}
+	fraction := p.ProcessedSeconds / p.DurationSeconds
+	if fraction > 1 {
+		return 1
+	}
+	return fraction
+}
+
+// ETASeconds estimates wall time from remaining media time and ffmpeg speed.
+func (p LiveProgress) ETASeconds() float64 {
+	if p.Stage != ProgressStageConverting ||
+		p.DurationSeconds <= 0 ||
+		p.Speed <= 0 ||
+		p.ProcessedSeconds >= p.DurationSeconds {
+		return 0
+	}
+	return (p.DurationSeconds - p.ProcessedSeconds) / p.Speed
+}
+
 // Service owns the conversion job handler.
 type Service struct {
 	st    *store.Store
 	root  RootFunc
 	tools FFmpeg
 	log   *slog.Logger
+
+	progressMu sync.RWMutex
+	progress   map[int64]LiveProgress
 }
 
 // New builds the service. tools may be nil, which is what Detect returns when
@@ -72,13 +121,70 @@ func New(st *store.Store, root RootFunc, tools FFmpeg, log *slog.Logger) *Servic
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Service{st: st, root: root, tools: tools, log: log}
+	return &Service{
+		st: st, root: root, tools: tools, log: log,
+		progress: make(map[int64]LiveProgress),
+	}
 }
 
 // Available reports whether ffmpeg and ffprobe were both found. The HTTP layer
 // surfaces this in GET /system/status so the UI can hide the Convert
 // affordance instead of offering a button that always fails.
 func (s *Service) Available() bool { return s != nil && s.tools != nil }
+
+// Progress returns a copy of the current process-local progress for one job.
+func (s *Service) Progress(id int64) (LiveProgress, bool) {
+	if s == nil {
+		return LiveProgress{}, false
+	}
+	s.progressMu.RLock()
+	progress, ok := s.progress[id]
+	s.progressMu.RUnlock()
+	return progress, ok
+}
+
+func (s *Service) setProgress(id int64, progress LiveProgress) {
+	s.progressMu.Lock()
+	s.progress[id] = progress
+	s.progressMu.Unlock()
+}
+
+func (s *Service) setProgressStage(id int64, stage ProgressStage) {
+	s.progressMu.Lock()
+	progress, ok := s.progress[id]
+	if ok {
+		progress.Stage = stage
+		s.progress[id] = progress
+	}
+	s.progressMu.Unlock()
+}
+
+func (s *Service) setProgressDuration(id int64, seconds float64) {
+	s.progressMu.Lock()
+	progress, ok := s.progress[id]
+	if ok {
+		progress.DurationSeconds = seconds
+		s.progress[id] = progress
+	}
+	s.progressMu.Unlock()
+}
+
+func (s *Service) setRunProgress(id int64, update RunProgress) {
+	s.progressMu.Lock()
+	progress, ok := s.progress[id]
+	if ok {
+		progress.ProcessedSeconds = update.ProcessedSeconds
+		progress.Speed = update.Speed
+		s.progress[id] = progress
+	}
+	s.progressMu.Unlock()
+}
+
+func (s *Service) clearProgress(id int64) {
+	s.progressMu.Lock()
+	delete(s.progress, id)
+	s.progressMu.Unlock()
+}
 
 // Handle runs one conversion. It matches automation.Handler; the store
 // argument is ignored because the service holds its own handle.
@@ -144,6 +250,11 @@ func (s *Service) Handle(ctx context.Context, _ *store.Store, payload json.RawMe
 	}
 	conv.Status = core.ConversionRunning
 	conv.Error = ""
+	s.setProgress(conv.ID, LiveProgress{
+		Stage:     ProgressStageProbing,
+		StartedAt: time.Now(),
+	})
+	defer s.clearProgress(conv.ID)
 
 	if err := s.run(ctx, conv, file); err != nil {
 		return s.fail(ctx, conv, err)
@@ -169,8 +280,20 @@ func (s *Service) run(ctx context.Context, conv *core.Conversion, file *core.Med
 	if err != nil {
 		return err
 	}
+	s.setProgressDuration(conv.ID, sourceProbe.Duration)
 
 	plan := Decide(profile, sourceProbe, parse.Container(file.Path))
+	encodingSettings := DefaultEncodingSettings()
+	if plan.Strategy == core.ConvertStrategyTranscode {
+		values, err := s.st.AllSettings(ctx)
+		if err != nil {
+			return err
+		}
+		encodingSettings, err = ResolveEncodingSettings(values)
+		if err != nil {
+			s.log.Warn("convert: invalid encoding setting; using its default", "error", err)
+		}
+	}
 	conv.Strategy = plan.Strategy
 	if plan.Strategy == core.ConvertStrategyNone {
 		conv.Status = core.ConversionDone
@@ -180,6 +303,12 @@ func (s *Service) run(ctx context.Context, conv *core.Conversion, file *core.Med
 		}
 		return s.event(ctx, core.EventLevelInfo, file,
 			fmt.Sprintf("Nothing to convert: %s already plays on the %s profile", path.Base(file.Path), profile.Name), "")
+	}
+
+	// Persist the chosen strategy before the long-running command starts, so
+	// the API and activity UI can say what the worker is doing.
+	if err := s.st.UpdateConversion(ctx, conv); err != nil {
+		return err
 	}
 
 	// Beside the original: same directory means same filesystem, which is what
@@ -197,9 +326,14 @@ func (s *Service) run(ctx context.Context, conv *core.Conversion, file *core.Med
 		}
 	}()
 
-	if err := s.tools.Run(ctx, Args(plan, sourceAbs, tempAbs)...); err != nil {
+	s.setProgressStage(conv.ID, ProgressStageConverting)
+	if err := s.tools.Run(ctx, func(update RunProgress) {
+		s.setRunProgress(conv.ID, update)
+	}, Args(plan, encodingSettings, sourceAbs, tempAbs)...); err != nil {
 		return err
 	}
+
+	s.setProgressStage(conv.ID, ProgressStageVerifying)
 
 	info, err := os.Stat(tempAbs)
 	if err != nil {
@@ -212,6 +346,8 @@ func (s *Service) run(ctx context.Context, conv *core.Conversion, file *core.Med
 	if err := Verify(sourceProbe, outputProbe, info.Size()); err != nil {
 		return err
 	}
+
+	s.setProgressStage(conv.ID, ProgressStageInstalling)
 
 	targetRel := swapExt(file.Path, plan.Container)
 	targetAbs := abs(root, targetRel)

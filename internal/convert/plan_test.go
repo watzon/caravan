@@ -106,7 +106,7 @@ func TestDTSAudioOnlyReEncodesTheAudio(t *testing.T) {
 	profile := core.ResolveTVProfile(core.TVProfileSafe)
 	probe := Probe{Duration: 3600, VideoCodec: "h264", BitDepth: 8, Width: 1920, Height: 1080, AudioCodecs: []string{"dts"}}
 
-	args := Args(Decide(profile, probe, "mkv"), "/in.mkv", "/out.mp4")
+	args := Args(Decide(profile, probe, "mkv"), DefaultEncodingSettings(), "/in.mkv", "/out.mp4")
 
 	joined := strings.Join(args, " ")
 	if !strings.Contains(joined, "-c:v copy") {
@@ -142,7 +142,7 @@ func TestRemuxDropsAudioTheContainerCannotHold(t *testing.T) {
 		t.Fatalf("audio streams = %v, want [0 2]: the TrueHD track cannot be copied into MP4", plan.AudioStreams)
 	}
 
-	args := Args(plan, "/in.mkv", "/out.mp4")
+	args := Args(plan, DefaultEncodingSettings(), "/in.mkv", "/out.mp4")
 	joined := strings.Join(args, " ")
 	for _, want := range []string{"-map 0:a:0", "-map 0:a:2"} {
 		if !strings.Contains(joined, want) {
@@ -251,7 +251,7 @@ func TestBitDepthFromPixFmt(t *testing.T) {
 }
 
 func TestArgsRemuxCopiesStreams(t *testing.T) {
-	args := Args(Plan{Strategy: core.ConvertStrategyRemux, Container: "mp4"}, "/in.mkv", "/out.mp4")
+	args := Args(Plan{Strategy: core.ConvertStrategyRemux, Container: "mp4"}, DefaultEncodingSettings(), "/in.mkv", "/out.mp4")
 
 	joined := strings.Join(args, " ")
 	if !strings.Contains(joined, "-c copy") {
@@ -272,7 +272,7 @@ func TestArgsRemuxCopiesStreams(t *testing.T) {
 }
 
 func TestArgsTranscodeTargetsTheProfileFloor(t *testing.T) {
-	args := Args(Plan{Strategy: core.ConvertStrategyTranscode, Container: "mp4", MaxHeight: 1080}, "/in.mkv", "/out.mp4")
+	args := Args(Plan{Strategy: core.ConvertStrategyTranscode, Container: "mp4", MaxHeight: 1080}, DefaultEncodingSettings(), "/in.mkv", "/out.mp4")
 
 	joined := strings.Join(args, " ")
 	for _, want := range []string{"libx264", "-pix_fmt yuv420p", "-c:a aac", "scale=-2:min(ih\\,1080)"} {
@@ -286,7 +286,7 @@ func TestArgsTranscodeTargetsTheProfileFloor(t *testing.T) {
 }
 
 func TestArgsTranscodeWithoutACapDoesNotScale(t *testing.T) {
-	args := Args(Plan{Strategy: core.ConvertStrategyTranscode, Container: "mp4"}, "/in.mkv", "/out.mp4")
+	args := Args(Plan{Strategy: core.ConvertStrategyTranscode, Container: "mp4"}, DefaultEncodingSettings(), "/in.mkv", "/out.mp4")
 	if slices.Contains(args, "-vf") {
 		t.Fatalf("no height cap must mean no scale filter: %v", args)
 	}

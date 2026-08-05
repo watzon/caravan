@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/watzon/caravan/internal/clients"
+	"github.com/watzon/caravan/internal/convert"
 	"github.com/watzon/caravan/internal/core"
 	"github.com/watzon/caravan/internal/store"
 	"github.com/watzon/caravan/internal/wanted"
@@ -55,12 +56,15 @@ var writableSettings = map[string]bool{
 	store.SettingEmbeddedTorrentMaxConcurrent: true,
 	store.SettingEmbeddedUsenetMaxConcurrent:  true,
 
-	store.SettingRouteTorrent:     true,
-	store.SettingRouteUsenet:      true,
-	store.SettingTVProfile:        true,
-	store.SettingDLNAEnabled:      true,
-	store.SettingDLNAFriendlyName: true,
-	SettingMode:                   true,
+	store.SettingRouteTorrent:            true,
+	store.SettingRouteUsenet:             true,
+	store.SettingTVProfile:               true,
+	store.SettingConvertVideoPreset:      true,
+	store.SettingConvertVideoCRF:         true,
+	store.SettingConvertAudioBitrateKbps: true,
+	store.SettingDLNAEnabled:             true,
+	store.SettingDLNAFriendlyName:        true,
+	SettingMode:                          true,
 }
 
 // trimmedSettings are written with their surrounding whitespace removed.
@@ -73,9 +77,12 @@ var writableSettings = map[string]bool{
 // nothing worked. Trimming on the way in makes the stored string, the validated
 // string and the sent string the same value.
 var trimmedSettings = map[string]bool{
-	store.SettingTMDBAPIKey:       true,
-	store.SettingStashboxEndpoint: true,
-	store.SettingStashboxAPIKey:   true,
+	store.SettingTMDBAPIKey:              true,
+	store.SettingStashboxEndpoint:        true,
+	store.SettingStashboxAPIKey:          true,
+	store.SettingConvertVideoPreset:      true,
+	store.SettingConvertVideoCRF:         true,
+	store.SettingConvertAudioBitrateKbps: true,
 }
 
 // engineSettingsApplier is implemented by providers that can apply the live
@@ -176,6 +183,10 @@ func (s *server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := validateEngineSettings(body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if _, err := convert.ResolveEncodingSettings(body); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}

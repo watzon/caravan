@@ -272,8 +272,8 @@ func targetContainer(profile core.TVProfile) string {
 	return strings.ToLower(profile.Containers[0])
 }
 
-// Args renders the ffmpeg command line for a plan.
-//
+// Args renders the ffmpeg command line for a plan and one snapshot of the
+// global encoding settings.
 // Notes on the choices, since they are the difference between "a file that
 // plays" and "a file that almost plays":
 //
@@ -287,7 +287,7 @@ func targetContainer(profile core.TVProfile) string {
 //     stream targets AAC, because that is the profile floor SPEC §8 names;
 //     yuv420p is forced because a 10-bit source would otherwise produce a
 //     10-bit H.264 stream no set decodes.
-func Args(plan Plan, in, out string) []string {
+func Args(plan Plan, settings EncodingSettings, in, out string) []string {
 	args := []string{"-nostdin", "-y", "-i", in, "-map", "0:v:0"}
 	if plan.AudioStreams == nil {
 		args = append(args, "-map", "0:a?")
@@ -305,7 +305,9 @@ func Args(plan Plan, in, out string) []string {
 		args = append(args, "-c:v", "copy")
 	} else {
 		args = append(args,
-			"-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+			"-c:v", "libx264",
+			"-preset", settings.VideoPreset,
+			"-crf", strconv.Itoa(settings.VideoCRF),
 			"-profile:v", "high", "-pix_fmt", "yuv420p")
 		if plan.MaxHeight > 0 {
 			// -2 keeps the width even (H.264 requires it) and preserves the
@@ -317,7 +319,7 @@ func Args(plan Plan, in, out string) []string {
 	if plan.AudioCopy {
 		args = append(args, "-c:a", "copy")
 	} else {
-		args = append(args, "-c:a", "aac", "-b:a", "192k")
+		args = append(args, "-c:a", "aac", "-b:a", strconv.Itoa(settings.AudioBitrateKbps)+"k")
 	}
 	return append(args, "-movflags", "+faststart", out)
 }

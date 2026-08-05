@@ -2,10 +2,12 @@
   /**
    * Settings → Playback: the ways the library reaches a screen. DLNA is built
    * in and comes first; Jellyfin is a handoff, and Stash is the same handoff
-   * for the adult library; the TV profile only changes what search warns about.
+   * for the adult library. The TV profile is the compatibility target; output
+   * settings only control how any required re-encoding runs.
    */
   import type { Settings } from '../api/types';
   import DlnaSettings from './DlnaSettings.svelte';
+  import ConversionSettings from './ConversionSettings.svelte';
   import JellyfinSettings from './JellyfinSettings.svelte';
   import StashSettings from './StashSettings.svelte';
   import TVProfileSettings from './TVProfileSettings.svelte';
@@ -31,4 +33,8 @@
     <StashSettings />
   {/if}
   <TVProfileSettings {settings} {saving} onsave={(patch) => onsave(patch, 'TV profile saved.')} />
+  <ConversionSettings
+    {settings}
+    {saving}
+    onsave={(patch) => onsave(patch, 'Conversion settings saved.')} />
 </div>

@@ -29,6 +29,8 @@ type fakeFFmpeg struct {
 	onRun func(t *fakeFFmpeg, args []string) error
 	// runErr fails the ffmpeg invocation outright.
 	runErr error
+	// progressUpdates are reported before the output file is written.
+	progressUpdates []RunProgress
 }
 
 func (f *fakeFFmpeg) Probe(_ context.Context, path string) (Probe, error) {
@@ -39,8 +41,13 @@ func (f *fakeFFmpeg) Probe(_ context.Context, path string) (Probe, error) {
 	return p, nil
 }
 
-func (f *fakeFFmpeg) Run(_ context.Context, args ...string) error {
+func (f *fakeFFmpeg) Run(_ context.Context, report func(RunProgress), args ...string) error {
 	f.runs = append(f.runs, args)
+	for _, update := range f.progressUpdates {
+		if report != nil {
+			report(update)
+		}
+	}
 	if f.runErr != nil {
 		return f.runErr
 	}
@@ -186,6 +193,55 @@ func TestRemuxReplacesTheLibraryFile(t *testing.T) {
 	}
 }
 
+func TestConversionReportsLiveProgress(t *testing.T) {
+	tools := &fakeFFmpeg{
+		probes:          map[string]Probe{},
+		progressUpdates: []RunProgress{{ProcessedSeconds: 30, Speed: 2}},
+	}
+	svc, st, root := newTestService(t, tools)
+	ctx := context.Background()
+
+	const rel = "library/Movies/Progress (2026)/Progress (2026).mkv"
+	file := seedFile(t, st, root, rel, core.MediaFile{
+		MovieID: 8, Quality: core.Quality1080p, Codec: "x264", Audio: "AAC",
+	})
+	sourceAbs := filepath.Join(root, filepath.FromSlash(rel))
+	tools.probes[sourceAbs] = Probe{
+		Duration: 120, VideoCodec: "h264", BitDepth: 8,
+		Width: 1920, Height: 1080, AudioCodecs: []string{"aac"},
+	}
+	conv := queue(t, st, file.ID, file.Path)
+	tools.onRun = func(f *fakeFFmpeg, args []string) error {
+		live, ok := svc.Progress(conv.ID)
+		if !ok {
+			t.Fatal("conversion has no live progress while ffmpeg is running")
+		}
+		if live.Stage != ProgressStageConverting || live.StartedAt.IsZero() {
+			t.Fatalf("live progress = %+v, want converting with a start time", live)
+		}
+		if live.Fraction() != 0.25 || live.ETASeconds() != 45 {
+			t.Fatalf("live progress = %+v, want 25%% with 45s remaining", live)
+		}
+		running, err := st.GetConversion(ctx, conv.ID)
+		if err != nil {
+			t.Fatalf("GetConversion: %v", err)
+		}
+		if running.Status != core.ConversionRunning ||
+			running.Strategy != core.ConvertStrategyRemux {
+			t.Fatalf("stored conversion = %+v, want running remux", running)
+		}
+		f.probes[outputPath(args)] = f.probes[sourceAbs]
+		return writeOutput(args, "remuxed bytes")
+	}
+
+	if err := handle(t, svc, conv); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if _, ok := svc.Progress(conv.ID); ok {
+		t.Fatal("finished conversion kept stale live progress")
+	}
+}
+
 func TestTranscodeRewritesStreamTags(t *testing.T) {
 	tools := &fakeFFmpeg{probes: map[string]Probe{}}
 	svc, st, root := newTestService(t, tools)
@@ -196,6 +252,13 @@ func TestTranscodeRewritesStreamTags(t *testing.T) {
 	})
 	sourceAbs := filepath.Join(root, filepath.FromSlash(rel))
 	tools.probes[sourceAbs] = Probe{Duration: 900, VideoCodec: "hevc", BitDepth: 10, Width: 3840, Height: 2160, AudioCodecs: []string{"dts"}}
+	if err := st.SetSettings(t.Context(), map[string]string{
+		store.SettingConvertVideoPreset:      "slow",
+		store.SettingConvertVideoCRF:         "18",
+		store.SettingConvertAudioBitrateKbps: "256",
+	}); err != nil {
+		t.Fatalf("SetSettings: %v", err)
+	}
 	tools.onRun = func(f *fakeFFmpeg, args []string) error {
 		f.probes[outputPath(args)] = Probe{Duration: 900, VideoCodec: "h264", BitDepth: 8, Width: 1920, Height: 1080, AudioCodecs: []string{"aac"}}
 		return writeOutput(args, "transcoded bytes")
@@ -206,8 +269,14 @@ func TestTranscodeRewritesStreamTags(t *testing.T) {
 		t.Fatalf("Handle: %v", err)
 	}
 
-	if joined := strings.Join(tools.runs[0], " "); !strings.Contains(joined, "libx264") {
-		t.Fatalf("want a re-encode, got %v", tools.runs[0])
+	joined := strings.Join(tools.runs[0], " ")
+	for _, want := range []string{
+		"-c:v libx264 -preset slow -crf 18",
+		"-c:a aac -b:a 256k",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("ffmpeg args %q do not contain %q", joined, want)
+		}
 	}
 	updated, err := st.GetMediaFile(context.Background(), file.ID)
 	if err != nil {

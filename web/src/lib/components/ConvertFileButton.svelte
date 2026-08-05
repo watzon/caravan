@@ -3,7 +3,7 @@
    * The per-file convert affordance (SPEC §8): the one place in the library
    * where a compatibility verdict becomes an action.
    *
-   * It renders nothing at all when there is nothing to offer — a file the
+   * It renders nothing at all when there is nothing to offer: a file the
    * profile is happy with, a file nothing could be judged about, or a server
    * without ffmpeg. SPEC §8 is explicit that a missing ffmpeg hides
    * Convert-for-TV and leaves the warning informational, and a disabled button
@@ -22,9 +22,11 @@
     file: MediaFile;
     /** Icon-only, for the episode table where a full label would not fit. */
     compact?: boolean;
+    /** Called after this file enters an open conversion, including a 409 race. */
+    onqueued?: () => void;
   }
 
-  let { file, compact = false }: Props = $props();
+  let { file, compact = false, onqueued }: Props = $props();
 
   let busy = $state(false);
   let queued = $state(false);
@@ -37,15 +39,18 @@
 
   async function convert() {
     busy = true;
+    let notifyQueued = false;
     try {
       await api.convertMediaFile(file.id);
       queued = true;
+      notifyQueued = true;
       pushToast('Queued for conversion.', 'neutral');
     } catch (err) {
       // Already queued is not a failure the user caused twice; say so and
       // leave the button in its queued state.
       if (err instanceof ApiError && err.status === 409) {
         queued = true;
+        notifyQueued = true;
         pushToast(errorText(err), 'neutral');
       } else {
         pushToast(errorText(err), 'danger');
@@ -53,6 +58,7 @@
     } finally {
       busy = false;
     }
+    if (notifyQueued) onqueued?.();
   }
 </script>
 
@@ -72,7 +78,7 @@
       size="sm"
       disabled={busy}
       title={file.compatibility?.reasons?.length
-        ? `${label} — ${file.compatibility.reasons.join('; ')}`
+        ? `${label}: ${file.compatibility.reasons.join('; ')}`
         : label}
       onclick={convert}>
       <Icon name="refresh" size={14} />

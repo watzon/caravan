@@ -5,21 +5,37 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/watzon/caravan/internal/convert"
 	"github.com/watzon/caravan/internal/core"
 	"github.com/watzon/caravan/internal/store"
 )
 
-// stubConverter stands in for internal/convert. Availability is the only thing
-// the HTTP layer asks it, so it is the only thing the stub answers.
-type stubConverter struct{ available bool }
+// stubConverter stands in for internal/convert. The HTTP layer asks it for
+// availability and optional live progress for running jobs.
+type stubConverter struct {
+	available bool
+	progress  map[int64]convert.LiveProgress
+}
 
 func (c stubConverter) Available() bool { return c.available }
 
+func (c stubConverter) Progress(id int64) (convert.LiveProgress, bool) {
+	progress, ok := c.progress[id]
+	return progress, ok
+}
+
 func seedConvertibleFile(t *testing.T, st *store.Store, path string) *core.MediaFile {
 	t.Helper()
-	f := core.MediaFile{Path: path, Size: 1234, Codec: "x265", Audio: "DTS", Quality: core.Quality2160p}
+	movie := &core.Movie{TMDBID: 1, Title: "Movie", SortTitle: "movie"}
+	if err := st.UpsertMovie(context.Background(), movie); err != nil {
+		t.Fatalf("UpsertMovie: %v", err)
+	}
+	f := core.MediaFile{
+		Path: path, Size: 1234, MovieID: movie.ID,
+		Codec: "x265", Audio: "DTS", Quality: core.Quality2160p,
+	}
 	if err := st.UpsertMediaFile(context.Background(), &f); err != nil {
 		t.Fatalf("UpsertMediaFile: %v", err)
 	}
@@ -29,16 +45,42 @@ func seedConvertibleFile(t *testing.T, st *store.Store, path string) *core.Media
 func TestConvertQueueRoundTrip(t *testing.T) {
 	h, st, _ := newTestServer(t, WithConverter(stubConverter{available: true}))
 	file := seedConvertibleFile(t, st, "library/Movies/A (2001)/A (2001).mkv")
+	remux := core.MediaFile{
+		Path: "library/Movies/B (2002)/B (2002).mkv", Size: 2345, MovieID: file.MovieID,
+		Codec: "x264", Audio: "AAC", Quality: core.Quality1080p,
+	}
+	compatible := core.MediaFile{
+		Path: "library/Movies/C (2003)/C (2003).mp4", Size: 3456, MovieID: file.MovieID,
+		Codec: "x264", Audio: "AAC", Quality: core.Quality1080p,
+	}
+	for _, candidate := range []*core.MediaFile{&remux, &compatible} {
+		if err := st.UpsertMediaFile(context.Background(), candidate); err != nil {
+			t.Fatalf("UpsertMediaFile(%q): %v", candidate.Path, err)
+		}
+	}
 
-	// Empty to start with, and the envelope is a list, never null.
+	// The page starts with every current file that needs work, but not a file
+	// that already matches the active profile.
 	rec := do(t, h, "GET", "/api/v1/convert", "")
 	wantStatus(t, rec, http.StatusOK)
 	var empty struct {
+		Pending     []mediaFileJSON  `json:"pending"`
 		Conversions []conversionJSON `json:"conversions"`
 	}
 	decodeBody(t, rec, &empty)
 	if empty.Conversions == nil || len(empty.Conversions) != 0 {
 		t.Fatalf("conversions = %v, want an empty list", empty.Conversions)
+	}
+	if len(empty.Pending) != 2 {
+		t.Fatalf("pending = %+v, want incompatible and remux files", empty.Pending)
+	}
+	if empty.Pending[0].ID != file.ID ||
+		empty.Pending[0].Compatibility.Verdict != core.TVCompatIncompatible {
+		t.Fatalf("pending[0] = %+v, want incompatible file %d", empty.Pending[0], file.ID)
+	}
+	if empty.Pending[1].ID != remux.ID ||
+		empty.Pending[1].Compatibility.Verdict != core.TVCompatNeedsRemux {
+		t.Fatalf("pending[1] = %+v, want remux file %d", empty.Pending[1], remux.ID)
 	}
 
 	rec = do(t, h, "POST", "/api/v1/convert", `{"media_file_id":`+itoa(file.ID)+`}`)
@@ -83,11 +125,193 @@ func TestConvertQueueRoundTrip(t *testing.T) {
 	rec = do(t, h, "GET", "/api/v1/convert", "")
 	wantStatus(t, rec, http.StatusOK)
 	var listed struct {
+		Pending     []mediaFileJSON  `json:"pending"`
 		Conversions []conversionJSON `json:"conversions"`
 	}
 	decodeBody(t, rec, &listed)
 	if len(listed.Conversions) != 1 || listed.Conversions[0].ID != created.ID {
 		t.Fatalf("queue = %+v", listed.Conversions)
+	}
+	if len(listed.Pending) != 1 || listed.Pending[0].ID != remux.ID {
+		t.Fatalf("pending after queue = %+v, want only remux file %d", listed.Pending, remux.ID)
+	}
+}
+
+func TestConvertListIncludesLiveProgress(t *testing.T) {
+	progress := make(map[int64]convert.LiveProgress)
+	h, st, _ := newTestServer(t, WithConverter(stubConverter{
+		available: true,
+		progress:  progress,
+	}))
+	file := seedConvertibleFile(t, st, "library/Movies/Live (2026)/Live (2026).mkv")
+	conv := &core.Conversion{
+		MediaFileID: file.ID,
+		SourcePath:  file.Path,
+		Strategy:    core.ConvertStrategyTranscode,
+		ProfileID:   core.TVProfileSafe,
+		Status:      core.ConversionRunning,
+	}
+	if err := st.CreateConversion(t.Context(), conv); err != nil {
+		t.Fatalf("CreateConversion: %v", err)
+	}
+	started := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	progress[conv.ID] = convert.LiveProgress{
+		Stage:            convert.ProgressStageConverting,
+		StartedAt:        started,
+		DurationSeconds:  120,
+		ProcessedSeconds: 30,
+		Speed:            1.5,
+	}
+
+	rec := do(t, h, "GET", "/api/v1/convert", "")
+	wantStatus(t, rec, http.StatusOK)
+	var listed struct {
+		Conversions []conversionJSON `json:"conversions"`
+	}
+	decodeBody(t, rec, &listed)
+	if len(listed.Conversions) != 1 {
+		t.Fatalf("conversions = %+v, want one", listed.Conversions)
+	}
+	got := listed.Conversions[0]
+	if got.Stage != convert.ProgressStageConverting ||
+		!got.StartedAt.Equal(started) ||
+		got.Progress != 0.25 ||
+		got.ProcessedSeconds != 30 ||
+		got.DurationSeconds != 120 ||
+		got.Speed != 1.5 ||
+		got.ETASeconds != 60 {
+		t.Fatalf("conversion progress = %+v", got)
+	}
+
+	progress[conv.ID] = convert.LiveProgress{
+		Stage:            convert.ProgressStageVerifying,
+		StartedAt:        started,
+		DurationSeconds:  120,
+		ProcessedSeconds: 30,
+		Speed:            1.5,
+	}
+	rec = do(t, h, "GET", "/api/v1/convert", "")
+	wantStatus(t, rec, http.StatusOK)
+	listed.Conversions = nil
+	decodeBody(t, rec, &listed)
+	got = listed.Conversions[0]
+	if got.Stage != convert.ProgressStageVerifying ||
+		got.Progress != 0.25 ||
+		got.Speed != 0 ||
+		got.ETASeconds != 0 {
+		t.Fatalf("verification progress = %+v, want fraction without speed or ETA", got)
+	}
+
+	conv.Status = core.ConversionDone
+	if err := st.UpdateConversion(t.Context(), conv); err != nil {
+		t.Fatalf("UpdateConversion(done): %v", err)
+	}
+	rec = do(t, h, "GET", "/api/v1/convert", "")
+	wantStatus(t, rec, http.StatusOK)
+	var terminal struct {
+		Conversions []map[string]json.RawMessage `json:"conversions"`
+	}
+	decodeBody(t, rec, &terminal)
+	if len(terminal.Conversions) != 1 {
+		t.Fatalf("terminal conversions = %+v, want one", terminal.Conversions)
+	}
+	for _, field := range []string{
+		"stage", "started_at", "progress", "processed_seconds",
+		"duration_seconds", "speed", "eta_seconds",
+	} {
+		if _, ok := terminal.Conversions[0][field]; ok {
+			t.Fatalf("terminal conversion includes live field %q", field)
+		}
+	}
+}
+
+func TestConversionSettingsRoundTripAndValidation(t *testing.T) {
+	h, st, _ := newTestServer(t)
+
+	rec := do(t, h, http.MethodPut, "/api/v1/settings", `{
+		"convert_video_preset":" slow ",
+		"convert_video_crf":"18",
+		"convert_audio_bitrate_kbps":"256"
+	}`)
+	wantStatus(t, rec, http.StatusOK)
+	var settings map[string]string
+	decodeBody(t, rec, &settings)
+	want := map[string]string{
+		store.SettingConvertVideoPreset:      "slow",
+		store.SettingConvertVideoCRF:         "18",
+		store.SettingConvertAudioBitrateKbps: "256",
+	}
+	for key, value := range want {
+		if settings[key] != value {
+			t.Errorf("%s = %q, want %q", key, settings[key], value)
+		}
+	}
+
+	for _, body := range []string{
+		`{"convert_video_preset":"turbo"}`,
+		`{"convert_video_crf":"-1"}`,
+		`{"convert_video_crf":"52"}`,
+		`{"convert_audio_bitrate_kbps":"63"}`,
+		`{"convert_audio_bitrate_kbps":"513"}`,
+		`{"convert_video_preset":"medium","convert_video_crf":"52"}`,
+	} {
+		rec = do(t, h, http.MethodPut, "/api/v1/settings", body)
+		wantStatus(t, rec, http.StatusBadRequest)
+		wantErrorBody(t, rec)
+	}
+	stored, err := st.GetSetting(t.Context(), store.SettingConvertVideoPreset)
+	if err != nil {
+		t.Fatalf("GetSetting: %v", err)
+	}
+	if stored != "slow" {
+		t.Fatalf("invalid partial update changed preset to %q, want slow", stored)
+	}
+}
+
+func TestConvertPendingRespectsAdultVisibility(t *testing.T) {
+	h, st, _ := newTestServer(t, WithConverter(stubConverter{available: true}))
+	ctx := t.Context()
+	site := &core.Series{
+		Kind: core.SeriesKindAdult, StashID: "site-1", Title: "Site", SortTitle: "site",
+	}
+	if err := st.UpsertSeries(ctx, site); err != nil {
+		t.Fatalf("UpsertSeries: %v", err)
+	}
+	scene := &core.Episode{SeriesID: site.ID, SeasonNumber: 2026, EpisodeNumber: 1}
+	if err := st.UpsertEpisode(ctx, scene); err != nil {
+		t.Fatalf("UpsertEpisode: %v", err)
+	}
+	file := &core.MediaFile{
+		Path: "library/Adult/Site/2026/Scene.mkv", Codec: "x265", Audio: "DTS",
+		Quality: core.Quality2160p,
+	}
+	if err := st.UpsertMediaFile(ctx, file); err != nil {
+		t.Fatalf("UpsertMediaFile: %v", err)
+	}
+	if err := st.LinkEpisodeFile(ctx, scene.ID, file.ID); err != nil {
+		t.Fatalf("LinkEpisodeFile: %v", err)
+	}
+
+	listPending := func() []mediaFileJSON {
+		t.Helper()
+		rec := do(t, h, "GET", "/api/v1/convert", "")
+		wantStatus(t, rec, http.StatusOK)
+		var body struct {
+			Pending []mediaFileJSON `json:"pending"`
+		}
+		decodeBody(t, rec, &body)
+		return body.Pending
+	}
+	if got := listPending(); len(got) != 0 {
+		t.Fatalf("pending with adult module off = %+v, want empty", got)
+	}
+
+	if err := st.SetAdultEnabled(ctx, true); err != nil {
+		t.Fatalf("SetAdultEnabled: %v", err)
+	}
+	got := listPending()
+	if len(got) != 1 || got[0].ID != file.ID {
+		t.Fatalf("pending with adult module on = %+v, want file %d", got, file.ID)
 	}
 }
 

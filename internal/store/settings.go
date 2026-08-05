@@ -103,6 +103,14 @@ const (
 	// task 3). Unset resolves to the safe default, so this key is a preference
 	// and never a required row.
 	SettingTVProfile = "tv_profile"
+	// SettingConvertVideoPreset, SettingConvertVideoCRF and
+	// SettingConvertAudioBitrateKbps control how ffmpeg produces output when
+	// the active TV profile requires a re-encode. They do not change the
+	// profile's compatibility target, and they have code defaults so a fresh
+	// install keeps the original veryfast/CRF 20/192 kbps behaviour.
+	SettingConvertVideoPreset      = "convert_video_preset"
+	SettingConvertVideoCRF         = "convert_video_crf"
+	SettingConvertAudioBitrateKbps = "convert_audio_bitrate_kbps"
 	// SettingJellyfinURL, SettingJellyfinAPIKey and SettingJellyfinEnabled
 	// configure the playback handoff (SPEC §5.2, PLAN phase 4 task 1): where
 	// the user's Jellyfin lives, the API key created in its dashboard, and

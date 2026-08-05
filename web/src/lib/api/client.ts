@@ -16,6 +16,7 @@ import type {
   AuthState,
   CalendarEntry,
   Conversion,
+  ConversionQueue,
   CreateRequestBody,
   CreateUserBody,
   DiscoverBrowse,
@@ -532,9 +533,13 @@ export const api = {
    * every mutation answers 503 there, which is what the route's banner says.
    * --------------------------------------------------------------------- */
 
-  listConversions: (limit = 100, signal?: AbortSignal) =>
-    request<{ conversions: Conversion[] }>(endpoints.conversions(), { query: { limit }, signal })
-      .then((payload) => payload?.conversions ?? []),
+  listConversionQueue: (limit = 100, signal?: AbortSignal) =>
+    request<ConversionQueue>(endpoints.conversions(), { query: { limit }, signal }).then(
+      (payload) => ({
+        pending: payload?.pending ?? [],
+        conversions: payload?.conversions ?? [],
+      }),
+    ),
 
   /** Queue one library file. 409 means it is already in the queue. */
   convertMediaFile: (mediaFileID: number) =>
