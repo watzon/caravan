@@ -49,6 +49,8 @@
   let type = $state<IndexerType>('torznab');
   let url = $state('');
   let apiKey = $state('');
+  let hasAPIKey = $state(false);
+  let clearAPIKey = $state(false);
   let categories = $state('');
   let enabled = $state(true);
 
@@ -123,6 +125,8 @@
     type = 'torznab';
     url = '';
     apiKey = '';
+    hasAPIKey = false;
+    clearAPIKey = false;
     categories = '';
     enabled = true;
     resetCategoryPicker();
@@ -134,7 +138,9 @@
     name = indexer.name;
     type = indexer.type;
     url = indexer.url;
-    apiKey = indexer.api_key;
+    apiKey = '';
+    hasAPIKey = indexer.has_api_key;
+    clearAPIKey = false;
     categories = formatCategories(indexer.categories);
     enabled = indexer.enabled;
     resetCategoryPicker();
@@ -160,10 +166,12 @@
       name: name.trim(),
       type,
       url: url.trim(),
-      api_key: apiKey.trim(),
       categories: treeUsable ? selectedCategories : parseCategories(categories),
       enabled,
     };
+    if (apiKey.trim() !== '' || clearAPIKey) {
+      body.api_key = apiKey.trim();
+    }
 
     saving = true;
     try {
@@ -347,7 +355,21 @@
         label="API key"
         for="indexer-key"
         help="Stored in the database, never in caravan.yaml and never logged.">
-        <TextInput id="indexer-key" bind:value={apiKey} type="password" mono placeholder="•••••" />
+        <div class="flex flex-col gap-2">
+          <TextInput
+            id="indexer-key"
+            bind:value={apiKey}
+            type="password"
+            mono
+            placeholder="•••••"
+            oninput={() => (clearAPIKey = false)} />
+          {#if hasAPIKey}
+            <p class="text-sm text-ink-secondary">A key is stored. Leave blank to keep it.</p>
+            <Button variant="secondary" size="sm" onclick={() => (clearAPIKey = true)}>
+              Clear API key
+            </Button>
+          {/if}
+        </div>
       </Field>
 
       <Field

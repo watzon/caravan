@@ -11,7 +11,7 @@ interface Call {
 
 const STORED: JellyfinConfig = {
   url: 'http://jellyfin.lan:8096',
-  api_key: 'stored-key',
+  has_api_key: true,
   enabled: true,
 };
 
@@ -43,7 +43,12 @@ beforeEach(() => {
       if (url.endsWith('/handoff/jellyfin/test')) return testResponse();
       if (url.endsWith('/handoff/jellyfin')) {
         if ((init?.method ?? 'GET') === 'POST') {
-          return jsonResponse(JSON.parse(String(init?.body)));
+          const body = JSON.parse(String(init?.body));
+          return jsonResponse({
+            url: body.url,
+            has_api_key: body.api_key !== undefined ? body.api_key !== '' : STORED.has_api_key,
+            enabled: body.enabled,
+          });
         }
         return jsonResponse(STORED);
       }
@@ -94,15 +99,16 @@ async function mountLoaded() {
 }
 
 describe('JellyfinSettings', () => {
-  it('loads the stored configuration into the form', async () => {
+  it('loads a blank write-only key and shows the stored hint', async () => {
     await mountLoaded();
 
     expect(input('jellyfin-url').value).toBe('http://jellyfin.lan:8096');
-    expect(input('jellyfin-api-key').value).toBe('stored-key');
+    expect(input('jellyfin-api-key').value).toBe('');
+    expect(host.textContent).toContain('A key is stored. Leave blank to keep it.');
     expect(host.querySelector('[role="switch"]')?.getAttribute('aria-checked')).toBe('true');
   });
 
-  it('saves the form to POST /handoff/jellyfin', async () => {
+  it('omits a blank key when saving an ordinary edit', async () => {
     await mountLoaded();
 
     type(input('jellyfin-url'), 'http://media-box:8096  ');
@@ -113,7 +119,21 @@ describe('JellyfinSettings', () => {
     expect(saved).toHaveLength(1);
     expect(saved[0]!.body).toEqual({
       url: 'http://media-box:8096',
-      api_key: 'stored-key',
+      enabled: true,
+    });
+  });
+
+  it('sends an empty key only when Clear is explicit', async () => {
+    await mountLoaded();
+
+    button('Clear API key').click();
+    button('Save').click();
+    await settle();
+
+    const saved = calls.filter((c) => c.method === 'POST' && c.url.endsWith('/handoff/jellyfin'));
+    expect(saved[0]!.body).toEqual({
+      url: 'http://jellyfin.lan:8096',
+      api_key: '',
       enabled: true,
     });
   });

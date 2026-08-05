@@ -14,7 +14,7 @@
    */
   import { onMount } from 'svelte';
   import { api, errorText } from '../api/client';
-  import type { JellyfinConfig } from '../api/types';
+  import type { JellyfinConfig, JellyfinConfigInput } from '../api/types';
   import Banner from './Banner.svelte';
   import Button from './Button.svelte';
   import Field from './Field.svelte';
@@ -40,6 +40,8 @@
 
   let url = $state('');
   let apiKey = $state('');
+  let hasAPIKey = $state(false);
+  let clearAPIKey = $state(false);
   let enabled = $state(false);
 
   async function load() {
@@ -48,7 +50,9 @@
       const cfg = await api.jellyfinConfig();
       loaded = cfg;
       url = cfg.url;
-      apiKey = cfg.api_key;
+      apiKey = '';
+      hasAPIKey = cfg.has_api_key;
+      clearAPIKey = false;
       enabled = cfg.enabled;
       error = null;
     } catch (err) {
@@ -66,13 +70,20 @@
   async function save() {
     saving = true;
     try {
-      const cfg = await api.saveJellyfinConfig({
+      const body: JellyfinConfigInput = {
         url: url.trim(),
-        api_key: apiKey.trim(),
         enabled,
-      });
+      };
+      if (apiKey.trim() !== '' || clearAPIKey) {
+        body.api_key = apiKey.trim();
+      }
+      const cfg = await api.saveJellyfinConfig(body);
       loaded = cfg;
       url = cfg.url;
+      apiKey = '';
+      hasAPIKey = cfg.has_api_key;
+      clearAPIKey = false;
+      enabled = cfg.enabled;
       pushToast('Jellyfin handoff saved.', 'success');
     } catch (err) {
       pushToast(errorText(err), 'danger');
@@ -87,7 +98,9 @@
     try {
       // The form's current values, not the saved ones: the point of a test
       // button is to find the typo before it is stored.
-      const info = await api.testJellyfin({ url: url.trim(), api_key: apiKey.trim() });
+      const body: Pick<JellyfinConfigInput, 'url' | 'api_key'> = { url: url.trim() };
+      if (apiKey.trim() !== '') body.api_key = apiKey.trim();
+      const info = await api.testJellyfin(body);
       const name = info.server_name || 'Jellyfin';
       result = { ok: true, message: `Connected to ${name}${info.version ? ` ${info.version}` : ''}` };
     } catch (err) {
@@ -130,7 +143,21 @@
       label="API key"
       for="jellyfin-api-key"
       help="Created in Jellyfin under Dashboard - API Keys. Triggering a library scan is an administrator action, so a read-only key will not do.">
-      <TextInput id="jellyfin-api-key" bind:value={apiKey} type="password" mono placeholder="•••••" />
+      <div class="flex flex-col gap-2">
+        <TextInput
+          id="jellyfin-api-key"
+          bind:value={apiKey}
+          type="password"
+          mono
+          placeholder="•••••"
+          oninput={() => (clearAPIKey = false)} />
+        {#if hasAPIKey}
+          <p class="text-sm text-ink-secondary">A key is stored. Leave blank to keep it.</p>
+          <Button variant="secondary" size="sm" onclick={() => (clearAPIKey = true)}>
+            Clear API key
+          </Button>
+        {/if}
+      </div>
     </Field>
 
     <Toggle

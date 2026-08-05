@@ -14,7 +14,7 @@ gate, and update its status row when finished.
 | 003 | Poll external download clients concurrently | P1 | M | — | DONE |
 | 004 | Batch episode-file reads | P1 | S | — | DONE |
 | 005 | Restrict SQLite state-file permissions | P1 | M | — | DONE |
-| 006 | Stop returning stored credentials | P2 | M | — | TODO |
+| 006 | Stop returning stored credentials | P2 | M | — | DONE |
 | 007 | Preserve the TMDB client cache | P2 | S | — | TODO |
 | 008 | Make Jellyfin setting writes atomic | P2 | S | 006 | TODO |
 | 009 | Bound calendar status queries | P2 | M | — | TODO |

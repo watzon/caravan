@@ -12,17 +12,12 @@ import (
 )
 
 // jellyfinJSON is the playback-handoff configuration on the wire (SPEC §11:
-// GET/POST /handoff/jellyfin).
-//
-// The API key is echoed back, as GET /settings and the indexer endpoints do:
-// the API is single-user and unauthenticated until phase 5, and the settings
-// screen has to render the value the user typed. SPEC §12's rule is that
-// credentials stay out of logs and out of caravan.yaml, which the access log
-// and the settings table both honor.
+// GET/POST /handoff/jellyfin). Stored credentials are write-only; HasAPIKey
+// tells the settings screen whether one is already present.
 type jellyfinJSON struct {
-	URL     string `json:"url"`
-	APIKey  string `json:"api_key"`
-	Enabled bool   `json:"enabled"`
+	URL       string `json:"url"`
+	HasAPIKey bool   `json:"has_api_key"`
+	Enabled   bool   `json:"enabled"`
 }
 
 // jellyfinTestJSON is what a successful test reports: proof the server answered
@@ -36,18 +31,15 @@ type jellyfinTestJSON struct {
 // optional, of POST /handoff/jellyfin/test.
 //
 // The test body exists so the settings form can verify what is on screen before
-// it is saved — the same reason POST /indexers/categories takes a body instead
-// of an id. Blank fields fall back to what is stored, so "test the saved
+// it is saved. Blank fields fall back to what is stored, so "test the saved
 // configuration" is an empty object.
 type jellyfinRequest struct {
-	URL     string `json:"url"`
-	APIKey  string `json:"api_key"`
-	Enabled bool   `json:"enabled"`
+	URL     string  `json:"url"`
+	APIKey  *string `json:"api_key"`
+	Enabled bool    `json:"enabled"`
 }
 
-// config validates the body into a storable configuration. The returned message
-// is empty when the body is valid.
-func (b jellyfinRequest) config() (jellyfin.Config, string) {
+func (b jellyfinRequest) config(apiKey string) (jellyfin.Config, string) {
 	raw := strings.TrimRight(strings.TrimSpace(b.URL), "/")
 	if raw != "" {
 		// Parsed rather than pattern-matched: the client builds request URLs
@@ -63,7 +55,7 @@ func (b jellyfinRequest) config() (jellyfin.Config, string) {
 	}
 	return jellyfin.Config{
 		URL:     raw,
-		APIKey:  strings.TrimSpace(b.APIKey),
+		APIKey:  strings.TrimSpace(apiKey),
 		Enabled: b.Enabled,
 	}, ""
 }
@@ -75,7 +67,11 @@ func (s *server) handleGetJellyfin(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreError(w, "read jellyfin settings", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, jellyfinJSON(cfg))
+	writeJSON(w, http.StatusOK, jellyfinJSON{
+		URL:       cfg.URL,
+		HasAPIKey: cfg.APIKey != "",
+		Enabled:   cfg.Enabled,
+	})
 }
 
 // handleSetJellyfin replaces the stored configuration. It is a replace rather
@@ -86,7 +82,16 @@ func (s *server) handleSetJellyfin(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	cfg, problem := body.config()
+	stored, err := s.jellyfinConfig(r.Context())
+	if err != nil {
+		s.writeStoreError(w, "read jellyfin settings", err)
+		return
+	}
+	apiKey := stored.APIKey
+	if body.APIKey != nil {
+		apiKey = *body.APIKey
+	}
+	cfg, problem := body.config(apiKey)
 	if problem != "" {
 		writeError(w, http.StatusBadRequest, problem)
 		return
@@ -104,7 +109,11 @@ func (s *server) handleSetJellyfin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	writeJSON(w, http.StatusOK, jellyfinJSON(cfg))
+	writeJSON(w, http.StatusOK, jellyfinJSON{
+		URL:       cfg.URL,
+		HasAPIKey: cfg.APIKey != "",
+		Enabled:   cfg.Enabled,
+	})
 }
 
 // handleTestJellyfin asks the server who it is with the supplied credentials,
@@ -127,9 +136,9 @@ func (s *server) handleTestJellyfin(w http.ResponseWriter, r *http.Request) {
 	if target == "" {
 		target = stored.URL
 	}
-	key := strings.TrimSpace(body.APIKey)
-	if key == "" {
-		key = stored.APIKey
+	key := stored.APIKey
+	if body.APIKey != nil && strings.TrimSpace(*body.APIKey) != "" {
+		key = *body.APIKey
 	}
 	if target == "" {
 		writeError(w, http.StatusBadRequest, "url is required")

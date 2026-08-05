@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/watzon/caravan/internal/store"
@@ -46,12 +47,16 @@ func TestJellyfinConfigRoundTrip(t *testing.T) {
 	}
 
 	rec = do(t, h, "POST", "/api/v1/handoff/jellyfin",
-		`{"url":"http://jellyfin.lan:8096/","api_key":"secret","enabled":true}`)
+		`{"url":"http://jellyfin.lan:8096/","api_key":"jelly-secret","enabled":true}`)
 	wantStatus(t, rec, 200)
+	if strings.Contains(rec.Body.String(), "jelly-secret") ||
+		strings.Contains(rec.Body.String(), `"api_key"`) {
+		t.Fatalf("Jellyfin response leaked credential: %s", rec.Body.String())
+	}
 	decodeBody(t, rec, &cfg)
 	// The trailing slash is normalized away so the client never builds a "//"
 	// path out of it.
-	if cfg.URL != "http://jellyfin.lan:8096" || cfg.APIKey != "secret" || !cfg.Enabled {
+	if cfg.URL != "http://jellyfin.lan:8096" || !cfg.HasAPIKey || !cfg.Enabled {
 		t.Fatalf("saved config = %+v", cfg)
 	}
 
@@ -59,7 +64,7 @@ func TestJellyfinConfigRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	for key, want := range map[string]string{
 		store.SettingJellyfinURL:     "http://jellyfin.lan:8096",
-		store.SettingJellyfinAPIKey:  "secret",
+		store.SettingJellyfinAPIKey:  "jelly-secret",
 		store.SettingJellyfinEnabled: "true",
 	} {
 		got, err := st.GetSetting(ctx, key)
@@ -73,9 +78,45 @@ func TestJellyfinConfigRoundTrip(t *testing.T) {
 
 	rec = do(t, h, "GET", "/api/v1/handoff/jellyfin", "")
 	wantStatus(t, rec, 200)
+	if strings.Contains(rec.Body.String(), "jelly-secret") ||
+		strings.Contains(rec.Body.String(), `"api_key"`) {
+		t.Fatalf("Jellyfin GET leaked credential: %s", rec.Body.String())
+	}
 	decodeBody(t, rec, &cfg)
-	if cfg.URL != "http://jellyfin.lan:8096" || !cfg.Enabled {
+	if cfg.URL != "http://jellyfin.lan:8096" || !cfg.HasAPIKey || !cfg.Enabled {
 		t.Fatalf("re-read config = %+v", cfg)
+	}
+
+	// An omitted key preserves the stored value.
+	rec = do(t, h, "POST", "/api/v1/handoff/jellyfin",
+		`{"url":"http://new-jellyfin:8096","enabled":false}`)
+	wantStatus(t, rec, 200)
+	decodeBody(t, rec, &cfg)
+	if cfg.URL != "http://new-jellyfin:8096" || !cfg.HasAPIKey || cfg.Enabled {
+		t.Fatalf("omitted-key config = %+v", cfg)
+	}
+	stored, err := st.GetSetting(ctx, store.SettingJellyfinAPIKey)
+	if err != nil {
+		t.Fatalf("GetSetting after omitted key: %v", err)
+	}
+	if stored != "jelly-secret" {
+		t.Fatalf("stored API key after omitted key = %q, want preserved secret", stored)
+	}
+
+	// An explicit empty key clears the stored value.
+	rec = do(t, h, "POST", "/api/v1/handoff/jellyfin",
+		`{"url":"http://new-jellyfin:8096","api_key":"","enabled":false}`)
+	wantStatus(t, rec, 200)
+	decodeBody(t, rec, &cfg)
+	if cfg.HasAPIKey {
+		t.Fatalf("cleared config = %+v, want has_api_key false", cfg)
+	}
+	stored, err = st.GetSetting(ctx, store.SettingJellyfinAPIKey)
+	if err != nil {
+		t.Fatalf("GetSetting after clear: %v", err)
+	}
+	if stored != "" {
+		t.Fatalf("stored API key after clear = %q, want empty", stored)
 	}
 }
 

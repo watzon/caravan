@@ -13,7 +13,7 @@ const GEEK: Indexer = {
   id: 1,
   name: 'NZBGeek',
   url: 'https://api.nzbgeek.info',
-  api_key: 'k',
+  has_api_key: true,
   type: 'newznab',
   categories: [2000],
   enabled: true,
@@ -43,19 +43,28 @@ let app: Record<string, unknown>;
 /** Every answer the categories endpoint will give, consumed in order. */
 let categoriesAnswers: Array<() => Response>;
 let categoriesCalls: number;
+let indexerWrites: Array<{ method: string; body: unknown }>;
 
 beforeEach(() => {
   categoriesAnswers = [];
   categoriesCalls = 0;
+  indexerWrites = [];
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (input: RequestInfo | URL) => {
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith('/indexers/categories')) {
         categoriesCalls += 1;
         const answer = categoriesAnswers.shift();
         if (!answer) throw new Error('unexpected categories fetch');
         return answer();
+      }
+      if (url.endsWith('/indexers/1') && init?.method === 'PUT') {
+        indexerWrites.push({
+          method: init.method,
+          body: typeof init.body === 'string' ? JSON.parse(init.body) : null,
+        });
+        return jsonResponse(GEEK);
       }
       if (url.endsWith('/indexers')) return jsonResponse({ indexers: [GEEK] });
       throw new Error(`unexpected fetch: ${url}`);
@@ -146,5 +155,36 @@ describe('IndexerSettings category picker', () => {
     clickButton('Reload from indexer');
     await settle();
     expect(host.textContent).toContain('TV/HD');
+  });
+
+  it('starts edits with a blank write-only key and stored hint', async () => {
+    categoriesAnswers = [() => jsonResponse({ categories: [] })];
+    app = mount(IndexerSettings, { target: host });
+    await settle();
+
+    clickButton('Edit');
+    await settle();
+
+    expect((host.querySelector('#indexer-key') as HTMLInputElement).value).toBe('');
+    expect(host.textContent).toContain('A key is stored. Leave blank to keep it.');
+  });
+
+  it('omits a blank key on ordinary save and sends empty only on Clear', async () => {
+    categoriesAnswers = [() => jsonResponse({ categories: [] }), () => jsonResponse({ categories: [] })];
+    app = mount(IndexerSettings, { target: host });
+    await settle();
+
+    clickButton('Edit');
+    await settle();
+    clickButton('Save');
+    await settle();
+    expect(indexerWrites[0]?.body).not.toHaveProperty('api_key');
+
+    clickButton('Edit');
+    await settle();
+    clickButton('Clear API key');
+    clickButton('Save');
+    await settle();
+    expect(indexerWrites[1]?.body).toHaveProperty('api_key', '');
   });
 });

@@ -242,7 +242,7 @@ describe('Settings metadata pane', () => {
         body: typeof init?.body === 'string' ? JSON.parse(init.body) : null,
       });
       if (url.includes('/settings/metadata/test')) return testReply();
-      if (url.endsWith('/settings')) return jsonResponse({ tmdb_api_key: 'stored-key' });
+      if (url.endsWith('/settings')) return jsonResponse({ tmdb_api_key_set: 'true' });
       if (url.endsWith('/system/status')) return jsonResponse(SYSTEM_STATUS);
       if (url.endsWith('/indexers')) return jsonResponse({ indexers: [] });
       if (url.endsWith('/usenet-servers')) return jsonResponse({ usenet_servers: [] });
@@ -273,6 +273,28 @@ describe('Settings metadata pane', () => {
     expect(host.textContent).toContain('TMDB accepted this key');
     // Testing is not saving: a key is only stored when Save says so.
     expect(calls.some((c) => c.method === 'PUT')).toBe(false);
+  });
+
+  it('keeps the field blank, saves typed keys, and clears explicitly', async () => {
+    const calls = stubMetadata(() => jsonResponse({ status: 'ok' }));
+    app = mount(Settings, { target: host, props: { section: 'metadata' } });
+    await settle();
+
+    const field = host.querySelector('#tmdb-key') as HTMLInputElement;
+    expect(field.value).toBe('');
+    expect(host.textContent).toContain('A key is stored. Leave blank to keep it.');
+
+    field.value = 'typed-key';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    button('Save').click();
+    await settle();
+    expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ tmdb_api_key: 'typed-key' });
+
+    button('Clear').click();
+    await settle();
+    const puts = calls.filter((c) => c.method === 'PUT');
+    expect(puts.at(-1)?.body).toEqual({ tmdb_api_key: '' });
   });
 
   it('reports the provider’s own complaint inline when the key is refused', async () => {

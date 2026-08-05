@@ -2,7 +2,7 @@
   /** Settings for general configuration, indexers, engine defaults, profiles and storage. */
   import { onMount } from 'svelte';
   import { api, errorText } from '../api/client';
-  import { SETTING_TMDB_API_KEY, type Settings } from '../api/types';
+  import { SETTING_TMDB_API_KEY, SETTING_TMDB_API_KEY_SET, type Settings } from '../api/types';
   import AdultSettings from '../components/AdultSettings.svelte';
   import Banner from '../components/Banner.svelte';
   import Button from '../components/Button.svelte';
@@ -229,7 +229,7 @@
     try {
       const loaded = await api.getSettings();
       settings = loaded;
-      tmdbKey = loaded[SETTING_TMDB_API_KEY] ?? '';
+      tmdbKey = '';
       error = null;
     } catch (err) {
       error = errorText(err);
@@ -281,6 +281,7 @@
 
   let status = $derived(system.status);
   let metadataState = $derived(system.metadataCredential);
+  let hasTMDBKey = $derived(settings?.[SETTING_TMDB_API_KEY_SET] === 'true');
 </script>
 
 <div class="flex flex-col gap-6 md:flex-row md:gap-7">
@@ -409,6 +410,9 @@
             placeholder="•••••"
             oninput={() => (tmdbTest = null)} />
         </Field>
+        {#if hasTMDBKey}
+          <p class="-mt-4 text-sm text-ink-secondary">A key is stored. Leave blank to keep it.</p>
+        {/if}
 
         {#if tmdbTest?.ok}
           <p class="-mt-4 text-sm text-success">✓ {tmdbTest.message}</p>
@@ -417,10 +421,16 @@
         <div class="flex flex-wrap items-center gap-2">
           <Button
             variant="primary"
-            disabled={saving}
+            disabled={saving || tmdbKey.trim() === ''}
             onclick={() => save({ [SETTING_TMDB_API_KEY]: tmdbKey.trim() }, 'TMDB API key saved.')}>
             <Icon name="check" size={14} />
             {saving ? 'Saving…' : 'Save'}
+          </Button>
+          <Button
+            variant="secondary"
+            disabled={!hasTMDBKey || saving}
+            onclick={() => save({ [SETTING_TMDB_API_KEY]: '' }, 'TMDB API key cleared.')}>
+            Clear
           </Button>
           <!-- The indexer card's idiom, on the credential every other card
                assumes: ask the provider, report what it said. -->

@@ -466,32 +466,73 @@ func TestAPIRoutingErrorsUseJSONEnvelope(t *testing.T) {
 }
 
 func TestSettingsRoundTrip(t *testing.T) {
-	h, _, _ := newTestServer(t)
+	h, st, _ := newTestServer(t)
+	ctx := context.Background()
 
 	rec := do(t, h, http.MethodGet, "/api/v1/settings", "")
 	wantStatus(t, rec, http.StatusOK)
 	var settings map[string]string
 	decodeBody(t, rec, &settings)
-	if len(settings) != 0 {
-		t.Fatalf("settings = %v, want empty on a fresh database", settings)
+	if settings["tmdb_api_key_set"] != "false" {
+		t.Fatalf("fresh settings = %v, want tmdb_api_key_set=false", settings)
+	}
+	if _, ok := settings[store.SettingTMDBAPIKey]; ok {
+		t.Fatalf("fresh settings exposed tmdb_api_key: %v", settings)
 	}
 
-	rec = do(t, h, http.MethodPut, "/api/v1/settings", `{"tmdb_api_key":"k","rss_sync_interval_minutes":"20"}`)
+	if err := st.SetSetting(ctx, store.SettingTMDBAPIKey, "tmdb-secret"); err != nil {
+		t.Fatalf("seed TMDB key: %v", err)
+	}
+	if err := st.SetSetting(ctx, store.SettingRSSSyncIntervalMinutes, "20"); err != nil {
+		t.Fatalf("seed interval: %v", err)
+	}
+
+	rec = do(t, h, http.MethodGet, "/api/v1/settings", "")
 	wantStatus(t, rec, http.StatusOK)
+	if strings.Contains(rec.Body.String(), "tmdb-secret") ||
+		strings.Contains(rec.Body.String(), `"tmdb_api_key"`) {
+		t.Fatalf("settings GET leaked credential: %s", rec.Body.String())
+	}
 	decodeBody(t, rec, &settings)
-	if settings[store.SettingTMDBAPIKey] != "k" || settings[store.SettingRSSSyncIntervalMinutes] != "20" {
-		t.Fatalf("settings = %v, want the values just written", settings)
+	if settings["tmdb_api_key_set"] != "true" || settings[store.SettingRSSSyncIntervalMinutes] != "20" {
+		t.Fatalf("settings = %v, want redacted key flag and interval", settings)
 	}
 
-	// A partial update leaves untouched keys alone.
+	// A partial update leaves the stored credential untouched.
 	rec = do(t, h, http.MethodPut, "/api/v1/settings", `{"rss_sync_interval_minutes":"45"}`)
 	wantStatus(t, rec, http.StatusOK)
-	decodeBody(t, rec, &settings)
-	if settings[store.SettingRSSSyncIntervalMinutes] != "45" {
-		t.Fatalf("rss_sync_interval_minutes = %q, want %q", settings[store.SettingRSSSyncIntervalMinutes], "45")
+	if strings.Contains(rec.Body.String(), "tmdb-secret") ||
+		strings.Contains(rec.Body.String(), `"tmdb_api_key"`) {
+		t.Fatalf("settings PUT leaked credential: %s", rec.Body.String())
 	}
-	if settings[store.SettingTMDBAPIKey] != "k" {
-		t.Fatalf("tmdb_api_key = %q, want it preserved", settings[store.SettingTMDBAPIKey])
+	decodeBody(t, rec, &settings)
+	if settings[store.SettingRSSSyncIntervalMinutes] != "45" || settings["tmdb_api_key_set"] != "true" {
+		t.Fatalf("settings = %v, want partial update with preserved key flag", settings)
+	}
+	stored, err := st.GetSetting(ctx, store.SettingTMDBAPIKey)
+	if err != nil {
+		t.Fatalf("GetSetting after partial update: %v", err)
+	}
+	if stored != "tmdb-secret" {
+		t.Fatalf("stored TMDB key after partial update = %q, want preserved secret", stored)
+	}
+
+	// An explicit empty value clears the credential.
+	rec = do(t, h, http.MethodPut, "/api/v1/settings", `{"tmdb_api_key":""}`)
+	wantStatus(t, rec, http.StatusOK)
+	if strings.Contains(rec.Body.String(), `"tmdb_api_key"`) {
+		t.Fatalf("settings clear response exposed secret field: %s", rec.Body.String())
+	}
+	decodeBody(t, rec, &settings)
+	if settings["tmdb_api_key_set"] != "false" {
+		t.Fatalf("settings after clear = %v, want tmdb_api_key_set=false", settings)
+	}
+	stored, err = st.GetSetting(ctx, store.SettingTMDBAPIKey)
+	if err != nil {
+		t.Fatalf("GetSetting after clear: %v", err)
+	}
+	if stored != "" {
+		t.Fatalf("stored TMDB key after clear = %q, want empty", stored)
 	}
 }
 
