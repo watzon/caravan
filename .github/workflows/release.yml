@@ -49,8 +49,8 @@ jobs:
           matrix="$(printf '%s\n' "$actual" | python3 -c 'import json, sys; print(json.dumps({"include": [{"goos": item.split("/")[0], "goarch": item.split("/")[1]} for item in sys.stdin.read().splitlines()]}))')"
           printf 'matrix=%s\n' "$matrix" >> "$GITHUB_OUTPUT"
 
-  freshness:
-    name: Verify embedded SPA freshness
+  web:
+    name: Build embedded SPA
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -65,18 +65,26 @@ jobs:
       - name: build frontend
         working-directory: web
         run: npm run build
-      - name: reject stale embedded SPA
-        run: git diff --exit-code -- web/dist
+      - name: upload embedded SPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+          if-no-files-found: error
 
   build:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
-    needs: [validate-tag, verify-targets, freshness]
+    needs: [validate-tag, verify-targets, web]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.verify-targets.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -118,6 +126,10 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod

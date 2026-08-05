@@ -58,14 +58,14 @@ manual hardware checks. See [the portable drive guide](docs/portable.md).
 ## Verify the repository
 
 ```sh
+(cd web && npm ci && npm run check && npm test && npm run build)
 go test -count=1 ./...
 go vet ./...
-(cd web && npm run check && npm test && npm run build)
 ```
 
-The web build must leave `web/dist/index.html` current for `go:embed`. CI also
-runs a pinned Go vulnerability scan, focused race coverage, a host-binary SPA
-smoke, and the Docker image smoke.
+`web/dist` is ignored generated output. Build the frontend before Go commands
+on a fresh checkout because `go:embed` requires `web/dist/index.html`. CI builds
+the SPA once and passes that artifact to Go, cross-compile, and race jobs.
 
 ## Project documents
 

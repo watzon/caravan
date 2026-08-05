@@ -149,8 +149,9 @@ and the analogous Darwin paths. Then pass that directory to `prepare`:
 caravan prepare /Volumes/CARAVAN -bin-dir ~/caravan-release-bins
 ```
 
-The release workflow checks the embedded SPA freshness contract before building
-these archives. It also exercises this unpacked layout with `prepare` in CI.
+The release workflow builds the embedded SPA from source once and passes that
+artifact to each target build. It also exercises this unpacked layout with
+`prepare` in CI.
 Those checks do not prove exFAT behavior or TV playback.
 
 ### Equipment

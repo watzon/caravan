@@ -15,6 +15,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -89,9 +93,12 @@ jobs:
       - name: build
         run: npm run build
 
-      - name: verify embedded SPA is fresh
-        working-directory: .
-        run: git diff --exit-code -- web/dist
+      - name: upload embedded SPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+          if-no-files-found: error
 
   cross-compile:
     name: Cross-compile ${{ matrix.goos }}/${{ matrix.goarch }}
@@ -113,6 +120,10 @@ jobs:
             goarch: arm64
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
@@ -129,9 +140,14 @@ jobs:
 
   race:
     name: Focused race coverage
+    needs: web
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod

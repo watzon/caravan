@@ -7,9 +7,8 @@ import (
 )
 
 // The API server serves the SPA from DistFS, so index.html must be reachable
-// without the "dist/" prefix and must look like a real Vite build. Source-to-
-// dist freshness belongs to CI's generated-tree diff because this test can
-// only inspect files that are already embedded.
+// without the "dist/" prefix and must look like a real Vite build. CI builds
+// the ignored dist tree before running this test.
 func TestDistFSServesIndex(t *testing.T) {
 	data, err := fs.ReadFile(DistFS(), "index.html")
 	if err != nil {

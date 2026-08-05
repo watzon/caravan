@@ -10,9 +10,9 @@ caravan.state
 # Air development artifacts
 /tmp/
 
-# web toolchain — web/dist is deliberately NOT ignored: it is embedded via
-# go:embed and a placeholder must exist for `go build` to work.
+# web toolchain output
 web/node_modules/
+web/dist/
 
 # macOS
 .DS_Store

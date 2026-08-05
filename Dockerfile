@@ -5,12 +5,9 @@
 
 # ---------------------------------------------------------------------------
 # Stage 1 — the SPA.
-#
-# web/dist is committed (go:embed needs *something* there for `go build` to
-# work at all), but nothing in CI proves the committed copy matches web/src.
-# The image therefore rebuilds it and .dockerignore keeps the committed copy
-# out of the build context entirely, so an image is a pure function of the
-# source tree rather than of whoever last remembered to run `npm run build`.
+# web/dist is generated and ignored. The image rebuilds it in the node stage,
+# and .dockerignore excludes any local copy, so an image is a pure function of
+# the source tree.
 # ---------------------------------------------------------------------------
 FROM node:22-alpine AS web
 

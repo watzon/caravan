@@ -18,8 +18,7 @@ caravan.yaml
 tmp/
 /caravan
 
-# Rebuilt by the node stage. Excluding the committed web/dist is what stops a
-# stale bundle from being embedded when someone forgot to rebuild it.
+# Rebuilt by the node stage; never copy local generated output into the image.
 web/node_modules/
 web/dist/
 

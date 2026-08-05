@@ -1,9 +1,8 @@
 // Package web embeds the built Svelte SPA so the server ships as one binary
 // with no runtime file dependencies (SPEC §2.2, §4).
 //
-// The embedded tree is web/dist, which is Vite's build output. A placeholder
-// index.html is committed so `go build` works on a checkout where the SPA has
-// never been built; a real build overwrites it.
+// The embedded tree is web/dist, which is ignored Vite build output. Run the
+// frontend build before compiling Go from a fresh checkout.
 package web
 
 import (
