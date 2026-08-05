@@ -477,17 +477,24 @@ func TestGetSeriesIncludesSeasonsAndEpisodes(t *testing.T) {
 	if err := st.UpsertEpisode(ctx, ep); err != nil {
 		t.Fatalf("UpsertEpisode: %v", err)
 	}
+	ep2 := &core.Episode{SeriesID: sr.ID, SeasonNumber: 1, EpisodeNumber: 2, Title: "Mountains"}
+	if err := st.UpsertEpisode(ctx, ep2); err != nil {
+		t.Fatalf("UpsertEpisode: %v", err)
+	}
 	// An episode whose season row is missing must still be visible.
 	orphan := &core.Episode{SeriesID: sr.ID, SeasonNumber: 2, EpisodeNumber: 1, Title: "Orphan"}
 	if err := st.UpsertEpisode(ctx, orphan); err != nil {
 		t.Fatalf("UpsertEpisode: %v", err)
 	}
 
-	f := &core.MediaFile{Path: "TV/Planet Earth II (2016)/Season 01/S01E01.mkv", Size: 9}
+	f := &core.MediaFile{Path: "TV/Planet Earth II (2016)/Season 01/S01E01E02.mkv", Size: 9}
 	if err := st.UpsertMediaFile(ctx, f); err != nil {
 		t.Fatalf("UpsertMediaFile: %v", err)
 	}
 	if err := st.LinkEpisodeFile(ctx, ep.ID, f.ID); err != nil {
+		t.Fatalf("LinkEpisodeFile: %v", err)
+	}
+	if err := st.LinkEpisodeFile(ctx, ep2.ID, f.ID); err != nil {
 		t.Fatalf("LinkEpisodeFile: %v", err)
 	}
 
@@ -509,19 +516,24 @@ func TestGetSeriesIncludesSeasonsAndEpisodes(t *testing.T) {
 	if detail.Seasons[0].ID != season.ID || !detail.Seasons[0].Monitored {
 		t.Fatalf("season 1 = %+v, want the stored row", detail.Seasons[0])
 	}
-	if len(detail.Seasons[0].Episodes) != 1 || detail.Seasons[0].Episodes[0].Title != "Islands" {
-		t.Fatalf("season 1 episodes = %+v, want S01E01", detail.Seasons[0].Episodes)
+	seasonEpisodes := detail.Seasons[0].Episodes
+	if len(seasonEpisodes) != 2 ||
+		seasonEpisodes[0].EpisodeNumber != 1 || seasonEpisodes[0].Title != "Islands" ||
+		seasonEpisodes[1].EpisodeNumber != 2 || seasonEpisodes[1].Title != "Mountains" {
+		t.Fatalf("season 1 episodes = %+v, want S01E01 then S01E02", seasonEpisodes)
 	}
-	if got := detail.Seasons[0].Episodes[0].File; got == nil || got.Path != f.Path {
-		t.Fatalf("episode file = %+v, want the linked file", got)
+	for _, episode := range seasonEpisodes {
+		if got := episode.File; got == nil || got.Path != f.Path {
+			t.Fatalf("episode %d file = %+v, want shared file %q", episode.EpisodeNumber, got, f.Path)
+		}
 	}
 	if detail.Seasons[1].ID != 0 || len(detail.Seasons[1].Episodes) != 1 {
 		t.Fatalf("derived season = %+v, want no row id and the orphan episode", detail.Seasons[1])
 	}
-	// Two episodes exist, one of which has a file: the counts the poster grid
-	// renders as "1 / 2".
-	if detail.EpisodeCount != 2 || detail.EpisodeFileCount != 1 {
-		t.Fatalf("counts = %d/%d, want 1/2", detail.EpisodeFileCount, detail.EpisodeCount)
+	// Three episodes exist, two of which share one file: counts are by covered
+	// episode, not by physical media-file row.
+	if detail.EpisodeCount != 3 || detail.EpisodeFileCount != 2 {
+		t.Fatalf("counts = %d/%d, want 2/3", detail.EpisodeFileCount, detail.EpisodeCount)
 	}
 }
 

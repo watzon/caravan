@@ -285,6 +285,14 @@ func (s *server) siteYears(ctx context.Context, seriesID int64) ([]siteYearJSON,
 	if err != nil {
 		return nil, 0, 0, err
 	}
+	filePairs, err := s.st.ListEpisodeMediaFilesForSeries(ctx, seriesID)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	filesByEpisode := make(map[int64][]core.MediaFile)
+	for _, pair := range filePairs {
+		filesByEpisode[pair.EpisodeID] = append(filesByEpisode[pair.EpisodeID], pair.File)
+	}
 
 	profile := s.activeTVProfile(ctx)
 	// Read once for the whole page, tolerantly for the reason siteProviderURL
@@ -296,10 +304,7 @@ func (s *server) siteYears(ctx context.Context, seriesID int64) ([]siteYearJSON,
 	byYear := map[int][]sceneJSON{}
 	total, withFile := 0, 0
 	for _, e := range episodes {
-		files, err := s.st.ListMediaFilesForEpisode(ctx, e.ID)
-		if err != nil {
-			return nil, 0, 0, err
-		}
+		files := filesByEpisode[e.ID]
 		total++
 		if len(files) > 0 {
 			withFile++

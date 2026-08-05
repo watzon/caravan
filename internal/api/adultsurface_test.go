@@ -576,17 +576,32 @@ func TestSitePageListsYearsAndScenesNewestFirst(t *testing.T) {
 	enableAdult(t, st)
 	site := seedSite(t, st)
 	ctx := context.Background()
+	scenes := make([]*core.Episode, 0, 2)
 	for _, e := range []struct {
 		number int
 		month  time.Month
 		day    int
 	}{{2, time.June, 2}, {3, time.November, 20}} {
-		if err := st.UpsertEpisode(ctx, &core.Episode{
+		scene := &core.Episode{
 			SeriesID: site.ID, SeasonNumber: 2022, EpisodeNumber: e.number,
 			StashID: "scene-" + itoa(int64(e.number)), Title: "Scene " + itoa(int64(e.number)),
 			AirDate: time.Date(2022, e.month, e.day, 0, 0, 0, 0, time.UTC), Monitored: true,
-		}); err != nil {
+		}
+		if err := st.UpsertEpisode(ctx, scene); err != nil {
 			t.Fatalf("UpsertEpisode: %v", err)
+		}
+		scenes = append(scenes, scene)
+	}
+	sharedFile := &core.MediaFile{
+		Path: store.AdultLibraryRoot + "/Brazzers/Season 2022/Brazzers - 2022-06-02-11-20.mkv",
+		Size: 42,
+	}
+	if err := st.UpsertMediaFile(ctx, sharedFile); err != nil {
+		t.Fatalf("UpsertMediaFile: %v", err)
+	}
+	for _, scene := range scenes {
+		if err := st.LinkEpisodeFile(ctx, scene.ID, sharedFile.ID); err != nil {
+			t.Fatalf("LinkEpisodeFile: %v", err)
 		}
 	}
 	if err := st.UpsertSeason(ctx, &core.Season{
@@ -618,6 +633,18 @@ func TestSitePageListsYearsAndScenesNewestFirst(t *testing.T) {
 	}
 	if len(got) != 3 || got[0] != 3 || got[1] != 2 || got[2] != 1 {
 		t.Errorf("2022 scene order = %v, want [3 2 1]", got)
+	}
+
+	for _, scene := range detail.Years[0].Scenes {
+		if scene.Number != 2 && scene.Number != 3 {
+			continue
+		}
+		if got := scene.File; got == nil || got.Path != sharedFile.Path {
+			t.Errorf("scene %d file = %+v, want shared file %q", scene.Number, got, sharedFile.Path)
+		}
+	}
+	if detail.SceneFileCount != 2 {
+		t.Errorf("scene file count = %d, want 2 covered scenes", detail.SceneFileCount)
 	}
 }
 

@@ -963,14 +963,19 @@ func (s *server) seasonDetail(ctx context.Context, seriesID int64) ([]seasonJSON
 	if err != nil {
 		return nil, err
 	}
+	filePairs, err := s.st.ListEpisodeMediaFilesForSeries(ctx, seriesID)
+	if err != nil {
+		return nil, err
+	}
+	filesByEpisode := make(map[int64][]core.MediaFile)
+	for _, pair := range filePairs {
+		filesByEpisode[pair.EpisodeID] = append(filesByEpisode[pair.EpisodeID], pair.File)
+	}
 
 	profile := s.activeTVProfile(ctx)
 	byNumber := make(map[int][]episodeJSON)
 	for _, e := range episodes {
-		files, err := s.st.ListMediaFilesForEpisode(ctx, e.ID)
-		if err != nil {
-			return nil, err
-		}
+		files := filesByEpisode[e.ID]
 		byNumber[e.SeasonNumber] = append(byNumber[e.SeasonNumber], episodeJSON{
 			ID:            e.ID,
 			SeriesID:      e.SeriesID,
