@@ -16,7 +16,7 @@ gate, and update its status row when finished.
 | 005 | Restrict SQLite state-file permissions | P1 | M | — | DONE |
 | 006 | Stop returning stored credentials | P2 | M | — | DONE |
 | 007 | Preserve the TMDB client cache | P2 | S | — | TODO |
-| 008 | Make Jellyfin setting writes atomic | P2 | S | 006 | TODO |
+| 008 | Make Jellyfin setting writes atomic | P2 | S | 006 | DONE |
 | 009 | Bound calendar status queries | P2 | M | — | TODO |
 | 010 | Add staged cursor pagination | P2 | L | 004, 009 | TODO |
 | 011 | Harden CI around behavioral contracts | P2 | M | 002 | TODO |

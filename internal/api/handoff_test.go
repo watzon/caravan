@@ -120,6 +120,45 @@ func TestJellyfinConfigRoundTrip(t *testing.T) {
 	}
 }
 
+func TestJellyfinConfigAtomicFailure(t *testing.T) {
+	h, st, _ := newTestServer(t)
+
+	rec := do(t, h, "POST", "/api/v1/handoff/jellyfin",
+		`{"url":"http://old-jellyfin:8096","api_key":"old-key","enabled":true}`)
+	wantStatus(t, rec, http.StatusOK)
+
+	if _, err := st.DB().ExecContext(context.Background(), `
+		CREATE TRIGGER refuse_jellyfin_url BEFORE UPDATE ON settings
+		WHEN NEW.key = '`+store.SettingJellyfinURL+`'
+		BEGIN SELECT RAISE(ABORT, 'disk full'); END`); err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+
+	rec = do(t, h, "POST", "/api/v1/handoff/jellyfin",
+		`{"url":"http://new-jellyfin:8096","api_key":"new-key","enabled":false}`)
+	wantStatus(t, rec, http.StatusInternalServerError)
+	var failure errorResponse
+	decodeBody(t, rec, &failure)
+	if !strings.Contains(failure.Error, "write jellyfin settings") {
+		t.Fatalf("error = %q, want the existing write envelope", failure.Error)
+	}
+
+	rec = do(t, h, "GET", "/api/v1/handoff/jellyfin", "")
+	wantStatus(t, rec, http.StatusOK)
+	var cfg jellyfinJSON
+	decodeBody(t, rec, &cfg)
+	if cfg.URL != "http://old-jellyfin:8096" || !cfg.Enabled || !cfg.HasAPIKey {
+		t.Fatalf("configuration after failed update = %+v, want old values", cfg)
+	}
+	stored, err := st.GetSetting(context.Background(), store.SettingJellyfinAPIKey)
+	if err != nil {
+		t.Fatalf("GetSetting API key after failed update: %v", err)
+	}
+	if stored != "old-key" {
+		t.Fatalf("stored API key after failed update = %q, want old-key", stored)
+	}
+}
+
 func TestJellyfinConfigRejectsBadRequests(t *testing.T) {
 	h, _, _ := newTestServer(t)
 

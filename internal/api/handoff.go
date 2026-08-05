@@ -102,12 +102,9 @@ func (s *server) handleSetJellyfin(w http.ResponseWriter, r *http.Request) {
 		store.SettingJellyfinAPIKey:  cfg.APIKey,
 		store.SettingJellyfinEnabled: strconv.FormatBool(cfg.Enabled),
 	}
-	// Sorted so a partial failure is at least deterministic.
-	for _, key := range []string{store.SettingJellyfinAPIKey, store.SettingJellyfinEnabled, store.SettingJellyfinURL} {
-		if err := s.st.SetSetting(r.Context(), key, values[key]); err != nil {
-			s.writeStoreError(w, "write jellyfin settings", err)
-			return
-		}
+	if err := s.st.SetSettings(r.Context(), values); err != nil {
+		s.writeStoreError(w, "write jellyfin settings", err)
+		return
 	}
 	writeJSON(w, http.StatusOK, jellyfinJSON{
 		URL:       cfg.URL,
