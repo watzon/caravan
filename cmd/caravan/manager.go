@@ -33,6 +33,7 @@ const metadataTimeout = 30 * time.Second
 //     library.Manager captures both at construction, so building one at startup
 //     would pin whatever was configured then and quietly ignore every later
 //     change. Building one per call keeps the settings table authoritative;
+//     cached clients preserve provider-local state between those calls.
 //     NewManager does no I/O, so this costs one settings query.
 type libraryAdapter struct {
 	st *store.Store
@@ -56,6 +57,18 @@ type libraryAdapter struct {
 	// adult is the last stash-box client built, kept alongside the settings it
 	// was built from; see stashboxClient.
 	adult *cachedStashbox
+	// tmdbMu guards tmdb, which is read and replaced from concurrent HTTP
+	// handlers.
+	tmdbMu sync.Mutex
+	// tmdb is the last TMDB client built, kept alongside the API key it was
+	// built from; see tmdbClient.
+	tmdb *cachedTMDB
+}
+
+// cachedTMDB is one TMDB client and the setting that defines it.
+type cachedTMDB struct {
+	key    string
+	client *tmdb.Client
 }
 
 // cachedStashbox is one stash-box client and the two settings that define it.
@@ -217,6 +230,8 @@ func (a *libraryAdapter) setting(ctx context.Context, key string) (string, error
 
 // Metadata returns the configured provider, or nil when there is no API key.
 //
+// The setting is read on every call so runtime edits take effect immediately.
+// A non-empty key reuses the matching client and its provider-local caches.
 // The nil is a genuine untyped nil rather than a nil *tmdb.Client, because
 // callers test the interface value against nil and a typed nil would pass that
 // test and then panic (SPEC §13: no key degrades to parse-only, it does not
@@ -231,10 +246,20 @@ func (a *libraryAdapter) metadata(ctx context.Context) core.MetadataProvider {
 		a.log.Error("read tmdb api key", "error", err)
 		return nil
 	}
+
+	a.tmdbMu.Lock()
+	defer a.tmdbMu.Unlock()
+
 	if key == "" {
+		a.tmdb = nil
 		return nil
 	}
-	return tmdb.New(key, a.hc)
+	if c := a.tmdb; c != nil && c.key == key {
+		return c.client
+	}
+	client := tmdb.New(key, a.hc)
+	a.tmdb = &cachedTMDB{key: key, client: client}
+	return client
 }
 
 // ValidateMetadataKey proves a TMDB API key with one live call (PLAN phase 10

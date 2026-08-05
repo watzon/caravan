@@ -2,20 +2,25 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/watzon/caravan/internal/clients"
 	"github.com/watzon/caravan/internal/core"
 	"github.com/watzon/caravan/internal/download"
 	"github.com/watzon/caravan/internal/store"
+	"github.com/watzon/caravan/internal/tmdb"
 	"github.com/watzon/caravan/internal/usenet"
 	"github.com/watzon/caravan/internal/usenet/nntp"
 )
@@ -54,6 +59,182 @@ func TestLateMetadataFollowsTheSettingsTable(t *testing.T) {
 	}
 	if got.Title != smokeMovieTitle || got.Year != smokeMovieYear {
 		t.Errorf("GetMovie = %q (%d), want %q (%d)", got.Title, got.Year, smokeMovieTitle, smokeMovieYear)
+	}
+}
+
+type tmdbProbe struct {
+	mu       sync.Mutex
+	requests []tmdbProbeRequest
+}
+
+type tmdbProbeRequest struct {
+	path string
+	key  string
+}
+
+func (p *tmdbProbe) record(r *http.Request) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.requests = append(p.requests, tmdbProbeRequest{
+		path: r.URL.Path,
+		key:  r.URL.Query().Get("api_key"),
+	})
+}
+
+func (p *tmdbProbe) count(path, key string) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	n := 0
+	for _, request := range p.requests {
+		if request.path == path && (key == "" || request.key == key) {
+			n++
+		}
+	}
+	return n
+}
+
+func startTMDBGenreProbe(t *testing.T, probe *tmdbProbe) {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		probe.record(r)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/3/genre/movie/list":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"genres": []map[string]any{{"id": 28, "name": "Action"}},
+			})
+		case "/3/configuration":
+			_ = json.NewEncoder(w).Encode(map[string]any{})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	redirectTMDB(t, srv.URL)
+}
+
+func tmdbMovieGenres(t *testing.T, provider core.MetadataProvider) {
+	t.Helper()
+	client, ok := provider.(*tmdb.Client)
+	if !ok {
+		t.Fatalf("metadata provider has type %T, want *tmdb.Client", provider)
+	}
+	if _, err := client.Genres(context.Background(), core.MediaTypeMovie); err != nil {
+		t.Fatalf("Genres: %v", err)
+	}
+}
+
+func TestTMDBProviderIsReusedAndInvalidatedByStoredKey(t *testing.T) {
+	ctx := context.Background()
+	adapter, st := testAdapter(t)
+	probe := new(tmdbProbe)
+	startTMDBGenreProbe(t, probe)
+
+	if err := st.SetSetting(ctx, store.SettingTMDBAPIKey, "working-key"); err != nil {
+		t.Fatalf("set working key: %v", err)
+	}
+	first := adapter.metadata(ctx)
+	tmdbMovieGenres(t, first)
+	second := adapter.metadata(ctx)
+	tmdbMovieGenres(t, second)
+	if first != second {
+		t.Fatal("same stored key returned different metadata clients")
+	}
+	if got := probe.count("/3/genre/movie/list", "working-key"); got != 1 {
+		t.Fatalf("working genre requests = %d, want 1", got)
+	}
+
+	if err := st.SetSetting(ctx, store.SettingTMDBAPIKey, "rotated-key"); err != nil {
+		t.Fatalf("rotate key: %v", err)
+	}
+	rotated := adapter.metadata(ctx)
+	tmdbMovieGenres(t, rotated)
+	if rotated == first {
+		t.Fatal("rotated key reused the working metadata client")
+	}
+	if got := probe.count("/3/genre/movie/list", "rotated-key"); got != 1 {
+		t.Fatalf("rotated genre requests = %d, want 1", got)
+	}
+	if got := probe.count("/3/genre/movie/list", ""); got != 2 {
+		t.Fatalf("total genre requests after rotation = %d, want 2", got)
+	}
+
+	if err := st.SetSetting(ctx, store.SettingTMDBAPIKey, ""); err != nil {
+		t.Fatalf("clear key: %v", err)
+	}
+	if got := adapter.metadata(ctx); got != nil {
+		t.Fatalf("metadata after clearing key = %T, want nil", got)
+	}
+	if err := st.SetSetting(ctx, store.SettingTMDBAPIKey, "rotated-key"); err != nil {
+		t.Fatalf("restore key: %v", err)
+	}
+	restored := adapter.metadata(ctx)
+	tmdbMovieGenres(t, restored)
+	if restored == rotated {
+		t.Fatal("restored key reused a client that survived clearing")
+	}
+	if got := probe.count("/3/genre/movie/list", "rotated-key"); got != 2 {
+		t.Fatalf("rotated genre requests after clear/re-add = %d, want 2", got)
+	}
+}
+
+func TestTMDBProviderIsSafeForConcurrentCallers(t *testing.T) {
+	ctx := context.Background()
+	adapter, st := testAdapter(t)
+	if err := st.SetSetting(ctx, store.SettingTMDBAPIKey, "working-key"); err != nil {
+		t.Fatalf("set working key: %v", err)
+	}
+
+	const callers = 8
+	got := make([]core.MetadataProvider, callers)
+	var wg sync.WaitGroup
+	for i := range got {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			got[i] = adapter.metadata(ctx)
+		}(i)
+	}
+	wg.Wait()
+
+	for i, provider := range got {
+		if provider == nil {
+			t.Fatalf("metadata = nil on caller %d", i)
+		}
+		if provider != got[0] {
+			t.Fatalf("caller %d got a different metadata client", i)
+		}
+	}
+}
+
+func TestTMDBCredentialValidationDoesNotEvictWorkingClient(t *testing.T) {
+	ctx := context.Background()
+	adapter, st := testAdapter(t)
+	probe := new(tmdbProbe)
+	startTMDBGenreProbe(t, probe)
+	if err := st.SetSetting(ctx, store.SettingTMDBAPIKey, "working-key"); err != nil {
+		t.Fatalf("set working key: %v", err)
+	}
+
+	working := adapter.metadata(ctx)
+	tmdbMovieGenres(t, working)
+	if err := adapter.ValidateMetadataKey(ctx, "candidate-key"); err != nil {
+		t.Fatalf("ValidateMetadataKey: %v", err)
+	}
+	afterValidation := adapter.metadata(ctx)
+	tmdbMovieGenres(t, afterValidation)
+
+	if afterValidation != working {
+		t.Fatal("candidate validation replaced the working metadata client")
+	}
+	if got := probe.count("/3/configuration", "candidate-key"); got != 1 {
+		t.Fatalf("candidate configuration requests = %d, want 1", got)
+	}
+	if got := probe.count("/3/genre/movie/list", "working-key"); got != 1 {
+		t.Fatalf("working genre requests after candidate validation = %d, want 1", got)
+	}
+	if got := probe.count("/3/genre/movie/list", "candidate-key"); got != 0 {
+		t.Fatalf("candidate genre requests = %d, want 0", got)
 	}
 }
 
