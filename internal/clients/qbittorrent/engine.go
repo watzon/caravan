@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -220,6 +221,29 @@ func (e *Engine) List(ctx context.Context) ([]core.DownloadStatus, error) {
 		out = append(out, status(t))
 	}
 	return out, nil
+}
+
+// ListPage returns a deterministic page over the provider snapshot. The
+// provider has no cursor API, so this does not claim network pagination.
+func (e *Engine) ListPage(ctx context.Context, limit int, before core.DownloadID) ([]core.DownloadStatus, core.DownloadID, error) {
+	statuses, err := e.List(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	sort.Slice(statuses, func(i, j int) bool { return statuses[i].ID < statuses[j].ID })
+	start := 0
+	for start < len(statuses) && before != "" && statuses[start].ID <= before {
+		start++
+	}
+	if start == len(statuses) || limit <= 0 {
+		return []core.DownloadStatus{}, "", nil
+	}
+	end := min(start+limit, len(statuses))
+	next := core.DownloadID("")
+	if end < len(statuses) {
+		next = statuses[end-1].ID
+	}
+	return statuses[start:end], next, nil
 }
 
 // Pause stops a torrent without discarding progress. See core.Engine.

@@ -203,7 +203,7 @@ beforeEach(() => {
       // The list endpoints answer with a named envelope (internal/api).
       if (url.endsWith('/library/movies')) return jsonResponse({ movies: [MOVIE] });
       // The sidebar badge polls the queue as soon as the shell mounts.
-      if (url.endsWith('/downloads')) return jsonResponse({ downloads: DOWNLOADS });
+      if (url.includes('/downloads')) return jsonResponse({ downloads: DOWNLOADS });
       // …and the requests badge alongside it.
       if (url.endsWith('/requests')) return jsonResponse({ requests: requestRows });
       if (url.endsWith('/discover')) return jsonResponse(DISCOVER);
@@ -441,7 +441,7 @@ describe('App shell', () => {
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
         if (url.endsWith('/system/status')) return jsonResponse(statusBody);
-        if (url.endsWith('/downloads')) return jsonResponse({ downloads: [] });
+        if (url.includes('/downloads')) return jsonResponse({ downloads: [] });
         if (url.endsWith('/library/movies')) return jsonResponse({ movies: [MOVIE] });
         if (url.endsWith('/library/movies/7')) return jsonResponse(MOVIE);
         if (url.endsWith('/library/movies/7/releases')) {
@@ -481,7 +481,7 @@ describe('App shell', () => {
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
         if (url.endsWith('/system/status')) return jsonResponse(statusBody);
-        if (url.endsWith('/downloads')) return jsonResponse({ downloads: [] });
+        if (url.includes('/downloads')) return jsonResponse({ downloads: [] });
         if (url.endsWith('/library/movies')) return jsonResponse({ movies: [MOVIE] });
         if (url.endsWith('/library/movies/7')) return jsonResponse(MOVIE);
         if (url.endsWith('/library/movies/7/releases')) {
@@ -516,7 +516,7 @@ describe('App shell', () => {
         if (url.endsWith('/system/status')) {
           return jsonResponse({ ...STATUS, mode: 'portable', dirty: true });
         }
-        if (url.endsWith('/downloads')) return jsonResponse({ downloads: [] });
+        if (url.includes('/downloads')) return jsonResponse({ downloads: [] });
         if (url.endsWith('/library/movies')) return jsonResponse({ movies: [MOVIE] });
         throw new Error(`unexpected fetch: ${url}`);
       }),
@@ -551,7 +551,7 @@ describe('App shell', () => {
           if (!listening) throw new TypeError('Failed to fetch');
           return jsonResponse({ ...STATUS, mode: 'portable' });
         }
-        if (url.endsWith('/downloads')) return jsonResponse({ downloads: [] });
+        if (url.includes('/downloads')) return jsonResponse({ downloads: [] });
         if (url.endsWith('/library/movies')) return jsonResponse({ movies: [MOVIE] });
         throw new Error(`unexpected fetch: ${url} ${init?.method ?? 'GET'}`);
       }),

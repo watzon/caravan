@@ -71,3 +71,48 @@ func (s *Store) ListEvents(ctx context.Context, limit int) ([]core.Event, error)
 	}
 	return out, nil
 }
+
+// ListEventsPage returns one keyset page of events, newest first. beforeID
+// excludes that event and every newer row. nextID is non-zero only when more
+// rows remain.
+func (s *Store) ListEventsPage(ctx context.Context, limit, beforeID int64) ([]core.Event, int64, error) {
+	if limit <= 0 {
+		return []core.Event{}, 0, nil
+	}
+	query := "SELECT " + eventColumns + " FROM events"
+	args := []any{}
+	if beforeID > 0 {
+		query += " WHERE id < ?"
+		args = append(args, beforeID)
+	}
+	query += " ORDER BY id DESC LIMIT ?"
+	args = append(args, limit+1)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("store: list event page: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]core.Event, 0, limit)
+	for rows.Next() {
+		var (
+			e         core.Event
+			createdAt string
+		)
+		if err := rows.Scan(&e.ID, &e.Level, &e.Category, &e.Message, &e.Detail,
+			&e.MovieID, &e.SeriesID, &createdAt); err != nil {
+			return nil, 0, fmt.Errorf("store: scan event page: %w", err)
+		}
+		if len(out) < int(limit) {
+			e.CreatedAt = parseTime(createdAt)
+			out = append(out, e)
+			continue
+		}
+		return out, out[len(out)-1].ID, nil
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("store: list event page: %w", err)
+	}
+	return out, 0, nil
+}

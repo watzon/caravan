@@ -498,6 +498,29 @@ func (e *Embedded) List(ctx context.Context) ([]core.DownloadStatus, error) {
 	return out, nil
 }
 
+// ListPage returns a deterministic page for the optional cursor seam. The
+// legacy List order remains oldest first for queue consumers.
+func (e *Embedded) ListPage(ctx context.Context, limit int, before core.DownloadID) ([]core.DownloadStatus, core.DownloadID, error) {
+	statuses, err := e.List(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	sort.Slice(statuses, func(i, j int) bool { return statuses[i].ID < statuses[j].ID })
+	start := 0
+	for start < len(statuses) && before != "" && statuses[start].ID <= before {
+		start++
+	}
+	if start == len(statuses) || limit <= 0 {
+		return []core.DownloadStatus{}, "", nil
+	}
+	end := min(start+limit, len(statuses))
+	next := core.DownloadID("")
+	if end < len(statuses) {
+		next = statuses[end-1].ID
+	}
+	return statuses[start:end], next, nil
+}
+
 // Insight reports the information anacrolix exposes without tracker scraping.
 // Tracker counts therefore stay zero, and availability is the number of peer
 // piece copies divided by the torrent's piece count.

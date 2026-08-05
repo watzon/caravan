@@ -144,6 +144,12 @@ type Engine interface {
 	Close() error
 }
 
+// EnginePager is the optional bounded listing seam. before is the backend
+// native ID of the last emitted status, and next is empty at the end.
+type EnginePager interface {
+	ListPage(ctx context.Context, limit int, before DownloadID) ([]DownloadStatus, DownloadID, error)
+}
+
 // EngineInsight is an optional extension for engines that can report
 // torrent-specific diagnostic information. External clients in phase 6 may
 // omit it without losing the core queue contract.

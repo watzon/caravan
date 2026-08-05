@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -74,6 +75,29 @@ func (e *stubEngine) List(ctx context.Context) ([]core.DownloadStatus, error) {
 		return nil, e.listErr
 	}
 	return append([]core.DownloadStatus(nil), e.statuses...), nil
+}
+
+func (e *stubEngine) ListPage(ctx context.Context, limit int, before string) ([]core.DownloadStatus, string, bool, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.listErr != nil {
+		return nil, "", true, e.listErr
+	}
+	statuses := append([]core.DownloadStatus(nil), e.statuses...)
+	sort.Slice(statuses, func(i, j int) bool { return statuses[i].ID < statuses[j].ID })
+	start := 0
+	for start < len(statuses) && before != "" && string(statuses[start].ID) <= before {
+		start++
+	}
+	if start == len(statuses) {
+		return []core.DownloadStatus{}, "", true, nil
+	}
+	end := min(start+limit, len(statuses))
+	next := ""
+	if end < len(statuses) {
+		next = string(statuses[end-1].ID)
+	}
+	return statuses[start:end], next, true, nil
 }
 
 func (e *stubEngine) Pause(ctx context.Context, id core.DownloadID) error {

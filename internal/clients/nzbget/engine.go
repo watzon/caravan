@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strings"
 
 	"github.com/watzon/caravan/internal/clients"
@@ -260,6 +261,29 @@ func (e *Engine) List(ctx context.Context) ([]core.DownloadStatus, error) {
 		out = append(out, historyStatus(h))
 	}
 	return out, nil
+}
+
+// ListPage returns a deterministic page over the provider snapshot. The
+// provider has no replay cursor, so this is local ordering only.
+func (e *Engine) ListPage(ctx context.Context, limit int, before core.DownloadID) ([]core.DownloadStatus, core.DownloadID, error) {
+	statuses, err := e.List(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	sort.Slice(statuses, func(i, j int) bool { return statuses[i].ID < statuses[j].ID })
+	start := 0
+	for start < len(statuses) && before != "" && statuses[start].ID <= before {
+		start++
+	}
+	if start == len(statuses) || limit <= 0 {
+		return []core.DownloadStatus{}, "", nil
+	}
+	end := min(start+limit, len(statuses))
+	next := core.DownloadID("")
+	if end < len(statuses) {
+		next = statuses[end-1].ID
+	}
+	return statuses[start:end], next, nil
 }
 
 // ours reports whether a download in this category belongs to Caravan's queue.

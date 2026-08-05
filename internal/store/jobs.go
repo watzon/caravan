@@ -242,6 +242,45 @@ func (s *Store) ListJobs(ctx context.Context, limit int) ([]core.Job, error) {
 	return out, nil
 }
 
+// ListJobsPage returns one keyset page of jobs, newest first. beforeID excludes
+// that job and every newer row. nextID is non-zero only when more rows remain.
+func (s *Store) ListJobsPage(ctx context.Context, limit int, beforeID int64) ([]core.Job, int64, error) {
+	if limit <= 0 {
+		return []core.Job{}, 0, nil
+	}
+	query := "SELECT " + jobColumns + " FROM jobs"
+	args := []any{}
+	if beforeID > 0 {
+		query += " WHERE id < ?"
+		args = append(args, beforeID)
+	}
+	query += " ORDER BY id DESC LIMIT ?"
+	args = append(args, limit+1)
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("store: list job page: %w", err)
+	}
+	defer rows.Close()
+
+	out := make([]core.Job, 0, limit)
+	for rows.Next() {
+		j, err := scanJob(rows)
+		if err != nil {
+			return nil, 0, fmt.Errorf("store: scan job page: %w", err)
+		}
+		if len(out) < limit {
+			out = append(out, *j)
+			continue
+		}
+		return out, out[len(out)-1].ID, nil
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("store: list job page: %w", err)
+	}
+	return out, 0, nil
+}
+
 // HasOpenJob reports whether a job of the given kind and payload is already
 // pending or running. Recurring jobs (RSS sync, backlog sweeps) use it to
 // stay singletons: a redelivered tick enqueues nothing when the work is

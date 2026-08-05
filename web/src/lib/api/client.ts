@@ -8,6 +8,7 @@
 import type {
   ActivityEvent,
   AddItemRequest,
+  EventPage,
   AddSiteRequest,
   AdultDiscoverPage,
   AdultUser,
@@ -30,6 +31,7 @@ import type {
   DownloadClientInput,
   DownloadClientTypeInfo,
   DownloadInsight,
+  DownloadPage,
   DlnaStatus,
   DownloadStatus,
   GrabRequest,
@@ -40,6 +42,7 @@ import type {
   JellyfinTestResult,
   Job,
   Library,
+  JobPage,
   LibraryIndexerOverride,
   LibraryPatch,
   MatchRequest,
@@ -774,8 +777,22 @@ export const api = {
   grabForSeries: (id: number, body: GrabRequest) =>
     request<void>(endpoints.seriesGrab(id), { method: 'POST', body }),
 
-  listDownloads: (signal?: AbortSignal) =>
-    listOf<DownloadStatus>(endpoints.downloads(), 'downloads', signal),
+  listDownloadsPage: (limit = 100, cursor?: string, signal?: AbortSignal) =>
+    request<DownloadPage>(endpoints.downloads(), { query: { limit, cursor }, signal }).then((payload) => ({
+      downloads: payload?.downloads ?? [],
+      next_cursor: payload?.next_cursor ?? '',
+    })),
+
+  listDownloads: async (signal?: AbortSignal) => {
+    const downloads: DownloadStatus[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = await api.listDownloadsPage(100, cursor, signal);
+      downloads.push(...page.downloads);
+      cursor = page.next_cursor || undefined;
+    } while (cursor);
+    return downloads;
+  },
 
   pauseDownload: (id: string) =>
     request<void>(endpoints.downloadPause(id), { method: 'POST' }),
@@ -835,10 +852,21 @@ export const api = {
   /** Queue a search for the whole wanted list — the backlog sweep on demand. */
   searchWanted: () =>
     request<SearchQueued>(endpoints.wantedSearch(), { method: 'POST' }),
+  listEventsPage: (limit = 100, cursor?: string, signal?: AbortSignal) =>
+    request<EventPage>(endpoints.events(), { query: { limit, cursor }, signal }).then((payload) => ({
+      events: payload?.events ?? [],
+      next_cursor: payload?.next_cursor ?? '',
+    })),
 
   listEvents: (limit = 100, signal?: AbortSignal) =>
     request<{ events: ActivityEvent[] }>(endpoints.events(), { query: { limit }, signal })
       .then((payload) => payload?.events ?? []),
+
+  listJobsPage: (limit = 100, cursor?: string, signal?: AbortSignal) =>
+    request<JobPage>(endpoints.jobs(), { query: { limit, cursor }, signal }).then((payload) => ({
+      jobs: payload?.jobs ?? [],
+      next_cursor: payload?.next_cursor ?? '',
+    })),
 
   listJobs: (limit = 100, signal?: AbortSignal) =>
     request<{ jobs: Job[] }>(endpoints.jobs(), { query: { limit }, signal })

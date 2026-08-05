@@ -1,10 +1,14 @@
 package api
 
 import (
+	"context"
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/watzon/caravan/internal/clients"
 	"github.com/watzon/caravan/internal/core"
@@ -56,7 +60,115 @@ type downloadJSON struct {
 // and survive a restart, the snapshot carries the rates and progress that are
 // stale the moment they are written. Nothing is written back here — keeping the
 // rows fresh is a background job's work, not a GET's.
+const (
+	defaultDownloadLimit = 100
+	maxDownloadLimit     = 1000
+)
+
+type downloadPager interface {
+	ListPage(context.Context, int, string) ([]core.DownloadStatus, string, bool, error)
+}
+
 func (s *server) handleListDownloads(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	_, hasLimit := query["limit"]
+	rawCursor := query.Get("cursor")
+	_, hasCursor := query["cursor"]
+	if !hasLimit && !hasCursor {
+		s.writeLegacyDownloads(w, r)
+		return
+	}
+
+	limit := defaultDownloadLimit
+	if raw := query.Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n <= 0 {
+			writeError(w, http.StatusBadRequest, "limit must be a positive integer")
+			return
+		}
+		limit = min(n, maxDownloadLimit)
+	}
+	storedBefore, orphanCursor, err := parseDownloadCursor(rawCursor)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	var engine core.Engine
+	if s.engine != nil {
+		engine = s.engine.Engine()
+	}
+	pager, ok := engine.(downloadPager)
+	if engine == nil || !ok {
+		s.writeLegacyDownloads(w, r)
+		return
+	}
+
+	rows, nextStored, err := s.st.ListDownloadsPage(r.Context(), limit, storedBefore)
+	if err != nil {
+		s.writeStoreError(w, "list download page", err)
+		return
+	}
+	out := make([]downloadJSON, 0, limit)
+	for _, row := range rows {
+		dto := storedDownloadDTO(row)
+		if status, err := engine.Status(r.Context(), row.EngineID); err == nil {
+			applyLiveStatus(&dto, *status)
+		}
+		dto.Protocol = clients.ProtocolForEngine(dto.Engine)
+		out = append(out, dto)
+	}
+
+	nextCursor := ""
+	if nextStored != 0 {
+		nextCursor = "stored:" + strconv.FormatInt(nextStored, 10)
+	} else {
+		remaining := limit - len(out)
+		if remaining == 0 {
+			statuses, _, supported, err := pager.ListPage(r.Context(), 1, orphanCursor)
+			if err != nil {
+				s.writeEngineError(w, "list download page", err)
+				return
+			}
+			if !supported {
+				s.writeLegacyDownloads(w, r)
+				return
+			}
+			for _, status := range statuses {
+				_, lookupErr := s.st.GetDownloadByEngineID(r.Context(), status.ID)
+				if errors.Is(lookupErr, store.ErrNotFound) {
+					nextCursor = encodeOrphanCursor(orphanCursor)
+					break
+				}
+				if lookupErr != nil {
+					s.writeStoreError(w, "check orphan download", lookupErr)
+					return
+				}
+			}
+		} else {
+			orphans, nextRaw, err := s.pageOrphans(r.Context(), pager, remaining, orphanCursor)
+			if err != nil {
+				s.writeEngineError(w, "list download page", err)
+				return
+			}
+			for _, status := range orphans {
+				dto := downloadJSON{Engine: status.Engine, ETASeconds: -1}
+				if dto.Engine == "" {
+					dto.Engine = s.engineName()
+				}
+				applyLiveStatus(&dto, status)
+				dto.Protocol = clients.ProtocolForEngine(dto.Engine)
+				out = append(out, dto)
+			}
+			if nextRaw != "" {
+				nextCursor = encodeOrphanCursor(nextRaw)
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"downloads": out, "next_cursor": nextCursor})
+}
+
+func (s *server) writeLegacyDownloads(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.st.ListDownloads(r.Context())
 	if err != nil {
 		s.writeStoreError(w, "list downloads", err)
@@ -84,16 +196,10 @@ func (s *server) handleListDownloads(w http.ResponseWriter, r *http.Request) {
 			applyLiveStatus(&dto, status)
 			delete(live, row.EngineID)
 		}
-		// After the overlay, not before: a router names the backend that
-		// actually holds the download, and that is the name the protocol
-		// follows from.
 		dto.Protocol = clients.ProtocolForEngine(dto.Engine)
 		out = append(out, dto)
 	}
 
-	// Anything the engine knows about that Caravan does not is surfaced rather
-	// than hidden: a download added out of band, or one whose row was lost, is
-	// still the user's data (SPEC §13).
 	orphans := make([]downloadJSON, 0, len(live))
 	for _, status := range live {
 		dto := downloadJSON{Engine: s.engineName(), ETASeconds: -1}
@@ -104,6 +210,91 @@ func (s *server) handleListDownloads(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(orphans, func(i, j int) bool { return orphans[i].ID < orphans[j].ID })
 
 	writeJSON(w, http.StatusOK, map[string]any{"downloads": append(out, orphans...)})
+}
+
+func (s *server) pageOrphans(ctx context.Context, pager downloadPager, limit int, cursor string) ([]core.DownloadStatus, string, error) {
+	if limit <= 0 {
+		statuses, _, supported, err := pager.ListPage(ctx, 1, cursor)
+		if err != nil || !supported {
+			return nil, "", err
+		}
+		for _, status := range statuses {
+			if _, err := s.st.GetDownloadByEngineID(ctx, status.ID); errors.Is(err, store.ErrNotFound) {
+				return []core.DownloadStatus{status}, "", nil
+			} else if err != nil {
+				return nil, "", err
+			}
+		}
+		return nil, "", nil
+	}
+	out := make([]core.DownloadStatus, 0, limit)
+	raw := cursor
+	for len(out) < limit {
+		statuses, next, supported, err := pager.ListPage(ctx, limit, raw)
+		if err != nil {
+			return nil, "", err
+		}
+		if !supported {
+			return nil, "", fmt.Errorf("download: page listing unavailable")
+		}
+		for _, status := range statuses {
+			_, lookupErr := s.st.GetDownloadByEngineID(ctx, status.ID)
+			if errors.Is(lookupErr, store.ErrNotFound) {
+				out = append(out, status)
+				if len(out) == limit {
+					return out, next, nil
+				}
+			} else if lookupErr != nil {
+				return nil, "", lookupErr
+			}
+		}
+		if next == "" {
+			return out, "", nil
+		}
+		raw = next
+	}
+	return out, raw, nil
+}
+
+func parseDownloadCursor(raw string) (int64, string, error) {
+	if raw == "" {
+		return 0, "", nil
+	}
+	if strings.HasPrefix(raw, "stored:") {
+		id, err := strconv.ParseInt(strings.TrimPrefix(raw, "stored:"), 10, 64)
+		if err != nil || id <= 0 {
+			return 0, "", errors.New("cursor must be a valid stored download cursor")
+		}
+		return id, "", nil
+	}
+	if raw == "orphan:start" {
+		return 0, "", nil
+	}
+	parts := strings.Split(raw, ":")
+	if len(parts) != 3 || parts[0] != "orphan" {
+		return 0, "", errors.New("cursor must be a tagged download cursor")
+	}
+	route, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil || len(route) == 0 {
+		return 0, "", errors.New("cursor has an invalid orphan route")
+	}
+	id, err := base64.RawURLEncoding.DecodeString(parts[2])
+	if err != nil || len(id) == 0 {
+		return 0, "", errors.New("cursor has an invalid orphan id")
+	}
+	return 0, string(route) + "\x00" + string(id), nil
+}
+
+func encodeOrphanCursor(raw string) string {
+	if raw == "" {
+		return "orphan:start"
+	}
+	route, id, ok := strings.Cut(raw, "\x00")
+	if !ok || route == "" || id == "" {
+		return ""
+	}
+	return "orphan:" + base64.RawURLEncoding.EncodeToString([]byte(route)) + ":" +
+		base64.RawURLEncoding.EncodeToString([]byte(id))
 }
 
 func storedDownloadDTO(d core.Download) downloadJSON {

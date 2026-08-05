@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -301,6 +302,123 @@ func (r *Router) List(ctx context.Context) ([]core.DownloadStatus, error) {
 		return nil, errors.Join(failures...)
 	}
 	return out, nil
+}
+
+// ListPage returns a bounded, deterministic merge of page-capable routes.
+// The cursor is an opaque route-key and native-ID boundary for the API layer.
+func (r *Router) ListPage(ctx context.Context, limit int, cursor string) ([]core.DownloadStatus, string, bool, error) {
+	routes, err := r.table(ctx)
+	if err != nil {
+		return nil, "", false, err
+	}
+	if limit <= 0 {
+		return []core.DownloadStatus{}, "", true, nil
+	}
+
+	boundaryRoute, boundaryID := "", core.DownloadID("")
+	if cursor != "" {
+		rawRoute, rawID, ok := strings.Cut(cursor, "\x00")
+		if !ok || rawRoute == "" || rawID == "" {
+			return nil, "", false, fmt.Errorf("download: invalid orphan cursor")
+		}
+		boundaryRoute, boundaryID = rawRoute, core.DownloadID(rawID)
+	}
+
+	type pageResult struct {
+		route     Route
+		key       string
+		statuses  []core.DownloadStatus
+		next      core.DownloadID
+		err       error
+		supported bool
+	}
+	results := make([]pageResult, len(routes))
+	var wg sync.WaitGroup
+	for i := range routes {
+		wg.Go(func() {
+			route := routes[i]
+			result := pageResult{route: route, key: routePageKey(route)}
+			pager, ok := route.Engine.(core.EnginePager)
+			if !ok {
+				result.supported = false
+				results[i] = result
+				return
+			}
+			result.supported = true
+			if boundaryRoute != "" && result.key < boundaryRoute {
+				results[i] = result
+				return
+			}
+			before := core.DownloadID("")
+			if result.key == boundaryRoute {
+				before = boundaryID
+			}
+			result.statuses, result.next, result.err = pager.ListPage(ctx, limit, before)
+			if result.err == nil && route.Report != nil {
+				route.Report(nil)
+			}
+			results[i] = result
+		})
+	}
+	wg.Wait()
+
+	for _, result := range results {
+		if !result.supported {
+			return nil, "", false, nil
+		}
+		if result.err != nil {
+			return nil, "", false, result.err
+		}
+		for i := range result.statuses {
+			status := result.statuses[i]
+			status.Engine = result.route.Name
+			status.ID = result.route.qualify(status.ID)
+			if result.route.gated() {
+				result.route.reconcile(&status)
+			}
+			result.statuses[i] = status
+		}
+	}
+	sort.SliceStable(results, func(i, j int) bool { return results[i].key < results[j].key })
+	out := make([]core.DownloadStatus, 0, limit)
+	lastKey := ""
+	lastNative := core.DownloadID("")
+	for _, result := range results {
+		for _, status := range result.statuses {
+			if len(out) == limit {
+				break
+			}
+			out = append(out, status)
+			lastKey = result.key
+			native, _ := result.route.native(status.ID)
+			lastNative = native
+		}
+		if len(out) == limit {
+			break
+		}
+	}
+	if len(out) == 0 {
+		return out, "", true, nil
+	}
+	more := false
+	for _, result := range results {
+		if result.key > lastKey && len(result.statuses) > 0 {
+			more = true
+			break
+		}
+		if result.key == lastKey && result.next != "" {
+			more = true
+			break
+		}
+	}
+	if !more {
+		return out, "", true, nil
+	}
+	return out, lastKey + "\x00" + string(lastNative), true, nil
+}
+
+func routePageKey(route Route) string {
+	return route.Name + "|" + route.IDPrefix
 }
 
 // Pause stops the download on the engine holding it.

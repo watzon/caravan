@@ -42,7 +42,14 @@ class DownloadsState {
     if (this.#inFlight) return;
     this.#inFlight = true;
     try {
-      this.items = await api.listDownloads();
+      const items: DownloadStatus[] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await api.listDownloadsPage(100, cursor);
+        items.push(...page.downloads);
+        cursor = page.next_cursor || undefined;
+      } while (cursor);
+      this.items = items;
       this.error = null;
     } catch (err) {
       this.error = errorText(err);

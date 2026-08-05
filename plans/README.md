@@ -18,7 +18,7 @@ gate, and update its status row when finished.
 | 007 | Preserve the TMDB client cache | P2 | S | — | DONE |
 | 008 | Make Jellyfin setting writes atomic | P2 | S | 006 | TODO |
 | 009 | Bound calendar status queries | P2 | M | — | DONE |
-| 010 | Add staged cursor pagination | P2 | L | 004, 009 | TODO |
+| 010 | Add staged cursor pagination | P2 | L | 004, 009 | DONE |
 | 011 | Harden CI around behavioral contracts | P2 | M | 002 | TODO |
 | 012 | Publish portable release artifacts | P3 | L | 002, 011 | TODO |
 | 013 | Reconcile project and deployment documentation | P3 | M | — | TODO |
