@@ -39,7 +39,9 @@ Single container. One `/config` volume, one `/data` volume. Because downloads an
 ```yaml
 services:
   caravan:
-    image: caravan/caravan:latest
+    image: caravan:latest
+    build:
+      context: .
     ports:
       - "8677:8677"
     volumes:
@@ -50,7 +52,9 @@ services:
     restart: unless-stopped
 ```
 
-Storage root (`/data`) is set in the web UI on first run and changeable later (see §10).
+The checked-in Compose file mounts `./data` at `/data` and seeds that path as
+the storage root. Change it in the web UI when you need a different root (see
+§10).
 
 ### 2.2 Mode B: Bare binary
 
@@ -385,7 +389,12 @@ Development is organized into phases, each absorbing one hat of the existing eco
 | 6 — External clients | Download-client bridges | qBittorrent, SABnzbd, NZBGet engine implementations |
 | 7 — Embedded Usenet | SABnzbd/NZBGet natively | NNTP client, NZB/yEnc pipeline, par2 repair, extraction — standalone Usenet with no external client |
 
-Post-v1 candidates: custom formats, anime numbering, multi-user/request management, music (Lidarr-shaped), mobile app.
+The v1.1 interlude shipped **discover & requests** (TMDB explore, request
+queue, and minimum availability) and **multi-user RBAC** (accounts, roles, and
+request ownership). These are current shipped scope, not post-v1 candidates.
+
+Post-v1 candidates: custom formats, anime numbering, music (Lidarr-shaped),
+mobile app.
 
 ---
 
@@ -404,7 +413,7 @@ Post-v1 candidates: custom formats, anime numbering, multi-user/request manageme
 - Media playback or transcoding-on-serve. Players are external.
 - Music, books, comics, anime-specific numbering.
 - Custom formats (Sonarr-style scoring DSL).
-- Multi-user, request approval workflows.
+- User-defined approval policies beyond the shipped request flow.
 - Acting as an indexer or tracker.
 
 ---

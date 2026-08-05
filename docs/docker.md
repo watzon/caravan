@@ -174,9 +174,11 @@ with no configuration.
 
 ## Upgrading
 
+Update the checkout, then rebuild the image from the current source:
+
 ```sh
-docker compose pull        # or: docker compose build --pull
-docker compose up -d
+git pull --ff-only
+docker compose up -d --build
 ```
 
 Database migrations run automatically on start; they are forward-only and each
