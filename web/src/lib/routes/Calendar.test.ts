@@ -30,6 +30,7 @@ beforeEach(() => {
         { kind: 'movie', date, title: 'In Progress', movie_id: 2, monitored: true, has_file: false, status: 'downloading' },
         { kind: 'movie', date, title: 'Still Missing', movie_id: 3, monitored: true, has_file: false, status: 'missing' },
         { kind: 'episode', date: tomorrow, title: 'Future', series_id: 4, season_number: 1, episode_number: 2, episode_title: 'Future', monitored: true, has_file: false, status: 'unaired' },
+        { kind: 'episode', date: tomorrow, title: 'Chainsmoker Cat', series_id: 5, season_number: 1, episode_number: 6, episode_title: 'Episode 6', monitored: true, has_file: false, status: 'unaired' },
       ] });
     }
     throw new Error(`unexpected fetch: ${String(input)}`);
@@ -69,5 +70,28 @@ describe('Calendar', () => {
       expect(entry, `${title} calendar entry`).not.toBeNull();
       expect(entry?.className).toContain(expectedClass);
     }
+
+    expect(host.querySelector('[title="Chainsmoker Cat S01E06"]')).not.toBeNull();
+  });
+
+  it('names month controls and includes status in each day chip', async () => {
+    app = mount(Calendar, { target: host });
+    await settle();
+
+    expect(host.querySelector('button[aria-label="Previous month"]')).not.toBeNull();
+    expect(host.querySelector('button[aria-label="Next month"]')).not.toBeNull();
+    expect(host.querySelector('[title="On Disk"]')?.getAttribute('aria-label')).toBe('On Disk, On disk');
+    expect(host.querySelector('[title="S01E02 Future"]')?.getAttribute('aria-label')).toBe('Future S01E02 Future, Not yet released');
+  });
+
+  it('marks today without a focus-style ring', async () => {
+    app = mount(Calendar, { target: host });
+    await settle();
+
+    const today = host.querySelector('[data-today="true"]');
+    expect(today).not.toBeNull();
+    expect(today?.className).toContain('bg-accent-tint');
+    expect(today?.className).not.toContain('ring-');
+    expect(today?.querySelector('p')?.className).toContain('rounded-full');
   });
 });

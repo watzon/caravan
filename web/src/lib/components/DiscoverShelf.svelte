@@ -25,12 +25,12 @@
   let scroller = $state<HTMLDivElement | null>(null);
   let canScrollLeft = $state(false);
   let canScrollRight = $state(false);
+  let requestedScrollLeft: number | null = null;
 
   function updateArrows() {
     const el = scroller;
     if (!el) return;
-    // The 1px slack absorbs fractional scroll positions on zoomed displays.
-    canScrollLeft = el.scrollLeft > 1;
+    canScrollLeft = el.scrollLeft > 0;
     canScrollRight = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
   }
 
@@ -38,15 +38,23 @@
   // not only when it scrolls.
   $effect(() => {
     void items.length;
+    requestedScrollLeft = null;
     updateArrows();
   });
 
   function page(direction: -1 | 1) {
     const el = scroller;
     if (!el) return;
-    // A near-full viewport per step keeps the last visible card on screen as
-    // the first card of the next page, so the reader keeps their place.
-    el.scrollBy({ left: direction * el.clientWidth * 0.9, behavior: 'smooth' });
+    // Keep an explicit destination while a smooth scroll is in flight. A
+    // second click can then extend the pending destination instead of asking
+    // the browser to scroll again from a position it has not updated yet.
+    const step = el.clientWidth * 0.9;
+    const pending = requestedScrollLeft;
+    const continuesPendingScroll = pending !== null && direction * (pending - el.scrollLeft) > 1;
+    const base = continuesPendingScroll ? pending : el.scrollLeft;
+    const target = Math.max(0, Math.min(el.scrollWidth - el.clientWidth, base + direction * step));
+    requestedScrollLeft = target;
+    el.scrollTo({ left: target, behavior: 'smooth' });
   }
 </script>
 

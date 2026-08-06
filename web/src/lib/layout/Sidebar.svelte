@@ -294,7 +294,8 @@
                   : 'text-ink-muted'}"
             aria-label={`${badge.count} ${
               badge.kind === 'accent' ? 'active in' : badge.kind === 'warning' ? 'waiting in' : 'in'
-            } ${item.label}`}>
+            } ${item.label}`}
+            title={item.href === '/wanted' ? 'Movies and episodes waiting' : undefined}>
             {badge.count}
           </span>
         {/if}

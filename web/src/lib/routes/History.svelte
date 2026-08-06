@@ -36,6 +36,32 @@
     search_episode: 'Episode search',
   };
   const POLL_MS = 10_000;
+  const RECOVERY_MESSAGE = 'Database verified after an unclean shutdown';
+
+  type ActivityEventRow = ActivityEvent & { repeatCount: number };
+
+  function sameRecoveryEvent(left: ActivityEvent, right: ActivityEvent): boolean {
+    return left.message === RECOVERY_MESSAGE &&
+      right.message === RECOVERY_MESSAGE &&
+      left.level === right.level &&
+      left.category === right.category &&
+      left.detail === right.detail &&
+      left.movie_id === right.movie_id &&
+      left.series_id === right.series_id;
+  }
+
+  function coalesceRecoveryEvents(items: ActivityEvent[]): ActivityEventRow[] {
+    const rows: ActivityEventRow[] = [];
+    for (const event of items) {
+      const previous = rows.at(-1);
+      if (previous && sameRecoveryEvent(previous, event)) {
+        previous.repeatCount += 1;
+        continue;
+      }
+      rows.push({ ...event, repeatCount: 1 });
+    }
+    return rows;
+  }
 
   let tab = $state<Tab>('events');
   let events = $state<ActivityEvent[] | null>(null);
@@ -50,6 +76,7 @@
   let jobsLoading = $state(false);
   let eventsLoadingOlder = $state(false);
   let jobsLoadingOlder = $state(false);
+  let eventRows = $derived(coalesceRecoveryEvents(events ?? []));
 
   function mergeByID<T extends { id: number }>(current: T[], incoming: T[]): T[] {
     const seen = new Set<number>();
@@ -150,10 +177,13 @@
     {:else if eventsLoading && events === null}
       <div class="flex flex-col gap-2">{#each Array.from({ length: 4 }) as _, i (i)}<Skeleton class="h-16 w-full rounded-md" />{/each}</div>
     {:else if (events ?? []).length === 0}
-      <EmptyState icon="pulse" title="No activity yet" message="Imports, searches and scheduled work will appear here." />
+      <EmptyState
+        icon="pulse"
+        title="No activity recorded"
+        message="Current health appears in the system status panel. Imports, searches and scheduled work will appear here." />
     {:else}
       <ol class="flex flex-col gap-2" aria-label="Activity events">
-        {#each events ?? [] as event (event.id)}
+        {#each eventRows as event (event.id)}
           <li class="rounded-md border border-border bg-surface px-3 py-3">
             <div class="flex items-start gap-3">
               <span class="mt-1.5 size-2 shrink-0 rounded-full {TONE_DOT[EVENT_TONE[event.level]]}" title={event.level}></span>
@@ -161,6 +191,9 @@
                 <div class="flex flex-wrap items-center gap-2">
                   <Badge tone={EVENT_TONE[event.level]}>{event.category}</Badge>
                   <p class="text-base text-ink">{event.message}</p>
+                  {#if event.repeatCount > 1}
+                    <Badge tone="neutral">{event.repeatCount} times</Badge>
+                  {/if}
                   <time class="ml-auto text-sm text-ink-muted" datetime={event.created_at} title={event.created_at}>{formatAge(event.created_at)} ago</time>
                 </div>
                 {#if event.detail}
