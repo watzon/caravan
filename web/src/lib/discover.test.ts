@@ -17,6 +17,7 @@ import {
   libraryHref,
   mediaTypeChip,
   modalSubtitle,
+  ratingPresentation,
   ratingText,
   requestSeasons,
   runtimeText,
@@ -64,6 +65,33 @@ describe('discover links and labels', () => {
     expect(ratingText(8)).toBe('8.0');
     expect(ratingText(0)).toBeNull();
     expect(ratingText(Number.NaN)).toBeNull();
+  });
+
+  it('presents a score only once the title has been released', () => {
+    const today = new Date(2025, 5, 15);
+
+    expect(ratingPresentation(7.862, '2025-06-14', today)).toEqual({
+      text: '7.9/10',
+      title: 'Rated 7.9/10',
+    });
+    expect(ratingPresentation(8, '2025-06-15', today)).toEqual({
+      text: '8.0/10',
+      title: 'Rated 8.0/10',
+    });
+    expect(ratingPresentation(9.1, '2025-06-16', today)).toEqual({
+      text: null,
+      title: 'Not yet rated',
+    });
+  });
+
+  it('does not present zero-vote or undated titles as rated', () => {
+    const today = new Date(2025, 5, 15);
+    const notYetRated = { text: null, title: 'Not yet rated' };
+
+    expect(ratingPresentation(0, '2025-06-14', today)).toEqual(notYetRated);
+    expect(ratingPresentation(Number.NaN, '2025-06-14', today)).toEqual(notYetRated);
+    expect(ratingPresentation(7.5, '', today)).toEqual(notYetRated);
+    expect(ratingPresentation(7.5, 'not-a-date', today)).toEqual(notYetRated);
   });
 
   it('reads the leading year off a provider date', () => {

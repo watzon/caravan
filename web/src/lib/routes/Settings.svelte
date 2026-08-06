@@ -188,23 +188,23 @@
 </script>
 
 <div data-settings-layout data-settings-main class="flex min-w-0 flex-1 flex-col gap-5">
-  <header class="flex flex-col gap-4 border-b border-border pb-4">
-    <div class="flex flex-wrap items-start justify-between gap-3">
-      <div class="flex min-w-0 flex-1 flex-col gap-1">
-        <h1 id={isOverview ? 'settings-overview' : headerEntry.anchor} class="text-lg font-semibold text-ink">
-          {isOverview ? 'Settings' : headerEntry.label}
-        </h1>
-        <p class="text-sm text-ink-secondary">
-          {isOverview
-            ? 'Find the next configuration task or open a settings page directly.'
-            : headerEntry.description}
-        </p>
+  {#if !isOverview}
+    <header class="flex flex-col gap-4 border-b border-border pb-4">
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div class="flex min-w-0 flex-1 flex-col gap-1">
+          <h1 id={headerEntry.anchor} class="text-lg font-semibold text-ink">
+            {headerEntry.label}
+          </h1>
+          <p class="text-sm text-ink-secondary">{headerEntry.description}</p>
+        </div>
+        {#if activeEntry?.advanced}
+          <Button variant="secondary" size="sm" onclick={toggleAdvanced}>
+            {showAdvanced ? 'Hide advanced' : 'Show advanced'}
+          </Button>
+        {/if}
       </div>
-      <Button variant="secondary" size="sm" onclick={toggleAdvanced}>
-        {showAdvanced ? 'Hide advanced' : 'Show advanced'}
-      </Button>
-    </div>
-  </header>
+    </header>
+  {/if}
 
   <div class:settings-advanced-hidden={!showAdvanced} class="flex min-w-0 flex-1 flex-col gap-5 {headerEntry.narrow ? 'max-w-3xl' : ''}">
     {#if error}
@@ -226,14 +226,19 @@
         </div>
         <ol class="flex flex-col gap-2">
           {#each setup as item}
-            <li class="flex items-center justify-between gap-4 rounded-md bg-raised px-3 py-2">
-              <div class="min-w-0">
-                <a href={item.href} class="text-sm font-medium text-ink hover:text-accent-text">{item.label}</a>
-                <p class="text-sm text-ink-secondary">{item.description}</p>
-              </div>
-              <Badge tone={item.complete ? 'success' : item.complete === null ? 'neutral' : 'warning'}>
-                {item.complete ? 'Done' : item.complete === null ? 'Checking' : 'Needs setup'}
-              </Badge>
+            <li>
+              <a
+                href={item.href}
+                class="flex items-center justify-between gap-4 rounded-md bg-raised px-3 py-2
+                       transition-colors duration-150 ease-out hover:bg-overlay">
+                <span class="min-w-0">
+                  <span class="block text-sm font-medium text-ink">{item.label}</span>
+                  <span class="block text-sm text-ink-secondary">{item.description}</span>
+                </span>
+                <Badge tone={item.complete ? 'success' : item.complete === null ? 'neutral' : 'warning'}>
+                  {item.complete ? 'Done' : item.complete === null ? 'Checking' : 'Needs setup'}
+                </Badge>
+              </a>
             </li>
           {/each}
         </ol>
@@ -388,7 +393,7 @@
       value={query}
       aria-label="Search settings"
       aria-controls={query.trim() ? 'settings-search-results' : undefined}
-      placeholder="Search"
+      placeholder="Search settings"
       oninput={(event) => (query = event.currentTarget.value)}
       onkeydown={(event) => {
         if (event.key !== 'Escape') return;

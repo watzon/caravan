@@ -69,10 +69,8 @@
     {/if}
 
     {#if duration}
-      <span
-        class="absolute bottom-2 right-2 rounded-sm bg-bg/80 px-1.5 py-0.5 font-mono text-xs
-               text-ink-secondary">
-        {duration}
+      <span class="absolute bottom-2 right-2">
+        <Badge mono tone="neutral">{duration}</Badge>
       </span>
     {/if}
   </div>

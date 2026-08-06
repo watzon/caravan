@@ -52,6 +52,11 @@ let libraries: Library[];
 /** What each write answers with, shifted in order; falls back to no change. */
 let writeReplies: Library[];
 let writeStatus: number;
+let holdWrites: boolean;
+let releaseWrite: (() => void) | null;
+let scanPosts: number;
+let scanStatusReads: number;
+let scanCounts: { media_files: number; unmatched: number };
 
 const SETTINGS = { route_torrent: '3', route_usenet: '' };
 const CLIENTS = [
@@ -71,14 +76,28 @@ beforeEach(() => {
   libraries = [MOVIES, SERIES];
   writeReplies = [];
   writeStatus = 200;
+  holdWrites = false;
+  releaseWrite = null;
+  scanPosts = 0;
+  scanStatusReads = 0;
+  scanCounts = { media_files: 12, unmatched: 2 };
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const method = init?.method ?? 'GET';
+      if (url.endsWith('/library/rescan') && method === 'POST') {
+        scanPosts += 1;
+        return jsonResponse({ status: 'scanning' }, 202);
+      }
       if (method !== 'GET') {
         const body = init?.body === undefined ? null : JSON.parse(String(init.body));
         writes.push({ method, url, body });
+        if (holdWrites) {
+          await new Promise<void>((resolve) => {
+            releaseWrite = resolve;
+          });
+        }
         if (writeStatus !== 200) return jsonResponse({ error: 'nope' }, writeStatus);
         const reply = writeReplies.shift();
         if (reply) libraries = libraries.map((l) => (l.id === reply.id ? reply : l));
@@ -89,6 +108,18 @@ beforeEach(() => {
       if (url.endsWith('/quality-profiles')) return jsonResponse({ profiles: PROFILES });
       if (url.endsWith('/download-clients/types')) return jsonResponse({ types: TYPES });
       if (url.endsWith('/download-clients')) return jsonResponse({ download_clients: CLIENTS });
+      if (url.endsWith('/system/status')) {
+        scanStatusReads += 1;
+        return jsonResponse({
+          scanning: false,
+          counts: {
+            movies: 0,
+            series: 0,
+            media_files: scanCounts.media_files,
+            unmatched: scanCounts.unmatched,
+          },
+        });
+      }
       throw new Error(`unexpected fetch: ${url}`);
     }),
   );
@@ -125,6 +156,18 @@ function pick(el: HTMLSelectElement, value: string) {
   el.value = value;
   el.dispatchEvent(new Event('change', { bubbles: true }));
   flushSync();
+}
+
+function autosaveStatus(key: string): string | null {
+  return host.querySelector(`[data-autosave-status="${key}"]`)?.textContent?.trim() ?? null;
+}
+
+function finishWrite() {
+  expect(releaseWrite, 'held write release').not.toBeNull();
+  const release = releaseWrite!;
+  releaseWrite = null;
+  holdWrites = false;
+  release();
 }
 
 function button(label: string): HTMLButtonElement {
@@ -187,6 +230,31 @@ describe('LibrariesSettings — override vs global default', () => {
     expect(select('library-route-torrent').classList.contains('border-accent')).toBe(true);
   });
 
+  it('clears a Saved acknowledgment when the next autosave begins', async () => {
+    writeReplies = [
+      library({ route_torrent: 'embedded' }),
+      library({ route_torrent: 'embedded', quality_profile_id: 7 }),
+    ];
+    await mountLoaded();
+
+    holdWrites = true;
+    pick(select('library-route-torrent'), 'embedded');
+    expect(autosaveStatus('1:torrent-route')).toBe('Saving…');
+
+    finishWrite();
+    await settle();
+    expect(autosaveStatus('1:torrent-route')).toBe('Saved');
+
+    holdWrites = true;
+    pick(select('library-profile'), '7');
+    expect(autosaveStatus('1:torrent-route')).toBeNull();
+    expect(autosaveStatus('1:profile')).toBe('Saving…');
+
+    finishWrite();
+    await settle();
+    expect(autosaveStatus('1:profile')).toBe('Saved');
+  });
+
   it('reads a stored override as an override on load', async () => {
     libraries = [library({ route_usenet: '4' }), SERIES];
     await mountLoaded();
@@ -207,6 +275,7 @@ describe('LibrariesSettings — override vs global default', () => {
 
     expect(select('library-route-torrent').value).toBe('');
     expect(noteFor('library-route-torrent')).toBe('Global default');
+    expect(autosaveStatus('1:torrent-route')).toBe('Error');
   });
 
   it('clearing an override sends the empty value rather than omitting it', async () => {
@@ -290,6 +359,7 @@ describe('LibrariesSettings — indexer rows', () => {
         body: { enabled: false, categories: [2000] },
       },
     ]);
+    expect(autosaveStatus('1:indexer-1')).toBe('Saved');
   });
 
   it('sends a null category list when a row has no override to carry', async () => {
@@ -358,6 +428,7 @@ describe('LibrariesSettings — switcher and reach', () => {
     await mountLoaded();
 
     expect(rootPath()).toBe('library/Movies');
+    expect((host.querySelector('#library-root') as HTMLInputElement).readOnly).toBe(true);
 
     button('Series').click();
     await settle();
@@ -383,6 +454,7 @@ describe('LibrariesSettings — switcher and reach', () => {
     expect(writes).toEqual([
       { method: 'PATCH', url: '/api/v1/libraries/1', body: { dlna_visible: false } },
     ]);
+    expect(autosaveStatus('1:dlna')).toBe('Saved');
   });
 
   /**
@@ -425,5 +497,27 @@ describe('LibrariesSettings — switcher and reach', () => {
 
     expect(host.textContent).toContain('boom');
     expect(button('Retry')).toBeDefined();
+  });
+});
+
+describe('LibrariesSettings - library scan', () => {
+  it('starts one scan at a time and reports the completed library counts', async () => {
+    await mountLoaded();
+
+    const rescan = button('Rescan library');
+    rescan.click();
+    flushSync();
+
+    expect(rescan.disabled).toBe(true);
+    expect(rescan.textContent).toContain('Scanning');
+    rescan.click();
+    await settle();
+
+    expect(scanPosts).toBe(1);
+    expect(scanStatusReads).toBe(1);
+    expect(rescan.disabled).toBe(false);
+    expect(host.textContent).toContain(
+      'Scan finished: 12 files in the library, 2 unmatched.',
+    );
   });
 });

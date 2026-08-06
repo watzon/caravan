@@ -307,7 +307,7 @@
     <div class="flex min-w-0 flex-1 flex-col overflow-y-auto">
       <TopBar
         {title}
-        onsearch={settingsSection === undefined && session.isAdmin ? () => openAdd() : undefined}
+        onadd={settingsSection === undefined && session.isAdmin ? () => openAdd() : undefined}
         onmenu={toggleSidebar}
         menuOpen={sidebarOpen}
         bind:menuButton={sidebarMenuButton} />

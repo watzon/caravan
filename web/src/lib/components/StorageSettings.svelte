@@ -47,7 +47,7 @@
   let newRoot = $state('');
   let busy = $state(false);
   let scanning = $state(false);
-  let confirming = $state<'repoint' | 'migrate' | null>(null);
+  let confirming = $state<'repoint' | 'migrate' | 'permanent-delete' | null>(null);
   let warnings = $state<string[]>([]);
   let restartRequired = $state(false);
   let migration = $state<StorageMigration | null>(null);
@@ -113,6 +113,7 @@
   let savedNaming = $state(untrack(() => namingSnapshot()));
   let namingChanged = $derived(namingSnapshot() !== savedNaming);
   let namingInvalid = $derived(namingError() !== '');
+  let permanentDeletion = $derived(Number(recycleRetentionDays) === 0);
   let episodePreview = $derived(
     preview(episodeFileFormat, {
       series: 'Planet Earth II',
@@ -128,6 +129,7 @@
       pushToast(error, 'danger');
       return;
     }
+    confirming = null;
     namingBusy = true;
     try {
       await api.putSettings({
@@ -145,6 +147,13 @@
     } finally {
       namingBusy = false;
     }
+  }
+  function requestNamingSave() {
+    if (permanentDeletion) {
+      confirming = 'permanent-delete';
+      return;
+    }
+    void saveNaming();
   }
 
   let timer: ReturnType<typeof setInterval> | null = null;
@@ -268,6 +277,13 @@
     >
       <TextInput id="settings-recycle-retention" type="number" min="0" max="3650" bind:value={recycleRetentionDays} />
     </Field>
+    {#if permanentDeletion}
+      <Banner
+        tone="danger"
+        icon="warning"
+        title="Permanent deletion"
+        message="With 0 days of retention, future Caravan deletions permanently remove Caravan-owned media, posters and NFO files instead of moving them to recycle." />
+    {/if}
     <Field label="Movie folder format" for="settings-movie-folder-format" help={'Tokens: {title}, {year}.'}>
       <TextInput id="settings-movie-folder-format" bind:value={movieFolderFormat} mono />
     </Field>
@@ -291,7 +307,15 @@
       <p>Movie preview: <code>{preview(movieFolderFormat, { title: 'Big Buck Bunny', year: ' (2008)' })}/{moviePreview}</code></p>
       <p>Episode preview: <code>{preview(seriesFolderFormat, { title: 'Planet Earth II', year: ' (2016)' })}/{preview(seasonFolderFormat, { season: '1', 'season:02': '01' })}/{episodePreview}</code></p>
     </div>
-    <div><Button variant="primary" onclick={saveNaming} disabled={namingBusy || !namingChanged || namingInvalid}>{namingBusy ? 'Saving…' : 'Save recycle and naming'}</Button></div>
+    <div>
+      <Button
+        variant={permanentDeletion ? 'danger' : 'primary'}
+        onclick={requestNamingSave}
+        disabled={namingBusy || !namingChanged || namingInvalid}
+      >
+        {namingBusy ? 'Saving…' : 'Save recycle and naming'}
+      </Button>
+    </div>
   </div>
   <DatabaseSettings />
 
@@ -391,6 +415,24 @@
     </div>
   {/if}
 </section>
+
+{#if confirming === 'permanent-delete'}
+  <Modal title="Use permanent deletion?" width="max-w-md" onclose={() => (confirming = null)}>
+    <div class="flex flex-col gap-3 px-4 py-4">
+      <p class="text-base text-ink-secondary">
+        Future Caravan deletions will permanently remove Caravan-owned media, posters and NFO files
+        instead of moving them to recycle. This cannot be undone.
+      </p>
+      <p class="text-base text-ink-secondary">
+        Saving this setting does not delete anything now or remove files already in recycle.
+      </p>
+    </div>
+    {#snippet footer()}
+      <Button variant="secondary" onclick={() => (confirming = null)}>Cancel</Button>
+      <Button variant="danger" onclick={saveNaming}>Save with permanent deletion</Button>
+    {/snippet}
+  </Modal>
+{/if}
 
 {#if confirming === 'repoint'}
   <Modal title="Re-point the storage root?" width="max-w-md" onclose={() => (confirming = null)}>

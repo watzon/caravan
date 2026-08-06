@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import Settings from './Settings.svelte';
+import TopBar from '../layout/TopBar.svelte';
 import { reactiveProps } from '../reactiveprops.svelte';
 import { system } from '../state/system.svelte';
 import { navigate, router } from '../router.svelte';
@@ -106,11 +107,13 @@ describe('Settings overview and route resolution', () => {
     app = mount(Settings, { target: host });
     await settle();
 
-    expect(host.querySelector('#settings-overview')?.textContent).toContain('Settings');
+    expect(host.querySelectorAll('h1')).toHaveLength(0);
     expect(host.querySelector('#tmdb-key')).toBeNull();
     expect(host.textContent).not.toContain('Find a setting');
-    expect(host.textContent).toContain('Set up Caravan');
-    expect(host.textContent).toContain('Browse settings');
+    expect(host.querySelector('h2#setup-heading')?.textContent).toContain('Set up Caravan');
+    expect(host.querySelector('h2#settings-categories-heading')?.textContent).toContain(
+      'Browse settings',
+    );
   });
 
 
@@ -143,6 +146,37 @@ describe('Settings overview and route resolution', () => {
     expect(host.textContent).toContain('Add a search or download source');
   });
 
+  it('makes every setup checklist row one full-row link', async () => {
+    stubFetch();
+    app = mount(Settings, { target: host });
+    await settle();
+
+    const rows = [...host.querySelectorAll('ol > li')];
+    expect(rows).toHaveLength(4);
+    for (const row of rows) {
+      const link = row.querySelector(':scope > a');
+      expect(link).not.toBeNull();
+      expect(link?.querySelector('.text-ink-secondary')).not.toBeNull();
+      expect(link?.textContent).toMatch(/Done|Checking|Needs setup/);
+    }
+  });
+
+  it('renders the settings action with an honest search placeholder', async () => {
+    stubFetch();
+    app = mount(Settings, { target: host });
+    await settle();
+
+    const chrome = document.createElement('div');
+    host.appendChild(chrome);
+    const topBar = mount(TopBar, { target: chrome, props: { title: 'Settings' } });
+    flushSync();
+
+    expect(host.querySelector<HTMLInputElement>('#settings-search')?.placeholder).toBe(
+      'Search settings',
+    );
+    unmount(topBar);
+  });
+
   it('keeps one mounted instance synchronized with section, fragment, and overview routes', async () => {
     stubFetch();
     navigate('/settings', { replace: true });
@@ -150,8 +184,8 @@ describe('Settings overview and route resolution', () => {
     app = mount(Settings, { target: host, props: props.props });
     await settle();
 
-    expect(host.querySelector('#settings-overview')).not.toBeNull();
-    expect(host.querySelector('#settings-search')).toBeNull();
+    expect(host.querySelector('h1')).toBeNull();
+    expect(host.querySelector('#setup-heading')).not.toBeNull();
 
     navigate('/settings/downloads#download-clients');
     props.set({ section: router.match?.params.section ?? '' });
@@ -168,7 +202,8 @@ describe('Settings overview and route resolution', () => {
     await settle();
 
     expect(router.hash).toBe('');
-    expect(host.querySelector('#settings-overview')).not.toBeNull();
+    expect(host.querySelector('h1')).toBeNull();
+    expect(host.querySelector('#setup-heading')).not.toBeNull();
     expect(host.querySelector('#settings-search')).toBeNull();
     expect(host.querySelector('#download-clients')).toBeNull();
   });
@@ -201,6 +236,22 @@ describe('Settings overview and route resolution', () => {
     expect(host.querySelector('h1#playback')?.textContent).toContain('Playback');
     expect(host.querySelector('[data-settings-sidebar]')).toBeNull();
     expect(host.querySelector('[data-settings-navigation-toggle]')).toBeNull();
+  });
+
+  it('offers advanced settings only on catalog entries marked advanced', async () => {
+    stubFetch();
+    app = mount(Settings, { target: host, props: { section: 'playback' } });
+    await settle();
+
+    expect(
+      [...host.querySelectorAll('button')].some((item) => item.textContent?.includes('advanced')),
+    ).toBe(false);
+
+    unmount(app);
+    app = mount(Settings, { target: host, props: { section: 'downloads' } });
+    await settle();
+
+    expect(button('Show advanced')).toBeDefined();
   });
 
   it('persists the advanced-settings preference and hides marked descendants by default', async () => {

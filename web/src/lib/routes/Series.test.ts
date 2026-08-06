@@ -7,8 +7,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import Series from './Series.svelte';
 import { clearToasts, toasts } from '../state/toast.svelte';
+import { navigate, router } from '../router.svelte';
 
-function series(id: number, title: string) {
+function series(
+  id: number,
+  title: string,
+  options: {
+    addedAt?: string;
+    state?: 'downloaded' | 'incomplete' | 'wanted' | 'unmonitored';
+  } = {},
+) {
+  const state = options.state ?? 'downloaded';
   return {
     id,
     tmdb_id: id,
@@ -22,17 +31,21 @@ function series(id: number, title: string) {
     path: '',
     poster_path: '',
     poster_url: '',
-    monitored: true,
+    monitored: state !== 'unmonitored',
     quality_profile_id: 0,
     first_aired: '',
-    added_at: '2026-01-01T00:00:00Z',
+    added_at: options.addedAt ?? '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
     episode_count: 9,
-    episode_file_count: 9,
+    episode_file_count: state === 'downloaded' ? 9 : state === 'incomplete' ? 4 : 0,
   };
 }
 
-const SERIES = [series(1, 'Andor'), series(2, 'Severance')];
+const SERIES = [
+  series(2, 'Severance', { addedAt: '2026-02-01T00:00:00Z' }),
+  series(1, 'Andor', { addedAt: '2026-01-01T00:00:00Z', state: 'unmonitored' }),
+];
+let servedSeries = SERIES;
 
 let host: HTMLElement;
 let app: Record<string, unknown> | undefined;
@@ -40,6 +53,8 @@ let calls: { url: string; method: string }[];
 
 beforeEach(() => {
   clearToasts();
+  servedSeries = SERIES;
+  window.scrollTo = () => {};
   calls = [];
   vi.stubGlobal(
     'fetch',
@@ -54,7 +69,7 @@ beforeEach(() => {
           headers: { 'Content-Type': 'application/json' },
         });
       }
-      return new Response(JSON.stringify({ series: SERIES }), {
+      return new Response(JSON.stringify({ series: servedSeries }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       });
@@ -77,12 +92,32 @@ async function settle() {
   flushSync();
 }
 
+async function open(url = '/series') {
+  window.history.replaceState({}, '', url);
+  navigate(url, { replace: true });
+  app = mount(Series, { target: host, props: { onadd: () => {} } });
+  await settle();
+}
+
 function button(label: string): HTMLButtonElement {
   const found = [...host.querySelectorAll('button')].find(
     (b) => b.textContent?.trim() === label,
   );
   expect(found, `${label} button`).toBeTruthy();
   return found as HTMLButtonElement;
+}
+
+function filterChip(label: string): HTMLButtonElement {
+  const filterButtons = host.querySelectorAll<HTMLButtonElement>(
+    '[aria-label="Filter library"] button',
+  );
+  const found = [...filterButtons].find((candidate) =>
+    [...candidate.querySelectorAll('span')].some(
+      (span) => span.textContent?.trim() === label,
+    ),
+  );
+  expect(found, `${label} filter`).toBeTruthy();
+  return found!;
 }
 
 function cards(): HTMLElement[] {
@@ -99,10 +134,28 @@ async function select(title: string) {
   await settle();
 }
 
+function sortSelect(): HTMLSelectElement {
+  const select = host.querySelector<HTMLSelectElement>('select[aria-label="Sort series"]');
+  expect(select, 'series sort control').toBeTruthy();
+  return select!;
+}
+
+async function chooseSort(value: 'title' | 'added' | 'status') {
+  const select = sortSelect();
+  select.value = value;
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle();
+}
+
+function cardIDs(): number[] {
+  return [...host.querySelectorAll<HTMLAnchorElement>('a[href^="/series/"]')].map((link) =>
+    Number(link.pathname.split('/').pop()),
+  );
+}
+
 describe('Series grid selection', () => {
   it('keeps cards as links while nothing is selected', async () => {
-    app = mount(Series, { target: host, props: { onadd: () => {} } });
-    await settle();
+    await open();
 
     expect(host.querySelector('a[href="/series/2"]')).toBeTruthy();
     expect(cards()).toHaveLength(0);
@@ -110,8 +163,7 @@ describe('Series grid selection', () => {
   });
 
   it('unmonitors the selection through the series endpoints', async () => {
-    app = mount(Series, { target: host, props: { onadd: () => {} } });
-    await settle();
+    await open();
 
     await select('Andor');
     cards()[1]!.click();
@@ -128,8 +180,7 @@ describe('Series grid selection', () => {
   });
 
   it('removes the selection and does not pluralize "series"', async () => {
-    app = mount(Series, { target: host, props: { onadd: () => {} } });
-    await settle();
+    await open();
 
     await select('Severance');
 
@@ -144,5 +195,48 @@ describe('Series grid selection', () => {
       '/api/v1/library/series/2',
     ]);
     expect(toasts.items.map((t) => t.message)).toEqual(['Removed 1']);
+  });
+
+  it('derives added sort from the URL on reload', async () => {
+    await open('/series?sort=added&layout=posters');
+
+    expect(sortSelect().value).toBe('added');
+    expect(cardIDs()).toEqual([2, 1]);
+    expect(router.params.get('layout')).toBe('posters');
+  });
+
+  it('keeps invalid sort in the URL while falling back to stable title and id order', async () => {
+    servedSeries = [series(8, 'Zulu'), series(6, 'Alpha'), series(3, 'Alpha')];
+    await open('/series?sort=oldest&layout=compact');
+
+    expect(sortSelect().value).toBe('title');
+    expect(cardIDs()).toEqual([3, 6, 8]);
+    expect(router.params.get('sort')).toBe('oldest');
+    expect(router.params.get('layout')).toBe('compact');
+  });
+
+  it('preserves filters, selection, and unrelated query keys across sort changes', async () => {
+    await open('/series?layout=compact');
+    filterChip('Unmonitored').click();
+    await settle();
+    expect(cardIDs()).toEqual([1]);
+
+    await select('Andor');
+    await chooseSort('status');
+
+    expect(router.path).toBe('/series');
+    expect(router.params.get('sort')).toBe('status');
+    expect(router.params.get('layout')).toBe('compact');
+    expect(filterChip('Unmonitored').getAttribute('aria-pressed')).toBe('true');
+    expect(cards().map((card) => card.getAttribute('aria-label'))).toEqual([
+      'Andor (2022)',
+    ]);
+    expect(cards()[0]?.getAttribute('aria-pressed')).toBe('true');
+
+    await chooseSort('title');
+    expect(router.params.has('sort')).toBe(false);
+    expect(router.params.get('layout')).toBe('compact');
+    expect(filterChip('Unmonitored').getAttribute('aria-pressed')).toBe('true');
+    expect(cards()[0]?.getAttribute('aria-pressed')).toBe('true');
   });
 });

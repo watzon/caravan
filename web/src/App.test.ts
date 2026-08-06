@@ -270,6 +270,76 @@ describe('App shell', () => {
     expect(host.textContent).not.toContain('No movies yet');
   });
 
+  it('routes the secondary global add action by click and keyboard', async () => {
+    app = mount(App, { target: host });
+    await settle();
+
+    const add = host.querySelector<HTMLButtonElement>('header button[title="Add movie or series"]')!;
+    expect(add).not.toBeNull();
+    expect(add.classList).toContain('bg-raised');
+    expect(add.classList).toContain('border-border-strong');
+    expect(add.classList).not.toContain('bg-accent');
+    expect(add.textContent).toContain('Add movie or series');
+    expect(add.querySelector('path')?.getAttribute('d')).toBe('M12 5v14M5 12h14');
+    expect(host.querySelectorAll('button.bg-accent')).toHaveLength(1);
+
+    add.click();
+    flushSync();
+    expect(host.querySelector('[role="dialog"]')?.textContent).toContain('Add to library');
+
+    host.querySelector<HTMLButtonElement>('[role="dialog"] button[aria-label="Close"]')!.click();
+    flushSync();
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+
+    const shortcut = new KeyboardEvent('keydown', {
+      key: 'k',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    window.dispatchEvent(shortcut);
+    flushSync();
+
+    expect(shortcut.defaultPrevented).toBe(true);
+    expect(host.querySelector('[role="dialog"]')?.textContent).toContain('Add to library');
+
+    host.querySelector<HTMLButtonElement>('[role="dialog"] button[aria-label="Close"]')!.click();
+    flushSync();
+
+    const commandShortcut = new KeyboardEvent('keydown', {
+      key: 'k',
+      metaKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    window.dispatchEvent(commandShortcut);
+    flushSync();
+
+    expect(commandShortcut.defaultPrevented).toBe(true);
+    expect(host.querySelector('[role="dialog"]')?.textContent).toContain('Add to library');
+  });
+
+  it('keeps the global add action unavailable to members', async () => {
+    sessionBody = { username: 'reader', role: 'member', open: false };
+    app = mount(App, { target: host });
+    await settle();
+
+    expect(window.location.pathname).toBe('/discover');
+    expect(host.querySelector('header button[title="Add movie or series"]')).toBeNull();
+
+    const shortcut = new KeyboardEvent('keydown', {
+      key: 'k',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    window.dispatchEvent(shortcut);
+    flushSync();
+
+    expect(shortcut.defaultPrevented).toBe(false);
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+  });
+
   it('uses responsive classes for the desktop rail and narrow drawer', async () => {
     app = mount(App, { target: host });
     await settle();
@@ -555,7 +625,18 @@ describe('App shell', () => {
     expect(badge?.getAttribute('title')).toContain('Invalid API key');
   });
 
-  it('badges the queue nav with the pending request count', async () => {
+  it('uses uniform semantic badges for every nonzero sidebar count', async () => {
+    statusBody = {
+      ...STATUS,
+      counts: {
+        ...STATUS.counts,
+        movies: 2,
+        series: 3,
+        wanted: 4,
+        converting: 5,
+        unmatched: 6,
+      },
+    };
     requestRows = [
       {
         id: 1,
@@ -577,8 +658,23 @@ describe('App shell', () => {
     app = mount(App, { target: host });
     await settle();
 
-    const link = host.querySelector('a[href="/requests"]');
-    expect(link?.textContent).toContain('1');
+    const cases = [
+      ['/requests', '1 pending request', 'bg-warning-tint'],
+      ['/movies', '2 movies in library', 'bg-raised'],
+      ['/series', '3 series in library', 'bg-raised'],
+      ['/wanted', '4 movies and episodes waiting', 'bg-warning-tint'],
+      ['/queue', '1 active download', 'bg-accent-tint'],
+      ['/convert', '5 open conversions', 'bg-raised'],
+      ['/scan-review', '6 unmatched media files', 'bg-warning-tint'],
+    ] as const;
+
+    for (const [href, title, tone] of cases) {
+      const badge = host.querySelector(`a[href="${href}"] > span[title="${title}"]`);
+      expect(badge, href).not.toBeNull();
+      expect(badge?.classList, href).toContain('h-5');
+      expect(badge?.classList, href).toContain('rounded-sm');
+      expect(badge?.classList, href).toContain(tone);
+    }
   });
 
   it('badges the queue nav with the active download count', async () => {
@@ -590,7 +686,7 @@ describe('App shell', () => {
     // One downloading, one paused: a paused download waits on the user, so the
     // badge counts one (see isActiveDownload).
     expect(queueLink?.textContent).toContain('1');
-    expect(host.querySelector('[aria-label="1 active in Queue"]')).not.toBeNull();
+    expect(queueLink?.querySelector('[title="1 active download"]')).not.toBeNull();
   });
 
   it('badges the library nav items with their counts', async () => {
@@ -598,9 +694,26 @@ describe('App shell', () => {
     await settle();
 
     // The status fixture reports one movie and zero series: a zero renders
-    // nothing rather than a grey 0.
-    expect(host.querySelector('[aria-label="1 in Movies"]')).not.toBeNull();
-    expect(host.querySelector('[aria-label*="in Series"]')).toBeNull();
+    // nothing rather than an inactive badge.
+    expect(host.querySelector('a[href="/movies"] > span[title="1 movie in library"]')).not.toBeNull();
+    expect(host.querySelector('a[href="/series"] > span[title]')).toBeNull();
+  });
+
+  it('shows the full storage path and visible used and free values', async () => {
+    const storageRoot = '/Volumes/Media Archive/Caravan Library';
+    statusBody = { ...STATUS, storage_root: storageRoot };
+    app = mount(App, { target: host });
+    await settle();
+
+    const path = [...host.querySelectorAll('span')].find(
+      (node) => node.getAttribute('title') === storageRoot,
+    );
+    expect(path).toBeDefined();
+    expect(path?.classList).toContain('truncate');
+    expect(path?.textContent).toContain(storageRoot);
+    expect(host.textContent).toContain('524 GB used');
+    expect(host.textContent).toContain('500 GB free');
+    expect(host.querySelector('[role="progressbar"][aria-label="Disk used"]')).not.toBeNull();
   });
 
   it('renders the queue screen with its rows and controls', async () => {
@@ -872,6 +985,11 @@ describe('App shell', () => {
 
     expect(host.querySelector('a[href="/settings/users"]')).not.toBeNull();
     expect(host.textContent).toContain('Settings → Users');
+    const warning = [...host.querySelectorAll<HTMLElement>('[role="alert"]')].find((alert) =>
+      alert.textContent?.includes('Listening on every interface without a password'),
+    );
+    expect(warning?.classList).toContain('bg-warning-tint');
+    expect(warning?.querySelector('.bg-warning')).not.toBeNull();
   });
 
   it('sends the user to first run when there is no storage root', async () => {

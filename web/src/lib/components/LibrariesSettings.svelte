@@ -52,6 +52,8 @@
     'h-9 w-full rounded-sm border bg-raised px-3 text-md text-ink ' +
     'focus:border-accent focus:outline-none disabled:opacity-50';
 
+  type AutosaveStatus = 'saving' | 'saved' | 'error';
+
   let libraries = $state<Library[]>([]);
   /** The global settings the routing selects fall back to. */
   let settings = $state<Settings>({});
@@ -64,6 +66,9 @@
   /** True while a write is in flight, so a second one cannot race it. */
   let busy = $state(false);
   let kind = $state<LibraryKind>('movie');
+  let scanning = $state(false);
+  let scanMessage = $state<string | null>(null);
+  let autosaveStates = $state<Record<string, AutosaveStatus>>({});
 
   /** The (library, indexer) pair whose categories the modal is editing. */
   let editing = $state<LibraryIndexer | null>(null);
@@ -150,30 +155,44 @@
     return profiles.find((profile) => profile.id === id)?.name ?? `profile ${id}`;
   }
 
+  function autosaveKey(lib: Library, field: string): string {
+    return `${lib.id}:${field}`;
+  }
+
+  function setAutosaveState(key: string, status: AutosaveStatus) {
+    autosaveStates =
+      status === 'saving' ? { [key]: status } : { ...autosaveStates, [key]: status };
+  }
+
   /**
    * The three select handlers take the picked value rather than reading the
    * bound state back, so nothing depends on whether Svelte's binding listener
    * or this handler runs first.
    */
   function saveProfile(value: string) {
+    const lib = selected;
+    if (!lib) return;
     profileID = value;
     void patch(
       { quality_profile_id: value === '' ? 0 : Number(value) },
       value === ''
-        ? `${selected?.name} follows the global default profile.`
-        : `${selected?.name} defaults to ${profileName(Number(value))}.`,
+        ? `${lib.name} follows the global default profile.`
+        : `${lib.name} defaults to ${profileName(Number(value))}.`,
+      autosaveKey(lib, 'profile'),
     );
   }
 
   function saveRoute(protocol: Protocol, value: string) {
-    const name = selected?.name ?? '';
+    const lib = selected;
+    if (!lib) return;
     if (protocol === 'torrent') {
       routeTorrent = value;
       void patch(
         { route_torrent: value },
         value === ''
-          ? `${name} follows the global torrent route.`
-          : `${name} routes torrents to ${routeLabel(value)}.`,
+          ? `${lib.name} follows the global torrent route.`
+          : `${lib.name} routes torrents to ${routeLabel(value)}.`,
+        autosaveKey(lib, 'torrent-route'),
       );
       return;
     }
@@ -181,21 +200,25 @@
     void patch(
       { route_usenet: value },
       value === ''
-        ? `${name} follows the global usenet route.`
-        : `${name} routes usenet to ${routeLabel(value)}.`,
+        ? `${lib.name} follows the global usenet route.`
+        : `${lib.name} routes usenet to ${routeLabel(value)}.`,
+      autosaveKey(lib, 'usenet-route'),
     );
   }
 
-  async function patch(body: LibraryPatch, note: string) {
+  async function patch(body: LibraryPatch, note: string, statusKey: string) {
     const lib = selected;
     if (!lib) return;
+    setAutosaveState(statusKey, 'saving');
     busy = true;
     try {
       replace(await api.updateLibrary(lib.id, body));
+      setAutosaveState(statusKey, 'saved');
       pushToast(note, 'success');
     } catch (err) {
+      setAutosaveState(statusKey, 'error');
       pushToast(errorText(err), 'danger');
-      reseed(lib);
+      if (selected?.id === lib.id) reseed(lib);
     } finally {
       busy = false;
     }
@@ -212,15 +235,19 @@
     enabled: boolean,
     categories: number[] | null,
     note: string,
+    statusKey?: string,
   ): Promise<boolean> {
     const lib = selected;
     if (!lib) return false;
+    if (statusKey) setAutosaveState(statusKey, 'saving');
     busy = true;
     try {
       replace(await api.setLibraryIndexer(lib.id, row.indexer_id, { enabled, categories }));
+      if (statusKey) setAutosaveState(statusKey, 'saved');
       pushToast(note, 'success');
       return true;
     } catch (err) {
+      if (statusKey) setAutosaveState(statusKey, 'error');
       pushToast(errorText(err), 'danger');
       return false;
     } finally {
@@ -240,6 +267,7 @@
       next
         ? `${lib.name} searches ${row.name} again.`
         : `${lib.name} no longer searches ${row.name}.`,
+      autosaveKey(lib, `indexer-${row.indexer_id}`),
     );
   }
 
@@ -266,7 +294,41 @@
     const ok = await writeIndexer(row, row.enabled, null, `${row.name} uses its own categories.`);
     if (ok) editing = null;
   }
+
+  async function rescan() {
+    if (scanning) return;
+    scanning = true;
+    scanMessage = null;
+    try {
+      await api.rescan();
+      const summary = await api.awaitScan();
+      const message = `Scan finished: ${summary.media_files} files in the library, ${summary.unmatched} unmatched.`;
+      scanMessage = message;
+      pushToast(message, summary.unmatched > 0 ? 'warning' : 'success');
+    } catch (err) {
+      scanMessage = `Scan failed: ${errorText(err)}`;
+      pushToast(errorText(err), 'danger');
+    } finally {
+      scanning = false;
+    }
+  }
 </script>
+
+{#snippet autosaveStatus(key: string)}
+  {#if autosaveStates[key]}
+    {@const status = autosaveStates[key]}
+    <span
+      data-autosave-status={key}
+      aria-live="polite"
+      class="text-xs {status === 'saved'
+        ? 'text-success'
+        : status === 'error'
+          ? 'text-danger'
+          : 'text-ink-muted'}">
+      {status === 'saving' ? 'Saving…' : status === 'saved' ? 'Saved' : 'Error'}
+    </span>
+  {/if}
+{/snippet}
 
 {#if error}
   <LoadError message={error} onretry={load} />
@@ -302,6 +364,20 @@
     </div>
 
     <SettingsCard
+      title="Library scan"
+      description="Find new media under the storage root and refresh the library counts.">
+      <div class="flex flex-wrap items-center gap-3">
+        <Button variant="secondary" disabled={scanning} onclick={rescan}>
+          <Icon name="refresh" size={14} />
+          {scanning ? 'Scanning…' : 'Rescan library'}
+        </Button>
+        {#if scanMessage}
+          <p class="text-sm text-ink-secondary" aria-live="polite">{scanMessage}</p>
+        {/if}
+      </div>
+    </SettingsCard>
+
+    <SettingsCard
       title={lib.name}
       description="Where this library lives, and what it grabs when an item names no profile of its own.">
       <Field
@@ -315,6 +391,9 @@
         label="Default quality profile"
         for="library-profile"
         help="Used for items in this library that name no profile. An item's own profile always wins.">
+        {#snippet note()}
+          {@render autosaveStatus(autosaveKey(lib, 'profile'))}
+        {/snippet}
         <select
           id="library-profile"
           bind:value={profileID}
@@ -398,12 +477,15 @@
                 {/if}
               </div>
 
-              <Toggle
-                checked={row.enabled}
-                labelHidden
-                label="Search {row.name} for {lib.name}"
-                disabled={busy}
-                onchange={(next) => toggleIndexer(lib, row, next)} />
+              <div class="flex shrink-0 flex-col items-end gap-1">
+                {@render autosaveStatus(autosaveKey(lib, `indexer-${row.indexer_id}`))}
+                <Toggle
+                  checked={row.enabled}
+                  labelHidden
+                  label="Search {row.name} for {lib.name}"
+                  disabled={busy}
+                  onchange={(next) => toggleIndexer(lib, row, next)} />
+              </div>
             </li>
           {/each}
         </ul>
@@ -440,6 +522,7 @@
             <option value={String(client.id)}>{client.name}</option>
           {/each}
         </select>
+        {@render autosaveStatus(autosaveKey(lib, 'torrent-route'))}
       </Field>
 
       <Field
@@ -462,19 +545,24 @@
             <option value={String(client.id)}>{client.name}</option>
           {/each}
         </select>
+        {@render autosaveStatus(autosaveKey(lib, 'usenet-route'))}
       </Field>
     </SettingsCard>
 
     <SettingsCard title="Reach" description="Where this library shows up outside Caravan.">
-      <Toggle
-        checked={lib.dlna_visible}
-        label="Share over DLNA"
-        disabled={busy}
-        onchange={(next) =>
-          patch(
-            { dlna_visible: next },
-            next ? `${lib.name} is shared over DLNA.` : `${lib.name} is hidden from DLNA.`,
-          )} />
+      <div class="flex flex-wrap items-center gap-3">
+        <Toggle
+          checked={lib.dlna_visible}
+          label="Share over DLNA"
+          disabled={busy}
+          onchange={(next) =>
+            patch(
+              { dlna_visible: next },
+              next ? `${lib.name} is shared over DLNA.` : `${lib.name} is hidden from DLNA.`,
+              autosaveKey(lib, 'dlna'),
+            )} />
+        {@render autosaveStatus(autosaveKey(lib, 'dlna'))}
+      </div>
       <p class="text-sm text-ink-secondary">
         Hiding a library drops its container from the DLNA tree; TVs pick the change up on their
         next browse rather than needing a restart. DLNA has no accounts, so anything shared here is

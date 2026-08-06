@@ -105,7 +105,7 @@ describe('ConvertFileButton', () => {
     expect(host.textContent).toContain('In the convert queue');
   });
 
-  it('calls a container-only fix a remux, because that is what it costs', () => {
+  it('calls a container-only fix a conversion, because that is the user-facing action', () => {
     stubFetch();
     app = mount(ConvertFileButton, {
       target: host,
@@ -113,7 +113,7 @@ describe('ConvertFileButton', () => {
     });
     flushSync();
 
-    expect(host.querySelector('button')?.textContent).toContain('Remux for TV');
+    expect(host.querySelector('button')?.textContent).toContain('Convert for TV');
   });
 
   it('renders nothing when the profile has no complaint', () => {

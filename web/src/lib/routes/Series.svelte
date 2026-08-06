@@ -14,6 +14,7 @@
   import SelectActions from '../components/SelectActions.svelte';
   import TextInput from '../components/TextInput.svelte';
   import { createSelection } from '../selection.svelte';
+  import { navigate, router } from '../router.svelte';
   import {
     SERIES_FILTERS,
     STATUS,
@@ -27,6 +28,18 @@
   }
 
   let { onadd }: Props = $props();
+
+  type SortKey = 'title' | 'added' | 'status';
+
+  const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+    { key: 'title', label: 'Title' },
+    { key: 'added', label: 'Added' },
+    { key: 'status', label: 'Status' },
+  ];
+
+  const SELECT_CLASS =
+    'h-9 rounded-sm border border-border-strong bg-raised px-3 text-md text-ink ' +
+    'focus:border-accent focus:outline-none';
 
   let series = $state<Series[] | null>(null);
   let loading = $state(true);
@@ -49,6 +62,29 @@
 
   onMount(load);
 
+  function readSort(value: string | null): SortKey {
+    return value === 'added' || value === 'status' ? value : 'title';
+  }
+
+  function compareTitle(a: Series, b: Series): number {
+    return (
+      (a.sort_title || a.title).localeCompare(b.sort_title || b.title) ||
+      a.title.localeCompare(b.title) ||
+      a.id - b.id
+    );
+  }
+
+  function applySort(value: string) {
+    const next = readSort(value);
+    const params = router.params;
+    if (next === 'title') params.delete('sort');
+    else params.set('sort', next);
+    const search = params.toString();
+    navigate(`${router.path}${search ? `?${search}` : ''}${router.hash}`);
+  }
+
+  let sort = $derived(readSort(router.params.get('sort')));
+
   let all = $derived(series ?? []);
 
   let chips = $derived<FilterChip[]>([
@@ -62,10 +98,22 @@
 
   let visible = $derived.by(() => {
     const needle = query.trim().toLowerCase();
-    return all.filter((s) => {
+    const filtered = all.filter((s) => {
       if (filter !== 'all' && seriesStatus(s) !== filter) return false;
       if (needle && !s.title.toLowerCase().includes(needle)) return false;
       return true;
+    });
+    return [...filtered].sort((a, b) => {
+      if (sort === 'added') {
+        return b.added_at.localeCompare(a.added_at) || compareTitle(a, b);
+      }
+      if (sort === 'status') {
+        return (
+          SERIES_FILTERS.indexOf(seriesStatus(a)) - SERIES_FILTERS.indexOf(seriesStatus(b)) ||
+          compareTitle(a, b)
+        );
+      }
+      return compareTitle(a, b);
     });
   });
 
@@ -80,6 +128,15 @@
   <div class="flex flex-wrap items-center gap-3">
     <FilterChips {chips} active={filter} onselect={(key) => (filter = key)} />
     <div class="ml-auto flex items-center gap-2">
+      <select
+        value={sort}
+        aria-label="Sort series"
+        onchange={(event) => applySort(event.currentTarget.value)}
+        class={SELECT_CLASS}>
+        {#each SORT_OPTIONS as option (option.key)}
+          <option value={option.key}>{option.label}</option>
+        {/each}
+      </select>
       <div class="w-56">
         <TextInput bind:value={query} type="search" placeholder="Filter titles…" ariaLabel="Filter series by title" />
       </div>

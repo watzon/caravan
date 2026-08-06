@@ -3,10 +3,11 @@ import { flushSync, mount, unmount } from 'svelte';
 import Convert from './Convert.svelte';
 import type { Conversion, MediaFile, SystemStatus } from '../api/types';
 import { system } from '../state/system.svelte';
+import { clearToasts, toasts } from '../state/toast.svelte';
 
-function jsonResponse(body: unknown): Response {
+function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
-    status: 200,
+    status,
     headers: { 'Content-Type': 'application/json' },
   });
 }
@@ -105,8 +106,18 @@ let app: Record<string, unknown>;
 let posts: { url: string; body: unknown }[];
 let rows: Conversion[];
 let pending: MediaFile[];
-function stub(ffmpeg: boolean) {
+let queueLoads: number;
+let conversionReleases: Array<() => void>;
+
+interface StubOptions {
+  conversionStatuses?: Record<number, number>;
+  holdConversions?: boolean;
+}
+
+function stub(ffmpeg: boolean, options: StubOptions = {}) {
   posts = [];
+  queueLoads = 0;
+  conversionReleases = [];
   system.status = { ...STATUS, ffmpeg_available: ffmpeg };
   vi.stubGlobal(
     'fetch',
@@ -116,8 +127,26 @@ function stub(ffmpeg: boolean) {
         const body = init?.body ? JSON.parse(String(init.body)) : null;
         posts.push({ url, body });
         if (url.endsWith('/convert')) {
-          const file = pending.find((candidate) => candidate.id === body.media_file_id)!;
-          pending = pending.filter((candidate) => candidate.id !== body.media_file_id);
+          const mediaFileID = Number(body.media_file_id);
+          if (options.holdConversions) {
+            await new Promise<void>((resolve) => conversionReleases.push(resolve));
+          }
+          const status = options.conversionStatuses?.[mediaFileID] ?? 200;
+          const file = pending.find((candidate) => candidate.id === mediaFileID)!;
+          if (status >= 400) {
+            if (status === 409) {
+              pending = pending.filter((candidate) => candidate.id !== mediaFileID);
+            }
+            return jsonResponse(
+              {
+                error: status === 409
+                  ? 'this file already has a conversion in the queue'
+                  : 'conversion failed',
+              },
+              status,
+            );
+          }
+          pending = pending.filter((candidate) => candidate.id !== mediaFileID);
           const queued: Conversion = {
             id: 4,
             media_file_id: file.id,
@@ -135,7 +164,10 @@ function stub(ffmpeg: boolean) {
         }
         return jsonResponse({ ...rows[2], status: 'cancelled' });
       }
-      if (url.includes('/convert')) return jsonResponse({ pending, conversions: rows });
+      if (url.includes('/convert')) {
+        queueLoads++;
+        return jsonResponse({ pending, conversions: rows });
+      }
       throw new Error(`unexpected fetch: ${url}`);
     }),
   );
@@ -147,6 +179,7 @@ beforeEach(() => {
     ...file,
     compatibility: { ...file.compatibility, reasons: [...file.compatibility.reasons] },
   }));
+  clearToasts();
   vi.useFakeTimers();
   host = document.createElement('div');
   document.body.appendChild(host);
@@ -157,6 +190,7 @@ afterEach(() => {
   host.remove();
   system.status = null;
   vi.unstubAllGlobals();
+  clearToasts();
   vi.useRealTimers();
 });
 
@@ -170,6 +204,16 @@ function buttonWith(text: string): HTMLButtonElement | undefined {
   return [...host.querySelectorAll('button')].find((b) => b.textContent?.includes(text)) as
     | HTMLButtonElement
     | undefined;
+}
+
+function buttonLabeled(text: string): HTMLButtonElement | undefined {
+  return [...host.querySelectorAll<HTMLButtonElement>('button[aria-label]')].find((button) =>
+    button.getAttribute('aria-label')?.includes(text),
+  );
+}
+
+function selectionBar(): HTMLElement | null {
+  return host.querySelector('[role="group"][aria-label="Selection actions"]');
 }
 
 function tabWith(text: string): HTMLButtonElement | undefined {
@@ -187,6 +231,12 @@ describe('Convert route', () => {
     expect(host.textContent).toContain('Blade Runner (1982).mkv');
     expect(host.textContent).toContain('HEVC video');
     expect(host.textContent).not.toContain('Arrival (2016).mkv');
+    expect(host.textContent).not.toContain('REMUX');
+    expect(
+      [...host.querySelectorAll<HTMLElement>('[title]')].some((element) =>
+        element.title.toLowerCase().includes('remux'),
+      ),
+    ).toBe(false);
     expect(tabWith('Pending')?.textContent).toContain('2');
     expect(tabWith('Active')?.textContent).toContain('1');
     expect(tabWith('Finished')?.textContent).toContain('2');
@@ -208,6 +258,108 @@ describe('Convert route', () => {
     expect(host.textContent).toContain('Deciding…');
   });
 
+  it('queues two selected files sequentially, then reloads and toasts once', async () => {
+    stub(true, { holdConversions: true });
+    app = mount(Convert, { target: host });
+    await settle();
+
+    buttonLabeled('Select Blade Runner')!.click();
+    flushSync();
+    buttonLabeled('Select Alien')!.click();
+    flushSync();
+    expect(selectionBar()?.textContent).toContain('2 selected');
+
+    buttonWith('Convert selected')!.click();
+    await Promise.resolve();
+    expect(posts.filter((post) => post.url === '/api/v1/convert')).toEqual([
+      { url: '/api/v1/convert', body: { media_file_id: 20 } },
+    ]);
+
+    conversionReleases.shift()!();
+    await settle();
+    expect(posts.filter((post) => post.url === '/api/v1/convert')).toEqual([
+      { url: '/api/v1/convert', body: { media_file_id: 20 } },
+      { url: '/api/v1/convert', body: { media_file_id: 21 } },
+    ]);
+
+    conversionReleases.shift()!();
+    await settle();
+    await settle();
+
+    expect(queueLoads).toBe(2);
+    expect(toasts.items).toEqual([
+      expect.objectContaining({ message: 'Queued 2', tone: 'neutral' }),
+    ]);
+    expect(selectionBar()).toBeNull();
+  });
+
+  it('treats an already-queued response as a handled selection', async () => {
+    stub(true, { conversionStatuses: { 20: 409 } });
+    app = mount(Convert, { target: host });
+    await settle();
+
+    buttonLabeled('Select Blade Runner')!.click();
+    flushSync();
+    buttonWith('Convert selected')!.click();
+    await settle();
+    await settle();
+
+    expect(queueLoads).toBe(2);
+    expect(toasts.items).toEqual([
+      expect.objectContaining({ message: 'Queued 1', tone: 'neutral' }),
+    ]);
+    expect(selectionBar()).toBeNull();
+    expect(host.textContent).not.toContain('Blade Runner (1982).mkv');
+  });
+
+  it('retains only failed selections after a partial batch', async () => {
+    stub(true, { conversionStatuses: { 21: 500 } });
+    app = mount(Convert, { target: host });
+    await settle();
+
+    buttonLabeled('Select Blade Runner')!.click();
+    flushSync();
+    buttonLabeled('Select Alien')!.click();
+    flushSync();
+    buttonWith('Convert selected')!.click();
+    await settle();
+    await settle();
+
+    expect(
+      posts.filter((post) => post.url === '/api/v1/convert').map((post) => post.body),
+    ).toEqual([
+      { media_file_id: 20 },
+      { media_file_id: 21 },
+    ]);
+    expect(queueLoads).toBe(2);
+    expect(toasts.items).toEqual([
+      expect.objectContaining({ message: 'Queued 1 of 2', tone: 'danger' }),
+    ]);
+    expect(selectionBar()?.textContent).toContain('1 selected');
+    expect(buttonLabeled('Deselect Alien')?.getAttribute('aria-pressed')).toBe('true');
+    expect(host.textContent).not.toContain('Blade Runner (1982).mkv');
+  });
+
+  it('clears pending selections from Escape and the bar control', async () => {
+    stub(true);
+    app = mount(Convert, { target: host });
+    await settle();
+
+    buttonLabeled('Select Blade Runner')!.click();
+    flushSync();
+    expect(selectionBar()).not.toBeNull();
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    flushSync();
+    expect(selectionBar()).toBeNull();
+
+    buttonLabeled('Select Alien')!.click();
+    flushSync();
+    host.querySelector<HTMLButtonElement>('button[title="Clear selection"]')!.click();
+    flushSync();
+    expect(selectionBar()).toBeNull();
+  });
+
   it('separates active work from finished history and keeps their actions', async () => {
     stub(true);
     app = mount(Convert, { target: host });
@@ -224,8 +376,9 @@ describe('Convert route', () => {
     tabWith('Finished')!.click();
     flushSync();
     expect(host.textContent).toContain('Arrival (2016).mkv');
-    expect(host.textContent).toContain('Remux (stream copy)');
+    expect(host.textContent).toContain('Convert (stream copy)');
     expect(host.textContent).toContain('Transcode (re-encode)');
+    expect(host.textContent).not.toContain('Remux');
     expect(host.textContent).toContain('ffmpeg: Invalid data found when processing input');
     expect(host.textContent).not.toContain('Heat (1995).avi');
     const finishedOpen = host.querySelector<HTMLButtonElement>(
@@ -377,12 +530,14 @@ describe('Convert route', () => {
     expect(host.textContent).toContain('ffmpeg is not installed');
     expect(host.textContent).toContain('Blade Runner (1982).mkv');
     expect(buttonWith('Convert for TV')).toBeUndefined();
+    expect(buttonLabeled('Select Blade Runner')).toBeUndefined();
+    expect(selectionBar()).toBeNull();
 
     tabWith('Finished')!.click();
     flushSync();
     // History stays readable - uninstalling ffmpeg must not erase it.
     expect(host.textContent).toContain('Arrival (2016).mkv');
-    expect(buttonWith('Retry')?.disabled).toBe(true);
+    expect(buttonWith('Retry')).toBeUndefined();
     host.querySelector<HTMLButtonElement>(
       'button[aria-label^="Open conversion details for Dune"]',
     )!.click();
@@ -390,7 +545,7 @@ describe('Convert route', () => {
     const drawerRetry = [...host.querySelectorAll<HTMLButtonElement>(
       '[role="dialog"] button',
     )].find((button) => button.textContent?.includes('Retry'));
-    expect(drawerRetry?.disabled).toBe(true);
+    expect(drawerRetry).toBeUndefined();
   });
 
   it('shows an empty state rather than a blank screen', async () => {

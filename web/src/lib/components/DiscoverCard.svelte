@@ -10,7 +10,7 @@
    * on a discover card has a file yet.
    */
   import type { DiscoverItem } from '../api/types';
-  import { discoverHref, mediaTypeChip, ratingText } from '../discover';
+  import { discoverHref, mediaTypeChip, ratingPresentation } from '../discover';
   import { UNKNOWN, titleWithYear } from '../format';
   import Badge from './Badge.svelte';
   import Icon from './Icon.svelte';
@@ -24,7 +24,7 @@
 
   let { item, showType = false }: Props = $props();
 
-  let rating = $derived(ratingText(item.vote_average));
+  let rating = $derived(ratingPresentation(item.vote_average, item.date));
 </script>
 
 <a
@@ -66,11 +66,16 @@
     <p class="truncate text-sm font-medium text-ink" title={item.title}>{item.title}</p>
     <p class="flex items-center justify-between gap-2 text-sm text-ink-secondary">
       <span>{item.year > 0 ? item.year : UNKNOWN}</span>
-      {#if rating}
-        <span class="inline-flex shrink-0 items-center gap-1 font-mono text-xs text-ink-muted">
-          <Icon name="star" size={10} />{rating}
+      <Badge mono tone="neutral" title={rating.title}>
+        <span class="inline-flex items-center gap-1">
+          <Icon name="star" size={10} />
+          {#if rating.text}
+            {rating.text}
+          {:else}
+            <span class="sr-only">{rating.title}</span>
+          {/if}
         </span>
-      {/if}
+      </Badge>
     </p>
   </div>
 </a>

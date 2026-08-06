@@ -27,6 +27,8 @@
   import { system } from '../state/system.svelte';
   import { formatBytes } from '../format';
   import { metadataStateLabel } from '../credentials';
+  import Badge from '../components/Badge.svelte';
+  import Button from '../components/Button.svelte';
   import Icon, { type IconName } from '../components/Icon.svelte';
   import ProgressBar from '../components/ProgressBar.svelte';
   import SafeShutdown from '../components/SafeShutdown.svelte';
@@ -148,36 +150,62 @@
   );
 
   /**
-   * What each nav item counts, and how loudly (DESIGN.md §5/§6: colored text,
-   * never solid fills).
+   * What each nav item counts, and how loudly (DESIGN.md §5/§6).
    *
-   * "quiet" is inventory (library sizes) — information, not a summons.
-   * "accent" is work in flight, "warning" is a backlog waiting on the user.
-   * Zeros render nothing: a row of grey 0s is noise.
+   * Neutral is inventory, information rather than a summons. Accent is work in
+   * flight, warning is a backlog waiting on the user. Zeros render nothing: a
+   * row of grey 0s is noise.
    */
-  type NavBadge = { count: number; kind: 'quiet' | 'accent' | 'warning' };
+  type NavBadge = { count: number; tone: Tone; title: string };
   function navBadge(href: string): NavBadge | null {
     const counts = status?.counts;
-    const quiet = (count?: number): NavBadge | null => (count ? { count, kind: 'quiet' } : null);
     switch (href) {
-      case '/requests':
-        return requests.pendingCount
-          ? { count: requests.pendingCount, kind: 'warning' }
+      case '/requests': {
+        const count = requests.pendingCount;
+        return count
+          ? { count, tone: 'warning', title: `${count} pending ${count === 1 ? 'request' : 'requests'}` }
           : null;
-      case '/movies':
-        return quiet(counts?.movies);
-      case '/series':
-        return quiet(counts?.series);
-      case '/adult':
-        return quiet(counts?.sites);
-      case '/wanted':
-        return counts?.wanted ? { count: counts.wanted, kind: 'warning' } : null;
-      case '/queue':
-        return downloads.activeCount > 0 ? { count: downloads.activeCount, kind: 'accent' } : null;
-      case '/convert':
-        return quiet(counts?.converting);
-      case '/scan-review':
-        return counts?.unmatched ? { count: counts.unmatched, kind: 'warning' } : null;
+      }
+      case '/movies': {
+        const count = counts?.movies ?? 0;
+        return count
+          ? { count, tone: 'neutral', title: `${count} ${count === 1 ? 'movie' : 'movies'} in library` }
+          : null;
+      }
+      case '/series': {
+        const count = counts?.series ?? 0;
+        return count ? { count, tone: 'neutral', title: `${count} series in library` } : null;
+      }
+      case '/adult': {
+        const count = counts?.sites ?? 0;
+        return count
+          ? { count, tone: 'neutral', title: `${count} adult ${count === 1 ? 'site' : 'sites'} in library` }
+          : null;
+      }
+      case '/wanted': {
+        const count = counts?.wanted ?? 0;
+        return count
+          ? { count, tone: 'warning', title: `${count} movies and episodes waiting` }
+          : null;
+      }
+      case '/queue': {
+        const count = downloads.activeCount;
+        return count
+          ? { count, tone: 'accent', title: `${count} active ${count === 1 ? 'download' : 'downloads'}` }
+          : null;
+      }
+      case '/convert': {
+        const count = counts?.converting ?? 0;
+        return count
+          ? { count, tone: 'neutral', title: `${count} open ${count === 1 ? 'conversion' : 'conversions'}` }
+          : null;
+      }
+      case '/scan-review': {
+        const count = counts?.unmatched ?? 0;
+        return count
+          ? { count, tone: 'warning', title: `${count} unmatched media ${count === 1 ? 'file' : 'files'}` }
+          : null;
+      }
       default:
         return null;
     }
@@ -187,6 +215,15 @@
     const s = status;
     if (!s || s.disk_total_bytes <= 0) return 0;
     return (s.disk_total_bytes - s.disk_free_bytes) / s.disk_total_bytes;
+  });
+
+  let diskUsage = $derived.by(() => {
+    const s = status;
+    if (!s || s.disk_total_bytes <= 0) return null;
+    return {
+      used: Math.max(0, s.disk_total_bytes - s.disk_free_bytes),
+      free: s.disk_free_bytes,
+    };
   });
 
   let health = $derived.by((): { tone: Tone; label: string } => {
@@ -281,23 +318,9 @@
         <Icon name={item.icon} />
         <span class="flex-1">{item.label}</span>
         {#if badge}
-          <!-- Plain colored text, never a solid fill (DESIGN.md §6). On the
-               active row even a quiet count takes the rust, like the mock. -->
-          <span
-            class="text-sm font-medium tabular-nums
-                   {badge.kind === 'accent'
-              ? 'text-accent-text'
-              : badge.kind === 'warning'
-                ? 'text-warning'
-                : active
-                  ? 'text-accent-text'
-                  : 'text-ink-muted'}"
-            aria-label={`${badge.count} ${
-              badge.kind === 'accent' ? 'active in' : badge.kind === 'warning' ? 'waiting in' : 'in'
-            } ${item.label}`}
-            title={item.href === '/wanted' ? 'Movies and episodes waiting' : undefined}>
+          <Badge tone={badge.tone} title={badge.title} class="tabular-nums">
             {badge.count}
-          </span>
+          </Badge>
         {/if}
       </a>
     {/snippet}
@@ -415,16 +438,17 @@
       {/if}
 
       <div class="flex flex-col gap-2">
-        <div class="flex items-center gap-2">
-          <span
-            class="min-w-0 flex-1 truncate font-mono text-xs text-ink-muted"
-            title={status?.storage_root}>
-            {status?.storage_root || 'no storage root'}
-          </span>
-          <span class="shrink-0 font-mono text-xs text-ink-secondary">
-            {status && status.disk_total_bytes > 0
-              ? `${formatBytes(status.disk_free_bytes)} free`
-              : '—'}
+        <span
+          class="min-w-0 truncate font-mono text-xs text-ink-muted"
+          title={status?.storage_root}>
+          {status?.storage_root || 'no storage root'}
+        </span>
+        <div class="flex items-center justify-between gap-2 text-xs">
+          <span class="text-ink-secondary">Disk used</span>
+          <span class="shrink-0 font-mono text-ink-secondary">
+            {diskUsage
+              ? `${formatBytes(diskUsage.used)} used · ${formatBytes(diskUsage.free)} free`
+              : 'Unknown'}
           </span>
         </div>
         <ProgressBar
@@ -444,14 +468,15 @@
     <!-- A username means an account is behind this browser; an open server has
          nobody to sign out (SPEC §11). -->
     {#if session.username}
-      <button
-        type="button"
-        class="flex items-center gap-2 rounded-md py-1 text-sm text-ink-secondary transition-colors duration-150 ease-out hover:text-ink disabled:opacity-50"
+      <Button
+        variant="ghost"
+        size="sm"
+        class="w-full justify-start"
         disabled={auth.busy}
         onclick={() => auth.logout()}>
         <Icon name="back" size={14} />
         <span>{auth.busy ? 'Signing out…' : `Sign out ${session.username}`}</span>
-      </button>
+      </Button>
     {/if}
   </div>
 </aside>

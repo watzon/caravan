@@ -43,7 +43,7 @@ describe('ConversionSettings', () => {
     expect(host.querySelector<HTMLSelectElement>('#convert-video-preset')?.value).toBe('veryfast');
     expect(input('convert-video-crf').value).toBe('20');
     expect(input('convert-audio-bitrate-kbps').value).toBe('192');
-    expect(host.textContent).toContain('Remuxes always copy streams');
+    expect(host.textContent).toContain('Container-only conversions copy streams');
     expect(host.textContent).toContain('running conversion keeps the settings it started with');
   });
 

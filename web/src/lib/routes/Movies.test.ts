@@ -9,8 +9,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import Movies from './Movies.svelte';
 import { clearToasts, toasts } from '../state/toast.svelte';
+import { navigate, router } from '../router.svelte';
 
-function movie(id: number, title: string) {
+function movie(
+  id: number,
+  title: string,
+  options: { addedAt?: string; monitored?: boolean; downloaded?: boolean } = {},
+) {
   return {
     id,
     tmdb_id: id,
@@ -22,16 +27,21 @@ function movie(id: number, title: string) {
     path: '',
     poster_path: '',
     poster_url: '',
-    monitored: true,
+    monitored: options.monitored ?? true,
     quality_profile_id: 0,
     release_date: '',
-    added_at: '2026-01-01T00:00:00Z',
+    added_at: options.addedAt ?? '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
-    file: null,
+    file: options.downloaded ? { id } : null,
   };
 }
 
-const MOVIES = [movie(1, 'Arrival'), movie(2, 'Dune'), movie(3, 'Sicario')];
+const MOVIES = [
+  movie(3, 'Sicario', { addedAt: '2026-03-01T00:00:00Z' }),
+  movie(2, 'Dune', { addedAt: '2026-02-01T00:00:00Z', monitored: false }),
+  movie(1, 'Arrival', { addedAt: '2026-01-01T00:00:00Z', downloaded: true }),
+];
+let servedMovies = MOVIES;
 
 let host: HTMLElement;
 let app: Record<string, unknown> | undefined;
@@ -58,7 +68,7 @@ function stubFetch() {
           headers: { 'Content-Type': 'application/json' },
         });
       }
-      return new Response(JSON.stringify({ movies: MOVIES }), {
+      return new Response(JSON.stringify({ movies: servedMovies }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       });
@@ -68,6 +78,8 @@ function stubFetch() {
 
 beforeEach(() => {
   clearToasts();
+  servedMovies = MOVIES;
+  window.scrollTo = () => {};
   stubFetch();
   host = document.createElement('div');
   document.body.appendChild(host);
@@ -86,7 +98,9 @@ async function settle() {
   flushSync();
 }
 
-async function open() {
+async function open(url = '/movies') {
+  window.history.replaceState({}, '', url);
+  navigate(url, { replace: true });
   app = mount(Movies, { target: host, props: { onadd: () => {} } });
   await settle();
 }
@@ -118,6 +132,25 @@ function cards(): HTMLElement[] {
 
 function methodsOf(method: string): string[] {
   return calls.filter((c) => c.method === method).map((c) => c.url);
+}
+
+function sortSelect(): HTMLSelectElement {
+  const select = host.querySelector<HTMLSelectElement>('select[aria-label="Sort movies"]');
+  expect(select, 'movie sort control').toBeTruthy();
+  return select!;
+}
+
+async function chooseSort(value: 'title' | 'added' | 'status') {
+  const select = sortSelect();
+  select.value = value;
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+  await settle();
+}
+
+function cardIDs(): number[] {
+  return [...host.querySelectorAll<HTMLAnchorElement>('a[href^="/movies/"]')].map((link) =>
+    Number(link.pathname.split('/').pop()),
+  );
 }
 
 describe('Movies grid', () => {
@@ -252,5 +285,64 @@ describe('Movies grid', () => {
     await settle();
     expect(host.textContent).not.toContain('selected');
     expect(host.querySelector('a[href="/movies/2"]')).toBeTruthy();
+  });
+  it('derives added sort from a reload URL and sorts newest first', async () => {
+    await open('/movies?sort=added&layout=posters');
+
+    expect(sortSelect().value).toBe('added');
+    expect(cardIDs()).toEqual([3, 2, 1]);
+    expect(router.params.get('layout')).toBe('posters');
+  });
+
+  it('falls back to stable title and id order without rewriting an invalid URL', async () => {
+    servedMovies = [movie(9, 'Zulu'), movie(7, 'Alpha'), movie(4, 'Alpha')];
+    await open('/movies?sort=sideways&layout=compact');
+
+    expect(sortSelect().value).toBe('title');
+    expect(cardIDs()).toEqual([4, 7, 9]);
+    expect(router.params.get('sort')).toBe('sideways');
+    expect(router.params.get('layout')).toBe('compact');
+  });
+
+  it('writes non-default sort and removes the default while preserving other query state', async () => {
+    await open('/movies?layout=compact');
+
+    await chooseSort('status');
+    expect(router.path).toBe('/movies');
+    expect(router.params.get('sort')).toBe('status');
+    expect(router.params.get('layout')).toBe('compact');
+    expect(cardIDs()).toEqual([1, 3, 2]);
+
+    await chooseSort('title');
+    expect(router.path).toBe('/movies');
+    expect(router.params.has('sort')).toBe(false);
+    expect(router.params.get('layout')).toBe('compact');
+    expect(cardIDs()).toEqual([1, 2, 3]);
+  });
+
+  it('filters before sorting and preserves the filter and selection across sort changes', async () => {
+    await open('/movies?layout=posters');
+    const input = host.querySelector<HTMLInputElement>('input[aria-label="Filter movies by title"]');
+    expect(input).toBeTruthy();
+    input!.value = 'i';
+    input!.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    expect(cardIDs()).toEqual([1, 3]);
+
+    await select('Arrival');
+    await chooseSort('added');
+
+    expect(input!.value).toBe('i');
+    expect(router.params.get('layout')).toBe('posters');
+    expect(router.params.get('sort')).toBe('added');
+    expect(cards().map((card) => card.getAttribute('aria-label'))).toEqual([
+      'Sicario (2021)',
+      'Arrival (2021)',
+    ]);
+    expect(
+      cards().find((card) => card.getAttribute('aria-label') === 'Arrival (2021)')?.getAttribute(
+        'aria-pressed',
+      ),
+    ).toBe('true');
   });
 });

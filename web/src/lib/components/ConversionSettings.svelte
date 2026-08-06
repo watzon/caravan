@@ -129,6 +129,7 @@
   </Field>
 
   <p class="text-sm text-ink-secondary">
-    Remuxes always copy streams. A running conversion keeps the settings it started with.
+    Container-only conversions copy streams.
+    A running conversion keeps the settings it started with.
   </p>
 </SettingsCard>

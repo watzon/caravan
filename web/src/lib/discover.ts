@@ -51,6 +51,48 @@ export function ratingText(vote: number): string | null {
   return vote.toFixed(1);
 }
 
+export interface RatingPresentation {
+  text: string | null;
+  title: string;
+}
+
+/**
+ * A rating badge's visible score and explanation.
+ *
+ * A provider score is not meaningful before the title's release date. Keep
+ * `ratingText` as the raw vote formatter for existing callers; discover cards
+ * and billboards use this release-aware presentation instead.
+ */
+export function ratingPresentation(
+  vote: number,
+  releaseDate: string,
+  today: Date = new Date(),
+): RatingPresentation {
+  const rating = ratingText(vote);
+  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(releaseDate);
+  if (!rating || !dateMatch || !Number.isFinite(today.getTime())) {
+    return { text: null, title: 'Not yet rated' };
+  }
+
+  const [, yearText, monthText, dayText] = dateMatch;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const release = new Date(year, month - 1, day);
+  const validReleaseDate =
+    release.getFullYear() === year &&
+    release.getMonth() === month - 1 &&
+    release.getDate() === day;
+  const released =
+    validReleaseDate &&
+    release.getTime() <= new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+
+  if (!released) return { text: null, title: 'Not yet rated' };
+
+  const text = `${rating}/10`;
+  return { text, title: `Rated ${text}` };
+}
+
 /** Leading year of a provider date ("2008-01-20" → 2008); 0 when unknown. */
 export function yearOf(date: string | null | undefined): number {
   if (!date) return 0;

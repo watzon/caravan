@@ -58,5 +58,7 @@
   {onkeydown}
   class="h-9 w-full rounded-sm border border-border-strong bg-raised px-3 text-md text-ink
          placeholder:text-ink-muted focus:border-accent focus:outline-none
+         read-only:cursor-text read-only:select-text read-only:border-border read-only:bg-base
+         read-only:text-ink-secondary read-only:focus:border-border
          disabled:opacity-50 transition-colors duration-150 ease-out
          {mono ? 'font-mono text-sm' : ''} {klass}" />

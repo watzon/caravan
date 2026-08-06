@@ -14,20 +14,27 @@
   let theme = $state<ThemePreference>('system');
   let motion = $state<MotionPreference>('system');
 
+  let saved = $state(false);
   onMount(() => {
     const preferences = readDisplayPreferences();
     theme = preferences.theme;
     motion = preferences.motion;
   });
 
+  function savePreferences() {
+    saved = false;
+    saveDisplayPreferences({ theme, motion });
+    saved = true;
+  }
+
   function updateTheme(value: ThemePreference) {
     theme = value;
-    saveDisplayPreferences({ theme, motion });
+    savePreferences();
   }
 
   function updateMotion(value: MotionPreference) {
     motion = value;
-    saveDisplayPreferences({ theme, motion });
+    savePreferences();
   }
 </script>
 
@@ -61,5 +68,8 @@
         </select>
       </Field>
     </div>
+    {#if saved}
+      <p class="text-sm text-success" aria-live="polite">Saved in this browser.</p>
+    {/if}
   </SettingsCard>
 </section>

@@ -9,23 +9,49 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import Adult from './Adult.svelte';
-import type { SessionUser } from '../api/types';
+import type { SessionUser, Site } from '../api/types';
+import { navigate } from '../router.svelte';
 import { session } from '../state/session.svelte';
 import { clearToasts } from '../state/toast.svelte';
 
-const SITES = [
-  {
-    id: 7,
-    stash_id: 'site-1',
-    title: 'Brazzers',
-    path: 'Adult/Brazzers',
+type SiteStatus = 'downloaded' | 'incomplete' | 'wanted' | 'unmonitored';
+
+function site(
+  id: number,
+  title: string,
+  addedAt: string,
+  status: SiteStatus,
+): Site {
+  const [sceneCount, sceneFileCount, monitored] = {
+    downloaded: [2, 2, true],
+    incomplete: [2, 1, true],
+    wanted: [2, 0, true],
+    unmonitored: [2, 0, false],
+  }[status] as [number, number, boolean];
+
+  return {
+    id,
+    stash_id: `site-${id}`,
+    title,
+    sort_title: title.toLowerCase(),
+    overview: '',
+    path: `Adult/${title}`,
     poster_path: '',
     poster_url: '',
-    monitored: true,
-    scene_count: 2,
-    scene_file_count: 1,
-    added_at: '2024-01-01T00:00:00Z',
-  },
+    monitored,
+    quality_profile_id: 0,
+    added_at: addedAt,
+    updated_at: addedAt,
+    scene_count: sceneCount,
+    scene_file_count: sceneFileCount,
+  };
+}
+
+const SITES = [
+  site(40, 'Zulu Club', '2026-04-01T00:00:00Z', 'wanted'),
+  site(10, 'Alpha Club', '2024-02-01T00:00:00Z', 'downloaded'),
+  site(30, 'Bravo Studio', '2025-03-01T00:00:00Z', 'incomplete'),
+  site(20, 'Delta House', '2023-01-01T00:00:00Z', 'unmonitored'),
 ];
 
 let host: HTMLElement | undefined;
@@ -53,14 +79,19 @@ function stubFetch(): void {
   );
 }
 
-async function mountShelf(role: 'admin' | 'member'): Promise<HTMLElement> {
+async function mountShelf(
+  role: 'admin' | 'member',
+  url = '/adult',
+): Promise<HTMLElement> {
   session.user = user(role);
+  window.history.replaceState({}, '', url);
+  navigate(url, { replace: true });
   host = document.createElement('div');
   document.body.appendChild(host);
   app = mount(Adult, { target: host, props: {} }) as Record<string, unknown>;
   flushSync();
   await vi.waitFor(() => {
-    if (!host!.textContent?.includes('Brazzers')) throw new Error('not loaded');
+    if (!host!.textContent?.includes('Zulu Club')) throw new Error('not loaded');
   });
   flushSync();
   return host;
@@ -73,6 +104,37 @@ function selectToggle(): HTMLElement | undefined {
   );
 }
 
+function sortSelect(): HTMLSelectElement {
+  const select = host!.querySelector<HTMLSelectElement>('select[aria-label="Sort sites"]');
+  expect(select, 'the site sort control').toBeTruthy();
+  return select!;
+}
+
+function pickSort(value: 'title' | 'added' | 'status'): void {
+  const select = sortSelect();
+  select.value = value;
+  select.dispatchEvent(new Event('change', { bubbles: true }));
+  flushSync();
+}
+
+function cardTitles(): string[] {
+  const links = [...host!.querySelectorAll<HTMLElement>('a[href^="/adult/sites/"]')];
+  const toggles = [
+    ...host!.querySelectorAll<HTMLElement>('button[aria-pressed][aria-label]'),
+  ];
+  return (links.length > 0 ? links : toggles).map(
+    (card) => card.getAttribute('aria-label') ?? '',
+  );
+}
+
+function typeFilter(value: string): void {
+  const input = host!.querySelector<HTMLInputElement>('input[type="search"]');
+  expect(input, 'the site filter').toBeTruthy();
+  input!.value = value;
+  input!.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+}
+
 afterEach(() => {
   if (app) unmount(app);
   host?.remove();
@@ -82,6 +144,7 @@ afterEach(() => {
   clearToasts();
   vi.unstubAllGlobals();
   vi.useRealTimers();
+  navigate('/', { replace: true });
 });
 
 describe('the Adult shelf grid', () => {
@@ -111,8 +174,86 @@ describe('the Adult shelf grid', () => {
     expect(selectToggle()).toBeUndefined();
     expect(document.querySelector('[aria-label="Selection actions"]')).toBeNull();
     // The shelf itself still renders: reading is what the grant is for.
-    expect(host!.textContent).toContain('Brazzers');
+    expect(host!.textContent).toContain('Zulu Club');
     expect(calls.every((c) => c.method === 'GET')).toBe(true);
+  });
+});
+
+describe('the Adult shelf sort', () => {
+  it.each([
+    ['title', ['Alpha Club', 'Bravo Studio', 'Delta House', 'Zulu Club']],
+    ['added', ['Zulu Club', 'Bravo Studio', 'Alpha Club', 'Delta House']],
+    ['status', ['Alpha Club', 'Bravo Studio', 'Zulu Club', 'Delta House']],
+  ] as const)('reads the supported %s sort from the URL', async (sort, expected) => {
+    stubFetch();
+    await mountShelf('admin', `/adult?sort=${sort}`);
+
+    expect(sortSelect().value).toBe(sort);
+    expect([...sortSelect().options].map((option) => option.value)).toEqual([
+      'title',
+      'added',
+      'status',
+    ]);
+    expect(cardTitles()).toEqual(expected);
+    expect(calls).toEqual([{ url: '/api/v1/adult/sites', method: 'GET' }]);
+  });
+
+  it('falls back to title for an invalid URL value and removes it as the default', async () => {
+    stubFetch();
+    await mountShelf('admin', '/adult?view=grid&sort=recent#sites');
+
+    expect(sortSelect().value).toBe('title');
+    expect(cardTitles()).toEqual(['Alpha Club', 'Bravo Studio', 'Delta House', 'Zulu Club']);
+
+    pickSort('title');
+    expect(`${window.location.pathname}${window.location.search}${window.location.hash}`).toBe(
+      '/adult?view=grid#sites',
+    );
+    expect(calls).toEqual([{ url: '/api/v1/adult/sites', method: 'GET' }]);
+  });
+
+  it('preserves unrelated query state and the fragment without reloading from the backend', async () => {
+    stubFetch();
+    await mountShelf('member', '/adult?view=grid&sort=status#sites');
+
+    pickSort('added');
+    expect(`${window.location.pathname}${window.location.search}${window.location.hash}`).toBe(
+      '/adult?view=grid&sort=added#sites',
+    );
+
+    pickSort('title');
+    expect(`${window.location.pathname}${window.location.search}${window.location.hash}`).toBe(
+      '/adult?view=grid#sites',
+    );
+    expect(calls).toEqual([{ url: '/api/v1/adult/sites', method: 'GET' }]);
+  });
+
+  it('sorts a filtered copy and keeps the selection through filter and sort changes', async () => {
+    stubFetch();
+    await mountShelf('admin', '/adult?sort=added');
+
+    typeFilter('club');
+    expect(cardTitles()).toEqual(['Zulu Club', 'Alpha Club']);
+
+    const toggle = host!.querySelector<HTMLButtonElement>(
+      'button[aria-label="Select Zulu Club"]',
+    );
+    expect(toggle, 'the Zulu Club selection control').toBeTruthy();
+    toggle!.click();
+    flushSync();
+
+    typeFilter('studio');
+    expect(cardTitles()).toEqual(['Bravo Studio']);
+    expect(host!.textContent).toContain('1 selected');
+
+    typeFilter('club');
+    pickSort('status');
+    expect(cardTitles()).toEqual(['Alpha Club', 'Zulu Club']);
+    expect(
+      host!.querySelector('button[aria-label="Zulu Club"][aria-pressed="true"]'),
+      'the selected site after sorting',
+    ).toBeTruthy();
+    expect(calls).toEqual([{ url: '/api/v1/adult/sites', method: 'GET' }]);
   });
 });
 

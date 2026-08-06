@@ -22,11 +22,10 @@
     discoverHref,
     libraryHref,
     mediaTypeChip,
-    ratingText,
+    ratingPresentation,
     sourceHref,
     type RequestMode,
   } from '../discover';
-  import { UNKNOWN } from '../format';
   import { discover } from '../state/discover.svelte';
   import { session } from '../state/session.svelte';
 
@@ -44,7 +43,9 @@
 
   let home = $derived(discover.home);
   let hero = $derived<DiscoverItem | null>(home?.trending[0] ?? null);
-  let heroRating = $derived(hero ? ratingText(hero.vote_average) : null);
+  let heroRating = $derived(
+    hero ? ratingPresentation(hero.vote_average, hero.date) : null,
+  );
 
   /** The billboard's one call to action, under whichever verb the role gets. */
   let heroAction = $derived(
@@ -60,8 +61,6 @@
     const parts: string[] = [];
     if (item.year > 0) parts.push(String(item.year));
     parts.push(item.media_type === 'movie' ? 'Movie' : 'Series');
-    const rating = ratingText(item.vote_average);
-    if (rating) parts.push(`★ ${rating}`);
     return parts.join(' · ');
   }
 </script>
@@ -159,11 +158,16 @@
             {/if}
             <Button variant="secondary" href={discoverHref(hero)}>Details</Button>
             {#if heroRating}
-              <span class="inline-flex items-center gap-1 font-mono text-sm text-ink-muted">
-                <Icon name="star" size={12} />{heroRating}
-              </span>
-            {:else}
-              <span class="font-mono text-sm text-ink-muted">{UNKNOWN}</span>
+              <Badge mono tone="neutral" title={heroRating.title}>
+                <span class="inline-flex items-center gap-1">
+                  <Icon name="star" size={12} />
+                  {#if heroRating.text}
+                    {heroRating.text}
+                  {:else}
+                    <span class="sr-only">{heroRating.title}</span>
+                  {/if}
+                </span>
+              </Badge>
             {/if}
           </div>
         </div>

@@ -33,9 +33,7 @@
 
   let shown = $derived((system.status?.ffmpeg_available ?? false) && convertible(file.compatibility));
 
-  let label = $derived(
-    file.compatibility?.verdict === 'needs-remux' ? 'Remux for TV' : 'Convert for TV',
-  );
+  const label = 'Convert for TV';
 
   async function convert() {
     busy = true;

@@ -279,7 +279,7 @@ describe('Storage settings', () => {
     // and useful on a drive.
     expect(button('Rescan library')).toBeDefined();
   });
-  it('saves recycle and naming settings with live previews', async () => {
+  it('saves nonzero recycle retention directly with live naming previews', async () => {
     await openStorageTab();
     expect(button('Save recycle and naming').hasAttribute('disabled')).toBe(true);
 
@@ -289,6 +289,8 @@ describe('Storage settings', () => {
     expect(button('Save recycle and naming').hasAttribute('disabled')).toBe(false);
 
     button('Save recycle and naming').click();
+    flushSync();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
     await settle();
 
     expect(puts).toContainEqual({
@@ -296,6 +298,41 @@ describe('Storage settings', () => {
       body: expect.objectContaining({
         recycle_retention_days: '30',
         movie_folder_format: '{year} - {title}',
+      }),
+    });
+    expect(button('Save recycle and naming').hasAttribute('disabled')).toBe(true);
+  });
+
+  it('does not save zero-day retention until permanent deletion is confirmed', async () => {
+    await openStorageTab();
+    type('#settings-movie-folder-format', '{title} - permanent');
+
+    const save = button('Save recycle and naming');
+    expect(save.classList.contains('bg-danger')).toBe(true);
+    save.click();
+    flushSync();
+
+    expect(puts).toEqual([]);
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain(
+      'Future Caravan deletions will permanently remove',
+    );
+
+    confirmButton('Cancel').click();
+    flushSync();
+    expect(puts).toEqual([]);
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+
+    button('Save recycle and naming').click();
+    flushSync();
+    expect(puts).toEqual([]);
+    confirmButton('Save with permanent deletion').click();
+    await settle();
+
+    expect(puts).toContainEqual({
+      url: '/api/v1/settings',
+      body: expect.objectContaining({
+        recycle_retention_days: '0',
+        movie_folder_format: '{title} - permanent',
       }),
     });
     expect(button('Save recycle and naming').hasAttribute('disabled')).toBe(true);

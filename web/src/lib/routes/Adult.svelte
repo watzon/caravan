@@ -29,12 +29,30 @@
   import { ADULT_EXPLORE_HREF, sceneCountNote, siteHref } from '../adult';
   import { createSelection } from '../selection.svelte';
   import { session } from '../state/session.svelte';
-  import type { StatusKey } from '../status';
+  import { navigate, router } from '../router.svelte';
+  import { SERIES_FILTERS, type StatusKey } from '../status';
+
+  type SortKey = 'title' | 'added' | 'status';
+
+  const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+    { key: 'title', label: 'Title' },
+    { key: 'added', label: 'Added' },
+    { key: 'status', label: 'Status' },
+  ];
+
+  const SELECT_CLASS =
+    'h-9 rounded-sm border border-border-strong bg-raised px-3 text-md text-ink ' +
+    'focus:border-accent focus:outline-none';
+
+  function readSort(value: string | null): SortKey {
+    return value === 'added' || value === 'status' ? value : 'title';
+  }
 
   let sites = $state<Site[] | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
   let query = $state('');
+  let sort = $derived(readSort(router.params.get('sort')));
 
   /** The add-a-site picker. Admin-only: POST /adult/sites answers 403 to a member. */
   let picking = $state(false);
@@ -68,9 +86,41 @@
 
   let visible = $derived.by(() => {
     const needle = query.trim().toLowerCase();
-    if (!needle) return all;
-    return all.filter((site) => site.title.toLowerCase().includes(needle));
+    const filtered = needle
+      ? all.filter((site) => site.title.toLowerCase().includes(needle))
+      : all;
+    return [...filtered].sort(compareSites);
   });
+
+  function compareTitle(a: Site, b: Site): number {
+    return (
+      (a.sort_title || a.title).localeCompare(b.sort_title || b.title) ||
+      a.title.localeCompare(b.title) ||
+      a.id - b.id
+    );
+  }
+
+  function compareSites(a: Site, b: Site): number {
+    if (sort === 'added') {
+      return b.added_at.localeCompare(a.added_at) || compareTitle(a, b);
+    }
+    if (sort === 'status') {
+      return (
+        SERIES_FILTERS.indexOf(siteStatus(a)) - SERIES_FILTERS.indexOf(siteStatus(b)) ||
+        compareTitle(a, b)
+      );
+    }
+    return compareTitle(a, b);
+  }
+
+  function applySort(value: string) {
+    const next = readSort(value);
+    const params = router.params;
+    if (next === 'title') params.delete('sort');
+    else params.set('sort', next);
+    const search = params.toString();
+    navigate(`${router.path}${search ? `?${search}` : ''}${router.hash}`);
+  }
 
   /**
    * A site's status in the shared vocabulary. It is the series rule with the
@@ -99,6 +149,15 @@
        with one tab in it is a strip that says nothing. -->
   <div class="flex flex-wrap items-center gap-3">
     <div class="ml-auto flex items-center gap-2">
+      <select
+        value={sort}
+        aria-label="Sort sites"
+        onchange={(event) => applySort(event.currentTarget.value)}
+        class={SELECT_CLASS}>
+        {#each SORT_OPTIONS as option (option.key)}
+          <option value={option.key}>{option.label}</option>
+        {/each}
+      </select>
       <div class="w-56">
         <TextInput
           bind:value={query}
