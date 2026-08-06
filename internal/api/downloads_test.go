@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -269,6 +270,63 @@ func TestListDownloadsCursorDrainsStoredAndOrphanPages(t *testing.T) {
 		if !seen[id] {
 			t.Errorf("pagination omitted %q", id)
 		}
+	}
+}
+
+func TestListDownloadsInterleavedOrphansAppearExactlyOnce(t *testing.T) {
+	h, st, engine := newRouteCursorDownloadServer(t)
+	for _, id := range []core.DownloadID{"b-persisted", "e-persisted"} {
+		storeDownload(t, st, id, string(id))
+	}
+	engine.statuses = []core.DownloadStatus{
+		{ID: "a-orphan", Name: "a-orphan", Engine: "stub"},
+		{ID: "b-persisted", Name: "b-persisted", Engine: "stub"},
+		{ID: "c-orphan", Name: "c-orphan", Engine: "stub"},
+		{ID: "d-orphan", Name: "d-orphan", Engine: "stub"},
+		{ID: "e-persisted", Name: "e-persisted", Engine: "stub"},
+		{ID: "f-orphan", Name: "f-orphan", Engine: "stub"},
+	}
+
+	orphanCounts := map[string]int{}
+	cursor := ""
+	for page := range 4 {
+		path := "/api/v1/downloads?limit=2"
+		if cursor != "" {
+			path += "&cursor=" + url.QueryEscape(cursor)
+		}
+		rec := do(t, h, http.MethodGet, path, "")
+		wantStatus(t, rec, http.StatusOK)
+		var body struct {
+			Downloads []downloadJSON `json:"downloads"`
+			Next      string         `json:"next_cursor"`
+		}
+		decodeBody(t, rec, &body)
+		if len(body.Downloads) > 2 {
+			t.Fatalf("page %d downloads = %+v, want at most two rows", page, body.Downloads)
+		}
+		for _, row := range body.Downloads {
+			if strings.HasSuffix(row.ID, "-orphan") {
+				orphanCounts[row.ID]++
+			}
+		}
+		cursor = body.Next
+		if cursor == "" {
+			break
+		}
+	}
+	if cursor != "" {
+		t.Fatalf("pagination did not drain; final cursor = %q", cursor)
+	}
+	for _, id := range []string{"a-orphan", "c-orphan", "d-orphan", "f-orphan"} {
+		if orphanCounts[id] != 1 {
+			t.Errorf("orphan %q appeared %d times, want exactly once; all counts = %v", id, orphanCounts[id], orphanCounts)
+		}
+	}
+	if len(orphanCounts) != 4 {
+		t.Fatalf("orphan counts = %v, want exactly four distinct engine-only rows", orphanCounts)
+	}
+	if limits := engine.recordedPageLimits(); !slices.Equal(limits, []int{2, 1, 2, 1}) {
+		t.Fatalf("native page limits = %v, want remaining capacities [2 1 2 1]", limits)
 	}
 }
 
@@ -579,6 +637,35 @@ func TestDeleteDownload(t *testing.T) {
 				t.Fatalf("detail = %q, want %q", events[0].Detail, wantDetail)
 			}
 		})
+	}
+}
+
+func TestDeleteAdultDownloadRecordsOwnershipForHistory(t *testing.T) {
+	h, st, _, _ := newAcquisitionServer(t)
+	ctx := context.Background()
+	site := &core.Series{
+		Kind: core.SeriesKindAdult, StashID: "removed-site", Title: "Removed Adult Site", SortTitle: "removed adult site",
+	}
+	if err := st.UpsertSeries(ctx, site); err != nil {
+		t.Fatalf("UpsertSeries: %v", err)
+	}
+	download := storeSeriesDownload(t, st, "adult-download", "Removed Adult Release", site.ID)
+
+	rec := do(t, h, http.MethodDelete, "/api/v1/downloads/"+string(download.EngineID), "")
+	wantStatus(t, rec, http.StatusNoContent)
+
+	events, err := st.ListEvents(ctx, 0)
+	if err != nil {
+		t.Fatalf("ListEvents: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events = %+v, want one removal event", events)
+	}
+	if events[0].Message != "Removed download "+download.Title {
+		t.Fatalf("message = %q, want removed download title", events[0].Message)
+	}
+	if events[0].MovieID != 0 || events[0].SeriesID != site.ID {
+		t.Fatalf("event ownership = movie %d series %d, want movie 0 series %d", events[0].MovieID, events[0].SeriesID, site.ID)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/watzon/caravan/internal/core"
+	"github.com/watzon/caravan/internal/stash"
 )
 
 func TestEventsRespectAdultVisibility(t *testing.T) {
@@ -107,4 +108,82 @@ func TestEventsRespectAdultVisibility(t *testing.T) {
 			t.Errorf("GET %s with adult enabled omitted the adult event: %v", path, got)
 		}
 	}
+}
+
+func TestEventsHideUnownedStashPathsWhenAdultVisibilityDisabled(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	ctx := context.Background()
+	setPassword(t, st, testPassword)
+	cookie := login(t, h, testAdmin, testPassword)
+
+	const (
+		orphanMessage = "Unrelated orphan event"
+		stashMessage  = "Stash scene handoff failed"
+		scenePath     = "/srv/adult/scenes/private-scene.mp4"
+	)
+	for _, event := range []*core.Event{
+		{Category: "system", Message: orphanMessage},
+		{Category: stash.EventCategory, Message: stashMessage, Detail: scenePath},
+	} {
+		if err := st.InsertEvent(ctx, event); err != nil {
+			t.Fatalf("InsertEvent(%q): %v", event.Message, err)
+		}
+	}
+
+	read := func(path string) struct {
+		Events []eventJSON `json:"events"`
+		Next   string      `json:"next_cursor"`
+	} {
+		t.Helper()
+		rec := doAuth(t, h, http.MethodGet, path, "", withCookie(cookie))
+		wantStatus(t, rec, http.StatusOK)
+		var body struct {
+			Events []eventJSON `json:"events"`
+			Next   string      `json:"next_cursor"`
+		}
+		decodeBody(t, rec, &body)
+		return body
+	}
+	assertRows := func(label string, events []eventJSON, wantStash bool) {
+		t.Helper()
+		var sawOrphan, sawStash, sawPath bool
+		for _, event := range events {
+			sawOrphan = sawOrphan || event.Message == orphanMessage
+			sawStash = sawStash || event.Message == stashMessage
+			sawPath = sawPath || event.Detail == scenePath
+		}
+		if !sawOrphan {
+			t.Errorf("%s omitted unrelated zero-ID event: %+v", label, events)
+		}
+		if sawStash != wantStash {
+			t.Errorf("%s Stash event visibility = %t, want %t: %+v", label, sawStash, wantStash, events)
+		}
+		if sawPath != wantStash {
+			t.Errorf("%s scene path visibility = %t, want %t: %+v", label, sawPath, wantStash, events)
+		}
+	}
+
+	if err := st.SetAdultEnabled(ctx, true); err != nil {
+		t.Fatalf("SetAdultEnabled(true): %v", err)
+	}
+	assertRows("enabled legacy history", read("/api/v1/events").Events, true)
+	enabledFirst := read("/api/v1/events?limit=1")
+	if len(enabledFirst.Events) != 1 || enabledFirst.Events[0].Message != stashMessage || enabledFirst.Events[0].Detail != scenePath {
+		t.Fatalf("enabled first history page = %+v, want Stash event with scene path", enabledFirst.Events)
+	}
+	if enabledFirst.Next == "" {
+		t.Fatal("enabled first history page has no cursor, want unrelated event on next page")
+	}
+	enabledSecond := read("/api/v1/events?limit=1&cursor=" + enabledFirst.Next)
+	assertRows("enabled paginated history", append(enabledFirst.Events, enabledSecond.Events...), true)
+
+	if err := st.SetAdultEnabled(ctx, false); err != nil {
+		t.Fatalf("SetAdultEnabled(false): %v", err)
+	}
+	assertRows("disabled legacy history", read("/api/v1/events").Events, false)
+	disabledPage := read("/api/v1/events?limit=1")
+	if len(disabledPage.Events) != 1 || disabledPage.Events[0].Message != orphanMessage {
+		t.Fatalf("disabled first history page = %+v, want refilled unrelated zero-ID event", disabledPage.Events)
+	}
+	assertRows("disabled paginated history", disabledPage.Events, false)
 }

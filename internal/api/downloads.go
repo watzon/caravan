@@ -261,7 +261,9 @@ func (s *server) pageOrphans(ctx context.Context, pager downloadPager, limit int
 	out := make([]core.DownloadStatus, 0, limit)
 	raw := cursor
 	for len(out) < limit {
-		statuses, next, supported, err := pager.ListPage(ctx, limit, raw)
+		// The native cursor follows its whole page, so never ask it to return
+		// more statuses than this API response can still consume.
+		statuses, next, supported, err := pager.ListPage(ctx, limit-len(out), raw)
 		if err != nil {
 			return nil, "", err
 		}
@@ -526,10 +528,22 @@ func (s *server) handleDeleteDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 
-	// Read the row before it is gone, so the event can name what was removed.
+	// Resolve the persisted row and its grab before deleting either engine or
+	// store state, so the removal event keeps stable library ownership.
 	name := string(id)
+	var movieID, seriesID int64
 	if row, err := s.st.GetDownloadByEngineID(ctx, id); err == nil {
 		name = row.Title
+		if row.GrabID != 0 {
+			grab, err := s.st.GetGrab(ctx, row.GrabID)
+			if err == nil {
+				movieID = grab.MovieID
+				seriesID = grab.SeriesID
+			} else if !errors.Is(err, store.ErrNotFound) {
+				s.writeStoreError(w, "get download grab", err)
+				return
+			}
+		}
 	} else if !errors.Is(err, store.ErrNotFound) {
 		s.writeStoreError(w, "get download", err)
 		return
@@ -552,6 +566,8 @@ func (s *server) handleDeleteDownload(w http.ResponseWriter, r *http.Request) {
 		Category: "download",
 		Message:  "Removed download " + name,
 		Detail:   detail,
+		MovieID:  movieID,
+		SeriesID: seriesID,
 	})
 	w.WriteHeader(http.StatusNoContent)
 }

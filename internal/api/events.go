@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"github.com/watzon/caravan/internal/core"
+	"github.com/watzon/caravan/internal/stash"
 	"github.com/watzon/caravan/internal/store"
 )
 
@@ -117,6 +118,18 @@ func (f *adultOwnershipFilter) ownerVisible(ctx context.Context, movieID, series
 	return !adult, nil
 }
 
+// eventVisible applies intrinsic event provenance before ownership IDs. Stash
+// rows are adult even without IDs because their detail may contain scene paths.
+func (f *adultOwnershipFilter) eventVisible(ctx context.Context, event core.Event) (bool, error) {
+	if f.adultVisible {
+		return true, nil
+	}
+	if event.Category == stash.EventCategory {
+		return false, nil
+	}
+	return f.ownerVisible(ctx, event.MovieID, event.SeriesID)
+}
+
 // listEvents scans store pages until it has limit visible rows. Filtering only
 // after a single page would let hidden adult rows consume the limit and make
 // older, visible history disappear.
@@ -129,7 +142,7 @@ func (f *adultOwnershipFilter) listEvents(ctx context.Context, limit int, before
 			return nil, 0, err
 		}
 		for _, event := range events {
-			visible, err := f.ownerVisible(ctx, event.MovieID, event.SeriesID)
+			visible, err := f.eventVisible(ctx, event)
 			if err != nil {
 				return nil, 0, err
 			}
