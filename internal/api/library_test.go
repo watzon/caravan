@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -862,24 +863,38 @@ func TestRescanIsSingleFlight(t *testing.T) {
 func TestSearchReturnsBothMediaTypes(t *testing.T) {
 	h, _, mgr := newTestServer(t)
 	mgr.provider = &stubProvider{
-		movies: []core.MovieMeta{{TMDBID: 1, Title: "Dune", Year: 2021, PosterURL: "https://img/dune.jpg"}},
-		series: []core.SeriesMeta{{TMDBID: 2, Title: "Dune: Prophecy", Year: 2024}},
+		movies: []core.MovieMeta{
+			{TMDBID: 1, Title: "Dune", Year: 2021, PosterURL: "https://img/dune.jpg", VoteAverage: 8.2},
+			{TMDBID: 3, Title: "Dune: Part Two", Year: 2024},
+		},
+		series: []core.SeriesMeta{
+			{TMDBID: 2, Title: "Dune: Prophecy", Year: 2024, VoteAverage: 7.4},
+			{TMDBID: 4, Title: "Dune: Zero Rating", Year: 2025},
+		},
 	}
 
 	rec := do(t, h, http.MethodGet, "/api/v1/search?q=dune", "")
 	wantStatus(t, rec, http.StatusOK)
+	rawBody := rec.Body.String()
 	var body searchResponse
 	decodeBody(t, rec, &body)
 
 	wantMovies := []movieMetaJSON{
-		{TMDBID: 1, Title: "Dune", Year: 2021, PosterURL: "https://img/dune.jpg"},
+		{TMDBID: 1, Title: "Dune", Year: 2021, PosterURL: "https://img/dune.jpg", VoteAverage: 8.2},
+		{TMDBID: 3, Title: "Dune: Part Two", Year: 2024},
 	}
-	wantSeries := []seriesMetaJSON{{TMDBID: 2, Title: "Dune: Prophecy", Year: 2024}}
+	wantSeries := []seriesMetaJSON{
+		{TMDBID: 2, Title: "Dune: Prophecy", Year: 2024, VoteAverage: 7.4},
+		{TMDBID: 4, Title: "Dune: Zero Rating", Year: 2025},
+	}
 	if !slices.Equal(body.Movies, wantMovies) {
 		t.Fatalf("movies = %+v, want %+v", body.Movies, wantMovies)
 	}
 	if !slices.Equal(body.Series, wantSeries) {
 		t.Fatalf("series = %+v, want %+v", body.Series, wantSeries)
+	}
+	if got := strings.Count(rawBody, `"vote_average":0`); got != 2 {
+		t.Fatalf("zero vote_average fields = %d, want 2 in %s", got, rawBody)
 	}
 }
 

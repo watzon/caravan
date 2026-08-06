@@ -46,10 +46,15 @@ func TestRoutePolicyMemberAndExemptionMatching(t *testing.T) {
 		{http.MethodPost, "/adult/sites", false},
 		{http.MethodPost, "/settings/adult", false},
 		{http.MethodGet, "/library/movies", false},
+		{http.MethodPost, "/library/episodes/7/search", false},
 	} {
 		if got := memberAllowed(test.method, test.path); got != test.want {
 			t.Errorf("memberAllowed(%q, %q) = %v, want %v", test.method, test.path, got, test.want)
 		}
+	}
+	episodeSearch, ok := policyForRegistration(http.MethodPost, "/library/episodes/{id}/search")
+	if !ok || episodeSearch.Access != routeAdmin || episodeSearch.Member {
+		t.Fatalf("episode search policy = %+v, %v; want registered admin-only policy", episodeSearch, ok)
 	}
 	for _, path := range []string{"/auth/login", "/auth/logout", "/calendar.ics", "/images/poster.jpg"} {
 		if !authExempt(path) {

@@ -81,6 +81,45 @@ func (s *server) handleSearchSeriesNow(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, searchQueuedResponse{Queued: queued})
 }
 
+// handleSearchEpisodeNow queues the automatic search for one wanted episode.
+func (s *server) handleSearchEpisodeNow(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	ctx := r.Context()
+	episode, err := s.st.GetEpisode(ctx, id)
+	if err != nil {
+		s.writeStoreError(w, "get episode", err)
+		return
+	}
+	if _, ok := s.getVisibleSeries(w, r, episode.SeriesID); !ok {
+		return
+	}
+
+	lists, err := wanted.Compute(ctx, s.st)
+	if err != nil {
+		s.writeStoreError(w, "compute wanted list", err)
+		return
+	}
+	queued := 0
+	for _, candidate := range lists.Episodes {
+		if candidate.ID != id {
+			continue
+		}
+		added, err := s.enqueueEpisodeSearch(ctx, id)
+		if err != nil {
+			s.writeStoreError(w, "queue episode search", err)
+			return
+		}
+		if added {
+			queued = 1
+		}
+		break
+	}
+	writeJSON(w, http.StatusAccepted, searchQueuedResponse{Queued: queued})
+}
+
 // handleSearchWanted queues an automatic search for the whole wanted list. It
 // is the backlog sweep on demand, and shares its dedupe: an item the sweep has
 // already queued is not queued twice.
@@ -133,7 +172,7 @@ func (s *server) queueSeriesSearch(ctx context.Context, seriesID int64) (int, er
 func (s *server) enqueueEpisodeSearches(ctx context.Context, episodes []wanted.Episode) (int, error) {
 	queued := 0
 	for _, e := range episodes {
-		added, err := s.enqueueSearchJob(ctx, core.JobSearchEpisode, core.JobSearchEpisodePayload{EpisodeID: e.ID})
+		added, err := s.enqueueEpisodeSearch(ctx, e.ID)
 		if err != nil {
 			return queued, err
 		}
@@ -146,6 +185,10 @@ func (s *server) enqueueEpisodeSearches(ctx context.Context, episodes []wanted.E
 
 func (s *server) enqueueMovieSearch(ctx context.Context, movieID int64) (bool, error) {
 	return s.enqueueSearchJob(ctx, core.JobSearchMovie, core.JobSearchMoviePayload{MovieID: movieID})
+}
+
+func (s *server) enqueueEpisodeSearch(ctx context.Context, episodeID int64) (bool, error) {
+	return s.enqueueSearchJob(ctx, core.JobSearchEpisode, core.JobSearchEpisodePayload{EpisodeID: episodeID})
 }
 
 // enqueueSearchJob adds one search job unless an identical one is already

@@ -11,12 +11,13 @@ import (
 
 // movieResult is the movie shape shared by search results and details.
 type movieResult struct {
-	ID            int64  `json:"id"`
-	Title         string `json:"title"`
-	OriginalTitle string `json:"original_title"`
-	Overview      string `json:"overview"`
-	PosterPath    string `json:"poster_path"`
-	ReleaseDate   string `json:"release_date"`
+	ID            int64   `json:"id"`
+	Title         string  `json:"title"`
+	OriginalTitle string  `json:"original_title"`
+	Overview      string  `json:"overview"`
+	PosterPath    string  `json:"poster_path"`
+	ReleaseDate   string  `json:"release_date"`
+	VoteAverage   float64 `json:"vote_average"`
 }
 
 // TMDB release types, from /movie/{id}/release_dates. Only the two home-release
@@ -114,6 +115,7 @@ func (c *Client) movieMeta(r movieResult, imdbID string) core.MovieMeta {
 		OriginalTitle: r.OriginalTitle,
 		Year:          yearOf(released),
 		Overview:      r.Overview,
+		VoteAverage:   r.VoteAverage,
 		ReleaseDate:   released,
 		PosterURL:     c.posterURL(r.PosterPath),
 	}

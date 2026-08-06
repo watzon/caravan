@@ -271,6 +271,7 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	// than releases — the work happens on the job queue, not in the request.
 	api.HandleFunc("POST /library/movies/{id}/search", s.handleSearchMovieNow)
 	api.HandleFunc("POST /library/series/{id}/search", s.handleSearchSeriesNow)
+	api.HandleFunc("POST /library/episodes/{id}/search", s.handleSearchEpisodeNow)
 
 	api.HandleFunc("GET /search", s.handleSearch)
 

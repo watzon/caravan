@@ -19,6 +19,7 @@ function mountModal(props: {
   kind?: 'movie' | 'series' | 'site' | null;
   initialKind?: 'movie' | 'series' | 'site';
   onpick?: (kind: 'movie' | 'series', tmdbID: number) => void;
+  onclose?: () => void;
 } = {}): HTMLElement {
   host = document.createElement('div');
   document.body.appendChild(host);
@@ -44,6 +45,7 @@ afterEach(() => {
   session.user = null;
   clearToasts();
   window.localStorage.clear();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
@@ -169,10 +171,33 @@ describe('AddItemModal', () => {
    * everything" is exactly the accident the off-by-default pair prevents — so
    * each assertion mounts a fresh modal and expects the same defaults.
    */
-  const MOVIES = [{ tmdb_id: 1, title: 'Dune', year: 2021, overview: '', poster_url: '' }];
-  const SERIES = [{ tmdb_id: 2, title: 'Severance', year: 2022, overview: '', poster_url: '' }];
+  const MOVIES = [
+    {
+      tmdb_id: 1,
+      title: 'Dune',
+      year: 2021,
+      overview: '',
+      release_date: '2021-10-22',
+      vote_average: 8.1,
+      poster_url: '',
+    },
+  ];
+  const SERIES = [
+    {
+      tmdb_id: 2,
+      title: 'Severance',
+      year: 2022,
+      overview: '',
+      first_air_date: '2022-02-18',
+      vote_average: 8.7,
+      poster_url: '',
+    },
+  ];
 
-  function stubSearchAndAdd(): { url: string; method: string; body: unknown }[] {
+  function stubSearchAndAdd(
+    results: { movies: unknown[]; series: unknown[] } = { movies: MOVIES, series: SERIES },
+    added: { id: number; title: string } = { id: 9, title: 'Added' },
+  ): { url: string; method: string; body: unknown }[] {
     const calls: { url: string; method: string; body: unknown }[] = [];
     vi.stubGlobal(
       'fetch',
@@ -183,9 +208,7 @@ describe('AddItemModal', () => {
           method: init?.method ?? 'GET',
           body: typeof init?.body === 'string' ? JSON.parse(init.body) : null,
         });
-        const payload = init?.method === 'POST'
-          ? { id: 9, title: 'Added' }
-          : { movies: MOVIES, series: SERIES };
+        const payload = init?.method === 'POST' ? added : results;
         return new Response(JSON.stringify(payload), {
           status: init?.method === 'POST' ? 201 : 200,
           headers: { 'Content-Type': 'application/json' },
@@ -208,6 +231,27 @@ describe('AddItemModal', () => {
     add.click();
     await vi.advanceTimersByTimeAsync(0);
     flushSync();
+  }
+
+  async function addSearchResults(query: string) {
+    const input = host!.querySelector('input[type="search"]') as HTMLInputElement;
+    input.value = query;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    await vi.advanceTimersByTimeAsync(300);
+    flushSync();
+  }
+
+  function resultButton(): HTMLButtonElement {
+    return host!.querySelector('ul button') as HTMLButtonElement;
+  }
+
+  function buttonWithText(text: string): HTMLButtonElement | null {
+    return (
+      [...host!.querySelectorAll<HTMLButtonElement>('button')].find(
+        (button) => button.textContent?.trim() === text,
+      ) ?? null
+    );
   }
 
   /** The options row, in the order they appear: monitor first, search second. */
@@ -322,6 +366,208 @@ describe('AddItemModal', () => {
   it('hides both options in pick mode, where nothing is being added', () => {
     mountModal({ onpick: () => {} });
     expect(optionBoxes()).toHaveLength(0);
+  });
+
+  it('disambiguates same-title results with distinct year and real rating badges', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-05T12:00:00Z'));
+    stubSearchAndAdd({
+      movies: [
+        {
+          tmdb_id: 10,
+          title: 'Dune',
+          year: 1984,
+          overview: '',
+          release_date: '1984-12-14',
+          vote_average: 6.3,
+          poster_url: '',
+        },
+        {
+          tmdb_id: 11,
+          title: 'Dune',
+          year: 2021,
+          overview: '',
+          release_date: '2021-10-22',
+          vote_average: 8.1,
+          poster_url: '',
+        },
+      ],
+      series: [],
+    });
+    mountModal();
+
+    const input = host!.querySelector('input[type="search"]') as HTMLInputElement;
+    input.value = 'dune';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    await vi.advanceTimersByTimeAsync(300);
+    flushSync();
+
+    const rows = [...host!.querySelectorAll('ul li')];
+    expect(rows).toHaveLength(2);
+    expect(rows[0]!.textContent).toContain('Dune');
+    expect(rows[0]!.textContent).toContain('1984');
+    expect(rows[0]!.textContent).toContain('6.3/10');
+    expect(rows[1]!.textContent).toContain('Dune');
+    expect(rows[1]!.textContent).toContain('2021');
+    expect(rows[1]!.textContent).toContain('8.1/10');
+  });
+
+  it('shows a zero provider vote as unrated instead of inferring a score', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-05T12:00:00Z'));
+    stubSearchAndAdd({
+      movies: [
+        {
+          tmdb_id: 12,
+          title: 'No Votes Yet',
+          year: 2020,
+          overview: '',
+          release_date: '2020-01-01',
+          vote_average: 0,
+          poster_url: '',
+        },
+      ],
+      series: [],
+    });
+    mountModal();
+
+    await addSearchResults('no votes');
+
+    const row = host!.querySelector('ul li')!;
+    expect(row.textContent).toContain('2020');
+    expect(row.textContent).toContain('Not yet rated');
+    expect(row.textContent).not.toContain('0.0/10');
+  });
+
+  it('suppresses a numeric rating for a future first-air date', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-05T12:00:00Z'));
+    stubSearchAndAdd({
+      movies: [],
+      series: [
+        {
+          tmdb_id: 13,
+          title: 'Tomorrow Show',
+          year: 2027,
+          overview: '',
+          first_air_date: '2027-01-10',
+          vote_average: 9.8,
+          poster_url: '',
+        },
+      ],
+    });
+    mountModal({ initialKind: 'series' });
+
+    await addSearchResults('tomorrow');
+
+    const row = host!.querySelector('ul li')!;
+    expect(row.textContent).toContain('2027');
+    expect(row.textContent).toContain('Not yet rated');
+    expect(row.textContent).not.toContain('9.8/10');
+  });
+
+  it('sends no add request when future confirmation is cancelled and adds after confirmation', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-05T12:00:00Z'));
+    const calls = stubSearchAndAdd({
+      movies: [
+        {
+          tmdb_id: 14,
+          title: 'Future Film',
+          year: 2027,
+          overview: '',
+          release_date: '2027-04-02',
+          vote_average: 7.4,
+          poster_url: '',
+        },
+      ],
+      series: [],
+    });
+    mountModal();
+    await addSearchResults('future');
+    expect(host!.querySelector('ul li')!.textContent).toContain('Not yet rated');
+    expect(host!.querySelector('ul li')!.textContent).not.toContain('7.4/10');
+
+    resultButton().click();
+    flushSync();
+    expect(buttonWithText('Add unreleased title')).not.toBeNull();
+    expect(calls.filter((call) => call.method === 'POST')).toHaveLength(0);
+
+    buttonWithText('Cancel')!.click();
+    flushSync();
+    expect(calls.filter((call) => call.method === 'POST')).toHaveLength(0);
+
+    resultButton().click();
+    flushSync();
+    buttonWithText('Add unreleased title')!.click();
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+    expect(calls.filter((call) => call.method === 'POST')).toHaveLength(1);
+  });
+
+  it('keeps released titles as a one-click add', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-05T12:00:00Z'));
+    const calls = stubSearchAndAdd();
+    mountModal();
+
+    await addSearchResults('dune');
+    resultButton().click();
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    expect(calls.filter((call) => call.method === 'POST')).toHaveLength(1);
+    expect(buttonWithText('Add unreleased title')).toBeNull();
+  });
+
+  it('preserves toast, close, and navigation after a released add', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-05T12:00:00Z'));
+    const onclose = vi.fn();
+    const pushState = vi.spyOn(window.history, 'pushState');
+    vi.stubGlobal('scrollTo', vi.fn());
+    stubSearchAndAdd(undefined, { id: 41, title: 'Dune' });
+    mountModal({ onclose });
+
+    await addSearchResults('dune');
+    resultButton().click();
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    expect(onclose).toHaveBeenCalledOnce();
+    expect(toasts.items.at(-1)).toMatchObject({ message: 'Added Dune', tone: 'success' });
+    expect(pushState).toHaveBeenCalledWith({}, '', '/movies/41');
+  });
+
+  it('keeps a future manual match as one click with no add confirmation or request', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-05T12:00:00Z'));
+    const onpick = vi.fn();
+    const calls = stubSearchAndAdd({
+      movies: [
+        {
+          tmdb_id: 15,
+          title: 'Future Match',
+          year: 2028,
+          overview: '',
+          release_date: '2028-02-03',
+          vote_average: 8.8,
+          poster_url: '',
+        },
+      ],
+      series: [],
+    });
+    mountModal({ kind: 'movie', onpick });
+
+    await addSearchResults('future match');
+    resultButton().click();
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    expect(onpick).toHaveBeenCalledWith('movie', 15);
+    expect(buttonWithText('Add unreleased title')).toBeNull();
+    expect(calls.filter((call) => call.method === 'POST')).toHaveLength(0);
   });
 });
 

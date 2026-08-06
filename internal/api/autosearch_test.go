@@ -160,6 +160,133 @@ func TestSearchSeriesNowRejectsUnknownSeries(t *testing.T) {
 	wantErrorBody(t, rec)
 }
 
+func TestSearchEpisodeNowQueuesOnlyTheSelectedWantedEpisodeAndDedupes(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	ctx := context.Background()
+
+	sr := &core.Series{TMDBID: 23, Title: "Slow Horses", Monitored: true}
+	if err := st.UpsertSeries(ctx, sr); err != nil {
+		t.Fatalf("UpsertSeries: %v", err)
+	}
+	selected := airedEpisode(t, st, sr.ID, 1, 1)
+	airedEpisode(t, st, sr.ID, 1, 2)
+	target := "/api/v1/library/episodes/" + itoa(selected.ID) + "/search"
+
+	wantQueued(t, h, target, 1)
+	jobs := openJobs(t, st, core.JobSearchEpisode)
+	if len(jobs) != 1 {
+		t.Fatalf("search_episode jobs = %d, want exactly 1", len(jobs))
+	}
+	if want := `{"episode_id":` + itoa(selected.ID) + `}`; jobs[0].Payload != want {
+		t.Fatalf("payload = %q, want %q", jobs[0].Payload, want)
+	}
+
+	wantQueued(t, h, target, 0)
+	if jobs := openJobs(t, st, core.JobSearchEpisode); len(jobs) != 1 {
+		t.Fatalf("search_episode jobs after a repeat = %d, want 1", len(jobs))
+	}
+}
+
+func TestSearchEpisodeNowSkipsAnEpisodeThatIsNotWanted(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	ctx := context.Background()
+
+	sr := &core.Series{TMDBID: 24, Title: "The Last of Us", Monitored: true}
+	if err := st.UpsertSeries(ctx, sr); err != nil {
+		t.Fatalf("UpsertSeries: %v", err)
+	}
+	future := &core.Episode{
+		SeriesID:      sr.ID,
+		SeasonNumber:  2,
+		EpisodeNumber: 1,
+		Title:         "Future episode",
+		AirDate:       time.Now().UTC().AddDate(0, 0, 7),
+		Monitored:     true,
+	}
+	if err := st.UpsertEpisode(ctx, future); err != nil {
+		t.Fatalf("UpsertEpisode: %v", err)
+	}
+
+	wantQueued(t, h, "/api/v1/library/episodes/"+itoa(future.ID)+"/search", 0)
+	if jobs := openJobs(t, st, core.JobSearchEpisode); len(jobs) != 0 {
+		t.Fatalf("search_episode jobs = %d, want none for an episode that has not aired", len(jobs))
+	}
+}
+
+func TestSearchEpisodeNowRejectsInvalidAndUnknownEpisodes(t *testing.T) {
+	h, _, _ := newTestServer(t)
+
+	for _, test := range []struct {
+		name   string
+		id     string
+		status int
+	}{
+		{name: "zero", id: "0", status: http.StatusBadRequest},
+		{name: "not a number", id: "nope", status: http.StatusBadRequest},
+		{name: "unknown", id: "9999", status: http.StatusNotFound},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			rec := do(t, h, http.MethodPost, "/api/v1/library/episodes/"+test.id+"/search", "")
+			wantStatus(t, rec, test.status)
+			wantErrorBody(t, rec)
+		})
+	}
+}
+
+func TestSearchEpisodeNowHidesAnInvisibleAdultEpisode(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	ctx := context.Background()
+
+	site := &core.Series{
+		Kind: core.SeriesKindAdult, StashID: "hidden-site", Title: "Hidden site", SortTitle: "hidden site",
+	}
+	if err := st.UpsertSeries(ctx, site); err != nil {
+		t.Fatalf("UpsertSeries: %v", err)
+	}
+	scene := airedEpisode(t, st, site.ID, 2026, 1)
+
+	rec := do(t, h, http.MethodPost, "/api/v1/library/episodes/"+itoa(scene.ID)+"/search", "")
+	wantStatus(t, rec, http.StatusNotFound)
+	wantErrorBody(t, rec)
+	if jobs := openJobs(t, st, core.JobSearchEpisode); len(jobs) != 0 {
+		t.Fatalf("search_episode jobs = %d, want none for an invisible episode", len(jobs))
+	}
+}
+
+func TestSearchEpisodeNowIsAdminOnly(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	ctx := context.Background()
+
+	sr := &core.Series{TMDBID: 25, Title: "Dark", Monitored: true}
+	if err := st.UpsertSeries(ctx, sr); err != nil {
+		t.Fatalf("UpsertSeries: %v", err)
+	}
+	episode := airedEpisode(t, st, sr.ID, 1, 1)
+	target := "/api/v1/library/episodes/" + itoa(episode.ID) + "/search"
+
+	createUser(t, st, testAdmin, testPassword, core.RoleAdmin)
+	createUser(t, st, testMember, testPassword, core.RoleMember)
+	admin := login(t, h, testAdmin, testPassword)
+	member := login(t, h, testMember, testPassword)
+
+	rec := do(t, h, http.MethodPost, target, "")
+	wantStatus(t, rec, http.StatusUnauthorized)
+	wantErrorBody(t, rec)
+	rec = doAuth(t, h, http.MethodPost, target, "", withCookie(member))
+	wantStatus(t, rec, http.StatusForbidden)
+	wantErrorBody(t, rec)
+	if jobs := openJobs(t, st, core.JobSearchEpisode); len(jobs) != 0 {
+		t.Fatalf("search_episode jobs before admin request = %d, want none", len(jobs))
+	}
+	rec = doAuth(t, h, http.MethodPost, target, "", withCookie(admin))
+	wantStatus(t, rec, http.StatusAccepted)
+	var body searchQueuedResponse
+	decodeBody(t, rec, &body)
+	if body.Queued != 1 {
+		t.Fatalf("admin search queued = %d, want 1", body.Queued)
+	}
+}
+
 func TestSearchWantedQueuesTheWholeList(t *testing.T) {
 	h, st, _ := newTestServer(t)
 	ctx := context.Background()

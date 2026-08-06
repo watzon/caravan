@@ -176,6 +176,7 @@ export interface MovieMeta {
   year: number;
   overview: string;
   release_date: string;
+  vote_average: number;
   /** Absolute provider URL. */
   poster_url: string;
 }
@@ -191,6 +192,7 @@ export interface SeriesMeta {
   overview: string;
   status: string;
   first_air_date: string;
+  vote_average: number;
   /** Absolute provider URL. */
   poster_url: string;
 }

@@ -185,6 +185,7 @@ export const endpoints = {
   // the interactive picker.
   movieSearchNow: (id: number) => `${API_BASE}/library/movies/${id}/search`,
   seriesSearchNow: (id: number) => `${API_BASE}/library/series/${id}/search`,
+  episodeSearchNow: (id: number) => `${API_BASE}/library/episodes/${id}/search`,
   wantedSearch: () => `${API_BASE}/wanted/search`,
   events: () => `${API_BASE}/events`,
   jobs: () => `${API_BASE}/jobs`,
@@ -932,6 +933,10 @@ export const api = {
   /** Queue a search for every wanted episode of one series. */
   searchSeriesNow: (id: number) =>
     request<SearchQueued>(endpoints.seriesSearchNow(id), { method: 'POST' }),
+
+  /** Queue an automatic search for exactly one wanted episode. */
+  searchEpisodeNow: (id: number) =>
+    request<SearchQueued>(endpoints.episodeSearchNow(id), { method: 'POST' }),
 
   /** Queue a search for the whole wanted list — the backlog sweep on demand. */
   searchWanted: () =>

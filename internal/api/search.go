@@ -19,27 +19,29 @@ const (
 // provider URL rather than a storage-root-relative path, because nothing has
 // been downloaded at this point.
 type movieMetaJSON struct {
-	TMDBID        int64  `json:"tmdb_id"`
-	IMDBID        string `json:"imdb_id"`
-	Title         string `json:"title"`
-	OriginalTitle string `json:"original_title"`
-	Year          int    `json:"year"`
-	Overview      string `json:"overview"`
-	ReleaseDate   string `json:"release_date"`
-	PosterURL     string `json:"poster_url"`
+	TMDBID        int64   `json:"tmdb_id"`
+	IMDBID        string  `json:"imdb_id"`
+	Title         string  `json:"title"`
+	OriginalTitle string  `json:"original_title"`
+	Year          int     `json:"year"`
+	Overview      string  `json:"overview"`
+	ReleaseDate   string  `json:"release_date"`
+	VoteAverage   float64 `json:"vote_average"`
+	PosterURL     string  `json:"poster_url"`
 }
 
 type seriesMetaJSON struct {
-	TMDBID        int64  `json:"tmdb_id"`
-	TVDBID        int64  `json:"tvdb_id"`
-	IMDBID        string `json:"imdb_id"`
-	Title         string `json:"title"`
-	OriginalTitle string `json:"original_title"`
-	Year          int    `json:"year"`
-	Overview      string `json:"overview"`
-	Status        string `json:"status"`
-	FirstAirDate  string `json:"first_air_date"`
-	PosterURL     string `json:"poster_url"`
+	TMDBID        int64   `json:"tmdb_id"`
+	TVDBID        int64   `json:"tvdb_id"`
+	IMDBID        string  `json:"imdb_id"`
+	Title         string  `json:"title"`
+	OriginalTitle string  `json:"original_title"`
+	Year          int     `json:"year"`
+	Overview      string  `json:"overview"`
+	Status        string  `json:"status"`
+	FirstAirDate  string  `json:"first_air_date"`
+	VoteAverage   float64 `json:"vote_average"`
+	PosterURL     string  `json:"poster_url"`
 }
 
 // searchResponse keeps the two media types in separate lists rather than one
@@ -113,6 +115,7 @@ func movieMetaDTO(m core.MovieMeta) movieMetaJSON {
 		Year:          m.Year,
 		Overview:      m.Overview,
 		ReleaseDate:   jsonTime(m.ReleaseDate),
+		VoteAverage:   m.VoteAverage,
 		PosterURL:     m.PosterURL,
 	}
 }
@@ -128,6 +131,7 @@ func seriesMetaDTO(sr core.SeriesMeta) seriesMetaJSON {
 		Overview:      sr.Overview,
 		Status:        sr.Status,
 		FirstAirDate:  jsonTime(sr.FirstAirDate),
+		VoteAverage:   sr.VoteAverage,
 		PosterURL:     sr.PosterURL,
 	}
 }

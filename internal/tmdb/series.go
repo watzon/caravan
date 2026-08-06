@@ -10,12 +10,13 @@ import (
 
 // tvResult is the series shape shared by search results and details.
 type tvResult struct {
-	ID           int64  `json:"id"`
-	Name         string `json:"name"`
-	OriginalName string `json:"original_name"`
-	Overview     string `json:"overview"`
-	PosterPath   string `json:"poster_path"`
-	FirstAirDate string `json:"first_air_date"`
+	ID           int64   `json:"id"`
+	Name         string  `json:"name"`
+	OriginalName string  `json:"original_name"`
+	Overview     string  `json:"overview"`
+	PosterPath   string  `json:"poster_path"`
+	FirstAirDate string  `json:"first_air_date"`
+	VoteAverage  float64 `json:"vote_average"`
 }
 
 // tvDetail is /tv/{id}. Its seasons list carries no episodes, only the season
@@ -138,6 +139,7 @@ func (c *Client) seriesMeta(r tvResult) core.SeriesMeta {
 		OriginalTitle: r.OriginalName,
 		Year:          yearOf(firstAir),
 		Overview:      r.Overview,
+		VoteAverage:   r.VoteAverage,
 		FirstAirDate:  firstAir,
 		PosterURL:     c.posterURL(r.PosterPath),
 	}

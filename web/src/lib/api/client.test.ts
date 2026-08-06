@@ -55,6 +55,7 @@ describe('endpoints', () => {
     expect(endpoints.movieGrab(7)).toBe('/api/v1/library/movies/7/grab');
     expect(endpoints.seriesReleases(9)).toBe('/api/v1/library/series/9/releases');
     expect(endpoints.seriesGrab(9)).toBe('/api/v1/library/series/9/grab');
+    expect(endpoints.episodeSearchNow(11)).toBe('/api/v1/library/episodes/11/search');
     expect(endpoints.downloads()).toBe('/api/v1/downloads');
     expect(endpoints.conversions()).toBe('/api/v1/convert');
     expect(endpoints.conversionCancel(4)).toBe('/api/v1/convert/4/cancel');
@@ -397,6 +398,19 @@ describe('interactive search', () => {
     stubFetch({ releases: [] });
     await api.seriesReleases(9, { season: 0, episode: 1 });
     expect(only().url).toBe('/api/v1/library/series/9/releases?season=0&episode=1');
+  });
+});
+
+describe('automatic search', () => {
+  it('POSTs an exact episode search with no body and returns the queued count', async () => {
+    stubFetch({ queued: 1 }, 202);
+
+    await expect(api.searchEpisodeNow(11)).resolves.toEqual({ queued: 1 });
+    expect(only()).toEqual({
+      url: '/api/v1/library/episodes/11/search',
+      method: 'POST',
+      body: null,
+    });
   });
 });
 

@@ -14,6 +14,8 @@
   import { api, errorText } from '../api/client';
   import type { MovieMeta, SearchResults, SeriesMeta, SiteMeta } from '../api/types';
   import { siteHref } from '../adult';
+  import { ratingPresentation } from '../discover';
+  import { isFuture } from '../format';
   import { metadataFault, type CredentialFault } from '../credentials';
   import { navigate } from '../router.svelte';
   import { session } from '../state/session.svelte';
@@ -43,6 +45,11 @@
    * depending on a sibling argument, pick mode simply has no adult scope.
    */
   type PickKind = 'movie' | 'series';
+  interface AddTarget {
+    kind: PickKind;
+    row: MovieMeta | SeriesMeta;
+    releaseDate: string;
+  }
 
   interface Props {
     onclose: () => void;
@@ -103,6 +110,8 @@
   let busyID = $state<number | null>(null);
   /** The site whose add is in flight; sites are named by a string, not an id. */
   let busyStashID = $state<string | null>(null);
+  /** An unreleased movie or series waiting for the user's explicit approval. */
+  let confirmingUnreleased = $state<AddTarget | null>(null);
 
   /**
    * Whether the adult scope is on screen. `session.adult` is the server's own
@@ -203,8 +212,30 @@
     moveResultFocus(event, body);
   }
 
-  function yearOf(row: MovieMeta | SeriesMeta): number {
-    return row.year;
+  function select(row: MovieMeta | SeriesMeta) {
+    const targetKind: PickKind = scope === 'series' ? 'series' : 'movie';
+    const target: AddTarget = {
+      kind: targetKind,
+      row,
+      releaseDate:
+        targetKind === 'movie'
+          ? (row as MovieMeta).release_date
+          : (row as SeriesMeta).first_air_date,
+    };
+    // Manual match only returns a provider id; it does not add a new library
+    // title, so an unreleased match stays the same one-click operation.
+    if (!onpick && isFuture(target.releaseDate)) {
+      confirmingUnreleased = target;
+      return;
+    }
+    void choose(target);
+  }
+
+  async function confirmUnreleased() {
+    const target = confirmingUnreleased;
+    if (!target) return;
+    confirmingUnreleased = null;
+    await choose(target);
   }
 
   /**
@@ -246,17 +277,16 @@
     }
   }
 
-  async function choose(row: MovieMeta | SeriesMeta) {
+  async function choose(target: AddTarget) {
+    const { kind: targetKind, row } = target;
     busyID = row.tmdb_id;
     addFault = null;
     try {
       if (onpick) {
-        // scope is never 'site' in pick mode: siteScope is false whenever
-        // onpick is set, so the narrowing below is a fact, not a cast.
-        await onpick(scope === 'series' ? 'series' : 'movie', row.tmdb_id);
+        await onpick(targetKind, row.tmdb_id);
         return;
       }
-      if (scope === 'movie') {
+      if (targetKind === 'movie') {
         const added = await api.addMovie({
           tmdb_id: row.tmdb_id,
           monitored: monitorOnAdd,
@@ -404,6 +434,8 @@
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
       <ul class="flex flex-col gap-2" onkeydown={onListKeydown}>
         {#each rows as row (row.tmdb_id)}
+          {@const releaseDate = 'release_date' in row ? row.release_date : row.first_air_date}
+          {@const rating = ratingPresentation(row.vote_average, releaseDate)}
           <li class="flex items-start gap-3 rounded-md border border-border p-2 transition-colors duration-150 ease-out hover:bg-raised focus-within:bg-raised">
             <div class="w-12 shrink-0">
               <Poster
@@ -412,12 +444,13 @@
                 fallbackIcon={scope === 'movie' ? 'film' : 'tv'} />
             </div>
             <div class="min-w-0 flex-1">
-              <p class="flex items-center gap-2 text-base font-medium text-ink">
-                <span class="truncate">{row.title}</span>
-                {#if yearOf(row) > 0}
-                  <Badge mono>{yearOf(row)}</Badge>
-                {/if}
-              </p>
+              <p class="truncate text-base font-medium text-ink">{row.title}</p>
+              <div class="mt-1 flex flex-wrap items-center gap-1.5">
+                <Badge mono tone="neutral">{row.year > 0 ? row.year : 'Year unknown'}</Badge>
+                <Badge mono tone="neutral" title={rating.title}>
+                  {rating.text ?? rating.title}
+                </Badge>
+              </div>
               <p class="line-clamp-2 text-sm text-ink-secondary">
                 {row.overview || 'No overview available.'}
               </p>
@@ -426,7 +459,7 @@
               variant="primary"
               size="sm"
               disabled={busyID !== null}
-              onclick={() => choose(row)}>
+              onclick={() => select(row)}>
               {busyID === row.tmdb_id ? 'Working…' : onpick ? 'Match' : 'Add'}
             </Button>
           </li>
@@ -466,3 +499,30 @@
     {/if}
   </div>
 </Modal>
+
+{#if confirmingUnreleased}
+  {@const target = confirmingUnreleased}
+  <Modal
+    title="Add unreleased title"
+    width="max-w-lg"
+    onclose={() => (confirmingUnreleased = null)}>
+    <div class="flex flex-col gap-3 p-4">
+      <p class="text-base text-ink">
+        <span class="font-medium">{target.row.title}</span> has not been released yet.
+      </p>
+      <p class="text-base text-ink-secondary">
+        Add it to the library anyway?
+      </p>
+    </div>
+
+    {#snippet footer()}
+      <Button
+        variant="ghost"
+        disabled={busyID !== null}
+        onclick={() => (confirmingUnreleased = null)}>Cancel</Button>
+      <Button variant="primary" disabled={busyID !== null} onclick={confirmUnreleased}>
+        Add unreleased title
+      </Button>
+    {/snippet}
+  </Modal>
+{/if}
