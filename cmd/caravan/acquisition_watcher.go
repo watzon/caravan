@@ -80,20 +80,20 @@ func (l lateMetadata) SearchSeries(ctx context.Context, q string) ([]core.Series
 	return p.SearchSeries(ctx, q)
 }
 
-func (l lateMetadata) GetMovie(ctx context.Context, tmdbID int64) (*core.MovieMeta, error) {
+func (l lateMetadata) GetMovie(ctx context.Context, ref string) (*core.MovieMeta, error) {
 	p, err := l.provider(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return p.GetMovie(ctx, tmdbID)
+	return p.GetMovie(ctx, ref)
 }
 
-func (l lateMetadata) GetSeries(ctx context.Context, tmdbID int64) (*core.SeriesMeta, error) {
+func (l lateMetadata) GetSeries(ctx context.Context, ref string) (*core.SeriesMeta, error) {
 	p, err := l.provider(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return p.GetSeries(ctx, tmdbID)
+	return p.GetSeries(ctx, ref)
 }
 
 // provider resolves the configured provider, reporting the absence of one as

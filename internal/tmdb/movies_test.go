@@ -22,6 +22,8 @@ func TestSearchMovies(t *testing.T) {
 
 	want := []core.MovieMeta{
 		{
+			Provider:      "tmdb",
+			ProviderRef:   "78",
 			TMDBID:        78,
 			Title:         "Blade Runner",
 			OriginalTitle: "Blade Runner",
@@ -33,6 +35,8 @@ func TestSearchMovies(t *testing.T) {
 			PosterURL:     "https://image.tmdb.org/t/p/w500/63N9uy8nd9j7Eog2axPQ8lbr3Wj.jpg",
 		},
 		{
+			Provider:      "tmdb",
+			ProviderRef:   "335984",
 			TMDBID:        335984,
 			Title:         "Blade Runner 2049",
 			OriginalTitle: "Blade Runner 2049",
@@ -46,6 +50,8 @@ func TestSearchMovies(t *testing.T) {
 		{
 			// No release date and no poster: both must degrade to zero
 			// values rather than being dropped or faked.
+			Provider:      "tmdb",
+			ProviderRef:   "999999",
 			TMDBID:        999999,
 			Title:         "Blade Runner: Untitled Workprint",
 			OriginalTitle: "Blade Runner: Untitled Workprint",
@@ -81,12 +87,14 @@ func TestGetMovie(t *testing.T) {
 		"/movie/78": {okJSON(t, "movie_detail.json")},
 	})
 
-	got, err := c.GetMovie(context.Background(), 78)
+	got, err := c.GetMovie(context.Background(), "78")
 	if err != nil {
 		t.Fatalf("GetMovie: %v", err)
 	}
 
 	want := core.MovieMeta{
+		Provider:      "tmdb",
+		ProviderRef:   "78",
 		TMDBID:        78,
 		IMDBID:        "tt0083658",
 		Title:         "Blade Runner",
@@ -129,7 +137,7 @@ func TestMovieVoteAverageDefaultsToZero(t *testing.T) {
 		t.Errorf("search VoteAverage = %v, want 0", got)
 	}
 
-	detail, err := c.GetMovie(context.Background(), 1)
+	detail, err := c.GetMovie(context.Background(), "1")
 	if err != nil {
 		t.Fatalf("GetMovie: %v", err)
 	}
@@ -158,7 +166,7 @@ func TestMovieVoteCountDefaultsToZeroWhenOmitted(t *testing.T) {
 		t.Errorf("search VoteCount = %d, want 0", got)
 	}
 
-	detail, err := c.GetMovie(context.Background(), 1)
+	detail, err := c.GetMovie(context.Background(), "1")
 	if err != nil {
 		t.Fatalf("GetMovie: %v", err)
 	}

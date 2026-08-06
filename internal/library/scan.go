@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/watzon/caravan/internal/core"
@@ -405,7 +406,7 @@ func (m *Manager) matchAndImportEpisode(ctx context.Context, lib *core.Library, 
 	}
 
 	meta := results[idx]
-	full, err := provider.GetSeries(ctx, meta.TMDBID)
+	full, err := provider.GetSeries(ctx, strconv.FormatInt(meta.TMDBID, 10))
 	if err != nil {
 		res.addErr("get series %d for %s: %v", meta.TMDBID, rel, err)
 		park(reasonProviderErr)

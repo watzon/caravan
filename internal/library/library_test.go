@@ -101,24 +101,35 @@ func (s *stubProvider) SearchSeries(_ context.Context, _ string) ([]core.SeriesM
 	return s.series, nil
 }
 
-func (s *stubProvider) GetMovie(_ context.Context, tmdbID int64) (*core.MovieMeta, error) {
+func (s *stubProvider) GetMovie(_ context.Context, ref string) (*core.MovieMeta, error) {
 	if s.getErr != nil {
 		return nil, s.getErr
 	}
-	if m, ok := s.movieByID[tmdbID]; ok {
+	if m, ok := s.movieByID[stubRefID(ref)]; ok {
 		return &m, nil
 	}
 	return nil, errors.New("stub: no such movie")
 }
 
-func (s *stubProvider) GetSeries(_ context.Context, tmdbID int64) (*core.SeriesMeta, error) {
+func (s *stubProvider) GetSeries(_ context.Context, ref string) (*core.SeriesMeta, error) {
 	if s.getErr != nil {
 		return nil, s.getErr
 	}
-	if sr, ok := s.seriesByID[tmdbID]; ok {
+	if sr, ok := s.seriesByID[stubRefID(ref)]; ok {
 		return &sr, nil
 	}
 	return nil, errors.New("stub: no such series")
+}
+
+// stubRefID parses a TMDB-shaped ref back into the int64 the stub's fixture
+// maps are keyed by. An unparsable ref yields 0, which matches nothing — the
+// same "no such title" answer the real client's ErrInvalidRef amounts to here.
+func stubRefID(ref string) int64 {
+	id, err := strconv.ParseInt(ref, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return id
 }
 
 // posterBytes is what the stub image host serves.

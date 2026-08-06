@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strconv"
 
 	"github.com/watzon/caravan/internal/core"
 )
@@ -79,7 +80,11 @@ func (c *Client) SearchSeries(ctx context.Context, q string) ([]core.SeriesMeta,
 // its episodes. Episodes are not available on the series endpoint at any
 // append_to_response depth, so each season is fetched individually — one
 // request per season, sequentially, to stay well inside TMDB's rate limit.
-func (c *Client) GetSeries(ctx context.Context, tmdbID int64) (*core.SeriesMeta, error) {
+func (c *Client) GetSeries(ctx context.Context, ref string) (*core.SeriesMeta, error) {
+	tmdbID, err := parseRef(ref)
+	if err != nil {
+		return nil, err
+	}
 	var d tvDetail
 	q := url.Values{"append_to_response": {"external_ids"}}
 	if err := c.get(ctx, fmt.Sprintf("/tv/%d", tmdbID), q, &d); err != nil {
@@ -135,6 +140,8 @@ func (c *Client) season(ctx context.Context, tmdbID int64, number int) (core.Sea
 func (c *Client) seriesMeta(r tvResult) core.SeriesMeta {
 	firstAir := parseDate(r.FirstAirDate)
 	return core.SeriesMeta{
+		Provider:      core.ProviderTMDB,
+		ProviderRef:   strconv.FormatInt(r.ID, 10),
 		TMDBID:        r.ID,
 		Title:         r.Name,
 		OriginalTitle: r.OriginalName,

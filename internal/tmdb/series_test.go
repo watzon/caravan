@@ -23,6 +23,8 @@ func TestSearchSeries(t *testing.T) {
 
 	want := []core.SeriesMeta{
 		{
+			Provider:      "tmdb",
+			ProviderRef:   "1396",
 			TMDBID:        1396,
 			Title:         "Breaking Bad",
 			OriginalTitle: "Breaking Bad",
@@ -35,6 +37,8 @@ func TestSearchSeries(t *testing.T) {
 		},
 		{
 			// Unaired show with no poster: zero year, blank poster URL.
+			Provider:      "tmdb",
+			ProviderRef:   "90228",
 			TMDBID:        90228,
 			Title:         "The Broken and the Bad",
 			OriginalTitle: "The Broken and the Bad",
@@ -61,12 +65,14 @@ func TestGetSeries(t *testing.T) {
 		"/tv/1396/season/1": {okJSON(t, "tv_season_1.json")},
 	})
 
-	got, err := c.GetSeries(context.Background(), 1396)
+	got, err := c.GetSeries(context.Background(), "1396")
 	if err != nil {
 		t.Fatalf("GetSeries: %v", err)
 	}
 
 	want := core.SeriesMeta{
+		Provider:      "tmdb",
+		ProviderRef:   "1396",
 		TMDBID:        1396,
 		TVDBID:        81189,
 		IMDBID:        "tt0903747",
@@ -168,7 +174,7 @@ func TestSeriesVoteAverageDefaultsToZero(t *testing.T) {
 		t.Errorf("search VoteAverage = %v, want 0", got)
 	}
 
-	detail, err := c.GetSeries(context.Background(), 1)
+	detail, err := c.GetSeries(context.Background(), "1")
 	if err != nil {
 		t.Fatalf("GetSeries: %v", err)
 	}
@@ -197,7 +203,7 @@ func TestSeriesVoteCountDefaultsToZeroWhenOmitted(t *testing.T) {
 		t.Errorf("search VoteCount = %d, want 0", got)
 	}
 
-	detail, err := c.GetSeries(context.Background(), 1)
+	detail, err := c.GetSeries(context.Background(), "1")
 	if err != nil {
 		t.Fatalf("GetSeries: %v", err)
 	}
@@ -216,7 +222,7 @@ func TestGetSeriesPropagatesSeasonFailure(t *testing.T) {
 		"/tv/1396/season/1": {okJSON(t, "tv_season_1.json")},
 	})
 
-	_, err := c.GetSeries(context.Background(), 1396)
+	_, err := c.GetSeries(context.Background(), "1396")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound from the season fetch", err)
 	}

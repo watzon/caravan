@@ -26,8 +26,8 @@ func (noMetadata) SearchMovies(context.Context, string) ([]core.MovieMeta, error
 func (noMetadata) SearchSeries(context.Context, string) ([]core.SeriesMeta, error) {
 	return nil, nil
 }
-func (noMetadata) GetMovie(context.Context, int64) (*core.MovieMeta, error)   { return nil, nil }
-func (noMetadata) GetSeries(context.Context, int64) (*core.SeriesMeta, error) { return nil, nil }
+func (noMetadata) GetMovie(context.Context, string) (*core.MovieMeta, error)   { return nil, nil }
+func (noMetadata) GetSeries(context.Context, string) (*core.SeriesMeta, error) { return nil, nil }
 
 // seedSite puts an adult series and one scene in the store, the state an owner
 // who used the module and then switched it off leaves behind.

@@ -43,7 +43,7 @@ func TestLateMetadataFollowsTheSettingsTable(t *testing.T) {
 	adapter, st := testAdapter(t)
 	meta := lateMetadata{adapter: adapter}
 
-	if _, err := meta.GetMovie(ctx, smokeTMDBID); !errors.Is(err, core.ErrNoMetadataProvider) {
+	if _, err := meta.GetMovie(ctx, strconv.FormatInt(smokeTMDBID, 10)); !errors.Is(err, core.ErrNoMetadataProvider) {
 		t.Fatalf("GetMovie with no key = %v, want ErrNoMetadataProvider", err)
 	}
 
@@ -53,7 +53,7 @@ func TestLateMetadataFollowsTheSettingsTable(t *testing.T) {
 		t.Fatalf("set tmdb key: %v", err)
 	}
 
-	got, err := meta.GetMovie(ctx, smokeTMDBID)
+	got, err := meta.GetMovie(ctx, strconv.FormatInt(smokeTMDBID, 10))
 	if err != nil {
 		t.Fatalf("GetMovie after the key was set: %v", err)
 	}

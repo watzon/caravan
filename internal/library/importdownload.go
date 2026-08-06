@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/watzon/caravan/internal/core"
@@ -533,7 +534,7 @@ func (m *Manager) movieMeta(ctx context.Context, movieID int64) (*core.MovieMeta
 	if err != nil {
 		return nil, "", err
 	}
-	meta, err := m.metadataFor(ctx, lib).GetMovie(ctx, mv.TMDBID)
+	meta, err := m.metadataFor(ctx, lib).GetMovie(ctx, strconv.FormatInt(mv.TMDBID, 10))
 	if err != nil {
 		return nil, "", fmt.Errorf("library: get movie %d: %w", mv.TMDBID, err)
 	}
@@ -564,7 +565,7 @@ func (m *Manager) seriesMeta(ctx context.Context, seriesID int64) (*core.SeriesM
 	if err != nil {
 		return nil, "", err
 	}
-	meta, err := m.metadataFor(ctx, lib).GetSeries(ctx, sr.TMDBID)
+	meta, err := m.metadataFor(ctx, lib).GetSeries(ctx, strconv.FormatInt(sr.TMDBID, 10))
 	if err != nil {
 		return nil, "", fmt.Errorf("library: get series %d: %w", sr.TMDBID, err)
 	}

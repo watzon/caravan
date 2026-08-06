@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/watzon/caravan/internal/core"
@@ -74,7 +75,7 @@ func (m *Manager) ImportUnmatched(ctx context.Context, unmatchedID, tmdbID int64
 		if err != nil {
 			return nil, err
 		}
-		meta, err := m.metadataFor(ctx, lib).GetMovie(ctx, tmdbID)
+		meta, err := m.metadataFor(ctx, lib).GetMovie(ctx, strconv.FormatInt(tmdbID, 10))
 		if err != nil {
 			return nil, fmt.Errorf("library: get movie %d: %w", tmdbID, err)
 		}
@@ -94,7 +95,7 @@ func (m *Manager) ImportUnmatched(ctx context.Context, unmatchedID, tmdbID int64
 		if err != nil {
 			return nil, err
 		}
-		meta, err := m.metadataFor(ctx, lib).GetSeries(ctx, tmdbID)
+		meta, err := m.metadataFor(ctx, lib).GetSeries(ctx, strconv.FormatInt(tmdbID, 10))
 		if err != nil {
 			return nil, fmt.Errorf("library: get series %d: %w", tmdbID, err)
 		}

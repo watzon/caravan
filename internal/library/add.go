@@ -3,6 +3,7 @@ package library
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/watzon/caravan/internal/core"
 )
@@ -44,7 +45,7 @@ func (m *Manager) AddMovie(ctx context.Context, tmdbID int64, minAvailability st
 		return nil, core.ErrNoMetadataProvider
 	}
 
-	meta, err := provider.GetMovie(ctx, tmdbID)
+	meta, err := provider.GetMovie(ctx, strconv.FormatInt(tmdbID, 10))
 	if err != nil {
 		return nil, fmt.Errorf("library: get movie %d: %w", tmdbID, err)
 	}
@@ -80,7 +81,7 @@ func (m *Manager) AddSeries(ctx context.Context, tmdbID int64, monitored *bool, 
 		return nil, core.ErrNoMetadataProvider
 	}
 
-	meta, err := provider.GetSeries(ctx, tmdbID)
+	meta, err := provider.GetSeries(ctx, strconv.FormatInt(tmdbID, 10))
 	if err != nil {
 		return nil, fmt.Errorf("library: get series %d: %w", tmdbID, err)
 	}

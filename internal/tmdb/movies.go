@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/watzon/caravan/internal/core"
@@ -66,7 +67,11 @@ func (c *Client) SearchMovies(ctx context.Context, q string) ([]core.MovieMeta, 
 
 // GetMovie returns full details for one movie, including its home-release
 // dates: they are what a minimum availability of "released" waits for.
-func (c *Client) GetMovie(ctx context.Context, tmdbID int64) (*core.MovieMeta, error) {
+func (c *Client) GetMovie(ctx context.Context, ref string) (*core.MovieMeta, error) {
+	tmdbID, err := parseRef(ref)
+	if err != nil {
+		return nil, err
+	}
 	var d movieDetail
 	q := url.Values{"append_to_response": {"release_dates"}}
 	if err := c.get(ctx, fmt.Sprintf("/movie/%d", tmdbID), q, &d); err != nil {
@@ -110,6 +115,8 @@ func earliestRelease(d movieDetail, releaseType int) time.Time {
 func (c *Client) movieMeta(r movieResult, imdbID string) core.MovieMeta {
 	released := parseDate(r.ReleaseDate)
 	return core.MovieMeta{
+		Provider:      core.ProviderTMDB,
+		ProviderRef:   strconv.FormatInt(r.ID, 10),
 		TMDBID:        r.ID,
 		IMDBID:        imdbID,
 		Title:         r.Title,

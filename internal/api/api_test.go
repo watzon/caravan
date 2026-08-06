@@ -314,11 +314,11 @@ func (p *stubProvider) SearchSeries(ctx context.Context, q string) ([]core.Serie
 	return p.series, p.err
 }
 
-func (p *stubProvider) GetMovie(ctx context.Context, tmdbID int64) (*core.MovieMeta, error) {
+func (p *stubProvider) GetMovie(ctx context.Context, ref string) (*core.MovieMeta, error) {
 	return nil, store.ErrNotFound
 }
 
-func (p *stubProvider) GetSeries(ctx context.Context, tmdbID int64) (*core.SeriesMeta, error) {
+func (p *stubProvider) GetSeries(ctx context.Context, ref string) (*core.SeriesMeta, error) {
 	return nil, store.ErrNotFound
 }
 

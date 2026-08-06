@@ -3,6 +3,7 @@ package library
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/watzon/caravan/internal/core"
 )
@@ -60,7 +61,7 @@ func (m *Manager) RefreshLibrary(ctx context.Context) (*RefreshResult, error) {
 		if err != nil {
 			return nil, err
 		}
-		meta, err := m.metadataFor(ctx, lib).GetMovie(ctx, mv.TMDBID)
+		meta, err := m.metadataFor(ctx, lib).GetMovie(ctx, strconv.FormatInt(mv.TMDBID, 10))
 		if err != nil {
 			res.addErr("refresh movie %q: %v", mv.Title, err)
 			continue
@@ -95,7 +96,7 @@ func (m *Manager) RefreshLibrary(ctx context.Context) (*RefreshResult, error) {
 		if err != nil {
 			return nil, err
 		}
-		meta, err := m.metadataFor(ctx, lib).GetSeries(ctx, sr.TMDBID)
+		meta, err := m.metadataFor(ctx, lib).GetSeries(ctx, strconv.FormatInt(sr.TMDBID, 10))
 		if err != nil {
 			res.addErr("refresh series %q: %v", sr.Title, err)
 			continue
