@@ -46,10 +46,12 @@ import type {
   Job,
   Library,
   JobPage,
+  LibraryCreate,
   LibraryIndexerOverride,
   LibraryPatch,
   MatchRequest,
   MediaRequest,
+  MetadataProviderInfo,
   MinAvailability,
   MediaType,
   Movie,
@@ -1075,6 +1077,14 @@ export const api = {
 
   listLibraries: (signal?: AbortSignal) =>
     listOf<Library>(endpoints.libraries(), 'libraries', signal),
+
+  createLibrary: (body: LibraryCreate) =>
+    request<Library>(endpoints.libraries(), { method: 'POST', body }),
+
+  deleteLibrary: (id: number) => request<void>(endpoints.library(id), { method: 'DELETE' }),
+
+  listMetadataProviders: (signal?: AbortSignal) =>
+    listOf<MetadataProviderInfo>(`${endpoints.libraries()}/providers`, 'providers', signal),
 
   updateLibrary: (id: number, body: LibraryPatch) =>
     request<Library>(endpoints.library(id), { method: 'PATCH', body }),

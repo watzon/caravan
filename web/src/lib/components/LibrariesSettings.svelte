@@ -29,6 +29,7 @@
     type LibraryIndexer,
     type LibraryKind,
     type LibraryPatch,
+    type MetadataProviderInfo,
     type Protocol,
     type QualityProfile,
     type Settings,
@@ -60,15 +61,27 @@
   let profiles = $state<QualityProfile[]>([]);
   let clients = $state<DownloadClient[]>([]);
   let types = $state<DownloadClientTypeInfo[]>([]);
+  let providers = $state<MetadataProviderInfo[]>([]);
 
   let loading = $state(true);
   let error = $state<string | null>(null);
   /** True while a write is in flight, so a second one cannot race it. */
   let busy = $state(false);
-  let kind = $state<LibraryKind>('movie');
+  /**
+   * Selection is by library id, not kind: since several libraries may share a
+   * kind, the id is the only thing that names one pill.
+   */
+  let selectedID = $state<number | null>(null);
   let scanning = $state(false);
   let scanMessage = $state<string | null>(null);
   let autosaveStates = $state<Record<string, AutosaveStatus>>({});
+
+  /** The add-library modal's staged fields; null when closed. */
+  let adding = $state<{ kind: LibraryKind; name: string; root: string; provider: string } | null>(
+    null,
+  );
+  /** Set while the delete confirmation is open for the selected library. */
+  let confirmingDelete = $state(false);
 
   /** The (library, indexer) pair whose categories the modal is editing. */
   let editing = $state<LibraryIndexer | null>(null);
@@ -77,19 +90,27 @@
   async function load() {
     loading = true;
     try {
-      const [loadedLibraries, loadedSettings, loadedProfiles, loadedClients, loadedTypes] =
-        await Promise.all([
-          api.listLibraries(),
-          api.getSettings(),
-          api.listQualityProfiles(),
-          api.listDownloadClients(),
-          api.downloadClientTypes(),
-        ]);
+      const [
+        loadedLibraries,
+        loadedSettings,
+        loadedProfiles,
+        loadedClients,
+        loadedTypes,
+        loadedProviders,
+      ] = await Promise.all([
+        api.listLibraries(),
+        api.getSettings(),
+        api.listQualityProfiles(),
+        api.listDownloadClients(),
+        api.downloadClientTypes(),
+        api.listMetadataProviders(),
+      ]);
       libraries = loadedLibraries;
       settings = loadedSettings;
       profiles = loadedProfiles;
       clients = loadedClients;
       types = loadedTypes;
+      providers = loadedProviders;
       error = null;
     } catch (err) {
       error = errorText(err);
@@ -100,7 +121,22 @@
 
   onMount(load);
 
-  let selected = $derived(libraries.find((l) => l.kind === kind) ?? libraries[0] ?? null);
+  let selected = $derived(libraries.find((l) => l.id === selectedID) ?? libraries[0] ?? null);
+
+  /** The kinds the create form may offer: whatever some provider can serve. */
+  let creatableKinds = $derived(
+    (['movie', 'tv', 'adult'] as LibraryKind[]).filter((k) =>
+      providers.some((p) => p.kinds.includes(k)),
+    ),
+  );
+
+  function providersFor(k: LibraryKind): MetadataProviderInfo[] {
+    return providers.filter((p) => p.kinds.includes(k));
+  }
+
+  function providerName(id: string): string {
+    return providers.find((p) => p.id === id)?.name ?? id;
+  }
 
   /**
    * The selects are mirrored into local state rather than driven straight off
@@ -111,11 +147,24 @@
   let routeTorrent = $state('');
   let routeUsenet = $state('');
   let profileID = $state('');
+  let nameDraft = $state('');
 
   function reseed(lib: Library) {
     routeTorrent = lib.route_torrent;
     routeUsenet = lib.route_usenet;
     profileID = lib.quality_profile_id === 0 ? '' : String(lib.quality_profile_id);
+    nameDraft = lib.name;
+  }
+
+  function commitName() {
+    const lib = selected;
+    if (!lib) return;
+    const name = nameDraft.trim();
+    if (name === '' || name === lib.name) {
+      nameDraft = lib.name;
+      return;
+    }
+    void patch({ name }, `Library renamed to ${name}.`, autosaveKey(lib, 'name'));
   }
 
   $effect(() => {
@@ -295,6 +344,86 @@
     if (ok) editing = null;
   }
 
+  function openAddLibrary() {
+    const kind = creatableKinds[0] ?? 'movie';
+    adding = { kind, name: '', root: '', provider: providersFor(kind)[0]?.id ?? '' };
+  }
+
+  /** Reseed the provider and root suggestions when the staged kind changes. */
+  function stageKind(kind: LibraryKind) {
+    if (!adding) return;
+    const eligible = providersFor(kind);
+    adding = {
+      ...adding,
+      kind,
+      provider: eligible.some((p) => p.id === adding.provider)
+        ? adding.provider
+        : (eligible[0]?.id ?? ''),
+    };
+  }
+
+  function stageName(name: string) {
+    if (!adding) return;
+    // The root suggestion follows the name until the user edits the root
+    // themselves — a prefilled path they never think about is the common case.
+    const suggested = 'library/' + adding.name.trim().replace(/[\\/]/g, ' ').trim();
+    const followed = adding.root === '' || adding.root === suggested;
+    adding = {
+      ...adding,
+      name,
+      root: followed ? 'library/' + name.trim().replace(/[\\/]/g, ' ').trim() : adding.root,
+    };
+  }
+
+  async function createLibrary() {
+    if (!adding) return;
+    busy = true;
+    try {
+      const created = await api.createLibrary({
+        kind: adding.kind,
+        name: adding.name.trim(),
+        root_path: adding.root.trim(),
+        provider: adding.provider,
+      });
+      libraries = [...libraries, created];
+      selectedID = created.id;
+      adding = null;
+      pushToast(`Added the ${created.name} library.`, 'success');
+    } catch (err) {
+      pushToast(errorText(err), 'danger');
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function deleteLibrary() {
+    const lib = selected;
+    if (!lib) return;
+    busy = true;
+    try {
+      await api.deleteLibrary(lib.id);
+      libraries = libraries.filter((l) => l.id !== lib.id);
+      selectedID = libraries[0]?.id ?? null;
+      confirmingDelete = false;
+      pushToast(`Removed the ${lib.name} library.`, 'success');
+    } catch (err) {
+      pushToast(errorText(err), 'danger');
+    } finally {
+      busy = false;
+    }
+  }
+
+  /** Why the selected library cannot be deleted, or null when it can. */
+  let deleteBlocked = $derived.by(() => {
+    const lib = selected;
+    if (!lib) return null;
+    if (lib.kind === 'adult') return 'Adult libraries are managed by the adult module switch.';
+    if (lib.is_default) return 'This is the default library for its kind. Make another library the default first.';
+    if (lib.item_count > 0)
+      return `The library still has ${lib.item_count} item${lib.item_count === 1 ? '' : 's'}. Move them to another library first.`;
+    return null;
+  });
+
   async function rescan() {
     if (scanning) return;
     scanning = true;
@@ -347,7 +476,7 @@
         <button
           type="button"
           aria-pressed={active}
-          onclick={() => (kind = option.kind)}
+          onclick={() => (selectedID = option.id)}
           class="inline-flex h-7 items-center gap-2 rounded-full border px-3 text-sm transition-colors duration-150 ease-out
                  {active
             ? 'border-accent bg-accent-tint text-accent-text'
@@ -359,8 +488,15 @@
             name={option.kind === 'movie' ? 'film' : option.kind === 'adult' ? 'flame' : 'tv'}
             size={14} />
           <span>{option.name}</span>
+          {#if option.is_default}
+            <span class="micro-label" title="Default {option.kind} library">default</span>
+          {/if}
         </button>
       {/each}
+      <Button variant="ghost" size="sm" onclick={openAddLibrary}>
+        <Icon name="plus" size={14} />
+        Add library
+      </Button>
     </div>
 
     <SettingsCard
@@ -381,6 +517,21 @@
       title={lib.name}
       description="Where this library lives, and what it grabs when an item names no profile of its own.">
       <Field
+        label="Name"
+        for="library-name"
+        help="The label the pills and the add dialog show. Press Enter to save.">
+        {#snippet note()}
+          {@render autosaveStatus(autosaveKey(lib, 'name'))}
+        {/snippet}
+        <TextInput
+          id="library-name"
+          bind:value={nameDraft}
+          onkeydown={(event) => {
+            if (event.key === 'Enter') commitName();
+          }} />
+      </Field>
+
+      <Field
         label="Root path"
         for="library-root"
         help="Relative to the storage root. Moving the whole library is Settings → Storage's job, so it is read-only here.">
@@ -388,6 +539,63 @@
           <TextInput id="library-root" value={lib.root_path} readonly mono />
         </div>
       </Field>
+
+      <Field
+        label="Metadata provider"
+        for="library-provider"
+        help="Which provider refreshes this library's items.">
+        {#snippet note()}
+          {@render autosaveStatus(autosaveKey(lib, 'provider'))}
+        {/snippet}
+        <select
+          id="library-provider"
+          value={lib.provider}
+          disabled={busy || providersFor(lib.kind).length <= 1}
+          onchange={(event) =>
+            patch(
+              { provider: event.currentTarget.value },
+              `${lib.name} uses ${providerName(event.currentTarget.value)} for metadata.`,
+              autosaveKey(lib, 'provider'),
+            )}
+          class="{SELECT_CLASS} border-border-strong">
+          {#each providersFor(lib.kind) as option (option.id)}
+            <option value={option.id}>{option.name}</option>
+          {/each}
+        </select>
+      </Field>
+
+      <div class="flex flex-wrap items-center gap-3">
+        {#if lib.is_default}
+          <Badge tone="accent">Default {lib.kind} library</Badge>
+        {:else}
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={busy}
+            onclick={() =>
+              patch(
+                { is_default: true },
+                `${lib.name} is now the default ${lib.kind} library.`,
+                autosaveKey(lib, 'default'),
+              )}>
+            Make default
+          </Button>
+          {@render autosaveStatus(autosaveKey(lib, 'default'))}
+        {/if}
+        <span class="mx-1 hidden h-5 w-px shrink-0 bg-border sm:block"></span>
+        <div title={deleteBlocked ?? ''}>
+          <Button
+            variant="danger"
+            size="sm"
+            disabled={busy || deleteBlocked !== null}
+            onclick={() => (confirmingDelete = true)}>
+            Delete library
+          </Button>
+        </div>
+        {#if deleteBlocked}
+          <p class="text-sm text-ink-muted">{deleteBlocked}</p>
+        {/if}
+      </div>
 
       <Field
         label="Default quality profile"
@@ -559,7 +767,7 @@
         <Toggle
           checked={lib.dlna_visible}
           label="Share over DLNA"
-          disabled={busy}
+          disabled={busy || (!lib.is_default && !lib.dlna_visible)}
           onchange={(next) =>
             patch(
               { dlna_visible: next },
@@ -568,6 +776,12 @@
             )} />
         {@render autosaveStatus(autosaveKey(lib, 'dlna'))}
       </div>
+      {#if !lib.is_default && !lib.dlna_visible}
+        <p class="text-sm text-ink-muted">
+          DLNA sharing for additional libraries arrives with per-library containers in a later
+          update.
+        </p>
+      {/if}
       <p class="text-sm text-ink-secondary">
         Hiding a library drops its container from the DLNA tree; TVs pick the change up on their
         next browse rather than needing a restart. DLNA has no accounts, so anything shared here is
@@ -609,6 +823,90 @@
           <Icon name="check" size={14} />
           Save
         </Button>
+      </div>
+    {/snippet}
+  </Modal>
+{/if}
+
+{#if adding}
+  {@const draft = adding}
+  <Modal title="Add library" width="max-w-lg" onclose={() => (adding = null)}>
+    <div class="flex flex-col gap-4 p-4">
+      <Field label="Kind" for="new-library-kind" help="What the library holds. This cannot change later.">
+        <select
+          id="new-library-kind"
+          value={draft.kind}
+          onchange={(event) => stageKind(event.currentTarget.value as LibraryKind)}
+          class="{SELECT_CLASS} border-border-strong">
+          {#each creatableKinds as k (k)}
+            <option value={k}>{k === 'movie' ? 'Movies' : k === 'tv' ? 'Series' : 'Adult'}</option>
+          {/each}
+        </select>
+      </Field>
+
+      <Field label="Name" for="new-library-name" help="The label the app shows for this library.">
+        <TextInput
+          id="new-library-name"
+          value={draft.name}
+          placeholder="Anime"
+          oninput={(event) => stageName((event.currentTarget as HTMLInputElement).value)} />
+      </Field>
+
+      <Field
+        label="Root path"
+        for="new-library-root"
+        help="Relative to the storage root, under library/. Created on the first import.">
+        <TextInput id="new-library-root" bind:value={draft.root} mono placeholder="library/Anime" />
+      </Field>
+
+      {#if providersFor(draft.kind).length > 1}
+        <Field label="Metadata provider" for="new-library-provider" help="Which provider refreshes this library's items.">
+          <select
+            id="new-library-provider"
+            bind:value={draft.provider}
+            class="{SELECT_CLASS} border-border-strong">
+            {#each providersFor(draft.kind) as option (option.id)}
+              <option value={option.id}>{option.name}</option>
+            {/each}
+          </select>
+        </Field>
+      {/if}
+
+      <p class="text-sm text-ink-secondary">
+        New libraries start hidden from DLNA. Per-library sharing arrives with a later update.
+      </p>
+    </div>
+
+    {#snippet footer()}
+      <div class="flex w-full flex-wrap items-center justify-end gap-2">
+        <Button variant="ghost" disabled={busy} onclick={() => (adding = null)}>Cancel</Button>
+        <Button
+          variant="primary"
+          disabled={busy || draft.name.trim() === '' || draft.root.trim() === ''}
+          onclick={createLibrary}>
+          <Icon name="check" size={14} />
+          Add library
+        </Button>
+      </div>
+    {/snippet}
+  </Modal>
+{/if}
+
+{#if confirmingDelete && selected}
+  {@const lib = selected}
+  <Modal title="Delete {lib.name}?" width="max-w-md" onclose={() => (confirmingDelete = false)}>
+    <div class="flex flex-col gap-2 p-4">
+      <p class="text-md text-ink">
+        The library is empty, so no files are touched. The row and its per-library settings are
+        removed; the folder on disk, if it exists, stays where it is.
+      </p>
+    </div>
+    {#snippet footer()}
+      <div class="flex w-full flex-wrap items-center justify-end gap-2">
+        <Button variant="ghost" disabled={busy} onclick={() => (confirmingDelete = false)}>
+          Cancel
+        </Button>
+        <Button variant="danger" disabled={busy} onclick={deleteLibrary}>Delete library</Button>
       </div>
     {/snippet}
   </Modal>

@@ -2,10 +2,14 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
+	"path"
 	"strconv"
+	"strings"
 
 	"github.com/watzon/caravan/internal/core"
+	"github.com/watzon/caravan/internal/library"
 	"github.com/watzon/caravan/internal/store"
 )
 
@@ -24,6 +28,16 @@ type libraryJSON struct {
 	// RootPath is read-only here: it is where the organizer already put the
 	// files, and moving the library is POST /system/storage-root/migrate's job.
 	RootPath string `json:"root_path"`
+	// Provider is the metadata provider that refreshes this library's items,
+	// one of the ids GET /libraries/providers lists.
+	Provider string `json:"provider"`
+	// IsDefault marks the one library per kind that answers by-kind lookups
+	// and receives items added without an explicit target.
+	IsDefault bool `json:"is_default"`
+	// ItemCount is how many movies and series name this library as theirs —
+	// the number the delete guard reports, so the screen can explain a
+	// refusal before the user reaches it.
+	ItemCount int64 `json:"item_count"`
 	// DLNAVisible advertises this library in the DLNA content tree.
 	DLNAVisible bool `json:"dlna_visible"`
 	// RouteTorrent and RouteUsenet override the global routing defaults. Empty
@@ -71,13 +85,24 @@ type libraryIndexerJSON struct {
 //
 // Every field is a pointer because every field has a meaningful zero: an empty
 // route and a zero profile id are how an override is cleared, and they have to
-// be distinguishable from "not mentioned in this request". Kind, name and root
-// path are absent because none of them is editable.
+// be distinguishable from "not mentioned in this request". Kind and root path
+// are absent because neither is editable.
 type libraryPatchRequest struct {
+	Name             *string `json:"name"`
+	Provider         *string `json:"provider"`
+	IsDefault        *bool   `json:"is_default"`
 	DLNAVisible      *bool   `json:"dlna_visible"`
 	RouteTorrent     *string `json:"route_torrent"`
 	RouteUsenet      *string `json:"route_usenet"`
 	QualityProfileID *int64  `json:"quality_profile_id"`
+}
+
+// libraryCreateRequest is the body of POST /libraries.
+type libraryCreateRequest struct {
+	Kind     string `json:"kind"`
+	Name     string `json:"name"`
+	RootPath string `json:"root_path"`
+	Provider string `json:"provider"`
 }
 
 // libraryIndexerRequest is the body of PUT /libraries/{id}/indexers/{indexerID}.
@@ -104,6 +129,165 @@ func (s *server) libraryVisible(r *http.Request, kind string) (bool, error) {
 		return true, nil
 	}
 	return s.adultVisible(r)
+}
+
+// handleListProviders lists the compiled-in metadata providers the create form
+// offers. Providers that serve only adult kinds are omitted for callers the
+// module is absent to, for libraryVisible's reason: a name in a picker is a
+// trace of a module whose promise is absence.
+func (s *server) handleListProviders(w http.ResponseWriter, r *http.Request) {
+	adult, err := s.adultVisible(r)
+	if err != nil {
+		s.writeStoreError(w, "read adult settings", err)
+		return
+	}
+	type providerJSON struct {
+		ID    string   `json:"id"`
+		Name  string   `json:"name"`
+		Kinds []string `json:"kinds"`
+	}
+	out := []providerJSON{}
+	for _, p := range core.Providers() {
+		kinds := make([]string, 0, len(p.Kinds))
+		for _, k := range p.Kinds {
+			if k == core.LibraryKindAdult && !adult {
+				continue
+			}
+			kinds = append(kinds, k)
+		}
+		if len(kinds) == 0 {
+			continue
+		}
+		out = append(out, providerJSON{ID: p.ID, Name: p.Name, Kinds: kinds})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"providers": out})
+}
+
+// handleCreateLibrary creates a new library beside the seeded ones.
+//
+// Nothing is written to disk, for AddMovie's reason: an empty folder is a
+// library item the scanner cannot see, and the organizer's MkdirAll creates
+// the directory the moment the first import needs it.
+//
+// The new row is created with DLNA sharing off. Until the DLNA tree learns to
+// carve one container per library, a second library's items would ride the
+// default library's container under the default's flag — the wrong owner for
+// that decision — so the flag stays down and the form says so.
+func (s *server) handleCreateLibrary(w http.ResponseWriter, r *http.Request) {
+	var body libraryCreateRequest
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	ctx := r.Context()
+
+	if body.Kind != core.LibraryKindMovie && body.Kind != core.LibraryKindTV && body.Kind != core.LibraryKindAdult {
+		writeError(w, http.StatusBadRequest, "kind must be movie, tv or adult")
+		return
+	}
+	if body.Kind == core.LibraryKindAdult {
+		visible, err := s.adultVisible(r)
+		if err != nil {
+			s.writeStoreError(w, "read adult settings", err)
+			return
+		}
+		if !visible {
+			writeError(w, http.StatusBadRequest, "kind must be movie, tv or adult")
+			return
+		}
+	}
+	name := strings.TrimSpace(body.Name)
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "name is required")
+		return
+	}
+	provider := body.Provider
+	if provider == "" {
+		provider = core.DefaultProviderForKind(body.Kind)
+	}
+	if !core.ProviderServes(provider, body.Kind) {
+		writeError(w, http.StatusBadRequest, "provider cannot serve this library kind")
+		return
+	}
+	root, err := validateLibraryRoot(ctx, s.st, body.RootPath)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	lib := &core.Library{
+		Kind: body.Kind, Name: name, RootPath: root,
+		Provider: provider, DLNAVisible: false,
+	}
+	if err := s.st.CreateLibrary(ctx, lib); err != nil {
+		s.writeStoreError(w, "create library", err)
+		return
+	}
+	s.writeLibraryStatus(w, r, *lib, http.StatusCreated)
+}
+
+// validateLibraryRoot normalizes and checks a new library's root path: a
+// clean, forward-slash, storage-root-relative path strictly under library/,
+// unique among the existing roots and neither containing nor contained by any
+// of them (nesting would make longest-prefix attribution a trap).
+func validateLibraryRoot(ctx context.Context, st *store.Store, raw string) (string, error) {
+	root := strings.Trim(strings.ReplaceAll(strings.TrimSpace(raw), "\\", "/"), "/")
+	if root == "" {
+		return "", errors.New("root_path is required")
+	}
+	if path.Clean(root) != root || strings.Contains(root, "..") {
+		return "", errors.New("root_path must be a clean relative path")
+	}
+	if !strings.HasPrefix(root, library.LibraryDir+"/") {
+		return "", errors.New("root_path must be under library/")
+	}
+	if root == library.LibraryDir {
+		return "", errors.New("root_path cannot be the library directory itself")
+	}
+	existing, err := st.ListLibraries(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, l := range existing {
+		switch {
+		case l.RootPath == root:
+			return "", errors.New("another library already uses this root")
+		case strings.HasPrefix(root, l.RootPath+"/"):
+			return "", errors.New("root_path is inside another library's root")
+		case strings.HasPrefix(l.RootPath, root+"/"):
+			return "", errors.New("root_path contains another library's root")
+		}
+	}
+	return root, nil
+}
+
+// handleDeleteLibrary removes an empty, non-default, non-adult library. The
+// guards live in store.DeleteLibrary; this maps each refusal to the message
+// the screen shows.
+func (s *server) handleDeleteLibrary(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	lib, ok := s.getVisibleLibrary(w, r, id)
+	if !ok {
+		return
+	}
+	err := s.st.DeleteLibrary(r.Context(), lib.ID)
+	switch {
+	case errors.Is(err, store.ErrLibraryNotEmpty):
+		writeError(w, http.StatusConflict, "the library still has items; move them to another library first")
+		return
+	case errors.Is(err, store.ErrLibraryIsDefault):
+		writeError(w, http.StatusConflict, "the library is its kind's default; make another library the default first")
+		return
+	case errors.Is(err, store.ErrLibraryIsAdult):
+		writeError(w, http.StatusConflict, "adult libraries are managed by the adult module switch")
+		return
+	case err != nil:
+		s.writeStoreError(w, "delete library", err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *server) handleListLibraries(w http.ResponseWriter, r *http.Request) {
@@ -179,6 +363,28 @@ func (s *server) handleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if body.Name != nil && strings.TrimSpace(*body.Name) == "" {
+		writeError(w, http.StatusBadRequest, "name cannot be empty")
+		return
+	}
+	if body.Provider != nil && !core.ProviderServes(*body.Provider, lib.Kind) {
+		writeError(w, http.StatusBadRequest, "provider cannot serve this library kind")
+		return
+	}
+	// Demotion has no meaning of its own: a kind must always have a default,
+	// so the flag moves by promoting the successor, never by clearing.
+	if body.IsDefault != nil && !*body.IsDefault {
+		writeError(w, http.StatusBadRequest, "make another library the default instead")
+		return
+	}
+	// Until the DLNA tree carves one container per library, a non-default
+	// library's items would be advertised under the default's container and
+	// the default's flag — the wrong owner for that decision — so sharing a
+	// non-default library stays refused rather than half-working.
+	if body.DLNAVisible != nil && *body.DLNAVisible && !lib.IsDefault {
+		writeError(w, http.StatusBadRequest, "per-library DLNA sharing for additional libraries is not available yet")
+		return
+	}
 	// The routing values are the same values the global settings hold, so they
 	// go through the same validator: an id that is gone, disabled or of the
 	// wrong protocol is silently ignored at grab time, which is exactly the
@@ -201,6 +407,12 @@ func (s *server) handleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if body.Name != nil {
+		lib.Name = strings.TrimSpace(*body.Name)
+	}
+	if body.Provider != nil {
+		lib.Provider = *body.Provider
+	}
 	if body.DLNAVisible != nil {
 		lib.DLNAVisible = *body.DLNAVisible
 	}
@@ -227,6 +439,13 @@ func (s *server) handleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		lib.QualityProfileID = selectedProfileID
+	}
+	if body.IsDefault != nil && *body.IsDefault && !lib.IsDefault {
+		if err := s.st.SetDefaultLibrary(ctx, lib.ID); err != nil {
+			s.writeStoreError(w, "set default library", err)
+			return
+		}
+		lib.IsDefault = true
 	}
 	s.writeLibrary(w, r, *lib)
 }
@@ -288,6 +507,10 @@ func (s *server) handleSetLibraryIndexer(w http.ResponseWriter, r *http.Request)
 // re-renders the identity, routing and indexer cards from one response instead
 // of guessing what the write did to the rest of them.
 func (s *server) writeLibrary(w http.ResponseWriter, r *http.Request, lib core.Library) {
+	s.writeLibraryStatus(w, r, lib, http.StatusOK)
+}
+
+func (s *server) writeLibraryStatus(w http.ResponseWriter, r *http.Request, lib core.Library, status int) {
 	ctx := r.Context()
 	indexers, err := s.st.ListIndexers(ctx)
 	if err != nil {
@@ -299,7 +522,7 @@ func (s *server) writeLibrary(w http.ResponseWriter, r *http.Request, lib core.L
 		s.writeStoreError(w, "list library indexers", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, dto)
+	writeJSON(w, status, dto)
 }
 
 // libraryDTO joins a library with every configured indexer and the overrides it
@@ -341,11 +564,18 @@ func (s *server) libraryDTO(ctx context.Context, l core.Library, indexers []core
 		rows = append(rows, row)
 	}
 
+	count, err := s.st.CountLibraryItems(ctx, l.ID)
+	if err != nil {
+		return libraryJSON{}, err
+	}
 	return libraryJSON{
 		ID:               l.ID,
 		Kind:             l.Kind,
 		Name:             l.Name,
 		RootPath:         l.RootPath,
+		Provider:         l.Provider,
+		IsDefault:        l.IsDefault,
+		ItemCount:        count,
 		DLNAVisible:      l.DLNAVisible,
 		RouteTorrent:     l.RouteTorrent,
 		RouteUsenet:      l.RouteUsenet,

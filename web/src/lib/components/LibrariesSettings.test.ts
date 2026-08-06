@@ -31,6 +31,9 @@ function library(over: Partial<Library> = {}): Library {
     kind: 'movie',
     name: 'Movies',
     root_path: 'library/Movies',
+    provider: 'tmdb',
+    is_default: true,
+    item_count: 0,
     dlna_visible: true,
     route_torrent: '',
     route_usenet: '',
@@ -103,6 +106,13 @@ beforeEach(() => {
         if (reply) libraries = libraries.map((l) => (l.id === reply.id ? reply : l));
         return jsonResponse(reply ?? libraries.find((l) => url.includes(`/libraries/${l.id}`)));
       }
+      if (url.endsWith('/libraries/providers'))
+        return jsonResponse({
+          providers: [
+            { id: 'tmdb', name: 'TMDB', kinds: ['movie', 'tv'] },
+            { id: 'stashbox', name: 'Stash-box', kinds: ['adult'] },
+          ],
+        });
       if (url.endsWith('/libraries')) return jsonResponse({ libraries });
       if (url.endsWith('/settings')) return jsonResponse(SETTINGS);
       if (url.endsWith('/quality-profiles')) return jsonResponse({ profiles: PROFILES });
@@ -532,5 +542,73 @@ describe('LibrariesSettings - library scan', () => {
     expect(host.textContent).toContain(
       'Scan finished: 12 files in the library, 2 unmatched.',
     );
+  });
+});
+
+describe('LibrariesSettings — multiple libraries', () => {
+  it('creates a library through the add modal and selects it', async () => {
+    await mountLoaded();
+    const addButton = [...host.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('Add library'),
+    );
+    expect(addButton, 'Add library button').toBeDefined();
+    addButton!.click();
+    flushSync();
+
+    pick(select('new-library-kind'), 'tv');
+
+    const name = host.querySelector('#new-library-name') as HTMLInputElement;
+    expect(name, 'name input').not.toBeNull();
+    name.value = 'Anime';
+    name.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+
+    const root = host.querySelector('#new-library-root') as HTMLInputElement;
+    expect(root.value).toBe('library/Anime');
+
+    writeReplies = [
+      library({ id: 9, kind: 'tv', name: 'Anime', root_path: 'library/Anime', is_default: false }),
+    ];
+    const submit = [...host.querySelectorAll('button')].find(
+      (b) => b.textContent?.includes('Add library') && b.closest('[role="dialog"], dialog, .fixed'),
+    );
+    (submit ?? addButton)!.click();
+    await settle();
+
+    const post = writes.find((w) => w.method === 'POST' && w.url.endsWith('/libraries'));
+    expect(post, 'POST /libraries').toBeDefined();
+    expect(post!.body).toMatchObject({
+      kind: 'tv',
+      name: 'Anime',
+      root_path: 'library/Anime',
+      provider: 'tmdb',
+    });
+    // The new library is selected and its pill rendered.
+    expect(host.textContent).toContain('Anime');
+  });
+
+  it('disables deletion while the library is the default or holds items', async () => {
+    libraries = [
+      MOVIES,
+      library({ id: 2, kind: 'tv', name: 'Series', root_path: 'library/TV' }),
+      library({
+        id: 9,
+        kind: 'tv',
+        name: 'Anime',
+        root_path: 'library/Anime',
+        is_default: false,
+        item_count: 3,
+      }),
+    ];
+    await mountLoaded();
+    const pill = [...host.querySelectorAll('button')].find((b) => b.textContent?.includes('Anime'));
+    pill!.click();
+    flushSync();
+
+    const del = [...host.querySelectorAll('button')].find((b) =>
+      b.textContent?.includes('Delete library'),
+    ) as HTMLButtonElement;
+    expect(del.disabled).toBe(true);
+    expect(host.textContent).toContain('still has 3 items');
   });
 });

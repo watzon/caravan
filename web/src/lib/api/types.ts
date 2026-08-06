@@ -1685,6 +1685,12 @@ export interface Library {
   name: string;
   /** Storage-root-relative and read-only: moving it is the Storage screen's job. */
   root_path: string;
+  /** Metadata provider id, one of GET /libraries/providers. */
+  provider: string;
+  /** The one library per kind that answers by-kind lookups and untargeted adds. */
+  is_default: boolean;
+  /** How many movies and series this library owns — what the delete guard counts. */
+  item_count: number;
   dlna_visible: boolean;
   route_torrent: string;
   route_usenet: string;
@@ -1695,13 +1701,35 @@ export interface Library {
 /**
  * Body for PATCH /libraries/{id}. Every field is optional because the screen
  * saves one control at a time, and `''`/`0` clear an override rather than
- * meaning "unset".
+ * meaning "unset". `is_default` may only be set true — a kind must always
+ * have a default, so the flag moves by promoting the successor.
  */
 export interface LibraryPatch {
+  name?: string;
+  provider?: string;
+  is_default?: boolean;
   dlna_visible?: boolean;
   route_torrent?: string;
   route_usenet?: string;
   quality_profile_id?: number;
+}
+
+/** Body for POST /libraries. */
+export interface LibraryCreate {
+  kind: LibraryKind;
+  name: string;
+  /** Storage-root-relative, must sit under library/. */
+  root_path: string;
+  /** Empty picks the kind's default provider. */
+  provider?: string;
+}
+
+/** One compiled-in metadata provider (GET /libraries/providers). */
+export interface MetadataProviderInfo {
+  id: string;
+  name: string;
+  /** The library kinds this provider can serve. */
+  kinds: LibraryKind[];
 }
 
 /**

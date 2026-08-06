@@ -312,7 +312,10 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	// seeded by the migration, so there is no create or delete — a library is
 	// part of the layout, not a thing a user adds.
 	api.HandleFunc("GET /libraries", s.handleListLibraries)
+	api.HandleFunc("POST /libraries", s.handleCreateLibrary)
+	api.HandleFunc("GET /libraries/providers", s.handleListProviders)
 	api.HandleFunc("PATCH /libraries/{id}", s.handleUpdateLibrary)
+	api.HandleFunc("DELETE /libraries/{id}", s.handleDeleteLibrary)
 	api.HandleFunc("PUT /libraries/{id}/indexers/{indexerID}", s.handleSetLibraryIndexer)
 
 	// The adult module (PLAN phase 9). Its routes are registered on a mux of

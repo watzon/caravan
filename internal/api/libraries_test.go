@@ -406,3 +406,111 @@ func TestAdultLibraryCardShowsTheAdultCategoriesAsItsDefault(t *testing.T) {
 			row.Categories, settings.Indexers[0].Categories)
 	}
 }
+
+// The create endpoint owns every guard the schema does not: kind and provider
+// agreement, root placement under library/, and no nesting among roots. A
+// created library starts with DLNA sharing off (the per-library tree is a
+// later phase) and is never the default.
+func TestCreateLibraryValidatesAndCreates(t *testing.T) {
+	h, st, _ := newTestServer(t)
+
+	rec := do(t, h, http.MethodPost, "/api/v1/libraries",
+		`{"kind":"tv","name":"Anime","root_path":"library/Anime"}`)
+	wantStatus(t, rec, http.StatusCreated)
+	var created libraryJSON
+	decodeBody(t, rec, &created)
+	if created.Provider != core.ProviderTMDB || created.IsDefault || created.DLNAVisible {
+		t.Errorf("created = %+v, want tmdb default provider, not default, dlna off", created)
+	}
+
+	for name, body := range map[string]string{
+		"root outside library/": `{"kind":"tv","name":"X","root_path":"media/X"}`,
+		"root is library/":      `{"kind":"tv","name":"X","root_path":"library"}`,
+		"nested root":           `{"kind":"tv","name":"X","root_path":"library/Anime/Sub"}`,
+		"duplicate root":        `{"kind":"movie","name":"X","root_path":"library/Anime"}`,
+		"dotdot root":           `{"kind":"tv","name":"X","root_path":"library/../etc"}`,
+		"wrong provider":        `{"kind":"movie","name":"X","root_path":"library/X","provider":"stashbox"}`,
+		"unknown kind":          `{"kind":"music","name":"X","root_path":"library/X"}`,
+		"adult without module":  `{"kind":"adult","name":"X","root_path":"library/X"}`,
+		"empty name":            `{"kind":"tv","name":"  ","root_path":"library/X"}`,
+	} {
+		rec := do(t, h, http.MethodPost, "/api/v1/libraries", body)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400", name, rec.Code)
+		}
+	}
+
+	// Deleting: the fresh, empty, non-default library goes; the defaults stay.
+	rec = do(t, h, http.MethodDelete, "/api/v1/libraries/"+itoa(created.ID), "")
+	wantStatus(t, rec, http.StatusNoContent)
+
+	def, err := st.GetDefaultLibrary(context.Background(), core.LibraryKindTV)
+	if err != nil {
+		t.Fatalf("GetDefaultLibrary: %v", err)
+	}
+	rec = do(t, h, http.MethodDelete, "/api/v1/libraries/"+itoa(def.ID), "")
+	wantStatus(t, rec, http.StatusConflict)
+}
+
+// Deleting a library that still owns items is refused with the count-bearing
+// message; promoting another library moves the default flag transactionally;
+// and sharing a non-default library over DLNA is refused until the tree
+// learns per-library containers.
+func TestLibraryDefaultHandoffAndGuards(t *testing.T) {
+	ctx := context.Background()
+	h, st, _ := newTestServer(t)
+
+	rec := do(t, h, http.MethodPost, "/api/v1/libraries",
+		`{"kind":"tv","name":"Anime","root_path":"library/Anime"}`)
+	wantStatus(t, rec, http.StatusCreated)
+	var anime libraryJSON
+	decodeBody(t, rec, &anime)
+
+	sr := &core.Series{TMDBID: 7, Title: "Frieren", Kind: core.SeriesKindTV, LibraryID: anime.ID}
+	if err := st.UpsertSeries(ctx, sr); err != nil {
+		t.Fatalf("UpsertSeries: %v", err)
+	}
+	rec = do(t, h, http.MethodDelete, "/api/v1/libraries/"+itoa(anime.ID), "")
+	wantStatus(t, rec, http.StatusConflict)
+
+	rec = do(t, h, http.MethodPatch, "/api/v1/libraries/"+itoa(anime.ID), `{"dlna_visible":true}`)
+	wantStatus(t, rec, http.StatusBadRequest)
+
+	rec = do(t, h, http.MethodPatch, "/api/v1/libraries/"+itoa(anime.ID), `{"is_default":true}`)
+	wantStatus(t, rec, http.StatusOK)
+	def, err := st.GetDefaultLibrary(ctx, core.LibraryKindTV)
+	if err != nil {
+		t.Fatalf("GetDefaultLibrary: %v", err)
+	}
+	if def.ID != anime.ID {
+		t.Errorf("default tv library = %+v, want Anime promoted", def)
+	}
+	rec = do(t, h, http.MethodPatch, "/api/v1/libraries/"+itoa(anime.ID), `{"is_default":false}`)
+	wantStatus(t, rec, http.StatusBadRequest)
+}
+
+// The provider list is the create form's vocabulary. Without the adult module
+// it must not name a provider that serves only adult libraries: a picker
+// entry is a trace of a module whose promise is absence.
+func TestListProvidersOmitsAdultWithoutTheModule(t *testing.T) {
+	h, _, _ := newTestServer(t)
+	rec := do(t, h, http.MethodGet, "/api/v1/libraries/providers", "")
+	wantStatus(t, rec, http.StatusOK)
+	var body struct {
+		Providers []struct {
+			ID    string   `json:"id"`
+			Kinds []string `json:"kinds"`
+		} `json:"providers"`
+	}
+	decodeBody(t, rec, &body)
+	for _, p := range body.Providers {
+		if p.ID == core.ProviderStashbox {
+			t.Errorf("providers = %+v, want stashbox absent with the module off", body.Providers)
+		}
+		for _, k := range p.Kinds {
+			if k == core.LibraryKindAdult {
+				t.Errorf("provider %s lists the adult kind with the module off", p.ID)
+			}
+		}
+	}
+}
