@@ -647,9 +647,9 @@ func (s *server) handleSetupAdmin(w http.ResponseWriter, r *http.Request) {
 	}
 	defer s.logins.leave()
 
-	// Count and insert are serialized for this process. The first successful
-	// insert closes the open-server path before another request can pass this
-	// check, so this endpoint can never create a second account.
+	// Avoid duplicate Argon2id work within this process. CreateFirstAdmin still
+	// owns the correctness invariant: its conditional insert is atomic even
+	// against another server or Store handle that does not share this mutex.
 	s.setupMu.Lock()
 	defer s.setupMu.Unlock()
 	users, err := s.st.CountUsers(r.Context())
@@ -671,8 +671,8 @@ func (s *server) handleSetupAdmin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	user := &core.User{Username: username, PasswordHash: hash, Role: core.RoleAdmin}
-	if err := s.st.CreateUser(r.Context(), user); err != nil {
-		if errors.Is(err, store.ErrUsernameTaken) {
+	if err := s.st.CreateFirstAdmin(r.Context(), user); err != nil {
+		if errors.Is(err, store.ErrFirstUserExists) {
 			writeError(w, http.StatusForbidden, "administrator setup is already complete")
 			return
 		}

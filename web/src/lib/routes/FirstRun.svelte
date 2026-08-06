@@ -37,7 +37,8 @@
   let adminUsername = $state('');
   let adminPassword = $state('');
   let adminConfirm = $state('');
-  let accountReady = $state(false);
+  let accountCreated = $state(false);
+  let accountReady = $derived(accountCreated || system.status?.password_set === true);
   let accountError = $state<string | null>(null);
   let tmdbKey = $state('');
   let scanNow = $state(true);
@@ -116,7 +117,7 @@
     try {
       await api.setupAdmin(adminUsername.trim(), adminPassword);
       await session.refresh();
-      accountReady = true;
+      accountCreated = true;
       accountError = null;
     } catch (err) {
       accountError = errorText(err);

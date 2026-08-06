@@ -65,40 +65,120 @@ func TestSetupAdminRejectsWeakInput(t *testing.T) {
 	}
 }
 
-func TestSetupAdminSerializesConcurrentFirstRequests(t *testing.T) {
+func TestSetupAdminSerializesDistinctConcurrentFirstRequests(t *testing.T) {
 	h, st, _ := newTestServer(t)
-	const requests = 2
-	responses := make(chan int, requests)
+	usernames := []string{"alice", "bob"}
+	type result struct {
+		username string
+		status   int
+	}
+	responses := make(chan result, len(usernames))
+	start := make(chan struct{})
 	var wg sync.WaitGroup
-	wg.Add(requests)
-	for range requests {
+	for _, username := range usernames {
+		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			rec := do(t, h, http.MethodPost, "/api/v1/setup/admin", `{"username":"admin","password":"correct horse battery"}`)
-			responses <- rec.Code
+			<-start
+			rec := do(t, h, http.MethodPost, "/api/v1/setup/admin",
+				`{"username":`+quote(username)+`,"password":"correct horse battery"}`)
+			responses <- result{username: username, status: rec.Code}
 		}()
 	}
+	close(start)
 	wg.Wait()
 	close(responses)
+
 	created, forbidden := 0, 0
-	for status := range responses {
-		switch status {
+	var winner string
+	for response := range responses {
+		switch response.status {
 		case http.StatusCreated:
 			created++
+			winner = response.username
 		case http.StatusForbidden:
 			forbidden++
 		default:
-			t.Fatalf("concurrent setup status = %d, want 201 or 403", status)
+			t.Fatalf("concurrent setup status = %d, want 201 or 403", response.status)
 		}
 	}
 	if created != 1 || forbidden != 1 {
 		t.Fatalf("concurrent setup statuses = created %d, forbidden %d; want one each", created, forbidden)
 	}
-	if count, err := st.CountUsers(context.Background()); err != nil {
-		t.Fatalf("CountUsers: %v", err)
-	} else if count != 1 {
-		t.Fatalf("CountUsers after concurrent setup = %d, want 1", count)
+	users, err := st.ListUsers(context.Background())
+	if err != nil {
+		t.Fatalf("ListUsers: %v", err)
 	}
+	if len(users) != 1 || users[0].Username != winner || users[0].Role != core.RoleAdmin {
+		t.Fatalf("users = %+v, want only winning administrator %q", users, winner)
+	}
+}
+
+func TestSetupAdminWinsRaceWithOpenCreateUser(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	start := make(chan struct{})
+	type result struct {
+		endpoint string
+		status   int
+	}
+	responses := make(chan result, 2)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		<-start
+		rec := do(t, h, http.MethodPost, "/api/v1/setup/admin",
+			`{"username":"owner","password":"correct horse battery"}`)
+		responses <- result{endpoint: "setup", status: rec.Code}
+	}()
+	go func() {
+		defer wg.Done()
+		<-start
+		rec := do(t, h, http.MethodPost, "/api/v1/users",
+			`{"username":"attacker","password":"correct horse battery","role":"admin"}`)
+		responses <- result{endpoint: "users", status: rec.Code}
+	}()
+	close(start)
+	wg.Wait()
+	close(responses)
+
+	for response := range responses {
+		switch response.endpoint {
+		case "setup":
+			if response.status != http.StatusCreated {
+				t.Fatalf("POST /setup/admin status = %d, want 201", response.status)
+			}
+		case "users":
+			if response.status != http.StatusForbidden && response.status != http.StatusUnauthorized {
+				t.Fatalf("racing POST /users status = %d, want 403 before setup commits or 401 after", response.status)
+			}
+		}
+	}
+
+	users, err := st.ListUsers(context.Background())
+	if err != nil {
+		t.Fatalf("ListUsers: %v", err)
+	}
+	if len(users) != 1 || users[0].Username != "owner" || users[0].Role != core.RoleAdmin {
+		t.Fatalf("users = %+v, want exactly the setup administrator and no attacker account", users)
+	}
+	if admins, err := st.CountAdmins(context.Background()); err != nil {
+		t.Fatalf("CountAdmins: %v", err)
+	} else if admins != 1 {
+		t.Fatalf("CountAdmins = %d, want 1", admins)
+	}
+}
+
+func TestSetupAdminIsRateLimitedAtCapacity(t *testing.T) {
+	s := &server{logins: newLoginGuard()}
+	for range loginConcurrency {
+		s.logins.slots <- struct{}{}
+	}
+
+	rec := do(t, http.HandlerFunc(s.handleSetupAdmin), http.MethodPost, "/api/v1/setup/admin",
+		`{"username":"admin","password":"correct horse battery"}`)
+	wantStatus(t, rec, http.StatusTooManyRequests)
+	wantErrorBody(t, rec)
 }
 
 func TestNeedsSetupWaitsForStorageAfterAdministratorCreation(t *testing.T) {

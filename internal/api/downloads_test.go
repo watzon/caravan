@@ -33,6 +33,30 @@ func storeDownload(t *testing.T, st *store.Store, engineID core.DownloadID, titl
 	return d
 }
 
+func storeSeriesDownload(t *testing.T, st *store.Store, engineID core.DownloadID, title string, seriesID int64) core.Download {
+	t.Helper()
+	ctx := context.Background()
+	grab := core.Grab{
+		GrabInfo: core.GrabInfo{SeriesID: seriesID, ReleaseTitle: title},
+		Status:   core.GrabStatusGrabbed,
+	}
+	if err := st.InsertGrab(ctx, &grab); err != nil {
+		t.Fatalf("InsertGrab: %v", err)
+	}
+	download := core.Download{
+		GrabID:   grab.GrabID,
+		Engine:   "stub",
+		EngineID: engineID,
+		Title:    title,
+		State:    core.DownloadQueued,
+		Size:     100,
+	}
+	if err := st.UpsertDownload(ctx, &download); err != nil {
+		t.Fatalf("UpsertDownload: %v", err)
+	}
+	return download
+}
+
 type routeCursorStubEngine struct {
 	*stubEngine
 	pageLimits []int
@@ -306,6 +330,72 @@ func TestListDownloadsRejectsInvalidCursorParameters(t *testing.T) {
 	} {
 		rec := do(t, h, http.MethodGet, path, "")
 		wantStatus(t, rec, http.StatusBadRequest)
+	}
+}
+
+func TestListDownloadsRespectsAdultVisibility(t *testing.T) {
+	h, st, engine, _ := newAcquisitionServer(t)
+	ctx := context.Background()
+	setPassword(t, st, testPassword)
+	cookie := login(t, h, testAdmin, testPassword)
+
+	site := &core.Series{
+		Kind: core.SeriesKindAdult, StashID: "queue-site", Title: "Adult Site", SortTitle: "adult site",
+	}
+	if err := st.UpsertSeries(ctx, site); err != nil {
+		t.Fatalf("UpsertSeries(adult): %v", err)
+	}
+	show := &core.Series{
+		Kind: core.SeriesKindTV, TMDBID: 101, Title: "Family Show", SortTitle: "family show",
+	}
+	if err := st.UpsertSeries(ctx, show); err != nil {
+		t.Fatalf("UpsertSeries(tv): %v", err)
+	}
+
+	adult := storeSeriesDownload(t, st, "adult-download", "Explicit Adult Release", site.ID)
+	ordinary := storeSeriesDownload(t, st, "tv-download", "Family Show S01E01", show.ID)
+	orphan := storeDownload(t, st, "orphaned-grab", "Download With Missing Grab")
+	engine.statuses = []core.DownloadStatus{
+		{ID: adult.EngineID, Engine: adult.Engine, Name: adult.Title, State: core.DownloadDownloading},
+		{ID: ordinary.EngineID, Engine: ordinary.Engine, Name: ordinary.Title, State: core.DownloadDownloading},
+		{ID: orphan.EngineID, Engine: orphan.Engine, Name: orphan.Title, State: core.DownloadDownloading},
+		{ID: "engine-only", Engine: "stub", Name: "Engine-only Download", State: core.DownloadDownloading},
+	}
+
+	names := func(path string) map[string]bool {
+		t.Helper()
+		rec := doAuth(t, h, http.MethodGet, path, "", withCookie(cookie))
+		wantStatus(t, rec, http.StatusOK)
+		var body struct {
+			Downloads []downloadJSON `json:"downloads"`
+		}
+		decodeBody(t, rec, &body)
+		got := make(map[string]bool, len(body.Downloads))
+		for _, row := range body.Downloads {
+			got[row.Name] = true
+		}
+		return got
+	}
+
+	for _, path := range []string{"/api/v1/downloads", "/api/v1/downloads?limit=10"} {
+		got := names(path)
+		if got[adult.Title] {
+			t.Errorf("GET %s with adult disabled exposed %q: %v", path, adult.Title, got)
+		}
+		for _, want := range []string{ordinary.Title, orphan.Title, "Engine-only Download"} {
+			if !got[want] {
+				t.Errorf("GET %s with adult disabled omitted %q: %v", path, want, got)
+			}
+		}
+	}
+
+	if err := st.SetAdultEnabled(ctx, true); err != nil {
+		t.Fatalf("SetAdultEnabled: %v", err)
+	}
+	for _, path := range []string{"/api/v1/downloads", "/api/v1/downloads?limit=10"} {
+		if got := names(path); !got[adult.Title] {
+			t.Errorf("GET %s with adult enabled omitted %q: %v", path, adult.Title, got)
+		}
 	}
 }
 

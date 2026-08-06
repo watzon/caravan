@@ -104,23 +104,44 @@ func (s *server) handleListDownloads(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows := []core.Download(nil)
-	var nextStored int64
-	if cursor.stage == downloadCursorStored {
-		rows, nextStored, err = s.st.ListDownloadsPage(r.Context(), limit, cursor.storedBefore)
-	}
+	adultVisible, err := s.adultVisible(r)
 	if err != nil {
-		s.writeStoreError(w, "list download page", err)
+		s.writeStoreError(w, "read adult settings", err)
 		return
 	}
+	ownership := adultOwnershipFilter{server: s, adultVisible: adultVisible}
 	out := make([]downloadJSON, 0, limit)
-	for _, row := range rows {
-		dto := storedDownloadDTO(row)
-		if status, err := engine.Status(r.Context(), row.EngineID); err == nil {
-			applyLiveStatus(&dto, *status)
+	var nextStored int64
+	if cursor.stage == downloadCursorStored {
+		beforeID := cursor.storedBefore
+		for len(out) < limit {
+			rows, next, err := s.st.ListDownloadsPage(r.Context(), limit-len(out), beforeID)
+			if err != nil {
+				s.writeStoreError(w, "list download page", err)
+				return
+			}
+			for _, row := range rows {
+				visible, err := ownership.downloadVisible(r.Context(), row)
+				if err != nil {
+					s.writeStoreError(w, "resolve download ownership", err)
+					return
+				}
+				if !visible {
+					continue
+				}
+				dto := storedDownloadDTO(row)
+				if status, err := engine.Status(r.Context(), row.EngineID); err == nil {
+					applyLiveStatus(&dto, *status)
+				}
+				dto.Protocol = clients.ProtocolForEngine(dto.Engine)
+				out = append(out, dto)
+			}
+			nextStored = next
+			if next == 0 || len(out) == limit {
+				break
+			}
+			beforeID = next
 		}
-		dto.Protocol = clients.ProtocolForEngine(dto.Engine)
-		out = append(out, dto)
 	}
 
 	nextCursor := ""
@@ -163,6 +184,12 @@ func (s *server) handleListDownloads(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) writeLegacyDownloads(w http.ResponseWriter, r *http.Request) {
+	adultVisible, err := s.adultVisible(r)
+	if err != nil {
+		s.writeStoreError(w, "read adult settings", err)
+		return
+	}
+	ownership := adultOwnershipFilter{server: s, adultVisible: adultVisible}
 	rows, err := s.st.ListDownloads(r.Context())
 	if err != nil {
 		s.writeStoreError(w, "list downloads", err)
@@ -185,10 +212,20 @@ func (s *server) writeLegacyDownloads(w http.ResponseWriter, r *http.Request) {
 
 	out := make([]downloadJSON, 0, len(rows)+len(live))
 	for _, row := range rows {
+		status, liveOK := live[row.EngineID]
+		delete(live, row.EngineID)
+
+		visible, err := ownership.downloadVisible(r.Context(), row)
+		if err != nil {
+			s.writeStoreError(w, "resolve download ownership", err)
+			return
+		}
+		if !visible {
+			continue
+		}
 		dto := storedDownloadDTO(row)
-		if status, ok := live[row.EngineID]; ok {
+		if liveOK {
 			applyLiveStatus(&dto, status)
-			delete(live, row.EngineID)
 		}
 		dto.Protocol = clients.ProtocolForEngine(dto.Engine)
 		out = append(out, dto)
@@ -315,6 +352,24 @@ func (c downloadCursor) encode() string {
 	default:
 		return ""
 	}
+}
+
+// downloadVisible follows the persisted download-to-grab link instead of
+// inferring ownership from the engine category, save path, or release title.
+// An out-of-band download or a row whose historical grab is gone remains
+// visible because its ownership cannot be established.
+func (f *adultOwnershipFilter) downloadVisible(ctx context.Context, download core.Download) (bool, error) {
+	if f.adultVisible || download.GrabID == 0 {
+		return true, nil
+	}
+	grab, err := f.server.st.GetGrab(ctx, download.GrabID)
+	if errors.Is(err, store.ErrNotFound) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return f.ownerVisible(ctx, grab.MovieID, grab.SeriesID)
 }
 
 func storedDownloadDTO(d core.Download) downloadJSON {

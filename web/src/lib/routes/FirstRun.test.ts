@@ -30,6 +30,7 @@ const STATUS = {
   disk_free_bytes: 0,
   disk_total_bytes: 0,
   engine_health: 'ok',
+  ffmpeg_available: false,
 };
 
 interface Call {
@@ -143,6 +144,25 @@ describe('FirstRun', () => {
     expect(host.querySelector('#admin-username')).not.toBeNull();
     expect(host.querySelector('#storage-root')).not.toBeNull();
     expect(host.querySelector('#tmdb-key')).not.toBeNull();
+  });
+
+  it('resumes setup when system status says the administrator password is set', async () => {
+    system.status = { ...STATUS, storage_root: '', needs_setup: true, password_set: true };
+    mountWizard();
+
+    expect(host.textContent).toContain('Administrator account created');
+    expect(host.querySelector('#admin-username')).toBeNull();
+    expect(called('/setup/admin')).toHaveLength(0);
+    typeInto('#storage-root', '/data');
+
+    scanOff();
+    button('Skip for now').click();
+    flushSync();
+    button('Start Caravan').click();
+    await settle();
+
+    expect(called('/setup/admin')).toHaveLength(0);
+    expect(called('/storage-root/repoint')).toHaveLength(1);
   });
 
   // PLAN phase 10 task 6, and the module's whole promise: an install that has
@@ -319,8 +339,10 @@ describe('FirstRun', () => {
 
   // "I have not typed it yet" is not the same answer as "I am going without
   // one", and only the second one should get through.
-  it('blocks finishing setup until an administrator exists', async () => {
+  it('still requires account creation when system status says no password is set', async () => {
+    system.status = { ...STATUS, storage_root: '', needs_setup: true, password_set: false };
     mountWizard();
+    expect(host.querySelector('#admin-username')).not.toBeNull();
     typeInto('#storage-root', '/data');
     button('Skip for now').click();
     flushSync();

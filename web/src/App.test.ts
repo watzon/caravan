@@ -10,6 +10,7 @@ import App from './App.svelte';
 import { navigate } from './lib/router.svelte';
 import { discover } from './lib/state/discover.svelte';
 import { session } from './lib/state/session.svelte';
+import { system } from './lib/state/system.svelte';
 import { shutdown } from './lib/state/shutdown.svelte';
 import { SETTINGS_CATALOG, SETTINGS_CATEGORIES, settingsHref } from './lib/settings/catalog';
 import type {
@@ -191,11 +192,14 @@ function stubViewport(matches: boolean) {
 
 /** What /system/status answers this test; a test may swap it before mounting. */
 let statusBody: SystemStatus = STATUS;
+/** What /auth/me answers this test; a test may swap it before mounting. */
+let sessionBody = { username: '', role: 'admin', open: true };
 /** What GET /requests answers; the sidebar badge counts the pending ones. */
 let requestRows: MediaRequest[] = [];
 
 beforeEach(() => {
   statusBody = STATUS;
+  sessionBody = { username: '', role: 'admin', open: true };
   requestRows = [];
   // Most shell tests deliberately run without matchMedia, like SSR/jsdom.
   // Responsive cases install their own media-query result before mounting.
@@ -216,9 +220,7 @@ beforeEach(() => {
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       // The shell asks who it is talking as before anything else.
-      if (url.endsWith('/auth/me')) {
-        return jsonResponse({ username: '', role: 'admin', open: true });
-      }
+      if (url.endsWith('/auth/me')) return jsonResponse(sessionBody);
       if (url.endsWith('/system/status')) return jsonResponse(statusBody);
       // The list endpoints answer with a named envelope (internal/api).
       if (url.endsWith('/library/movies')) return jsonResponse({ movies: [MOVIE] });
@@ -834,14 +836,31 @@ describe('App shell', () => {
     expect(host.textContent).not.toContain('CARAVAN');
   });
 
-  it('prefers first run over login while the open server still needs setup', async () => {
-    statusBody = { ...STATUS, needs_setup: true };
+  it('requires account creation while a fresh open server still needs setup', async () => {
+    statusBody = { ...STATUS, storage_root: '', needs_setup: true, password_set: false };
 
     app = mount(App, { target: host });
     await settle();
 
     expect(window.location.pathname).toBe('/first-run');
     expect(host.textContent).toContain('Create your administrator account');
+    expect(host.querySelector('#admin-username')).not.toBeNull();
+    expect(host.textContent).not.toContain('Sign in');
+  });
+
+  it('resumes first run after reload for a signed-in administrator whose account already exists', async () => {
+    sessionBody = { username: 'admin', role: 'admin', open: false };
+    statusBody = { ...STATUS, storage_root: '', needs_setup: true, password_set: true };
+    system.status = null;
+    system.loading = true;
+    navigate('/first-run', { replace: true });
+
+    app = mount(App, { target: host });
+    await settle();
+
+    expect(window.location.pathname).toBe('/first-run');
+    expect(host.textContent).toContain('Administrator account created');
+    expect(host.querySelector('#admin-username')).toBeNull();
     expect(host.textContent).not.toContain('Sign in');
   });
 
