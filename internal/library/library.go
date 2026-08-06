@@ -68,7 +68,10 @@ type Manager struct {
 	// when the module is off" a property of one function rather than of every
 	// call site.
 	adult core.AdultMetadataProvider
-	root  string
+	// providers resolves a library's own provider choice; nil outside the
+	// full wiring. See metadataFor/adultFor for the fallback rule.
+	providers Providers
+	root      string
 
 	// parse turns a filename into a ParsedRelease. It is a field rather than a
 	// direct call so tests can drive matching and reconciliation with
@@ -146,8 +149,26 @@ type AdultNotifier interface {
 	AdultLibraryChanged(ctx context.Context, episodeIDs []int64) error
 }
 
+// Providers resolves a library's configured metadata provider by id
+// (core.ProviderDescriptor). It is an interface here for the reason Notifier
+// is: this package must not learn which clients exist or which settings build
+// them. Either method may return nil — an unknown id, or a provider whose
+// credential is not configured — and the caller degrades exactly as it does
+// for a nil Manager-level provider.
+type Providers interface {
+	Metadata(ctx context.Context, providerID string) core.MetadataProvider
+	Adult(ctx context.Context, providerID string) core.AdultMetadataProvider
+}
+
 // Option configures a Manager at construction.
 type Option func(*Manager)
+
+// WithProviders attaches the per-library provider registry. Without one,
+// every library resolves to the Manager-level providers (NewManager's mp and
+// WithAdultProvider), which is both the test seam and the pre-0022 behaviour.
+func WithProviders(p Providers) Option {
+	return func(m *Manager) { m.providers = p }
+}
 
 // WithNotifier attaches a playback handoff. Without one, imports simply do not
 // notify anything.

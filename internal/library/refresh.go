@@ -56,7 +56,11 @@ func (m *Manager) RefreshLibrary(ctx context.Context) (*RefreshResult, error) {
 		if !mv.Monitored || mv.TMDBID == 0 {
 			continue
 		}
-		meta, err := m.provider.GetMovie(ctx, mv.TMDBID)
+		lib, err := m.libraryByIDOrDefault(ctx, mv.LibraryID, core.LibraryKindMovie)
+		if err != nil {
+			return nil, err
+		}
+		meta, err := m.metadataFor(ctx, lib).GetMovie(ctx, mv.TMDBID)
 		if err != nil {
 			res.addErr("refresh movie %q: %v", mv.Title, err)
 			continue
@@ -87,7 +91,11 @@ func (m *Manager) RefreshLibrary(ctx context.Context) (*RefreshResult, error) {
 		if !sr.Monitored || sr.TMDBID == 0 {
 			continue
 		}
-		meta, err := m.provider.GetSeries(ctx, sr.TMDBID)
+		lib, err := m.seriesLibraryOf(ctx, &sr)
+		if err != nil {
+			return nil, err
+		}
+		meta, err := m.metadataFor(ctx, lib).GetSeries(ctx, sr.TMDBID)
 		if err != nil {
 			res.addErr("refresh series %q: %v", sr.Title, err)
 			continue

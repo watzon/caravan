@@ -31,14 +31,20 @@ import (
 // library it already lives in, because a move is an explicit operation, never
 // a side effect of an add (see libraries.go).
 func (m *Manager) AddMovie(ctx context.Context, tmdbID int64, minAvailability string, monitored *bool, libraryID int64) (*core.Movie, error) {
-	if m.provider == nil {
-		return nil, core.ErrNoMetadataProvider
-	}
 	if tmdbID <= 0 {
 		return nil, fmt.Errorf("library: invalid tmdb id %d", tmdbID)
 	}
+	// The library first, so its provider choice answers the metadata fetch.
+	lib, err := m.movieLibrary(ctx, tmdbID, "", libraryID)
+	if err != nil {
+		return nil, err
+	}
+	provider := m.metadataFor(ctx, lib)
+	if provider == nil {
+		return nil, core.ErrNoMetadataProvider
+	}
 
-	meta, err := m.provider.GetMovie(ctx, tmdbID)
+	meta, err := provider.GetMovie(ctx, tmdbID)
 	if err != nil {
 		return nil, fmt.Errorf("library: get movie %d: %w", tmdbID, err)
 	}
@@ -46,10 +52,6 @@ func (m *Manager) AddMovie(ctx context.Context, tmdbID int64, minAvailability st
 		return nil, fmt.Errorf("library: movie %d not found", tmdbID)
 	}
 
-	lib, err := m.movieLibrary(ctx, tmdbID, "", libraryID)
-	if err != nil {
-		return nil, err
-	}
 	mv, _, err := m.upsertMovieRow(ctx, meta, m.movieDir(lib, meta.Title, meta.Year), "", minAvailability, monitored, lib.ID)
 	return mv, err
 }
@@ -66,14 +68,19 @@ func (m *Manager) AddMovie(ctx context.Context, tmdbID int64, minAvailability st
 // semantics they have always had, because unmonitoring a whole tree row by row
 // would be a different decision from not following the series.
 func (m *Manager) AddSeries(ctx context.Context, tmdbID int64, monitored *bool, libraryID int64) (*core.Series, error) {
-	if m.provider == nil {
-		return nil, core.ErrNoMetadataProvider
-	}
 	if tmdbID <= 0 {
 		return nil, fmt.Errorf("library: invalid tmdb id %d", tmdbID)
 	}
+	lib, err := m.seriesLibrary(ctx, tmdbID, "", libraryID)
+	if err != nil {
+		return nil, err
+	}
+	provider := m.metadataFor(ctx, lib)
+	if provider == nil {
+		return nil, core.ErrNoMetadataProvider
+	}
 
-	meta, err := m.provider.GetSeries(ctx, tmdbID)
+	meta, err := provider.GetSeries(ctx, tmdbID)
 	if err != nil {
 		return nil, fmt.Errorf("library: get series %d: %w", tmdbID, err)
 	}
@@ -81,10 +88,6 @@ func (m *Manager) AddSeries(ctx context.Context, tmdbID int64, monitored *bool, 
 		return nil, fmt.Errorf("library: series %d not found", tmdbID)
 	}
 
-	lib, err := m.seriesLibrary(ctx, tmdbID, "", libraryID)
-	if err != nil {
-		return nil, err
-	}
 	sr, _, err := m.upsertSeriesRow(ctx, meta, m.seriesDir(lib, meta.Title, meta.Year), "", monitored, lib.ID)
 	if err != nil {
 		return nil, err

@@ -68,7 +68,13 @@ func (m *Manager) ImportUnmatched(ctx context.Context, unmatchedID, tmdbID int64
 
 	switch mediaType {
 	case MediaTypeMovie:
-		meta, err := m.provider.GetMovie(ctx, tmdbID)
+		// The same library the import below will resolve, so its provider
+		// choice answers the metadata fetch.
+		lib, err := m.movieLibrary(ctx, tmdbID, u.Path, 0)
+		if err != nil {
+			return nil, err
+		}
+		meta, err := m.metadataFor(ctx, lib).GetMovie(ctx, tmdbID)
 		if err != nil {
 			return nil, fmt.Errorf("library: get movie %d: %w", tmdbID, err)
 		}
@@ -84,7 +90,11 @@ func (m *Manager) ImportUnmatched(ctx context.Context, unmatchedID, tmdbID int64
 		if !u.Parsed.IsEpisode() {
 			return nil, fmt.Errorf("library: %q has no season/episode number to import as an episode", u.Path)
 		}
-		meta, err := m.provider.GetSeries(ctx, tmdbID)
+		lib, err := m.seriesLibrary(ctx, tmdbID, u.Path, 0)
+		if err != nil {
+			return nil, err
+		}
+		meta, err := m.metadataFor(ctx, lib).GetSeries(ctx, tmdbID)
 		if err != nil {
 			return nil, fmt.Errorf("library: get series %d: %w", tmdbID, err)
 		}

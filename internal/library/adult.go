@@ -123,7 +123,12 @@ func (m *Manager) addSite(ctx context.Context, stashID string, monitored *bool, 
 		return nil, fmt.Errorf("library: empty stash id")
 	}
 
-	meta, err := m.adult.GetSite(ctx, stashID)
+	// The library first, so its provider choice answers the metadata fetch.
+	lib, err := m.siteLibrary(ctx, stashID, "", libraryID)
+	if err != nil {
+		return nil, err
+	}
+	meta, err := m.adultFor(ctx, lib).GetSite(ctx, stashID)
 	if err != nil {
 		return nil, fmt.Errorf("library: get site %s: %w", stashID, err)
 	}
@@ -131,10 +136,6 @@ func (m *Manager) addSite(ctx context.Context, stashID string, monitored *bool, 
 		return nil, fmt.Errorf("library: site %s not found", stashID)
 	}
 
-	lib, err := m.siteLibrary(ctx, stashID, "", libraryID)
-	if err != nil {
-		return nil, err
-	}
 	sr, _, err := m.upsertSiteRow(ctx, meta, adultSeriesDir(lib, meta.Name), "", monitored, lib.ID)
 	if err != nil {
 		return nil, err
@@ -237,7 +238,11 @@ func (m *Manager) upsertSiteRow(ctx context.Context, meta *core.SiteMeta, dir, p
 // how a scene becomes an episode row is writeScenes' and numberScenes' job,
 // unchanged.
 func (m *Manager) syncSiteScenes(ctx context.Context, sr *core.Series) error {
-	return m.walkSiteScenes(ctx, sr.StashID, func(batch []core.SceneMeta) error {
+	lib, err := m.seriesLibraryOf(ctx, sr)
+	if err != nil {
+		return err
+	}
+	return m.walkSiteScenes(ctx, m.adultFor(ctx, lib), sr.StashID, func(batch []core.SceneMeta) error {
 		return m.writeScenes(ctx, sr, batch)
 	})
 }
@@ -276,7 +281,7 @@ type sceneBatch func([]core.SceneMeta) error
 // either way. A site whose whole catalogue sits in one year publishes once, at
 // the end — nothing can be numbered before its year is complete, and a
 // single-year site is a short walk anyway.
-func (m *Manager) walkSiteScenes(ctx context.Context, siteStashID string, flush sceneBatch) error {
+func (m *Manager) walkSiteScenes(ctx context.Context, provider core.AdultMetadataProvider, siteStashID string, flush sceneBatch) error {
 	seen := map[string]bool{}
 	// Scenes waiting for their year to be proven complete, keyed by that year,
 	// and lowest is the oldest year the walk has reached. Everything above it
@@ -327,7 +332,7 @@ func (m *Manager) walkSiteScenes(ctx context.Context, siteStashID string, flush 
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		result, err := m.adult.SearchScenes(ctx, core.SceneQuery{
+		result, err := provider.SearchScenes(ctx, core.SceneQuery{
 			SiteStashID: siteStashID,
 			Page:        page,
 			PerPage:     scenePageSize,
@@ -617,7 +622,11 @@ func (m *Manager) refreshSites(ctx context.Context, res *RefreshResult) error {
 		if !sr.Monitored || sr.StashID == "" {
 			continue
 		}
-		meta, err := m.adult.GetSite(ctx, sr.StashID)
+		lib, err := m.seriesLibraryOf(ctx, &sr)
+		if err != nil {
+			return err
+		}
+		meta, err := m.adultFor(ctx, lib).GetSite(ctx, sr.StashID)
 		if err != nil {
 			res.addErr("refresh site %q: %v", sr.Title, err)
 			continue
@@ -856,7 +865,7 @@ func grabCoversEpisode(grab core.GrabInfo, id int64) bool {
 // the site is new or when the date belongs to a scene the library has not seen
 // yet — once per site per scan, because a walk that found nothing would find
 // nothing again for the next file.
-func (m *Manager) matchAndImportScene(ctx context.Context, rel string, size int64, p core.ParsedRelease, res *ScanResult, park func(string)) (string, error) {
+func (m *Manager) matchAndImportScene(ctx context.Context, lib *core.Library, rel string, size int64, p core.ParsedRelease, res *ScanResult, park func(string)) (string, error) {
 	sr, err := m.adultSeriesByTitle(ctx, p.Title)
 	if err != nil {
 		return "", err
@@ -871,7 +880,7 @@ func (m *Manager) matchAndImportScene(ctx context.Context, rel string, size int6
 	}
 
 	if reason != "" && (sr == nil || !m.syncedSites[sr.ID]) {
-		sr, err = m.syncSiteFor(ctx, sr, p.Title, rel, res, park)
+		sr, err = m.syncSiteFor(ctx, lib, sr, p.Title, rel, res, park)
 		if err != nil || sr == nil {
 			return "", err
 		}
@@ -893,9 +902,9 @@ func (m *Manager) matchAndImportScene(ctx context.Context, rel string, size int6
 // file that prompted the sync: a brand-new site is created in the adult
 // library whose root holds it. It reports nil (having already parked) when
 // the site cannot be resolved at all.
-func (m *Manager) syncSiteFor(ctx context.Context, sr *core.Series, title, rel string, res *ScanResult, park func(string)) (*core.Series, error) {
+func (m *Manager) syncSiteFor(ctx context.Context, scanLib *core.Library, sr *core.Series, title, rel string, res *ScanResult, park func(string)) (*core.Series, error) {
 	if sr == nil {
-		sites, err := m.adult.SearchSites(ctx, title)
+		sites, err := m.adultFor(ctx, scanLib).SearchSites(ctx, title)
 		if err != nil {
 			res.addErr("search sites for %q: %v", title, err)
 			park(reasonProviderErr)

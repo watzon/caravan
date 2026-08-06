@@ -316,10 +316,10 @@ func (m *Manager) scanFile(ctx context.Context, rel string, size int64, res *Sca
 	case p.Confidence < m.minConfidence:
 		park(reasonLowParse)
 		return
-	case isScene && m.adult == nil:
+	case isScene && m.adultFor(ctx, lib) == nil:
 		park(reasonNoProvider)
 		return
-	case !isScene && m.provider == nil:
+	case !isScene && m.metadataFor(ctx, lib) == nil:
 		park(reasonNoProvider)
 		return
 	}
@@ -330,11 +330,11 @@ func (m *Manager) scanFile(ctx context.Context, rel string, size int64, res *Sca
 	)
 	switch {
 	case isScene:
-		finalRel, err = m.matchAndImportScene(ctx, rel, size, p, res, park)
+		finalRel, err = m.matchAndImportScene(ctx, lib, rel, size, p, res, park)
 	case isEpisode:
-		finalRel, err = m.matchAndImportEpisode(ctx, rel, size, p, res, park)
+		finalRel, err = m.matchAndImportEpisode(ctx, lib, rel, size, p, res, park)
 	default:
-		finalRel, err = m.matchAndImportMovie(ctx, rel, size, p, res, park)
+		finalRel, err = m.matchAndImportMovie(ctx, lib, rel, size, p, res, park)
 	}
 	if err != nil {
 		res.addErr("import %s: %v", rel, err)
@@ -356,11 +356,11 @@ func (m *Manager) scanFile(ctx context.Context, rel string, size int64, res *Sca
 	}
 }
 
-// matchAndImportMovie searches the provider for rel's parsed title and imports
-// the winner. A provider failure or a weak match parks the file rather than
-// failing the scan.
-func (m *Manager) matchAndImportMovie(ctx context.Context, rel string, size int64, p core.ParsedRelease, res *ScanResult, park func(string)) (string, error) {
-	results, err := m.provider.SearchMovies(ctx, p.Title)
+// matchAndImportMovie searches the file's library's provider for rel's parsed
+// title and imports the winner. A provider failure or a weak match parks the
+// file rather than failing the scan.
+func (m *Manager) matchAndImportMovie(ctx context.Context, lib *core.Library, rel string, size int64, p core.ParsedRelease, res *ScanResult, park func(string)) (string, error) {
+	results, err := m.metadataFor(ctx, lib).SearchMovies(ctx, p.Title)
 	if err != nil {
 		res.addErr("search movies for %s: %v", rel, err)
 		park(reasonProviderErr)
@@ -385,8 +385,9 @@ func (m *Manager) matchAndImportMovie(ctx context.Context, rel string, size int6
 // matchAndImportEpisode is matchAndImportMovie's series twin. It resolves the
 // full series details after the search, because episode titles and the season
 // tree only come back from GetSeries.
-func (m *Manager) matchAndImportEpisode(ctx context.Context, rel string, size int64, p core.ParsedRelease, res *ScanResult, park func(string)) (string, error) {
-	results, err := m.provider.SearchSeries(ctx, p.Title)
+func (m *Manager) matchAndImportEpisode(ctx context.Context, lib *core.Library, rel string, size int64, p core.ParsedRelease, res *ScanResult, park func(string)) (string, error) {
+	provider := m.metadataFor(ctx, lib)
+	results, err := provider.SearchSeries(ctx, p.Title)
 	if err != nil {
 		res.addErr("search series for %s: %v", rel, err)
 		park(reasonProviderErr)
@@ -404,7 +405,7 @@ func (m *Manager) matchAndImportEpisode(ctx context.Context, rel string, size in
 	}
 
 	meta := results[idx]
-	full, err := m.provider.GetSeries(ctx, meta.TMDBID)
+	full, err := provider.GetSeries(ctx, meta.TMDBID)
 	if err != nil {
 		res.addErr("get series %d for %s: %v", meta.TMDBID, rel, err)
 		park(reasonProviderErr)

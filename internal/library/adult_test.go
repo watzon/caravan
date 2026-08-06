@@ -456,7 +456,7 @@ func TestRefreshLibraryDoesNotSendSitesToTMDB(t *testing.T) {
 func (a *adultHarness) collectScenes(id string) []core.SceneMeta {
 	a.t.Helper()
 	var out []core.SceneMeta
-	err := a.mgr.walkSiteScenes(context.Background(), id, func(batch []core.SceneMeta) error {
+	err := a.mgr.walkSiteScenes(context.Background(), a.mgr.adult, id, func(batch []core.SceneMeta) error {
 		out = append(out, batch...)
 		return nil
 	})

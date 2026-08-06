@@ -508,7 +508,11 @@ func (m *Manager) movieMeta(ctx context.Context, movieID int64) (*core.MovieMeta
 		return nil, fmt.Sprintf("movie %q has no TMDB id to import against", mv.Title), nil
 	}
 
-	meta, err := m.provider.GetMovie(ctx, mv.TMDBID)
+	lib, err := m.libraryByIDOrDefault(ctx, mv.LibraryID, core.LibraryKindMovie)
+	if err != nil {
+		return nil, "", err
+	}
+	meta, err := m.metadataFor(ctx, lib).GetMovie(ctx, mv.TMDBID)
 	if err != nil {
 		return nil, "", fmt.Errorf("library: get movie %d: %w", mv.TMDBID, err)
 	}
@@ -535,7 +539,11 @@ func (m *Manager) seriesMeta(ctx context.Context, seriesID int64) (*core.SeriesM
 		return nil, fmt.Sprintf("series %q has no TMDB id to import against", sr.Title), nil
 	}
 
-	meta, err := m.provider.GetSeries(ctx, sr.TMDBID)
+	lib, err := m.seriesLibraryOf(ctx, sr)
+	if err != nil {
+		return nil, "", err
+	}
+	meta, err := m.metadataFor(ctx, lib).GetSeries(ctx, sr.TMDBID)
 	if err != nil {
 		return nil, "", fmt.Errorf("library: get series %d: %w", sr.TMDBID, err)
 	}

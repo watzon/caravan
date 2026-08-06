@@ -135,3 +135,32 @@ func (m *Manager) siteLibrary(ctx context.Context, stashID, rel string, targetID
 func (m *Manager) seriesLibraryOf(ctx context.Context, sr *core.Series) (*core.Library, error) {
 	return m.libraryByIDOrDefault(ctx, sr.LibraryID, core.LibraryKindForSeries(sr.Kind))
 }
+
+// metadataFor resolves the metadata provider that answers for one library:
+// the library's own choice through the registry when both exist, the
+// Manager-level provider otherwise.
+//
+// The fallback runs even with a registry wired, because the two are built
+// from the same settings in the full wiring — a registry that answers nil for
+// a library's id means "not configured", which is exactly what a nil
+// Manager-level provider means, and every caller already degrades on nil
+// (park the file, refuse the add).
+func (m *Manager) metadataFor(ctx context.Context, lib *core.Library) core.MetadataProvider {
+	if m.providers != nil && lib != nil && lib.Provider != "" {
+		if p := m.providers.Metadata(ctx, lib.Provider); p != nil {
+			return p
+		}
+	}
+	return m.provider
+}
+
+// adultFor is metadataFor's adult twin. It does NOT replace adultReady: the
+// module switch is a global gate and stays one.
+func (m *Manager) adultFor(ctx context.Context, lib *core.Library) core.AdultMetadataProvider {
+	if m.providers != nil && lib != nil && lib.Provider != "" {
+		if p := m.providers.Adult(ctx, lib.Provider); p != nil {
+			return p
+		}
+	}
+	return m.adult
+}

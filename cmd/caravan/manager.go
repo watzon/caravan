@@ -103,7 +103,31 @@ func (a *libraryAdapter) current(ctx context.Context) (*library.Manager, error) 
 		library.WithNotifier(a.notify),
 		library.WithAdultNotifier(a.notifyAdult),
 		library.WithAdultProvider(a.adultMetadata(ctx)),
+		library.WithProviders(providerRegistry{a}),
 	), nil
+}
+
+// providerRegistry resolves a library's configured provider id to a client
+// (library.Providers). It is a separate type because libraryAdapter already
+// answers api.Manager's argument-less Metadata. The ids come from core's
+// registry, the clients from the same cached builders the Manager-level
+// fields use, so the registry and the fallback can never answer differently
+// for the ids that exist today. An unknown id is a genuine untyped nil, for
+// the reason the builders' own nils are.
+type providerRegistry struct{ a *libraryAdapter }
+
+func (p providerRegistry) Metadata(ctx context.Context, providerID string) core.MetadataProvider {
+	if providerID == core.ProviderTMDB {
+		return p.a.metadata(ctx)
+	}
+	return nil
+}
+
+func (p providerRegistry) Adult(ctx context.Context, providerID string) core.AdultMetadataProvider {
+	if providerID == core.ProviderStashbox {
+		return p.a.adultMetadata(ctx)
+	}
+	return nil
 }
 
 // adultMetadata returns the stash-box provider, or nil.

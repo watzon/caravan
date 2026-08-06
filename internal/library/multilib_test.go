@@ -116,3 +116,51 @@ func TestAddTargetsTheChosenLibrary(t *testing.T) {
 		t.Errorf("re-add moved the series to {library %d, path %q}, want it kept in Anime", again.LibraryID, again.Path)
 	}
 }
+
+// fakeRegistry answers provider ids with canned providers and records what
+// was asked, so a test can prove WHICH library's provider choice served a
+// request.
+type fakeRegistry struct {
+	metadata map[string]core.MetadataProvider
+	asked    []string
+}
+
+func (f *fakeRegistry) Metadata(_ context.Context, id string) core.MetadataProvider {
+	f.asked = append(f.asked, id)
+	return f.metadata[id]
+}
+
+func (f *fakeRegistry) Adult(_ context.Context, _ string) core.AdultMetadataProvider { return nil }
+
+// A library's provider column names which client refreshes its items: an add
+// into a library configured with a second provider id resolves that id
+// through the registry, while the default library keeps the fallback.
+func TestAddResolvesTheLibrarysOwnProvider(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+
+	other := &stubProvider{
+		seriesByID: map[int64]core.SeriesMeta{
+			99: {TMDBID: 99, Title: "Frieren", Year: 2023},
+		},
+	}
+	reg := &fakeRegistry{metadata: map[string]core.MetadataProvider{"other": other}}
+	h.mgr.providers = reg
+
+	anime := &core.Library{Kind: core.LibraryKindTV, Name: "Anime",
+		RootPath: "library/Anime", Provider: "other"}
+	if err := h.st.CreateLibrary(ctx, anime); err != nil {
+		t.Fatalf("CreateLibrary: %v", err)
+	}
+
+	sr, err := h.mgr.AddSeries(ctx, 99, nil, anime.ID)
+	if err != nil {
+		t.Fatalf("AddSeries: %v", err)
+	}
+	if sr.Title != "Frieren" {
+		t.Errorf("added series = %+v, want the registry provider's answer", sr)
+	}
+	if len(reg.asked) == 0 || reg.asked[len(reg.asked)-1] != "other" {
+		t.Errorf("registry asked for %v, want the library's own provider id", reg.asked)
+	}
+}
