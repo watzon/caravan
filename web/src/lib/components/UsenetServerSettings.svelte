@@ -330,13 +330,15 @@
         {@const result = tests[server.id]}
         <li class="flex flex-wrap items-center gap-3 rounded-md border border-border bg-surface px-3 py-3">
           <span
+            aria-hidden="true"
             class="size-2 shrink-0 rounded-full {server.enabled ? 'bg-success' : 'bg-ink-muted'}">
           </span>
-          <span class="sr-only">{server.enabled ? 'Enabled' : 'Disabled'}</span>
 
           <div class="min-w-0 flex-1">
             <p class="flex flex-wrap items-center gap-2">
-              <span class="truncate text-base font-medium text-ink">{server.name}</span>
+              <span class="truncate text-base font-medium text-ink" title={server.name}>
+                {server.name}
+              </span>
               <Badge mono tone={server.tls ? 'accent' : 'warning'}>
                 {server.tls ? 'TLS' : 'Plaintext'}
               </Badge>
@@ -344,11 +346,13 @@
                 {server.max_connections} conn
               </Badge>
               <Badge mono tone="neutral">Priority {server.priority}</Badge>
-              {#if !server.enabled}
-                <Badge tone="neutral">Disabled</Badge>
-              {/if}
+              <Badge tone={server.enabled ? 'success' : 'neutral'}>
+                {server.enabled ? 'Enabled' : 'Disabled'}
+              </Badge>
             </p>
-            <p class="truncate font-mono text-xs text-ink-muted" title="{server.host}:{server.port}">
+            <p
+              class="truncate font-mono text-xs text-ink-muted"
+              title={`${server.host}:${server.port}${server.username ? ` · ${server.username}` : ''}`}>
               {server.host}:{server.port}
               {#if server.username}· {server.username}{/if}
             </p>
@@ -484,7 +488,9 @@
           {formTesting ? 'Testing…' : 'Test'}
         </Button>
         {#if formTest}
-          <p class="truncate text-sm {formTest.ok ? 'text-success' : 'text-danger'}">
+          <p
+            class="truncate text-sm {formTest.ok ? 'text-success' : 'text-danger'}"
+            title={formTest.message}>
             {formTest.ok ? '✓ ' : '✕ '}{formTest.message}
           </p>
         {/if}

@@ -66,6 +66,7 @@ describe('Poster', () => {
     flushSync();
     expect(img()).toBeNull();
     expect(target!.querySelector('svg')).not.toBeNull();
+    expect(target!.querySelector('[role="img"]')?.getAttribute('aria-label')).toBe('poster');
   });
 
   it('uses the provider URL directly when there is no local poster', () => {

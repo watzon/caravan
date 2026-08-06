@@ -155,9 +155,9 @@
   {#if error}
     <LoadError message={error} onretry={load} />
   {:else if loading && series === null}
-    <div class="flex gap-6">
+    <div class="flex flex-col gap-6 md:flex-row">
       <Skeleton class="aspect-[2/3] w-52 rounded-md" />
-      <div class="flex flex-1 flex-col gap-3">
+      <div class="flex min-w-0 flex-1 flex-col gap-3">
         <Skeleton class="h-8 w-1/2" />
         <Skeleton class="h-4 w-1/4" />
         <Skeleton class="h-20 w-full" />
@@ -189,7 +189,7 @@
               <MetadataLinks links={seriesLinks(current)} />
             </div>
           </div>
-          <div class="flex items-center gap-3">
+          <div class="flex w-full flex-wrap items-center gap-3 sm:w-auto">
             <Button variant="primary" disabled={searching} onclick={searchNow}>
               <Icon name="search" size={14} />
               {searching ? 'Searching…' : 'Search now'}
@@ -262,10 +262,10 @@
           {@const episodes = episodesOf(season)}
           {@const isCollapsed = collapsed[season.season_number] ?? false}
           <section class="overflow-hidden rounded-md border border-border">
-            <header class="flex items-center gap-3 bg-surface px-3 py-2">
+            <header class="flex flex-wrap items-center gap-3 bg-surface px-3 py-2">
               <button
                 type="button"
-                class="flex min-w-0 flex-1 items-center gap-2 text-left"
+                class="flex w-full min-w-0 items-center gap-2 text-left sm:w-auto sm:flex-1"
                 aria-expanded={!isCollapsed}
                 onclick={() =>
                   (collapsed = { ...collapsed, [season.season_number]: !isCollapsed })}>

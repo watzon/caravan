@@ -140,8 +140,10 @@
         aria-hidden="true">
         {monogram}
       </span>
-      <div class="min-w-0">
-        <h2 class="truncate font-display text-xl font-semibold tracking-tight text-ink">
+      <div class="min-w-0 flex-1">
+        <h2
+          class="truncate font-display text-xl font-semibold tracking-tight text-ink"
+          title={sourceName || undefined}>
           {sourceName || 'Loading…'}
         </h2>
         <!-- No catalogue count: TMDB's is the whole catalogue, not what

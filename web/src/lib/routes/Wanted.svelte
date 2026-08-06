@@ -201,7 +201,7 @@
                     onclick={() => movieSelection.toggle(movie.id)}></button>
                 {/if}
                 <div
-                  class="relative z-20 flex min-w-0 flex-1 items-center gap-3
+                  class="relative z-20 flex min-w-0 flex-1 flex-wrap items-center gap-3
                          {selectionActive ? 'pointer-events-none' : ''}">
                   {#if selectionActive}
                     <span
@@ -231,9 +231,9 @@
                   <div class="w-9 shrink-0">
                     <Poster path={movie.poster_path} fallback={movie.poster_url} alt={movie.title} />
                   </div>
-                  <div class="min-w-0 flex-1">
-                    <p class="truncate font-medium text-ink">{titleWithYear(movie.title, movie.year)}</p>
-                    <p class="mt-0.5 truncate text-sm text-ink-secondary">{detail(movie)}</p>
+                  <div class="min-w-0 basis-40 flex-1">
+                    <p class="truncate font-medium text-ink" title={titleWithYear(movie.title, movie.year)}>{titleWithYear(movie.title, movie.year)}</p>
+                    <p class="mt-0.5 truncate text-sm text-ink-secondary" title={detail(movie)}>{detail(movie)}</p>
                   </div>
                   <Badge tone={movie.reason === 'missing' ? 'danger' : 'warning'}>{movie.reason === 'missing' ? 'Missing' : 'Below quality cutoff'}</Badge>
                   {#if !selectionActive}
@@ -263,7 +263,7 @@
                     onclick={() => episodeSelection.toggle(episode.id)}></button>
                 {/if}
                 <div
-                  class="relative z-20 flex min-w-0 flex-1 items-center gap-3
+                  class="relative z-20 flex min-w-0 flex-1 flex-wrap items-center gap-3
                          {selectionActive ? 'pointer-events-none' : ''}">
                   {#if selectionActive}
                     <span
@@ -295,11 +295,13 @@
                       alt={episode.series_title}
                       fallbackIcon="tv" />
                   </div>
-                  <div class="min-w-0 flex-1">
-                    <p class="truncate font-medium text-ink">
+                  <div class="min-w-0 basis-40 flex-1">
+                    <p
+                      class="truncate font-medium text-ink"
+                      title="{episode.series_title} - {episodeCode(episode.season_number, episode.episode_number)} - {episode.title}">
                       {episode.series_title} - {episodeCode(episode.season_number, episode.episode_number)} - {episode.title}
                     </p>
-                    <p class="mt-0.5 truncate text-sm text-ink-secondary">{detail(episode)}</p>
+                    <p class="mt-0.5 truncate text-sm text-ink-secondary" title={detail(episode)}>{detail(episode)}</p>
                   </div>
                   <Badge tone={episode.reason === 'missing' ? 'danger' : 'warning'}>{episode.reason === 'missing' ? 'Missing' : 'Below quality cutoff'}</Badge>
                   {#if !selectionActive}
@@ -314,7 +316,7 @@
     </div>
   {/if}
   {#if selectionActive}
-    <div class="pointer-events-none fixed bottom-6 left-60 right-0 z-40 flex justify-center">
+    <div class="pointer-events-none fixed bottom-6 left-0 right-0 z-40 flex justify-center px-3 md:left-60">
       <div
         class="pointer-events-auto flex items-center gap-1 rounded-lg border border-border-strong
                bg-overlay py-1.5 pl-4 pr-1.5 shadow-2xl"

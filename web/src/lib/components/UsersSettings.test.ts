@@ -138,6 +138,21 @@ describe('Users settings', () => {
     expect(rows[1]).toContain('MEMBER');
     // A hash has nowhere to appear, but neither does the word.
     expect(host.textContent?.toLowerCase()).not.toContain('argon2id$');
+    expect(host.querySelector('span[title="root"]')?.textContent).toBe('root');
+    expect(host.querySelector('span[title="ada"]')?.textContent).toBe('ada');
+
+    const deleteButtons = [...host.querySelectorAll<HTMLButtonElement>('li button')].filter((candidate) =>
+      candidate.textContent?.includes('Delete'),
+    );
+    expect(deleteButtons.map((candidate) => candidate.textContent?.trim())).toEqual([
+      'Delete root',
+      'Delete ada',
+    ]);
+    expect(deleteButtons[0]?.title).toBe(
+      'The only admin cannot be deleted while other accounts exist',
+    );
+    expect(deleteButtons[1]?.title).toBe('Delete ada');
+    expect(deleteButtons[1]?.parentElement?.classList.contains('w-full')).toBe(true);
   });
 
   it('creates an account with a username, a password and a role', async () => {

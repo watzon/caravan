@@ -127,7 +127,7 @@ function cards(): HTMLElement[] {
 /** The per-card check circle that starts a selection. */
 async function select(title: string) {
   const circle = host.querySelector<HTMLButtonElement>(
-    `button[aria-label="Select ${title} (2022)"]`,
+    `button[aria-label^="Select ${title} (2022), "]`,
   );
   expect(circle, `the select circle on ${title}`).toBeTruthy();
   circle!.click();
@@ -160,6 +160,15 @@ describe('Series grid selection', () => {
     expect(host.querySelector('a[href="/series/2"]')).toBeTruthy();
     expect(cards()).toHaveLength(0);
     expect(host.querySelectorAll('button[aria-label^="Select "]')).toHaveLength(2);
+  });
+
+  it('labels the sort and title filter controls', async () => {
+    await open();
+
+    expect(sortSelect().getAttribute('aria-label')).toBe('Sort series');
+    expect(
+      host.querySelector<HTMLInputElement>('input[type="search"]')?.getAttribute('aria-label'),
+    ).toBe('Filter series by title');
   });
 
   it('unmonitors the selection through the series endpoints', async () => {
@@ -229,7 +238,7 @@ describe('Series grid selection', () => {
     expect(router.params.get('layout')).toBe('compact');
     expect(filterChip('Unmonitored').getAttribute('aria-pressed')).toBe('true');
     expect(cards().map((card) => card.getAttribute('aria-label'))).toEqual([
-      'Andor (2022)',
+      'Andor (2022), Unmonitored',
     ]);
     expect(cards()[0]?.getAttribute('aria-pressed')).toBe('true');
 

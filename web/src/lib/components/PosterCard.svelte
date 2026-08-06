@@ -13,8 +13,8 @@
    * middle-click, and the circle drops to a decoration because the whole card
    * is the control.
    */
-  import { titleWithYear } from '../format';
-  import type { StatusKey } from '../status';
+  import { UNKNOWN, titleWithYear } from '../format';
+  import { STATUS, type StatusKey } from '../status';
   import Badge from './Badge.svelte';
   import Icon from './Icon.svelte';
   import Poster from './Poster.svelte';
@@ -60,6 +60,9 @@
     ontoggle,
   }: Props = $props();
 
+  let subtitle = $derived(`${year > 0 ? year : UNKNOWN}${note ? ` · ${note}` : ''}`);
+  let accessibleName = $derived(`${titleWithYear(title, year)}, ${STATUS[status].label}`);
+
   const SHELL = 'group/card flex w-full flex-col gap-2 rounded-md text-left focus:outline-none';
 
   const CIRCLE = `flex size-5 items-center justify-center rounded-full border
@@ -80,11 +83,10 @@
       fit={posterFit}
       aspect={posterAspect} />
 
-    <!-- flex, not inline: line-height would stretch the circle into a pill. -->
     <span
-      class="absolute left-2 top-2 flex items-center justify-center rounded-full
-             border border-border-strong bg-bg p-1.5">
-      <StatusDot {status} showLabel={false} />
+      class="absolute left-2 top-2 flex items-center rounded-md border border-border-strong
+             bg-bg px-2 py-1">
+      <StatusDot {status} />
     </span>
 
     {#if selectable}
@@ -106,9 +108,7 @@
 
   <div class="min-w-0">
     <p class="truncate text-sm font-medium text-ink" title={title}>{title}</p>
-    <p class="truncate text-sm text-ink-secondary">
-      {year > 0 ? year : '—'}{note ? ` · ${note}` : ''}
-    </p>
+    <p class="truncate text-sm text-ink-secondary" title={subtitle}>{subtitle}</p>
   </div>
 {/snippet}
 
@@ -117,13 +117,13 @@
     type="button"
     class={SHELL}
     aria-pressed={selected}
-    aria-label={titleWithYear(title, year)}
+    aria-label={accessibleName}
     onclick={() => ontoggle?.()}>
     {@render card()}
   </button>
 {:else}
   <div class="group/card relative">
-    <a {href} class={SHELL} aria-label={titleWithYear(title, year)}>
+    <a {href} class={SHELL} aria-label={accessibleName}>
       {@render card()}
     </a>
     {#if ontoggle}
@@ -132,7 +132,7 @@
         class="{CIRCLE} absolute right-2 top-2 z-10 border-border-strong bg-bg text-ink-secondary
                opacity-0 hover:border-accent hover:text-accent focus-visible:opacity-100
                group-hover/card:opacity-100 group-focus-within/card:opacity-100 pointer-coarse:opacity-100"
-        aria-label="Select {titleWithYear(title, year)}"
+        aria-label="Select {accessibleName}"
         onclick={() => ontoggle?.()}>
         <Icon name="check" size={12} />
       </button>

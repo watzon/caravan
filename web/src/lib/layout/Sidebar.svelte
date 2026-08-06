@@ -247,6 +247,7 @@
    * costs no upstream call however often the card refreshes.
    */
   let credentialLabel = $derived(metadataStateLabel(system.metadataCredential));
+  let signOutLabel = $derived(auth.busy ? 'Signing out…' : `Sign out ${session.username}`);
 
   let settingsMode = $derived(settingsSection !== undefined);
   let activeSettingsEntry = $derived(
@@ -443,9 +444,9 @@
           title={status?.storage_root}>
           {status?.storage_root || 'no storage root'}
         </span>
-        <div class="flex items-center justify-between gap-2 text-xs">
+        <div class="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-xs">
           <span class="text-ink-secondary">Disk used</span>
-          <span class="shrink-0 font-mono text-ink-secondary">
+          <span class="min-w-0 font-mono text-ink-secondary">
             {diskUsage
               ? `${formatBytes(diskUsage.used)} used · ${formatBytes(diskUsage.free)} free`
               : 'Unknown'}
@@ -471,11 +472,11 @@
       <Button
         variant="ghost"
         size="sm"
-        class="w-full justify-start"
+        class="w-full min-w-0 justify-start"
         disabled={auth.busy}
         onclick={() => auth.logout()}>
         <Icon name="back" size={14} />
-        <span>{auth.busy ? 'Signing out…' : `Sign out ${session.username}`}</span>
+        <span class="min-w-0 truncate" title={signOutLabel}>{signOutLabel}</span>
       </Button>
     {/if}
   </div>

@@ -261,6 +261,10 @@ describe('AdultSettings', () => {
     expect(switches()).toHaveLength(2);
     const memberSwitch = toggle(1);
     expect(memberSwitch.getAttribute('aria-checked')).toBe('false');
+    expect(memberSwitch.getAttribute('aria-label')).toBe('Adult content for ada');
+    expect(memberSwitch.getAttribute('title')).toBe('Adult content for ada');
+    expect(memberSwitch.parentElement?.classList.contains('w-full')).toBe(true);
+    expect(host.querySelector('span[title="ada"]')?.textContent).toBe('ada');
 
     memberSwitch.click();
     await settle();

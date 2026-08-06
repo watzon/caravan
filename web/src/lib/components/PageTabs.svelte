@@ -14,12 +14,11 @@
   let { tabs, active, onchange, ariaLabel }: Props = $props();
 </script>
 
-<div class="flex gap-2 border-b border-border" role="tablist" aria-label={ariaLabel}>
+<div class="flex gap-2 border-b border-border" role="group" aria-label={ariaLabel}>
   {#each tabs as item (item.key)}
     <button
       type="button"
-      role="tab"
-      aria-selected={active === item.key}
+      aria-pressed={active === item.key}
       onclick={() => onchange(item.key)}
       class="-mb-px flex items-center gap-1.5 border-b-2 px-3 py-2 text-base transition-colors duration-150 ease-out
              {active === item.key

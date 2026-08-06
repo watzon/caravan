@@ -123,8 +123,17 @@ describe('DlnaSettings', () => {
 
     expect(nameInput().value).toBe('Caravan');
     expect(host.querySelector('[role="switch"]')?.getAttribute('aria-checked')).toBe('true');
-    expect(host.textContent).toContain('Advertising');
+    const advertisingStatuses = [...host.querySelectorAll('span')].filter(
+      (element) => element.textContent?.trim() === 'Advertising',
+    );
+    expect(advertisingStatuses).toHaveLength(1);
+    expect(advertisingStatuses[0]?.closest('dd')).not.toBeNull();
+    expect(advertisingStatuses[0]?.classList.contains('sr-only')).toBe(false);
     expect(host.textContent).toContain('1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed');
+    const deviceID = [...host.querySelectorAll('dd')].find(
+      (element) => element.textContent?.trim() === ADVERTISING.uuid,
+    );
+    expect(deviceID?.getAttribute('title')).toBe(ADVERTISING.uuid);
   });
 
   it('saves the toggle and the trimmed name through the settings flow', async () => {

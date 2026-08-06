@@ -114,16 +114,19 @@
 
       <Field
         label="Endpoint"
-        for="adult-enable-endpoint"
-        help="The provider's GraphQL endpoint. The preset follows Caravan's default; pick Custom to point at your own stash-box.">
+        for="adult-enable-endpoint">
         <select
           id="adult-enable-endpoint"
+          aria-describedby="adult-enable-endpoint-help"
           value={preset ? 'tpdb' : 'custom'}
           onchange={(event) => (preset = event.currentTarget.value === 'tpdb')}
           class={SELECT_CLASS}>
           <option value="tpdb">ThePornDB — {STASHBOX_TPDB_ENDPOINT}</option>
           <option value="custom">Custom stash-box…</option>
         </select>
+        <p id="adult-enable-endpoint-help" class="text-sm text-ink-secondary">
+          The provider's GraphQL endpoint. The preset follows Caravan's default; pick Custom to point at your own stash-box.
+        </p>
       </Field>
 
       {#if !preset}
@@ -184,7 +187,7 @@
       </ul>
 
       {#if error}
-        <p class="text-sm text-danger">{error}</p>
+        <p class="text-sm text-danger" role="alert">{error}</p>
       {/if}
     {/if}
   </div>

@@ -113,6 +113,31 @@ async function mountBrowse() {
 }
 
 describe('DiscoverBrowse — paging', () => {
+  it('exposes the complete source name when the heading truncates', async () => {
+    const sourceName = 'A Curated Network Name That Is Longer Than the Browse Header';
+    served = (page) => ({
+      ...pageBody(page),
+      source: { id: 213, name: sourceName, type: 'network' as const },
+    });
+
+    await mountBrowse();
+
+    expect(host.querySelector('h2.truncate')?.getAttribute('title')).toBe(sourceName);
+  });
+
+  it('names its type filters, library toggle, and sort control', async () => {
+    await mountBrowse();
+
+    const filterGroup = host.querySelector('[role="group"][aria-label="Filter by type"]')!;
+    expect(
+      [...filterGroup.querySelectorAll('button')].map((button) => button.textContent?.trim()),
+    ).toEqual(['All', 'Series', 'Movies']);
+    expect(host.querySelector('[role="switch"]')?.textContent?.trim()).toBe(
+      'Hide items in library',
+    );
+    expect(host.querySelector('select')?.getAttribute('aria-label')).toBe('Sort results');
+  });
+
   it('retries the page that failed, not the one that already loaded', async () => {
     await mountBrowse();
     clickText('Load more');

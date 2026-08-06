@@ -25,9 +25,17 @@ gate, and update its status row when finished.
 | 014 | Make route policies declarative and complete | P3 | M | 001 | DONE |
 | 015 | Extract the acquisition composition root incrementally | P3 | L | 003, 008 | DONE |
 | 016 | Spike a read-only live activity stream | P3 | M | 003, 010 | DONE |
+| 017 | Force authentication through first-run onboarding | P0 | L | — | DONE |
+| 018 | Functional corrections from the frontend review | P1 | M | — | DONE |
+| 019 | Consistency and UX normalization | P2 | L | 018 | DONE |
+| 020 | Accessibility sweep and unverified surfaces | P2 | M | 018, 019 | DONE |
 
 Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED: <reason>`, or
 `REJECTED: <reason>`.
+
+Plans 017-020 come from the 2026-08-05 frontend review (Orca builtin browser
+against the dev server) rather than the 2026-08-04 audit. They are planned at
+commit `6d751f6`.
 
 ## Dependency notes
 
@@ -47,6 +55,13 @@ Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED: <reason>`, or
   polling and configuration-write contracts rather than moving known defects.
 - Plan 016 follows plans 003 and 010. The spike should measure an already bounded
   polling baseline and must not use events to hide slow list operations.
+- Plan 017 is the forcing function for the review's security findings: once the
+  implicit admin path closes, adult content is visible only to granted accounts.
+  It also owns the adult-leak audit for queue and history surfaces.
+- Plan 019 follows plan 018 because both touch the same components (Discover
+  shelf, Sidebar, Wanted, Queue, History, Calendar) and must not race.
+- Plan 020 sweeps last so it verifies the settled UI instead of re-checking
+  code that 018 and 019 are still changing.
 
 ## Scope decisions
 
@@ -76,6 +91,23 @@ Status values: `TODO`, `IN PROGRESS`, `DONE`, `BLOCKED: <reason>`, or
   actionable manifest drift and `npm audit --audit-level=high` passed. Plan 011
   adds the missing Go vulnerability gate instead of proposing speculative
   dependency churn.
+
+## Review findings corrected or rejected (2026-08-05 frontend review)
+
+- "Movie detail shows a future Added date": false positive. The observed date
+  (2 Aug 2026) preceded the review date (5 Aug 2026). No date bug is evidenced.
+- "Library grids have no bulk actions": incorrect. `SelectActions` bulk bars
+  exist for admins in Movies, Series, and Adult. The real gap is Convert and
+  Wanted bulk coverage, planned in 019 step 7.
+- "/ and /discover duplicate route": intentional. `web/src/lib/router.ts`
+  documents that /discover exists so the nav entry has a canonical href while
+  / remains the index. No redirect is planned.
+- "Bind banner dismiss is permanent": overstated. Dismissal uses
+  `sessionStorage`, so it survives reloads but not a new browser session. Plan
+  017 step 6 adds the remediation link; the forcing function makes the banner
+  largely unreachable.
+- "Add modal gives no post-add feedback": incorrect. `AddItemModal.svelte`
+  toasts and navigates to the new item on success.
 
 ## Baseline verification
 

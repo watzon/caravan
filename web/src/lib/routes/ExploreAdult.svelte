@@ -235,19 +235,19 @@
 
   <div class="flex flex-wrap items-center gap-2">
     <form
-      class="flex items-center gap-2"
+      class="flex w-full min-w-0 items-center gap-2 sm:w-auto"
       onsubmit={(event) => {
         event.preventDefault();
         apply({ ...filter, text: text.trim() });
       }}>
-      <div class="w-56">
+      <div class="min-w-0 flex-1 sm:w-56 sm:flex-none">
         <TextInput
           bind:value={text}
           type="search"
           placeholder="Search scenes…"
           ariaLabel="Search the metadata provider for scenes" />
       </div>
-      <Button variant="secondary" type="submit" disabled={loading}>
+      <Button class="shrink-0" variant="secondary" type="submit" disabled={loading}>
         <Icon name="search" size={14} />
         Search
       </Button>
@@ -369,7 +369,8 @@
       {#if performerModeVisible}
         <button
           type="button"
-          aria-label="Match any or all performers"
+          aria-label={`Match performers: ${filter.performersAll ? 'all' : 'any'}`}
+          aria-pressed={filter.performersAll}
           onclick={() => apply({ ...filter, performersAll: !filter.performersAll })}
           class="inline-flex h-7 items-center rounded-full border border-border bg-surface px-3
                  font-mono text-xs text-ink-secondary transition-colors duration-150 ease-out
@@ -380,7 +381,8 @@
       {#if tagModeVisible}
         <button
           type="button"
-          aria-label="Match any or all tags"
+          aria-label={`Match tags: ${filter.tagsAll ? 'all' : 'any'}`}
+          aria-pressed={filter.tagsAll}
           onclick={() => apply({ ...filter, tagsAll: !filter.tagsAll })}
           class="inline-flex h-7 items-center rounded-full border border-border bg-surface px-3
                  font-mono text-xs text-ink-secondary transition-colors duration-150 ease-out

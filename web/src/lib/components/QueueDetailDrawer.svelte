@@ -45,6 +45,28 @@
     onlimitsapplied,
   }: Props = $props();
 
+  const drawerID = $props.id();
+  const titleID = `${drawerID}-title`;
+  const peersTabID = `${drawerID}-peers-tab`;
+  const peersPanelID = `${drawerID}-peers-panel`;
+  const trackersTabID = `${drawerID}-trackers-tab`;
+  const trackersPanelID = `${drawerID}-trackers-panel`;
+  const limitsTabID = `${drawerID}-limits-tab`;
+  const limitsPanelID = `${drawerID}-limits-panel`;
+  const filesTabID = `${drawerID}-files-tab`;
+  const filesPanelID = `${drawerID}-files-panel`;
+  const downLimitID = `${drawerID}-download-limit`;
+  const upLimitID = `${drawerID}-upload-limit`;
+  const limitsHelpID = `${drawerID}-limits-help`;
+  const FOCUSABLE_SELECTOR = [
+    'a[href]',
+    'button:not([disabled])',
+    'input:not([disabled]):not([type="hidden"])',
+    'select:not([disabled])',
+    'textarea:not([disabled])',
+    '[tabindex]:not([tabindex="-1"])',
+  ].join(',');
+
   let tab = $state<Tab>('peers');
   let insight = $state<DownloadInsight | null>(null);
   let insightError = $state<string | null>(null);
@@ -55,12 +77,22 @@
   let applying = $state(false);
   let dialog = $state<HTMLElement | null>(null);
 
+  function focusableElements() {
+    return Array.from(dialog?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR) ?? []).filter(
+      (element) =>
+        element.tabIndex >= 0 &&
+        !element.closest('[aria-hidden="true"], [hidden], [inert]') &&
+        element.getAttribute('aria-disabled') !== 'true',
+    );
+  }
+
   $effect(() => {
     const previous = document.activeElement as HTMLElement | null;
     dialog?.focus();
+    const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
-      document.body.style.overflow = '';
+      document.body.style.overflow = previousOverflow;
       previous?.focus?.();
     };
   });
@@ -126,13 +158,50 @@
     };
   });
 
-  $effect(() => {
-    function onkeydown(event: KeyboardEvent) {
-      if (event.key === 'Escape') onclose();
+  function onkeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      event.stopPropagation();
+      onclose();
+      return;
     }
-    window.addEventListener('keydown', onkeydown);
-    return () => window.removeEventListener('keydown', onkeydown);
-  });
+    if (event.key !== 'Tab') return;
+    if (document.activeElement !== dialog && !dialog?.contains(document.activeElement)) return;
+
+    const focusable = focusableElements();
+    if (focusable.length === 0) {
+      event.preventDefault();
+      dialog?.focus();
+      return;
+    }
+    const active = document.activeElement as HTMLElement | null;
+    const index = focusable.indexOf(active as HTMLElement);
+    const atBoundary = event.shiftKey
+      ? index <= 0
+      : index === -1 || index === focusable.length - 1;
+    if (!atBoundary) return;
+    event.preventDefault();
+    focusable[event.shiftKey ? focusable.length - 1 : 0]?.focus();
+  }
+
+  function ontabkeydown(event: KeyboardEvent) {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    const tabs = [...(dialog?.querySelectorAll<HTMLButtonElement>('[role="tab"]') ?? [])];
+    if (tabs.length === 0) return;
+    const index = tabs.indexOf(event.currentTarget as HTMLButtonElement);
+    let next: number;
+    if (event.key === 'Home') {
+      next = 0;
+    } else if (event.key === 'End') {
+      next = tabs.length - 1;
+    } else if (event.key === 'ArrowRight') {
+      next = (index + 1) % tabs.length;
+    } else {
+      next = (index - 1 + tabs.length) % tabs.length;
+    }
+    event.preventDefault();
+    tabs[next]?.focus();
+    tabs[next]?.click();
+  }
 
   async function applyLimits() {
     applying = true;
@@ -158,11 +227,14 @@
   }
 </script>
 
+<svelte:window {onkeydown} />
+
 <div class="fixed inset-0 z-50 flex justify-end" aria-hidden="false">
   <button
     type="button"
     class="absolute inset-0 cursor-default bg-bg/80"
-    aria-label="Close download details"
+    tabindex="-1"
+    aria-hidden="true"
     onclick={onclose}></button>
 
   <div
@@ -170,23 +242,26 @@
     class="relative flex h-full w-full max-w-[440px] flex-col border-l border-border-strong bg-surface shadow-2xl"
     role="dialog"
     aria-modal="true"
-    aria-label="Download details"
+    aria-labelledby={titleID}
     tabindex="-1">
     <header class="flex items-start gap-3 border-b border-border px-5 py-4">
       <div class="min-w-0 flex-1">
         <div class="flex items-center gap-2">
-          <h2 class="min-w-0 truncate font-display text-xl font-semibold tracking-tight text-ink" title={download.name}>
+          <h2
+            id={titleID}
+            class="min-w-0 truncate font-display text-xl font-semibold tracking-tight text-ink"
+            title={download.name || UNKNOWN}>
             {download.name || UNKNOWN}
           </h2>
           <Badge tone={meta.tone}>{meta.label}</Badge>
         </div>
-        <p class="mt-1 truncate font-mono text-xs text-ink-muted" title={download.name}>
+        <p class="mt-1 truncate font-mono text-xs text-ink-muted" title={download.name || UNKNOWN}>
           {download.name || UNKNOWN}
         </p>
       </div>
       <button
         type="button"
-        class="shrink-0 rounded-sm p-1 text-ink-secondary transition-colors duration-150 hover:bg-raised hover:text-ink focus:outline-none focus:ring-2 focus:ring-accent"
+        class="shrink-0 rounded-sm p-1 text-ink-secondary transition-colors duration-150 hover:bg-raised hover:text-ink"
         aria-label="Close download details"
         onclick={onclose}>
         <Icon name="close" />
@@ -206,30 +281,38 @@
           </div>
           <p class="font-mono text-sm text-ink-secondary">ETA {formatDuration(download.eta_seconds)}</p>
         </div>
-        <ProgressBar value={download.progress} tone="info" label="{download.name} progress" />
+        <ProgressBar value={download.progress} tone="info" label="{download.name || UNKNOWN} progress" />
         <!-- A Usenet download has no upload half, no share ratio and no piece
              availability. Showing those as 0.00 would read as a torrent that is
              seeding nothing rather than as a protocol that has no such thing. -->
         {#if usenet}
-          <dl class="grid grid-cols-4 gap-2">
+          <dl class="grid grid-cols-2 gap-2">
             <div class="min-w-0">
               <dt class="micro-label">Down</dt>
-              <dd class="mt-1 truncate font-mono text-sm text-ink">{formatRate(download.down_rate)}</dd>
+              <dd class="mt-1 truncate font-mono text-sm text-ink" title={formatRate(download.down_rate)}>
+                {formatRate(download.down_rate)}
+              </dd>
             </div>
             <div class="min-w-0">
               <dt class="micro-label">ETA</dt>
-              <dd class="mt-1 truncate font-mono text-sm text-ink">{formatDuration(download.eta_seconds)}</dd>
+              <dd class="mt-1 truncate font-mono text-sm text-ink" title={formatDuration(download.eta_seconds)}>
+                {formatDuration(download.eta_seconds)}
+              </dd>
             </div>
           </dl>
         {:else}
-          <dl class="grid grid-cols-4 gap-2">
+          <dl class="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <div class="min-w-0">
               <dt class="micro-label">Down</dt>
-              <dd class="mt-1 truncate font-mono text-sm text-ink">{formatRate(download.down_rate)}</dd>
+              <dd class="mt-1 truncate font-mono text-sm text-ink" title={formatRate(download.down_rate)}>
+                {formatRate(download.down_rate)}
+              </dd>
             </div>
             <div class="min-w-0">
               <dt class="micro-label">Up</dt>
-              <dd class="mt-1 truncate font-mono text-sm text-ink">{formatRate(download.up_rate)}</dd>
+              <dd class="mt-1 truncate font-mono text-sm text-ink" title={formatRate(download.up_rate)}>
+                {formatRate(download.up_rate)}
+              </dd>
             </div>
             <div class="min-w-0">
               <dt class="micro-label">Ratio</dt>
@@ -283,16 +366,16 @@
         <!-- Which client is holding this, and where it says the data is. For
              an external client that path is on the client's own machine, and
              it is the first thing to check when an import cannot read it. -->
-        <dl class="grid grid-cols-4 gap-2">
+        <dl class="grid grid-cols-1 gap-2 sm:grid-cols-4">
           <div class="min-w-0">
             <dt class="micro-label">Client</dt>
-            <dd class="mt-1 truncate text-sm text-ink" title="Which backend holds this download">
+            <dd class="mt-1 truncate text-sm text-ink" title={engineLabel(download)}>
               {engineLabel(download)}
             </dd>
           </div>
-          <div class="col-span-3 min-w-0">
+          <div class="min-w-0 sm:col-span-3">
             <dt class="micro-label">Location</dt>
-            <dd class="mt-1 truncate font-mono text-sm text-ink-secondary" title={download.save_path}>
+            <dd class="mt-1 truncate font-mono text-sm text-ink-secondary" title={download.save_path || UNKNOWN}>
               {download.save_path || UNKNOWN}
             </dd>
           </div>
@@ -305,26 +388,38 @@
                implements no per-download rate control, so the tab could only
                ever have answered 400. -->
           <button
+            id={filesTabID}
             type="button"
             role="tab"
             aria-selected={tab === 'files'}
+            aria-controls={filesPanelID}
+            tabindex={tab === 'files' ? 0 : -1}
+            onkeydown={ontabkeydown}
             class="-mb-px border-b-2 border-accent px-3 py-2 text-sm text-ink"
             onclick={() => (tab = 'files')}>
             Files{files.length ? ` (${files.length})` : ''}
           </button>
         {:else if insightSupported}
           <button
+            id={peersTabID}
             type="button"
             role="tab"
             aria-selected={tab === 'peers'}
+            aria-controls={peersPanelID}
+            tabindex={tab === 'peers' ? 0 : -1}
+            onkeydown={ontabkeydown}
             class="-mb-px border-b-2 px-3 py-2 text-sm transition-colors duration-150 {tab === 'peers' ? 'border-accent text-ink' : 'border-transparent text-ink-secondary hover:text-ink'}"
             onclick={() => (tab = 'peers')}>
             Peers{insight ? ` (${insight.peers.length})` : ''}
           </button>
           <button
+            id={trackersTabID}
             type="button"
             role="tab"
             aria-selected={tab === 'trackers'}
+            aria-controls={trackersPanelID}
+            tabindex={tab === 'trackers' ? 0 : -1}
+            onkeydown={ontabkeydown}
             class="-mb-px border-b-2 px-3 py-2 text-sm transition-colors duration-150 {tab === 'trackers' ? 'border-accent text-ink' : 'border-transparent text-ink-secondary hover:text-ink'}"
             onclick={() => (tab = 'trackers')}>
             Trackers{insight ? ` (${insight.trackers.length})` : ''}
@@ -332,9 +427,13 @@
         {/if}
         {#if !usenet}
           <button
+            id={limitsTabID}
             type="button"
             role="tab"
             aria-selected={tab === 'limits'}
+            aria-controls={limitsPanelID}
+            tabindex={tab === 'limits' ? 0 : -1}
+            onkeydown={ontabkeydown}
             class="-mb-px border-b-2 px-3 py-2 text-sm transition-colors duration-150 {tab === 'limits' ? 'border-accent text-ink' : 'border-transparent text-ink-secondary hover:text-ink'}"
             onclick={() => (tab = 'limits')}>
             Limits
@@ -343,7 +442,7 @@
       </div>
 
       {#if usenet}
-        <section class="px-5 py-4" aria-label="Files">
+        <div id={filesPanelID} role="tabpanel" aria-labelledby={filesTabID} class="px-5 py-4">
           {#if insightError}
             <p class="text-sm text-ink-secondary">File detail is unavailable: {insightError}</p>
           {:else if !insightSupported}
@@ -363,7 +462,7 @@
               {#each files as file (file.name)}
                 <li class="flex flex-col gap-1.5 border-b border-border py-3 last:border-b-0">
                   <div class="flex items-center gap-2">
-                    <p class="min-w-0 flex-1 truncate font-mono text-sm text-ink" title={file.name}>
+                    <p class="min-w-0 flex-1 truncate font-mono text-sm text-ink" title={file.name || UNKNOWN}>
                       {truncateMiddle(file.name || UNKNOWN, 48)}
                     </p>
                     {#if file.segments_failed > 0}
@@ -378,7 +477,7 @@
                   <ProgressBar
                     value={file.segments > 0 ? file.segments_done / file.segments : 0}
                     tone={file.segments_failed > 0 ? 'warning' : file.complete ? 'success' : 'info'}
-                    label="{file.name} progress" />
+                    label="{file.name || UNKNOWN} progress" />
                   <p class="font-mono text-xs text-ink-muted">
                     {file.segments_done} / {file.segments} segments
                   </p>
@@ -386,9 +485,9 @@
               {/each}
             </ul>
           {/if}
-        </section>
+        </div>
       {:else if tab === 'peers' && insightSupported}
-        <section class="px-5 py-4" aria-label="Peers">
+        <div id={peersPanelID} role="tabpanel" aria-labelledby={peersTabID} class="px-5 py-4">
           {#if insightError}
             <p class="text-sm text-ink-secondary">Insight is unavailable: {insightError}</p>
           {:else if insight === null}
@@ -411,7 +510,7 @@
                     <tr class="border-t border-border">
                       <td class="py-2 pr-2">
                         <p class="truncate font-mono text-sm text-ink" title={peer.addr}>{peer.addr}</p>
-                        <p class="truncate text-xs text-ink-muted" title={peer.client}>{peer.client || UNKNOWN}</p>
+                        <p class="truncate text-xs text-ink-muted" title={peer.client || UNKNOWN}>{peer.client || UNKNOWN}</p>
                       </td>
                       <td class="py-2 font-mono text-sm text-ink">{Math.round(peer.progress * 100)}%</td>
                       <td class="py-2 font-mono text-sm text-ink">{formatRate(peer.down_rate)}</td>
@@ -422,9 +521,9 @@
               </table>
             </div>
           {/if}
-        </section>
+        </div>
       {:else if tab === 'trackers' && insightSupported}
-        <section class="px-5 py-4" aria-label="Trackers">
+        <div id={trackersPanelID} role="tabpanel" aria-labelledby={trackersTabID} class="px-5 py-4">
           {#if insight === null}
             <p class="text-sm text-ink-secondary">Open Peers to load tracker information.</p>
           {:else if insight.trackers.length === 0}
@@ -442,40 +541,54 @@
               {/each}
             </ul>
           {/if}
-        </section>
+        </div>
       {:else}
-        <section class="flex flex-col gap-6 px-5 py-5" aria-label="Limits">
+        <div
+          id={limitsPanelID}
+          role="tabpanel"
+          aria-labelledby={limitsTabID}
+          class="flex flex-col gap-6 px-5 py-5">
           <div>
             <h3 class="micro-label">Rate limits</h3>
             <div class="mt-3 flex flex-col gap-3">
-              <label class="grid grid-cols-[128px_minmax(0,1fr)] items-center gap-3 text-sm text-ink">
-                <span>Download limit</span>
+              <label
+                for={downLimitID}
+                class="grid grid-cols-[128px_minmax(0,1fr)] items-center gap-3 text-sm text-ink">
+                <span>Download limit<span class="sr-only"> in KB/s</span></span>
                 <span class="relative">
                   <input
-                    aria-label="Download limit"
+                    id={downLimitID}
+                    aria-describedby={limitsHelpID}
                     type="number"
                     min="0"
                     step="1"
                     bind:value={downKbps}
-                    class="h-9 w-full rounded-sm border border-border-strong bg-raised px-3 pr-12 font-mono text-sm text-ink focus:border-accent focus:outline-none" />
-                  <span class="pointer-events-none absolute inset-y-0 right-3 flex items-center font-mono text-xs text-ink-muted">KB/s</span>
+                    class="h-9 w-full rounded-sm border border-border-strong bg-raised px-3 pr-12 font-mono text-sm text-ink focus:border-accent" />
+                  <span
+                    aria-hidden="true"
+                    class="pointer-events-none absolute inset-y-0 right-3 flex items-center font-mono text-xs text-ink-muted">KB/s</span>
                 </span>
               </label>
-              <label class="grid grid-cols-[128px_minmax(0,1fr)] items-center gap-3 text-sm text-ink">
-                <span>Upload limit</span>
+              <label
+                for={upLimitID}
+                class="grid grid-cols-[128px_minmax(0,1fr)] items-center gap-3 text-sm text-ink">
+                <span>Upload limit<span class="sr-only"> in KB/s</span></span>
                 <span class="relative">
                   <input
-                    aria-label="Upload limit"
+                    id={upLimitID}
+                    aria-describedby={limitsHelpID}
                     type="number"
                     min="0"
                     step="1"
                     bind:value={upKbps}
-                    class="h-9 w-full rounded-sm border border-border-strong bg-raised px-3 pr-12 font-mono text-sm text-ink focus:border-accent focus:outline-none" />
-                  <span class="pointer-events-none absolute inset-y-0 right-3 flex items-center font-mono text-xs text-ink-muted">KB/s</span>
+                    class="h-9 w-full rounded-sm border border-border-strong bg-raised px-3 pr-12 font-mono text-sm text-ink focus:border-accent" />
+                  <span
+                    aria-hidden="true"
+                    class="pointer-events-none absolute inset-y-0 right-3 flex items-center font-mono text-xs text-ink-muted">KB/s</span>
                 </span>
               </label>
             </div>
-            <p class="mt-2 text-xs text-ink-muted">
+            <p id={limitsHelpID} class="mt-2 text-xs text-ink-muted">
               0 is unlimited. Empty inherits the global limit from
               <a
                 class="text-accent-text hover:underline"
@@ -497,11 +610,11 @@
               {applying ? 'Applying...' : 'Apply limits'}
             </Button>
           </div>
-        </section>
+        </div>
       {/if}
     </div>
 
-    <footer class="flex items-center gap-2 border-t border-border px-5 py-3">
+    <footer class="flex flex-wrap items-center gap-2 border-t border-border px-5 py-3">
       <!-- A failed download has nothing to pause. What it has is a stage that
            went wrong and the fifteen gigabytes it already fetched, so the one
            action worth offering is trying that stage again. -->

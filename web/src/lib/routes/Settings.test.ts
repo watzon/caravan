@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import Settings from './Settings.svelte';
 import TopBar from '../layout/TopBar.svelte';
+import FilterOptions from '../components/FilterOptions.svelte';
+import PosterCard from '../components/PosterCard.svelte';
 import { reactiveProps } from '../reactiveprops.svelte';
 import { system } from '../state/system.svelte';
 import { navigate, router } from '../router.svelte';
@@ -161,7 +163,7 @@ describe('Settings overview and route resolution', () => {
     }
   });
 
-  it('renders the settings action with an honest search placeholder', async () => {
+  it('renders the settings action with an accessible search name and honest placeholder', async () => {
     stubFetch();
     app = mount(Settings, { target: host });
     await settle();
@@ -171,9 +173,9 @@ describe('Settings overview and route resolution', () => {
     const topBar = mount(TopBar, { target: chrome, props: { title: 'Settings' } });
     flushSync();
 
-    expect(host.querySelector<HTMLInputElement>('#settings-search')?.placeholder).toBe(
-      'Search settings',
-    );
+    const search = host.querySelector<HTMLInputElement>('#settings-search');
+    expect(search?.getAttribute('aria-label')).toBe('Search settings');
+    expect(search?.placeholder).toBe('Search settings');
     unmount(topBar);
   });
 
@@ -293,6 +295,72 @@ describe('Settings overview and route resolution', () => {
 
     expect(host.querySelector('#dlna-friendly-name')).not.toBeNull();
     expect(host.querySelector('#jellyfin-url')).not.toBeNull();
+  });
+});
+
+describe('Plan 020 truncation contracts', () => {
+  it('exposes complete filter option names and hints', () => {
+    const name = 'A provider filter name that cannot fit in the popover';
+    const hint = 'A complete secondary description for matching names';
+    app = mount(FilterOptions, {
+      target: host,
+      props: {
+        options: [{ id: 'provider-1', name, hint }],
+        selected: [],
+        onselect: vi.fn(),
+      },
+    });
+
+    const truncated = [...host.querySelectorAll<HTMLElement>('button .truncate')];
+    expect(truncated.map((element) => element.title)).toEqual([name, hint]);
+  });
+
+  it('exposes complete poster metadata and visibly names its status', () => {
+    const note = 'A note long enough to be visually truncated by a narrow poster card';
+    app = mount(PosterCard, {
+      target: host,
+      props: {
+        href: '/movies/1',
+        title: 'Example movie',
+        year: 2026,
+        posterPath: null,
+        status: 'downloaded',
+        note,
+      },
+    });
+
+    const subtitle = [...host.querySelectorAll<HTMLParagraphElement>('p.truncate')].find((element) =>
+      element.textContent?.includes(note),
+    );
+    expect(subtitle?.title).toBe(`2026 · ${note}`);
+    expect(host.querySelector('a')?.getAttribute('aria-label')).toBe(
+      'Example movie (2026), Downloaded',
+    );
+
+    const statusText = [...host.querySelectorAll('span')].find(
+      (element) => element.children.length === 0 && element.textContent?.trim() === 'Downloaded',
+    );
+    expect(statusText).toBeDefined();
+    expect(statusText?.classList.contains('sr-only')).toBe(false);
+  });
+
+  it('retains selection semantics and status in a selectable card name', () => {
+    app = mount(PosterCard, {
+      target: host,
+      props: {
+        href: '/movies/1',
+        title: 'Example movie',
+        year: 2026,
+        posterPath: null,
+        status: 'downloaded',
+        selectable: true,
+        selected: true,
+      },
+    });
+
+    const card = host.querySelector('button');
+    expect(card?.getAttribute('aria-pressed')).toBe('true');
+    expect(card?.getAttribute('aria-label')).toBe('Example movie (2026), Downloaded');
   });
 });
 

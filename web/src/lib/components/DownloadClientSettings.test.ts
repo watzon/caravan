@@ -163,6 +163,26 @@ async function mountAndEdit() {
 }
 
 describe('DownloadClientSettings', () => {
+  it('exposes full client strings where row text can truncate', async () => {
+    app = mount(DownloadClientSettings, { target: host });
+    await settle();
+
+    const clientName = [...host.querySelectorAll<HTMLElement>('.truncate')].find(
+      (element) => element.textContent?.trim() === QBIT.name,
+    );
+    const clientURL = [...host.querySelectorAll<HTMLElement>('.truncate')].find(
+      (element) => element.textContent?.trim() === QBIT.url,
+    );
+    expect(clientName?.getAttribute('title')).toBe(QBIT.name);
+    expect(clientURL?.getAttribute('title')).toBe(QBIT.url);
+    const enabledStatus = [...host.querySelectorAll('span')].find(
+      (element) =>
+        element.textContent?.trim() === 'Enabled' && !element.classList.contains('sr-only'),
+    );
+    expect(enabledStatus).toBeDefined();
+    expect(host.querySelector('.size-2')?.getAttribute('aria-hidden')).toBe('true');
+  });
+
   it('disables unavailable types when adding a client and explains why', async () => {
     app = mount(DownloadClientSettings, { target: host });
     await settle();
@@ -329,6 +349,7 @@ describe('DownloadClientSettings', () => {
     expect(test!.body).not.toHaveProperty('password');
     expect(writeCalls().some((call) => call.method === 'PUT')).toBe(false);
     expect(host.textContent).toContain('Reachable');
+    expect(host.querySelector('[title="Reachable"]')).not.toBeNull();
   });
 
   it('reports a failed test with the client’s own complaint', async () => {

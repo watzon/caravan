@@ -51,7 +51,12 @@ function mountModal(title: string, options: ModalOptions = {}): MountedComponent
   return { app, host };
 }
 
-function mountField(help?: string, error?: string): MountedComponent {
+function mountField(
+  help?: string,
+  error?: string,
+  htmlFor: string | null = 'field-control',
+  childHTML = '<input id="field-control">',
+): MountedComponent {
   const host = document.createElement('div');
   document.body.appendChild(host);
   hosts.push(host);
@@ -59,10 +64,10 @@ function mountField(help?: string, error?: string): MountedComponent {
     target: host,
     props: {
       label: 'Name',
-      for: 'field-control',
+      for: htmlFor ?? undefined,
       help,
       error,
-      children: rawSnippet('<input id="field-control">'),
+      children: rawSnippet(childHTML),
     },
   }) as Record<string, unknown>;
   apps.push(app);
@@ -70,14 +75,17 @@ function mountField(help?: string, error?: string): MountedComponent {
   return { app, host };
 }
 
-function mountTextInput(context: { describedBy: string | undefined; invalid: boolean }): MountedComponent {
+function mountTextInput(
+  context: { describedBy: string | undefined; invalid: boolean },
+  props: { ariaLabel?: string; type?: 'text' | 'password' | 'search' } = {},
+): MountedComponent {
   const host = document.createElement('div');
   document.body.appendChild(host);
   hosts.push(host);
   const app = mount(TextInput, {
     target: host,
     context: new Map([[FIELD_ACCESSIBILITY_CONTEXT, context]]),
-    props: { value: '' },
+    props: { value: '', ...props },
   }) as Record<string, unknown>;
   apps.push(app);
   flushSync();
@@ -177,6 +185,20 @@ describe('Modal close protection', () => {
 
     expect(onclose).toHaveBeenCalledOnce();
     expect(host.querySelector('[data-modal-discard-confirmation]')).toBeNull();
+  });
+});
+
+describe('Modal accessible name', () => {
+  it('uses its visible heading as the dialog name and exposes the full truncated title', () => {
+    const title = 'Edit a server with an intentionally long display name';
+    const { host } = mountModal(title);
+    const modal = dialog(host);
+    const headingID = modal.getAttribute('aria-labelledby');
+    const heading = headingID ? host.querySelector<HTMLElement>(`#${headingID}`) : null;
+
+    expect(heading).not.toBeNull();
+    expect(heading?.textContent?.trim()).toBe(title);
+    expect(heading?.title).toBe(title);
   });
 });
 
@@ -281,6 +303,8 @@ describe('Field text input accessibility', () => {
     expect(help.id).not.toBe('');
     expect(input?.getAttribute('aria-describedby')).toBe(help.id);
     expect(input?.getAttribute('aria-invalid')).toBeNull();
+    expect(field.host.querySelector<HTMLInputElement>('#field-control')?.labels?.[0]?.htmlFor)
+      .toBe('field-control');
   });
 
   it('uses a stable error id and marks the text input invalid', () => {
@@ -293,5 +317,26 @@ describe('Field text input accessibility', () => {
     expect(error.id).not.toBe('');
     expect(input?.getAttribute('aria-describedby')).toBe(error.id);
     expect(input?.getAttribute('aria-invalid')).toBe('true');
+  });
+
+  it('forwards an explicit accessible name for a standalone text input', () => {
+    const input = mountTextInput(
+      { describedBy: undefined, invalid: false },
+      { ariaLabel: 'Filter movies by title', type: 'search' },
+    ).host.querySelector<HTMLInputElement>('input');
+
+    expect(input?.getAttribute('aria-label')).toBe('Filter movies by title');
+  });
+
+  it('uses non-label text for a group heading when there is no control id', () => {
+    const field = mountField(
+      'Choose one option',
+      undefined,
+      null,
+      '<div role="radiogroup" aria-label="Name choices"></div>',
+    );
+
+    expect(field.host.querySelector('label')).toBeNull();
+    expect(field.host.querySelector('.micro-label')?.textContent).toBe('Name');
   });
 });

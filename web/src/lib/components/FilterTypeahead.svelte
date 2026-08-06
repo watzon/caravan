@@ -97,9 +97,9 @@
                    transition-colors duration-150 ease-out
                    {on ? 'bg-accent-tint text-accent-text' : 'text-ink hover:bg-raised'}">
             <span class="min-w-0">
-              <span class="block truncate text-base">{option.name}</span>
+              <span class="block truncate text-base" title={option.name}>{option.name}</span>
               {#if option.hint}
-                <span class="block truncate text-sm text-ink-muted">{option.hint}</span>
+                <span class="block truncate text-sm text-ink-muted" title={option.hint}>{option.hint}</span>
               {/if}
             </span>
             {#if on}
@@ -117,7 +117,7 @@
             onclick={() => ontoggle(ref)}
             class="flex w-full items-center justify-between gap-2 rounded-sm bg-accent-tint px-2
                    py-1.5 text-left text-base text-accent-text">
-            <span class="truncate">{ref.name || ref.id}</span>
+            <span class="truncate" title={ref.name || ref.id}>{ref.name || ref.id}</span>
             <Icon name="check" size={12} />
           </button>
         </li>

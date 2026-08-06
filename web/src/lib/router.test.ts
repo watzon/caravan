@@ -322,6 +322,12 @@ describe('router document navigation', () => {
     navigate('/router-test-start', { replace: true });
     const stop = startRouter();
     const pushState = vi.spyOn(window.history, 'pushState');
+    const intercepted: boolean[] = [];
+    const stopDocumentNavigation = (event: MouseEvent) => {
+      intercepted.push(event.defaultPrevented);
+      event.preventDefault();
+    };
+    document.addEventListener('click', stopDocumentNavigation);
     const links = [
       '<a href="/movies" download>Movie export</a>',
       '<a href="/api/v1/system/backup">Download backup</a>',
@@ -338,12 +344,13 @@ describe('router document navigation', () => {
         link.dispatchEvent(event);
         link.remove();
 
-        expect(event.defaultPrevented, link.textContent).toBe(false);
+        expect(intercepted.at(-1), link.textContent).toBe(false);
       }
       expect(pushState).not.toHaveBeenCalled();
       expect(router.path).toBe('/router-test-start');
     } finally {
       pushState.mockRestore();
+      document.removeEventListener('click', stopDocumentNavigation);
       stop();
     }
   });

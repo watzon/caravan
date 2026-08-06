@@ -73,10 +73,11 @@
         {#each sources as source (source.id)}
           <a
             href={sourceHref(source)}
-            class="flex h-14 items-center justify-center rounded-md border border-border bg-surface px-3
+            title={source.name}
+            class="flex h-14 min-w-0 items-center justify-center rounded-md border border-border bg-surface px-3
                    text-center text-sm text-ink-secondary transition-colors duration-150 ease-out
                    hover:border-border-strong hover:bg-raised hover:text-ink">
-            {source.name}
+            <span class="line-clamp-2">{source.name}</span>
           </a>
         {/each}
       </div>
@@ -132,9 +133,13 @@
           <p class="font-mono text-xs font-medium tracking-wide text-warning">
             TRENDING #1 · {mediaTypeChip(hero.media_type)}
           </p>
-          <h2 class="font-display text-2xl font-bold tracking-tight text-ink">{hero.title}</h2>
-          <p class="text-base text-ink-secondary">{metaLine(hero)}</p>
-          <p class="line-clamp-2 max-w-xl text-base text-ink-secondary">
+          <h2 class="font-display text-2xl font-bold tracking-tight text-ink" title={hero.title}>
+            {hero.title}
+          </h2>
+          <p class="text-base text-ink-secondary" title={metaLine(hero)}>{metaLine(hero)}</p>
+          <p
+            class="line-clamp-2 max-w-xl text-base text-ink-secondary"
+            title={hero.overview || 'No overview available.'}>
             {hero.overview || 'No overview available.'}
           </p>
           <div class="mt-1 flex flex-wrap items-center gap-3">

@@ -4,14 +4,14 @@
   import Icon from './Icon.svelte';
 </script>
 
-<div class="pointer-events-none fixed bottom-4 right-4 z-[60] flex w-80 flex-col gap-2" aria-live="polite">
+<div class="pointer-events-none fixed bottom-4 left-4 right-4 z-[60] flex w-auto flex-col gap-2 sm:left-auto sm:w-80" aria-live="polite">
   {#each toasts.items as toast (toast.id)}
     <div
       class="pointer-events-auto flex items-center gap-3 overflow-hidden rounded-md border border-border {TONE_TINT[
         toast.tone
       ]}">
       <span class="w-0.5 self-stretch {TONE_DOT[toast.tone]}"></span>
-      <p class="flex-1 py-3 text-base text-ink">{toast.message}</p>
+      <p class="min-w-0 flex-1 break-words py-3 text-base text-ink">{toast.message}</p>
       <button
         type="button"
         class="p-3 text-ink-secondary transition-colors duration-150 hover:text-ink"

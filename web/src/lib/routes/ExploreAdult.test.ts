@@ -172,6 +172,19 @@ afterEach(() => {
 });
 
 describe('a filtered scene scope', () => {
+  it('names the scene search, filters, toggle, and sort control', async () => {
+    session.user = grantedUser(EVERY_SCENE_FILTER);
+    await open('/discover/adult');
+
+    expect(host.querySelector('input[type="search"]')?.getAttribute('aria-label')).toBe(
+      'Search the metadata provider for scenes',
+    );
+    expect(buttonWithText('Search')).toBeDefined();
+    expect(pillLabels()).toEqual(['Site', 'Performers', 'Tags', 'Year', 'Duration']);
+    expect(host.querySelector('[role="switch"]')?.textContent?.trim()).toBe('Hide in library');
+    expect(host.querySelector('select')?.getAttribute('aria-label')).toBe('Sort results');
+  });
+
   it('turns a shared URL into one request carrying every filter', async () => {
     await open(
       '/discover/adult?q=poolside&site=84060:Vixen&scope=network' +
@@ -212,20 +225,38 @@ describe('a filtered scene scope', () => {
    * over one id the two readings are the same question, and a mode nothing on
    * screen explains is worse than no mode at all.
    */
-  it('offers the tags any/all mode only with more than one tag', async () => {
+  it('offers and announces the any/all modes only with multiple values', async () => {
+    session.user = grantedUser(EVERY_SCENE_FILTER);
     await open('/discover/adult?tags=70:Outdoor');
     expect(host.textContent).not.toContain('tags: any');
 
     unmount(app!);
     app = undefined;
-    await open('/discover/adult?tags=70:Outdoor&tags=71:Threesome');
-    expect(host.textContent).toContain('tags: any');
+    await open(
+      '/discover/adult?performers=1:Sienna+Vale&performers=2:Mara+Solis' +
+        '&tags=70:Outdoor&tags=71:Threesome',
+    );
 
-    host.querySelector<HTMLButtonElement>('button[aria-label="Match any or all tags"]')?.click();
+    const performerAny = buttonWithText('performers: any')!;
+    const tagsAny = buttonWithText('tags: any')!;
+    expect(performerAny.getAttribute('aria-label')).toBe('Match performers: any');
+    expect(performerAny.getAttribute('aria-pressed')).toBe('false');
+    expect(tagsAny.getAttribute('aria-label')).toBe('Match tags: any');
+    expect(tagsAny.getAttribute('aria-pressed')).toBe('false');
+
+    tagsAny.click();
     await settle();
-
-    expect(host.textContent).toContain('tags: all');
+    const tagsAll = buttonWithText('tags: all')!;
+    expect(tagsAll.getAttribute('aria-label')).toBe('Match tags: all');
+    expect(tagsAll.getAttribute('aria-pressed')).toBe('true');
     expect(lastSceneQuery().get('tags_all')).toBe('true');
+
+    buttonWithText('performers: any')!.click();
+    await settle();
+    const performersAll = buttonWithText('performers: all')!;
+    expect(performersAll.getAttribute('aria-label')).toBe('Match performers: all');
+    expect(performersAll.getAttribute('aria-pressed')).toBe('true');
+    expect(lastSceneQuery().get('performers_all')).toBe('true');
   });
 
   it('drops the site scope with the site when its chip is removed', async () => {

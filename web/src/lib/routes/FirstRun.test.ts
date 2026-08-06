@@ -146,6 +146,23 @@ describe('FirstRun', () => {
     expect(host.querySelector('#tmdb-key')).not.toBeNull();
   });
 
+  it('associates setup inputs with visible labels and names the scan switch', () => {
+    mountWizard();
+
+    for (const [id, label] of [
+      ['admin-username', 'Username'],
+      ['admin-password', 'Password'],
+      ['admin-confirm', 'Confirm password'],
+      ['storage-root', 'Storage root'],
+      ['tmdb-key', 'TMDB API key'],
+    ]) {
+      expect(host.querySelector(`label[for="${id}"]`)?.textContent).toContain(label);
+    }
+    expect(host.querySelector('[role="switch"]')?.getAttribute('aria-label')).toBe(
+      'Scan for existing media now',
+    );
+  });
+
   it('resumes setup when system status says the administrator password is set', async () => {
     system.status = { ...STATUS, storage_root: '', needs_setup: true, password_set: true };
     mountWizard();

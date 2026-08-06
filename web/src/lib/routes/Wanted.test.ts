@@ -105,15 +105,20 @@ describe('Wanted', () => {
     expect(host.textContent).toContain('Severance - S01E03 - In Perpetuity');
     expect(host.textContent).toContain('Air date unknown');
     expect(host.querySelector('a[href="/series/3/search/1/2"]')).not.toBeNull();
+    expect(host.querySelector('[title="Arrival (2016)"]')).not.toBeNull();
+    expect(host.querySelector('[title="Severance - S01E02 - Half Loop"]')).not.toBeNull();
+    expect(host.querySelector('[title="Air date unknown"]')).not.toBeNull();
     expect(host.textContent).not.toContain('Blade Runner');
 
     const belowCutoffName = 'Below quality cutoff 2';
-    const belowCutoff = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(
-      (tab) => tab.textContent?.replace(/\s+/g, ' ').trim() === belowCutoffName,
+    const belowCutoff = [...host.querySelectorAll<HTMLButtonElement>('[role="group"][aria-label="Wanted filter"] button')].find(
+      (button) => button.textContent?.replace(/\s+/g, ' ').trim() === belowCutoffName,
     );
     expect(belowCutoff?.textContent?.replace(/\s+/g, ' ').trim()).toBe(belowCutoffName);
+    expect(belowCutoff?.getAttribute('aria-pressed')).toBe('false');
     belowCutoff!.click();
     flushSync();
+    expect(belowCutoff?.getAttribute('aria-pressed')).toBe('true');
 
     expect(host.textContent).toContain('Blade Runner (1982)');
     expect(host.textContent).toContain('720p on disk, cutoff 1080p');
@@ -122,6 +127,7 @@ describe('Wanted', () => {
     expect(movieRow?.textContent).toContain('Below quality cutoff');
     expect(episodeRow?.textContent).toContain('Below quality cutoff');
     expect(host.textContent).not.toContain('Below cutoff');
+    expect(host.querySelector('[title="720p on disk, cutoff 1080p"]')).not.toBeNull();
     expect(host.textContent).not.toContain('Arrival (2016)');
     expect(host.querySelector('a[href="/movies/8/search"]')).not.toBeNull();
   });

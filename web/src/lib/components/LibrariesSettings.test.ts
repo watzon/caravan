@@ -304,6 +304,12 @@ describe('LibrariesSettings — indexer rows', () => {
     // The dot reports the indexer's own health, which is still green — the
     // library is what switched it off, not the indexer.
     expect(host.querySelector('li span.bg-success')).not.toBeNull();
+    expect(host.textContent).toContain('Indexer enabled');
+    expect(host.querySelector('span[title="Prowlarr"]')?.textContent).toBe('Prowlarr');
+    const searchToggle = host.querySelector<HTMLButtonElement>('[role="switch"]');
+    expect(searchToggle?.getAttribute('aria-label')).toBe('Search Prowlarr for Movies');
+    expect(searchToggle?.getAttribute('title')).toBe('Search Prowlarr for Movies');
+    expect(searchToggle?.parentElement?.classList.contains('w-full')).toBe(true);
   });
 
   it('points to Indexers when an indexer is off everywhere', async () => {
@@ -319,6 +325,7 @@ describe('LibrariesSettings — indexer rows', () => {
       'Open Indexers',
     );
     expect(host.querySelector('li span.bg-ink-muted')).not.toBeNull();
+    expect(host.textContent).toContain('Indexer disabled');
     // Still on for this library: the row must not offer to "re-enable" it.
     expect(host.querySelector('[role="switch"]')?.getAttribute('aria-checked')).toBe('true');
   });
@@ -382,6 +389,9 @@ describe('LibrariesSettings — indexer rows', () => {
 
     button('Edit').click();
     flushSync();
+    expect(
+      host.querySelector('[role="dialog"] footer > div')?.classList.contains('flex-wrap'),
+    ).toBe(true);
     const input = host.querySelector('#library-indexer-categories') as HTMLInputElement;
     input.value = '2010, 2020';
     input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -429,6 +439,9 @@ describe('LibrariesSettings — switcher and reach', () => {
 
     expect(rootPath()).toBe('library/Movies');
     expect((host.querySelector('#library-root') as HTMLInputElement).readOnly).toBe(true);
+    expect(
+      (host.querySelector('#library-root') as HTMLInputElement).closest('[title]')?.getAttribute('title'),
+    ).toBe('library/Movies');
 
     button('Series').click();
     await settle();

@@ -135,7 +135,7 @@
           ...(episodeIDs.length > 0 ? { episode_ids: episodeIDs } : {}),
         });
       }
-      pushToast(`Grabbed ${truncateMiddle(release.title, 48)}`, 'success');
+      pushToast(`Grabbed ${release.title}`, 'success');
       navigate('/queue');
     } catch (err) {
       pushToast(errorText(err), 'danger');
@@ -227,6 +227,7 @@
                 <span class="flex items-center gap-2">
                   {#if best}
                     <span class="h-4 w-0.5 shrink-0 rounded-full bg-accent" aria-hidden="true"></span>
+                    <span class="text-xs font-semibold uppercase tracking-wide text-accent-text">Best</span>
                   {/if}
                   <span class="truncate text-ink-secondary" title={release.indexer}>
                     {release.indexer || UNKNOWN}

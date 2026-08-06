@@ -171,7 +171,9 @@
             {/if}
           </p>
 
-          <h2 class="font-display text-2xl font-bold tracking-tight text-ink">{title.title}</h2>
+          <h2 class="font-display text-2xl font-bold tracking-tight text-ink" title={title.title}>
+            {title.title}
+          </h2>
 
           <p class="flex flex-wrap items-center gap-2 text-base text-ink-secondary">
             {#each metaParts as part, i (part + i)}
@@ -258,7 +260,9 @@
                     </span>
                   {/if}
                   <span class="w-full truncate text-sm text-ink" title={member.name}>{member.name}</span>
-                  <span class="w-full truncate text-xs text-ink-secondary" title={member.character}>
+                  <span
+                    class="w-full truncate text-xs text-ink-secondary"
+                    title={member.character || UNKNOWN}>
                     {member.character || UNKNOWN}
                   </span>
                 </li>
@@ -273,12 +277,12 @@
             <ul class="flex flex-col divide-y divide-border overflow-hidden rounded-md border border-border">
               {#each title.seasons as season (season.season_number)}
                 {@const meta = seasonMeta(season)}
-                <li class="flex h-12 items-center gap-3 px-3">
+                <li class="flex min-h-12 flex-wrap items-center gap-3 px-3 py-2">
                   <span class="text-base text-ink">{seasonLabel(season.season_number)}</span>
                   {#if meta}
                     <span class="font-mono text-xs text-ink-muted">{meta}</span>
                   {/if}
-                  <span class="ml-auto">
+                  <span class="ml-auto shrink-0">
                     {#if season.in_library}
                       <Badge tone="success">In library</Badge>
                     {:else if season.requested}

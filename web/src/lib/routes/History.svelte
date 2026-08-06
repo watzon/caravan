@@ -186,10 +186,11 @@
         {#each eventRows as event (event.id)}
           <li class="rounded-md border border-border bg-surface px-3 py-3">
             <div class="flex items-start gap-3">
-              <span class="mt-1.5 size-2 shrink-0 rounded-full {TONE_DOT[EVENT_TONE[event.level]]}" title={event.level}></span>
+              <span class="mt-1.5 size-2 shrink-0 rounded-full {TONE_DOT[EVENT_TONE[event.level]]}" aria-hidden="true"></span>
               <div class="min-w-0 flex-1">
                 <div class="flex flex-wrap items-center gap-2">
                   <Badge tone={EVENT_TONE[event.level]}>{event.category}</Badge>
+                  <span class="font-mono text-xs uppercase text-ink-secondary">{event.level}</span>
                   <p class="text-base text-ink">{event.message}</p>
                   {#if event.repeatCount > 1}
                     <Badge tone="neutral">{event.repeatCount} times</Badge>
@@ -226,7 +227,7 @@
       {#each jobs ?? [] as job (job.id)}
         {@const meta = JOB_META[job.state]}
         <li class="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-3 py-3 last:border-b-0">
-          <span class="size-2 shrink-0 rounded-full {TONE_DOT[meta.tone]}" title={meta.label}></span>
+          <span class="size-2 shrink-0 rounded-full {TONE_DOT[meta.tone]}" aria-hidden="true"></span>
           <p class="min-w-36 font-medium text-ink">{JOB_KIND[job.kind]}</p>
           <Badge tone={meta.tone}>{meta.label}</Badge>
           <span class="font-mono text-xs text-ink-secondary">{job.attempts}/5</span>

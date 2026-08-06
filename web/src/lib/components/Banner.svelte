@@ -20,13 +20,13 @@
 <div class="flex items-start gap-3 overflow-hidden rounded-md {TONE_TINT[tone]} {klass}" role="alert">
   <span class="w-0.5 self-stretch {TONE_DOT[tone]}"></span>
   <span class="pt-3 {TONE_TEXT[tone]}"><Icon name={icon} /></span>
-  <div class="flex-1 py-3 pr-3">
+  <div class="min-w-0 flex-1 py-3 pr-3">
     {#if title}
-      <p class="text-base font-semibold text-ink">{title}</p>
+      <p class="break-words text-base font-semibold text-ink">{title}</p>
     {/if}
-    <p class="text-base text-ink-secondary">{message}</p>
+    <p class="break-words text-base text-ink-secondary">{message}</p>
   </div>
   {#if action}
-    <div class="flex items-center self-stretch py-3 pr-3">{@render action()}</div>
+    <div class="flex shrink-0 items-center self-stretch py-3 pr-3">{@render action()}</div>
   {/if}
 </div>

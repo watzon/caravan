@@ -132,6 +132,22 @@ describe('UsenetServerSettings', () => {
     expect(host.textContent).toContain('TLS');
     expect(host.textContent).toContain('20 conn');
     expect(host.textContent).toContain('Priority 25');
+    const enabledStatus = [...host.querySelectorAll('span')].find(
+      (element) =>
+        element.textContent?.trim() === 'Enabled' && !element.classList.contains('sr-only'),
+    );
+    expect(enabledStatus).toBeDefined();
+    expect(host.querySelector('.size-2')?.getAttribute('aria-hidden')).toBe('true');
+    const serverName = [...host.querySelectorAll<HTMLElement>('.truncate')].find(
+      (element) => element.textContent?.trim() === EWEKA.name,
+    );
+    const serverAddress = [...host.querySelectorAll<HTMLElement>('.truncate')].find(
+      (element) => element.textContent?.includes(`${EWEKA.host}:${EWEKA.port}`),
+    );
+    expect(serverName?.getAttribute('title')).toBe(EWEKA.name);
+    expect(serverAddress?.getAttribute('title')).toBe(
+      `${EWEKA.host}:${EWEKA.port} · ${EWEKA.username}`,
+    );
   });
 
   // The copy rule: these are the built-in engine's own article sources. A user
@@ -326,6 +342,7 @@ describe('UsenetServerSettings', () => {
     expect(test!.body).toMatchObject({ id: 7, host: 'news.eweka.nl', port: 563, tls: true });
     expect(test!.body).not.toHaveProperty('password');
     expect(host.textContent).toContain('Connected');
+    expect(host.querySelector('[title="Connected"]')).not.toBeNull();
   });
 
   it('reports why a test failed rather than only that it did', async () => {

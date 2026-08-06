@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import ScanReview from './ScanReview.svelte';
 import { system } from '../state/system.svelte';
-import type { SystemStatus } from '../api/types';
+import type { SystemStatus, UnmatchedFile } from '../api/types';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -34,8 +34,10 @@ const STATUS = {
 
 let host: HTMLElement;
 let app: Record<string, unknown> | undefined;
+let unmatched: UnmatchedFile[];
 
 beforeEach(() => {
+  unmatched = [];
   host = document.createElement('div');
   document.body.appendChild(host);
   system.status = null;
@@ -43,7 +45,7 @@ beforeEach(() => {
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes('/import/queue')) return jsonResponse({ unmatched: [] });
+      if (url.includes('/import/queue')) return jsonResponse({ items: unmatched });
       throw new Error(`unexpected fetch: ${url}`);
     }),
   );
@@ -89,5 +91,40 @@ describe('ScanReview', () => {
 
     expect(host.textContent).not.toContain('Nothing can be matched');
     expect(host.textContent).toContain('Nothing to review');
+  });
+
+  it('exposes a full unmatched path when the table shortens it', async () => {
+    const path = 'library/Movies/A Very Long Movie Name (2026)/A.Very.Long.Movie.Name.2026.2160p.BluRay.x265-GROUP.mkv';
+    unmatched = [{
+      id: 1,
+      path,
+      size: 1_000_000,
+      parsed: {
+        title: 'A Very Long Movie Name',
+        year: 2026,
+        season: 0,
+        episodes: [],
+        quality: '2160p',
+        source: 'BluRay',
+        codec: 'x265',
+        audio: 'DTS',
+        bit_depth: 10,
+        group: 'GROUP',
+        proper: false,
+        repack: false,
+        edition: '',
+        confidence: 0.4,
+      },
+      reason: 'No confident match',
+      seen_at: '2026-08-01T00:00:00Z',
+    }];
+    system.status = { ...STATUS, metadata_credential: 'ok' };
+    app = mount(ScanReview, { target: host });
+    await settle();
+
+    const pathCell = host.querySelector<HTMLElement>('td.font-mono[title]');
+    expect(pathCell).not.toBeNull();
+    expect(pathCell?.textContent?.trim()).not.toBe(path);
+    expect(pathCell?.getAttribute('title')).toBe(path);
   });
 });

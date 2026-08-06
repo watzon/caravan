@@ -79,6 +79,18 @@ describe('Calendar', () => {
     expect(host.querySelector('[title="Chainsmoker Cat S01E06"]')).not.toBeNull();
   });
 
+  it('contains the wide month grid inside a shrinkable horizontal scroller', async () => {
+    app = mount(Calendar, { target: host });
+    await settle();
+
+    const month = host.querySelector<HTMLElement>('[aria-label="Month calendar"]');
+    expect(month?.classList.contains('min-w-0')).toBe(true);
+    expect(month?.classList.contains('max-w-full')).toBe(true);
+    expect(month?.firstElementChild?.classList.contains('min-w-[760px]')).toBe(true);
+    expect(month?.parentElement?.classList.contains('w-full')).toBe(true);
+    expect(month?.parentElement?.classList.contains('min-w-0')).toBe(true);
+  });
+
   it('names month controls and shows and announces status in each day chip', async () => {
     app = mount(Calendar, { target: host });
     await settle();
@@ -118,9 +130,11 @@ describe('Calendar', () => {
 
     const agenda = host.querySelector('[aria-label="Calendar agenda"]');
     expect(agenda?.querySelector('a[href="/series/5"]')?.textContent).toBe('Chainsmoker Cat S01E06');
+    expect(agenda?.querySelector('a[href="/series/5"]')?.getAttribute('title')).toBe('Chainsmoker Cat S01E06');
     const specialEntries = Array.from(agenda?.querySelectorAll('a[href="/series/6"]') ?? []);
     expect(specialEntries).toHaveLength(1);
     expect(specialEntries[0]?.textContent).toBe('Series Name S00E04');
+    expect(specialEntries[0]?.getAttribute('title')).toBe('Series Name S00E04');
   });
 
   it('marks today without a focus-style ring', async () => {
@@ -130,6 +144,8 @@ describe('Calendar', () => {
     const today = host.querySelector('[data-today="true"]');
     expect(today).not.toBeNull();
     expect(today?.className).toContain('bg-accent-tint');
+    expect(today?.querySelector('[aria-current="date"]')?.textContent).toContain('Today');
+    expect(today?.querySelector('[aria-current="date"]')?.className).toContain('relative');
     expect(today?.className).not.toContain('ring-');
     expect(today?.querySelector('p')?.className).toContain('rounded-full');
   });

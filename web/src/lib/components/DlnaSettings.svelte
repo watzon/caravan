@@ -136,11 +136,6 @@
 <SettingsCard
   title="DLNA"
   description="The built-in media server. TVs and apps browse and play the library directly — no account, no transcoding.">
-  {#snippet action()}
-    {#if status?.advertising}
-      <Badge tone="success">Advertising</Badge>
-    {/if}
-  {/snippet}
 
   {#if error}
     <LoadError message={error} onretry={load} />
@@ -209,7 +204,11 @@
       </div>
       <div class="min-w-0">
         <dt class="micro-label">Device ID</dt>
-        <dd class="mt-1 truncate font-mono text-sm text-ink">{status.uuid || '—'}</dd>
+        <dd
+          class="mt-1 truncate font-mono text-sm text-ink"
+          title={status.uuid || undefined}>
+          {status.uuid || '—'}
+        </dd>
       </div>
     </dl>
 

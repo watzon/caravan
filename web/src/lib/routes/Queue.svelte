@@ -332,7 +332,7 @@
   {@const target = removing}
   <Modal title="Remove from the queue" width="max-w-lg" onclose={() => (removing = null)}>
     <div class="flex flex-col gap-4 p-4">
-      <p class="font-mono text-sm text-ink">{truncateMiddle(target.name || UNKNOWN, 72)}</p>
+      <p class="font-mono text-sm text-ink" title={target.name || UNKNOWN}>{truncateMiddle(target.name || UNKNOWN, 72)}</p>
       <p class="text-base text-ink-secondary">
         Removing stops the download. Its data stays on disk unless you say otherwise - an
         already-imported file is a hardlink away from this data, so deleting it can cost you

@@ -17,6 +17,8 @@
   let { rows = 4 }: Props = $props();
 </script>
 
+<span class="sr-only" role="status">Searching…</span>
+
 <div class="flex flex-col gap-2">
   {#each Array.from({ length: rows }) as _, i (i)}
     <div class="flex items-center gap-3 rounded-md border border-border p-2">

@@ -384,7 +384,9 @@
         label="Root path"
         for="library-root"
         help="Relative to the storage root. Moving the whole library is Settings → Storage's job, so it is read-only here.">
-        <TextInput id="library-root" value={lib.root_path} readonly mono />
+        <div title={lib.root_path}>
+          <TextInput id="library-root" value={lib.root_path} readonly mono />
+        </div>
       </Field>
 
       <Field
@@ -434,16 +436,19 @@
               class="flex flex-wrap items-center gap-3 rounded-md border bg-surface px-3 py-3
                      {row.categories_overridden ? 'border-accent' : 'border-border'}">
               <span
+                aria-hidden="true"
                 class="size-2 shrink-0 rounded-full {row.indexer_enabled
                   ? 'bg-success'
                   : 'bg-ink-muted'}">
               </span>
-              <span class="sr-only">{row.indexer_enabled ? 'Enabled' : 'Disabled'}</span>
 
               <div class="flex min-w-0 flex-1 flex-col gap-1">
                 <p class="flex flex-wrap items-center gap-2">
-                  <span class="truncate text-base font-medium text-ink">{row.name}</span>
+                  <span class="truncate text-base font-medium text-ink" title={row.name}>{row.name}</span>
                   <Badge mono tone={row.type === 'torznab' ? 'accent' : 'info'}>{row.type}</Badge>
+                  <Badge tone={row.indexer_enabled ? 'success' : 'neutral'}>
+                    {row.indexer_enabled ? 'Indexer enabled' : 'Indexer disabled'}
+                  </Badge>
                 </p>
 
                 <div class="flex flex-wrap items-center gap-1.5">
@@ -477,7 +482,7 @@
                 {/if}
               </div>
 
-              <div class="flex shrink-0 flex-col items-end gap-1">
+              <div class="flex w-full shrink-0 flex-col items-end gap-1 sm:w-auto">
                 {@render autosaveStatus(autosaveKey(lib, `indexer-${row.indexer_id}`))}
                 <Toggle
                   checked={row.enabled}
@@ -594,15 +599,17 @@
     </div>
 
     {#snippet footer()}
-      {#if row.categories_overridden}
-        <Button variant="ghost" disabled={busy} onclick={clearCategories}>Use the indexer's</Button>
-        <span class="mx-1 h-5 w-px shrink-0 bg-border"></span>
-      {/if}
-      <Button variant="ghost" disabled={busy} onclick={() => (editing = null)}>Cancel</Button>
-      <Button variant="primary" disabled={busy} onclick={saveCategories}>
-        <Icon name="check" size={14} />
-        Save
-      </Button>
+      <div class="flex w-full flex-wrap items-center justify-end gap-2">
+        {#if row.categories_overridden}
+          <Button variant="ghost" disabled={busy} onclick={clearCategories}>Use the indexer's</Button>
+          <span class="mx-1 hidden h-5 w-px shrink-0 bg-border sm:block"></span>
+        {/if}
+        <Button variant="ghost" disabled={busy} onclick={() => (editing = null)}>Cancel</Button>
+        <Button variant="primary" disabled={busy} onclick={saveCategories}>
+          <Icon name="check" size={14} />
+          Save
+        </Button>
+      </div>
     {/snippet}
   </Modal>
 {/if}

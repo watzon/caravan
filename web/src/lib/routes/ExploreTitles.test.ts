@@ -123,6 +123,26 @@ afterEach(() => {
 });
 
 describe('a filtered movie scope', () => {
+  it('names every filter trigger, toggle, and sort control', async () => {
+    await open('movie', '/discover/movies');
+
+    const filterNames = [...host.querySelectorAll<HTMLButtonElement>('button[aria-expanded]')].map(
+      (button) => button.textContent?.trim(),
+    );
+    expect(filterNames).toEqual([
+      'Genre',
+      'Cast & crew',
+      'Studio',
+      'Keyword',
+      'Year',
+      'Runtime',
+      'Rating',
+      'Language',
+    ]);
+    expect(host.querySelector('[role="switch"]')?.textContent?.trim()).toBe('Hide in library');
+    expect(host.querySelector('select')?.getAttribute('aria-label')).toBe('Sort results');
+  });
+
   /**
    * The whole point of putting the filter in the URL: this address is what
    * somebody shares or reloads into, and every part of it has to survive the

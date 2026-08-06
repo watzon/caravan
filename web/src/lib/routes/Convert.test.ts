@@ -217,8 +217,8 @@ function selectionBar(): HTMLElement | null {
 }
 
 function tabWith(text: string): HTMLButtonElement | undefined {
-  return [...host.querySelectorAll<HTMLButtonElement>('button[role="tab"]')].find((button) =>
-    button.textContent?.includes(text),
+  return [...host.querySelectorAll<HTMLButtonElement>('[role="group"][aria-label="Conversion work"] button')].find(
+    (button) => button.textContent?.includes(text),
   );
 }
 
@@ -232,6 +232,7 @@ describe('Convert route', () => {
     expect(host.textContent).toContain('HEVC video');
     expect(host.textContent).not.toContain('Arrival (2016).mkv');
     expect(host.textContent).not.toContain('REMUX');
+    expect(host.querySelector(`[title="${PENDING[0]?.path}"]`)).not.toBeNull();
     expect(
       [...host.querySelectorAll<HTMLElement>('[title]')].some((element) =>
         element.title.toLowerCase().includes('remux'),
@@ -240,6 +241,8 @@ describe('Convert route', () => {
     expect(tabWith('Pending')?.textContent).toContain('2');
     expect(tabWith('Active')?.textContent).toContain('1');
     expect(tabWith('Finished')?.textContent).toContain('2');
+    expect(tabWith('Pending')?.getAttribute('aria-pressed')).toBe('true');
+    expect(tabWith('Active')?.getAttribute('aria-pressed')).toBe('false');
 
     buttonWith('Convert for TV')!.click();
     await settle();
@@ -254,6 +257,7 @@ describe('Convert route', () => {
 
     tabWith('Active')!.click();
     flushSync();
+    expect(tabWith('Active')?.getAttribute('aria-pressed')).toBe('true');
     expect(host.textContent).toContain('Blade Runner (1982).mkv');
     expect(host.textContent).toContain('Deciding…');
   });

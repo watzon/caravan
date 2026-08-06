@@ -162,9 +162,9 @@
   });
 </script>
 
-<div class="flex max-w-[1360px] flex-col gap-5">
+<div class="flex w-full min-w-0 max-w-[1360px] flex-col gap-5">
   <div class="flex flex-wrap items-center gap-3">
-    <div class="flex items-center gap-1" aria-label="Calendar month navigation">
+    <div class="flex flex-wrap items-center justify-center gap-1" aria-label="Calendar month navigation">
       <button
         type="button"
         aria-label="Previous month"
@@ -195,7 +195,7 @@
   {:else if loading && entries === null}
     <Skeleton class="h-[620px] w-full rounded-md" />
   {:else if view === 'month'}
-    <section class="overflow-x-auto rounded-md border border-border bg-surface" aria-label="Month calendar">
+    <section class="w-full min-w-0 max-w-full overflow-x-auto rounded-md border border-border bg-surface" aria-label="Month calendar">
       <div class="min-w-[760px]">
         <div class="grid grid-cols-7 border-b border-border bg-raised">
           {#each DAYS as day}
@@ -211,7 +211,7 @@
             <div
               data-today={isToday ? 'true' : undefined}
               class="min-h-28 border-b border-r border-border p-2 last:border-r-0 {isToday ? 'bg-accent-tint' : inMonth ? 'bg-surface' : 'bg-bg/40'}">
-              <p class="mb-1 font-mono text-xs {isToday ? 'inline-flex size-5 items-center justify-center rounded-full bg-accent text-ink-inverse' : inMonth ? 'text-ink-secondary' : 'text-ink-muted'}">{date.getDate()}</p>
+              <p aria-current={isToday ? 'date' : undefined} class="relative mb-1 font-mono text-xs {isToday ? 'inline-flex size-5 items-center justify-center rounded-full bg-accent text-ink-inverse' : inMonth ? 'text-ink-secondary' : 'text-ink-muted'}">{#if isToday}<span class="sr-only">Today, </span>{/if}{date.getDate()}</p>
               <div class="flex flex-col gap-1">
                 {#each cellEntries.slice(0, 3) as entry (entry.kind + entry.title + entry.date)}
                   {@const meta = STATUS[entry.status]}
@@ -246,7 +246,7 @@
               <li class="flex items-center gap-3 border-b border-border px-3 py-3 last:border-b-0">
                 <span class="size-2 shrink-0 rounded-full {TONE_DOT[meta.tone]}" title={meta.label}></span>
                 <Badge tone={entry.kind === 'movie' ? 'neutral' : 'info'}>{entry.kind === 'movie' ? 'Movie' : 'Episode'}</Badge>
-                <a href={entry.kind === 'movie' && entry.movie_id ? `/movies/${entry.movie_id}` : entry.series_id ? `/series/${entry.series_id}` : undefined} class="min-w-0 flex-1 truncate font-medium text-ink hover:text-accent-text">{agendaTitle(entry)}</a>
+                <a href={entry.kind === 'movie' && entry.movie_id ? `/movies/${entry.movie_id}` : entry.series_id ? `/series/${entry.series_id}` : undefined} class="min-w-0 flex-1 truncate font-medium text-ink hover:text-accent-text" title={agendaTitle(entry)}>{agendaTitle(entry)}</a>
                 <span class="text-sm {TONE_TEXT[meta.tone]}">{meta.label}</span>
               </li>
             {/each}

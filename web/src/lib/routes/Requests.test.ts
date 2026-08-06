@@ -186,6 +186,8 @@ describe('Requests', () => {
 
     expect(host.querySelector('a[href="/discover/series/1396"]')).not.toBeNull();
     expect(host.querySelector('a[href="/discover/movie/78"]')).not.toBeNull();
+    expect(host.querySelector('a[title="Severance (2022)"]')).not.toBeNull();
+    expect(host.querySelector('a[title="Blade Runner (1982)"]')).not.toBeNull();
   });
 
   it('dismisses a row, drops it locally and says so', async () => {

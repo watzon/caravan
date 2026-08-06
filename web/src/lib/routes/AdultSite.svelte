@@ -46,7 +46,6 @@
   import {
     CATALOGUING_POLL_MS,
     performerSummary,
-    sceneLine,
     sceneNumber,
     scenePerformers,
   } from '../adult';
@@ -224,9 +223,9 @@
          argument and a retry would silently swallow its own failure. -->
     <LoadError message={error} onretry={() => load()} />
   {:else if loading && site === null}
-    <div class="flex gap-6">
+    <div class="flex flex-col gap-6 md:flex-row">
       <Skeleton class="aspect-[2/3] w-52 rounded-md" />
-      <div class="flex flex-1 flex-col gap-3">
+      <div class="flex min-w-0 flex-1 flex-col gap-3">
         <Skeleton class="h-8 w-1/2" />
         <Skeleton class="h-4 w-1/4" />
         <Skeleton class="h-20 w-full" />
@@ -265,7 +264,7 @@
             </div>
           </div>
           {#if session.isAdmin}
-            <div class="flex items-center gap-3">
+            <div class="flex w-full flex-wrap items-center gap-3 sm:w-auto">
               <Button variant="primary" disabled={searching} onclick={searchNow}>
                 <Icon name="search" size={14} />
                 {searching ? 'Searching…' : 'Search monitored'}
@@ -352,10 +351,10 @@
         {#each years as year (year.year)}
           {@const isCollapsed = collapsed[year.year] ?? false}
           <section class="overflow-hidden rounded-md border border-border">
-            <header class="flex items-center gap-3 bg-surface px-3 py-2">
+            <header class="flex flex-wrap items-center gap-3 bg-surface px-3 py-2">
               <button
                 type="button"
-                class="flex min-w-0 flex-1 items-center gap-2 text-left"
+                class="flex w-full min-w-0 items-center gap-2 text-left sm:w-auto sm:flex-1"
                 aria-expanded={!isCollapsed}
                 onclick={() => (collapsed = { ...collapsed, [year.year]: !isCollapsed })}>
                 <span class="text-ink-secondary">
@@ -430,7 +429,9 @@
                         <tr
                           class="h-10 border-t border-border transition-colors duration-150 hover:bg-raised">
                           <td class="max-w-[420px] px-3 py-2 text-ink">
-                            <span class="block truncate" title={sceneLine(scene)}>
+                            <span
+                              class="block truncate"
+                              title={`${sceneNumber(scene.number)} ${scene.title || UNKNOWN}`}>
                               <span class="font-mono text-ink-secondary">
                                 {sceneNumber(scene.number)}
                               </span>

@@ -25,11 +25,21 @@
   let { item, showType = false }: Props = $props();
 
   let rating = $derived(ratingPresentation(item.vote_average, item.vote_count, item.date));
+  let accessibleLabel = $derived.by(() => {
+    const parts = [
+      item.year > 0 ? titleWithYear(item.title, item.year) : `${item.title}, Year unknown`,
+    ];
+    if (showType) parts.push(mediaTypeChip(item.media_type));
+    parts.push(rating.title);
+    if (item.in_library) parts.push('In library');
+    else if (item.requested) parts.push('Requested');
+    return parts.join(', ');
+  });
 </script>
 
 <a
   href={discoverHref(item)}
-  aria-label={titleWithYear(item.title, item.year)}
+  aria-label={accessibleLabel}
   class="group/card flex w-full flex-col gap-2 rounded-md text-left focus:outline-none">
   <div
     class="relative rounded-md ring-1 ring-transparent transition-[box-shadow] duration-150 ease-out

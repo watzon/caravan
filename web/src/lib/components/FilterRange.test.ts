@@ -67,6 +67,25 @@ function settle() {
 }
 
 describe('FilterRange', () => {
+  it('associates each input with its visible label and shared hint', () => {
+    mountRange({
+      minLabel: 'Minimum runtime',
+      maxValue: 0,
+      maxLabel: 'Maximum runtime',
+      onmax: () => {},
+      hint: 'Runtime is measured in minutes.',
+    });
+
+    const [min, max] = boxes() as [HTMLInputElement, HTMLInputElement];
+    const labels = [...host.querySelectorAll<HTMLLabelElement>('label')];
+    expect(labels.map((label) => label.control)).toEqual([min, max]);
+
+    const hintID = min.getAttribute('aria-describedby');
+    expect(hintID).toBeTruthy();
+    expect(max.getAttribute('aria-describedby')).toBe(hintID);
+    expect(host.querySelector(`#${hintID}`)?.textContent).toBe('Runtime is measured in minutes.');
+  });
+
   /**
    * The regression. Every intermediate state of typing "7.5" must survive, and
    * the only complete number among them is the one that reaches the filter.

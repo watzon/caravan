@@ -170,8 +170,8 @@
 <svelte:window {onkeydown} />
 
 <div class="flex flex-col gap-6">
-  <div class="flex items-center gap-2">
-    <div class="min-w-0 flex-1">
+  <div class="flex flex-wrap items-center gap-2">
+    <div class="min-w-0 basis-full sm:flex-1">
       <PageTabs
         {tabs}
         active={tab}
@@ -359,7 +359,7 @@
     </ul>
   {/if}
   {#if tab === 'pending' && ffmpeg && selection.active}
-    <div class="pointer-events-none fixed bottom-6 left-60 right-0 z-40 flex justify-center">
+    <div class="pointer-events-none fixed bottom-6 left-0 right-0 z-40 flex justify-center px-3 md:left-60">
       <div
         class="pointer-events-auto flex items-center gap-1 rounded-lg border border-border-strong
                bg-overlay py-1.5 pl-4 pr-1.5 shadow-2xl"

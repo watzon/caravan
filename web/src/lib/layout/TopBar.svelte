@@ -37,7 +37,7 @@
 </script>
 
 <header
-  class="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-4 bg-bg/95 px-6 backdrop-blur">
+  class="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-2 bg-bg/95 px-3 backdrop-blur sm:gap-4 sm:px-6">
   <button
     type="button"
     class="flex h-9 items-center rounded-md border border-border-strong bg-raised px-3 text-sm text-ink-secondary transition-colors duration-150 ease-out hover:bg-overlay hover:text-ink md:hidden"
@@ -49,12 +49,12 @@
     Menu
   </button>
 
-  <h1 class="truncate font-display text-xl font-semibold tracking-tight text-ink">
+  <h1 class="min-w-0 truncate font-display text-xl font-semibold tracking-tight text-ink" title={title}>
     {title}
   </h1>
 
   {#if page.subtitle}
-    <span class="truncate text-sm text-ink-secondary">{page.subtitle}</span>
+    <span class="hidden min-w-0 truncate text-sm text-ink-secondary sm:inline" title={page.subtitle}>{page.subtitle}</span>
   {/if}
 
   <div class="flex-1"></div>
@@ -66,8 +66,8 @@
   {#if onadd}
     <Button variant="secondary" onclick={onadd} title="Add movie or series">
       <Icon name="plus" size={14} />
-      <span class="sr-only sm:not-sr-only">Add movie or series</span>
-      <kbd class="ml-2 rounded-sm bg-surface px-1.5 py-0.5 font-mono text-xs text-ink-muted">
+      <span class="sr-only lg:not-sr-only">Add movie or series</span>
+      <kbd class="ml-2 hidden rounded-sm bg-surface px-1.5 py-0.5 font-mono text-xs text-ink-muted xl:inline">
         {isMac ? '⌘' : 'Ctrl'}K
       </kbd>
     </Button>

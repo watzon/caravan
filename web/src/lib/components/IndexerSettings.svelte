@@ -298,20 +298,20 @@
         {@const result = tests[indexer.id]}
         <li class="flex flex-wrap items-center gap-3 rounded-md border border-border bg-surface px-3 py-3">
           <span
+            aria-hidden="true"
             class="size-2 shrink-0 rounded-full {indexer.enabled ? 'bg-success' : 'bg-ink-muted'}">
           </span>
-          <span class="sr-only">{indexer.enabled ? 'Enabled' : 'Disabled'}</span>
 
           <div class="min-w-0 flex-1">
             <p class="flex flex-wrap items-center gap-2">
-              <span class="truncate text-base font-medium text-ink">{indexer.name}</span>
+              <span class="truncate text-base font-medium text-ink" title={indexer.name}>{indexer.name}</span>
               <Badge mono tone={indexer.type === 'torznab' ? 'accent' : 'info'}>
                 {indexer.type}
               </Badge>
               <Badge mono tone="neutral">Priority {indexer.priority ?? 25}</Badge>
-              {#if !indexer.enabled}
-                <Badge tone="neutral">Disabled</Badge>
-              {/if}
+              <Badge tone={indexer.enabled ? 'success' : 'neutral'}>
+                {indexer.enabled ? 'Enabled' : 'Disabled'}
+              </Badge>
             </p>
             <p class="truncate font-mono text-xs text-ink-muted" title={indexer.url}>
               {indexer.url}
@@ -323,7 +323,7 @@
             {/if}
           </div>
 
-          <div class="flex shrink-0 items-center gap-2">
+          <div class="flex w-full shrink-0 items-center justify-end gap-2 sm:w-auto">
             <Button
               variant="secondary"
               size="sm"
@@ -336,6 +336,7 @@
               variant="ghost"
               size="sm"
               disabled={busyID === indexer.id}
+              title="Remove {indexer.name}"
               onclick={() => (confirmingRemove = indexer)}>
               <Icon name="trash" size={14} />
               <span class="sr-only">Remove {indexer.name}</span>

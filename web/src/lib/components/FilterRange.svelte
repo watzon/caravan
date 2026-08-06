@@ -62,6 +62,9 @@
     max,
   }: Props = $props();
 
+  const fieldID = $props.id();
+  const hintID = `${fieldID}-hint`;
+
   const FIELD =
     'h-9 w-full rounded-sm border border-border-strong bg-raised px-2 text-md text-ink ' +
     'placeholder:text-ink-muted focus:border-accent focus:outline-none';
@@ -184,6 +187,7 @@
         type="text"
         inputmode="decimal"
         {placeholder}
+        aria-describedby={hint ? hintID : undefined}
         bind:value={minText}
         oninput={() => schedule('min', commitMin)}
         onchange={() => flush('min', commitMin)}
@@ -198,6 +202,7 @@
           type="text"
           inputmode="decimal"
           {placeholder}
+          aria-describedby={hint ? hintID : undefined}
           bind:value={maxText}
           oninput={() => schedule('max', commitMax)}
           onchange={() => flush('max', commitMax)}
@@ -207,6 +212,6 @@
   </div>
 
   {#if hint}
-    <p class="text-sm text-ink-muted">{hint}</p>
+    <p id={hintID} class="text-sm text-ink-muted">{hint}</p>
   {/if}
 </div>

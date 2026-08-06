@@ -27,6 +27,9 @@ beforeEach(() => {
     if (url.endsWith('/quality-profiles/import') && init?.method === 'POST') {
       return jsonResponse(importResponse);
     }
+    if (/\/quality-profiles\/\d+$/.test(url) && init?.method === 'DELETE') {
+      return jsonResponse({ error: 'profile deletion failed' }, 500);
+    }
     if (/\/quality-profiles\/\d+$/.test(url) && init?.method === 'PUT') {
       return jsonResponse(updateResponse);
     }
@@ -67,6 +70,14 @@ function button(label: string) {
   return found!;
 }
 
+function describedText(element: Element): string {
+  const id = element.getAttribute('aria-describedby');
+  expect(id, 'aria-describedby').toBeTruthy();
+  const description = id ? host.querySelector(`#${id}`) : null;
+  expect(description, `description ${id}`).not.toBeNull();
+  return description?.textContent?.trim() ?? '';
+}
+
 describe('QualityProfiles', () => {
 
   it('disables invalid profile saves while retaining validation and duplicate feedback', async () => {
@@ -89,6 +100,14 @@ describe('QualityProfiles', () => {
     flushSync();
     expect(host.textContent).toContain('Enter a profile name.');
     expect(host.textContent).toContain('Select at least one quality.');
+
+    const qualityGroup = host.querySelector('[role="group"][aria-label="Allowed qualities"]')!;
+    expect(host.querySelector('#quality-profile-items-error[role="alert"]')).not.toBeNull();
+    expect(describedText(qualityGroup)).toBe('Select at least one quality.');
+
+    const cutoff = host.querySelector('#quality-profile-cutoff')!;
+    expect(cutoff.getAttribute('aria-invalid')).toBe('true');
+    expect(describedText(cutoff)).toBe('Choose a cutoff from the selected qualities.');
 
     onlyQuality.click();
     const name = host.querySelector('#quality-profile-name') as HTMLInputElement;
@@ -119,6 +138,25 @@ describe('QualityProfiles', () => {
     expect(host.textContent).toContain('Prefer adds a compatibility bonus.');
     expect(host.textContent).toContain('Require rejects releases that do not match the selected TV target.');
     expect(host.textContent).toContain('shows each score contribution below.');
+
+    expect(describedText(host.querySelector('#quality-profile-cutoff')!)).toContain(
+      'define which releases are accepted',
+    );
+    expect(describedText(host.querySelector('[aria-label="Preferred source order"]')!)).toContain(
+      'Preferred sources affect ranking',
+    );
+    expect(
+      describedText(host.querySelector('[aria-label="Proper and Repack preference"]')!),
+    ).toContain('Neutral ignores proper and repack tags');
+    expect(describedText(host.querySelector('#quality-profile-min-seeders')!)).toContain(
+      'Applies to torrent releases only',
+    );
+    expect(
+      describedText(host.querySelector('[aria-label="TV compatibility policy"]')!),
+    ).toContain('Require rejects releases');
+    expect(describedText(host.querySelector('#quality-format-score-0')!)).toContain(
+      'Negative scores penalize matching releases',
+    );
     expect(button('Cancel').closest('.flex-wrap')).not.toBeNull();
   });
 
@@ -258,6 +296,19 @@ describe('QualityProfiles', () => {
     expect(deleteButtons).toHaveLength(2);
     expect(deleteButtons[0]?.disabled).toBe(true);
     expect(deleteButtons[1]?.disabled).toBe(false);
+
+    deleteButtons[1]!.click();
+    flushSync();
+    const deleteDialog = host.querySelector<HTMLElement>('[role="dialog"]');
+    const confirmDelete = [...deleteDialog!.querySelectorAll<HTMLButtonElement>('button')].find(
+      (candidate) => candidate.textContent?.trim() === 'Delete',
+    );
+    expect(confirmDelete).toBeDefined();
+    confirmDelete!.click();
+    await settle();
+    expect(deleteDialog!.querySelector('[role="alert"]')?.textContent).toBe(
+      'profile deletion failed',
+    );
   });
 
   it('clones a distinct policy draft and can set the clone source as the default', async () => {

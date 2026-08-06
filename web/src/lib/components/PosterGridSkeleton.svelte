@@ -9,6 +9,8 @@
   let { count = 12 }: Props = $props();
 </script>
 
+<span class="sr-only" role="status">Loading items…</span>
+
 <PosterGrid>
   {#each Array.from({ length: count }) as _, i (i)}
     <div class="flex flex-col gap-2">

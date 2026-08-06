@@ -77,6 +77,18 @@ describe('AddItemModal', () => {
     expect(document.activeElement).toBe(host!.querySelector('input'));
   });
 
+  it('names the search field, scope tabs, and close control', () => {
+    mountModal();
+
+    expect(host!.querySelector('input[type="search"]')?.getAttribute('aria-label')).toBe(
+      'Search TMDB',
+    );
+    expect(host!.querySelector('[role="tablist"]')?.getAttribute('aria-label')).toBe(
+      'Search type',
+    );
+    expect(host!.querySelector('button[aria-label="Close"]')).not.toBeNull();
+  });
+
   function pressTab(target: Element, shiftKey = false): KeyboardEvent {
     const event = new KeyboardEvent('keydown', { key: 'Tab', shiftKey, cancelable: true, bubbles: true });
     target.dispatchEvent(event);
@@ -433,6 +445,35 @@ describe('AddItemModal', () => {
     expect(rows[1]!.textContent).toContain('Dune');
     expect(rows[1]!.textContent).toContain('2021');
     expect(rows[1]!.textContent).toContain('8.1/10');
+  });
+
+  it('exposes full search-result names and overviews when the row truncates them', async () => {
+    vi.useFakeTimers();
+    const fullTitle = 'A Search Result Title That Is Much Longer Than the Modal Row';
+    const fullOverview =
+      'A complete overview that remains available even when the visible result is clamped to two lines.';
+    stubSearchAndAdd({
+      movies: [
+        {
+          tmdb_id: 18,
+          title: fullTitle,
+          year: 2024,
+          overview: fullOverview,
+          release_date: '2024-06-14',
+          vote_average: 7.2,
+          vote_count: 320,
+          poster_url: '',
+        },
+      ],
+      series: [],
+    });
+    mountModal();
+
+    await addSearchResults('long result');
+
+    const row = host!.querySelector('ul li')!;
+    expect(row.querySelector('.truncate')?.getAttribute('title')).toBe(fullTitle);
+    expect(row.querySelector('.line-clamp-2')?.getAttribute('title')).toBe(fullOverview);
   });
 
   it('suppresses a nonzero provider average when its vote count is zero', async () => {
@@ -910,6 +951,31 @@ describe('AddItemModal adult scope', () => {
     const search = siteSearches(calls);
     expect(search).toHaveLength(before + 1);
     expect(search[before]!.url).toContain('q=brazzers');
+  });
+
+  it('exposes complete site names and aliases when the result row truncates them', async () => {
+    vi.useFakeTimers();
+    const fullName = 'A Provider Site Name That Is Longer Than the Available Result Row';
+    const aliases = ['A very long release alias', 'Another complete alias'];
+    stubProviders({
+      sites: [
+        {
+          ...SITES[0],
+          name: fullName,
+          aliases,
+        },
+      ],
+    });
+    mountSiteScope();
+    await settle();
+    type('provider');
+    await settle(300);
+
+    const row = host!.querySelector('ul li')!;
+    expect(row.querySelector('.truncate')?.getAttribute('title')).toBe(fullName);
+    expect(row.querySelectorAll('.truncate')[1]?.getAttribute('title')).toBe(
+      `also ${aliases.join(', ')}`,
+    );
   });
 
   it('does not search a site query below the minimum length', async () => {

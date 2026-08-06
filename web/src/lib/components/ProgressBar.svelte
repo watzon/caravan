@@ -6,7 +6,7 @@
     /** Fraction in [0,1]. */
     value: number;
     tone?: Tone;
-    label?: string;
+    label: string;
     class?: string;
   }
 
@@ -20,6 +20,7 @@
   aria-valuenow={pct}
   aria-valuemin="0"
   aria-valuemax="100"
+  aria-valuetext={`${pct}%`}
   aria-label={label}>
   <div
     class="h-full rounded-full transition-[width] duration-150 ease-out {TONE_DOT[tone]}"

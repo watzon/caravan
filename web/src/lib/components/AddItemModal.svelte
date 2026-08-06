@@ -326,7 +326,7 @@
 <Modal {title} {onclose}>
   <div bind:this={body} class="flex flex-col gap-4 p-4">
     {#if !fixedKind}
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2">
         <div class="flex gap-2" role="tablist" aria-label="Search type">
           {#each scopes as tab (tab.key)}
             <button
@@ -342,7 +342,7 @@
             </button>
           {/each}
         </div>
-        <span class="ml-auto flex items-center gap-1 text-xs text-ink-muted" aria-hidden="true">
+        <span class="ml-0 flex items-center gap-1 text-xs text-ink-muted sm:ml-auto" aria-hidden="true">
           <kbd class="rounded-sm bg-surface px-1.5 py-0.5 font-mono">Tab</kbd>
           to switch
         </span>
@@ -399,7 +399,7 @@
                 <Poster path={hit.image_url} alt="" fallbackIcon="flame" />
               </div>
               <div class="min-w-0 flex-1">
-                <p class="truncate text-base font-medium text-ink">{hit.name}</p>
+                <p class="truncate text-base font-medium text-ink" title={hit.name}>{hit.name}</p>
                 <p class="flex flex-wrap items-center gap-2 text-sm text-ink-secondary">
                   {#if hit.parent_name}
                     <span>{hit.parent_name}</span>
@@ -407,7 +407,9 @@
                   <!-- A release name carries whichever alias its packager saw,
                        so the aliases are what make the right row identifiable. -->
                   {#if hit.aliases.length > 0}
-                    <span class="truncate">also {hit.aliases.join(', ')}</span>
+                    <span class="truncate" title={`also ${hit.aliases.join(', ')}`}>
+                      also {hit.aliases.join(', ')}
+                    </span>
                   {/if}
                 </p>
               </div>
@@ -450,14 +452,16 @@
                 fallbackIcon={scope === 'movie' ? 'film' : 'tv'} />
             </div>
             <div class="min-w-0 flex-1">
-              <p class="truncate text-base font-medium text-ink">{row.title}</p>
+              <p class="truncate text-base font-medium text-ink" title={row.title}>{row.title}</p>
               <div class="mt-1 flex flex-wrap items-center gap-1.5">
                 <Badge mono tone="neutral">{row.year > 0 ? row.year : 'Year unknown'}</Badge>
                 <Badge mono tone="neutral" title={rating.title}>
                   {rating.text ?? rating.title}
                 </Badge>
               </div>
-              <p class="line-clamp-2 text-sm text-ink-secondary">
+              <p
+                class="line-clamp-2 text-sm text-ink-secondary"
+                title={row.overview || 'No overview available.'}>
                 {row.overview || 'No overview available.'}
               </p>
             </div>

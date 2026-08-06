@@ -65,7 +65,10 @@
       class="size-full {fit === 'contain' ? 'object-contain p-4' : 'object-cover'}"
       onerror={() => (stage += 1)} />
   {:else}
-    <div class="flex size-full items-center justify-center text-ink-muted">
+    <div
+      class="flex size-full items-center justify-center text-ink-muted"
+      role={alt ? 'img' : undefined}
+      aria-label={alt || undefined}>
       <Icon name={fallbackIcon} size={28} />
     </div>
   {/if}

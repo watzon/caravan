@@ -110,6 +110,26 @@ function type(id: string, value: string) {
 }
 
 describe('IndexerSettings category picker', () => {
+  it('names compact row controls and exposes the full truncated values', async () => {
+    app = mount(IndexerSettings, { target: host });
+    await settle();
+
+    expect(host.querySelector('span[title="NZBGeek"]')?.textContent).toBe('NZBGeek');
+    expect(host.textContent).toContain('Enabled');
+    expect(host.querySelector('span.bg-success')?.getAttribute('aria-hidden')).toBe('true');
+    expect(host.querySelector('p[title="https://api.nzbgeek.info"]')?.textContent?.trim()).toBe(
+      'https://api.nzbgeek.info',
+    );
+
+    const remove = [...host.querySelectorAll<HTMLButtonElement>('button')].find((candidate) =>
+      candidate.textContent?.includes('Remove NZBGeek'),
+    );
+    expect(remove).toBeDefined();
+    expect(remove?.textContent?.trim()).toBe('Remove NZBGeek');
+    expect(remove?.title).toBe('Remove NZBGeek');
+    expect(remove?.parentElement?.classList.contains('w-full')).toBe(true);
+  });
+
   it('loads the caps tree when the edit form opens', async () => {
     categoriesAnswers = [() => jsonResponse({ categories: FULL_TREE })];
     app = mount(IndexerSettings, { target: host });

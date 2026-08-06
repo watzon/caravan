@@ -156,7 +156,7 @@
 
           <div class="min-w-0 flex-1">
             {#if href}
-              <a href={href} class="block truncate text-base font-medium text-ink">{label}</a>
+              <a href={href} class="block truncate text-base font-medium text-ink" title={label}>{label}</a>
             {:else}
               <p class="truncate text-base font-medium text-ink" title={label}>{label}</p>
             {/if}

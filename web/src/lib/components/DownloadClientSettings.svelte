@@ -357,19 +357,21 @@
         {@const info = describeType(types, client.type)}
         <li class="flex flex-wrap items-center gap-3 rounded-md border border-border bg-surface px-3 py-3">
           <span
+            aria-hidden="true"
             class="size-2 shrink-0 rounded-full {client.enabled ? 'bg-success' : 'bg-ink-muted'}">
           </span>
-          <span class="sr-only">{client.enabled ? 'Enabled' : 'Disabled'}</span>
 
           <div class="min-w-0 flex-1">
             <p class="flex flex-wrap items-center gap-2">
-              <span class="truncate text-base font-medium text-ink">{client.name}</span>
+              <span class="truncate text-base font-medium text-ink" title={client.name}>
+                {client.name}
+              </span>
               <Badge mono tone={info.protocol === 'torrent' ? 'accent' : 'info'}>
                 {info.label}
               </Badge>
-              {#if !client.enabled}
-                <Badge tone="neutral">Disabled</Badge>
-              {/if}
+              <Badge tone={client.enabled ? 'success' : 'neutral'}>
+                {client.enabled ? 'Enabled' : 'Disabled'}
+              </Badge>
               {#if !info.supported}
                 <Badge tone="warning">Not supported yet</Badge>
               {/if}
@@ -547,7 +549,9 @@
           {formTesting ? 'Testing…' : 'Test'}
         </Button>
         {#if formTest}
-          <p class="truncate text-sm {formTest.ok ? 'text-success' : 'text-danger'}">
+          <p
+            class="truncate text-sm {formTest.ok ? 'text-success' : 'text-danger'}"
+            title={formTest.message}>
             {formTest.ok ? '✓ ' : '✕ '}{formTest.message}
           </p>
         {/if}

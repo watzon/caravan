@@ -14,6 +14,10 @@
 
   let { profileID, kind, onassign }: Props = $props();
 
+  const fieldID = $props.id();
+  const selectID = `${fieldID}-select`;
+  const stateID = `${fieldID}-state`;
+
   let profiles = $state<QualityProfile[]>([]);
   let libraries = $state<Library[]>([]);
   let loading = $state(true);
@@ -74,7 +78,7 @@
 </script>
 
 <div class="min-w-0">
-  <dt class="micro-label">Quality profile</dt>
+  <dt class="micro-label"><label for={selectID}>Quality profile</label></dt>
   <dd class="mt-1 flex min-w-0 flex-col gap-1.5">
     {#if loading}
       <span class="text-sm text-ink-secondary">Loading profile choices…</span>
@@ -90,8 +94,9 @@
       </div>
     {:else}
       <select
+        id={selectID}
         aria-label="Quality profile"
-        aria-describedby="profile-assignment-state"
+        aria-describedby={stateID}
         value={String(profileID)}
         disabled={saving}
         onchange={assign}
@@ -103,7 +108,7 @@
         {/each}
       </select>
 
-      <p id="profile-assignment-state" class="text-sm text-ink-secondary" aria-live="polite">
+      <p id={stateID} class="text-sm text-ink-secondary" aria-live="polite">
         {#if profileID === 0}
           Inherited from {inheritedSource}: <span class="font-medium text-ink">{profileName(inheritedProfile)}</span>
         {:else}

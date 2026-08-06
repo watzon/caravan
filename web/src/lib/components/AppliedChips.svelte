@@ -27,17 +27,17 @@
 </script>
 
 {#if chips.length > 0 || trailing}
-  <div class="flex flex-wrap items-center gap-2" aria-label="Applied filters">
+  <div class="flex flex-wrap items-center gap-2" role="group" aria-label="Applied filters">
     {#each chips as chip (chip.key)}
       <span
-        class="inline-flex h-7 items-center gap-1.5 rounded-full border border-accent
+        class="inline-flex h-7 max-w-full items-center gap-1.5 rounded-full border border-accent
                bg-accent-tint pl-3 pr-1.5 font-mono text-xs text-accent-text">
-        {chip.label}
+        <span class="min-w-0 truncate" title={chip.label}>{chip.label}</span>
         <button
           type="button"
           aria-label="Remove filter {chip.label}"
           onclick={() => onremove(chip.key)}
-          class="inline-flex size-4 items-center justify-center rounded-full
+          class="inline-flex size-4 shrink-0 items-center justify-center rounded-full
                  transition-colors duration-150 ease-out hover:bg-accent hover:text-ink-inverse">
           <Icon name="close" size={10} />
         </button>

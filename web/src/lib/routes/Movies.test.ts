@@ -116,7 +116,7 @@ function button(label: string): HTMLButtonElement {
 /** The per-card check circle that starts a selection. */
 async function select(title: string) {
   const circle = host.querySelector<HTMLButtonElement>(
-    `button[aria-label="Select ${title} (2021)"]`,
+    `button[aria-label^="Select ${title} (2021), "]`,
   );
   expect(circle, `the select circle on ${title}`).toBeTruthy();
   circle!.click();
@@ -159,11 +159,26 @@ describe('Movies grid', () => {
 
     const link = host.querySelector('a[href="/movies/2"]');
     expect(link, 'a card is a link while nothing is selected').toBeTruthy();
-    expect(link?.getAttribute('aria-label')).toBe('Dune (2021)');
+    expect(link?.getAttribute('aria-label')).toBe('Dune (2021), Unmonitored');
     expect(host.querySelectorAll('button[aria-label^="Select "]')).toHaveLength(3);
     // Filter chips carry aria-pressed too; a card toggle also carries the
-    // title as its accessible name.
+    // title and status as its accessible name.
     expect(host.querySelector('button[aria-pressed][aria-label]')).toBeNull();
+  });
+
+  it('labels the sort and title filter and keeps card status textual', async () => {
+    await open();
+
+    expect(sortSelect().getAttribute('aria-label')).toBe('Sort movies');
+    expect(
+      host.querySelector<HTMLInputElement>('input[type="search"]')?.getAttribute('aria-label'),
+    ).toBe('Filter movies by title');
+    const downloadedCard = host.querySelector('a[href="/movies/1"]');
+    const downloadedStatus = [...(downloadedCard?.querySelectorAll('span') ?? [])].find(
+      (element) => element.textContent?.trim() === 'Downloaded',
+    );
+    expect(downloadedStatus, 'visible status on the downloaded card').toBeTruthy();
+    expect(downloadedStatus?.classList.contains('sr-only')).toBe(false);
   });
 
   it('starts a selection from a card circle and ends it by deselecting the last card', async () => {
@@ -336,13 +351,13 @@ describe('Movies grid', () => {
     expect(router.params.get('layout')).toBe('posters');
     expect(router.params.get('sort')).toBe('added');
     expect(cards().map((card) => card.getAttribute('aria-label'))).toEqual([
-      'Sicario (2021)',
-      'Arrival (2021)',
+      'Sicario (2021), Wanted',
+      'Arrival (2021), Downloaded',
     ]);
     expect(
-      cards().find((card) => card.getAttribute('aria-label') === 'Arrival (2021)')?.getAttribute(
-        'aria-pressed',
-      ),
+      cards()
+        .find((card) => card.getAttribute('aria-label') === 'Arrival (2021), Downloaded')
+        ?.getAttribute('aria-pressed'),
     ).toBe('true');
   });
 });

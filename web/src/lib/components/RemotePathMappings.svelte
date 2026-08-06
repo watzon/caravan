@@ -202,7 +202,7 @@
               disabled={deletingID === mapping.id}
               onclick={() => (confirmingRemove = mapping)}>
               <span class="sr-only">Remove {mapping.remote_path} mapping</span>
-              Remove
+              <span aria-hidden="true">Remove</span>
             </Button>
           </div>
         </li>

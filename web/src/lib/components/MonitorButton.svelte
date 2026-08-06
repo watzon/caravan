@@ -51,5 +51,5 @@
          {monitored
     ? 'border-accent bg-accent-tint text-accent-text'
     : 'border-transparent text-ink-muted hover:bg-raised hover:text-ink'}">
-  <Icon name="bookmark" size={16} />
+  <Icon name="bookmark" size={16} class={monitored ? 'fill-current' : ''} />
 </button>

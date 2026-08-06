@@ -38,6 +38,7 @@ describe('MonitorButton', () => {
     expect(button.getAttribute('type')).toBe('button');
     expect(button.getAttribute('role')).toBeNull();
     expect(button.getAttribute('aria-pressed')).toBe('true');
+    expect(button.querySelector('svg')?.classList.contains('fill-current')).toBe(true);
   });
 
   it('names the action rather than only the state', () => {
@@ -51,6 +52,7 @@ describe('MonitorButton', () => {
     const off = mountButton({ monitored: false });
     expect(off.getAttribute('aria-pressed')).toBe('false');
     expect(off.getAttribute('aria-label')).toBe('Unmonitored — click to monitor Dune');
+    expect(off.querySelector('svg')?.classList.contains('fill-current')).toBe(false);
   });
 
   it('asks for the opposite of what it shows', () => {

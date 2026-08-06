@@ -264,6 +264,29 @@ describe('SeriesDetail season inventory', () => {
     expect(importedFileCells[5]?.textContent?.trim()).toBe('1 B');
   });
 
+  it('keeps full folder and episode titles on truncated values', async () => {
+    const folder = 'library/TV/Severance (2022)/A deliberately long series folder';
+    const episodeTitle = 'The Very Long and Important Episode Title That Must Remain Available';
+    stubFetch(0, {
+      ...SERIES_WITH_FILES,
+      path: folder,
+      seasons: [
+        {
+          ...SERIES_WITH_FILES.seasons[0],
+          episodes: [{ ...episode(1, true), title: episodeTitle }],
+        },
+      ],
+    });
+    app = mount(SeriesDetail, { target: host, props: { id: 3 } });
+    await settle();
+
+    const titled = [...host.querySelectorAll<HTMLElement>('[title]')];
+    const folderValue = titled.find((element) => element.title === folder);
+    const episodeValue = titled.find((element) => element.title === episodeTitle);
+    expect(folderValue?.classList.contains('truncate')).toBe(true);
+    expect(episodeValue?.classList.contains('truncate')).toBe(true);
+  });
+
   it('PATCHes the season monitor flag and reloads its cascaded episode state', async () => {
     stubFetch(0, SERIES_WITH_FILES);
     app = mount(SeriesDetail, { target: host, props: { id: 3 } });

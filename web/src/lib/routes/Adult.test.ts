@@ -123,7 +123,7 @@ function cardTitles(): string[] {
     ...host!.querySelectorAll<HTMLElement>('button[aria-pressed][aria-label]'),
   ];
   return (links.length > 0 ? links : toggles).map(
-    (card) => card.getAttribute('aria-label') ?? '',
+    (card) => card.querySelector('p[title]')?.textContent?.trim() ?? '',
   );
 }
 
@@ -157,9 +157,9 @@ describe('the Adult shelf grid', () => {
     toggle!.click();
     flushSync();
 
-    // The shared action bar. Its own label is a bare count; the shelf's nouns
-    // appear on the remove confirm, which is where they matter.
-    const bar = document.querySelector('[aria-label="Selection actions"]');
+    // The shared action bar names the selected subject for assistive technology;
+    // its visible label stays a bare count, while the confirm carries the noun.
+    const bar = document.querySelector('[aria-label="Actions for 1 selected site"]');
     expect(bar, 'the selection action bar').toBeTruthy();
     expect(bar!.textContent).toContain('1 selected');
     for (const label of ['Search', 'Monitor', 'Unmonitor', 'Remove…']) {
@@ -172,10 +172,22 @@ describe('the Adult shelf grid', () => {
     await mountShelf('member');
 
     expect(selectToggle()).toBeUndefined();
-    expect(document.querySelector('[aria-label="Selection actions"]')).toBeNull();
+    expect(document.querySelector('[aria-label="Actions for 1 selected site"]')).toBeNull();
     // The shelf itself still renders: reading is what the grant is for.
     expect(host!.textContent).toContain('Zulu Club');
     expect(calls.every((c) => c.method === 'GET')).toBe(true);
+  });
+});
+
+describe('the Adult shelf controls', () => {
+  it('labels the sort and site filter controls', async () => {
+    stubFetch();
+    await mountShelf('admin');
+
+    expect(sortSelect().getAttribute('aria-label')).toBe('Sort sites');
+    expect(
+      host!.querySelector<HTMLInputElement>('input[type="search"]')?.getAttribute('aria-label'),
+    ).toBe('Filter sites by name');
   });
 });
 
@@ -236,7 +248,7 @@ describe('the Adult shelf sort', () => {
     expect(cardTitles()).toEqual(['Zulu Club', 'Alpha Club']);
 
     const toggle = host!.querySelector<HTMLButtonElement>(
-      'button[aria-label="Select Zulu Club"]',
+      'button[aria-label^="Select Zulu Club, "]',
     );
     expect(toggle, 'the Zulu Club selection control').toBeTruthy();
     toggle!.click();
@@ -250,7 +262,7 @@ describe('the Adult shelf sort', () => {
     pickSort('status');
     expect(cardTitles()).toEqual(['Alpha Club', 'Zulu Club']);
     expect(
-      host!.querySelector('button[aria-label="Zulu Club"][aria-pressed="true"]'),
+      host!.querySelector('button[aria-label^="Zulu Club, "][aria-pressed="true"]'),
       'the selected site after sorting',
     ).toBeTruthy();
     expect(calls).toEqual([{ url: '/api/v1/adult/sites', method: 'GET' }]);

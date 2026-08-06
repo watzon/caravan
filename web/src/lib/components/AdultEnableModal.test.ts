@@ -101,6 +101,10 @@ describe('AdultEnableModal', () => {
     // The custom URL field only exists once Custom is chosen.
     expect(host.querySelector('#adult-enable-endpoint-url')).toBeNull();
     expect(host.textContent).not.toContain('DLNA stays off');
+
+    const helpID = select.getAttribute('aria-describedby');
+    expect(helpID).toBe('adult-enable-endpoint-help');
+    expect(host.querySelector(`#${helpID}`)?.textContent).toContain("provider's GraphQL endpoint");
   });
 
   // Nothing to authenticate with is refused before a request is made: the
@@ -201,6 +205,20 @@ describe('AdultEnableModal', () => {
 
     expect(enabled).toEqual([]);
     expect(host.textContent).toContain('a stash-box API key is required');
+  });
+
+  it('announces a non-credential enable failure without leaving the confirmation step', async () => {
+    enableReply = () => jsonResponse({ error: 'settings service unavailable' }, 500);
+    mountModal();
+    toConfirm();
+
+    button('Enable adult content').click();
+    await settle();
+
+    const alert = host.querySelector('[role="alert"]');
+    expect(alert?.textContent).toContain('settings service unavailable');
+    expect(host.textContent).toContain('DLNA stays off');
+    expect(enabled).toEqual([]);
   });
 
   // Cancel leaves everything off — which is easy to guarantee, because nothing

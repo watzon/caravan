@@ -25,6 +25,9 @@
     onretry,
   }: Props = $props();
 
+  const drawerID = $props.id();
+  const titleID = `${drawerID}-title`;
+
   const STAGE_LABELS: Record<ConversionStage, string> = {
     probing: 'Inspecting source',
     converting: 'Encoding media',
@@ -69,8 +72,13 @@
         previousFocus.focus();
       } else {
         queueMicrotask(() => {
-          document.querySelector<HTMLElement>(
-            'main [role="tab"], main button:not([disabled]), main a[href]',
+          const pageTabs = document.querySelector<HTMLElement>(
+            'main [role="group"][aria-label="Conversion work"]',
+          );
+          (
+            pageTabs?.querySelector<HTMLElement>('button[aria-pressed="true"]') ??
+            pageTabs?.querySelector<HTMLElement>('button:not([disabled])') ??
+            document.querySelector<HTMLElement>('main button:not([disabled]), main a[href]')
           )?.focus();
         });
       }
@@ -122,15 +130,17 @@
     class="relative flex h-full w-full max-w-xl flex-col border-l border-border bg-surface shadow-2xl"
     role="dialog"
     aria-modal="true"
-    aria-labelledby="conversion-detail-title"
+    aria-labelledby={titleID}
     tabindex="-1">
     <header class="flex items-start gap-3 border-b border-border px-5 py-4">
       <div class="min-w-0 flex-1">
         <p class="micro-label">Conversion details</p>
-        <h2 id="conversion-detail-title" class="mt-1 truncate text-lg font-semibold text-ink" title={filename}>
+        <h2 id={titleID} class="mt-1 truncate text-lg font-semibold text-ink" title={filename}>
           {filename}
         </h2>
-        <p class="mt-1 truncate font-mono text-xs text-ink-secondary" title={conversion.source_path}>
+        <p
+          class="mt-1 truncate font-mono text-xs text-ink-secondary"
+          title={conversion.source_path || UNKNOWN}>
           {conversion.source_path || UNKNOWN}
         </p>
       </div>
@@ -239,13 +249,13 @@
         {#if conversion.error}
           <div class="rounded-md border border-danger/30 bg-danger/5 px-3 py-3">
             <p class="micro-label text-danger">Error</p>
-            <p class="mt-1 text-sm text-danger">{conversion.error}</p>
+            <p class="mt-1 break-words text-sm text-danger">{conversion.error}</p>
           </div>
         {/if}
       </section>
     </div>
 
-    <footer class="flex items-center gap-2 border-t border-border px-5 py-3">
+    <footer class="flex flex-wrap items-center gap-2 border-t border-border px-5 py-3">
       <Button variant="ghost" size="sm" onclick={onclose}>Close</Button>
       <span class="flex-1"></span>
       {#if conversion.status === 'queued' && oncancel}

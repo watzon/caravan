@@ -148,7 +148,7 @@
        to Explore's adult scope, so this shelf is sites and only sites. A strip
        with one tab in it is a strip that says nothing. -->
   <div class="flex flex-wrap items-center gap-3">
-    <div class="ml-auto flex items-center gap-2">
+    <div class="ml-auto flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
       <select
         value={sort}
         aria-label="Sort sites"
@@ -158,7 +158,7 @@
           <option value={option.key}>{option.label}</option>
         {/each}
       </select>
-      <div class="w-56">
+      <div class="w-full sm:w-56">
         <TextInput
           bind:value={query}
           type="search"

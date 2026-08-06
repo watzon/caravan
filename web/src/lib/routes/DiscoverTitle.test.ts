@@ -183,6 +183,51 @@ describe('Discover rating surfaces', () => {
   }
 });
 
+describe('Discover text fallbacks', () => {
+  it('exposes complete hero and source text when the visible copy is clamped', () => {
+    const heroTitle = 'A Trending Title That Is Longer Than the Billboard Copy';
+    const heroOverview =
+      'The complete billboard overview remains available when only two visual lines fit in the hero.';
+    const sourceName = 'A Network Name That Is Longer Than Its Browse Tile';
+    discover.home = {
+      trending: [payload({ title: heroTitle, overview: heroOverview })],
+      popular_movies: [],
+      popular_series: [],
+      networks: [{ id: 213, name: sourceName, type: 'network' }],
+      studios: [],
+    };
+    app = mount(DiscoverRoute, { target: host }) as Record<string, unknown>;
+    flushSync();
+
+    expect(host.querySelector(`h2[title="${heroTitle}"]`)).not.toBeNull();
+    expect(host.querySelector('p.line-clamp-2')?.getAttribute('title')).toBe(heroOverview);
+    expect(host.querySelector('a[href="/discover/network/213"]')?.getAttribute('title')).toBe(
+      sourceName,
+    );
+  });
+
+  it('exposes the complete detail hero title', async () => {
+    const detailTitle = 'A Complete Detail Hero Title That Can Wrap at Phone Width';
+    await mountTitle(payload({ title: detailTitle }));
+
+    expect(host.querySelector('h2')?.getAttribute('title')).toBe(detailTitle);
+  });
+
+  it('uses the visible fallback as the title for an unknown cast character', async () => {
+    await mountTitle(
+      payload({
+        cast: [{ tmdb_id: 1, name: 'Known Performer', character: '', profile_url: '' }],
+      }),
+    );
+
+    const character = host.querySelector('.truncate.text-ink-secondary');
+    const visibleFallback = character?.textContent?.trim();
+    expect(visibleFallback).toBeTruthy();
+    expect(character?.getAttribute('title')).toBe(visibleFallback);
+  });
+});
+
+
 describe('DiscoverTitle — season rows', () => {
   it('offers a Request for a missing season of a title nobody owns', async () => {
     await mountTitle(payload({ seasons: [season(1, { requested: true }), season(2)] }));

@@ -315,13 +315,13 @@
             <li class="flex flex-wrap items-center gap-3 rounded-md border border-border bg-surface px-3 py-3">
               <div class="min-w-0 flex-1">
                 <p class="flex flex-wrap items-center gap-2">
-                  <span class="truncate text-base font-medium text-ink">{user.username}</span>
+                  <span class="truncate text-base font-medium text-ink" title={user.username}>{user.username}</span>
                   <Badge mono tone={user.role === 'admin' ? 'accent' : 'neutral'}>
                     {user.role === 'admin' ? 'ADMIN' : 'MEMBER'}
                   </Badge>
                 </p>
               </div>
-              <div class="flex shrink-0 items-center gap-2">
+              <div class="flex w-full shrink-0 items-center justify-end gap-2 sm:w-auto">
                 {#if user.always_granted}
                   <span class="text-sm text-ink-secondary">Always has access</span>
                 {:else}
@@ -352,7 +352,7 @@
               every device on the network.
             </dd>
           </div>
-          <div class="flex shrink-0 items-center gap-2">
+          <div class="flex w-full shrink-0 items-center justify-end gap-2 sm:w-auto">
             <Badge tone={sharedOnDlna ? 'warning' : 'neutral'}>
               {sharedOnDlna ? 'Shared on this network' : 'Not shared'}
             </Badge>
@@ -369,7 +369,7 @@
               only way it goes along.
             </dd>
           </div>
-          <div class="flex shrink-0 items-center">
+          <div class="flex w-full shrink-0 items-center justify-end sm:w-auto">
             <Badge tone="neutral">Excluded</Badge>
           </div>
         </div>

@@ -45,11 +45,17 @@
 <div class="flex flex-col gap-2 {klass}">
   {#if note}
     <div class="flex items-baseline justify-between gap-2">
-      <label class="micro-label" for={htmlFor}>{label}</label>
+      {#if htmlFor}
+        <label class="micro-label" for={htmlFor}>{label}</label>
+      {:else}
+        <span class="micro-label">{label}</span>
+      {/if}
       {@render note()}
     </div>
-  {:else}
+  {:else if htmlFor}
     <label class="micro-label" for={htmlFor}>{label}</label>
+  {:else}
+    <span class="micro-label">{label}</span>
   {/if}
   {@render children()}
   {#if error}

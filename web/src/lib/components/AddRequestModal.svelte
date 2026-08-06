@@ -135,6 +135,13 @@
   let everySelected = $derived(allSelected(seasonList, selected));
   let subtitle = $derived(modalSubtitle(mediaType, title, year, seasonList));
   let primaryLabel = $derived(submitLabel(mode, mediaType, selected.length));
+  let storageSummary = $derived.by(() => {
+    const status = system.status;
+    const root = status?.storage_root || 'no storage root';
+    return status && status.disk_total_bytes > 0
+      ? `${root} · ${formatBytes(status.disk_free_bytes)} free`
+      : root;
+  });
   let canSubmit = $derived(
     !busy && !loadingSeasons && (mediaType === 'movie' || selectable.length === 0 || selected.length > 0),
   );
@@ -341,7 +348,7 @@
               {@const checked = selected.includes(season.season_number)}
               <li>
                 <label
-                  class="flex h-12 cursor-pointer items-center gap-3 px-3 transition-colors duration-150 ease-out hover:bg-raised
+                  class="flex min-h-12 cursor-pointer flex-wrap items-center gap-3 px-3 py-2 transition-colors duration-150 ease-out hover:bg-raised
                          {season.in_library ? 'cursor-default opacity-60' : ''}">
                   <input
                     type="checkbox"
@@ -353,7 +360,7 @@
                   {#if meta}
                     <span class="font-mono text-xs text-ink-muted">{meta}</span>
                   {/if}
-                  <span class="ml-auto">
+                  <span class="ml-auto shrink-0">
                     {#if season.in_library}
                       <Badge tone="success">In library</Badge>
                     {:else if season.requested}
@@ -415,13 +422,8 @@
         <!-- Caravan has one storage root, so the folder is shown rather than
              chosen: a picker with a single option is a lie about the model. -->
         <Field label="Root folder" for="add-root">
-          <select id="add-root" class={SELECT_CLASS} disabled>
-            <option>
-              {system.status?.storage_root || 'no storage root'}
-              {system.status && system.status.disk_total_bytes > 0
-                ? ` · ${formatBytes(system.status.disk_free_bytes)} free`
-                : ''}
-            </option>
+          <select id="add-root" class={SELECT_CLASS} title={storageSummary} disabled>
+            <option>{storageSummary}</option>
           </select>
         </Field>
       </div>

@@ -80,6 +80,11 @@ describe('History', () => {
     expect(rows).toHaveLength(3);
     expect(rows[0]?.textContent).toContain('2 times');
     expect(rows[2]?.textContent).not.toContain('2 times');
+    expect(rows[0]?.textContent).toContain('info');
+    const eventDots = host.querySelectorAll('[aria-label="Activity events"] .rounded-full');
+    expect(eventDots).toHaveLength(3);
+    expect([...eventDots].every((dot) => dot.getAttribute('aria-hidden') === 'true')).toBe(true);
+    expect(host.querySelector('[aria-label="Activity events"] .rounded-full[title]')).toBeNull();
   });
 
   it('keeps history separate from current system health', async () => {
@@ -95,17 +100,22 @@ describe('History', () => {
     app = mount(History, { target: host });
     await settle();
 
-    const jobsTab = [...host.querySelectorAll('[role="tab"]')].find(
-      (tab) => tab.textContent?.trim() === 'Jobs',
+    const jobsTab = [...host.querySelectorAll('[role="group"][aria-label="Activity feed"] button')].find(
+      (button) => button.textContent?.trim() === 'Jobs',
     ) as HTMLButtonElement | undefined;
     expect(jobsTab).toBeDefined();
+    expect(jobsTab?.getAttribute('aria-pressed')).toBe('false');
     jobsTab!.click();
     await settle();
+    expect(jobsTab?.getAttribute('aria-pressed')).toBe('true');
 
     expect(host.textContent).toContain('Movie search');
     expect(host.textContent).toContain('Failed');
     expect(host.textContent).toContain('3/5');
     expect(host.textContent).toContain('Indexer timed out');
+    const jobDot = host.querySelector('[aria-label="Acquisition jobs"] .rounded-full');
+    expect(jobDot?.getAttribute('aria-hidden')).toBe('true');
+    expect(jobDot?.getAttribute('title')).toBeNull();
     expect(host.querySelector('[aria-label="Acquisition jobs"]')).not.toBeNull();
     const loadOlder = [...host.querySelectorAll('button')].find(
       (button) => button.textContent?.includes('Load older'),

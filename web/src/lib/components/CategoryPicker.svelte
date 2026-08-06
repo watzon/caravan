@@ -52,6 +52,7 @@
 
   {#snippet row(node: IndexerCategory, depth: number)}
     {@const state = selectionState(node, picked)}
+    {@const label = node.name || `Category ${node.id}`}
     <li>
       <button
         type="button"
@@ -71,8 +72,10 @@
             <Icon name="minus" size={12} />
           {/if}
         </span>
-        <span class="min-w-0 flex-1 truncate text-sm {state === 'none' ? 'text-ink-secondary' : 'text-ink'}">
-          {node.name || `Category ${node.id}`}
+        <span
+          class="min-w-0 flex-1 truncate text-sm {state === 'none' ? 'text-ink-secondary' : 'text-ink'}"
+          title={label}>
+          {label}
         </span>
         <span class="shrink-0 font-mono text-xs text-ink-muted">{node.id}</span>
       </button>
@@ -94,6 +97,7 @@
       {#each unknown as id (id)}
         <button
           type="button"
+          aria-label="Remove {id} from the selection"
           onclick={() => onchange(selected.filter((x) => x !== id))}
           class="flex h-5 items-center gap-1 rounded-sm bg-warning-tint px-1.5 font-mono text-xs
                  text-warning hover:text-ink"

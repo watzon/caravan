@@ -58,9 +58,9 @@
                    text-base transition-colors duration-150 ease-out
                    {on ? 'bg-accent-tint text-accent-text' : 'text-ink hover:bg-raised'}">
             <span class="min-w-0">
-              <span class="block truncate">{option.name}</span>
+              <span class="block truncate" title={option.name}>{option.name}</span>
               {#if option.hint}
-                <span class="block truncate text-sm text-ink-muted">{option.hint}</span>
+                <span class="block truncate text-sm text-ink-muted" title={option.hint}>{option.hint}</span>
               {/if}
             </span>
             {#if on}

@@ -382,7 +382,7 @@
 </div>
 
 {#snippet settingsSearch()}
-  <div data-settings-top-search class="relative w-32 sm:w-72">
+  <div data-settings-top-search class="relative w-24 lg:w-72">
     <Icon
       name="search"
       size={14}

@@ -142,6 +142,9 @@ describe('RemotePathMappings', () => {
     expect(host.textContent).toContain('/mnt/downloads');
     expect(host.textContent).toContain('2 matched imports or events.');
     expect(host.textContent).toContain('Last match: 2026-08-05T12:00:00Z.');
+    const remove = button('Remove');
+    expect(remove.querySelector('.sr-only')?.textContent).toBe('Remove /downloads mapping');
+    expect(remove.querySelector('[aria-hidden="true"]')?.textContent).toBe('Remove');
   });
 
   it('validates both paths, canonicalizes trailing separators, and creates a mapping only after they are present', async () => {

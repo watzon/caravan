@@ -13,7 +13,7 @@
    * Focus returns to the trigger on close, so a keyboard reader is never
    * dropped at the top of the document.
    */
-  import type { Snippet } from 'svelte';
+  import { untrack, type Snippet } from 'svelte';
   import Icon from './Icon.svelte';
 
   interface Props {
@@ -36,6 +36,21 @@
   let open = $state(false);
   let trigger = $state<HTMLButtonElement | null>(null);
   let panel = $state<HTMLElement | null>(null);
+  let panelShift = $state(0);
+
+  function placePanel() {
+    if (!open || !panel) return;
+    const gutter = 16;
+    const rect = panel.getBoundingClientRect();
+    // This runs inside an effect when the panel mounts. Geometry needs the
+    // previous correction, but that read must not subscribe the effect to the
+    // state it writes.
+    const previousShift = untrack(() => panelShift);
+    const left = rect.left - previousShift;
+    const right = rect.right - previousShift;
+    const maxRight = window.innerWidth - gutter;
+    panelShift = left < gutter ? gutter - left : right > maxRight ? maxRight - right : 0;
+  }
 
   function close(refocus = true) {
     if (!open) return;
@@ -60,7 +75,11 @@
   }
 
   $effect(() => {
-    if (!open) return;
+    if (!open) {
+      panelShift = 0;
+      return;
+    }
+    placePanel();
     // The first field, not the first button: every body here opens on
     // something you type into or choose from, and a popover the keyboard has
     // to Tab into is one it cannot really reach.
@@ -69,7 +88,7 @@
   });
 </script>
 
-<svelte:window {onkeydown} onpointerdowncapture={onpointerdown} />
+<svelte:window {onkeydown} onresize={placePanel} onpointerdowncapture={onpointerdown} />
 
 <div class="relative">
   <button
@@ -93,7 +112,8 @@
       bind:this={panel}
       role="dialog"
       aria-label={label}
-      class="absolute left-0 top-full z-30 mt-1 {width} rounded-lg border border-border-strong
+      style:transform={`translateX(${panelShift}px)`}
+      class="absolute left-0 top-full z-30 mt-1 max-w-[calc(100vw-2rem)] {width} rounded-lg border border-border-strong
              bg-overlay p-3 shadow-2xl">
       {@render children()}
     </div>

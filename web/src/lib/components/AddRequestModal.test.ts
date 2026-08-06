@@ -9,6 +9,7 @@ import { flushSync, mount, unmount, type ComponentProps } from 'svelte';
 import AddRequestModal from './AddRequestModal.svelte';
 import type { DiscoverSeason } from '../api/types';
 import { session } from '../state/session.svelte';
+import { system } from '../state/system.svelte';
 import { clearToasts, toasts } from '../state/toast.svelte';
 
 interface Call {
@@ -135,6 +136,7 @@ afterEach(() => {
   // A role leaking into the next test would decide which half of the credential
   // copy it reads; null is "not answered for yet", which reads as admin.
   session.user = null;
+  system.status = null;
   clearToasts();
   window.localStorage.clear();
   vi.unstubAllGlobals();
@@ -214,6 +216,43 @@ describe('AddRequestModal — modes', () => {
     expect(host.querySelector('#add-root')).not.toBeNull();
     expect(host.textContent).toContain('Search for selected seasons right away');
     expect(calls.map((c) => c.url)).toContain('/api/v1/quality-profiles');
+  });
+
+  it('gives every input, select, and button an accessible name', async () => {
+    mountModal({ mode: 'add' });
+    await settle();
+
+    for (const control of host.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>(
+      'input, select, button',
+    )) {
+      const id = control.id;
+      const name =
+        control.getAttribute('aria-label') ||
+        (id ? host.querySelector<HTMLLabelElement>(`label[for="${id}"]`)?.textContent?.trim() : '') ||
+        control.closest('label')?.textContent?.trim() ||
+        (control instanceof HTMLButtonElement ? control.textContent?.trim() : '');
+      expect(name, `${control.tagName.toLowerCase()}${id ? `#${id}` : ''}`).toBeTruthy();
+    }
+  });
+
+  it('exposes the complete storage path when the disabled folder field clips it', async () => {
+    const storageRoot = '/Volumes/Media Archive/A Very Long Caravan Library Root';
+    system.status = {
+      storage_root: storageRoot,
+      disk_total_bytes: 100,
+      disk_free_bytes: 50,
+    } as never;
+    mountModal({
+      mode: 'add',
+      mediaType: 'movie',
+      tmdbID: 78,
+      title: 'Blade Runner',
+      year: 1982,
+      seasons: null,
+    });
+    await settle();
+
+    expect(host.querySelector('#add-root')?.getAttribute('title')).toBe(`${storageRoot} · 50 B free`);
   });
 
   it('sends the selected profile with an approval before the series search', async () => {

@@ -141,6 +141,20 @@ describe('Queue filtering', () => {
     flushSync();
     expect(rowNames()).toHaveLength(QUEUE.length);
   });
+
+  it('labels the delete-data option and preserves the full name in the removal dialog', async () => {
+    await mountQueue();
+    const remove = [...host.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
+      button.textContent?.includes('Remove still-downloading'),
+    );
+    expect(remove).toBeDefined();
+    remove!.click();
+    flushSync();
+
+    const deleteData = host.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    expect(deleteData?.closest('label')?.textContent).toContain('Also delete the downloaded data');
+    expect(host.querySelector('[role="dialog"] p[title="still-downloading"]')).not.toBeNull();
+  });
 });
 
 describe('Queue detail drawer', () => {

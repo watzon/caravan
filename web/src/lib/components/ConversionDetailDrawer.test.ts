@@ -24,7 +24,7 @@ const RUNNING: Conversion = {
 };
 
 let host: HTMLElement;
-let app: Record<string, unknown>;
+let app: Record<string, unknown> | undefined;
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -34,8 +34,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  unmount(app);
+  if (app) unmount(app);
   host.remove();
+  document.querySelector('[data-conversion-focus-main]')?.remove();
   vi.useRealTimers();
 });
 
@@ -71,6 +72,20 @@ describe('ConversionDetailDrawer', () => {
     expect(host.textContent).toContain('2m');
     expect(host.textContent).toContain('Remaining');
     expect(host.textContent).toContain('40s');
+
+    const dialog = host.querySelector<HTMLElement>('[role="dialog"]')!;
+    const headingID = dialog.getAttribute('aria-labelledby');
+    const heading = headingID ? host.querySelector<HTMLElement>(`#${headingID}`) : null;
+    const sourcePath = host.querySelector<HTMLElement>(`p[title="${RUNNING.source_path}"]`);
+    const progress = host.querySelector<HTMLElement>('[role="progressbar"]');
+    const iconClose = host.querySelector<HTMLButtonElement>('button[title="Close conversion details"]');
+
+    expect(heading?.textContent?.trim()).toBe('Contact (1997).mkv');
+    expect(heading?.title).toBe('Contact (1997).mkv');
+    expect(sourcePath?.title).toBe(RUNNING.source_path);
+    expect(progress?.getAttribute('aria-label')).toBe('Contact (1997).mkv conversion progress');
+    expect(progress?.getAttribute('aria-valuetext')).toBe('50%');
+    expect(iconClose?.textContent?.trim()).toBe('Close');
   });
 
   it('presents stream-copy conversion without internal vocabulary', () => {
@@ -123,6 +138,33 @@ describe('ConversionDetailDrawer', () => {
     buttons.at(-1)!.focus();
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab' }));
     expect(document.activeElement).toBe(buttons[0]);
+  });
+
+  it('returns focus to the selected PageTabs button when the opener is gone', async () => {
+    const main = document.createElement('main');
+    main.dataset.conversionFocusMain = '';
+    main.innerHTML = `
+      <button type="button">Unrelated action</button>
+      <div role="group" aria-label="Conversion work">
+        <button type="button" aria-pressed="false">Needs conversion</button>
+        <button type="button" aria-pressed="true">Active</button>
+      </div>
+    `;
+    document.body.appendChild(main);
+    const selected = main.querySelector<HTMLButtonElement>('button[aria-pressed="true"]')!;
+    const opener = document.createElement('button');
+    document.body.appendChild(opener);
+    opener.focus();
+
+    render(RUNNING);
+    opener.remove();
+    const mounted = app;
+    if (!mounted) throw new Error('Expected mounted drawer');
+    app = undefined;
+    await unmount(mounted);
+    await Promise.resolve();
+
+    expect(document.activeElement).toBe(selected);
   });
 
   it('does not invent zero progress before ffmpeg reports media time', () => {

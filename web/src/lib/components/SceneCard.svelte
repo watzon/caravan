@@ -78,7 +78,7 @@
   <div class="min-w-0">
     <p class="truncate text-base font-medium text-ink" title={scene.title}>{scene.title}</p>
     {#if meta}
-      <p class="truncate text-sm text-ink-secondary">{meta}</p>
+      <p class="truncate text-sm text-ink-secondary" title={meta}>{meta}</p>
     {/if}
     {#if performers.length > 0}
       <p class="truncate text-sm text-ink-muted" title={performers.join(', ')}>

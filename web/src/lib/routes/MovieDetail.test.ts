@@ -249,6 +249,29 @@ describe('MovieDetail facts', () => {
     expect(new Set(labels).size).toBe(labels.length);
     expect(labels).not.toEqual(expect.arrayContaining(['Year', 'Status', 'Release date']));
   });
+  it('keeps full folder and file paths on truncated values', async () => {
+    const folder = 'library/Movies/Dune (2021)/A deliberately long folder name';
+    const filePath = `${folder}/Dune (2021) Remux Extended Edition.mkv`;
+    stubFetch(0, {
+      ...MOVIE_WITH_FILE,
+      path: folder,
+      file: { ...MOVIE_WITH_FILE.file, path: filePath },
+    });
+    app = mount(MovieDetail, { target: host, props: { id: 7 } });
+    await settle();
+
+    const folderValue = [...host.querySelectorAll('dt')].find(
+      (term) => term.textContent?.trim() === 'Folder',
+    )?.nextElementSibling as HTMLElement | undefined;
+    expect(folderValue?.classList.contains('truncate')).toBe(true);
+    expect(folderValue?.title).toBe(folder);
+
+    const fileCell = [...host.querySelectorAll<HTMLElement>('td[title]')].find(
+      (cell) => cell.title === filePath,
+    );
+    expect(fileCell?.textContent?.trim()).not.toBe(filePath);
+    expect(fileCell?.title).toBe(filePath);
+  });
 });
 
 describe('MovieDetail cast', () => {

@@ -276,14 +276,15 @@
           for="tmdb-key"
           error={testResult && !testResult.ok ? testResult.message : null}
           help="A free TMDB API key names every movie and show Caravan touches. It is stored in the database, never in caravan.yaml or logs.">
-          <div class="flex items-start gap-2">
+          <div class="flex flex-col items-stretch gap-2 sm:flex-row sm:items-start">
             <TextInput
               id="tmdb-key"
               bind:value={tmdbKey}
               oninput={onKeyInput}
               type="password"
               mono
-              placeholder="•••••" />
+              placeholder="•••••"
+              class="min-w-0 flex-1" />
             <Button variant="secondary" disabled={testing} onclick={test} class="shrink-0">
               {testing ? 'Testing…' : 'Test'}
             </Button>

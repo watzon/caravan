@@ -242,7 +242,7 @@
 
 {#if matching}
   <AddItemModal
-    title="Match “{truncateMiddle(matching.path, 48)}”"
+    title="Match “{matching.path}”"
     kind={guessKind(matching)}
     initialQuery={matching.parsed.title}
     onpick={confirmMatch}

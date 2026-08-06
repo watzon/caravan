@@ -149,9 +149,12 @@
     tabindex="-1"
     {onkeydown}
     class="relative flex max-h-full w-full {width} flex-col overflow-hidden rounded-lg
-           border border-border-strong bg-overlay shadow-2xl focus:outline-none">
+           border border-border-strong bg-overlay shadow-2xl">
     <header class="flex items-center justify-between gap-4 border-b border-border px-4 py-3">
-      <h2 id={titleID} class="font-display text-md font-semibold tracking-tight text-ink">
+      <h2
+        id={titleID}
+        class="min-w-0 flex-1 truncate font-display text-md font-semibold tracking-tight text-ink"
+        title={confirmingDiscard ? 'Discard changes?' : title}>
         {confirmingDiscard ? 'Discard changes?' : title}
       </h2>
       {#if !confirmingDiscard}
@@ -173,7 +176,7 @@
       </div>
       <footer
         data-modal-discard-actions
-        class="flex items-center justify-end gap-2 border-t border-border px-4 py-3">
+        class="flex flex-wrap items-center justify-end gap-2 border-t border-border px-4 py-3">
         <Button variant="secondary" onclick={keepEditing}>Keep editing</Button>
         <Button variant="danger" onclick={discardChanges}>Discard changes</Button>
       </footer>
@@ -181,7 +184,7 @@
       <div class="min-h-0 flex-1 overflow-y-auto">{@render children()}</div>
 
       {#if footer}
-        <footer class="flex items-center justify-end gap-2 border-t border-border px-4 py-3">
+        <footer class="flex flex-wrap items-center justify-end gap-2 border-t border-border px-4 py-3">
           {@render footer()}
         </footer>
       {/if}

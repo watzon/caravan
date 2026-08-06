@@ -74,15 +74,17 @@
 <svelte:window {onkeydown} />
 
 {#if selection.active}
-  <!-- Pinned to the window bottom, centered over the content column: the
-       left-60 offset is the sidebar's w-60. -->
-  <div class="pointer-events-none fixed bottom-6 left-60 right-0 z-40 flex justify-center">
+  <!-- Centered over the content column at desktop widths, and kept inside the
+       viewport while the sidebar is off-canvas on phones. -->
+  <div class="pointer-events-none fixed bottom-3 left-0 right-0 z-40 flex justify-center px-3 md:bottom-6 md:left-60">
     <div
-      class="pointer-events-auto flex items-center gap-1 rounded-lg border border-border-strong
-             bg-overlay py-1.5 pl-4 pr-1.5 shadow-2xl"
+      class="pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-1 rounded-lg
+             border border-border-strong bg-overlay px-1.5 py-1.5 shadow-2xl"
       role="group"
-      aria-label="Selection actions">
-      <span class="mr-2 whitespace-nowrap text-base font-medium text-ink">
+      aria-label="Actions for {subject}">
+      <span
+        aria-live="polite"
+        class="mr-2 basis-full whitespace-nowrap px-2 text-center text-base font-medium text-ink sm:basis-auto sm:px-0">
         {selection.count} selected
       </span>
 
@@ -117,7 +119,7 @@
         Remove…
       </Button>
 
-      <span class="mx-1 h-5 w-px bg-border" aria-hidden="true"></span>
+      <span class="mx-1 hidden h-5 w-px bg-border sm:block" aria-hidden="true"></span>
 
       <Button
         variant="ghost"

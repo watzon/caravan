@@ -629,8 +629,12 @@
           <TextInput id="quality-profile-name" bind:value={name} oninput={() => (serverNameError = null)} autofocus />
         </Field>
 
-        <Field label="Allowed qualities" error={validation.items} help="Qualities stay in the fixed best-first order.">
-          <div class="grid grid-cols-2 gap-2" role="group" aria-label="Allowed qualities">
+        <Field label="Allowed qualities">
+          <div
+            class="grid grid-cols-2 gap-2"
+            role="group"
+            aria-label="Allowed qualities"
+            aria-describedby={validation.items ? 'quality-profile-items-error' : 'quality-profile-items-help'}>
             {#each QUALITY_LADDER as item (item)}
               <label class="flex items-center gap-2 rounded-sm border border-border bg-raised px-3 py-2 text-base text-ink">
                 <input type="checkbox" checked={items.includes(item)} onchange={() => toggleItem(item)} class="size-4 accent-accent" />
@@ -643,16 +647,29 @@
               {#each items as item (item)}<Badge mono tone="neutral">{item}</Badge>{/each}
             </div>
           {/if}
+          {#if validation.items}
+            <p id="quality-profile-items-error" class="text-sm text-danger" role="alert">{validation.items}</p>
+          {:else}
+            <p id="quality-profile-items-help" class="text-sm text-ink-secondary">Qualities stay in the fixed best-first order.</p>
+          {/if}
         </Field>
 
         <Field
           label="Cutoff"
-          for="quality-profile-cutoff"
-          error={validation.cutoff}
-          help="Allowed qualities plus this cutoff define which releases are accepted.">
-          <select id="quality-profile-cutoff" bind:value={cutoff} class="h-9 w-full rounded-sm border border-border-strong bg-raised px-3 text-md text-ink focus:border-accent focus:outline-none">
+          for="quality-profile-cutoff">
+          <select
+            id="quality-profile-cutoff"
+            bind:value={cutoff}
+            aria-invalid={validation.cutoff ? 'true' : undefined}
+            aria-describedby={validation.cutoff ? 'quality-profile-cutoff-error' : 'quality-profile-cutoff-help'}
+            class="h-9 w-full rounded-sm border border-border-strong bg-raised px-3 text-md text-ink focus:border-accent focus:outline-none">
             {#each items as item (item)}<option value={item}>{item}</option>{/each}
           </select>
+          {#if validation.cutoff}
+            <p id="quality-profile-cutoff-error" class="text-sm text-danger" role="alert">{validation.cutoff}</p>
+          {:else}
+            <p id="quality-profile-cutoff-help" class="text-sm text-ink-secondary">Allowed qualities plus this cutoff define which releases are accepted.</p>
+          {/if}
         </Field>
 
         <Toggle checked={upgradeAllowed} label="Allow upgrades above the cutoff" onchange={(next) => (upgradeAllowed = next)} />
@@ -663,13 +680,13 @@
           <h3 id="quality-profile-source-heading" class="font-medium text-ink">Source and protocol</h3>
           <Badge tone="neutral">Advanced</Badge>
         </div>
-        <Field label="Source order" help="Preferred sources affect ranking. Move sources to set their preferred order.">
-          <ol class="flex flex-col gap-2" aria-label="Preferred source order">
+        <Field label="Source order">
+          <ol class="flex flex-col gap-2" aria-label="Preferred source order" aria-describedby="quality-profile-source-order-help">
             {#each sourceOrder as source, index (source)}
-              <li class="flex items-center gap-3 rounded-sm border border-border bg-raised px-3 py-2">
+              <li class="flex flex-wrap items-center gap-3 rounded-sm border border-border bg-raised px-3 py-2">
                 <span class="w-8 shrink-0 font-mono text-sm text-ink-muted">{index + 1}</span>
                 <span class="min-w-0 flex-1 font-mono text-sm text-ink">{source}</span>
-                <div class="flex shrink-0 gap-1">
+                <div class="flex w-full flex-wrap justify-end gap-1 sm:w-auto">
                   <Button variant="secondary" size="sm" disabled={index === 0} onclick={() => moveSource(index, -1)}>Move {source} up</Button>
                   <Button variant="secondary" size="sm" disabled={index === sourceOrder.length - 1} onclick={() => moveSource(index, 1)}>Move {source} down</Button>
                 </div>
@@ -677,10 +694,15 @@
             {/each}
           </ol>
           <div><Button variant="ghost" size="sm" disabled={preferredSources.length === 0} onclick={resetSourceOrder}>Reset to built-in order</Button></div>
+          <p id="quality-profile-source-order-help" class="text-sm text-ink-secondary">Preferred sources affect ranking. Move sources to set their preferred order.</p>
         </Field>
 
-        <Field label="Proper and Repack preference" help="Prefer adds score. Neutral ignores proper and repack tags.">
-          <div class="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Proper and Repack preference">
+        <Field label="Proper and Repack preference">
+          <div
+            class="grid gap-2 sm:grid-cols-2"
+            role="radiogroup"
+            aria-label="Proper and Repack preference"
+            aria-describedby="quality-profile-proper-repack-help">
             <label class="flex items-start gap-2 rounded-sm border border-border bg-raised px-3 py-3 text-sm text-ink">
               <input type="radio" name="proper-repack-preference" value="prefer" checked={properRepackPreference === 'prefer'} onchange={() => (properRepackPreference = 'prefer')} class="mt-0.5 accent-accent" />
               <span><span class="block font-medium">Prefer</span><span class="text-ink-secondary">Adds score for proper and repack tags.</span></span>
@@ -690,10 +712,16 @@
               <span><span class="block font-medium">Neutral</span><span class="text-ink-secondary">Ignores proper and repack tags.</span></span>
             </label>
           </div>
+          <p id="quality-profile-proper-repack-help" class="text-sm text-ink-secondary">Prefer adds score. Neutral ignores proper and repack tags.</p>
         </Field>
 
-        <Field label="Minimum torrent seeders" for="quality-profile-min-seeders" error={validation.minSeeders} help="Applies to torrent releases only. Zero disables the minimum.">
-          <input id="quality-profile-min-seeders" type="number" min="0" step="1" value={minSeeders} oninput={(event) => (minSeeders = (event.currentTarget as HTMLInputElement).value)} aria-invalid={validation.minSeeders ? 'true' : undefined} class="h-9 w-full rounded-sm border border-border-strong bg-raised px-3 text-md text-ink focus:border-accent focus:outline-none" />
+        <Field label="Minimum torrent seeders" for="quality-profile-min-seeders">
+          <input id="quality-profile-min-seeders" type="number" min="0" step="1" value={minSeeders} oninput={(event) => (minSeeders = (event.currentTarget as HTMLInputElement).value)} aria-invalid={validation.minSeeders ? 'true' : undefined} aria-describedby={validation.minSeeders ? 'quality-profile-min-seeders-error' : 'quality-profile-min-seeders-help'} class="h-9 w-full rounded-sm border border-border-strong bg-raised px-3 text-md text-ink focus:border-accent focus:outline-none" />
+          {#if validation.minSeeders}
+            <p id="quality-profile-min-seeders-error" class="text-sm text-danger" role="alert">{validation.minSeeders}</p>
+          {:else}
+            <p id="quality-profile-min-seeders-help" class="text-sm text-ink-secondary">Applies to torrent releases only. Zero disables the minimum.</p>
+          {/if}
         </Field>
       </section>
 
@@ -704,11 +732,13 @@
         </div>
         <p class="text-sm leading-5 text-ink-secondary">Size limits apply only when Caravan knows the release size. Zero disables that bound.</p>
         <div class="grid gap-5 sm:grid-cols-2">
-          <Field label="Minimum size (MB)" for="quality-profile-min-size" error={validation.minSizeMB}>
-            <input id="quality-profile-min-size" type="number" min="0" step="1" value={minSizeMB} oninput={(event) => (minSizeMB = (event.currentTarget as HTMLInputElement).value)} aria-invalid={validation.minSizeMB ? 'true' : undefined} class="h-9 w-full rounded-sm border border-border-strong bg-raised px-3 text-md text-ink focus:border-accent focus:outline-none" />
+          <Field label="Minimum size (MB)" for="quality-profile-min-size">
+            <input id="quality-profile-min-size" type="number" min="0" step="1" value={minSizeMB} oninput={(event) => (minSizeMB = (event.currentTarget as HTMLInputElement).value)} aria-invalid={validation.minSizeMB ? 'true' : undefined} aria-describedby={validation.minSizeMB ? 'quality-profile-min-size-error' : undefined} class="h-9 w-full rounded-sm border border-border-strong bg-raised px-3 text-md text-ink focus:border-accent focus:outline-none" />
+            {#if validation.minSizeMB}<p id="quality-profile-min-size-error" class="text-sm text-danger" role="alert">{validation.minSizeMB}</p>{/if}
           </Field>
-          <Field label="Maximum size (MB)" for="quality-profile-max-size" error={validation.maxSizeMB}>
-            <input id="quality-profile-max-size" type="number" min="0" step="1" value={maxSizeMB} oninput={(event) => (maxSizeMB = (event.currentTarget as HTMLInputElement).value)} aria-invalid={validation.maxSizeMB ? 'true' : undefined} class="h-9 w-full rounded-sm border border-border-strong bg-raised px-3 text-md text-ink focus:border-accent focus:outline-none" />
+          <Field label="Maximum size (MB)" for="quality-profile-max-size">
+            <input id="quality-profile-max-size" type="number" min="0" step="1" value={maxSizeMB} oninput={(event) => (maxSizeMB = (event.currentTarget as HTMLInputElement).value)} aria-invalid={validation.maxSizeMB ? 'true' : undefined} aria-describedby={validation.maxSizeMB ? 'quality-profile-max-size-error' : undefined} class="h-9 w-full rounded-sm border border-border-strong bg-raised px-3 text-md text-ink focus:border-accent focus:outline-none" />
+            {#if validation.maxSizeMB}<p id="quality-profile-max-size-error" class="text-sm text-danger" role="alert">{validation.maxSizeMB}</p>{/if}
           </Field>
         </div>
       </section>
@@ -731,9 +761,12 @@
           </div>
         </Field>
         <Field
-          label="Compatibility policy"
-          help="Prefer adds a compatibility bonus. Require rejects releases that do not match the selected TV target.">
-          <div class="grid gap-2 sm:grid-cols-3" role="radiogroup" aria-label="TV compatibility policy">
+          label="Compatibility policy">
+          <div
+            class="grid gap-2 sm:grid-cols-3"
+            role="radiogroup"
+            aria-label="TV compatibility policy"
+            aria-describedby="quality-profile-compatibility-help">
             {#each TV_COMPATIBILITY_POLICIES as policy (policy)}
               <label class="flex items-center gap-2 rounded-sm border border-border bg-raised px-3 py-2 text-sm text-ink">
                 <input type="radio" name="tv-compatibility-policy" value={policy} checked={tvCompatibilityPolicy === policy} onchange={() => (tvCompatibilityPolicy = policy)} class="accent-accent" />
@@ -741,6 +774,7 @@
               </label>
             {/each}
           </div>
+          <p id="quality-profile-compatibility-help" class="text-sm text-ink-secondary">Prefer adds a compatibility bonus. Require rejects releases that do not match the selected TV target.</p>
         </Field>
       </section>
 
@@ -766,8 +800,13 @@
               <Field label="Rule name" for={`quality-format-name-${index}`} error={formatErrors.name}>
                 <TextInput id={`quality-format-name-${index}`} value={format.name} oninput={(event) => updateCustomFormat(index, { name: (event.currentTarget as HTMLInputElement).value })} />
               </Field>
-              <Field label="Score" for={`quality-format-score-${index}`} error={formatErrors.score} help="Negative scores penalize matching releases.">
-                <input id={`quality-format-score-${index}`} type="number" step="1" value={format.score} oninput={(event) => updateCustomFormat(index, { score: (event.currentTarget as HTMLInputElement).value })} aria-invalid={formatErrors.score ? 'true' : undefined} class="h-9 w-full rounded-sm border border-border-strong bg-surface px-3 text-md text-ink focus:border-accent focus:outline-none" />
+              <Field label="Score" for={`quality-format-score-${index}`}>
+                <input id={`quality-format-score-${index}`} type="number" step="1" value={format.score} oninput={(event) => updateCustomFormat(index, { score: (event.currentTarget as HTMLInputElement).value })} aria-invalid={formatErrors.score ? 'true' : undefined} aria-describedby={formatErrors.score ? `quality-format-score-${index}-error` : `quality-format-score-${index}-help`} class="h-9 w-full rounded-sm border border-border-strong bg-surface px-3 text-md text-ink focus:border-accent focus:outline-none" />
+                {#if formatErrors.score}
+                  <p id={`quality-format-score-${index}-error`} class="text-sm text-danger" role="alert">{formatErrors.score}</p>
+                {:else}
+                  <p id={`quality-format-score-${index}-help`} class="text-sm text-ink-secondary">Negative scores penalize matching releases.</p>
+                {/if}
               </Field>
             </div>
             <Field label="Include terms" for={`quality-format-include-${index}`} error={formatErrors.includeTerms} help="Separate terms with commas. At least one term is required.">
@@ -788,16 +827,24 @@
           <p class="mt-1 text-sm text-ink-secondary">Paste one release name per line. Caravan parses and scores each name on the server, then shows each score contribution below.</p>
         </div>
         {#if editing}
-          <Field label="Release names" for="quality-profile-test-titles" error={testError} help={dirty ? 'Save policy changes before testing so the results match the saved profile.' : 'One release name per line.'}>
+          <Field label="Release names" for="quality-profile-test-titles">
             <textarea
               id="quality-profile-test-titles"
               bind:value={testTitles}
               aria-invalid={testError ? 'true' : undefined}
+              aria-describedby={testError ? 'quality-profile-test-titles-error' : 'quality-profile-test-titles-help'}
               rows="5"
               disabled={testing || dirty}
               class="w-full resize-y rounded-sm border border-border-strong bg-raised px-3 py-2 font-mono text-sm text-ink focus:border-accent focus:outline-none disabled:opacity-50"
               placeholder="Example.2026.1080p.WEB-DL"
             ></textarea>
+            {#if testError}
+              <p id="quality-profile-test-titles-error" class="text-sm text-danger" role="alert">{testError}</p>
+            {:else}
+              <p id="quality-profile-test-titles-help" class="text-sm text-ink-secondary">
+                {dirty ? 'Save policy changes before testing so the results match the saved profile.' : 'One release name per line.'}
+              </p>
+            {/if}
           </Field>
           <div>
             <Button variant="secondary" disabled={testing || dirty} onclick={runTest}>{testing ? 'Testing...' : 'Test releases'}</Button>
@@ -867,7 +914,7 @@
   <Modal title="Delete quality profile" width="max-w-md" onclose={() => (deleting = null)}>
     <div class="flex flex-col gap-3 p-4">
       <p class="text-base text-ink-secondary">Delete <span class="font-medium text-ink">{profile.name}</span>? This cannot be undone.</p>
-      {#if deleteError}<p class="text-sm text-danger">{deleteError}</p>{/if}
+      {#if deleteError}<p class="text-sm text-danger" role="alert">{deleteError}</p>{/if}
     </div>
     {#snippet footer()}
       <div class="flex w-full flex-wrap justify-end gap-2">

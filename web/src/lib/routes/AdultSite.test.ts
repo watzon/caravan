@@ -368,6 +368,18 @@ describe('AdultSite scene rows', () => {
     expect(cell!.getAttribute('title')).toBe('Ava Wells, Ivy Rain, Mia Stone, Nina Reed');
   });
 
+  it('keeps full site metadata and scene text on truncated values', async () => {
+    stubFetch();
+    await mountSite();
+
+    const titles = [...host!.querySelectorAll<HTMLElement>('[title]')].map(
+      (element) => element.title,
+    );
+    expect(titles).toContain(SITE.path);
+    expect(titles).toContain(SITE.stash_id);
+    expect(titles).toContain('#003 Deep Impact');
+  });
+
   it('keeps the performers out of the title cell', async () => {
     stubFetch();
     await mountSite();

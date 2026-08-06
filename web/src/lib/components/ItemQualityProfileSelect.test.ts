@@ -101,6 +101,24 @@ afterEach(() => {
 });
 
 describe('ItemQualityProfileSelect inheritance', () => {
+  it('associates the visible label and assignment state with the select', async () => {
+    app = mount(ItemQualityProfileSelect, {
+      target: host,
+      props: { profileID: 0, kind: 'movie', onassign: async () => {} },
+    });
+    await waitForProfileChoices();
+
+    const select = profileSelect();
+    const label = [...host.querySelectorAll<HTMLLabelElement>('label')].find(
+      (candidate) => candidate.htmlFor === select.id,
+    );
+    expect(label?.textContent).toBe('Quality profile');
+
+    const stateID = select.getAttribute('aria-describedby');
+    expect(stateID).toBeTruthy();
+    expect(host.querySelector(`#${stateID}`)?.textContent).toContain('Inherited from Cinema: Archive');
+  });
+
   it('names the matching library profile for an inherited movie', async () => {
     app = mount(ItemQualityProfileSelect, {
       target: host,

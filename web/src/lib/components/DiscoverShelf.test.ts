@@ -72,6 +72,29 @@ describe('DiscoverShelf', () => {
     expect(host.querySelectorAll('a[href^="/discover/"]')).toHaveLength(25);
   });
 
+  it('keeps a card’s full title, accessible name, rating, and status in text', () => {
+    const fullTitle = 'A Discover Card Title That Is Longer Than Its Poster Column';
+    show([
+      { ...item(1), title: fullTitle, in_library: true },
+      { ...item(2), requested: true },
+      { ...item(3), year: 0 },
+    ]);
+
+    const card = host.querySelector<HTMLAnchorElement>('a[href="/discover/movie/1"]')!;
+    expect(card.getAttribute('aria-label')).toBe(
+      `${fullTitle} (2020), Rated 7.0/10, In library`,
+    );
+    expect(card.querySelector('.truncate')?.getAttribute('title')).toBe(fullTitle);
+    expect(card.querySelector('[title="Rated 7.0/10"]')).not.toBeNull();
+    expect(card.textContent).toContain('IN LIBRARY');
+    expect(
+      host.querySelector('a[href="/discover/movie/2"]')?.getAttribute('aria-label'),
+    ).toContain('Requested');
+    expect(
+      host.querySelector('a[href="/discover/movie/3"]')?.getAttribute('aria-label'),
+    ).toContain('Title 3, Year unknown');
+  });
+
   it('shows no arrows while the row fits its viewport', () => {
     show([item(1), item(2)]);
 

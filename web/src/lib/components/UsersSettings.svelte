@@ -197,7 +197,7 @@
         <li class="flex flex-wrap items-center gap-3 rounded-md border border-border bg-surface px-3 py-3">
           <div class="min-w-0 flex-1">
             <p class="flex flex-wrap items-center gap-2">
-              <span class="truncate text-base font-medium text-ink">{user.username}</span>
+              <span class="truncate text-base font-medium text-ink" title={user.username}>{user.username}</span>
               <Badge mono tone={user.role === 'admin' ? 'accent' : 'neutral'}>
                 {user.role === 'admin' ? 'ADMIN' : 'MEMBER'}
               </Badge>
@@ -207,7 +207,7 @@
             </p>
           </div>
 
-          <div class="flex shrink-0 items-center gap-2">
+          <div class="flex w-full shrink-0 items-center justify-end gap-2 sm:w-auto">
             <Button
               variant="ghost"
               size="sm"
@@ -225,7 +225,7 @@
               disabled={undeletable(user)}
               title={undeletable(user)
                 ? 'The only admin cannot be deleted while other accounts exist'
-                : undefined}
+                : `Delete ${user.username}`}
               onclick={() => open({ kind: 'delete', user })}>
               <Icon name="trash" size={14} />
               <span class="sr-only">Delete {user.username}</span>

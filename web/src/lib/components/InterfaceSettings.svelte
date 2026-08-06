@@ -10,6 +10,8 @@
   } from '../displayPreferences';
 
   const SELECT_CLASS = 'h-9 w-full rounded-sm border border-border-strong bg-raised px-3 text-md text-ink focus:border-accent focus:outline-none';
+  const THEME_HELP_ID = 'display-theme-help';
+  const MOTION_HELP_ID = 'display-motion-help';
 
   let theme = $state<ThemePreference>('system');
   let motion = $state<MotionPreference>('system');
@@ -45,9 +47,10 @@
     title="Appearance"
     description="These preferences apply only to this browser, so each person and device can choose its own display.">
     <div class="grid gap-4 sm:grid-cols-2">
-      <Field label="Theme" for="display-theme" help="System follows this device's light or dark appearance.">
+      <Field label="Theme" for="display-theme">
         <select
           id="display-theme"
+          aria-describedby={THEME_HELP_ID}
           value={theme}
           class={SELECT_CLASS}
           onchange={(event) => updateTheme(event.currentTarget.value as ThemePreference)}>
@@ -55,17 +58,24 @@
           <option value="dark">Dark</option>
           <option value="light">Light</option>
         </select>
+        <p id={THEME_HELP_ID} class="text-sm text-ink-secondary">
+          System follows this device's light or dark appearance.
+        </p>
       </Field>
 
-      <Field label="Motion" for="display-motion" help="Reduce interface transitions and animated feedback on this browser.">
+      <Field label="Motion" for="display-motion">
         <select
           id="display-motion"
+          aria-describedby={MOTION_HELP_ID}
           value={motion}
           class={SELECT_CLASS}
           onchange={(event) => updateMotion(event.currentTarget.value as MotionPreference)}>
           <option value="system">Follow system</option>
           <option value="reduced">Reduce motion</option>
         </select>
+        <p id={MOTION_HELP_ID} class="text-sm text-ink-secondary">
+          Reduce interface transitions and animated feedback on this browser.
+        </p>
       </Field>
     </div>
     {#if saved}
