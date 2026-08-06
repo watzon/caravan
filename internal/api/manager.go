@@ -29,12 +29,12 @@ type Manager interface {
 	// historical behaviour — monitored — and is what every caller that has no
 	// opinion passes, including request approval. It applies to a NEW row only;
 	// re-adding something already in the library keeps the owner's flag.
-	AddMovie(ctx context.Context, tmdbID int64, minAvailability string, monitored *bool) (*core.Movie, error)
+	AddMovie(ctx context.Context, tmdbID int64, minAvailability string, monitored *bool, libraryID int64) (*core.Movie, error)
 
 	// AddSeries adds a series (with its seasons and episodes) by provider id.
 	// monitored is the series-level flag and reads exactly as AddMovie's; the
 	// season and episode rows keep their own monitored semantics.
-	AddSeries(ctx context.Context, tmdbID int64, monitored *bool) (*core.Series, error)
+	AddSeries(ctx context.Context, tmdbID int64, monitored *bool, libraryID int64) (*core.Series, error)
 
 	// RemoveMovie stops tracking a movie. With deleteFiles set it deletes the
 	// movie's files from disk first; without it, only the rows go and a rescan
@@ -64,7 +64,7 @@ type Manager interface {
 	// It does NOT walk the site's scene catalogue: that is hundreds of provider
 	// round trips for a large site, and it is a core.JobSyncSite the caller
 	// queues (see handleAddSite). monitored reads as AddMovie's does.
-	AddSite(ctx context.Context, stashID string, monitored *bool) (*core.Series, error)
+	AddSite(ctx context.Context, stashID string, monitored *bool, libraryID int64) (*core.Series, error)
 
 	// AddSiteAndWait is AddSite with the catalogue walked before it returns.
 	//
@@ -73,7 +73,7 @@ type Manager interface {
 	// scene, and a scene is an episode row that the walk is the only thing that
 	// creates. Queueing the walk instead would answer "approved" for a request
 	// that has, at that moment, made nothing wanted.
-	AddSiteAndWait(ctx context.Context, stashID string, monitored *bool) (*core.Series, error)
+	AddSiteAndWait(ctx context.Context, stashID string, monitored *bool, libraryID int64) (*core.Series, error)
 
 	// Metadata returns the configured metadata provider, or nil when none is
 	// configured (no TMDB API key yet). The search endpoint reports that as a

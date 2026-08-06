@@ -156,7 +156,7 @@ func (a *adultHarness) seedBrazzers() {
 // the same thing about the same walk.
 func (a *adultHarness) addSite(id string) *core.Series {
 	a.t.Helper()
-	sr, err := a.mgr.AddSiteAndWait(context.Background(), id, nil)
+	sr, err := a.mgr.AddSiteAndWait(context.Background(), id, nil, 0)
 	if err != nil {
 		a.t.Fatalf("AddSiteAndWait: %v", err)
 	}
@@ -357,7 +357,7 @@ func TestAddSiteRefusesWhenTheModuleIsDisabled(t *testing.T) {
 	h := newAdultHarness(t, false)
 	h.seedBrazzers()
 
-	if _, err := h.mgr.AddSite(context.Background(), "site-1", nil); !errors.Is(err, ErrAdultDisabled) {
+	if _, err := h.mgr.AddSite(context.Background(), "site-1", nil, 0); !errors.Is(err, ErrAdultDisabled) {
 		t.Errorf("AddSite error = %v, want ErrAdultDisabled", err)
 	}
 	if h.adult.calls != 0 {
@@ -368,7 +368,7 @@ func TestAddSiteRefusesWhenTheModuleIsDisabled(t *testing.T) {
 func TestAddSiteReportsAMissingProvider(t *testing.T) {
 	h := newAdultHarness(t, true)
 	h.mgr.adult = nil
-	if _, err := h.mgr.AddSite(context.Background(), "site-1", nil); !errors.Is(err, core.ErrNoAdultProvider) {
+	if _, err := h.mgr.AddSite(context.Background(), "site-1", nil, 0); !errors.Is(err, core.ErrNoAdultProvider) {
 		t.Errorf("AddSite error = %v, want ErrNoAdultProvider", err)
 	}
 }
@@ -954,7 +954,7 @@ func TestAddSiteDefersTheCatalogueWalk(t *testing.T) {
 	a.seedBrazzers()
 	ctx := context.Background()
 
-	sr, err := a.mgr.AddSite(ctx, "site-1", nil)
+	sr, err := a.mgr.AddSite(ctx, "site-1", nil, 0)
 	if err != nil {
 		t.Fatalf("AddSite: %v", err)
 	}
@@ -994,11 +994,11 @@ func TestAddSiteTwiceIsOneSite(t *testing.T) {
 	a.seedBrazzers()
 	ctx := context.Background()
 
-	first, err := a.mgr.AddSite(ctx, "site-1", nil)
+	first, err := a.mgr.AddSite(ctx, "site-1", nil, 0)
 	if err != nil {
 		t.Fatalf("AddSite: %v", err)
 	}
-	second, err := a.mgr.AddSite(ctx, "site-1", nil)
+	second, err := a.mgr.AddSite(ctx, "site-1", nil, 0)
 	if err != nil {
 		t.Fatalf("AddSite again: %v", err)
 	}
@@ -1021,7 +1021,7 @@ func TestAddSiteAndWaitLandsTheCatalogueBeforeReturning(t *testing.T) {
 	a := newAdultHarness(t, true)
 	a.seedBrazzers()
 
-	sr, err := a.mgr.AddSiteAndWait(context.Background(), "site-1", nil)
+	sr, err := a.mgr.AddSiteAndWait(context.Background(), "site-1", nil, 0)
 	if err != nil {
 		t.Fatalf("AddSiteAndWait: %v", err)
 	}
@@ -1055,7 +1055,7 @@ func TestSyncSiteIsANoOpWhenThereIsNothingToWalk(t *testing.T) {
 		t.Errorf("SyncSite filed %d scenes under a television series", len(eps))
 	}
 
-	sr, err := a.mgr.AddSite(ctx, "site-1", nil)
+	sr, err := a.mgr.AddSite(ctx, "site-1", nil, 0)
 	if err != nil {
 		t.Fatalf("AddSite: %v", err)
 	}
@@ -1079,7 +1079,7 @@ func TestAddSiteUnmonitoredLeavesItsScenesUnmonitored(t *testing.T) {
 	a.seedBrazzers()
 	ctx := context.Background()
 
-	sr, err := a.mgr.AddSiteAndWait(ctx, "site-1", ptr(false))
+	sr, err := a.mgr.AddSiteAndWait(ctx, "site-1", ptr(false), 0)
 	if err != nil {
 		t.Fatalf("AddSiteAndWait: %v", err)
 	}
@@ -1188,7 +1188,7 @@ func TestCatalogueWalkPublishesEachYearBeforeItFinishes(t *testing.T) {
 	a.seedThreeYears()
 	ctx := context.Background()
 
-	sr, err := a.mgr.AddSite(ctx, "site-1", nil)
+	sr, err := a.mgr.AddSite(ctx, "site-1", nil, 0)
 	if err != nil {
 		t.Fatalf("AddSite: %v", err)
 	}
@@ -1309,7 +1309,7 @@ func TestFailedWalkKeepsTheYearsItAlreadyPublished(t *testing.T) {
 	a.seedThreeYears()
 	ctx := context.Background()
 
-	sr, err := a.mgr.AddSite(ctx, "site-1", nil)
+	sr, err := a.mgr.AddSite(ctx, "site-1", nil, 0)
 	if err != nil {
 		t.Fatalf("AddSite: %v", err)
 	}

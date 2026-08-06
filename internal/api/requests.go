@@ -317,14 +317,14 @@ func (s *server) handleApproveRequest(w http.ResponseWriter, r *http.Request) {
 		// Omission keeps the historical monitored default. An explicit false is
 		// useful when an admin approves a request but does not want automatic
 		// searches for future releases.
-		m, err := s.addMovieToLibrary(ctx, req.TMDBID, body.SearchNow, minAvailability, body.Monitored, body.QualityProfileID)
+		m, err := s.addMovieToLibrary(ctx, req.TMDBID, body.SearchNow, minAvailability, body.Monitored, body.QualityProfileID, 0)
 		if err != nil {
 			s.writeManagerError(w, "add movie", err)
 			return
 		}
 		out["movie"] = movieDTO(*m)
 	default:
-		sr, err := s.addSeriesToLibrary(ctx, req.TMDBID, body.SearchNow, body.Seasons, body.Monitored, body.QualityProfileID)
+		sr, err := s.addSeriesToLibrary(ctx, req.TMDBID, body.SearchNow, body.Seasons, body.Monitored, body.QualityProfileID, 0)
 		if err != nil {
 			s.writeManagerError(w, "add series", err)
 			return
@@ -457,7 +457,7 @@ func (s *server) approveScene(ctx context.Context, w http.ResponseWriter, r *htt
 	// an approval that answered before the walk would close the request against
 	// an episode row that does not exist yet — so the granted scene would not
 	// be wanted, and the next sweep would search for nothing.
-	sr, err := s.mgr.AddSiteAndWait(ctx, scene.SiteStashID, nil)
+	sr, err := s.mgr.AddSiteAndWait(ctx, scene.SiteStashID, nil, 0)
 	if err != nil {
 		s.writeManagerError(w, "add site", err)
 		return nil, err

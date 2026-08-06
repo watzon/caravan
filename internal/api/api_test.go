@@ -115,7 +115,7 @@ func (m *stubManager) Scan(ctx context.Context) error {
 	return m.scanErr
 }
 
-func (m *stubManager) AddMovie(ctx context.Context, tmdbID int64, minAvailability string, monitored *bool) (*core.Movie, error) {
+func (m *stubManager) AddMovie(ctx context.Context, tmdbID int64, minAvailability string, monitored *bool, libraryID int64) (*core.Movie, error) {
 	if m.addErr != nil {
 		return nil, m.addErr
 	}
@@ -131,7 +131,7 @@ func (m *stubManager) AddMovie(ctx context.Context, tmdbID int64, minAvailabilit
 	return mv, nil
 }
 
-func (m *stubManager) AddSeries(ctx context.Context, tmdbID int64, monitored *bool) (*core.Series, error) {
+func (m *stubManager) AddSeries(ctx context.Context, tmdbID int64, monitored *bool, libraryID int64) (*core.Series, error) {
 	if m.addErr != nil {
 		return nil, m.addErr
 	}
@@ -199,7 +199,7 @@ func (m *stubManager) MatchUnmatched(ctx context.Context, id int64, mediaType st
 // handler tests read back the same shape a real manager produces — and, like
 // the real one, it files NO scenes. The catalogue walk is a job now, and a stub
 // that quietly did it inline would hide the very split these tests defend.
-func (m *stubManager) AddSite(ctx context.Context, stashID string, monitored *bool) (*core.Series, error) {
+func (m *stubManager) AddSite(ctx context.Context, stashID string, monitored *bool, libraryID int64) (*core.Series, error) {
 	m.mu.Lock()
 	m.addSiteCalls = append(m.addSiteCalls, stashID)
 	m.mu.Unlock()
@@ -223,8 +223,8 @@ func (m *stubManager) AddSite(ctx context.Context, stashID string, monitored *bo
 // exists only on this path, so a caller that switched to the deferred AddSite
 // would leave the request approved with no episode row behind it, and the test
 // would see exactly that.
-func (m *stubManager) AddSiteAndWait(ctx context.Context, stashID string, monitored *bool) (*core.Series, error) {
-	sr, err := m.AddSite(ctx, stashID, monitored)
+func (m *stubManager) AddSiteAndWait(ctx context.Context, stashID string, monitored *bool, libraryID int64) (*core.Series, error) {
+	sr, err := m.AddSite(ctx, stashID, monitored, libraryID)
 	if err != nil {
 		return nil, err
 	}

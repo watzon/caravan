@@ -18,6 +18,7 @@
   import { isFuture } from '../format';
   import { metadataFault, type CredentialFault } from '../credentials';
   import { navigate } from '../router.svelte';
+  import { libraries } from '../state/libraries.svelte';
   import { session } from '../state/session.svelte';
   import { pushToast } from '../state/toast.svelte';
   import { focusFirstResult, moveResultFocus } from '../typeahead';
@@ -121,6 +122,26 @@
    * Pick mode drops it too: a manual match is a TMDB id by definition.
    */
   let siteScope = $derived(!onpick && session.adult);
+
+  // Add mode offers a target library when the scope's kind has more than one.
+  // Pick mode adds nothing, so it neither needs the list nor may fetch it —
+  // and the fetch is lazy for the store's reason: /libraries is admin-only.
+  $effect(() => {
+    if (!onpick) void libraries.load();
+  });
+  /** The chosen target library; 0 is "the default", which needs no request field. */
+  let targetLibraryID = $state(0);
+  let libraryChoices = $derived(
+    onpick
+      ? []
+      : libraries.ofKind(scope === 'movie' ? 'movie' : scope === 'series' ? 'tv' : 'adult'),
+  );
+  $effect(() => {
+    // Scope-dependent state, like the search results: flipping the tab points
+    // the select back at that kind's default.
+    void scope;
+    targetLibraryID = 0;
+  });
 
   let scopes = $derived<{ key: Scope; label: string }[]>([
     { key: 'movie', label: 'Movies' },
@@ -268,6 +289,7 @@
         stash_id: hit.stash_id,
         monitored: monitorOnAdd,
         search_now: searchOnAdd,
+        library_id: targetLibraryID || undefined,
       });
       // The site page it navigates to will be empty for a moment: the add
       // answers as soon as the row exists and the scenes arrive from a
@@ -297,6 +319,7 @@
           tmdb_id: row.tmdb_id,
           monitored: monitorOnAdd,
           search_now: searchOnAdd,
+          library_id: targetLibraryID || undefined,
         });
         pushToast(`Added ${added.title}`, 'success');
         onclose();
@@ -306,6 +329,7 @@
           tmdb_id: row.tmdb_id,
           monitored: monitorOnAdd,
           search_missing: searchOnAdd,
+          library_id: targetLibraryID || undefined,
         });
         pushToast(`Added ${added.title}`, 'success');
         onclose();
@@ -486,6 +510,25 @@
            The search box only exists while monitoring is on, because a search
            reads the wanted list and nothing unmonitored is on it. -->
       <div class="flex flex-col gap-2">
+        {#if libraryChoices.length > 1}
+          <!-- Only rendered when the choice exists: with a single library of
+               the kind there is nothing to decide and the select would be a
+               question with one answer. -->
+          <label
+            class="flex items-center gap-3 rounded-md border border-border bg-raised px-3 py-2">
+            <span class="text-base text-ink">Library</span>
+            <select
+              bind:value={targetLibraryID}
+              class="h-8 flex-1 rounded-sm border border-border-strong bg-raised px-2 text-md text-ink focus:border-accent focus:outline-none"
+              aria-label="Target library">
+              {#each libraryChoices as choice (choice.id)}
+                <option value={choice.is_default ? 0 : choice.id}>
+                  {choice.name}{choice.is_default ? ' (default)' : ''}
+                </option>
+              {/each}
+            </select>
+          </label>
+        {/if}
         <label class="flex items-center gap-3 rounded-md border border-border bg-raised px-3 py-2">
           <input
             type="checkbox"

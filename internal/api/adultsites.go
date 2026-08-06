@@ -357,6 +357,9 @@ type addSiteRequest struct {
 	// core.JobSyncSitePayload): before the walk the site has no episode rows,
 	// so a search queued now would queue nothing.
 	SearchNow bool `json:"search_now"`
+	// LibraryID reads exactly as addRequest.LibraryID: the adult library a
+	// NEW site lands in, zero for the default.
+	LibraryID int64 `json:"library_id"`
 }
 
 // handleAddSite adds a site to the library and queues the walk of its
@@ -380,9 +383,12 @@ func (s *server) handleAddSite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "stash_id is required")
 		return
 	}
+	if !s.validAddLibraryID(w, r, body.LibraryID, core.LibraryKindAdult) {
+		return
+	}
 
 	ctx := r.Context()
-	sr, err := s.mgr.AddSite(ctx, stashID, body.Monitored)
+	sr, err := s.mgr.AddSite(ctx, stashID, body.Monitored, body.LibraryID)
 	if err != nil {
 		s.writeManagerError(w, "add site", err)
 		return

@@ -100,8 +100,8 @@ func (m *Manager) adultReady(ctx context.Context) error {
 //
 // monitored follows monitoredOrDefault: nil means monitored, and it decides a
 // new row only.
-func (m *Manager) AddSite(ctx context.Context, stashID string, monitored *bool) (*core.Series, error) {
-	return m.addSite(ctx, stashID, monitored, false)
+func (m *Manager) AddSite(ctx context.Context, stashID string, monitored *bool, libraryID int64) (*core.Series, error) {
+	return m.addSite(ctx, stashID, monitored, libraryID, false)
 }
 
 // AddSiteAndWait is AddSite with the catalogue walk done before it returns.
@@ -111,11 +111,11 @@ func (m *Manager) AddSite(ctx context.Context, stashID string, monitored *bool) 
 // scene request is that caller — the scene it granted has to be a wanted
 // episode by the time the approval answers, or the request is closed against
 // nothing.
-func (m *Manager) AddSiteAndWait(ctx context.Context, stashID string, monitored *bool) (*core.Series, error) {
-	return m.addSite(ctx, stashID, monitored, true)
+func (m *Manager) AddSiteAndWait(ctx context.Context, stashID string, monitored *bool, libraryID int64) (*core.Series, error) {
+	return m.addSite(ctx, stashID, monitored, libraryID, true)
 }
 
-func (m *Manager) addSite(ctx context.Context, stashID string, monitored *bool, walk bool) (*core.Series, error) {
+func (m *Manager) addSite(ctx context.Context, stashID string, monitored *bool, libraryID int64, walk bool) (*core.Series, error) {
 	if err := m.adultReady(ctx); err != nil {
 		return nil, err
 	}
@@ -131,7 +131,7 @@ func (m *Manager) addSite(ctx context.Context, stashID string, monitored *bool, 
 		return nil, fmt.Errorf("library: site %s not found", stashID)
 	}
 
-	lib, err := m.siteLibrary(ctx, stashID, "", 0)
+	lib, err := m.siteLibrary(ctx, stashID, "", libraryID)
 	if err != nil {
 		return nil, err
 	}

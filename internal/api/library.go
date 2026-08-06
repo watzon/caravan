@@ -234,6 +234,33 @@ type addRequest struct {
 	// is series-only. Omitting it defaults a new movie to released and leaves
 	// a re-added movie's choice alone.
 	MinAvailability string `json:"min_availability"`
+	// LibraryID is the library a NEW item lands in. Zero — and every request
+	// from before libraries were plural — targets the kind's default. A
+	// re-added title stays in the library it already lives in whatever this
+	// says: a move is an explicit operation, never a side effect of an add.
+	LibraryID int64 `json:"library_id"`
+}
+
+// validAddLibraryID validates an add's library target, writing the refusal
+// itself. Zero names the default and is always fine; a real id must exist, be
+// visible to this caller, and hold items of the endpoint's kind.
+func (s *server) validAddLibraryID(w http.ResponseWriter, r *http.Request, libraryID int64, kind string) bool {
+	if libraryID < 0 {
+		writeError(w, http.StatusBadRequest, "invalid library_id")
+		return false
+	}
+	if libraryID == 0 {
+		return true
+	}
+	lib, ok := s.getVisibleLibrary(w, r, libraryID)
+	if !ok {
+		return false
+	}
+	if lib.Kind != kind {
+		writeError(w, http.StatusBadRequest, "library holds a different kind of item")
+		return false
+	}
+	return true
 }
 
 func (s *server) handleListMovies(w http.ResponseWriter, r *http.Request) {
@@ -287,8 +314,11 @@ func (s *server) handleAddMovie(w http.ResponseWriter, r *http.Request) {
 	if !s.validQualityProfileID(w, r, body.QualityProfileID) {
 		return
 	}
+	if !s.validAddLibraryID(w, r, body.LibraryID, core.LibraryKindMovie) {
+		return
+	}
 
-	m, err := s.addMovieToLibrary(r.Context(), body.TMDBID, body.SearchNow, body.MinAvailability, body.Monitored, body.QualityProfileID)
+	m, err := s.addMovieToLibrary(r.Context(), body.TMDBID, body.SearchNow, body.MinAvailability, body.Monitored, body.QualityProfileID, body.LibraryID)
 	if err != nil {
 		s.writeManagerError(w, "add movie", err)
 		return
@@ -329,8 +359,8 @@ func (s *server) validQualityProfileID(w http.ResponseWriter, r *http.Request, p
 // is what makes "a pending request is absorbed when its title arrives" true
 // however the title arrived, and it is the one place a permission check goes
 // when Caravan grows more than one kind of user.
-func (s *server) addMovieToLibrary(ctx context.Context, tmdbID int64, searchNow bool, minAvailability string, monitored *bool, qualityProfileID int64) (*core.Movie, error) {
-	m, err := s.mgr.AddMovie(ctx, tmdbID, minAvailability, monitored)
+func (s *server) addMovieToLibrary(ctx context.Context, tmdbID int64, searchNow bool, minAvailability string, monitored *bool, qualityProfileID, libraryID int64) (*core.Movie, error) {
+	m, err := s.mgr.AddMovie(ctx, tmdbID, minAvailability, monitored, libraryID)
 	if err != nil {
 		return nil, err
 	}
@@ -358,8 +388,8 @@ func (s *server) addMovieToLibrary(ctx context.Context, tmdbID int64, searchNow 
 // else the provider knows about lands unmonitored. It is the same season
 // selection the add dialog shows, and it is what makes a partial add absorb
 // only the part of a pending request it actually granted.
-func (s *server) addSeriesToLibrary(ctx context.Context, tmdbID int64, searchMissing bool, seasons []int, monitored *bool, qualityProfileID int64) (*core.Series, error) {
-	sr, err := s.mgr.AddSeries(ctx, tmdbID, monitored)
+func (s *server) addSeriesToLibrary(ctx context.Context, tmdbID int64, searchMissing bool, seasons []int, monitored *bool, qualityProfileID, libraryID int64) (*core.Series, error) {
+	sr, err := s.mgr.AddSeries(ctx, tmdbID, monitored, libraryID)
 	if err != nil {
 		return nil, err
 	}
@@ -720,8 +750,11 @@ func (s *server) handleAddSeries(w http.ResponseWriter, r *http.Request) {
 	if !s.validQualityProfileID(w, r, body.QualityProfileID) {
 		return
 	}
+	if !s.validAddLibraryID(w, r, body.LibraryID, core.LibraryKindTV) {
+		return
+	}
 
-	sr, err := s.addSeriesToLibrary(r.Context(), body.TMDBID, body.SearchMissing, body.Seasons, body.Monitored, body.QualityProfileID)
+	sr, err := s.addSeriesToLibrary(r.Context(), body.TMDBID, body.SearchMissing, body.Seasons, body.Monitored, body.QualityProfileID, body.LibraryID)
 	if err != nil {
 		s.writeManagerError(w, "add series", err)
 		return

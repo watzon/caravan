@@ -690,6 +690,11 @@ export interface AddItemRequest {
    * it defaults a new movie to 'released' and leaves a re-add's choice alone.
    */
   min_availability?: MinAvailability;
+  /**
+   * The library a NEW item lands in. Omitting it (or 0) targets the kind's
+   * default library; a re-added title stays where it already lives.
+   */
+  library_id?: number;
 }
 
 /**
@@ -706,6 +711,8 @@ export interface AddSiteRequest {
    * scenes to search for.
    */
   search_now?: boolean;
+  /** Reads exactly as AddItemRequest.library_id does, over adult libraries. */
+  library_id?: number;
 }
 
 /**

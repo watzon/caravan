@@ -315,44 +315,42 @@ func (a *libraryAdapter) Scan(ctx context.Context) error {
 	return nil
 }
 
-func (a *libraryAdapter) AddMovie(ctx context.Context, tmdbID int64, minAvailability string, monitored *bool) (*core.Movie, error) {
+func (a *libraryAdapter) AddMovie(ctx context.Context, tmdbID int64, minAvailability string, monitored *bool, libraryID int64) (*core.Movie, error) {
 	mgr, err := a.current(ctx)
 	if err != nil {
 		return nil, err
 	}
-	// Library selection is not exposed through this adapter yet; 0 targets
-	// the kind's default library, which is what every add meant before 0022.
-	return mgr.AddMovie(ctx, tmdbID, minAvailability, monitored, 0)
+	return mgr.AddMovie(ctx, tmdbID, minAvailability, monitored, libraryID)
 }
 
-func (a *libraryAdapter) AddSeries(ctx context.Context, tmdbID int64, monitored *bool) (*core.Series, error) {
+func (a *libraryAdapter) AddSeries(ctx context.Context, tmdbID int64, monitored *bool, libraryID int64) (*core.Series, error) {
 	mgr, err := a.current(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return mgr.AddSeries(ctx, tmdbID, monitored, 0)
+	return mgr.AddSeries(ctx, tmdbID, monitored, libraryID)
 }
 
 // AddSite adds a site by stash-box id. It goes through current like every other
 // add, so the storage root and both providers are whatever the settings table
 // says right now — including "the module was switched off a moment ago", which
 // current resolves to a nil adult provider and library.AddSite refuses.
-func (a *libraryAdapter) AddSite(ctx context.Context, stashID string, monitored *bool) (*core.Series, error) {
+func (a *libraryAdapter) AddSite(ctx context.Context, stashID string, monitored *bool, libraryID int64) (*core.Series, error) {
 	mgr, err := a.current(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return mgr.AddSite(ctx, stashID, monitored)
+	return mgr.AddSite(ctx, stashID, monitored, libraryID)
 }
 
 // AddSiteAndWait is AddSite with the catalogue walk inline, for the scene
 // approval path. Same current() resolution, same refusal when the module is off.
-func (a *libraryAdapter) AddSiteAndWait(ctx context.Context, stashID string, monitored *bool) (*core.Series, error) {
+func (a *libraryAdapter) AddSiteAndWait(ctx context.Context, stashID string, monitored *bool, libraryID int64) (*core.Series, error) {
 	mgr, err := a.current(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return mgr.AddSiteAndWait(ctx, stashID, monitored)
+	return mgr.AddSiteAndWait(ctx, stashID, monitored, libraryID)
 }
 
 // SyncSite walks one site's catalogue, and is what the core.JobSyncSite handler

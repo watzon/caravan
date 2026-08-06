@@ -1351,3 +1351,110 @@ describe('AddItemModal — metadata credential', () => {
     expect(host!.textContent).not.toContain('Settings → Metadata');
   });
 });
+
+describe('AddItemModal — target library', () => {
+  afterEach(() => {
+    if (app) unmount(app);
+    app = undefined;
+    host?.remove();
+    host = undefined;
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+    clearToasts();
+  });
+
+  function lib(over: Record<string, unknown>) {
+    return {
+      id: 1,
+      kind: 'tv',
+      name: 'Series',
+      root_path: 'library/TV',
+      provider: 'tmdb',
+      is_default: true,
+      item_count: 0,
+      dlna_visible: true,
+      route_torrent: '',
+      route_usenet: '',
+      quality_profile_id: 0,
+      indexers: [],
+      ...over,
+    };
+  }
+
+  it('offers a library select when a kind has several and sends the pick', async () => {
+    vi.useFakeTimers();
+    const calls: { url: string; method: string; body: unknown }[] = [];
+    const series = [
+      {
+        tmdb_id: 2,
+        title: 'Frieren',
+        year: 2023,
+        overview: '',
+        first_air_date: '2023-09-29',
+        vote_average: 8.9,
+        vote_count: 1000,
+        poster_url: '',
+      },
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? 'GET';
+        calls.push({
+          url,
+          method,
+          body: typeof init?.body === 'string' ? JSON.parse(init.body) : null,
+        });
+        let payload: unknown = { movies: [], series };
+        let status = 200;
+        if (url.includes('/libraries')) {
+          payload = {
+            libraries: [
+              lib({}),
+              lib({ id: 9, name: 'Anime', root_path: 'library/Anime', is_default: false }),
+            ],
+          };
+        } else if (method === 'POST') {
+          payload = { id: 7, title: 'Frieren' };
+          status = 201;
+        }
+        return new Response(JSON.stringify(payload), {
+          status,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    );
+
+    const { libraries } = await import('../state/libraries.svelte');
+    await libraries.load(true);
+
+    mountModal({ initialKind: 'series' });
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    const select = host!.querySelector(
+      'select[aria-label="Target library"]',
+    ) as HTMLSelectElement;
+    expect(select, 'library select').not.toBeNull();
+    select.value = '9';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+
+    const input = host!.querySelector('input[type="search"]') as HTMLInputElement;
+    input.value = 'frieren';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    await vi.advanceTimersByTimeAsync(300);
+    flushSync();
+
+    const add = host!.querySelector('ul button') as HTMLButtonElement;
+    add.click();
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    const post = calls.find((c) => c.method === 'POST');
+    expect(post?.url).toBe('/api/v1/library/series');
+    expect(post?.body).toMatchObject({ tmdb_id: 2, library_id: 9 });
+  });
+});
