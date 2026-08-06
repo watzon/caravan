@@ -34,6 +34,10 @@ type Movie struct {
 	// QualityProfileID references quality_profiles.id; 0 means "use the
 	// default profile".
 	QualityProfileID int64
+	// LibraryID references libraries.id — which movie library owns this row.
+	// Soft like QualityProfileID; 0 means "unknown", which resolves through
+	// the kind's default library until a rescan heals it from Path.
+	LibraryID int64
 	// ReleaseDate is the theatrical release date, zero when unknown.
 	ReleaseDate time.Time
 	// DigitalRelease and PhysicalRelease are the home-release dates, zero when
@@ -126,6 +130,11 @@ type Series struct {
 	// QualityProfileID references quality_profiles.id; 0 means "use the
 	// default profile".
 	QualityProfileID int64
+	// LibraryID references libraries.id — which library owns this series. Its
+	// library's kind always agrees with Kind (UpsertSeries asserts it). Soft
+	// like QualityProfileID; 0 means "unknown", which resolves through the
+	// kind's default library until a rescan heals it from Path.
+	LibraryID int64
 	// FirstAired is the first air date, zero when unknown.
 	FirstAired time.Time
 	AddedAt    time.Time

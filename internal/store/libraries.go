@@ -11,7 +11,7 @@ import (
 )
 
 const libraryColumns = `id, kind, name, root_path, dlna_visible,
-	route_torrent, route_usenet, quality_profile_id`
+	route_torrent, route_usenet, quality_profile_id, provider, is_default`
 
 // ListLibraries returns every library ordered by id, which is the order 0012
 // seeded them in: Movies first, then Series.
@@ -49,12 +49,17 @@ func (s *Store) GetLibrary(ctx context.Context, id int64) (*core.Library, error)
 	return l, nil
 }
 
-// GetLibraryByKind returns the library for one of the core.LibraryKind*
-// constants, or ErrNotFound. This is how an item finds its library: kind is
-// the only mapping, so a movie row and the movie library never need a join
-// column between them.
+// GetLibraryByKind returns the DEFAULT library of the given kind, or
+// ErrNotFound when no library of that kind exists at all.
+//
+// Before 0022 kind identified a library outright; now it identifies the
+// default one, which is what every call site written under the old rule
+// means by the lookup. A kind whose default flag was somehow lost falls back
+// to the lowest id, so a by-kind caller never fails while a library of the
+// kind exists.
 func (s *Store) GetLibraryByKind(ctx context.Context, kind string) (*core.Library, error) {
-	row := s.db.QueryRowContext(ctx, "SELECT "+libraryColumns+" FROM libraries WHERE kind = ?", kind)
+	row := s.db.QueryRowContext(ctx, "SELECT "+libraryColumns+
+		" FROM libraries WHERE kind = ? ORDER BY is_default DESC, id LIMIT 1", kind)
 	l, err := scanLibrary(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("store: library of kind %q: %w", kind, ErrNotFound)
@@ -65,8 +70,155 @@ func (s *Store) GetLibraryByKind(ctx context.Context, kind string) (*core.Librar
 	return l, nil
 }
 
+// GetDefaultLibrary is GetLibraryByKind under its post-0022 name. New code
+// should say what it means; the old name survives for the call sites written
+// when kind was the whole mapping.
+func (s *Store) GetDefaultLibrary(ctx context.Context, kind string) (*core.Library, error) {
+	return s.GetLibraryByKind(ctx, kind)
+}
+
+// ListLibrariesByKind returns every library of one kind ordered by id, the
+// default first among equals only by virtue of usually being oldest — callers
+// that need the default ask GetDefaultLibrary.
+func (s *Store) ListLibrariesByKind(ctx context.Context, kind string) ([]core.Library, error) {
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT "+libraryColumns+" FROM libraries WHERE kind = ? ORDER BY id", kind)
+	if err != nil {
+		return nil, fmt.Errorf("store: list libraries of kind %q: %w", kind, err)
+	}
+	defer rows.Close()
+
+	out := []core.Library{}
+	for rows.Next() {
+		l, err := scanLibrary(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: scan library: %w", err)
+		}
+		out = append(out, *l)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list libraries of kind %q: %w", kind, err)
+	}
+	return out, nil
+}
+
+// Library deletion refusals. Each is a distinct error because the API answers
+// each with a different message, and the difference matters to the user: one
+// asks them to move items first, the others say the row is structural.
+var (
+	// ErrLibraryNotEmpty refuses to delete a library that still owns items.
+	ErrLibraryNotEmpty = errors.New("store: library still has items")
+	// ErrLibraryIsDefault refuses to delete a kind's default library —
+	// demote it first, so every by-kind lookup keeps an answer.
+	ErrLibraryIsDefault = errors.New("store: library is its kind's default")
+	// ErrLibraryIsAdult refuses to delete an adult library: the module's
+	// switch already promises that disabling deletes nothing, and deletion
+	// through this door would be that promise broken (see SetAdultEnabled).
+	ErrLibraryIsAdult = errors.New("store: adult libraries are managed by the module switch")
+)
+
+// CreateLibrary inserts a new library and writes back the assigned id. The
+// caller (the API layer) validates the kind, the provider and the root path —
+// this function only owns what the schema owns: root uniqueness, and the DLNA
+// tree version, which must advance when a visible container appears.
+func (s *Store) CreateLibrary(ctx context.Context, l *core.Library) error {
+	res, err := s.db.ExecContext(ctx, `
+		INSERT INTO libraries (kind, name, root_path, dlna_visible,
+			route_torrent, route_usenet, quality_profile_id, provider, is_default)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		l.Kind, l.Name, l.RootPath, l.DLNAVisible,
+		nullString(l.RouteTorrent), nullString(l.RouteUsenet), nullInt64(l.QualityProfileID),
+		l.Provider, l.IsDefault)
+	if err != nil {
+		return fmt.Errorf("store: create library %q: %w", l.Name, err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return fmt.Errorf("store: create library %q: %w", l.Name, err)
+	}
+	l.ID = id
+	if l.DLNAVisible {
+		return s.bumpDLNAUpdateID(ctx)
+	}
+	return nil
+}
+
+// DeleteLibrary removes an empty, non-default, non-adult library. The guards
+// live here rather than in the API so no second caller can forget one: a
+// library that still owns items is ErrLibraryNotEmpty (with items stranded
+// nowhere), the kind's default is ErrLibraryIsDefault, and adult libraries
+// are ErrLibraryIsAdult.
+func (s *Store) DeleteLibrary(ctx context.Context, id int64) error {
+	lib, err := s.GetLibrary(ctx, id)
+	if err != nil {
+		return err
+	}
+	if lib.Kind == core.LibraryKindAdult {
+		return ErrLibraryIsAdult
+	}
+	if lib.IsDefault {
+		return ErrLibraryIsDefault
+	}
+	n, err := s.CountLibraryItems(ctx, id)
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		return fmt.Errorf("%w: %d", ErrLibraryNotEmpty, n)
+	}
+	if _, err := s.db.ExecContext(ctx, "DELETE FROM libraries WHERE id = ?", id); err != nil {
+		return fmt.Errorf("store: delete library %d: %w", id, err)
+	}
+	if lib.DLNAVisible {
+		return s.bumpDLNAUpdateID(ctx)
+	}
+	return nil
+}
+
+// CountLibraryItems reports how many movies and series name the library as
+// theirs. It is the emptiness check DeleteLibrary runs and the item_count the
+// Libraries screen renders, so both always agree.
+func (s *Store) CountLibraryItems(ctx context.Context, id int64) (int64, error) {
+	var n int64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT (SELECT COUNT(*) FROM movies WHERE library_id = ?)
+		     + (SELECT COUNT(*) FROM series WHERE library_id = ?)`, id, id).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("store: count items of library %d: %w", id, err)
+	}
+	return n, nil
+}
+
+// SetDefaultLibrary makes the given library its kind's default. Clear-then-set
+// in one transaction: the partial unique index admits at most one default per
+// kind, so the old flag must be gone before the new one lands.
+func (s *Store) SetDefaultLibrary(ctx context.Context, id int64) error {
+	lib, err := s.GetLibrary(ctx, id)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: set default library %d: %w", id, err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx,
+		"UPDATE libraries SET is_default = 0 WHERE kind = ? AND is_default = 1", lib.Kind); err != nil {
+		return fmt.Errorf("store: set default library %d: %w", id, err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		"UPDATE libraries SET is_default = 1 WHERE id = ?", id); err != nil {
+		return fmt.Errorf("store: set default library %d: %w", id, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: set default library %d: %w", id, err)
+	}
+	return nil
+}
+
 // UpdateLibrary rewrites the mutable fields of an existing library. Kind is
 // not among them: it is the library's identity and what items are mapped by.
+// Neither is is_default — that is SetDefaultLibrary's transactional job.
 // Updating an absent library is ErrNotFound.
 //
 // Flipping dlna_visible also advances SettingDLNAUpdateID, because that flag is
@@ -82,11 +234,11 @@ func (s *Store) UpdateLibrary(ctx context.Context, l *core.Library) error {
 	}
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE libraries SET name = ?, root_path = ?, dlna_visible = ?,
-			route_torrent = ?, route_usenet = ?, quality_profile_id = ?
+			route_torrent = ?, route_usenet = ?, quality_profile_id = ?, provider = ?
 		WHERE id = ?`,
 		l.Name, l.RootPath, l.DLNAVisible,
 		nullString(l.RouteTorrent), nullString(l.RouteUsenet), nullInt64(l.QualityProfileID),
-		l.ID)
+		l.Provider, l.ID)
 	if err != nil {
 		return fmt.Errorf("store: update library %d: %w", l.ID, err)
 	}
@@ -356,7 +508,7 @@ func scanLibrary(sc scanner) (*core.Library, error) {
 		profileID sql.NullInt64
 	)
 	if err := sc.Scan(&l.ID, &l.Kind, &l.Name, &l.RootPath, &l.DLNAVisible,
-		&torrent, &usenet, &profileID); err != nil {
+		&torrent, &usenet, &profileID, &l.Provider, &l.IsDefault); err != nil {
 		return nil, err
 	}
 	l.RouteTorrent = torrent.String

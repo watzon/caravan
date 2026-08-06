@@ -70,15 +70,25 @@ func (s *Store) SetAdultEnabled(ctx context.Context, enabled bool) error {
 
 // ensureAdultLibrary creates the Adult library row if it is not already there.
 //
-// The insert is guarded by the kind column's own UNIQUE constraint rather than
-// by a read-then-write, so two enables racing produce one row and one of them
-// does nothing, instead of two rows or a failed request.
+// The insert is guarded by root_path's UNIQUE constraint rather than by a
+// read-then-write, so two enables racing produce one row and one of them does
+// nothing, instead of two rows or a failed request. Before 0022 the guard was
+// UNIQUE(kind); with several libraries per kind allowed, the seed root is the
+// column that still identifies THIS row, and it is what a re-enable collides
+// with — the row is never deleted (see the disable contract above), so the
+// collision is the common case, not the edge.
+//
+// The row becomes the kind's default only when no adult default exists yet:
+// on first enable that is this row, and forever after the subquery keeps a
+// re-enable from ever contending with idx_libraries_default_per_kind.
 func (s *Store) ensureAdultLibrary(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO libraries (kind, name, root_path, dlna_visible)
-		VALUES (?, ?, ?, 0)
-		ON CONFLICT (kind) DO NOTHING`,
-		core.LibraryKindAdult, AdultLibraryName, AdultLibraryRoot)
+		INSERT INTO libraries (kind, name, root_path, dlna_visible, provider, is_default)
+		SELECT ?, ?, ?, 0, ?,
+			NOT EXISTS (SELECT 1 FROM libraries WHERE kind = ? AND is_default = 1)
+		ON CONFLICT (root_path) DO NOTHING`,
+		core.LibraryKindAdult, AdultLibraryName, AdultLibraryRoot,
+		core.ProviderStashbox, core.LibraryKindAdult)
 	if err != nil {
 		return fmt.Errorf("store: create adult library: %w", err)
 	}

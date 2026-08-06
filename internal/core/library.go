@@ -1,8 +1,10 @@
 package core
 
-// Library kinds (SPEC §7 `libraries.kind`, PLAN phase 8). The kind is what
-// maps an item to its library: every movie belongs to the movie library, every
-// series to the tv library, and there is exactly one library per kind.
+// Library kinds (SPEC §7 `libraries.kind`, PLAN phase 8). The kind names the
+// item vocabulary a library speaks — movie rows, television series, adult
+// sites. Since migration 0022 an install may hold several libraries of one
+// kind; the one flagged is_default absorbs every lookup that still asks by
+// kind, and items name their own library through `library_id`.
 const (
 	LibraryKindMovie = "movie"
 	LibraryKindTV    = "tv"
@@ -40,8 +42,9 @@ func LibraryKindForSeries(seriesKind string) string {
 // opened the Libraries screen.
 type Library struct {
 	ID int64
-	// Kind is one of the LibraryKind* constants, unique across libraries and
-	// not editable: it is the library's identity, not a preference.
+	// Kind is one of the LibraryKind* constants and is not editable: it says
+	// which item vocabulary the library speaks (and so which tables its items
+	// live in), not which shelf it is. Several libraries may share a kind.
 	Kind string
 	// Name is the user-facing label.
 	Name string
@@ -61,6 +64,14 @@ type Library struct {
 	// name none of their own. Zero means no library default, which falls
 	// through to the store's default profile.
 	QualityProfileID int64
+	// Provider is the id of the metadata provider that refreshes this
+	// library's items — one of the Provider* constants, validated against
+	// Kind by ProviderServes at the edge.
+	Provider string
+	// IsDefault marks the one library per kind that answers legacy by-kind
+	// lookups and receives items added without an explicit target. Exactly
+	// one default exists per kind (partial unique index, migration 0022).
+	IsDefault bool
 }
 
 // LibraryIndexer is one (library, indexer) search override.

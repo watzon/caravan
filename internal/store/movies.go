@@ -11,7 +11,8 @@ import (
 
 const movieColumns = `id, tmdb_id, imdb_id, title, sort_title, year, overview,
 	path, poster_path, poster_url, monitored, quality_profile_id, release_date,
-	digital_release, physical_release, min_availability, added_at, updated_at`
+	digital_release, physical_release, min_availability, added_at, updated_at,
+	library_id`
 
 // UpsertMovie inserts or updates m and writes back the assigned ID.
 //
@@ -42,16 +43,21 @@ func (s *Store) UpsertMovie(ctx context.Context, m *core.Movie) error {
 	}
 
 	if m.ID != 0 {
+		// library_id 0 keeps the stored value: a caller that rebuilt the
+		// struct from provider metadata has not decided the movie moves, and a
+		// rescan must never move an item between libraries. A move names its
+		// target explicitly.
 		res, err := s.db.ExecContext(ctx, `
 			UPDATE movies SET tmdb_id = ?, imdb_id = ?, title = ?, sort_title = ?, year = ?,
 				overview = ?, path = ?, poster_path = ?, poster_url = ?, monitored = ?,
 				quality_profile_id = ?, release_date = ?, digital_release = ?,
-				physical_release = ?, min_availability = ?, added_at = ?, updated_at = ?
+				physical_release = ?, min_availability = ?, added_at = ?, updated_at = ?,
+				library_id = COALESCE(NULLIF(?, 0), library_id)
 			WHERE id = ?`,
 			m.TMDBID, m.IMDBID, m.Title, m.SortTitle, m.Year, m.Overview, m.Path, m.PosterPath,
 			m.PosterURL, m.Monitored, m.QualityProfileID, formatTime(m.ReleaseDate),
 			formatTime(m.DigitalRelease), formatTime(m.PhysicalRelease), m.MinAvailability,
-			formatTime(m.AddedAt), formatTime(m.UpdatedAt), m.ID)
+			formatTime(m.AddedAt), formatTime(m.UpdatedAt), m.LibraryID, m.ID)
 		if err != nil {
 			return fmt.Errorf("store: update movie %d: %w", m.ID, err)
 		}
@@ -68,12 +74,13 @@ func (s *Store) UpsertMovie(ctx context.Context, m *core.Movie) error {
 	res, err := s.db.ExecContext(ctx, `
 		INSERT INTO movies (tmdb_id, imdb_id, title, sort_title, year, overview, path,
 			poster_path, poster_url, monitored, quality_profile_id, release_date,
-			digital_release, physical_release, min_availability, added_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			digital_release, physical_release, min_availability, added_at, updated_at,
+			library_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		m.TMDBID, m.IMDBID, m.Title, m.SortTitle, m.Year, m.Overview, m.Path, m.PosterPath,
 		m.PosterURL, m.Monitored, m.QualityProfileID, formatTime(m.ReleaseDate),
 		formatTime(m.DigitalRelease), formatTime(m.PhysicalRelease), m.MinAvailability,
-		formatTime(m.AddedAt), formatTime(m.UpdatedAt))
+		formatTime(m.AddedAt), formatTime(m.UpdatedAt), m.LibraryID)
 	if err != nil {
 		return fmt.Errorf("store: insert movie %q: %w", m.Title, err)
 	}

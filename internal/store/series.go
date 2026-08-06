@@ -10,7 +10,8 @@ import (
 )
 
 const seriesColumns = `id, kind, tmdb_id, stash_id, tvdb_id, imdb_id, title, sort_title, year, overview,
-	status, path, poster_path, poster_url, monitored, quality_profile_id, first_aired, added_at, updated_at`
+	status, path, poster_path, poster_url, monitored, quality_profile_id, first_aired, added_at, updated_at,
+	library_id`
 
 // UpsertSeries inserts or updates sr and writes back the assigned ID.
 //
@@ -28,6 +29,21 @@ func (s *Store) UpsertSeries(ctx context.Context, sr *core.Series) error {
 	}
 	if !core.ValidSeriesKind(sr.Kind) {
 		return fmt.Errorf("store: upsert series %q: unknown kind %q", sr.Title, sr.Kind)
+	}
+	// A series' library must speak the series' kind: `series.kind` says what
+	// the row IS, the library says which shelf answers for it, and the two
+	// vocabularies line up through core.LibraryKindForSeries. Drift here would
+	// grade an adult series against a television library's settings (or the
+	// reverse), so it is refused loudly at the one door every write uses.
+	if sr.LibraryID != 0 {
+		lib, err := s.GetLibrary(ctx, sr.LibraryID)
+		if err != nil {
+			return fmt.Errorf("store: upsert series %q: %w", sr.Title, err)
+		}
+		if lib.Kind != core.LibraryKindForSeries(sr.Kind) {
+			return fmt.Errorf("store: upsert series %q: kind %q does not belong in %q library %d",
+				sr.Title, sr.Kind, lib.Kind, lib.ID)
+		}
 	}
 
 	if sr.ID == 0 {
@@ -50,16 +66,20 @@ func (s *Store) UpsertSeries(ctx context.Context, sr *core.Series) error {
 	sr.UpdatedAt = ts
 
 	if sr.ID != 0 {
+		// library_id 0 keeps the stored value — a refresh must never move a
+		// series between libraries; a move names its target explicitly.
 		res, err := s.db.ExecContext(ctx, `
 			UPDATE series SET kind = ?, tmdb_id = ?, stash_id = ?, tvdb_id = ?, imdb_id = ?,
 				title = ?, sort_title = ?,
 				year = ?, overview = ?, status = ?, path = ?, poster_path = ?, poster_url = ?,
-				monitored = ?, quality_profile_id = ?, first_aired = ?, added_at = ?, updated_at = ?
+				monitored = ?, quality_profile_id = ?, first_aired = ?, added_at = ?, updated_at = ?,
+				library_id = COALESCE(NULLIF(?, 0), library_id)
 			WHERE id = ?`,
 			sr.Kind, sr.TMDBID, sr.StashID, sr.TVDBID, sr.IMDBID, sr.Title, sr.SortTitle,
 			sr.Year, sr.Overview,
 			sr.Status, sr.Path, sr.PosterPath, sr.PosterURL, sr.Monitored, sr.QualityProfileID,
-			formatTime(sr.FirstAired), formatTime(sr.AddedAt), formatTime(sr.UpdatedAt), sr.ID)
+			formatTime(sr.FirstAired), formatTime(sr.AddedAt), formatTime(sr.UpdatedAt),
+			sr.LibraryID, sr.ID)
 		if err != nil {
 			return fmt.Errorf("store: update series %d: %w", sr.ID, err)
 		}
@@ -77,12 +97,13 @@ func (s *Store) UpsertSeries(ctx context.Context, sr *core.Series) error {
 		INSERT INTO series (kind, tmdb_id, stash_id, tvdb_id, imdb_id, title, sort_title,
 			year, overview,
 			status, path, poster_path, poster_url, monitored, quality_profile_id, first_aired,
-			added_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			added_at, updated_at, library_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		sr.Kind, sr.TMDBID, sr.StashID, sr.TVDBID, sr.IMDBID, sr.Title, sr.SortTitle,
 		sr.Year, sr.Overview,
 		sr.Status, sr.Path, sr.PosterPath, sr.PosterURL, sr.Monitored, sr.QualityProfileID,
-		formatTime(sr.FirstAired), formatTime(sr.AddedAt), formatTime(sr.UpdatedAt))
+		formatTime(sr.FirstAired), formatTime(sr.AddedAt), formatTime(sr.UpdatedAt),
+		sr.LibraryID)
 	if err != nil {
 		return fmt.Errorf("store: insert series %q: %w", sr.Title, err)
 	}
@@ -232,7 +253,7 @@ func scanSeries(sc scanner) (*core.Series, error) {
 	err := sc.Scan(&sr.ID, &sr.Kind, &sr.TMDBID, &sr.StashID, &sr.TVDBID, &sr.IMDBID,
 		&sr.Title, &sr.SortTitle, &sr.Year,
 		&sr.Overview, &sr.Status, &sr.Path, &sr.PosterPath, &sr.PosterURL, &sr.Monitored,
-		&sr.QualityProfileID, &firstAired, &addedAt, &updatedAt)
+		&sr.QualityProfileID, &firstAired, &addedAt, &updatedAt, &sr.LibraryID)
 	if err != nil {
 		return nil, err
 	}
