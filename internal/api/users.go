@@ -61,16 +61,15 @@ type userCreateRequest struct {
 	Role     string `json:"role"`
 }
 
-// handleCreateUser adds an account.
-//
-// On a server with no accounts this is also the route that closes it: whoever
-// can reach the API is an implicit admin until the first user exists, so the
-// first POST here is what turns the open default into a login screen. That is
-// the same shape the old "set a password" flow had, one door further along.
-//
-// Which is why the account that closes it has to be an admin — see
-// insistAnAdminRemains.
+// handleCreateUser adds an account after first-run setup. An open server's
+// implicit administrator is deliberately not an account administrator: only
+// POST /setup/admin may create the first account and close the server.
 func (s *server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
+	if currentUser(r).Open {
+		writeError(w, http.StatusForbidden, "administrator setup is required before users can be created")
+		return
+	}
+
 	var body userCreateRequest
 	if !decodeJSON(w, r, &body) {
 		return
@@ -110,11 +109,10 @@ func (s *server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 // insistAnAdminRemains refuses a create that would leave the server gated with
 // no admin, writing the failure itself.
 //
-// It is the same invariant the last-admin deletion guard keeps, enforced on the
-// way in: an account is what closes an open server, so a first account created
-// as a member gates the API with nobody able to reopen it. There is no
-// role-change endpoint, POST /users is admin-only from that moment on, and the
-// only recovery would be editing the database by hand.
+// It is the same invariant the last-admin deletion guard keeps. First-run now
+// creates its administrator only through POST /setup/admin, but this remains a
+// defense against a legacy or manually edited database that already contains
+// members and no administrator.
 //
 // 409, matching the deletion refusal: the body is well-formed and it is the
 // state of the world that says no.

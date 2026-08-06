@@ -1,10 +1,14 @@
 package api
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"strconv"
 
 	"github.com/watzon/caravan/internal/core"
+	"github.com/watzon/caravan/internal/stash"
+	"github.com/watzon/caravan/internal/store"
 )
 
 // Bounds on GET /events?limit=. The feed is a UI convenience, not an export
@@ -43,16 +47,6 @@ func (s *server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		limit = min(n, maxEventLimit)
 	}
 
-	if !cursorMode {
-		events, err := s.st.ListEvents(r.Context(), limit)
-		if err != nil {
-			s.writeStoreError(w, "list events", err)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"events": eventJSONs(events)})
-		return
-	}
-
 	var beforeID int64
 	if rawCursor != "" {
 		parsed, err := strconv.ParseInt(rawCursor, 10, 64)
@@ -62,15 +56,107 @@ func (s *server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		beforeID = parsed
 	}
-	events, nextID, err := s.st.ListEventsPage(r.Context(), int64(limit), beforeID)
+
+	adultVisible, err := s.adultVisible(r)
 	if err != nil {
-		s.writeStoreError(w, "list event page", err)
+		s.writeStoreError(w, "read adult settings", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"events":      eventJSONs(events),
-		"next_cursor": cursorString(nextID),
-	})
+	ownership := adultOwnershipFilter{server: s, adultVisible: adultVisible}
+	events, nextID, err := ownership.listEvents(r.Context(), limit, beforeID)
+	if err != nil {
+		s.writeStoreError(w, "resolve event ownership", err)
+		return
+	}
+
+	response := map[string]any{"events": eventJSONs(events)}
+	if cursorMode {
+		response["next_cursor"] = cursorString(nextID)
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+// adultOwnershipFilter is the shared Queue and History ownership policy for one
+// request. Adult visibility is resolved once by adultVisible; series kind is
+// then cached because a page commonly contains several events or downloads for
+// the same series.
+//
+// MovieID establishes ordinary movie ownership. SeriesID needs a store lookup,
+// because television and adult sites deliberately share the series table. A
+// missing linked row is an orphan, not evidence that the row is adult, so it is
+// preserved. Unexpected store failures abort the response rather than leaking a
+// row whose ownership could not be checked.
+type adultOwnershipFilter struct {
+	server       *server
+	adultVisible bool
+	seriesAdult  map[int64]bool
+}
+
+func (f *adultOwnershipFilter) ownerVisible(ctx context.Context, movieID, seriesID int64) (bool, error) {
+	if f.adultVisible {
+		return true, nil
+	}
+	if seriesID == 0 {
+		// A MovieID, or no ownership IDs at all, cannot identify an adult site.
+		return true, nil
+	}
+	if adult, ok := f.seriesAdult[seriesID]; ok {
+		return !adult, nil
+	}
+	series, err := f.server.st.GetSeries(ctx, seriesID)
+	if errors.Is(err, store.ErrNotFound) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	adult := series.Kind == core.SeriesKindAdult
+	if f.seriesAdult == nil {
+		f.seriesAdult = make(map[int64]bool)
+	}
+	f.seriesAdult[seriesID] = adult
+	return !adult, nil
+}
+
+// eventVisible applies intrinsic event provenance before ownership IDs. Adult-
+// only and Stash rows remain adult even without IDs; their detail may contain
+// scene paths or handoff failures whose episode can no longer be resolved.
+func (f *adultOwnershipFilter) eventVisible(ctx context.Context, event core.Event) (bool, error) {
+	if f.adultVisible {
+		return true, nil
+	}
+	if event.Category == core.EventCategoryAdultOnly || event.Category == stash.EventCategory {
+		return false, nil
+	}
+	return f.ownerVisible(ctx, event.MovieID, event.SeriesID)
+}
+
+// listEvents scans store pages until it has limit visible rows. Filtering only
+// after a single page would let hidden adult rows consume the limit and make
+// older, visible history disappear.
+func (f *adultOwnershipFilter) listEvents(ctx context.Context, limit int, beforeID int64) ([]core.Event, int64, error) {
+	out := make([]core.Event, 0, limit)
+	nextID := beforeID
+	for len(out) < limit {
+		events, next, err := f.server.st.ListEventsPage(ctx, int64(limit-len(out)), nextID)
+		if err != nil {
+			return nil, 0, err
+		}
+		for _, event := range events {
+			visible, err := f.eventVisible(ctx, event)
+			if err != nil {
+				return nil, 0, err
+			}
+			if visible {
+				out = append(out, event)
+			}
+		}
+		if next == 0 {
+			return out, 0, nil
+		}
+		nextID = next
+	}
+	return out, nextID, nil
 }
 
 func eventJSONs(events []core.Event) []eventJSON {

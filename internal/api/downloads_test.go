@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -31,6 +32,30 @@ func storeDownload(t *testing.T, st *store.Store, engineID core.DownloadID, titl
 		t.Fatalf("UpsertDownload: %v", err)
 	}
 	return d
+}
+
+func storeSeriesDownload(t *testing.T, st *store.Store, engineID core.DownloadID, title string, seriesID int64) core.Download {
+	t.Helper()
+	ctx := context.Background()
+	grab := core.Grab{
+		GrabInfo: core.GrabInfo{SeriesID: seriesID, ReleaseTitle: title},
+		Status:   core.GrabStatusGrabbed,
+	}
+	if err := st.InsertGrab(ctx, &grab); err != nil {
+		t.Fatalf("InsertGrab: %v", err)
+	}
+	download := core.Download{
+		GrabID:   grab.GrabID,
+		Engine:   "stub",
+		EngineID: engineID,
+		Title:    title,
+		State:    core.DownloadQueued,
+		Size:     100,
+	}
+	if err := st.UpsertDownload(ctx, &download); err != nil {
+		t.Fatalf("UpsertDownload: %v", err)
+	}
+	return download
 }
 
 type routeCursorStubEngine struct {
@@ -248,6 +273,63 @@ func TestListDownloadsCursorDrainsStoredAndOrphanPages(t *testing.T) {
 	}
 }
 
+func TestListDownloadsInterleavedOrphansAppearExactlyOnce(t *testing.T) {
+	h, st, engine := newRouteCursorDownloadServer(t)
+	for _, id := range []core.DownloadID{"b-persisted", "e-persisted"} {
+		storeDownload(t, st, id, string(id))
+	}
+	engine.statuses = []core.DownloadStatus{
+		{ID: "a-orphan", Name: "a-orphan", Engine: "stub"},
+		{ID: "b-persisted", Name: "b-persisted", Engine: "stub"},
+		{ID: "c-orphan", Name: "c-orphan", Engine: "stub"},
+		{ID: "d-orphan", Name: "d-orphan", Engine: "stub"},
+		{ID: "e-persisted", Name: "e-persisted", Engine: "stub"},
+		{ID: "f-orphan", Name: "f-orphan", Engine: "stub"},
+	}
+
+	orphanCounts := map[string]int{}
+	cursor := ""
+	for page := range 4 {
+		path := "/api/v1/downloads?limit=2"
+		if cursor != "" {
+			path += "&cursor=" + url.QueryEscape(cursor)
+		}
+		rec := do(t, h, http.MethodGet, path, "")
+		wantStatus(t, rec, http.StatusOK)
+		var body struct {
+			Downloads []downloadJSON `json:"downloads"`
+			Next      string         `json:"next_cursor"`
+		}
+		decodeBody(t, rec, &body)
+		if len(body.Downloads) > 2 {
+			t.Fatalf("page %d downloads = %+v, want at most two rows", page, body.Downloads)
+		}
+		for _, row := range body.Downloads {
+			if strings.HasSuffix(row.ID, "-orphan") {
+				orphanCounts[row.ID]++
+			}
+		}
+		cursor = body.Next
+		if cursor == "" {
+			break
+		}
+	}
+	if cursor != "" {
+		t.Fatalf("pagination did not drain; final cursor = %q", cursor)
+	}
+	for _, id := range []string{"a-orphan", "c-orphan", "d-orphan", "f-orphan"} {
+		if orphanCounts[id] != 1 {
+			t.Errorf("orphan %q appeared %d times, want exactly once; all counts = %v", id, orphanCounts[id], orphanCounts)
+		}
+	}
+	if len(orphanCounts) != 4 {
+		t.Fatalf("orphan counts = %v, want exactly four distinct engine-only rows", orphanCounts)
+	}
+	if limits := engine.recordedPageLimits(); !slices.Equal(limits, []int{2, 1, 2, 1}) {
+		t.Fatalf("native page limits = %v, want remaining capacities [2 1 2 1]", limits)
+	}
+}
+
 func TestListDownloadsExactStoredPageFindsLaterOrphan(t *testing.T) {
 	h, st, engine := newRouteCursorDownloadServer(t)
 	for _, id := range []core.DownloadID{"persisted-a", "persisted-b"} {
@@ -306,6 +388,72 @@ func TestListDownloadsRejectsInvalidCursorParameters(t *testing.T) {
 	} {
 		rec := do(t, h, http.MethodGet, path, "")
 		wantStatus(t, rec, http.StatusBadRequest)
+	}
+}
+
+func TestListDownloadsRespectsAdultVisibility(t *testing.T) {
+	h, st, engine, _ := newAcquisitionServer(t)
+	ctx := context.Background()
+	setPassword(t, st, testPassword)
+	cookie := login(t, h, testAdmin, testPassword)
+
+	site := &core.Series{
+		Kind: core.SeriesKindAdult, StashID: "queue-site", Title: "Adult Site", SortTitle: "adult site",
+	}
+	if err := st.UpsertSeries(ctx, site); err != nil {
+		t.Fatalf("UpsertSeries(adult): %v", err)
+	}
+	show := &core.Series{
+		Kind: core.SeriesKindTV, TMDBID: 101, Title: "Family Show", SortTitle: "family show",
+	}
+	if err := st.UpsertSeries(ctx, show); err != nil {
+		t.Fatalf("UpsertSeries(tv): %v", err)
+	}
+
+	adult := storeSeriesDownload(t, st, "adult-download", "Explicit Adult Release", site.ID)
+	ordinary := storeSeriesDownload(t, st, "tv-download", "Family Show S01E01", show.ID)
+	orphan := storeDownload(t, st, "orphaned-grab", "Download With Missing Grab")
+	engine.statuses = []core.DownloadStatus{
+		{ID: adult.EngineID, Engine: adult.Engine, Name: adult.Title, State: core.DownloadDownloading},
+		{ID: ordinary.EngineID, Engine: ordinary.Engine, Name: ordinary.Title, State: core.DownloadDownloading},
+		{ID: orphan.EngineID, Engine: orphan.Engine, Name: orphan.Title, State: core.DownloadDownloading},
+		{ID: "engine-only", Engine: "stub", Name: "Engine-only Download", State: core.DownloadDownloading},
+	}
+
+	names := func(path string) map[string]bool {
+		t.Helper()
+		rec := doAuth(t, h, http.MethodGet, path, "", withCookie(cookie))
+		wantStatus(t, rec, http.StatusOK)
+		var body struct {
+			Downloads []downloadJSON `json:"downloads"`
+		}
+		decodeBody(t, rec, &body)
+		got := make(map[string]bool, len(body.Downloads))
+		for _, row := range body.Downloads {
+			got[row.Name] = true
+		}
+		return got
+	}
+
+	for _, path := range []string{"/api/v1/downloads", "/api/v1/downloads?limit=10"} {
+		got := names(path)
+		if got[adult.Title] {
+			t.Errorf("GET %s with adult disabled exposed %q: %v", path, adult.Title, got)
+		}
+		for _, want := range []string{ordinary.Title, orphan.Title, "Engine-only Download"} {
+			if !got[want] {
+				t.Errorf("GET %s with adult disabled omitted %q: %v", path, want, got)
+			}
+		}
+	}
+
+	if err := st.SetAdultEnabled(ctx, true); err != nil {
+		t.Fatalf("SetAdultEnabled: %v", err)
+	}
+	for _, path := range []string{"/api/v1/downloads", "/api/v1/downloads?limit=10"} {
+		if got := names(path); !got[adult.Title] {
+			t.Errorf("GET %s with adult enabled omitted %q: %v", path, adult.Title, got)
+		}
 	}
 }
 
@@ -489,6 +637,35 @@ func TestDeleteDownload(t *testing.T) {
 				t.Fatalf("detail = %q, want %q", events[0].Detail, wantDetail)
 			}
 		})
+	}
+}
+
+func TestDeleteAdultDownloadRecordsOwnershipForHistory(t *testing.T) {
+	h, st, _, _ := newAcquisitionServer(t)
+	ctx := context.Background()
+	site := &core.Series{
+		Kind: core.SeriesKindAdult, StashID: "removed-site", Title: "Removed Adult Site", SortTitle: "removed adult site",
+	}
+	if err := st.UpsertSeries(ctx, site); err != nil {
+		t.Fatalf("UpsertSeries: %v", err)
+	}
+	download := storeSeriesDownload(t, st, "adult-download", "Removed Adult Release", site.ID)
+
+	rec := do(t, h, http.MethodDelete, "/api/v1/downloads/"+string(download.EngineID), "")
+	wantStatus(t, rec, http.StatusNoContent)
+
+	events, err := st.ListEvents(ctx, 0)
+	if err != nil {
+		t.Fatalf("ListEvents: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("events = %+v, want one removal event", events)
+	}
+	if events[0].Message != "Removed download "+download.Title {
+		t.Fatalf("message = %q, want removed download title", events[0].Message)
+	}
+	if events[0].MovieID != 0 || events[0].SeriesID != site.ID {
+		t.Fatalf("event ownership = movie %d series %d, want movie 0 series %d", events[0].MovieID, events[0].SeriesID, site.ID)
 	}
 }
 

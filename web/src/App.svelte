@@ -353,9 +353,14 @@
               tone="warning"
               icon="warning"
               title="Listening on every interface without a password"
-              message="Anyone on this network can reach Caravan and change its settings. Add an account under Settings → Users.">
+              message="Anyone on this network can reach Caravan and change its settings.">
               {#snippet action()}
-                <Button variant="secondary" size="sm" onclick={dismissNag}>Dismiss</Button>
+                <div class="flex items-center gap-3">
+                  <a href="/settings/users" class="text-sm font-semibold text-accent-text hover:underline">
+                    Settings → Users
+                  </a>
+                  <Button variant="secondary" size="sm" onclick={dismissNag}>Dismiss</Button>
+                </div>
               {/snippet}
             </Banner>
           {/if}

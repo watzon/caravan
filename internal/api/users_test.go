@@ -14,57 +14,35 @@ type usersBody struct {
 	Users []userJSON `json:"users"`
 }
 
-// The bootstrap path: an open server is administered by whoever can reach it,
-// so the first POST /users is what closes it behind them.
-func TestCreateFirstUserClosesAnOpenServer(t *testing.T) {
-	h, _, _ := newTestServer(t)
-
-	rec := do(t, h, http.MethodPost, "/api/v1/users",
-		`{"username":"chris","password":`+quote(testPassword)+`,"role":"admin"}`)
-	wantStatus(t, rec, http.StatusCreated)
-	var created userJSON
-	decodeBody(t, rec, &created)
-	if created.ID == 0 || created.Username != "chris" || created.Role != core.RoleAdmin {
-		t.Fatalf("created user = %+v, want the account just made", created)
-	}
-
-	// The API is gated from this request on.
-	wantStatus(t, do(t, h, http.MethodGet, "/api/v1/library/movies", ""), http.StatusUnauthorized)
-	cookie := login(t, h, "chris", testPassword)
-	wantStatus(t, doAuth(t, h, http.MethodGet, "/api/v1/library/movies", "", withCookie(cookie)),
-		http.StatusOK)
-}
-
-// The first account closes the server, so it has to be one that can reopen it.
-// A member first would gate the API with nobody able to administer it: there is
-// no role-change endpoint, POST /users is admin-only from that moment, and the
-// only way back would be editing the database by hand.
-func TestFirstAccountMustBeAnAdmin(t *testing.T) {
+func TestOnlySetupAdminCanCreateFirstAccount(t *testing.T) {
 	h, st, _ := newTestServer(t)
 
-	rec := do(t, h, http.MethodPost, "/api/v1/users",
-		`{"username":"housemate","password":`+quote(testPassword)+`,"role":"member"}`)
-	wantStatus(t, rec, http.StatusConflict)
-	wantErrorBody(t, rec)
+	for _, role := range []string{core.RoleAdmin, core.RoleMember} {
+		rec := do(t, h, http.MethodPost, "/api/v1/users",
+			`{"username":"attacker","password":`+quote(testPassword)+`,"role":`+quote(role)+`}`)
+		wantStatus(t, rec, http.StatusForbidden)
+		wantErrorBody(t, rec)
+	}
 
-	// Nothing landed, so the server is still open rather than gated and
-	// unadministerable.
 	users, err := st.ListUsers(context.Background())
 	if err != nil {
 		t.Fatalf("ListUsers: %v", err)
 	}
 	if len(users) != 0 {
-		t.Fatalf("users = %+v, want the refused create to have left none", users)
+		t.Fatalf("users = %+v, want open-server POST /users to create none", users)
 	}
 	wantStatus(t, do(t, h, http.MethodGet, "/api/v1/library/movies", ""), http.StatusOK)
 
-	// An admin first is accepted, and members are ordinary from then on.
-	rec = do(t, h, http.MethodPost, "/api/v1/users",
-		`{"username":"chris","password":`+quote(testPassword)+`,"role":"admin"}`)
-	wantStatus(t, rec, http.StatusCreated)
+	cookie := setupAdmin(t, h, "chris", testPassword)
+	users, err = st.ListUsers(context.Background())
+	if err != nil {
+		t.Fatalf("ListUsers after setup: %v", err)
+	}
+	if len(users) != 1 || users[0].Username != "chris" || users[0].Role != core.RoleAdmin {
+		t.Fatalf("users after setup = %+v, want only the setup administrator", users)
+	}
 
-	cookie := login(t, h, "chris", testPassword)
-	rec = doAuth(t, h, http.MethodPost, "/api/v1/users",
+	rec := doAuth(t, h, http.MethodPost, "/api/v1/users",
 		`{"username":"housemate","password":`+quote(testPassword)+`,"role":"member"}`,
 		withCookie(cookie))
 	wantStatus(t, rec, http.StatusCreated)

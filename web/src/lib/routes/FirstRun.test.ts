@@ -30,6 +30,7 @@ const STATUS = {
   disk_free_bytes: 0,
   disk_total_bytes: 0,
   engine_health: 'ok',
+  ffmpeg_available: false,
 };
 
 interface Call {
@@ -65,6 +66,10 @@ beforeEach(() => {
       const override = responders.find((r) => url.includes(r.match));
       if (override) return override.reply();
 
+      if (url.endsWith('/setup/admin')) return jsonResponse({ password_set: true }, 201);
+      if (url.endsWith('/auth/me')) {
+        return jsonResponse({ username: 'admin', role: 'admin', open: false, adult: true });
+      }
       if (url.includes('/settings/metadata/test')) return jsonResponse({ status: 'ok' });
       if (url.includes('/storage-root/repoint')) {
         return jsonResponse({ root: '/data', warnings: [], restart_required: false });
@@ -120,16 +125,44 @@ function scanOff() {
   scanToggle.click();
   flushSync();
 }
+async function createAccount() {
+  typeInto('#admin-username', 'admin');
+  typeInto('#admin-password', 'correct horse');
+  typeInto('#admin-confirm', 'correct horse');
+  button('Create account').click();
+  await settle();
+}
 
 describe('FirstRun', () => {
-  it('offers the three steps on one screen', () => {
+  it('offers the four setup steps on one screen', () => {
     mountWizard();
 
+    expect(host.textContent).toContain('Create your administrator account');
     expect(host.textContent).toContain('Where does your media live?');
     expect(host.textContent).toContain('How should Caravan identify it?');
     expect(host.textContent).toContain('Already have a library?');
+    expect(host.querySelector('#admin-username')).not.toBeNull();
     expect(host.querySelector('#storage-root')).not.toBeNull();
     expect(host.querySelector('#tmdb-key')).not.toBeNull();
+  });
+
+  it('resumes setup when system status says the administrator password is set', async () => {
+    system.status = { ...STATUS, storage_root: '', needs_setup: true, password_set: true };
+    mountWizard();
+
+    expect(host.textContent).toContain('Administrator account created');
+    expect(host.querySelector('#admin-username')).toBeNull();
+    expect(called('/setup/admin')).toHaveLength(0);
+    typeInto('#storage-root', '/data');
+
+    scanOff();
+    button('Skip for now').click();
+    flushSync();
+    button('Start Caravan').click();
+    await settle();
+
+    expect(called('/setup/admin')).toHaveLength(0);
+    expect(called('/storage-root/repoint')).toHaveLength(1);
   });
 
   // PLAN phase 10 task 6, and the module's whole promise: an install that has
@@ -161,6 +194,7 @@ describe('FirstRun', () => {
 
   it('saves the root and proven key, then goes to settings without a scan', async () => {
     mountWizard();
+    await createAccount();
     typeInto('#storage-root', '/data');
     typeInto('#tmdb-key', 'abc123');
     scanOff();
@@ -193,6 +227,7 @@ describe('FirstRun', () => {
         ),
     });
     mountWizard();
+    await createAccount();
     typeInto('#storage-root', '/data');
     typeInto('#tmdb-key', 'wrong');
     scanOff();
@@ -211,6 +246,7 @@ describe('FirstRun', () => {
   // first, and only a pass continues.
   it('tests an untested key on submit rather than saving it blind', async () => {
     mountWizard();
+    await createAccount();
     typeInto('#storage-root', '/data');
     typeInto('#tmdb-key', 'abc123');
     scanOff();
@@ -225,6 +261,7 @@ describe('FirstRun', () => {
   // The escape hatch, taken on purpose - and it names what it costs.
   it('lets the key be skipped, saying what that means, and saves no key', async () => {
     mountWizard();
+    await createAccount();
     typeInto('#storage-root', '/data');
     scanOff();
 
@@ -249,6 +286,7 @@ describe('FirstRun', () => {
       reply: () => jsonResponse({ ...STATUS, scanning: true }),
     });
     mountWizard();
+    await createAccount();
     typeInto('#storage-root', '/data');
     button('Skip for now').click();
     flushSync();
@@ -270,6 +308,7 @@ describe('FirstRun', () => {
       reply: () => jsonResponse({ error: 'scanner unavailable' }, 503),
     });
     mountWizard();
+    await createAccount();
     typeInto('#storage-root', '/data');
     button('Skip for now').click();
     flushSync();
@@ -300,8 +339,24 @@ describe('FirstRun', () => {
 
   // "I have not typed it yet" is not the same answer as "I am going without
   // one", and only the second one should get through.
+  it('still requires account creation when system status says no password is set', async () => {
+    system.status = { ...STATUS, storage_root: '', needs_setup: true, password_set: false };
+    mountWizard();
+    expect(host.querySelector('#admin-username')).not.toBeNull();
+    typeInto('#storage-root', '/data');
+    button('Skip for now').click();
+    flushSync();
+
+    button('Start Caravan').click();
+    await settle();
+
+    expect(host.textContent).toContain('Create the administrator account');
+    expect(called('/storage-root/repoint')).toHaveLength(0);
+  });
+
   it('will not finish on an empty key that was never skipped', async () => {
     mountWizard();
+    await createAccount();
     typeInto('#storage-root', '/data');
     scanOff();
 

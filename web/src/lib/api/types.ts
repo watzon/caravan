@@ -305,6 +305,11 @@ export interface SystemStatus {
    */
   dirty?: boolean;
   /**
+   * True while the administrator account or storage root is still missing.
+   * Optional for compatibility with older servers and test fixtures.
+   */
+  needs_setup?: boolean;
+  /**
    * Whether a login password is configured (SPEC §11). Optional so an older
    * server, or a test fixture, reads as "no password" rather than as a crash.
    */

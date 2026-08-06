@@ -750,6 +750,7 @@ func TestSystemStatus(t *testing.T) {
 		// A fresh database has no TMDB key, which is the first-run state the
 		// wizard's metadata step exists to fix.
 		MetadataCredential: CredentialAbsent,
+		NeedsSetup:         true,
 		// No provider means nothing polls external clients, and the banner
 		// input is an empty list rather than null.
 		UnhealthyDownloadClients: []unhealthyClientJSON{},

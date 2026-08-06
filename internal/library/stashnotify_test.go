@@ -186,6 +186,33 @@ func TestAdultHandoffFailureDoesNotFailTheImport(t *testing.T) {
 	}
 }
 
+func TestAdultHandoffFailureKeepsAdultProvenanceWhenEpisodeIsMissing(t *testing.T) {
+	h := newHarness(t)
+	h.mgr.notifyAdult = &recordingAdultNotifier{failing: true}
+
+	const missingEpisodeID int64 = 999999
+	if _, err := h.st.GetEpisode(context.Background(), missingEpisodeID); err == nil {
+		t.Fatalf("GetEpisode(%d) succeeded, want a missing episode fixture", missingEpisodeID)
+	}
+
+	h.mgr.adultLibraryChanged(context.Background(), []int64{missingEpisodeID})
+
+	events := h.events()
+	if len(events) != 1 {
+		t.Fatalf("events = %+v, want one adult handoff failure", events)
+	}
+	event := events[0]
+	if event.Category != core.EventCategoryAdultOnly {
+		t.Errorf("event category = %q, want intrinsic adult provenance %q", event.Category, core.EventCategoryAdultOnly)
+	}
+	if event.Message != "Adult library handoff could not be notified" {
+		t.Errorf("event message = %q, want the adult handoff failure", event.Message)
+	}
+	if event.MovieID != 0 || event.SeriesID != 0 {
+		t.Errorf("event ownership = movie %d, series %d; want provenance independent of ownership lookup", event.MovieID, event.SeriesID)
+	}
+}
+
 // sceneNamed finds one seeded scene by title.
 func (a *adultHarness) sceneNamed(seriesID int64, title string) core.Episode {
 	a.t.Helper()

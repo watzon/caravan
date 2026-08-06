@@ -300,13 +300,13 @@ Disk-to-server migration is therefore: copy or move the drive contents, re-point
 
 ### 10.1 First run
 
-Three light steps, then the scan review. Everything else ships with defaults; there is no further wizard.
+Four light steps, then the scan review. Everything else ships with defaults; there is no further wizard.
 
-1. **Storage root.** Pick the storage root (pre-filled: `/data` in Docker, the drive root in portable mode).
-2. **Metadata.** Enter the TMDB API key. The key is proved before it is stored — `POST /settings/metadata/test` runs one live check and answers `{"status":"ok"}` or the provider's own reason — so an invalid key is caught in the field it was typed into rather than by the first add that fails. "Skip for now" is an explicit escape hatch and names its consequence: scanning still parses and imports, but nothing matches against TMDB until a key is entered in Settings → Metadata.
-3. **Optional scan.** Point Caravan at existing media; a library scan is queued immediately.
-4. **Scan review.** Confidently matched items land in the library; everything else parks in an unmatched queue showing the parser's best guess, with manual metadata search to resolve.
-
+1. **Administrator account.** Create the first administrator username and password (at least 8 characters). The account is required before setup can finish; `POST /setup/admin` creates it once and signs that browser in with an HttpOnly session cookie.
+2. **Storage root.** Pick the storage root (pre-filled: `/data` in Docker, the drive root in portable mode).
+3. **Metadata.** Enter the TMDB API key. The key is proved before it is stored — `POST /settings/metadata/test` runs one live check and answers `{"status":"ok"}` or the provider's own reason — so an invalid key is caught in the field it was typed into rather than by the first add that fails. "Skip for now" is an explicit escape hatch and names its consequence: scanning still parses and imports, but nothing matches against TMDB until a key is entered in Settings → Metadata.
+4. **Optional scan.** Point Caravan at existing media; a library scan is queued immediately.
+5. **Scan review.** Confidently matched items land in the library; everything else parks in an unmatched queue showing the parser's best guess, with manual metadata search to resolve.
 The first run contains no adult-content references at all: the module is invisible when off, and turning it on is its own setup inside Settings (§10.2).
 
 **Credential health.** `GET /system/status` reports `metadata_credential` as `absent`, `invalid` or `ok`, from a cached verdict rather than a live call — the status endpoint is polled on a timer and must cost no upstream traffic. The verdict changes only when the user does something: the Test button, a key edit (one live check, skipped when the Test button already proved that exact key), or a metadata call that comes back rejected. An unreachable provider is not a wrong key and never flips the state.
@@ -350,6 +350,8 @@ GET       /events                   # activity feed
 ```
 
 Auth: single-user. Password optional, session cookie, API key for external tools. Portable mode binds `127.0.0.1` by default; Docker mode binds all interfaces and nags until a password is set.
+
+**Upgrade from a no-password install.** On first boot after forced authentication is enabled, an existing installation with no users reports `needs_setup: true` and routes the browser to First run. The administrator step must be completed before storage and metadata setup can finish; existing installations that already have users keep their accounts and do not enter this flow.
 
 ---
 

@@ -218,7 +218,7 @@ func (m *Manager) adultLibraryChanged(ctx context.Context, episodeIDs []int64) {
 	if err := m.notifyAdult.AdultLibraryChanged(ctx, episodeIDs); err != nil {
 		_ = m.store.InsertEvent(ctx, &core.Event{
 			Level:    core.EventLevelWarn,
-			Category: EventCategoryImport,
+			Category: core.EventCategoryAdultOnly,
 			Message:  "Adult library handoff could not be notified",
 			Detail:   err.Error(),
 		})

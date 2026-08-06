@@ -21,6 +21,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -79,9 +80,11 @@ type server struct {
 	sessions   *sessionStore
 	sessionTTL time.Duration
 
-	// logins bounds POST /auth/login, the one gated route an unauthenticated
-	// caller reaches and the only one that runs a 19 MiB key derivation.
+	// logins bounds password derivations for both login and first-run setup.
 	logins *loginGuard
+	// setupMu serializes first-admin creation so only one request can observe
+	// the empty-user state and close the open server.
+	setupMu sync.Mutex
 
 	// listenAddr is the address the process bound, supplied by the serving
 	// process with WithListenAddr. It is reported through GET /system/status so
@@ -162,6 +165,9 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("POST /system/storage-root/repoint", s.handleRepointStorageRoot)
 	api.HandleFunc("POST /system/storage-root/migrate", s.handleMigrateStorageRoot)
 	api.HandleFunc("GET /system/storage-root/migration", s.handleStorageMigration)
+	// First-run setup is the one unauthenticated write. The handler itself
+	// refuses once any account exists and issues the first session.
+	api.HandleFunc("POST /setup/admin", s.handleSetupAdmin)
 
 	// Accounts and sessions (SPEC §11). Login and logout are exempt from the
 	// gate below; /auth/me and the password change are not, so both always

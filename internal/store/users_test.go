@@ -6,6 +6,7 @@ import (
 	"errors"
 	"path/filepath"
 	"reflect"
+	"sync"
 	"testing"
 
 	"github.com/watzon/caravan/internal/core"
@@ -43,6 +44,61 @@ func TestUserRoundTrip(t *testing.T) {
 
 	if _, err := st.GetUser(ctx, u.ID+1); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("GetUser(absent) = %v, want ErrNotFound", err)
+	}
+}
+
+func TestCreateFirstAdminIsAtomicAcrossStoreHandles(t *testing.T) {
+	first, path := openTemp(t)
+	second, err := Open(path)
+	if err != nil {
+		t.Fatalf("open second Store: %v", err)
+	}
+	t.Cleanup(func() { second.Close() })
+
+	users := []*core.User{
+		{Username: "alice", PasswordHash: "$argon2id$alice"},
+		{Username: "bob", PasswordHash: "$argon2id$bob"},
+	}
+	stores := []*Store{first, second}
+	start := make(chan struct{})
+	errs := make(chan error, len(stores))
+	var wg sync.WaitGroup
+	for i := range stores {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			errs <- stores[i].CreateFirstAdmin(context.Background(), users[i])
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+
+	created, rejected := 0, 0
+	for err := range errs {
+		switch {
+		case err == nil:
+			created++
+		case errors.Is(err, ErrFirstUserExists):
+			rejected++
+		default:
+			t.Fatalf("CreateFirstAdmin returned unexpected error: %v", err)
+		}
+	}
+	if created != 1 || rejected != 1 {
+		t.Fatalf("CreateFirstAdmin results = %d created, %d rejected; want one each", created, rejected)
+	}
+
+	got, err := first.ListUsers(context.Background())
+	if err != nil {
+		t.Fatalf("ListUsers: %v", err)
+	}
+	if len(got) != 1 || got[0].Role != core.RoleAdmin {
+		t.Fatalf("users = %+v, want exactly one administrator", got)
+	}
+	if got[0].Username != users[0].Username && got[0].Username != users[1].Username {
+		t.Fatalf("created username = %q, want exactly one contender", got[0].Username)
 	}
 }
 

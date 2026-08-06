@@ -15,6 +15,10 @@ import (
 // collision, not a 500.
 var ErrUsernameTaken = errors.New("store: username already taken")
 
+// ErrFirstUserExists is returned by CreateFirstAdmin when any account already
+// exists. The setup endpoint maps it to its stable "already complete" reply.
+var ErrFirstUserExists = errors.New("store: first user already exists")
+
 const userColumns = `id, username, password_hash, role, adult_access, created_at, updated_at`
 
 // CreateUser inserts a new account and writes back the assigned ID. The
@@ -41,6 +45,46 @@ func (s *Store) CreateUser(ctx context.Context, u *core.User) error {
 	id, err := res.LastInsertId()
 	if err != nil {
 		return fmt.Errorf("store: create user %q: %w", u.Username, err)
+	}
+	u.ID = id
+	return nil
+}
+
+// CreateFirstAdmin inserts the administrator that closes an open server. The
+// emptiness check and insert are one SQLite statement, so concurrent callers
+// using different Store handles and different usernames cannot both observe an
+// empty table and commit. Exactly one row can be inserted; every loser receives
+// ErrFirstUserExists.
+//
+// The hash is stored verbatim. As with CreateUser, plaintext passwords never
+// cross the store boundary.
+func (s *Store) CreateFirstAdmin(ctx context.Context, u *core.User) error {
+	ts := now()
+	u.Role = core.RoleAdmin
+	u.CreatedAt = ts
+	u.UpdatedAt = ts
+
+	res, err := s.db.ExecContext(ctx, `
+		INSERT INTO users (username, password_hash, role, adult_access, created_at, updated_at)
+		SELECT ?, ?, ?, ?, ?, ?
+		WHERE NOT EXISTS (SELECT 1 FROM users)`,
+		u.Username, u.PasswordHash, u.Role, u.AdultAccess, formatTime(ts), formatTime(ts))
+	if err != nil {
+		if isUniqueViolation(err) {
+			return fmt.Errorf("store: create first administrator %q: %w", u.Username, ErrFirstUserExists)
+		}
+		return fmt.Errorf("store: create first administrator %q: %w", u.Username, err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: create first administrator %q: %w", u.Username, err)
+	}
+	if affected == 0 {
+		return fmt.Errorf("store: create first administrator %q: %w", u.Username, ErrFirstUserExists)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return fmt.Errorf("store: create first administrator %q: %w", u.Username, err)
 	}
 	u.ID = id
 	return nil
