@@ -71,6 +71,12 @@
     return `${identified}, ${status}`;
   }
 
+  function agendaTitle(entry: CalendarEntry) {
+    const title = entryTitle(entry);
+    if (entry.kind === 'movie' || !entry.series_id || title.startsWith(entry.title)) return title;
+    return `${entry.title} - ${title}`;
+  }
+
   let month = $state(todayMonth());
   let view = $state<View>('month');
   let entries = $state<CalendarEntry[] | null>(null);
@@ -211,10 +217,11 @@
                   {@const meta = STATUS[entry.status]}
                   <a
                     href={entry.kind === 'movie' && entry.movie_id ? `/movies/${entry.movie_id}` : entry.series_id ? `/series/${entry.series_id}` : undefined}
-                    class="truncate rounded-sm px-1.5 py-0.5 text-xs {TONE_TINT[meta.tone]} {TONE_TEXT[meta.tone]}"
+                    class="flex min-w-0 items-center gap-1.5 rounded-sm px-1.5 py-0.5 text-xs {TONE_TINT[meta.tone]} {TONE_TEXT[meta.tone]}"
                     title={entryTitle(entry)}
                     aria-label={entryLabel(entry, meta.label)}>
-                    {entryTitle(entry)}
+                    <span class="min-w-0 truncate">{entryTitle(entry)}</span>
+                    <span class="shrink-0 font-medium">{meta.label}</span>
                   </a>
                 {/each}
                 {#if cellEntries.length > 3}
@@ -239,7 +246,7 @@
               <li class="flex items-center gap-3 border-b border-border px-3 py-3 last:border-b-0">
                 <span class="size-2 shrink-0 rounded-full {TONE_DOT[meta.tone]}" title={meta.label}></span>
                 <Badge tone={entry.kind === 'movie' ? 'neutral' : 'info'}>{entry.kind === 'movie' ? 'Movie' : 'Episode'}</Badge>
-                <a href={entry.kind === 'movie' && entry.movie_id ? `/movies/${entry.movie_id}` : entry.series_id ? `/series/${entry.series_id}` : undefined} class="min-w-0 flex-1 truncate font-medium text-ink hover:text-accent-text">{entry.kind === 'episode' && entry.series_id ? `${entry.title} - ${entryTitle(entry)}` : entryTitle(entry)}</a>
+                <a href={entry.kind === 'movie' && entry.movie_id ? `/movies/${entry.movie_id}` : entry.series_id ? `/series/${entry.series_id}` : undefined} class="min-w-0 flex-1 truncate font-medium text-ink hover:text-accent-text">{agendaTitle(entry)}</a>
                 <span class="text-sm {TONE_TEXT[meta.tone]}">{meta.label}</span>
               </li>
             {/each}

@@ -108,4 +108,42 @@ describe('DiscoverShelf', () => {
     expect(arrow('Scroll Trending left')?.disabled).toBe(false);
     expect(arrow('Scroll Trending right')?.disabled).toBe(true);
   });
+
+  it('pages from the current position after user scrolling interrupts a pending page', () => {
+    show(Array.from({ length: 12 }, (_, i) => item(i + 1)));
+    const el = scroller(0);
+    const scrollTo = vi.fn();
+    el.scrollTo = scrollTo;
+
+    arrow('Scroll Trending right')?.click();
+    expect(scrollTo).toHaveBeenLastCalledWith({ left: 540, behavior: 'smooth' });
+
+    // Input arrives before the browser reports the manually changed position.
+    el.dispatchEvent(new Event('wheel'));
+    el.scrollLeft = 240;
+    el.dispatchEvent(new Event('scroll'));
+    flushSync();
+
+    arrow('Scroll Trending right')?.click();
+    expect(scrollTo).toHaveBeenLastCalledWith({ left: 780, behavior: 'smooth' });
+  });
+
+  it('reconciles a pending page once the browser reaches its destination', () => {
+    show(Array.from({ length: 12 }, (_, i) => item(i + 1)));
+    const el = scroller(0);
+    const scrollTo = vi.fn();
+    el.scrollTo = scrollTo;
+
+    arrow('Scroll Trending right')?.click();
+    el.scrollLeft = 540;
+    el.dispatchEvent(new Event('scroll'));
+    flushSync();
+
+    el.scrollLeft = 240;
+    el.dispatchEvent(new Event('scroll'));
+    flushSync();
+    arrow('Scroll Trending right')?.click();
+
+    expect(scrollTo).toHaveBeenLastCalledWith({ left: 780, behavior: 'smooth' });
+  });
 });

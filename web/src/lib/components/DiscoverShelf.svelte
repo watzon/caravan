@@ -30,8 +30,32 @@
   function updateArrows() {
     const el = scroller;
     if (!el) return;
+    // Once the browser has arrived, there is no longer a pending destination
+    // for later clicks to extend.
+    if (requestedScrollLeft !== null && Math.abs(el.scrollLeft - requestedScrollLeft) <= 1) {
+      requestedScrollLeft = null;
+    }
     canScrollLeft = el.scrollLeft > 0;
     canScrollRight = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+  }
+
+  function cancelPendingScroll() {
+    requestedScrollLeft = null;
+  }
+
+  function cancelPendingScrollOnKeydown(event: KeyboardEvent) {
+    switch (event.key) {
+      case 'ArrowLeft':
+      case 'ArrowRight':
+      case 'ArrowUp':
+      case 'ArrowDown':
+      case 'PageUp':
+      case 'PageDown':
+      case 'Home':
+      case 'End':
+      case ' ':
+        cancelPendingScroll();
+    }
   }
 
   // Arrow state depends on content width, so recompute when the list changes,
@@ -95,7 +119,16 @@
       {/if}
     </div>
 
-    <div bind:this={scroller} onscroll={updateArrows} class="flex gap-4 overflow-x-auto pb-1">
+    <!-- These handlers only reconcile paging state; the browser still owns scrolling. -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      bind:this={scroller}
+      onscroll={updateArrows}
+      onpointerdown={cancelPendingScroll}
+      onwheel={cancelPendingScroll}
+      ontouchstart={cancelPendingScroll}
+      onkeydown={cancelPendingScrollOnKeydown}
+      class="flex gap-4 overflow-x-auto pb-1">
       {#each items as item (`${item.media_type}-${item.tmdb_id}`)}
         <div class="w-32 shrink-0 sm:w-40">
           <DiscoverCard {item} {showType} />
