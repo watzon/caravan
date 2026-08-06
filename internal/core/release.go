@@ -223,9 +223,10 @@ type Release struct {
 	// nothing, which is not the same as "no category" — a filter cannot reject
 	// what it cannot see.
 	//
-	// They are not cached in the `releases` table: nothing after the match
-	// needs them, and a search sends the categories rather than filtering on
-	// them.
+	// They ARE cached in the `releases` table (0023). They used not to be —
+	// nothing after the match needed them — but the untied universal-search
+	// grab must answer "is this cached release adult" for a caller without
+	// the adult grant, without re-searching.
 	Categories []int
 	// Parsed is what the release parser made of Title.
 	Parsed ParsedRelease

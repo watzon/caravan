@@ -351,5 +351,9 @@ type UnmatchedFile struct {
 	// Reason explains why it was not matched ("no metadata match",
 	// "low parser confidence", …).
 	Reason string
-	SeenAt time.Time
+	// LibraryID scopes the manual match: a file parked by an untied universal
+	// search grab already knows which library its user chose, and the review
+	// screen pre-selects it. 0 — every scan-parked file — means unscoped.
+	LibraryID int64
+	SeenAt    time.Time
 }

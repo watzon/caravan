@@ -10,7 +10,7 @@ import (
 	"github.com/watzon/caravan/internal/core"
 )
 
-const unmatchedColumns = `id, path, size, parsed, reason, seen_at`
+const unmatchedColumns = `id, path, size, parsed, reason, seen_at, library_id`
 
 // UpsertUnmatchedFile parks a file in the scan-review queue, or refreshes the
 // entry if it is already parked. Identity is the storage-root-relative Path,
@@ -25,12 +25,13 @@ func (s *Store) UpsertUnmatchedFile(ctx context.Context, u *core.UnmatchedFile) 
 	}
 
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO unmatched_files (path, size, parsed, reason, seen_at)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO unmatched_files (path, size, parsed, reason, seen_at, library_id)
+		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT (path) DO UPDATE SET
 			size = excluded.size, parsed = excluded.parsed,
-			reason = excluded.reason, seen_at = excluded.seen_at`,
-		u.Path, u.Size, string(parsed), u.Reason, formatTime(u.SeenAt))
+			reason = excluded.reason, seen_at = excluded.seen_at,
+			library_id = excluded.library_id`,
+		u.Path, u.Size, string(parsed), u.Reason, formatTime(u.SeenAt), nullInt64(u.LibraryID))
 	if err != nil {
 		return fmt.Errorf("store: upsert unmatched file %q: %w", u.Path, err)
 	}
@@ -90,13 +91,15 @@ func (s *Store) DeleteUnmatchedFileByPath(ctx context.Context, path string) erro
 
 func scanUnmatchedFile(sc scanner) (*core.UnmatchedFile, error) {
 	var (
-		u      core.UnmatchedFile
-		parsed string
-		seenAt string
+		u         core.UnmatchedFile
+		parsed    string
+		seenAt    string
+		libraryID sql.NullInt64
 	)
-	if err := sc.Scan(&u.ID, &u.Path, &u.Size, &parsed, &u.Reason, &seenAt); err != nil {
+	if err := sc.Scan(&u.ID, &u.Path, &u.Size, &parsed, &u.Reason, &seenAt, &libraryID); err != nil {
 		return nil, err
 	}
+	u.LibraryID = libraryID.Int64
 	if parsed != "" {
 		// A row whose JSON no longer decodes must still list: the point of
 		// this queue is visibility, and the user can re-parse from the UI.

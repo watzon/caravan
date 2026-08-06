@@ -121,6 +121,8 @@ type AddOpts struct {
 	// EpisodeIDs are the episodes.id values the grab is expected to satisfy.
 	// A season pack lists all of them.
 	EpisodeIDs []int64
+	// LibraryID reads exactly as GrabInfo.LibraryID does.
+	LibraryID int64
 	// Paused adds the download without starting it.
 	//
 	// It is how a concurrency cap reaches an external download client. Caravan
@@ -322,6 +324,12 @@ type GrabInfo struct {
 	// ReleaseTitle is the release name that was grabbed, kept so a stuck
 	// import can tell the user what it was trying to import.
 	ReleaseTitle string
+	// LibraryID is the library the grab's payload belongs to. On a grab tied
+	// to a movie or series it mirrors the item's own library; on a universal
+	// search grab tied to nothing it is the WHOLE target — the finished
+	// download parks in scan review scoped to this library. 0 on rows from
+	// before universal search existed.
+	LibraryID int64
 }
 
 // Grab statuses.
