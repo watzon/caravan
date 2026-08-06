@@ -95,9 +95,21 @@ function pillLabels(): string[] {
 }
 
 /** The sort dropdown's options, by the name a reader sees. */
-function sortLabels(): string[] {
-  const select = host.querySelector<HTMLSelectElement>('select[aria-label="Sort results"]');
-  return [...(select?.options ?? [])].map((o) => o.textContent?.trim() ?? '');
+async function sortLabels(): Promise<string[]> {
+  const trigger = [...host.querySelectorAll<HTMLButtonElement>('button[aria-expanded]')].find(
+    (b) => (b.textContent ?? '').trim().startsWith('Sort'),
+  );
+  expect(trigger, 'the sort dropdown').toBeTruthy();
+  trigger!.click();
+  await settle();
+  const panel = host.querySelector<HTMLElement>('[role="dialog"][aria-label^="Sort"]');
+  const labels = [...(panel?.querySelectorAll<HTMLButtonElement>('button') ?? [])].map((b) =>
+    (b.textContent ?? '').trim(),
+  );
+  // A pick (or a look) leaves the popover open; dismiss it as a reader does.
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+  await settle();
+  return labels;
 }
 
 /** A pill renders its body lazily, so a control inside one needs it opened. */
@@ -180,9 +192,8 @@ describe('a filtered scene scope', () => {
       'Search the metadata provider for scenes',
     );
     expect(buttonWithText('Search')).toBeDefined();
-    expect(pillLabels()).toEqual(['Site', 'Performers', 'Tags', 'Year', 'Duration']);
+    expect(pillLabels()).toEqual(['Site', 'Performers', 'Tags', 'Year', 'Duration', 'Sort: Newest']);
     expect(host.querySelector('[role="switch"]')?.textContent?.trim()).toBe('Hide in library');
-    expect(host.querySelector('select')?.getAttribute('aria-label')).toBe('Sort results');
   });
 
   it('turns a shared URL into one request carrying every filter', async () => {
@@ -421,8 +432,8 @@ describe('the rail on an endpoint that serves less', () => {
 
     expect(pillLabels()).toContain('Year');
     expect(pillLabels()).toContain('Duration');
-    expect(sortLabels()).toContain('Longest');
-    expect(sortLabels()).toContain('Relevance');
+    expect(await sortLabels()).toContain('Longest');
+    expect(await sortLabels()).toContain('Relevance');
   });
 
   it('draws no pill for a filter the endpoint refuses', async () => {
@@ -431,13 +442,13 @@ describe('the rail on an endpoint that serves less', () => {
 
     expect(pillLabels()).not.toContain('Year');
     expect(pillLabels()).not.toContain('Duration');
-    expect(sortLabels()).not.toContain('Longest');
-    expect(sortLabels()).not.toContain('Relevance');
+    expect(await sortLabels()).not.toContain('Longest');
+    expect(await sortLabels()).not.toContain('Relevance');
     // The filters every dialect serves are untouched.
     expect(pillLabels()).toContain('Site');
     expect(pillLabels()).toContain('Performers');
     expect(pillLabels()).toContain('Tags');
-    expect(sortLabels()).toContain('Newest');
+    expect(await sortLabels()).toContain('Newest');
   });
 
   /**

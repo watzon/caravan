@@ -282,7 +282,10 @@ describe('App shell', () => {
     expect(add.classList).not.toContain('bg-accent');
     expect(add.textContent).toContain('Add movie or series');
     expect(add.querySelector('path')?.getAttribute('d')).toBe('M12 5v14M5 12h14');
-    expect(host.querySelectorAll('button.bg-accent')).toHaveLength(1);
+    // The rail no longer carries a page-level primary that duplicates this
+    // one; the empty state owns the only accent add button, and the library
+    // here is not empty.
+    expect(host.querySelectorAll('button.bg-accent')).toHaveLength(0);
 
     add.click();
     flushSync();
@@ -700,7 +703,7 @@ describe('App shell', () => {
     expect(host.querySelector('a[href="/series"] > span[title]')).toBeNull();
   });
 
-  it('shows the full storage path and visible used and free values', async () => {
+  it('shows the full storage path with free space visible and the used breakdown on the tooltip', async () => {
     const storageRoot = '/Volumes/Media Archive/Caravan Library';
     statusBody = { ...STATUS, storage_root: storageRoot };
     app = mount(App, { target: host });
@@ -712,8 +715,13 @@ describe('App shell', () => {
     expect(path).toBeDefined();
     expect(path?.classList).toContain('truncate');
     expect(path?.textContent).toContain(storageRoot);
-    expect(host.textContent).toContain('524 GB used');
+    // Free space is the visible number; used and total ride the tooltip so
+    // the row never wraps into a dangling "free".
     expect(host.textContent).toContain('500 GB free');
+    expect(host.textContent).not.toContain('524 GB used');
+    expect(
+      host.querySelector('span[title="524 GB used of 1 TB"]')?.classList,
+    ).toContain('whitespace-nowrap');
     expect(host.querySelector('[role="progressbar"][aria-label="Disk used"]')).not.toBeNull();
   });
 

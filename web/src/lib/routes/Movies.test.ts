@@ -134,16 +134,33 @@ function methodsOf(method: string): string[] {
   return calls.filter((c) => c.method === method).map((c) => c.url);
 }
 
-function sortSelect(): HTMLSelectElement {
-  const select = host.querySelector<HTMLSelectElement>('select[aria-label="Sort movies"]');
-  expect(select, 'movie sort control').toBeTruthy();
-  return select!;
+function sortTrigger(): HTMLButtonElement {
+  const trigger = [
+    ...host.querySelectorAll<HTMLButtonElement>('button[aria-haspopup="dialog"]'),
+  ].find((button) => (button.textContent ?? '').trim().startsWith('Sort'));
+  expect(trigger, 'movie sort dropdown').toBeTruthy();
+  return trigger!;
 }
 
-async function chooseSort(value: 'title' | 'added' | 'status') {
-  const select = sortSelect();
-  select.value = value;
-  select.dispatchEvent(new Event('change', { bubbles: true }));
+/** The trigger's accessible name is "Sort: {current}", the value it sorts by. */
+function sortValue(): string {
+  return sortTrigger().textContent?.trim().replace(/^Sort:\s*/, '') ?? '';
+}
+
+async function chooseSort(name: 'Title' | 'Added' | 'Status') {
+  if (!host.querySelector('[role="dialog"][aria-label^="Sort"]')) {
+    sortTrigger().click();
+    await settle();
+  }
+  const panel = host.querySelector<HTMLElement>('[role="dialog"][aria-label^="Sort"]');
+  const option = [...(panel?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
+    (button) => (button.textContent ?? '').trim() === name,
+  );
+  expect(option, `sort option "${name}"`).toBeTruthy();
+  option!.click();
+  await settle();
+  // A pick leaves the popover open for a second one; dismiss it as a reader does.
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
   await settle();
 }
 
@@ -169,7 +186,7 @@ describe('Movies grid', () => {
   it('labels the sort and title filter and keeps card status textual', async () => {
     await open();
 
-    expect(sortSelect().getAttribute('aria-label')).toBe('Sort movies');
+    expect(sortValue()).toBe('Title');
     expect(
       host.querySelector<HTMLInputElement>('input[type="search"]')?.getAttribute('aria-label'),
     ).toBe('Filter movies by title');
@@ -304,7 +321,7 @@ describe('Movies grid', () => {
   it('derives added sort from a reload URL and sorts newest first', async () => {
     await open('/movies?sort=added&layout=posters');
 
-    expect(sortSelect().value).toBe('added');
+    expect(sortValue()).toBe('Added');
     expect(cardIDs()).toEqual([3, 2, 1]);
     expect(router.params.get('layout')).toBe('posters');
   });
@@ -313,7 +330,7 @@ describe('Movies grid', () => {
     servedMovies = [movie(9, 'Zulu'), movie(7, 'Alpha'), movie(4, 'Alpha')];
     await open('/movies?sort=sideways&layout=compact');
 
-    expect(sortSelect().value).toBe('title');
+    expect(sortValue()).toBe('Title');
     expect(cardIDs()).toEqual([4, 7, 9]);
     expect(router.params.get('sort')).toBe('sideways');
     expect(router.params.get('layout')).toBe('compact');
@@ -322,13 +339,13 @@ describe('Movies grid', () => {
   it('writes non-default sort and removes the default while preserving other query state', async () => {
     await open('/movies?layout=compact');
 
-    await chooseSort('status');
+    await chooseSort('Status');
     expect(router.path).toBe('/movies');
     expect(router.params.get('sort')).toBe('status');
     expect(router.params.get('layout')).toBe('compact');
     expect(cardIDs()).toEqual([1, 3, 2]);
 
-    await chooseSort('title');
+    await chooseSort('Title');
     expect(router.path).toBe('/movies');
     expect(router.params.has('sort')).toBe(false);
     expect(router.params.get('layout')).toBe('compact');
@@ -345,7 +362,7 @@ describe('Movies grid', () => {
     expect(cardIDs()).toEqual([1, 3]);
 
     await select('Arrival');
-    await chooseSort('added');
+    await chooseSort('Added');
 
     expect(input!.value).toBe('i');
     expect(router.params.get('layout')).toBe('posters');

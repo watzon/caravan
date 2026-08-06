@@ -4,6 +4,7 @@
   import { api, errorText } from '../api/client';
   import type { Movie } from '../api/types';
   import Button from '../components/Button.svelte';
+  import Dropdown from '../components/Dropdown.svelte';
   import EmptyState from '../components/EmptyState.svelte';
   import FilterChips from '../components/FilterChips.svelte';
   import Icon from '../components/Icon.svelte';
@@ -37,9 +38,8 @@
     { key: 'status', label: 'Status' },
   ];
 
-  const SELECT_CLASS =
-    'h-9 rounded-sm border border-border-strong bg-raised px-3 text-md text-ink ' +
-    'focus:border-accent focus:outline-none';
+  /** The dropdown takes {id, name}; the rail's order is the array's. */
+  const SORT_CHOICES = SORT_OPTIONS.map((option) => ({ id: option.key, name: option.label }));
 
   let movies = $state<Movie[] | null>(null);
   let loading = $state(true);
@@ -122,25 +122,17 @@
   <div class="flex flex-wrap items-center gap-3">
     <FilterChips {chips} active={filter} onselect={(key) => (filter = key)} />
     <div class="ml-auto flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
-      <select
-        value={sort}
-        aria-label="Sort movies"
-        onchange={(event) => applySort(event.currentTarget.value)}
-        class={SELECT_CLASS}>
-        {#each SORT_OPTIONS as option (option.key)}
-          <option value={option.key}>{option.label}</option>
-        {/each}
-      </select>
+      <Dropdown label="Sort" options={SORT_CHOICES} value={sort} onselect={applySort} shape="box" />
       <div class="w-full sm:w-56">
         <TextInput bind:value={query} type="search" placeholder="Filter titles…" ariaLabel="Filter movies by title" />
       </div>
-      <Button variant="secondary" onclick={load} title="Reload the library list">
+      <!-- No add button on the rail: the top bar's global add (and ⌘K)
+           opens the same dialog, and the empty state carries the contextual
+           one. Refresh goes ghost-icon for the same reason: it is a utility,
+           not a destination. -->
+      <Button variant="ghost" onclick={load} title="Reload the library list" class="px-2">
         <Icon name="refresh" size={14} />
-        Refresh
-      </Button>
-      <Button variant="primary" onclick={onadd}>
-        <Icon name="plus" size={14} />
-        Add movie
+        <span class="sr-only">Refresh</span>
       </Button>
     </div>
   </div>

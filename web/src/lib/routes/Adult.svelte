@@ -18,6 +18,7 @@
   import type { Site } from '../api/types';
   import AddItemModal from '../components/AddItemModal.svelte';
   import Button from '../components/Button.svelte';
+  import Dropdown from '../components/Dropdown.svelte';
   import EmptyState from '../components/EmptyState.svelte';
   import Icon from '../components/Icon.svelte';
   import LoadError from '../components/LoadError.svelte';
@@ -40,9 +41,8 @@
     { key: 'status', label: 'Status' },
   ];
 
-  const SELECT_CLASS =
-    'h-9 rounded-sm border border-border-strong bg-raised px-3 text-md text-ink ' +
-    'focus:border-accent focus:outline-none';
+  /** The dropdown takes {id, name}; the rail's order is the array's. */
+  const SORT_CHOICES = SORT_OPTIONS.map((option) => ({ id: option.key, name: option.label }));
 
   function readSort(value: string | null): SortKey {
     return value === 'added' || value === 'status' ? value : 'title';
@@ -149,15 +149,7 @@
        with one tab in it is a strip that says nothing. -->
   <div class="flex flex-wrap items-center gap-3">
     <div class="ml-auto flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
-      <select
-        value={sort}
-        aria-label="Sort sites"
-        onchange={(event) => applySort(event.currentTarget.value)}
-        class={SELECT_CLASS}>
-        {#each SORT_OPTIONS as option (option.key)}
-          <option value={option.key}>{option.label}</option>
-        {/each}
-      </select>
+      <Dropdown label="Sort" options={SORT_CHOICES} value={sort} onselect={applySort} shape="box" />
       <div class="w-full sm:w-56">
         <TextInput
           bind:value={query}
@@ -165,9 +157,12 @@
           placeholder="Filter sites…"
           ariaLabel="Filter sites by name" />
       </div>
-      <Button variant="secondary" onclick={load} title="Reload the site list">
+      <!-- Ghost-icon refresh: a utility, not a destination. The add button
+           stays: the top bar's global add has no adult scope, so this is the
+           one way in. -->
+      <Button variant="ghost" onclick={load} title="Reload the site list" class="px-2">
         <Icon name="refresh" size={14} />
-        Refresh
+        <span class="sr-only">Refresh</span>
       </Button>
       {#if session.isAdmin}
         <Button variant="primary" onclick={() => (picking = true)}>

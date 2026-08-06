@@ -134,16 +134,33 @@ async function select(title: string) {
   await settle();
 }
 
-function sortSelect(): HTMLSelectElement {
-  const select = host.querySelector<HTMLSelectElement>('select[aria-label="Sort series"]');
-  expect(select, 'series sort control').toBeTruthy();
-  return select!;
+function sortTrigger(): HTMLButtonElement {
+  const trigger = [
+    ...host.querySelectorAll<HTMLButtonElement>('button[aria-haspopup="dialog"]'),
+  ].find((button) => (button.textContent ?? '').trim().startsWith('Sort'));
+  expect(trigger, 'series sort dropdown').toBeTruthy();
+  return trigger!;
 }
 
-async function chooseSort(value: 'title' | 'added' | 'status') {
-  const select = sortSelect();
-  select.value = value;
-  select.dispatchEvent(new Event('change', { bubbles: true }));
+/** The trigger's accessible name is "Sort: {current}", the value it sorts by. */
+function sortValue(): string {
+  return sortTrigger().textContent?.trim().replace(/^Sort:\s*/, '') ?? '';
+}
+
+async function chooseSort(name: 'Title' | 'Added' | 'Status') {
+  if (!host.querySelector('[role="dialog"][aria-label^="Sort"]')) {
+    sortTrigger().click();
+    await settle();
+  }
+  const panel = host.querySelector<HTMLElement>('[role="dialog"][aria-label^="Sort"]');
+  const option = [...(panel?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
+    (button) => (button.textContent ?? '').trim() === name,
+  );
+  expect(option, `sort option "${name}"`).toBeTruthy();
+  option!.click();
+  await settle();
+  // A pick leaves the popover open for a second one; dismiss it as a reader does.
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
   await settle();
 }
 
@@ -165,7 +182,7 @@ describe('Series grid selection', () => {
   it('labels the sort and title filter controls', async () => {
     await open();
 
-    expect(sortSelect().getAttribute('aria-label')).toBe('Sort series');
+    expect(sortValue()).toBe('Title');
     expect(
       host.querySelector<HTMLInputElement>('input[type="search"]')?.getAttribute('aria-label'),
     ).toBe('Filter series by title');
@@ -209,7 +226,7 @@ describe('Series grid selection', () => {
   it('derives added sort from the URL on reload', async () => {
     await open('/series?sort=added&layout=posters');
 
-    expect(sortSelect().value).toBe('added');
+    expect(sortValue()).toBe('Added');
     expect(cardIDs()).toEqual([2, 1]);
     expect(router.params.get('layout')).toBe('posters');
   });
@@ -218,7 +235,7 @@ describe('Series grid selection', () => {
     servedSeries = [series(8, 'Zulu'), series(6, 'Alpha'), series(3, 'Alpha')];
     await open('/series?sort=oldest&layout=compact');
 
-    expect(sortSelect().value).toBe('title');
+    expect(sortValue()).toBe('Title');
     expect(cardIDs()).toEqual([3, 6, 8]);
     expect(router.params.get('sort')).toBe('oldest');
     expect(router.params.get('layout')).toBe('compact');
@@ -231,7 +248,7 @@ describe('Series grid selection', () => {
     expect(cardIDs()).toEqual([1]);
 
     await select('Andor');
-    await chooseSort('status');
+    await chooseSort('Status');
 
     expect(router.path).toBe('/series');
     expect(router.params.get('sort')).toBe('status');
@@ -242,7 +259,7 @@ describe('Series grid selection', () => {
     ]);
     expect(cards()[0]?.getAttribute('aria-pressed')).toBe('true');
 
-    await chooseSort('title');
+    await chooseSort('Title');
     expect(router.params.has('sort')).toBe(false);
     expect(router.params.get('layout')).toBe('compact');
     expect(filterChip('Unmonitored').getAttribute('aria-pressed')).toBe('true');

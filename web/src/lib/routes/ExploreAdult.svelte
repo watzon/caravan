@@ -19,6 +19,7 @@
   import type { AdultDiscoverPage, SceneMeta } from '../api/types';
   import AppliedChips from '../components/AppliedChips.svelte';
   import Button from '../components/Button.svelte';
+  import Dropdown from '../components/Dropdown.svelte';
   import EmptyState from '../components/EmptyState.svelte';
   import ExploreScopes from '../components/ExploreScopes.svelte';
   import FilterOptions from '../components/FilterOptions.svelte';
@@ -53,9 +54,6 @@
   import { session } from '../state/session.svelte';
   import { pushToast } from '../state/toast.svelte';
 
-  const SELECT_CLASS =
-    'h-8 rounded-sm border border-border-strong bg-raised px-2 text-base text-ink ' +
-    'focus:border-accent focus:outline-none';
 
   let filter = $derived(parseSceneFilter(router.params));
   let chips = $derived(sceneChips(filter));
@@ -349,15 +347,11 @@
         checked={filter.hideOwned}
         label="Hide in library"
         onchange={(next) => apply({ ...filter, hideOwned: next })} />
-      <select
+      <Dropdown
+        label="Sort"
+        options={sortOptions.map((option) => ({ id: option.key, name: option.label }))}
         value={filter.sort}
-        aria-label="Sort results"
-        onchange={(event) => apply({ ...filter, sort: event.currentTarget.value })}
-        class={SELECT_CLASS}>
-        {#each sortOptions as option (option.key)}
-          <option value={option.key}>{option.label}</option>
-        {/each}
-      </select>
+        onselect={(id) => apply({ ...filter, sort: id })} />
     </div>
   </div>
 

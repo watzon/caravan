@@ -104,16 +104,43 @@ function selectToggle(): HTMLElement | undefined {
   );
 }
 
-function sortSelect(): HTMLSelectElement {
-  const select = host!.querySelector<HTMLSelectElement>('select[aria-label="Sort sites"]');
-  expect(select, 'the site sort control').toBeTruthy();
-  return select!;
+function sortTrigger(): HTMLButtonElement {
+  const trigger = [
+    ...host!.querySelectorAll<HTMLButtonElement>('button[aria-haspopup="dialog"]'),
+  ].find((button) => (button.textContent ?? '').trim().startsWith('Sort'));
+  expect(trigger, 'the site sort dropdown').toBeTruthy();
+  return trigger!;
 }
 
-function pickSort(value: 'title' | 'added' | 'status'): void {
-  const select = sortSelect();
-  select.value = value;
-  select.dispatchEvent(new Event('change', { bubbles: true }));
+/** The visible option names, in the rail's order. Opens and dismisses the popover. */
+function sortLabels(): string[] {
+  if (!host!.querySelector('[role="dialog"][aria-label^="Sort"]')) {
+    sortTrigger().click();
+    flushSync();
+  }
+  const panel = host!.querySelector<HTMLElement>('[role="dialog"][aria-label^="Sort"]');
+  const labels = [...(panel?.querySelectorAll<HTMLButtonElement>('button') ?? [])].map((button) =>
+    (button.textContent ?? '').trim(),
+  );
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+  flushSync();
+  return labels;
+}
+
+function pickSort(name: 'Title' | 'Added' | 'Status'): void {
+  if (!host!.querySelector('[role="dialog"][aria-label^="Sort"]')) {
+    sortTrigger().click();
+    flushSync();
+  }
+  const panel = host!.querySelector<HTMLElement>('[role="dialog"][aria-label^="Sort"]');
+  const option = [...(panel?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find(
+    (button) => (button.textContent ?? '').trim() === name,
+  );
+  expect(option, `the "${name}" sort option`).toBeTruthy();
+  option!.click();
+  flushSync();
+  // A pick leaves the popover open for a second one; dismiss it as a reader does.
+  window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
   flushSync();
 }
 
@@ -184,7 +211,7 @@ describe('the Adult shelf controls', () => {
     stubFetch();
     await mountShelf('admin');
 
-    expect(sortSelect().getAttribute('aria-label')).toBe('Sort sites');
+    expect(sortTrigger().textContent?.trim()).toBe('Sort: Title');
     expect(
       host!.querySelector<HTMLInputElement>('input[type="search"]')?.getAttribute('aria-label'),
     ).toBe('Filter sites by name');
@@ -200,12 +227,10 @@ describe('the Adult shelf sort', () => {
     stubFetch();
     await mountShelf('admin', `/adult?sort=${sort}`);
 
-    expect(sortSelect().value).toBe(sort);
-    expect([...sortSelect().options].map((option) => option.value)).toEqual([
-      'title',
-      'added',
-      'status',
-    ]);
+    expect(sortTrigger().textContent?.trim()).toBe(
+      `Sort: ${{ title: 'Title', added: 'Added', status: 'Status' }[sort]}`,
+    );
+    expect(sortLabels()).toEqual(['Title', 'Added', 'Status']);
     expect(cardTitles()).toEqual(expected);
     expect(calls).toEqual([{ url: '/api/v1/adult/sites', method: 'GET' }]);
   });
@@ -214,10 +239,10 @@ describe('the Adult shelf sort', () => {
     stubFetch();
     await mountShelf('admin', '/adult?view=grid&sort=recent#sites');
 
-    expect(sortSelect().value).toBe('title');
+    expect(sortTrigger().textContent?.trim()).toBe('Sort: Title');
     expect(cardTitles()).toEqual(['Alpha Club', 'Bravo Studio', 'Delta House', 'Zulu Club']);
 
-    pickSort('title');
+    pickSort('Title');
     expect(`${window.location.pathname}${window.location.search}${window.location.hash}`).toBe(
       '/adult?view=grid#sites',
     );
@@ -228,12 +253,12 @@ describe('the Adult shelf sort', () => {
     stubFetch();
     await mountShelf('member', '/adult?view=grid&sort=status#sites');
 
-    pickSort('added');
+    pickSort('Added');
     expect(`${window.location.pathname}${window.location.search}${window.location.hash}`).toBe(
       '/adult?view=grid&sort=added#sites',
     );
 
-    pickSort('title');
+    pickSort('Title');
     expect(`${window.location.pathname}${window.location.search}${window.location.hash}`).toBe(
       '/adult?view=grid#sites',
     );
@@ -259,7 +284,7 @@ describe('the Adult shelf sort', () => {
     expect(host!.textContent).toContain('1 selected');
 
     typeFilter('club');
-    pickSort('status');
+    pickSort('Status');
     expect(cardTitles()).toEqual(['Alpha Club', 'Zulu Club']);
     expect(
       host!.querySelector('button[aria-label^="Zulu Club, "][aria-pressed="true"]'),

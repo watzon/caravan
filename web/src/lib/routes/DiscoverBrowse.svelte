@@ -14,6 +14,7 @@
   import Button from '../components/Button.svelte';
   import DiscoverCard from '../components/DiscoverCard.svelte';
   import DiscoverError from '../components/DiscoverError.svelte';
+  import Dropdown from '../components/Dropdown.svelte';
   import EmptyState from '../components/EmptyState.svelte';
   import Icon from '../components/Icon.svelte';
   import PosterGrid from '../components/PosterGrid.svelte';
@@ -37,9 +38,8 @@
     { key: 'title', label: 'Title' },
   ];
 
-  const SELECT_CLASS =
-    'h-9 rounded-sm border border-border-strong bg-raised px-3 text-md text-ink ' +
-    'focus:border-accent focus:outline-none disabled:opacity-50';
+  /** The dropdown takes {id, name}; the rail's order is the array's. */
+  const SORT_CHOICES = SORTS.map((option) => ({ id: option.key, name: option.label }));
 
   let page = $state<DiscoverBrowse | null>(null);
   let items = $state<DiscoverItem[]>([]);
@@ -176,14 +176,13 @@
         label="Hide items in library"
         onchange={(next) => (hideOwned = next)} />
 
-      <select
-        bind:value={sort}
-        aria-label="Sort results"
-        class="ml-auto {SELECT_CLASS}">
-        {#each SORTS as option (option.key)}
-          <option value={option.key}>{option.label}</option>
-        {/each}
-      </select>
+      <div class="ml-auto">
+        <Dropdown
+          label="Sort"
+          options={SORT_CHOICES}
+          value={sort}
+          onselect={(id) => (sort = id as SortKey)} />
+      </div>
     </div>
 
     {#if loading && items.length === 0}

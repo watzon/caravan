@@ -118,7 +118,7 @@
   });
 
 
-  function openAdd(kind: 'movie' | 'series' = 'movie') {
+  function openAdd(kind: 'movie' | 'series') {
     addKind = kind;
     addOpen = true;
   }
@@ -269,9 +269,10 @@
 
       // Adding straight to the library is an admin's to do; a member's ⌘K
       // would open a dialog whose submit is a 403.
+      // The dialog seeds the tab of the shelf you are standing on.
       if (!session.isAdmin) return;
       event.preventDefault();
-      openAdd();
+      openAdd(router.path.startsWith('/series') ? 'series' : 'movie');
     }
   }
 
@@ -307,7 +308,11 @@
     <div class="flex min-w-0 flex-1 flex-col overflow-y-auto">
       <TopBar
         {title}
-        onadd={settingsSection === undefined && session.isAdmin ? () => openAdd() : undefined}
+        onadd={
+          settingsSection === undefined && session.isAdmin
+            ? () => openAdd(router.path.startsWith('/series') ? 'series' : 'movie')
+            : undefined
+        }
         onmenu={toggleSidebar}
         menuOpen={sidebarOpen}
         bind:menuButton={sidebarMenuButton} />

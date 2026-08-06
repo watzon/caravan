@@ -22,6 +22,7 @@
   import Button from '../components/Button.svelte';
   import DiscoverCard from '../components/DiscoverCard.svelte';
   import DiscoverError from '../components/DiscoverError.svelte';
+  import Dropdown from '../components/Dropdown.svelte';
   import EmptyState from '../components/EmptyState.svelte';
   import ExploreScopes from '../components/ExploreScopes.svelte';
   import FilterOptions from '../components/FilterOptions.svelte';
@@ -53,9 +54,8 @@
 
   let { mediaType }: Props = $props();
 
-  const SELECT_CLASS =
-    'h-8 rounded-sm border border-border-strong bg-raised px-2 text-base text-ink ' +
-    'focus:border-accent focus:outline-none';
+  /** The dropdown takes {id, name}; TITLE_SORTS carries the provider pair too. */
+  const SORT_CHOICES = TITLE_SORTS.map((option) => ({ id: option.key, name: option.label }));
 
   /** The year pill writes whole years; the API takes the days they bound. */
   const YEAR_START = '-01-01';
@@ -336,15 +336,11 @@
         checked={filter.hideOwned}
         label="Hide in library"
         onchange={(next) => apply({ ...filter, hideOwned: next })} />
-      <select
+      <Dropdown
+        label="Sort"
+        options={SORT_CHOICES}
         value={sortKey}
-        aria-label="Sort results"
-        onchange={(event) => apply({ ...filter, sort: event.currentTarget.value })}
-        class={SELECT_CLASS}>
-        {#each TITLE_SORTS as option (option.key)}
-          <option value={option.key}>{option.label}</option>
-        {/each}
-      </select>
+        onselect={(id) => apply({ ...filter, sort: id })} />
     </div>
   </div>
 

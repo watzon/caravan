@@ -22,7 +22,7 @@
   }
 
   interface Props {
-    options: Option[];
+    options: readonly Option[];
     /** Ids currently chosen. A single-select passes at most one. */
     selected: readonly string[];
     onselect: (id: string) => void;

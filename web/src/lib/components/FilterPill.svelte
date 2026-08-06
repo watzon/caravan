@@ -29,9 +29,16 @@
     children: Snippet;
     /** Popover width. A typeahead wants more room than a range pair. */
     width?: string;
+    /**
+     * Geometry. 'pill' is the explore rail's own shape at button height
+     * (32px, DESIGN.md §6). 'box' takes the input radius and height (36px)
+     * for rails where the trigger replaces a select beside inputs, so the
+     * row keeps one baseline. Same control and colorway otherwise.
+     */
+    shape?: 'pill' | 'box';
   }
 
-  let { label, applied = false, children, width = 'w-64' }: Props = $props();
+  let { label, applied = false, children, width = 'w-64', shape = 'pill' }: Props = $props();
 
   let open = $state(false);
   let trigger = $state<HTMLButtonElement | null>(null);
@@ -97,8 +104,9 @@
     aria-haspopup="dialog"
     aria-expanded={open}
     onclick={() => (open = !open)}
-    class="inline-flex h-8 items-center gap-1.5 rounded-full border px-3 text-base
+    class="inline-flex items-center gap-1.5 border px-3 text-base
            whitespace-nowrap transition-colors duration-150 ease-out
+           {shape === 'pill' ? 'h-8 rounded-full' : 'h-9 rounded-md'}
            {applied
       ? 'border-accent bg-accent-tint text-accent-text'
       : 'border-border bg-surface text-ink-secondary hover:border-border-strong hover:bg-raised hover:text-ink'}

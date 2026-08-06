@@ -138,9 +138,9 @@ describe('a filtered movie scope', () => {
       'Runtime',
       'Rating',
       'Language',
+      'Sort: Popularity',
     ]);
     expect(host.querySelector('[role="switch"]')?.textContent?.trim()).toBe('Hide in library');
-    expect(host.querySelector('select')?.getAttribute('aria-label')).toBe('Sort results');
   });
 
   /**

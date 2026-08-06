@@ -135,7 +135,10 @@ describe('DiscoverBrowse — paging', () => {
     expect(host.querySelector('[role="switch"]')?.textContent?.trim()).toBe(
       'Hide items in library',
     );
-    expect(host.querySelector('select')?.getAttribute('aria-label')).toBe('Sort results');
+    const sortTrigger = [
+      ...host.querySelectorAll<HTMLButtonElement>('button[aria-haspopup="dialog"]'),
+    ].find((button) => (button.textContent ?? '').trim().startsWith('Sort'));
+    expect(sortTrigger?.textContent?.trim()).toBe('Sort: Popularity');
   });
 
   it('retries the page that failed, not the one that already loaded', async () => {

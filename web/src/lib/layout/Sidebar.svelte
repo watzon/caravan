@@ -444,12 +444,18 @@
           title={status?.storage_root}>
           {status?.storage_root || 'no storage root'}
         </span>
-        <div class="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-xs">
-          <span class="text-ink-secondary">Disk used</span>
-          <span class="min-w-0 font-mono text-ink-secondary">
-            {diskUsage
-              ? `${formatBytes(diskUsage.used)} used · ${formatBytes(diskUsage.free)} free`
-              : 'Unknown'}
+        <div class="flex items-baseline justify-between gap-2 text-xs">
+          <span class="text-ink-secondary">Disk</span>
+          <!-- The free number is the one a reader acts on (DESIGN.md §5), so
+               it gets the line to itself: one nowrap value, never a wrapped
+               pair with a dangling "free". The full breakdown moves to the
+               tooltip. -->
+          <span
+            class="whitespace-nowrap font-mono text-ink"
+            title={diskUsage
+              ? `${formatBytes(diskUsage.used)} used of ${formatBytes(diskUsage.used + diskUsage.free)}`
+              : undefined}>
+            {diskUsage ? `${formatBytes(diskUsage.free)} free` : 'Unknown'}
           </span>
         </div>
         <ProgressBar
@@ -475,7 +481,7 @@
         class="w-full min-w-0 justify-start"
         disabled={auth.busy}
         onclick={() => auth.logout()}>
-        <Icon name="back" size={14} />
+        <Icon name="logout" size={14} />
         <span class="min-w-0 truncate" title={signOutLabel}>{signOutLabel}</span>
       </Button>
     {/if}
