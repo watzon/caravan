@@ -1,12 +1,13 @@
 /**
- * The acquisition screen. Two things are asserted here that the pure helpers
- * cannot: that a season row on an owned series does not offer a Request the
- * server would answer 409 to, and that the facts rail renders the provider
- * facts the payload now carries.
+ * The acquisition screen and its shared discover rating surfaces. The mounted
+ * regressions cover presentation that pure helpers cannot: rating provenance,
+ * release-date gating, season actions for owned titles, and provider facts.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import DiscoverTitle from './DiscoverTitle.svelte';
+import DiscoverCard from '../components/DiscoverCard.svelte';
+import DiscoverRoute from './Discover.svelte';
 import type { DiscoverSeason, DiscoverTitle as DiscoverTitlePayload } from '../api/types';
 import { discover } from '../state/discover.svelte';
 import { session } from '../state/session.svelte';
@@ -36,6 +37,7 @@ function payload(extra: Partial<DiscoverTitlePayload> = {}): DiscoverTitlePayloa
     poster_url: '',
     backdrop_url: '',
     vote_average: 8.9,
+    vote_count: 1_234,
     date: '2008-01-20',
     in_library: false,
     library_id: 0,
@@ -86,6 +88,38 @@ async function mountTitle(body: DiscoverTitlePayload) {
   await settle();
 }
 
+type RatingSurface = 'card' | 'hero' | 'title';
+
+async function mountRatingSurface(surface: RatingSurface, body: DiscoverTitlePayload) {
+  if (surface === 'card') {
+    app = mount(DiscoverCard, {
+      target: host,
+      props: { item: body },
+    }) as Record<string, unknown>;
+    flushSync();
+    return;
+  }
+
+  if (surface === 'hero') {
+    discover.home = {
+      trending: [body],
+      popular_movies: [],
+      popular_series: [],
+      networks: [],
+      studios: [],
+    };
+    app = mount(DiscoverRoute, { target: host }) as Record<string, unknown>;
+    flushSync();
+    return;
+  }
+
+  await mountTitle(body);
+}
+
+function ratingElement(): HTMLElement | null {
+  return host.querySelector('[title^="Rated "], [title="Not yet rated"]');
+}
+
 /** The trailing control or badge of each season row. */
 function seasonSlots(): string[] {
   return [...host.querySelectorAll('section li')].map((li) =>
@@ -121,6 +155,33 @@ afterEach(() => {
 function buttonLabels(): (string | undefined)[] {
   return [...host.querySelectorAll('button')].map((b) => b.textContent?.trim());
 }
+
+describe('Discover rating surfaces', () => {
+  for (const surface of ['card', 'hero', 'title'] as const) {
+    it(`shows a released, voted rating on the ${surface}`, async () => {
+      await mountRatingSurface(surface, payload());
+
+      expect(ratingElement()?.getAttribute('title')).toBe('Rated 8.9/10');
+      expect(ratingElement()?.textContent).toContain('8.9/10');
+    });
+
+    const hiddenRatings: Array<[string, Partial<DiscoverTitlePayload>]> = [
+      ['a nonzero average with zero votes', { vote_count: 0 }],
+      ['a future release date', { date: '2999-01-01' }],
+      ['an unknown release date', { date: '' }],
+      ['an invalid release date', { date: '2025-02-30' }],
+    ];
+
+    for (const [condition, extra] of hiddenRatings) {
+      it(`shows Not yet rated for ${condition} on the ${surface}`, async () => {
+        await mountRatingSurface(surface, payload(extra));
+
+        expect(ratingElement()?.getAttribute('title')).toBe('Not yet rated');
+        expect(ratingElement()?.textContent).not.toContain('8.9/10');
+      });
+    }
+  }
+});
 
 describe('DiscoverTitle — season rows', () => {
   it('offers a Request for a missing season of a title nobody owns', async () => {

@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -184,6 +186,55 @@ func TestSearchEpisodeNowQueuesOnlyTheSelectedWantedEpisodeAndDedupes(t *testing
 	wantQueued(t, h, target, 0)
 	if jobs := openJobs(t, st, core.JobSearchEpisode); len(jobs) != 1 {
 		t.Fatalf("search_episode jobs after a repeat = %d, want 1", len(jobs))
+	}
+}
+
+func TestSearchEpisodeNowConcurrentDuplicatesQueueOnce(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	ctx := context.Background()
+
+	sr := &core.Series{TMDBID: 230, Title: "Slow Horses", Monitored: true}
+	if err := st.UpsertSeries(ctx, sr); err != nil {
+		t.Fatalf("UpsertSeries: %v", err)
+	}
+	episode := airedEpisode(t, st, sr.ID, 1, 1)
+	target := "/api/v1/library/episodes/" + itoa(episode.ID) + "/search"
+
+	const requests = 2
+	start := make(chan struct{})
+	responses := make(chan *httptest.ResponseRecorder, requests)
+	var wg sync.WaitGroup
+	for range requests {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, target, nil))
+			responses <- rec
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(responses)
+
+	queued := map[int]int{}
+	for rec := range responses {
+		wantStatus(t, rec, http.StatusAccepted)
+		var body searchQueuedResponse
+		decodeBody(t, rec, &body)
+		queued[body.Queued]++
+	}
+	if queued[1] != 1 || queued[0] != 1 || len(queued) != 2 {
+		t.Fatalf("concurrent queued responses = %v, want one queued 1 and one queued 0", queued)
+	}
+
+	jobs := openJobs(t, st, core.JobSearchEpisode)
+	if len(jobs) != 1 {
+		t.Fatalf("search_episode jobs = %d, want exactly 1", len(jobs))
+	}
+	if want := `{"episode_id":` + itoa(episode.ID) + `}`; jobs[0].Payload != want {
+		t.Fatalf("payload = %q, want %q", jobs[0].Payload, want)
 	}
 }
 

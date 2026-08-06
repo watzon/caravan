@@ -159,6 +159,7 @@ const DISCOVER: DiscoverHome = {
       poster_url: '',
       backdrop_url: '',
       vote_average: 8.4,
+      vote_count: 1,
       date: '2022-02-18',
       in_library: false,
       library_id: 0,

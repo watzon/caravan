@@ -37,6 +37,7 @@ type DiscoverItem struct {
 	PosterURL   string
 	BackdropURL string
 	VoteAverage float64
+	VoteCount   int
 	// Date is the release date for a movie and the first air date for a
 	// series, zero when the provider has none.
 	Date time.Time

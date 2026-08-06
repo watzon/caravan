@@ -18,7 +18,7 @@
 
   const TABS: { key: Tab; label: string }[] = [
     { key: 'missing', label: 'Missing' },
-    { key: 'below_cutoff', label: 'Below cutoff' },
+    { key: 'below_cutoff', label: 'Below quality cutoff' },
   ];
 
   let wanted = $state<WantedLists | null>(null);
@@ -235,7 +235,7 @@
                     <p class="truncate font-medium text-ink">{titleWithYear(movie.title, movie.year)}</p>
                     <p class="mt-0.5 truncate text-sm text-ink-secondary">{detail(movie)}</p>
                   </div>
-                  <Badge tone={movie.reason === 'missing' ? 'danger' : 'warning'}>{movie.reason === 'missing' ? 'Missing' : 'Below cutoff'}</Badge>
+                  <Badge tone={movie.reason === 'missing' ? 'danger' : 'warning'}>{movie.reason === 'missing' ? 'Missing' : 'Below quality cutoff'}</Badge>
                   {#if !selectionActive}
                     <Button href={searchHref(movie)} size="sm">Search</Button>
                   {/if}
@@ -301,7 +301,7 @@
                     </p>
                     <p class="mt-0.5 truncate text-sm text-ink-secondary">{detail(episode)}</p>
                   </div>
-                  <Badge tone={episode.reason === 'missing' ? 'danger' : 'warning'}>{episode.reason === 'missing' ? 'Missing' : 'Below cutoff'}</Badge>
+                  <Badge tone={episode.reason === 'missing' ? 'danger' : 'warning'}>{episode.reason === 'missing' ? 'Missing' : 'Below quality cutoff'}</Badge>
                   {#if !selectionActive}
                     <Button href={searchHref(episode)} size="sm">Search</Button>
                   {/if}

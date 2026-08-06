@@ -864,11 +864,11 @@ func TestSearchReturnsBothMediaTypes(t *testing.T) {
 	h, _, mgr := newTestServer(t)
 	mgr.provider = &stubProvider{
 		movies: []core.MovieMeta{
-			{TMDBID: 1, Title: "Dune", Year: 2021, PosterURL: "https://img/dune.jpg", VoteAverage: 8.2},
+			{TMDBID: 1, Title: "Dune", Year: 2021, PosterURL: "https://img/dune.jpg", VoteAverage: 8.2, VoteCount: 12_345},
 			{TMDBID: 3, Title: "Dune: Part Two", Year: 2024},
 		},
 		series: []core.SeriesMeta{
-			{TMDBID: 2, Title: "Dune: Prophecy", Year: 2024, VoteAverage: 7.4},
+			{TMDBID: 2, Title: "Dune: Prophecy", Year: 2024, VoteAverage: 7.4, VoteCount: 678},
 			{TMDBID: 4, Title: "Dune: Zero Rating", Year: 2025},
 		},
 	}
@@ -880,11 +880,11 @@ func TestSearchReturnsBothMediaTypes(t *testing.T) {
 	decodeBody(t, rec, &body)
 
 	wantMovies := []movieMetaJSON{
-		{TMDBID: 1, Title: "Dune", Year: 2021, PosterURL: "https://img/dune.jpg", VoteAverage: 8.2},
+		{TMDBID: 1, Title: "Dune", Year: 2021, PosterURL: "https://img/dune.jpg", VoteAverage: 8.2, VoteCount: 12_345},
 		{TMDBID: 3, Title: "Dune: Part Two", Year: 2024},
 	}
 	wantSeries := []seriesMetaJSON{
-		{TMDBID: 2, Title: "Dune: Prophecy", Year: 2024, VoteAverage: 7.4},
+		{TMDBID: 2, Title: "Dune: Prophecy", Year: 2024, VoteAverage: 7.4, VoteCount: 678},
 		{TMDBID: 4, Title: "Dune: Zero Rating", Year: 2025},
 	}
 	if !slices.Equal(body.Movies, wantMovies) {
@@ -895,6 +895,9 @@ func TestSearchReturnsBothMediaTypes(t *testing.T) {
 	}
 	if got := strings.Count(rawBody, `"vote_average":0`); got != 2 {
 		t.Fatalf("zero vote_average fields = %d, want 2 in %s", got, rawBody)
+	}
+	if got := strings.Count(rawBody, `"vote_count":0`); got != 2 {
+		t.Fatalf("zero vote_count fields = %d, want 2 in %s", got, rawBody)
 	}
 }
 

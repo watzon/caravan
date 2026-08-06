@@ -192,23 +192,13 @@ func (s *server) enqueueEpisodeSearch(ctx context.Context, episodeID int64) (boo
 }
 
 // enqueueSearchJob adds one search job unless an identical one is already
-// pending or running, and reports whether it wrote a row. The dedupe is the
-// same HasOpenJob check the backlog sweep uses (PLAN phase 3, task 5): two
-// clicks on Search now must not become two searches.
+// pending or running, and reports whether it wrote a row. The store performs
+// the dedupe and insert atomically, so simultaneous Search now requests cannot
+// both queue the same work.
 func (s *server) enqueueSearchJob(ctx context.Context, kind string, payload any) (bool, error) {
 	encoded, err := json.Marshal(payload)
 	if err != nil {
 		return false, fmt.Errorf("encode %s payload: %w", kind, err)
 	}
-	open, err := s.st.HasOpenJob(ctx, kind, string(encoded))
-	if err != nil {
-		return false, err
-	}
-	if open {
-		return false, nil
-	}
-	if err := s.st.EnqueueJob(ctx, &core.Job{Kind: kind, Payload: string(encoded)}); err != nil {
-		return false, err
-	}
-	return true, nil
+	return s.st.EnqueueJobIfNotOpen(ctx, &core.Job{Kind: kind, Payload: string(encoded)})
 }

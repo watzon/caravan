@@ -29,6 +29,7 @@ func TestSearchSeries(t *testing.T) {
 			Year:          2008,
 			Overview:      "Walter White, a New Mexico chemistry teacher, is diagnosed with Stage III cancer and given a prognosis of only two years left to live.",
 			VoteAverage:   8.9,
+			VoteCount:     12442,
 			FirstAirDate:  time.Date(2008, 1, 20, 0, 0, 0, 0, time.UTC),
 			PosterURL:     "https://image.tmdb.org/t/p/w500/ggFHVNu6YYI5L9pCfOacjizRGt.jpg",
 		},
@@ -39,6 +40,7 @@ func TestSearchSeries(t *testing.T) {
 			OriginalTitle: "The Broken and the Bad",
 			Overview:      "A companion series exploring the world of Breaking Bad.",
 			VoteAverage:   6.8,
+			VoteCount:     34,
 		},
 	}
 
@@ -73,6 +75,7 @@ func TestGetSeries(t *testing.T) {
 		Year:          2008,
 		Overview:      "Walter White, a New Mexico chemistry teacher, is diagnosed with Stage III cancer and given a prognosis of only two years left to live.",
 		VoteAverage:   8.9,
+		VoteCount:     12442,
 		Status:        "Ended",
 		FirstAirDate:  time.Date(2008, 1, 20, 0, 0, 0, 0, time.UTC),
 		PosterURL:     "https://image.tmdb.org/t/p/w500/ggFHVNu6YYI5L9pCfOacjizRGt.jpg",
@@ -171,6 +174,38 @@ func TestSeriesVoteAverageDefaultsToZero(t *testing.T) {
 	}
 	if got := detail.VoteAverage; got != 0 {
 		t.Errorf("detail VoteAverage = %v, want 0", got)
+	}
+}
+
+func TestSeriesVoteCountDefaultsToZeroWhenOmitted(t *testing.T) {
+	c, _ := newStub(t, map[string][]response{
+		"/search/tv": {{status: http.StatusOK, body: []byte(`{"results":[{"id":1,"vote_average":7.4}]}`)}},
+		"/tv/1":      {{status: http.StatusOK, body: []byte(`{"id":1,"vote_average":8.1}`)}},
+	})
+
+	results, err := c.SearchSeries(context.Background(), "few votes")
+	if err != nil {
+		t.Fatalf("SearchSeries: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("got %d results, want 1", len(results))
+	}
+	if got := results[0].VoteAverage; got != 7.4 {
+		t.Errorf("search VoteAverage = %v, want 7.4", got)
+	}
+	if got := results[0].VoteCount; got != 0 {
+		t.Errorf("search VoteCount = %d, want 0", got)
+	}
+
+	detail, err := c.GetSeries(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("GetSeries: %v", err)
+	}
+	if got := detail.VoteAverage; got != 8.1 {
+		t.Errorf("detail VoteAverage = %v, want 8.1", got)
+	}
+	if got := detail.VoteCount; got != 0 {
+		t.Errorf("detail VoteCount = %d, want 0", got)
 	}
 }
 

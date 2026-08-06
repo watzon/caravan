@@ -18,6 +18,7 @@ type movieResult struct {
 	PosterPath    string  `json:"poster_path"`
 	ReleaseDate   string  `json:"release_date"`
 	VoteAverage   float64 `json:"vote_average"`
+	VoteCount     int     `json:"vote_count"`
 }
 
 // TMDB release types, from /movie/{id}/release_dates. Only the two home-release
@@ -116,6 +117,7 @@ func (c *Client) movieMeta(r movieResult, imdbID string) core.MovieMeta {
 		Year:          yearOf(released),
 		Overview:      r.Overview,
 		VoteAverage:   r.VoteAverage,
+		VoteCount:     r.VoteCount,
 		ReleaseDate:   released,
 		PosterURL:     c.posterURL(r.PosterPath),
 	}

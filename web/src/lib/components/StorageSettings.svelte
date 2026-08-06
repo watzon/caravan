@@ -33,9 +33,11 @@
 
   interface Props {
     settings: Settings;
+    saving?: boolean;
+    onsave: (patch: Settings, note: string) => Promise<boolean>;
   }
 
-  let { settings }: Props = $props();
+  let { settings, saving = false, onsave }: Props = $props();
 
   /** Matches the convert queue's cadence: a file-by-file move, not a spinner. */
   const POLL_MS = 2000;
@@ -132,18 +134,18 @@
     confirming = null;
     namingBusy = true;
     try {
-      await api.putSettings({
-        [namingKeys.recycle]: String(recycleRetentionDays),
-        [namingKeys.movieFolder]: movieFolderFormat,
-        [namingKeys.movieFile]: movieFileFormat,
-        [namingKeys.seriesFolder]: seriesFolderFormat,
-        [namingKeys.seasonFolder]: seasonFolderFormat,
-        [namingKeys.episodeFile]: episodeFileFormat,
-      });
-      savedNaming = namingSnapshot();
-      pushToast('Recycle retention and naming settings saved.', 'success');
-    } catch (err) {
-      pushToast(errorText(err), 'danger');
+      const saved = await onsave(
+        {
+          [namingKeys.recycle]: String(recycleRetentionDays),
+          [namingKeys.movieFolder]: movieFolderFormat,
+          [namingKeys.movieFile]: movieFileFormat,
+          [namingKeys.seriesFolder]: seriesFolderFormat,
+          [namingKeys.seasonFolder]: seasonFolderFormat,
+          [namingKeys.episodeFile]: episodeFileFormat,
+        },
+        'Recycle retention and naming settings saved.',
+      );
+      if (saved) savedNaming = namingSnapshot();
     } finally {
       namingBusy = false;
     }
@@ -311,9 +313,9 @@
       <Button
         variant={permanentDeletion ? 'danger' : 'primary'}
         onclick={requestNamingSave}
-        disabled={namingBusy || !namingChanged || namingInvalid}
+        disabled={saving || namingBusy || !namingChanged || namingInvalid}
       >
-        {namingBusy ? 'Saving…' : 'Save recycle and naming'}
+        {saving || namingBusy ? 'Saving…' : 'Save recycle and naming'}
       </Button>
     </div>
   </div>

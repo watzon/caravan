@@ -110,8 +110,8 @@
   let busyID = $state<number | null>(null);
   /** The site whose add is in flight; sites are named by a string, not an id. */
   let busyStashID = $state<string | null>(null);
-  /** An unreleased movie or series waiting for the user's explicit approval. */
-  let confirmingUnreleased = $state<AddTarget | null>(null);
+  /** A future- or unknown-release title waiting for the user's explicit approval. */
+  let confirmingRelease = $state<AddTarget | null>(null);
 
   /**
    * Whether the adult scope is on screen. `session.adult` is the server's own
@@ -212,6 +212,12 @@
     moveResultFocus(event, body);
   }
 
+  function hasKnownReleaseDate(value: string): boolean {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+    const date = new Date(`${value}T00:00:00Z`);
+    return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+  }
+
   function select(row: MovieMeta | SeriesMeta) {
     const targetKind: PickKind = scope === 'series' ? 'series' : 'movie';
     const target: AddTarget = {
@@ -223,18 +229,18 @@
           : (row as SeriesMeta).first_air_date,
     };
     // Manual match only returns a provider id; it does not add a new library
-    // title, so an unreleased match stays the same one-click operation.
-    if (!onpick && isFuture(target.releaseDate)) {
-      confirmingUnreleased = target;
+    // title, so any match stays the same one-click operation.
+    if (!onpick && (!hasKnownReleaseDate(target.releaseDate) || isFuture(target.releaseDate))) {
+      confirmingRelease = target;
       return;
     }
     void choose(target);
   }
 
-  async function confirmUnreleased() {
-    const target = confirmingUnreleased;
+  async function confirmRelease() {
+    const target = confirmingRelease;
     if (!target) return;
-    confirmingUnreleased = null;
+    confirmingRelease = null;
     await choose(target);
   }
 
@@ -435,7 +441,7 @@
       <ul class="flex flex-col gap-2" onkeydown={onListKeydown}>
         {#each rows as row (row.tmdb_id)}
           {@const releaseDate = 'release_date' in row ? row.release_date : row.first_air_date}
-          {@const rating = ratingPresentation(row.vote_average, releaseDate)}
+          {@const rating = ratingPresentation(row.vote_average, row.vote_count, releaseDate)}
           <li class="flex items-start gap-3 rounded-md border border-border p-2 transition-colors duration-150 ease-out hover:bg-raised focus-within:bg-raised">
             <div class="w-12 shrink-0">
               <Poster
@@ -500,15 +506,20 @@
   </div>
 </Modal>
 
-{#if confirmingUnreleased}
-  {@const target = confirmingUnreleased}
+{#if confirmingRelease}
+  {@const target = confirmingRelease}
+  {@const unknownReleaseDate = !hasKnownReleaseDate(target.releaseDate)}
   <Modal
-    title="Add unreleased title"
+    title={unknownReleaseDate ? 'Add title with unknown release date' : 'Add unreleased title'}
     width="max-w-lg"
-    onclose={() => (confirmingUnreleased = null)}>
+    onclose={() => (confirmingRelease = null)}>
     <div class="flex flex-col gap-3 p-4">
       <p class="text-base text-ink">
-        <span class="font-medium">{target.row.title}</span> has not been released yet.
+        {#if unknownReleaseDate}
+          <span class="font-medium">{target.row.title}</span>'s release date is unknown.
+        {:else}
+          <span class="font-medium">{target.row.title}</span> has not been released yet.
+        {/if}
       </p>
       <p class="text-base text-ink-secondary">
         Add it to the library anyway?
@@ -519,9 +530,9 @@
       <Button
         variant="ghost"
         disabled={busyID !== null}
-        onclick={() => (confirmingUnreleased = null)}>Cancel</Button>
-      <Button variant="primary" disabled={busyID !== null} onclick={confirmUnreleased}>
-        Add unreleased title
+        onclick={() => (confirmingRelease = null)}>Cancel</Button>
+      <Button variant="primary" disabled={busyID !== null} onclick={confirmRelease}>
+        {unknownReleaseDate ? 'Add title anyway' : 'Add unreleased title'}
       </Button>
     {/snippet}
   </Modal>

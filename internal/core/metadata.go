@@ -52,6 +52,7 @@ type MovieMeta struct {
 	Year          int
 	Overview      string
 	VoteAverage   float64
+	VoteCount     int
 	// ReleaseDate is the theatrical release date, zero when the provider did
 	// not supply one.
 	ReleaseDate time.Time
@@ -76,6 +77,7 @@ type SeriesMeta struct {
 	Year          int
 	Overview      string
 	VoteAverage   float64
+	VoteCount     int
 	// Status is the provider's series status ("Continuing", "Ended", …).
 	Status string
 	// FirstAirDate is zero when the provider did not supply one.

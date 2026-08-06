@@ -44,7 +44,7 @@
   let home = $derived(discover.home);
   let hero = $derived<DiscoverItem | null>(home?.trending[0] ?? null);
   let heroRating = $derived(
-    hero ? ratingPresentation(hero.vote_average, hero.date) : null,
+    hero ? ratingPresentation(hero.vote_average, hero.vote_count, hero.date) : null,
   );
 
   /** The billboard's one call to action, under whichever verb the role gets. */

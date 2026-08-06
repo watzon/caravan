@@ -17,6 +17,7 @@ type tvResult struct {
 	PosterPath   string  `json:"poster_path"`
 	FirstAirDate string  `json:"first_air_date"`
 	VoteAverage  float64 `json:"vote_average"`
+	VoteCount    int     `json:"vote_count"`
 }
 
 // tvDetail is /tv/{id}. Its seasons list carries no episodes, only the season
@@ -140,6 +141,7 @@ func (c *Client) seriesMeta(r tvResult) core.SeriesMeta {
 		Year:          yearOf(firstAir),
 		Overview:      r.Overview,
 		VoteAverage:   r.VoteAverage,
+		VoteCount:     r.VoteCount,
 		FirstAirDate:  firstAir,
 		PosterURL:     c.posterURL(r.PosterPath),
 	}

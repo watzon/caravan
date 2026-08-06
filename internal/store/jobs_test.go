@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -78,6 +79,78 @@ func TestEnqueueAndClaimJob(t *testing.T) {
 	}
 	if _, err := st.GetJob(ctx, 404); !errors.Is(err, ErrNotFound) {
 		t.Errorf("GetJob(absent) = %v, want ErrNotFound", err)
+	}
+}
+
+func TestEnqueueJobIfNotOpenIsAtomicAcrossStoreHandles(t *testing.T) {
+	first, path := openTemp(t)
+	second, err := Open(path)
+	if err != nil {
+		t.Fatalf("open second Store: %v", err)
+	}
+	t.Cleanup(func() { second.Close() })
+
+	createdAt := time.Now().UTC().Add(-time.Minute)
+	runAfter := time.Now().UTC().Add(time.Hour)
+	jobs := []*core.Job{
+		{Kind: core.JobSearchEpisode, Payload: `{"episode_id":42}`, CreatedAt: createdAt, RunAfter: runAfter},
+		{Kind: core.JobSearchEpisode, Payload: `{"episode_id":42}`, CreatedAt: createdAt, RunAfter: runAfter},
+	}
+	stores := []*Store{first, second}
+	start := make(chan struct{})
+	type enqueueResult struct {
+		added bool
+		err   error
+	}
+	results := make(chan enqueueResult, len(stores))
+	var wg sync.WaitGroup
+	for i := range stores {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			added, err := stores[i].EnqueueJobIfNotOpen(context.Background(), jobs[i])
+			results <- enqueueResult{added: added, err: err}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+
+	added := 0
+	for result := range results {
+		if result.err != nil {
+			t.Fatalf("EnqueueJobIfNotOpen: %v", result.err)
+		}
+		if result.added {
+			added++
+		}
+	}
+	if added != 1 {
+		t.Fatalf("EnqueueJobIfNotOpen added %d jobs, want 1", added)
+	}
+
+	got, err := first.ListJobs(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("ListJobs: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("jobs = %d rows, want 1", len(got))
+	}
+	if got[0].Kind != core.JobSearchEpisode || got[0].Payload != `{"episode_id":42}` {
+		t.Fatalf("job = %+v, want the requested episode search", got[0])
+	}
+	if got[0].State != core.JobStatePending {
+		t.Fatalf("job state = %q, want %q", got[0].State, core.JobStatePending)
+	}
+	if !got[0].CreatedAt.Equal(createdAt) {
+		t.Fatalf("created_at = %s, want %s", got[0].CreatedAt, createdAt)
+	}
+	if !got[0].RunAfter.Equal(runAfter) {
+		t.Fatalf("run_after = %s, want %s", got[0].RunAfter, runAfter)
+	}
+	if got[0].UpdatedAt.IsZero() {
+		t.Fatal("updated_at is zero")
 	}
 }
 

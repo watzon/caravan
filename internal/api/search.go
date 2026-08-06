@@ -27,6 +27,7 @@ type movieMetaJSON struct {
 	Overview      string  `json:"overview"`
 	ReleaseDate   string  `json:"release_date"`
 	VoteAverage   float64 `json:"vote_average"`
+	VoteCount     int     `json:"vote_count"`
 	PosterURL     string  `json:"poster_url"`
 }
 
@@ -41,6 +42,7 @@ type seriesMetaJSON struct {
 	Status        string  `json:"status"`
 	FirstAirDate  string  `json:"first_air_date"`
 	VoteAverage   float64 `json:"vote_average"`
+	VoteCount     int     `json:"vote_count"`
 	PosterURL     string  `json:"poster_url"`
 }
 
@@ -116,6 +118,7 @@ func movieMetaDTO(m core.MovieMeta) movieMetaJSON {
 		Overview:      m.Overview,
 		ReleaseDate:   jsonTime(m.ReleaseDate),
 		VoteAverage:   m.VoteAverage,
+		VoteCount:     m.VoteCount,
 		PosterURL:     m.PosterURL,
 	}
 }
@@ -132,6 +135,7 @@ func seriesMetaDTO(sr core.SeriesMeta) seriesMetaJSON {
 		Status:        sr.Status,
 		FirstAirDate:  jsonTime(sr.FirstAirDate),
 		VoteAverage:   sr.VoteAverage,
+		VoteCount:     sr.VoteCount,
 		PosterURL:     sr.PosterURL,
 	}
 }

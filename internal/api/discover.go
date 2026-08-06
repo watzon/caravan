@@ -60,6 +60,7 @@ type discoverItemJSON struct {
 	PosterURL   string  `json:"poster_url"`
 	BackdropURL string  `json:"backdrop_url"`
 	VoteAverage float64 `json:"vote_average"`
+	VoteCount   int     `json:"vote_count"`
 	// Date is the release date for a movie and the first air date for a
 	// series, empty when the provider has none.
 	Date string `json:"date"`
@@ -416,6 +417,7 @@ func (st *libraryState) decorate(item core.DiscoverItem) discoverItemJSON {
 		PosterURL:   item.PosterURL,
 		BackdropURL: item.BackdropURL,
 		VoteAverage: item.VoteAverage,
+		VoteCount:   item.VoteCount,
 		Date:        jsonDate(item.Date),
 		InLibrary:   libraryID != 0,
 		LibraryID:   libraryID,

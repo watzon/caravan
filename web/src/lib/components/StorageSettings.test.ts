@@ -8,6 +8,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import Settings from '../routes/Settings.svelte';
+import { reactiveProps } from '../reactiveprops.svelte';
 import { system } from '../state/system.svelte';
 import { clearToasts, toasts } from '../state/toast.svelte';
 import type { StorageMigration, StorageMigrationStatus, SystemStatus } from '../api/types';
@@ -60,6 +61,7 @@ let repointReply: unknown = { root: '/new-root', warnings: [], restart_required:
 let repointStatus = 200;
 let storageRoot = '/old-root';
 let mode: SystemStatus['mode'] = 'server';
+let storedSettings: Record<string, string> = {};
 
 beforeEach(() => {
   host = document.createElement('div');
@@ -71,6 +73,7 @@ beforeEach(() => {
   repointStatus = 200;
   storageRoot = '/old-root';
   mode = 'server';
+  storedSettings = { storage_root: storageRoot };
   system.status = null;
   clearToasts();
 
@@ -95,7 +98,12 @@ beforeEach(() => {
         return jsonResponse(migration.migration, 202);
       }
       if (url.endsWith('/system/storage-root/migration')) return jsonResponse(migration);
-      if (url.endsWith('/settings')) return jsonResponse({ storage_root: storageRoot });
+      if (url.endsWith('/settings') && method === 'PUT') {
+        const patch = JSON.parse(String(init?.body)) as Record<string, string>;
+        storedSettings = { ...storedSettings, ...patch };
+        return jsonResponse({ ...storedSettings, storage_root: storageRoot });
+      }
+      if (url.endsWith('/settings')) return jsonResponse({ ...storedSettings, storage_root: storageRoot });
       if (url.endsWith('/system/status')) return jsonResponse({ ...STATUS, mode, storage_root: storageRoot });
       throw new Error(`unexpected fetch: ${url}`);
     }),
@@ -301,6 +309,36 @@ describe('Storage settings', () => {
       }),
     });
     expect(button('Save recycle and naming').hasAttribute('disabled')).toBe(true);
+  });
+
+  it('keeps saved naming authoritative when the mounted Settings shell changes sections', async () => {
+    await system.refresh();
+    const props = reactiveProps({ section: 'storage' });
+    app = mount(Settings, { target: host, props: props.props });
+    await settle();
+
+    type('#settings-recycle-retention', '30');
+    button('Save recycle and naming').click();
+    await settle();
+
+    props.set({ section: 'metadata' });
+    await settle();
+    expect(host.querySelector('#settings-recycle-retention')).toBeNull();
+
+    props.set({ section: 'storage' });
+    await settle();
+    expect((host.querySelector('#settings-recycle-retention') as HTMLInputElement).value).toBe('30');
+
+    type('#settings-movie-folder-format', '{year} - {title}');
+    button('Save recycle and naming').click();
+    await settle();
+
+    expect(puts.at(-1)?.body).toEqual(
+      expect.objectContaining({
+        recycle_retention_days: '30',
+        movie_folder_format: '{year} - {title}',
+      }),
+    );
   });
 
   it('does not save zero-day retention until permanent deletion is confirmed', async () => {

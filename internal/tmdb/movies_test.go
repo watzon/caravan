@@ -28,6 +28,7 @@ func TestSearchMovies(t *testing.T) {
 			Year:          1982,
 			Overview:      "In the smog-choked dystopian Los Angeles of 2019, blade runner Rick Deckard is called out of retirement to terminate a quartet of replicants who have escaped to Earth seeking their creator for a way to extend their short life spans.",
 			VoteAverage:   7.9,
+			VoteCount:     12894,
 			ReleaseDate:   time.Date(1982, 6, 25, 0, 0, 0, 0, time.UTC),
 			PosterURL:     "https://image.tmdb.org/t/p/w500/63N9uy8nd9j7Eog2axPQ8lbr3Wj.jpg",
 		},
@@ -38,6 +39,7 @@ func TestSearchMovies(t *testing.T) {
 			Year:          2017,
 			Overview:      "Thirty years after the events of the first film, a new blade runner, LAPD Officer K, unearths a long-buried secret that has the potential to plunge what's left of society into chaos.",
 			VoteAverage:   7.6,
+			VoteCount:     11703,
 			ReleaseDate:   time.Date(2017, 10, 4, 0, 0, 0, 0, time.UTC),
 			PosterURL:     "https://image.tmdb.org/t/p/w500/gajva2L0rPYkEWjzgFlBXCAVBE5.jpg",
 		},
@@ -92,6 +94,7 @@ func TestGetMovie(t *testing.T) {
 		Year:          1982,
 		Overview:      "In the smog-choked dystopian Los Angeles of 2019, blade runner Rick Deckard is called out of retirement to terminate a quartet of replicants who have escaped to Earth seeking their creator for a way to extend their short life spans.",
 		VoteAverage:   7.9,
+		VoteCount:     12894,
 		ReleaseDate:   time.Date(1982, 6, 25, 0, 0, 0, 0, time.UTC),
 		// The earliest of each home-release type across every region, not the
 		// US one: the fixture's earliest digital is German, its earliest
@@ -132,5 +135,37 @@ func TestMovieVoteAverageDefaultsToZero(t *testing.T) {
 	}
 	if got := detail.VoteAverage; got != 0 {
 		t.Errorf("detail VoteAverage = %v, want 0", got)
+	}
+}
+
+func TestMovieVoteCountDefaultsToZeroWhenOmitted(t *testing.T) {
+	c, _ := newStub(t, map[string][]response{
+		"/search/movie": {{status: http.StatusOK, body: []byte(`{"results":[{"id":1,"vote_average":7.4}]}`)}},
+		"/movie/1":      {{status: http.StatusOK, body: []byte(`{"id":1,"vote_average":8.1}`)}},
+	})
+
+	results, err := c.SearchMovies(context.Background(), "few votes")
+	if err != nil {
+		t.Fatalf("SearchMovies: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("got %d results, want 1", len(results))
+	}
+	if got := results[0].VoteAverage; got != 7.4 {
+		t.Errorf("search VoteAverage = %v, want 7.4", got)
+	}
+	if got := results[0].VoteCount; got != 0 {
+		t.Errorf("search VoteCount = %d, want 0", got)
+	}
+
+	detail, err := c.GetMovie(context.Background(), 1)
+	if err != nil {
+		t.Fatalf("GetMovie: %v", err)
+	}
+	if got := detail.VoteAverage; got != 8.1 {
+		t.Errorf("detail VoteAverage = %v, want 8.1", got)
+	}
+	if got := detail.VoteCount; got != 0 {
+		t.Errorf("detail VoteCount = %d, want 0", got)
 	}
 }

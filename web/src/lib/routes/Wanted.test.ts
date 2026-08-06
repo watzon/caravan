@@ -48,6 +48,7 @@ beforeEach(() => {
         episodes: [
           { id: 10, series_id: 3, series_title: 'Severance', season_number: 1, episode_number: 2, title: 'Half Loop', air_date: '2026-07-14', poster_path: 'TV/Severance/poster.jpg', poster_url: '', reason: 'missing', file_quality: '' },
           { id: 11, series_id: 3, series_title: 'Severance', season_number: 1, episode_number: 3, title: 'In Perpetuity', air_date: '', poster_path: 'TV/Severance/poster.jpg', poster_url: '', reason: 'missing', file_quality: '' },
+          { id: 12, series_id: 3, series_title: 'Severance', season_number: 1, episode_number: 4, title: 'The You You Are', air_date: '2026-07-28', poster_path: 'TV/Severance/poster.jpg', poster_url: '', reason: 'below_cutoff', file_quality: '720p' },
         ],
       });
     }
@@ -106,15 +107,21 @@ describe('Wanted', () => {
     expect(host.querySelector('a[href="/series/3/search/1/2"]')).not.toBeNull();
     expect(host.textContent).not.toContain('Blade Runner');
 
-    const belowCutoff = [...host.querySelectorAll('[role="tab"]')].find((tab) =>
-      tab.textContent?.includes('Below cutoff'),
-    ) as HTMLButtonElement | undefined;
-    expect(belowCutoff).toBeDefined();
+    const belowCutoffName = 'Below quality cutoff 2';
+    const belowCutoff = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(
+      (tab) => tab.textContent?.replace(/\s+/g, ' ').trim() === belowCutoffName,
+    );
+    expect(belowCutoff?.textContent?.replace(/\s+/g, ' ').trim()).toBe(belowCutoffName);
     belowCutoff!.click();
     flushSync();
 
     expect(host.textContent).toContain('Blade Runner (1982)');
     expect(host.textContent).toContain('720p on disk, cutoff 1080p');
+    const movieRow = host.querySelector('a[href="/movies/8/search"]')?.closest('li');
+    const episodeRow = host.querySelector('a[href="/series/3/search/1/4"]')?.closest('li');
+    expect(movieRow?.textContent).toContain('Below quality cutoff');
+    expect(episodeRow?.textContent).toContain('Below quality cutoff');
+    expect(host.textContent).not.toContain('Below cutoff');
     expect(host.textContent).not.toContain('Arrival (2016)');
     expect(host.querySelector('a[href="/movies/8/search"]')).not.toBeNull();
   });

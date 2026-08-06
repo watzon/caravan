@@ -24,7 +24,7 @@
 
   let { item, showType = false }: Props = $props();
 
-  let rating = $derived(ratingPresentation(item.vote_average, item.date));
+  let rating = $derived(ratingPresentation(item.vote_average, item.vote_count, item.date));
 </script>
 
 <a

@@ -125,8 +125,26 @@ describe('AddItemModal', () => {
   it('walks the results with Up/Down and hands focus back to the field from the top', async () => {
     vi.useFakeTimers();
     const movies = [
-      { tmdb_id: 1, title: 'Dune', year: 2021, overview: '', poster_url: '' },
-      { tmdb_id: 2, title: 'Dune: Part Two', year: 2024, overview: '', poster_url: '' },
+      {
+        tmdb_id: 1,
+        title: 'Dune',
+        year: 2021,
+        overview: '',
+        release_date: '2021-10-22',
+        vote_average: 8.1,
+        vote_count: 12_341,
+        poster_url: '',
+      },
+      {
+        tmdb_id: 2,
+        title: 'Dune: Part Two',
+        year: 2024,
+        overview: '',
+        release_date: '2024-03-01',
+        vote_average: 8.5,
+        vote_count: 8_921,
+        poster_url: '',
+      },
     ];
     vi.stubGlobal(
       'fetch',
@@ -179,6 +197,7 @@ describe('AddItemModal', () => {
       overview: '',
       release_date: '2021-10-22',
       vote_average: 8.1,
+      vote_count: 12_341,
       poster_url: '',
     },
   ];
@@ -190,6 +209,7 @@ describe('AddItemModal', () => {
       overview: '',
       first_air_date: '2022-02-18',
       vote_average: 8.7,
+      vote_count: 4_208,
       poster_url: '',
     },
   ];
@@ -380,6 +400,7 @@ describe('AddItemModal', () => {
           overview: '',
           release_date: '1984-12-14',
           vote_average: 6.3,
+          vote_count: 1_847,
           poster_url: '',
         },
         {
@@ -389,6 +410,7 @@ describe('AddItemModal', () => {
           overview: '',
           release_date: '2021-10-22',
           vote_average: 8.1,
+          vote_count: 12_341,
           poster_url: '',
         },
       ],
@@ -413,7 +435,7 @@ describe('AddItemModal', () => {
     expect(rows[1]!.textContent).toContain('8.1/10');
   });
 
-  it('shows a zero provider vote as unrated instead of inferring a score', async () => {
+  it('suppresses a nonzero provider average when its vote count is zero', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-08-05T12:00:00Z'));
     stubSearchAndAdd({
@@ -424,7 +446,8 @@ describe('AddItemModal', () => {
           year: 2020,
           overview: '',
           release_date: '2020-01-01',
-          vote_average: 0,
+          vote_average: 8.6,
+          vote_count: 0,
           poster_url: '',
         },
       ],
@@ -437,7 +460,7 @@ describe('AddItemModal', () => {
     const row = host!.querySelector('ul li')!;
     expect(row.textContent).toContain('2020');
     expect(row.textContent).toContain('Not yet rated');
-    expect(row.textContent).not.toContain('0.0/10');
+    expect(row.textContent).not.toContain('8.6/10');
   });
 
   it('suppresses a numeric rating for a future first-air date', async () => {
@@ -453,6 +476,7 @@ describe('AddItemModal', () => {
           overview: '',
           first_air_date: '2027-01-10',
           vote_average: 9.8,
+          vote_count: 86,
           poster_url: '',
         },
       ],
@@ -479,6 +503,7 @@ describe('AddItemModal', () => {
           overview: '',
           release_date: '2027-04-02',
           vote_average: 7.4,
+          vote_count: 37,
           poster_url: '',
         },
       ],
@@ -492,6 +517,7 @@ describe('AddItemModal', () => {
     resultButton().click();
     flushSync();
     expect(buttonWithText('Add unreleased title')).not.toBeNull();
+    expect(host!.textContent).toContain('has not been released yet');
     expect(calls.filter((call) => call.method === 'POST')).toHaveLength(0);
 
     buttonWithText('Cancel')!.click();
@@ -504,6 +530,81 @@ describe('AddItemModal', () => {
     await vi.advanceTimersByTimeAsync(0);
     flushSync();
     expect(calls.filter((call) => call.method === 'POST')).toHaveLength(1);
+  });
+
+  it.each([
+    {
+      case: 'an empty movie release date',
+      initialKind: 'movie' as const,
+      title: 'Undated Film',
+      expectedURL: '/api/v1/library/movies',
+      results: {
+        movies: [
+          {
+            tmdb_id: 16,
+            title: 'Undated Film',
+            year: 0,
+            overview: '',
+            release_date: '',
+            vote_average: 7.2,
+            vote_count: 24,
+            poster_url: '',
+          },
+        ],
+        series: [],
+      },
+    },
+    {
+      case: 'an invalid series first-air date',
+      initialKind: 'series' as const,
+      title: 'Impossible Premiere',
+      expectedURL: '/api/v1/library/series',
+      results: {
+        movies: [],
+        series: [
+          {
+            tmdb_id: 17,
+            title: 'Impossible Premiere',
+            year: 2026,
+            overview: '',
+            first_air_date: '2026-02-30',
+            vote_average: 8.3,
+            vote_count: 91,
+            poster_url: '',
+          },
+        ],
+      },
+    },
+  ])('requires confirmation for $case and sends no request when cancelled', async ({
+    initialKind,
+    title,
+    expectedURL,
+    results,
+  }) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-05T12:00:00Z'));
+    const calls = stubSearchAndAdd(results);
+    mountModal({ initialKind });
+    await addSearchResults(title);
+
+    resultButton().click();
+    flushSync();
+    expect(host!.textContent).toContain(`${title}'s release date is unknown.`);
+    expect(buttonWithText('Add title anyway')).not.toBeNull();
+    expect(calls.filter((call) => call.method === 'POST')).toHaveLength(0);
+
+    buttonWithText('Cancel')!.click();
+    flushSync();
+    expect(calls.filter((call) => call.method === 'POST')).toHaveLength(0);
+
+    resultButton().click();
+    flushSync();
+    buttonWithText('Add title anyway')!.click();
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+    expect(calls.filter((call) => call.method === 'POST')).toEqual([
+      expect.objectContaining({ url: expectedURL }),
+    ]);
   });
 
   it('keeps released titles as a one-click add', async () => {
@@ -540,7 +641,7 @@ describe('AddItemModal', () => {
     expect(pushState).toHaveBeenCalledWith({}, '', '/movies/41');
   });
 
-  it('keeps a future manual match as one click with no add confirmation or request', async () => {
+  it('keeps an unknown-date manual match as one click with no add confirmation or request', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-08-05T12:00:00Z'));
     const onpick = vi.fn();
@@ -548,11 +649,12 @@ describe('AddItemModal', () => {
       movies: [
         {
           tmdb_id: 15,
-          title: 'Future Match',
-          year: 2028,
+          title: 'Undated Match',
+          year: 0,
           overview: '',
-          release_date: '2028-02-03',
+          release_date: '',
           vote_average: 8.8,
+          vote_count: 42,
           poster_url: '',
         },
       ],
@@ -560,12 +662,13 @@ describe('AddItemModal', () => {
     });
     mountModal({ kind: 'movie', onpick });
 
-    await addSearchResults('future match');
+    await addSearchResults('undated match');
     resultButton().click();
     await vi.advanceTimersByTimeAsync(0);
     flushSync();
 
     expect(onpick).toHaveBeenCalledWith('movie', 15);
+    expect(buttonWithText('Add title anyway')).toBeNull();
     expect(buttonWithText('Add unreleased title')).toBeNull();
     expect(calls.filter((call) => call.method === 'POST')).toHaveLength(0);
   });
@@ -1041,7 +1144,18 @@ describe('AddItemModal — metadata credential', () => {
       if (post) return coded('metadata_credential_invalid', 'the TMDB API key was rejected');
       return new Response(
         JSON.stringify({
-          movies: [{ tmdb_id: 1, title: 'Dune', year: 2021, overview: '', poster_url: '' }],
+          movies: [
+            {
+              tmdb_id: 1,
+              title: 'Dune',
+              year: 2021,
+              overview: '',
+              release_date: '2021-10-22',
+              vote_average: 8.1,
+              vote_count: 12_341,
+              poster_url: '',
+            },
+          ],
           series: [],
         }),
         { status: 200, headers: { 'Content-Type': 'application/json' } },
@@ -1112,7 +1226,18 @@ describe('AddItemModal — metadata credential', () => {
           });
         }
         return ok({
-          movies: [{ tmdb_id: 1, title: 'Dune', year: 2021, overview: '', poster_url: '' }],
+          movies: [
+            {
+              tmdb_id: 1,
+              title: 'Dune',
+              year: 2021,
+              overview: '',
+              release_date: '2021-10-22',
+              vote_average: 8.1,
+              vote_count: 12_341,
+              poster_url: '',
+            },
+          ],
           series: [],
         });
       }),

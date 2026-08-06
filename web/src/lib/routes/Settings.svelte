@@ -274,7 +274,7 @@
     {:else if activeEntry?.route === '/settings/indexers'}
       <IndexerSettings />
     {:else if activeEntry?.route === '/settings/storage' && settings}
-      <StorageSettings {settings} />
+      <StorageSettings {settings} {saving} onsave={save} />
     {:else if activeEntry?.route === '/settings/quality-profiles'}
       <QualityProfiles />
     {:else if activeEntry?.route === '/settings/users'}

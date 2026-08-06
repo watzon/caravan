@@ -43,12 +43,12 @@ export function mediaTypeChip(mediaType: MediaType): string {
 }
 
 /**
- * TMDB's 0-10 vote as one decimal, or null when nobody has voted yet. Zero is
- * "unrated", not "rated zero", so it must not render as a score.
+ * TMDB's 0-10 vote as one decimal, or null when there is no positive score
+ * backed by at least one vote.
  */
-export function ratingText(vote: number): string | null {
-  if (!Number.isFinite(vote) || vote <= 0) return null;
-  return vote.toFixed(1);
+export function ratingText(voteAverage: number, voteCount: number): string | null {
+  if (!(voteCount > 0) || !Number.isFinite(voteAverage) || voteAverage <= 0) return null;
+  return voteAverage.toFixed(1);
 }
 
 export interface RatingPresentation {
@@ -59,16 +59,16 @@ export interface RatingPresentation {
 /**
  * A rating badge's visible score and explanation.
  *
- * A provider score is not meaningful before the title's release date. Keep
- * `ratingText` as the raw vote formatter for existing callers; discover cards
- * and billboards use this release-aware presentation instead.
+ * A provider score is meaningful only when at least one person voted and the
+ * title has a known, valid release date that is not in the future.
  */
 export function ratingPresentation(
-  vote: number,
+  voteAverage: number,
+  voteCount: number,
   releaseDate: string,
   today: Date = new Date(),
 ): RatingPresentation {
-  const rating = ratingText(vote);
+  const rating = ratingText(voteAverage, voteCount);
   const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(releaseDate);
   if (!rating || !dateMatch || !Number.isFinite(today.getTime())) {
     return { text: null, title: 'Not yet rated' };

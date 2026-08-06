@@ -24,7 +24,7 @@
     canRequestSeason,
     languageName,
     libraryHref,
-    ratingText,
+    ratingPresentation,
     runtimeText,
     seasonMeta,
     type RequestMode,
@@ -65,7 +65,11 @@
 
   onMount(load);
 
-  let rating = $derived(title ? ratingText(title.vote_average) : null);
+  let rating = $derived(
+    title
+      ? ratingPresentation(title.vote_average, title.vote_count, title.date)
+      : { text: null, title: 'Not yet rated' },
+  );
   let genre = $derived(title?.genres[0] ?? '');
   let episodeTotal = $derived(
     (title?.seasons ?? []).reduce((sum, s) => sum + Math.max(0, s.episode_count), 0),
@@ -304,7 +308,7 @@
         <div class="flex gap-3">
           <div class="flex flex-1 flex-col gap-1 rounded-md bg-raised p-3">
             <span class="micro-label">TMDB</span>
-            <span class="font-mono text-md text-ink">{rating ?? UNKNOWN}</span>
+            <span class="font-mono text-md text-ink" title={rating.title}>{rating.text ?? rating.title}</span>
           </div>
         </div>
 

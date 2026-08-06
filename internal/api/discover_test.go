@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -163,10 +164,20 @@ type discoverHomeBody struct {
 
 func TestDiscoverHomeDecoratesLibraryAndRequests(t *testing.T) {
 	ctx := context.Background()
+	trendingMovie := movieItem(78, "Blade Runner")
+	trendingMovie.VoteAverage = 8.1
+	trendingMovie.VoteCount = 9_834
+	trendingSeries := seriesItem(1396, "Breaking Bad")
+	trendingSeries.VoteAverage = 8.9
+	trendingSeries.VoteCount = 15_672
+	popularMovie := movieItem(335984, "Blade Runner 2049")
+	popularMovie.VoteAverage = 7.6
+	popularSeries := seriesItem(66732, "Stranger Things")
+	popularSeries.VoteAverage = 8.5
 	p := &stubDiscoverProvider{
-		trending:      []core.DiscoverItem{movieItem(78, "Blade Runner"), seriesItem(1396, "Breaking Bad")},
-		popularMovies: []core.DiscoverItem{movieItem(335984, "Blade Runner 2049")},
-		popularSeries: []core.DiscoverItem{seriesItem(66732, "Stranger Things")},
+		trending:      []core.DiscoverItem{trendingMovie, trendingSeries},
+		popularMovies: []core.DiscoverItem{popularMovie},
+		popularSeries: []core.DiscoverItem{popularSeries},
 	}
 	h, st := discoverServer(t, p)
 
@@ -183,6 +194,7 @@ func TestDiscoverHomeDecoratesLibraryAndRequests(t *testing.T) {
 
 	rec := do(t, h, http.MethodGet, "/api/v1/discover", "")
 	wantStatus(t, rec, http.StatusOK)
+	rawBody := rec.Body.String()
 
 	var body discoverHomeBody
 	decodeBody(t, rec, &body)
@@ -205,11 +217,26 @@ func TestDiscoverHomeDecoratesLibraryAndRequests(t *testing.T) {
 	if body.Trending[0].Date != "1982-06-25" {
 		t.Errorf("date = %q, want 1982-06-25", body.Trending[0].Date)
 	}
+	if body.Trending[0].VoteAverage != 8.1 || body.Trending[0].VoteCount != 9_834 {
+		t.Errorf("trending movie rating = %g from %d votes, want 8.1 from 9834", body.Trending[0].VoteAverage, body.Trending[0].VoteCount)
+	}
+	if body.Trending[1].VoteAverage != 8.9 || body.Trending[1].VoteCount != 15_672 {
+		t.Errorf("trending series rating = %g from %d votes, want 8.9 from 15672", body.Trending[1].VoteAverage, body.Trending[1].VoteCount)
+	}
 	if body.PopularMovies[0].InLibrary || body.PopularMovies[0].Requested {
 		t.Errorf("popular movie = %+v, want neither flag", body.PopularMovies[0])
 	}
 	if body.PopularSeries[0].TMDBID != 66732 {
 		t.Errorf("popular series = %+v, want tmdb 66732", body.PopularSeries[0])
+	}
+	if body.PopularMovies[0].VoteAverage != 7.6 || body.PopularMovies[0].VoteCount != 0 {
+		t.Errorf("popular movie rating = %g from %d votes, want 7.6 from 0", body.PopularMovies[0].VoteAverage, body.PopularMovies[0].VoteCount)
+	}
+	if body.PopularSeries[0].VoteAverage != 8.5 || body.PopularSeries[0].VoteCount != 0 {
+		t.Errorf("popular series rating = %g from %d votes, want 8.5 from 0", body.PopularSeries[0].VoteAverage, body.PopularSeries[0].VoteCount)
+	}
+	if got := strings.Count(rawBody, `"vote_count":0`); got != 2 {
+		t.Fatalf("zero vote_count fields = %d, want 2 in %s", got, rawBody)
 	}
 }
 

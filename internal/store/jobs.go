@@ -51,6 +51,52 @@ func (s *Store) EnqueueJob(ctx context.Context, j *core.Job) error {
 	return nil
 }
 
+// EnqueueJobIfNotOpen appends a job only when no pending or running job has
+// the same kind and payload. The existence check and insert are one SQLite
+// statement, so concurrent callers using different Store handles cannot both
+// add the same open job.
+//
+// A zero RunAfter means "eligible immediately".
+func (s *Store) EnqueueJobIfNotOpen(ctx context.Context, j *core.Job) (bool, error) {
+	ts := now()
+	createdAt := j.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = ts
+	}
+	state := core.JobStatePending
+
+	res, err := s.db.ExecContext(ctx, `
+		INSERT INTO jobs (kind, payload, state, attempts, run_after, lease_expires_at,
+			last_error, created_at, updated_at)
+		SELECT ?, ?, ?, ?, ?, '', '', ?, ?
+		WHERE NOT EXISTS (
+			SELECT 1 FROM jobs
+			WHERE kind = ? AND payload = ? AND state IN (?, ?)
+		)`,
+		j.Kind, j.Payload, state, j.Attempts, formatTime(j.RunAfter),
+		formatTime(createdAt), formatTime(ts),
+		j.Kind, j.Payload, core.JobStatePending, core.JobStateRunning)
+	if err != nil {
+		return false, fmt.Errorf("store: enqueue %s job if not open: %w", j.Kind, err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("store: enqueue %s job if not open: %w", j.Kind, err)
+	}
+	if affected == 0 {
+		return false, nil
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return false, fmt.Errorf("store: enqueue %s job if not open: %w", j.Kind, err)
+	}
+	j.ID = id
+	j.CreatedAt = createdAt
+	j.UpdatedAt = ts
+	j.State = state
+	return true, nil
+}
+
 // ClaimJob takes the oldest eligible job of one of the given kinds and leases
 // it for the given duration. An empty kinds slice claims any kind.
 //

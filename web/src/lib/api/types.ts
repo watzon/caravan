@@ -177,6 +177,8 @@ export interface MovieMeta {
   overview: string;
   release_date: string;
   vote_average: number;
+  /** Number of provider votes behind `vote_average`. */
+  vote_count: number;
   /** Absolute provider URL. */
   poster_url: string;
 }
@@ -193,6 +195,8 @@ export interface SeriesMeta {
   status: string;
   first_air_date: string;
   vote_average: number;
+  /** Number of provider votes behind `vote_average`. */
+  vote_count: number;
   /** Absolute provider URL. */
   poster_url: string;
 }
@@ -1410,6 +1414,8 @@ export interface DiscoverItem {
   backdrop_url: string;
   /** TMDB's 0-10 vote average; 0 when nobody has voted. */
   vote_average: number;
+  /** Number of TMDB votes behind `vote_average`. */
+  vote_count: number;
   /** Release date (movie) or first air date (series); "" when unknown. */
   date: string;
   in_library: boolean;

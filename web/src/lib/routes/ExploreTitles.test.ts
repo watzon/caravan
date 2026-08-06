@@ -25,6 +25,7 @@ function item(tmdbID: number, inLibrary = false): DiscoverItem {
     poster_url: '',
     backdrop_url: '',
     vote_average: 8,
+    vote_count: 1,
     date: '2024-01-01',
     in_library: inLibrary,
     library_id: inLibrary ? 3 : 0,

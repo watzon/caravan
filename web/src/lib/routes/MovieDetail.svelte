@@ -1,8 +1,8 @@
 <script lang="ts">
   /** Movie detail (DESIGN.md §4: 32px display item title, machine text in mono). */
-  import { onMount } from 'svelte';
+  import { onDestroy, onMount } from 'svelte';
   import { api, errorText } from '../api/client';
-  import type { MinAvailability, Movie } from '../api/types';
+  import type { CastMember, MinAvailability, Movie } from '../api/types';
   import { AVAILABILITY_OPTIONS } from '../discover';
   import Badge from '../components/Badge.svelte';
   import Button from '../components/Button.svelte';
@@ -38,20 +38,42 @@
   let searching = $state(false);
   let confirmingRemove = $state(false);
   let removing = $state(false);
+  let cast = $state<CastMember[]>([]);
+  let loadAbort: AbortController | null = null;
 
-  async function load() {
-    loading = true;
+  async function loadCast(tmdbID: number, controller: AbortController) {
     try {
-      movie = await api.getMovie(id);
-      error = null;
-    } catch (err) {
-      error = errorText(err);
-    } finally {
-      loading = false;
+      const detail = await api.discoverTitle('movie', tmdbID, controller.signal);
+      if (loadAbort === controller && !controller.signal.aborted) {
+        cast = detail.cast ?? [];
+      }
+    } catch {
+      // Cast is supplemental: unavailable metadata never hides the library movie.
     }
   }
 
-  onMount(load);
+  async function load() {
+    loadAbort?.abort();
+    const controller = new AbortController();
+    loadAbort = controller;
+    cast = [];
+    loading = true;
+    try {
+      const loaded = await api.getMovie(id, controller.signal);
+      if (loadAbort !== controller || controller.signal.aborted) return;
+      movie = loaded;
+      error = null;
+      if (loaded.tmdb_id > 0) void loadCast(loaded.tmdb_id, controller);
+    } catch (err) {
+      if (loadAbort !== controller || controller.signal.aborted) return;
+      error = errorText(err);
+    } finally {
+      if (loadAbort === controller && !controller.signal.aborted) loading = false;
+    }
+  }
+
+  onMount(() => void load());
+  onDestroy(() => loadAbort?.abort());
 
   async function setMonitored(next: boolean) {
     const current = movie;
@@ -215,6 +237,29 @@
         <p class="max-w-3xl text-md text-ink-secondary">
           {movie.overview || 'No overview available.'}
         </p>
+
+        {#if cast.length > 0}
+          <section class="max-w-3xl" aria-labelledby="movie-cast-heading">
+            <h3 id="movie-cast-heading" class="micro-label">Cast</h3>
+            <ul class="mt-2 grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-2">
+              {#each cast.slice(0, 6) as member (`${member.tmdb_id}-${member.name}-${member.character}`)}
+                <li class="flex min-w-0 items-baseline gap-2 text-sm">
+                  <span class="min-w-0 flex-1 truncate text-ink" title={member.name}>
+                    {member.name}
+                  </span>
+                  {#if member.character}
+                    <span class="shrink-0 text-xs text-ink-muted">as</span>
+                    <span
+                      class="min-w-0 flex-1 truncate text-ink-secondary"
+                      title={member.character}>
+                      {member.character}
+                    </span>
+                  {/if}
+                </li>
+              {/each}
+            </ul>
+          </section>
+        {/if}
 
         <dl class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
           <div>

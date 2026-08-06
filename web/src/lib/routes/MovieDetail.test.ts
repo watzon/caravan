@@ -70,7 +70,7 @@ const LIBRARIES = [
 
 let host: HTMLElement;
 let app: Record<string, unknown> | undefined;
-let calls: { url: string; method: string; body: unknown }[];
+let calls: { url: string; method: string; body: unknown; signal?: AbortSignal }[];
 
 // A movie with an imported file: the delete-files checkbox is only offered
 // when there is something on disk to delete.
@@ -96,6 +96,8 @@ function stubFetch(
   movie: unknown = MOVIE,
   assignedMovie: unknown = movie,
   profileChoicesStatus = 200,
+  discover: unknown = { cast: [] },
+  discoverStatus = 200,
 ) {
   calls = [];
   vi.stubGlobal(
@@ -107,6 +109,7 @@ function stubFetch(
         url,
         method: init?.method ?? 'GET',
         body,
+        signal: init?.signal ?? undefined,
       });
       if (url.endsWith('/quality-profiles')) {
         return new Response(
@@ -122,6 +125,12 @@ function stubFetch(
       if (url.endsWith('/libraries')) {
         return new Response(JSON.stringify({ libraries: LIBRARIES }), {
           status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.includes('/discover/movie/')) {
+        return new Response(JSON.stringify(discover), {
+          status: discoverStatus,
           headers: { 'Content-Type': 'application/json' },
         });
       }
@@ -239,6 +248,70 @@ describe('MovieDetail facts', () => {
     ]);
     expect(new Set(labels).size).toBe(labels.length);
     expect(labels).not.toEqual(expect.arrayContaining(['Year', 'Status', 'Release date']));
+  });
+});
+
+describe('MovieDetail cast', () => {
+  it('loads cast by the movie TMDB id and preserves full truncated text in tooltips', async () => {
+    const name = 'Rebecca Very-Long-Name Ferguson';
+    const character = 'Lady Jessica of House Atreides';
+    stubFetch(0, MOVIE, MOVIE, 200, {
+      cast: [{ tmdb_id: 933238, name, character, profile_url: '' }],
+    });
+    app = mount(MovieDetail, { target: host, props: { id: 7 } });
+    await settle();
+
+    expect(
+      calls.filter((call) => call.url.includes('/discover/')).map((call) => call.url),
+    ).toEqual(['/api/v1/discover/movie/438631']);
+
+    const section = host.querySelector('#movie-cast-heading')?.closest('section');
+    expect(section?.textContent).toContain('Cast');
+    const [renderedName, renderedCharacter] =
+      section?.querySelectorAll<HTMLElement>('li [title]') ?? [];
+    expect(renderedName?.textContent?.trim()).toBe(name);
+    expect(renderedName?.classList.contains('truncate')).toBe(true);
+    expect(renderedName?.title).toBe(name);
+    expect(renderedCharacter?.textContent?.trim()).toBe(character);
+    expect(renderedCharacter?.classList.contains('truncate')).toBe(true);
+    expect(renderedCharacter?.title).toBe(character);
+  });
+
+  it.each([
+    { condition: 'empty', response: { cast: [] }, status: 200 },
+    { condition: 'failing', response: { error: 'Metadata unavailable' }, status: 503 },
+  ])(
+    'keeps the library movie visible when cast metadata is $condition',
+    async ({ response, status }) => {
+      stubFetch(0, MOVIE, MOVIE, 200, response, status);
+      app = mount(MovieDetail, { target: host, props: { id: 7 } });
+      await settle();
+
+      expect(host.querySelector('h2')?.textContent).toContain('Dune');
+      expect(host.querySelector('#movie-cast-heading')).toBeNull();
+      expect(toasts.items).toHaveLength(0);
+    },
+  );
+
+  it('does not ask Discover for a movie without a positive TMDB id', async () => {
+    stubFetch(0, { ...MOVIE, tmdb_id: 0 });
+    app = mount(MovieDetail, { target: host, props: { id: 7 } });
+    await settle();
+
+    expect(calls.some((call) => call.url.includes('/discover/'))).toBe(false);
+    expect(host.querySelector('h2')?.textContent).toContain('Dune');
+  });
+
+  it('aborts the supplemental request when the detail route unmounts', async () => {
+    stubFetch(0);
+    app = mount(MovieDetail, { target: host, props: { id: 7 } });
+    await settle();
+
+    const signal = calls.find((call) => call.url.includes('/discover/'))?.signal;
+    expect(signal?.aborted).toBe(false);
+    unmount(app);
+    app = undefined;
+    expect(signal?.aborted).toBe(true);
   });
 });
 

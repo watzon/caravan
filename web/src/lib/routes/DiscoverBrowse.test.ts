@@ -20,6 +20,7 @@ function item(tmdbID: number): DiscoverItem {
     poster_url: '',
     backdrop_url: '',
     vote_average: 7,
+    vote_count: 1,
     date: '2020-01-01',
     in_library: false,
     library_id: 0,

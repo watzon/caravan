@@ -33,6 +33,7 @@ func TestTrendingWeekDropsNonTitles(t *testing.T) {
 			PosterURL:   "https://image.tmdb.org/t/p/w500/63N9uy8nd9j7Eog2axPQ8lbr3Wj.jpg",
 			BackdropURL: "https://image.tmdb.org/t/p/w780/hZkgoQYus5vegHoetLkCJzb17zJ.jpg",
 			VoteAverage: 7.9,
+			VoteCount:   12894,
 			Date:        time.Date(1982, 6, 25, 0, 0, 0, 0, time.UTC),
 		},
 		{
@@ -47,6 +48,7 @@ func TestTrendingWeekDropsNonTitles(t *testing.T) {
 			PosterURL:   "https://image.tmdb.org/t/p/w500/ggFHVNu6YYI5L9pCfOacjizRGt.jpg",
 			BackdropURL: "https://image.tmdb.org/t/p/w780/tsRy63Mu5cu8etL1X7ZLyf7UP1M.jpg",
 			VoteAverage: 8.9,
+			VoteCount:   12442,
 			Date:        time.Date(2008, 1, 20, 0, 0, 0, 0, time.UTC),
 		},
 		{
@@ -172,6 +174,9 @@ func TestMoviesByCompany(t *testing.T) {
 	if got.Items[0].MediaType != core.MediaTypeMovie {
 		t.Errorf("MediaType = %q, want %q", got.Items[0].MediaType, core.MediaTypeMovie)
 	}
+	if got.Items[0].VoteCount != 6100 {
+		t.Errorf("VoteCount = %d, want 6100", got.Items[0].VoteCount)
+	}
 
 	q := s.seen()[0].query
 	if q.Get("with_companies") != "41077" {
@@ -199,6 +204,9 @@ func TestSeriesByNetwork(t *testing.T) {
 	}
 	if got.Items[0].MediaType != core.MediaTypeSeries {
 		t.Errorf("MediaType = %q, want %q", got.Items[0].MediaType, core.MediaTypeSeries)
+	}
+	if got.Items[0].VoteCount != 16000 {
+		t.Errorf("VoteCount = %d, want 16000", got.Items[0].VoteCount)
 	}
 
 	q := s.seen()[0].query
@@ -270,6 +278,9 @@ func TestMovieDetail(t *testing.T) {
 	if got.Title != "Blade Runner" || got.Year != 1982 {
 		t.Errorf("title/year = %q/%d, want Blade Runner/1982", got.Title, got.Year)
 	}
+	if got.VoteCount != 12894 {
+		t.Errorf("VoteCount = %d, want 12894", got.VoteCount)
+	}
 	if got.Runtime != 117 {
 		t.Errorf("Runtime = %d, want 117", got.Runtime)
 	}
@@ -307,6 +318,10 @@ func TestMovieDetail(t *testing.T) {
 		t.Errorf("recommendation MediaType = %q, want %q",
 			got.Recommendations[0].MediaType, core.MediaTypeMovie)
 	}
+	if got.Recommendations[0].VoteAverage != 7.5 || got.Recommendations[0].VoteCount != 0 {
+		t.Errorf("recommendation rating = %v/%d, want 7.5/0 when vote_count is omitted",
+			got.Recommendations[0].VoteAverage, got.Recommendations[0].VoteCount)
+	}
 	if len(got.Seasons) != 0 {
 		t.Errorf("Seasons = %+v, want none on a movie", got.Seasons)
 	}
@@ -331,6 +346,9 @@ func TestSeriesDetail(t *testing.T) {
 	}
 	if got.Title != "Breaking Bad" || got.Year != 2008 {
 		t.Errorf("title/year = %q/%d, want Breaking Bad/2008", got.Title, got.Year)
+	}
+	if got.VoteCount != 12442 {
+		t.Errorf("VoteCount = %d, want 12442", got.VoteCount)
 	}
 	if got.Status != "Ended" {
 		t.Errorf("Status = %q, want Ended", got.Status)
@@ -381,6 +399,10 @@ func TestSeriesDetail(t *testing.T) {
 	}
 	if got.Recommendations[0].Title != "Stranger Things" {
 		t.Errorf("recommendation title = %q, want Stranger Things", got.Recommendations[0].Title)
+	}
+	if got.Recommendations[0].VoteAverage != 8.6 || got.Recommendations[0].VoteCount != 0 {
+		t.Errorf("recommendation rating = %v/%d, want 8.6/0 when vote_count is omitted",
+			got.Recommendations[0].VoteAverage, got.Recommendations[0].VoteCount)
 	}
 
 	if appended := s.seen()[0].query.Get("append_to_response"); appended != detailAppend {

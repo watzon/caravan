@@ -57,6 +57,7 @@ type discoverResult struct {
 	PosterPath   string  `json:"poster_path"`
 	BackdropPath string  `json:"backdrop_path"`
 	VoteAverage  float64 `json:"vote_average"`
+	VoteCount    int     `json:"vote_count"`
 	ReleaseDate  string  `json:"release_date"`
 	FirstAirDate string  `json:"first_air_date"`
 }
@@ -344,6 +345,7 @@ func (c *Client) discoverItem(r discoverResult, mediaType string) core.DiscoverI
 		PosterURL:   c.posterURL(r.PosterPath),
 		BackdropURL: c.backdropURL(r.BackdropPath),
 		VoteAverage: r.VoteAverage,
+		VoteCount:   r.VoteCount,
 		Date:        when,
 	}
 }
