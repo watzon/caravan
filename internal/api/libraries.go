@@ -169,10 +169,11 @@ func (s *server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 // library item the scanner cannot see, and the organizer's MkdirAll creates
 // the directory the moment the first import needs it.
 //
-// The new row is created with DLNA sharing off. Until the DLNA tree learns to
-// carve one container per library, a second library's items would ride the
-// default library's container under the default's flag — the wrong owner for
-// that decision — so the flag stays down and the form says so.
+// The new row is created with DLNA sharing off. The DLNA tree carves one
+// container per library, so the flag would work — but sharing a library over a
+// protocol with no accounts is a decision the owner makes, not one a create
+// form makes for them, so it starts down and the Reach card is where it goes
+// up.
 func (s *server) handleCreateLibrary(w http.ResponseWriter, r *http.Request) {
 	var body libraryCreateRequest
 	if !decodeJSON(w, r, &body) {
@@ -375,14 +376,6 @@ func (s *server) handleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
 	// so the flag moves by promoting the successor, never by clearing.
 	if body.IsDefault != nil && !*body.IsDefault {
 		writeError(w, http.StatusBadRequest, "make another library the default instead")
-		return
-	}
-	// Until the DLNA tree carves one container per library, a non-default
-	// library's items would be advertised under the default's container and
-	// the default's flag — the wrong owner for that decision — so sharing a
-	// non-default library stays refused rather than half-working.
-	if body.DLNAVisible != nil && *body.DLNAVisible && !lib.IsDefault {
-		writeError(w, http.StatusBadRequest, "per-library DLNA sharing for additional libraries is not available yet")
 		return
 	}
 	// The routing values are the same values the global settings hold, so they

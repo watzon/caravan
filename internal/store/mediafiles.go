@@ -81,54 +81,68 @@ func (s *Store) GetMediaFile(ctx context.Context, id int64) (*core.MediaFile, er
 	return f, nil
 }
 
-// GetMediaFileLibraryKind resolves the one library that owns a media file.
-// Files with no owner, or with conflicting movie/episode or TV/Adult owners,
-// return ErrNotFound so callers fail closed instead of choosing one link.
-func (s *Store) GetMediaFileLibraryKind(ctx context.Context, id int64) (string, error) {
+// GetMediaFileLibrary resolves the one library that owns a media file: its
+// kind, and the `libraries` row the owning movie or series names. A zero
+// library id is the usual "names none", which callers resolve through the
+// kind's default library (see core.Movie.LibraryID) — the DLNA tree needs both
+// halves, because with several libraries per kind the kind alone no longer
+// says whose dlna_visible flag applies.
+//
+// Files with no owner, or with conflicting movie/episode owners, or with
+// episode owners across two libraries, return ErrNotFound so callers fail
+// closed instead of choosing one link.
+func (s *Store) GetMediaFileLibrary(ctx context.Context, id int64) (int64, string, error) {
+	fail := func(err error) (int64, string, error) { return 0, "", err }
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT DISTINCT mf.movie_id, s.kind
+		SELECT DISTINCT mf.movie_id, m.library_id, s.kind, s.library_id
 		FROM media_files mf
+		LEFT JOIN movies m ON m.id = mf.movie_id
 		LEFT JOIN episode_files ef ON ef.media_file_id = mf.id
 		LEFT JOIN episodes e ON e.id = ef.episode_id
 		LEFT JOIN series s ON s.id = e.series_id
 		WHERE mf.id = ?`, id)
 	if err != nil {
-		return "", fmt.Errorf("store: get media file %d library: %w", id, err)
+		return fail(fmt.Errorf("store: get media file %d library: %w", id, err))
 	}
 	defer rows.Close()
 
 	found := false
 	movieOwned := false
+	movieLibrary := int64(0)
 	episodeKind := ""
+	episodeLibrary := int64(0)
 	for rows.Next() {
 		found = true
 		var (
-			movieID    int64
-			seriesKind sql.NullString
+			movieID     int64
+			movieLibID  sql.NullInt64
+			seriesKind  sql.NullString
+			seriesLibID sql.NullInt64
 		)
-		if err := rows.Scan(&movieID, &seriesKind); err != nil {
-			return "", fmt.Errorf("store: scan media file %d library: %w", id, err)
+		if err := rows.Scan(&movieID, &movieLibID, &seriesKind, &seriesLibID); err != nil {
+			return fail(fmt.Errorf("store: scan media file %d library: %w", id, err))
 		}
 		movieOwned = movieID != 0
+		movieLibrary = movieLibID.Int64
 		if !seriesKind.Valid {
 			continue
 		}
 		kind := core.LibraryKindForSeries(seriesKind.String)
-		if episodeKind != "" && episodeKind != kind {
-			return "", fmt.Errorf("store: media file %d library: %w", id, ErrNotFound)
+		if episodeKind != "" && (episodeKind != kind || episodeLibrary != seriesLibID.Int64) {
+			return fail(fmt.Errorf("store: media file %d library: %w", id, ErrNotFound))
 		}
-		episodeKind = kind
+		episodeKind, episodeLibrary = kind, seriesLibID.Int64
 	}
 	if err := rows.Err(); err != nil {
-		return "", fmt.Errorf("store: get media file %d library: %w", id, err)
+		return fail(fmt.Errorf("store: get media file %d library: %w", id, err))
 	}
 	if !found || (movieOwned && episodeKind != "") || (!movieOwned && episodeKind == "") {
-		return "", fmt.Errorf("store: media file %d library: %w", id, ErrNotFound)
+		return fail(fmt.Errorf("store: media file %d library: %w", id, ErrNotFound))
 	}
 	if movieOwned {
-		return core.LibraryKindMovie, nil
+		return movieLibrary, core.LibraryKindMovie, nil
 	}
-	return episodeKind, nil
+	return episodeLibrary, episodeKind, nil
 }
 
 // UpdateMediaFileConverted repoints a media file at the file ffmpeg produced
@@ -183,7 +197,7 @@ type ConversionCandidate struct {
 // ordered by path. Compatibility is profile-dependent and belongs to the API;
 // this query only resolves ownership and excludes open conversion rows.
 //
-// Ownership fails closed, matching GetMediaFileLibraryKind: unowned files,
+// Ownership fails closed, matching GetMediaFileLibrary: unowned files,
 // files attached to both a movie and an episode, and files attached across TV
 // and adult series do not become shared-surface candidates.
 func (s *Store) ListConversionCandidates(ctx context.Context) ([]ConversionCandidate, error) {

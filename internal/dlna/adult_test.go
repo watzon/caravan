@@ -445,10 +445,10 @@ func TestTheTwoShelvesRefuseEachOthersRows(t *testing.T) {
 	// The site through the television prefix, and the show through the adult
 	// one. Both are "no such object".
 	for _, objectID := range []string{
-		tvShelf.seriesObjectID(sites[0].ID),
-		tvShelf.seasonObjectID(sites[0].ID, 2022),
-		adultShelf.seriesObjectID(shows[0].ID),
-		adultShelf.seasonObjectID(shows[0].ID, 1),
+		tvIDSpace.seriesObjectID(sites[0].ID),
+		tvIDSpace.seasonObjectID(sites[0].ID, 2022),
+		adultIDSpace.seriesObjectID(shows[0].ID),
+		adultIDSpace.seasonObjectID(shows[0].ID, 1),
 	} {
 		if _, err := svc.children(ctx, testURLs, objectID); !errors.Is(err, errNoObject) {
 			t.Errorf("children(%s) = %v, want errNoObject", objectID, err)
@@ -459,30 +459,30 @@ func TestTheTwoShelvesRefuseEachOthersRows(t *testing.T) {
 	}
 }
 
-// The prefixes have to stay mutually exclusive, or shelfOf would answer for the
-// wrong shelf and every check above it would be reasoning about the wrong rows.
+// The prefixes have to stay mutually exclusive, or shelfSpaceOf would answer
+// for the wrong id space and every check above it would be reasoning about the
+// wrong rows. Container ids are not in this test any more: which library a
+// container id names is a row lookup now, not a prefix match.
 func TestShelfPrefixesAreUnambiguous(t *testing.T) {
 	for _, tc := range []struct {
 		objectID string
 		want     string
 	}{
-		{tvID, tvID},
-		{adultID, adultID},
-		{"s:1", tvID},
-		{"s:1:2", tvID},
-		{"e:1:2", tvID},
-		{"as:1", adultID},
-		{"as:1:2022", adultID},
-		{"ae:1:2", adultID},
+		{"s:1", core.SeriesKindTV},
+		{"s:1:2", core.SeriesKindTV},
+		{"e:1:2", core.SeriesKindTV},
+		{"as:1", core.SeriesKindAdult},
+		{"as:1:2022", core.SeriesKindAdult},
+		{"ae:1:2", core.SeriesKindAdult},
 	} {
-		sh, ok := shelfOf(tc.objectID)
-		if !ok || sh.containerID != tc.want {
-			t.Errorf("shelfOf(%q) = %q,%v, want %q", tc.objectID, sh.containerID, ok, tc.want)
+		space, ok := shelfSpaceOf(tc.objectID)
+		if !ok || space.seriesKind != tc.want {
+			t.Errorf("shelfSpaceOf(%q) = %q,%v, want %q", tc.objectID, space.seriesKind, ok, tc.want)
 		}
 	}
-	for _, objectID := range []string{rootID, moviesID, "m:1", "nonsense", ""} {
-		if sh, ok := shelfOf(objectID); ok {
-			t.Errorf("shelfOf(%q) = %q, want no shelf", objectID, sh.containerID)
+	for _, objectID := range []string{rootID, moviesID, tvID, adultID, "lib:3", "m:1", "nonsense", ""} {
+		if space, ok := shelfSpaceOf(objectID); ok {
+			t.Errorf("shelfSpaceOf(%q) = %q, want no id space", objectID, space.seriesKind)
 		}
 	}
 }

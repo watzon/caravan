@@ -454,8 +454,8 @@ func TestCreateLibraryValidatesAndCreates(t *testing.T) {
 
 // Deleting a library that still owns items is refused with the count-bearing
 // message; promoting another library moves the default flag transactionally;
-// and sharing a non-default library over DLNA is refused until the tree
-// learns per-library containers.
+// and a non-default library may be shared over DLNA, which is what the tree's
+// per-library containers made possible.
 func TestLibraryDefaultHandoffAndGuards(t *testing.T) {
 	ctx := context.Background()
 	h, st, _ := newTestServer(t)
@@ -474,7 +474,19 @@ func TestLibraryDefaultHandoffAndGuards(t *testing.T) {
 	wantStatus(t, rec, http.StatusConflict)
 
 	rec = do(t, h, http.MethodPatch, "/api/v1/libraries/"+itoa(anime.ID), `{"dlna_visible":true}`)
-	wantStatus(t, rec, http.StatusBadRequest)
+	wantStatus(t, rec, http.StatusOK)
+	var shared libraryJSON
+	decodeBody(t, rec, &shared)
+	if !shared.DLNAVisible {
+		t.Errorf("library = %+v, want dlna_visible saved on a non-default library", shared)
+	}
+	saved, err := st.GetLibrary(ctx, anime.ID)
+	if err != nil {
+		t.Fatalf("GetLibrary: %v", err)
+	}
+	if !saved.DLNAVisible {
+		t.Error("the flag came back on the response but never reached the row")
+	}
 
 	rec = do(t, h, http.MethodPatch, "/api/v1/libraries/"+itoa(anime.ID), `{"is_default":true}`)
 	wantStatus(t, rec, http.StatusOK)

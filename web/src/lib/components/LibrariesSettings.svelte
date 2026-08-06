@@ -767,7 +767,7 @@
         <Toggle
           checked={lib.dlna_visible}
           label="Share over DLNA"
-          disabled={busy || (!lib.is_default && !lib.dlna_visible)}
+          disabled={busy}
           onchange={(next) =>
             patch(
               { dlna_visible: next },
@@ -776,12 +776,6 @@
             )} />
         {@render autosaveStatus(autosaveKey(lib, 'dlna'))}
       </div>
-      {#if !lib.is_default && !lib.dlna_visible}
-        <p class="text-sm text-ink-muted">
-          DLNA sharing for additional libraries arrives with per-library containers in a later
-          update.
-        </p>
-      {/if}
       <p class="text-sm text-ink-secondary">
         Hiding a library drops its container from the DLNA tree; TVs pick the change up on their
         next browse rather than needing a restart. DLNA has no accounts, so anything shared here is
@@ -873,7 +867,7 @@
       {/if}
 
       <p class="text-sm text-ink-secondary">
-        New libraries start hidden from DLNA. Per-library sharing arrives with a later update.
+        New libraries start hidden from DLNA; share them from the library's Reach card.
       </p>
     </div>
 
