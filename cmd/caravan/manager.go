@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -379,6 +380,16 @@ func (a *libraryAdapter) RefreshLibrary(ctx context.Context) (*library.RefreshRe
 		return nil, err
 	}
 	return mgr.RefreshLibrary(ctx)
+}
+
+// HandleRecycleCleanup resolves the current storage root before deleting
+// expired recycle batches, so a migrated library is cleaned in its new home.
+func (a *libraryAdapter) HandleRecycleCleanup(ctx context.Context, st *store.Store, payload json.RawMessage) error {
+	mgr, err := a.current(ctx)
+	if err != nil {
+		return err
+	}
+	return mgr.HandleRecycleCleanup(ctx, st, payload)
 }
 
 func (a *libraryAdapter) RemoveMovie(ctx context.Context, id int64, deleteFiles bool) error {

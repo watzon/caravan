@@ -92,6 +92,19 @@ type DownloadStatus struct {
 	Error string
 }
 
+// RemotePathMapping translates an absolute path reported by an external
+// download client into the path where the same files are mounted on Caravan's
+// host. The importer applies the longest matching RemotePath component prefix.
+type RemotePathMapping struct {
+	ID            int64
+	RemotePath    string
+	LocalPath     string
+	MatchCount    int64
+	LastMatchedAt time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
 // AddOpts is the routing context handed to an engine along with a Release: it
 // says what the grab was *for*, so the import pipeline can match the finished
 // data back to a library item without re-guessing (SPEC §5.1).
@@ -361,6 +374,10 @@ const (
 	// current for titles that have no files yet — nothing else ever revisits
 	// those, and the minimum-availability gate judges against their dates.
 	JobRefreshMetadata = "refresh_metadata"
+	// JobRecycleCleanup removes expired library recycle batches.
+	JobRecycleCleanup = "recycle_cleanup"
+	// JobNotificationDispatch delivers new activity events to configured webhooks.
+	JobNotificationDispatch = "notification_dispatch"
 	// JobSyncSite walks one adult site's whole scene catalogue into season and
 	// episode rows.
 	//

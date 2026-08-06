@@ -185,6 +185,73 @@ describe('UsenetServerSettings', () => {
     expect(host.textContent).not.toContain('Discarded');
   });
 
+  it('protects a dirty editor draft until the close confirmation explicitly discards it', async () => {
+    app = mount(UsenetServerSettings, { target: host });
+    await settle();
+    clickButton('Edit');
+    await settle();
+
+    const dialog = editor();
+    const name = dialog.querySelector<HTMLInputElement>('#usenet-name');
+    expect(name, 'the edited server name input').not.toBeNull();
+    expect(name!.value).toBe('Eweka');
+    name!.value = 'Unsaved Eweka';
+    name!.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+
+    const close = dialog.querySelector<HTMLButtonElement>('button[aria-label="Close"]');
+    expect(close, 'the editor close button').not.toBeNull();
+    close!.click();
+    await settle();
+
+    expect(host.textContent).toContain('Discard changes');
+    clickButton('Keep editing', document.body);
+    await settle();
+    expect(input('usenet-name').value).toBe('Unsaved Eweka');
+
+    const secondClose = editor().querySelector<HTMLButtonElement>('button[aria-label="Close"]');
+    expect(secondClose, 'the restored editor close button').not.toBeNull();
+    secondClose!.click();
+    await settle();
+    clickButton('Discard changes', document.body);
+    await settle();
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+    expect(host.querySelector('#usenet-name')).toBeNull();
+    expect(writeCalls()).toHaveLength(0);
+  });
+
+  it('disables Save as No changes until a valid draft differs from its snapshot', async () => {
+    await mountAndEdit();
+
+    const save = [...editor().querySelectorAll('button')].find(
+      (candidate) => candidate.textContent?.trim() === 'No changes',
+    ) as HTMLButtonElement | undefined;
+    expect(save, 'the unchanged Save action').toBeDefined();
+    expect(save!.disabled).toBe(true);
+
+    type('usenet-name', 'Eweka renamed');
+    const changedSave = [...editor().querySelectorAll('button')].find(
+      (candidate) => candidate.textContent?.trim() === 'Save',
+    ) as HTMLButtonElement | undefined;
+    expect(changedSave, 'the changed Save action').toBeDefined();
+    expect(changedSave!.disabled).toBe(false);
+
+    type('usenet-host', '');
+    expect(changedSave!.disabled).toBe(true);
+  });
+
+  it('marks only connection tuning fields as advanced', async () => {
+    await mountAndEdit();
+
+    const advanced = [...editor().querySelectorAll<HTMLElement>('[data-settings-advanced]')];
+    expect(advanced).toHaveLength(2);
+    expect(advanced.map((field) => field.textContent)).toEqual(
+      expect.arrayContaining([expect.stringContaining('Connections'), expect.stringContaining('Priority')]),
+    );
+    expect(editor().querySelector('#usenet-host')?.closest('[data-settings-advanced]')).toBeNull();
+    expect(editor().querySelector('#usenet-password')?.closest('[data-settings-advanced]')).toBeNull();
+  });
+
   it('never pre-fills a stored password, and says it is unchanged', async () => {
     await mountAndEdit();
 

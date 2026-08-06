@@ -327,16 +327,27 @@
           {/each}
         </select>
       </Field>
+
+      <p class="text-sm text-ink-secondary">
+        <a href="/settings/quality-profiles" class="text-accent-text hover:underline"
+          >Manage download profiles</a
+        >
+        to change the choices available here.
+      </p>
     </SettingsCard>
 
     <SettingsCard
       title="Indexers"
-      description="Which sources this library searches, and with which categories. Everything here narrows Settings → Indexers — a library can never switch an indexer back on.">
+      description="Which sources this library searches, and with which categories. A library can narrow an enabled indexer, but it cannot turn one back on.">
       {#if lib.indexers.length === 0}
         <EmptyState
           icon="link"
           title="No indexers yet"
-          message="Add a Torznab or Newznab source under Settings → Indexers and it appears here for every library." />
+          message="Add a Torznab or Newznab source before assigning it to a library.">
+          {#snippet action()}
+            <Button variant="secondary" href="/settings/indexers">Manage indexers</Button>
+          {/snippet}
+        </EmptyState>
       {:else}
         <ul class="flex flex-col gap-2">
           {#each lib.indexers as row (row.indexer_id)}
@@ -376,7 +387,11 @@
                      that conflates them sends the user to the wrong screen. -->
                 {#if !row.indexer_enabled}
                   <p class="text-sm text-ink-muted">
-                    Disabled in Settings → Indexers, so no library searches it.
+                    This indexer is disabled globally. <a
+                      href="/settings/indexers"
+                      class="text-accent-text hover:underline">Open Indexers</a
+                    >
+                    to enable it.
                   </p>
                 {:else if !row.enabled}
                   <p class="text-sm text-ink-muted">Not searched for this library.</p>
@@ -397,7 +412,13 @@
 
     <SettingsCard
       title="Downloads"
-      description="Where this library's grabs land. Anything left on the global default follows Settings → Downloads.">
+      description="Where this library's grabs land. A blank route follows the global default.">
+      <p class="text-sm text-ink-secondary">
+        <a href="/settings/downloads" class="text-accent-text hover:underline"
+          >Configure global download routing</a
+        >
+        for every library.
+      </p>
       <Field
         label="Torrent route"
         for="library-route-torrent"
@@ -457,7 +478,8 @@
       <p class="text-sm text-ink-secondary">
         Hiding a library drops its container from the DLNA tree; TVs pick the change up on their
         next browse rather than needing a restart. DLNA has no accounts, so anything shared here is
-        open to everyone on the network.
+        open to everyone on the network. Configure screen compatibility and other destinations in
+        <a href="/settings/playback" class="text-accent-text hover:underline">Playback</a>.
       </p>
     </SettingsCard>
   </div>

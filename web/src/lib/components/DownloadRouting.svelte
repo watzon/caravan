@@ -102,8 +102,13 @@
     <h3 class="text-base font-medium text-ink">Routing</h3>
     <p class="mt-1 text-sm text-ink-secondary">
       Which engine takes a release is decided by its protocol, not per grab. Torznab results go to
-      the torrent engine, Newznab results to the usenet one. Both are built in; an external client
+      the torrent engine, Newznab results to the usenet one. Both are built in; an
+      <a class="text-accent-text hover:underline" href="/settings/downloads#download-clients">external client</a>
       is optional.
+    </p>
+    <p class="mt-1 text-sm text-ink-secondary">
+      Library-specific routing is configured under
+      <a class="text-accent-text hover:underline" href="/settings/libraries">Settings → Libraries</a>.
     </p>
   </div>
 
@@ -130,8 +135,7 @@
 
   <Field
     label="Usenet releases"
-    for="route-usenet"
-    help="Caravan's built-in engine downloads, repairs and unpacks NZBs itself. It needs a news server under Settings → Usenet servers, and no download client.">
+    for="route-usenet">
     <select
       id="route-usenet"
       bind:value={usenet}
@@ -144,6 +148,14 @@
       {/each}
     </select>
   </Field>
+
+  <p class="-mt-2 text-sm text-ink-secondary">
+    Caravan's built-in engine downloads, repairs and unpacks NZBs itself. It needs a news server under
+    <a
+      class="text-accent-text hover:underline"
+      href="/settings/downloads#usenet-servers">Settings → Usenet servers</a
+    >, and no download client.
+  </p>
 
   <Button variant="primary" class="self-start" disabled={loading || saving} onclick={save}>
     <Icon name="check" size={14} />

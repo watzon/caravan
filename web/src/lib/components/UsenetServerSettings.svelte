@@ -40,6 +40,19 @@
   import TextInput from './TextInput.svelte';
   import Toggle from './Toggle.svelte';
 
+  /** The fields that make an editor draft meaningfully different from its source. */
+  type UsenetDraft = {
+    name: string;
+    host: string;
+    port: string;
+    tls: boolean;
+    username: string;
+    password: string;
+    maxConnections: string;
+    priority: string;
+    enabled: boolean;
+  };
+
   /** The result of the last test per server id, so the row can say what happened. */
   type TestResult = { ok: boolean; message: string };
 
@@ -74,6 +87,41 @@
    */
   let storedPassword = $state(false);
 
+  /** A stable copy of the form as it was when this editor was opened. */
+  let initialDraft = $state<UsenetDraft | null>(null);
+
+  function draft(): UsenetDraft {
+    return { name, host, port, tls, username, password, maxConnections, priority, enabled };
+  }
+
+  function sameDraft(left: UsenetDraft, right: UsenetDraft): boolean {
+    return left.name === right.name
+      && left.host === right.host
+      && left.port === right.port
+      && left.tls === right.tls
+      && left.username === right.username
+      && left.password === right.password
+      && left.maxConnections === right.maxConnections
+      && left.priority === right.priority
+      && left.enabled === right.enabled;
+  }
+
+  let dirty = $derived(initialDraft !== null && !sameDraft(draft(), initialDraft));
+
+  function validationProblem(): string | null {
+    return validateUsenetServer({
+      name,
+      host,
+      port,
+      username,
+      password,
+      maxConnections,
+      hasStoredPassword: storedPassword && username.trim() !== '',
+    });
+  }
+
+  let formValid = $derived(validationProblem() === null);
+
   async function load() {
     loading = true;
     try {
@@ -102,6 +150,7 @@
     priority = String(DEFAULT_USENET_PRIORITY);
     enabled = true;
     storedPassword = false;
+    initialDraft = draft();
   }
 
   function openEdit(server: UsenetServer) {
@@ -119,12 +168,14 @@
     priority = String(server.priority);
     enabled = server.enabled;
     storedPassword = server.has_password;
+    initialDraft = draft();
   }
 
   function closeForm() {
     editingID = null;
     formError = null;
     formTest = null;
+    initialDraft = null;
   }
 
   /**
@@ -159,21 +210,13 @@
   }
 
   function validate(): boolean {
-    const problem = validateUsenetServer({
-      name,
-      host,
-      port,
-      username,
-      password,
-      maxConnections,
-      hasStoredPassword: storedPassword && username.trim() !== '',
-    });
+    const problem = validationProblem();
     formError = problem;
     return problem === null;
   }
 
   async function save() {
-    if (!validate()) return;
+    if (saving || !dirty || !validate()) return;
     const body = formBody();
 
     saving = true;
@@ -344,6 +387,7 @@
   <Modal
     title={editingID === 0 ? 'Add news server' : 'Edit news server'}
     width="max-w-xl"
+    dirty={dirty}
     onclose={closeForm}>
     <form
       class="flex flex-col gap-4 p-4"
@@ -401,27 +445,31 @@
           placeholder={storedPassword ? 'Unchanged' : '•••••'} />
       </Field>
 
-      <Field
-        label="Connections"
-        for="usenet-connections"
-        help="Never set this above the limit on your plan: going over gets connections refused rather than downloads slowed.">
-        <TextInput
-          id="usenet-connections"
-          bind:value={maxConnections}
-          mono
-          placeholder={String(DEFAULT_USENET_MAX_CONNECTIONS)} />
-      </Field>
+      <div data-settings-advanced>
+        <Field
+          label="Connections"
+          for="usenet-connections"
+          help="Never set this above the limit on your plan: going over gets connections refused rather than downloads slowed.">
+          <TextInput
+            id="usenet-connections"
+            bind:value={maxConnections}
+            mono
+            placeholder={String(DEFAULT_USENET_MAX_CONNECTIONS)} />
+        </Field>
+      </div>
 
-      <Field
-        label="Priority"
-        for="usenet-priority"
-        help="Lowest wins. Give a block or backup account a higher number so it is only asked for articles the main server is missing.">
-        <TextInput
-          id="usenet-priority"
-          bind:value={priority}
-          mono
-          placeholder={String(DEFAULT_USENET_PRIORITY)} />
-      </Field>
+      <div data-settings-advanced>
+        <Field
+          label="Priority"
+          for="usenet-priority"
+          help="Lowest wins. Give a block or backup account a higher number so it is only asked for articles the main server is missing.">
+          <TextInput
+            id="usenet-priority"
+            bind:value={priority}
+            mono
+            placeholder={String(DEFAULT_USENET_PRIORITY)} />
+        </Field>
+      </div>
 
       <Toggle checked={enabled} label="Enabled" onchange={(next) => (enabled = next)} />
 
@@ -450,9 +498,9 @@
         <span class="mx-1 h-5 w-px shrink-0 bg-border"></span>
       {/if}
       <Button variant="ghost" onclick={closeForm} disabled={saving}>Cancel</Button>
-      <Button variant="primary" disabled={saving} onclick={save}>
+      <Button variant="primary" disabled={saving || !dirty || !formValid} onclick={save}>
         <Icon name="check" size={14} />
-        {saving ? 'Saving…' : 'Save'}
+        {saving ? 'Saving…' : !dirty ? 'No changes' : 'Save'}
       </Button>
     {/snippet}
   </Modal>

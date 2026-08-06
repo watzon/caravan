@@ -35,6 +35,7 @@
   import { pushToast } from '../state/toast.svelte';
   import { episodeStatus, seriesStatus } from '../status';
   import { compatBadge } from '../tvcompat';
+  import ItemQualityProfileSelect from '../components/ItemQualityProfileSelect.svelte';
 
   interface Props {
     id: number;
@@ -89,6 +90,12 @@
     } finally {
       busy = false;
     }
+  }
+
+  async function setQualityProfile(profileID: number) {
+    const current = series;
+    if (!current) return;
+    series = await api.setSeriesQualityProfile(current.id, profileID);
   }
 
   /**
@@ -219,7 +226,7 @@
           {current.overview || 'No overview available.'}
         </p>
 
-        <dl class="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <dl class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <div>
             <dt class="micro-label">Folder</dt>
             <dd class="mt-1 truncate font-mono text-sm text-ink" title={current.path}>
@@ -236,6 +243,10 @@
             <dt class="micro-label">First aired</dt>
             <dd class="mt-1 text-sm text-ink">{formatDate(current.first_aired)}</dd>
           </div>
+          <ItemQualityProfileSelect
+            profileID={current.quality_profile_id}
+            kind="tv"
+            onassign={setQualityProfile} />
         </dl>
       </div>
     </div>

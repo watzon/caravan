@@ -12,6 +12,7 @@ import type {
   AddSiteRequest,
   AdultDiscoverPage,
   AdultUser,
+  ApproveRequestBody,
   ApproveRequestResult,
   AuthState,
   CalendarEntry,
@@ -54,7 +55,13 @@ import type {
   Movie,
   QualityProfile,
   QualityProfileInput,
+  QualityProfileTestRequest,
+  QualityProfileTestResponse,
   Release,
+  NotificationWebhook,
+  NotificationWebhookInput,
+  RemotePathMapping,
+  RemotePathMappingInput,
   RepointResult,
   RequestStatus,
   RunTaskResult,
@@ -75,6 +82,8 @@ import type {
   StorageMigrationStatus,
   SystemStatus,
   SystemTask,
+  TaskIntervalInput,
+  TaskIntervalUpdate,
   TVProfile,
   UnmatchedFile,
   UsenetServer,
@@ -105,6 +114,8 @@ export const endpoints = {
   // Phase 5 — the portable integrity flow (SPEC §2.3, §13).
   systemShutdown: () => `${API_BASE}/system/shutdown`,
   systemVerify: () => `${API_BASE}/system/verify`,
+  systemBackup: () => `${API_BASE}/system/backup`,
+  systemRestore: () => `${API_BASE}/system/restore`,
   // Phase 5 — moving the storage root (SPEC §10). Re-pointing answers
   // synchronously; migrating answers 202 and the progress endpoint is polled.
   storageRootRepoint: () => `${API_BASE}/system/storage-root/repoint`,
@@ -146,6 +157,10 @@ export const endpoints = {
   downloadClientTest: (id: number) => `${API_BASE}/download-clients/${id}/test`,
   downloadClientTestConfig: () => `${API_BASE}/download-clients/test`,
 
+  // A client may report a path rooted somewhere other than Caravan's host.
+  remotePathMappings: () => `${API_BASE}/remote-path-mappings`,
+  remotePathMapping: (id: number) => `${API_BASE}/remote-path-mappings/${id}`,
+
   // Phase 7 — news servers the built-in engine fetches articles from
   // (SPEC §5.1). Same shape as the download-client endpoints, including the
   // unsaved-config probe.
@@ -173,9 +188,14 @@ export const endpoints = {
   wantedSearch: () => `${API_BASE}/wanted/search`,
   events: () => `${API_BASE}/events`,
   jobs: () => `${API_BASE}/jobs`,
-  // The recurring background tasks, and the button that brings one forward.
+  // The recurring background tasks, their editable cadence, and the button
+  // that brings the queued successor forward.
   tasks: () => `${API_BASE}/system/tasks`,
+  task: (kind: string) => `${API_BASE}/system/tasks/${encodeURIComponent(kind)}`,
   runTask: (kind: string) => `${API_BASE}/system/tasks/${encodeURIComponent(kind)}/run`,
+  notificationWebhooks: () => `${API_BASE}/notification-webhooks`,
+  notificationWebhook: (id: number) => `${API_BASE}/notification-webhooks/${id}`,
+  notificationWebhookTest: (id: number) => `${API_BASE}/notification-webhooks/${id}/test`,
   calendar: () => `${API_BASE}/calendar`,
   calendarFeed: (apiKey: string) => `${API_BASE}/calendar.ics?apikey=${encodeURIComponent(apiKey)}`,
   regenerateAPIKey: () => `${API_BASE}/settings/apikey`,
@@ -212,6 +232,10 @@ export const endpoints = {
   conversionRetry: (id: number) => `${API_BASE}/convert/${id}/retry`,
   qualityProfiles: () => `${API_BASE}/quality-profiles`,
   qualityProfile: (id: number) => `${API_BASE}/quality-profiles/${id}`,
+  qualityProfileDefault: (id: number) => `${API_BASE}/quality-profiles/${id}/default`,
+  qualityProfileTest: (id: number) => `${API_BASE}/quality-profiles/${id}/test`,
+  qualityProfilesExport: () => `${API_BASE}/quality-profiles/export`,
+  qualityProfilesImport: () => `${API_BASE}/quality-profiles/import`,
 
   // Phase 8 — libraries as first-class objects (SPEC §7). Admin-only: a member
   // gets 403 from the allowlist, so nothing here is offered to one.
@@ -282,6 +306,8 @@ interface RequestOptions {
   body?: unknown;
   query?: Record<string, string | number | string[] | undefined>;
   signal?: AbortSignal;
+  rawBody?: BodyInit;
+  contentType?: string;
 }
 
 /**
@@ -307,18 +333,21 @@ function withQuery(path: string, query: RequestOptions['query']): string {
 }
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', body, query, signal } = options;
+  const { method = 'GET', body, rawBody, contentType, query, signal } = options;
 
   let res: Response;
   try {
+    const hasBody = body !== undefined || rawBody !== undefined;
     res = await fetch(withQuery(path, query), {
       method,
       signal,
-      headers: body === undefined ? { Accept: 'application/json' } : {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      headers: hasBody
+        ? {
+            Accept: 'application/json',
+            'Content-Type': contentType ?? 'application/json',
+          }
+        : { Accept: 'application/json' },
+      body: rawBody ?? (body === undefined ? undefined : JSON.stringify(body)),
     });
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') throw err;
@@ -447,6 +476,14 @@ export const api = {
    * throws when the database fails its check, in which case the flag stays set.
    */
   verifyIntegrity: () => request<VerifyResult>(endpoints.systemVerify(), { method: 'POST' }),
+
+  /** Stage a Caravan SQLite backup for replacement after the next restart. */
+  restoreBackup: (file: Blob) =>
+    request<{ restart_required: boolean }>(endpoints.systemRestore(), {
+      method: 'POST',
+      rawBody: file,
+      contentType: 'application/vnd.sqlite3',
+    }),
 
   /**
    * Re-point the storage root (SPEC §10): change where Caravan looks without
@@ -726,6 +763,41 @@ export const api = {
     request<void>(endpoints.downloadClientTestConfig(), { method: 'POST', body }),
 
   /* ---------------------------------------------------------------------
+   * Remote path mappings (SPEC §11).
+   * ------------------------------------------------------------------- */
+
+  listRemotePathMappings: (signal?: AbortSignal) =>
+    listOf<RemotePathMapping>(endpoints.remotePathMappings(), 'remote_path_mappings', signal),
+
+  addRemotePathMapping: (body: RemotePathMappingInput) =>
+    request<RemotePathMapping>(endpoints.remotePathMappings(), { method: 'POST', body }),
+
+  updateRemotePathMapping: (id: number, body: RemotePathMappingInput) =>
+    request<RemotePathMapping>(endpoints.remotePathMapping(id), { method: 'PUT', body }),
+
+  deleteRemotePathMapping: (id: number) =>
+    request<void>(endpoints.remotePathMapping(id), { method: 'DELETE' }),
+
+  /* ---------------------------------------------------------------------
+   * Notification webhooks.
+   * ------------------------------------------------------------------- */
+
+  listNotificationWebhooks: (signal?: AbortSignal) =>
+    listOf<NotificationWebhook>(endpoints.notificationWebhooks(), 'notification_webhooks', signal),
+
+  addNotificationWebhook: (body: NotificationWebhookInput) =>
+    request<NotificationWebhook>(endpoints.notificationWebhooks(), { method: 'POST', body }),
+
+  updateNotificationWebhook: (id: number, body: NotificationWebhookInput) =>
+    request<NotificationWebhook>(endpoints.notificationWebhook(id), { method: 'PUT', body }),
+
+  deleteNotificationWebhook: (id: number) =>
+    request<void>(endpoints.notificationWebhook(id), { method: 'DELETE' }),
+
+  testNotificationWebhook: (id: number) =>
+    request<void>(endpoints.notificationWebhookTest(id), { method: 'POST' }),
+
+  /* ---------------------------------------------------------------------
    * Phase 7 — news servers for the built-in engine (SPEC §5.1, §11).
    * ------------------------------------------------------------------- */
 
@@ -890,6 +962,13 @@ export const api = {
   runTask: (kind: string) =>
     request<RunTaskResult>(endpoints.runTask(kind), { method: 'POST' }),
 
+  /** Change a recurring task's cadence in whole minutes. */
+  updateTaskInterval: (kind: string, body: TaskIntervalInput) =>
+    request<TaskIntervalUpdate>(endpoints.task(kind), {
+      method: 'PUT',
+      body,
+    }),
+
   calendar: (start: string, end: string, signal?: AbortSignal) =>
     request<{ entries: CalendarEntry[] }>(endpoints.calendar(), {
       query: { start, end },
@@ -955,8 +1034,26 @@ export const api = {
   updateQualityProfile: (id: number, body: QualityProfileInput) =>
     request<QualityProfile>(endpoints.qualityProfile(id), { method: 'PUT', body }),
 
+  setDefaultQualityProfile: (id: number) =>
+    request<QualityProfile>(endpoints.qualityProfileDefault(id), { method: 'PUT' }),
+
+  testQualityProfile: (id: number, body: QualityProfileTestRequest) =>
+    request<QualityProfileTestResponse>(endpoints.qualityProfileTest(id), {
+      method: 'POST',
+      body,
+    }),
+
   deleteQualityProfile: (id: number) =>
     request<void>(endpoints.qualityProfile(id), { method: 'DELETE' }),
+
+  exportQualityProfilesURL: () => endpoints.qualityProfilesExport(),
+
+  importQualityProfiles: (body: {
+    version: 1;
+    default_profile: string;
+    profiles: QualityProfileInput[];
+  }) =>
+    request<{ profiles: number }>(endpoints.qualityProfilesImport(), { method: 'POST', body }),
 
   /* ------------------------------------------------------------------------
    * Phase 8 — libraries.
@@ -1063,33 +1160,34 @@ export const api = {
 
   /**
    * Grant a request by adding its title, the same path the add button takes.
-   * There is deliberately no quality-profile field: the add endpoints have
-   * none either, so this one does not pretend to.
+   * An explicit profile is persisted by this add, before any series search is
+   * queued by the caller.
    */
   approveRequest: (
     id: number,
     searchNow: boolean,
     seasons?: number[],
     minAvailability?: MinAvailability,
-  ) =>
-    request<ApproveRequestResult>(endpoints.requestApprove(id), {
-      method: 'POST',
-      body: {
-        search_now: searchNow,
-        ...(seasons ? { seasons } : {}),
-        ...(minAvailability ? { min_availability: minAvailability } : {}),
-      },
-    }),
+    qualityProfileID?: number,
+    monitored?: boolean,
+  ) => {
+    const body: ApproveRequestBody = {
+      search_now: searchNow,
+      ...(seasons ? { seasons } : {}),
+      ...(minAvailability ? { min_availability: minAvailability } : {}),
+      ...(qualityProfileID !== undefined && qualityProfileID > 0
+        ? { quality_profile_id: qualityProfileID }
+        : {}),
+      ...(monitored !== undefined ? { monitored } : {}),
+    };
+    return request<ApproveRequestResult>(endpoints.requestApprove(id), { method: 'POST', body });
+  },
 
   /** Turn a request down. The row survives as dismissed history. */
   dismissRequest: (id: number) =>
     request<void>(endpoints.request(id), { method: 'DELETE' }),
 
-  /**
-   * Re-assign a library item's quality profile. The add endpoints take only a
-   * tmdb id and a search flag, so choosing a profile while adding is this
-   * PATCH applied straight after the add.
-   */
+  /** Re-assign an existing library item's quality profile. */
   setMovieQualityProfile: (id: number, profileID: number) =>
     request<Movie>(endpoints.movie(id), {
       method: 'PATCH',

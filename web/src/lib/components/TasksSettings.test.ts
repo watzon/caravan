@@ -66,6 +66,13 @@ let ran: string[];
 /** When true the run request hangs until releaseRun is called. */
 let deferRun: boolean;
 let releaseRun: ((response: Response) => void) | null;
+/** Every interval update requested by the editor. */
+let intervalUpdates: Array<{ kind: string; interval_minutes: number }>;
+/** Number of list reads, including the immediate refresh after an interval save. */
+let taskReads: number;
+/** When true the interval update waits until releaseInterval is called. */
+let deferInterval: boolean;
+let releaseInterval: ((response: Response) => void) | null;
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -75,18 +82,39 @@ beforeEach(() => {
   deferRun = false;
   releaseRun = null;
   runResult = () => jsonResponse({ kind: 'rss_sync', already_running: false });
+  intervalUpdates = [];
+  taskReads = 0;
+  deferInterval = false;
+  releaseInterval = null;
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      const interval = /\/system\/tasks\/([^/]+)$/.exec(url);
+      if (interval && init?.method === 'PUT') {
+        const kind = decodeURIComponent(interval[1] ?? '');
+        const body = JSON.parse(String(init.body)) as { interval_minutes: number };
+        intervalUpdates.push({ kind, interval_minutes: body.interval_minutes });
+        const response = () => {
+          tasks = tasks.map((task) =>
+            task.kind === kind ? { ...task, interval_minutes: body.interval_minutes } : task,
+          );
+          return jsonResponse({ kind, interval_minutes: body.interval_minutes });
+        };
+        if (deferInterval) return new Promise<Response>((resolve) => (releaseInterval = resolve));
+        return response();
+      }
       const run = /\/system\/tasks\/([^/]+)\/run$/.exec(url);
       if (run && init?.method === 'POST') {
         ran.push(run[1] ?? '');
         if (deferRun) return new Promise<Response>((resolve) => (releaseRun = resolve));
         return runResult();
       }
-      if (url.endsWith('/system/tasks')) return jsonResponse({ tasks });
-      throw new Error(`unexpected fetch: ${url}`);
+      if (url.endsWith('/system/tasks')) {
+        taskReads += 1;
+        return jsonResponse({ tasks });
+      }
+      throw new Error(`unexpected fetch: ${init?.method ?? 'GET'} ${url}`);
     }),
   );
   host = document.createElement('div');
@@ -125,7 +153,7 @@ function heading(name: string): string {
   return row(name).querySelector('div')?.textContent ?? '';
 }
 
-/** One labelled reading out of a row: Every, Last run, Next run. */
+/** One labelled status reading out of a row: Last run or Next run. */
 function field(name: string, label: string): string {
   const cell = [...row(name).querySelectorAll('dl > div')].find(
     (d) => d.querySelector('dt')?.textContent?.trim() === label,
@@ -142,17 +170,38 @@ function runButton(name: string): HTMLButtonElement {
   return found as HTMLButtonElement;
 }
 
+function intervalInput(name: string): HTMLInputElement {
+  const found = row(name).querySelector<HTMLInputElement>('input[type=\"number\"]');
+  expect(found, `interval input in the ${name} row`).toBeDefined();
+  return found as HTMLInputElement;
+}
+
+function setInterval(name: string, value: string) {
+  const input = intervalInput(name);
+  input.value = value;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+}
+
+function intervalButton(name: string): HTMLButtonElement {
+  const found = [...row(name).querySelectorAll('button')].find((button) =>
+    /Save interval|Saving/.test(button.textContent ?? ''),
+  );
+  expect(found, `interval save button in the ${name} row`).toBeDefined();
+  return found as HTMLButtonElement;
+}
+
 describe('TasksSettings', () => {
   it('renders one row per task with its cadence, last run and next run', async () => {
     await render();
 
     expect(host.querySelectorAll('li')).toHaveLength(3);
     expect(heading('RSS sync')).toContain('Checks indexer feeds');
-    expect(field('RSS sync', 'Every')).toBe('15 min');
+    expect(intervalInput('RSS sync').value).toBe('15');
     expect(field('RSS sync', 'Last run')).toBe('10m ago OK');
     expect(field('RSS sync', 'Next run')).toBe('in 5m');
 
-    expect(field('Backlog search', 'Every')).toBe('6 h');
+    expect(intervalInput('Backlog search').value).toBe('360');
     expect(field('Backlog search', 'Next run')).toBe('in 6h');
     // Nothing has finished yet: no age, and no result badge to colour.
     expect(field('Backlog search', 'Last run')).toBe('Never');
@@ -220,6 +269,65 @@ describe('TasksSettings', () => {
     await settle();
 
     expect(toasts.items.at(-1)?.message).toContain('unknown task');
+    expect(toasts.items.at(-1)?.tone).toBe('danger');
+  });
+
+  it('validates task intervals before sending an update', async () => {
+    await render();
+    expect(intervalButton('RSS sync').disabled).toBe(true);
+
+    setInterval('RSS sync', '4');
+
+    expect(intervalInput('RSS sync').getAttribute('aria-invalid')).toBe('true');
+    expect(row('RSS sync').textContent).toContain('Enter a whole number from 5 to 43,200 minutes.');
+    expect(intervalButton('RSS sync').disabled).toBe(true);
+    expect(intervalUpdates).toEqual([]);
+
+    setInterval('RSS sync', '43201');
+    expect(intervalInput('RSS sync').getAttribute('aria-invalid')).toBe('true');
+    expect(intervalButton('RSS sync').disabled).toBe(true);
+    expect(intervalUpdates).toEqual([]);
+  });
+
+  it('updates one interval at a time and refreshes the task list immediately', async () => {
+    await render();
+    setInterval('RSS sync', '30');
+    setInterval('Backlog search', '420');
+    deferInterval = true;
+
+    intervalButton('RSS sync').click();
+    await settle();
+
+    expect(intervalUpdates).toEqual([{ kind: 'rss_sync', interval_minutes: 30 }]);
+    expect(intervalButton('RSS sync').textContent).toContain('Saving…');
+    expect(intervalButton('RSS sync').disabled).toBe(true);
+    expect(intervalButton('Backlog search').disabled).toBe(false);
+
+    deferInterval = false;
+    releaseInterval?.(jsonResponse({ kind: 'rss_sync', interval_minutes: 30 }));
+    await settle();
+
+    expect(intervalInput('RSS sync').value).toBe('30');
+    expect(taskReads).toBeGreaterThanOrEqual(2);
+    expect(toasts.items.at(-1)?.message).toBe('RSS sync interval saved.');
+    expect(toasts.items.at(-1)?.tone).toBe('success');
+  });
+
+  it('reports a refused interval update without disturbing another task', async () => {
+    await render();
+    setInterval('RSS sync', '30');
+    setInterval('Backlog search', '420');
+    deferInterval = true;
+
+    intervalButton('RSS sync').click();
+    await settle();
+    deferInterval = false;
+    releaseInterval?.(jsonResponse({ error: 'interval must be within policy' }, 422));
+    await settle();
+
+    expect(intervalButton('RSS sync').disabled).toBe(false);
+    expect(intervalButton('Backlog search').disabled).toBe(false);
+    expect(toasts.items.at(-1)?.message).toContain('interval must be within policy');
     expect(toasts.items.at(-1)?.tone).toBe('danger');
   });
 

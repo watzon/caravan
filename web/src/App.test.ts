@@ -11,6 +11,7 @@ import { navigate } from './lib/router.svelte';
 import { discover } from './lib/state/discover.svelte';
 import { session } from './lib/state/session.svelte';
 import { shutdown } from './lib/state/shutdown.svelte';
+import { SETTINGS_CATALOG, SETTINGS_CATEGORIES, settingsHref } from './lib/settings/catalog';
 import type {
   DiscoverHome,
   DownloadStatus,
@@ -171,6 +172,23 @@ const DISCOVER: DiscoverHome = {
 
 let host: HTMLElement;
 let app: Record<string, unknown>;
+
+function stubViewport(matches: boolean) {
+  vi.stubGlobal(
+    'matchMedia',
+    vi.fn(() => ({
+      matches,
+      media: '(max-width: 767px)',
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    })),
+  );
+}
+
 /** What /system/status answers this test; a test may swap it before mounting. */
 let statusBody: SystemStatus = STATUS;
 /** What GET /requests answers; the sidebar badge counts the pending ones. */
@@ -179,6 +197,8 @@ let requestRows: MediaRequest[] = [];
 beforeEach(() => {
   statusBody = STATUS;
   requestRows = [];
+  // Most shell tests deliberately run without matchMedia, like SSR/jsdom.
+  // Responsive cases install their own media-query result before mounting.
   discover.reset();
   // jsdom has no layout, so scrollTo is unimplemented; the router calls it.
   window.scrollTo = () => {};
@@ -202,6 +222,11 @@ beforeEach(() => {
       if (url.endsWith('/system/status')) return jsonResponse(statusBody);
       // The list endpoints answer with a named envelope (internal/api).
       if (url.endsWith('/library/movies')) return jsonResponse({ movies: [MOVIE] });
+      if (url.endsWith('/settings')) return jsonResponse({});
+      if (url.endsWith('/libraries')) return jsonResponse({ libraries: [] });
+      if (url.endsWith('/indexers')) return jsonResponse({ indexers: [] });
+      if (url.endsWith('/usenet-servers')) return jsonResponse({ usenet_servers: [] });
+      if (url.endsWith('/download-clients')) return jsonResponse({ download_clients: [] });
       // The sidebar badge polls the queue as soon as the shell mounts.
       if (url.includes('/downloads')) return jsonResponse({ downloads: DOWNLOADS });
       // …and the requests badge alongside it.
@@ -241,6 +266,233 @@ describe('App shell', () => {
     // The library list rendered its one movie rather than an empty state.
     expect(host.textContent).toContain('Big Buck Bunny');
     expect(host.textContent).not.toContain('No movies yet');
+  });
+
+  it('uses responsive classes for the desktop rail and narrow drawer', async () => {
+    app = mount(App, { target: host });
+    await settle();
+
+    const navigation = host.querySelector<HTMLElement>('#primary-navigation-drawer')!;
+    const menu = host.querySelector<HTMLButtonElement>('[aria-controls="primary-navigation-drawer"]')!;
+
+    expect(navigation.classList).toContain('fixed');
+    expect(navigation.classList).toContain('md:static');
+    expect(navigation.classList).toContain('w-60');
+    expect(menu.classList).toContain('md:hidden');
+  });
+
+  it('opens from the menu button and closes on its close button or overlay', async () => {
+    stubViewport(true);
+    app = mount(App, { target: host });
+    await settle();
+
+    const navigation = host.querySelector<HTMLElement>('#primary-navigation-drawer')!;
+    const menu = host.querySelector<HTMLButtonElement>('[aria-controls="primary-navigation-drawer"]')!;
+
+    expect(navigation.getAttribute('aria-hidden')).toBe('true');
+    expect(navigation.inert).toBe(true);
+    expect(navigation.classList).toContain('-translate-x-full');
+    expect(navigation.classList).toContain('md:translate-x-0');
+
+    menu.click();
+    flushSync();
+
+    expect(menu.getAttribute('aria-expanded')).toBe('true');
+    expect(navigation.getAttribute('aria-hidden')).toBeNull();
+    expect(navigation.inert).toBe(false);
+    expect(host.querySelector('[data-sidebar-overlay]')).not.toBeNull();
+
+    const close = navigation.querySelector<HTMLButtonElement>('[aria-label="Close navigation"]')!;
+    expect(document.activeElement).toBe(close);
+    close.click();
+    flushSync();
+    expect(menu.getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(menu);
+
+    menu.click();
+    flushSync();
+    host.querySelector<HTMLElement>('[data-sidebar-overlay]')!.click();
+    flushSync();
+
+    expect(menu.getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(menu);
+  });
+
+  it('closes the narrow drawer when a navigation link changes routes', async () => {
+    stubViewport(true);
+    app = mount(App, { target: host });
+    await settle();
+
+    const menu = host.querySelector<HTMLButtonElement>('[aria-controls="primary-navigation-drawer"]')!;
+    menu.click();
+    flushSync();
+
+    host
+      .querySelector<HTMLAnchorElement>('#primary-navigation-drawer a[href="/discover"]')!
+      .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+    await settle();
+
+    expect(window.location.pathname).toBe('/discover');
+    expect(menu.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('replaces primary rows with one settings sidebar and restores them after returning', async () => {
+    navigate('/settings/metadata', { replace: true });
+    app = mount(App, { target: host });
+    await settle();
+
+    const sidebar = host.querySelector<HTMLElement>('#primary-navigation-drawer')!;
+    const settingsNavigation = sidebar.querySelector<HTMLElement>('[data-settings-sidebar-navigation]')!;
+    const back = sidebar.querySelector<HTMLAnchorElement>('[data-settings-back]')!;
+    const categories = [...settingsNavigation.querySelectorAll<HTMLElement>('[data-settings-category]')];
+
+    expect(host.querySelectorAll('aside')).toHaveLength(1);
+    expect(host.querySelectorAll('[data-settings-sidebar]')).toHaveLength(0);
+    expect(sidebar.dataset.sidebarMode).toBe('settings');
+    expect(back.tagName).toBe('A');
+    expect(back.getAttribute('href')).toBe('/movies');
+    expect(back.textContent).toContain('Back to Caravan');
+    expect(categories.map((group) => group.querySelector('p')?.textContent?.trim())).toEqual(
+      SETTINGS_CATEGORIES,
+    );
+    for (const entry of SETTINGS_CATALOG) {
+      expect(settingsNavigation.querySelector(`a[href="${settingsHref(entry)}"]`)).not.toBeNull();
+    }
+    for (const href of [
+      '/discover',
+      '/requests',
+      '/series',
+      '/adult',
+      '/wanted',
+      '/calendar',
+      '/queue',
+      '/convert',
+      '/history',
+      '/scan-review',
+    ]) {
+      expect(sidebar.querySelector(`a[href="${href}"]`)).toBeNull();
+    }
+    expect(
+      [...sidebar.querySelectorAll<HTMLAnchorElement>('a[href="/movies"]')].map((link) =>
+        link.textContent?.trim(),
+      ),
+    ).toEqual(['CARAVAN', 'Back to Caravan']);
+    expect(sidebar.querySelector('a[href="/settings/metadata#metadata"]')?.getAttribute('aria-current')).toBe(
+      'page',
+    );
+
+    navigate('/settings/general', { replace: true });
+    await settle();
+    expect(sidebar.querySelector('a[href="/settings/metadata#metadata"]')?.getAttribute('aria-current')).toBe(
+      'page',
+    );
+
+    back.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+    await settle();
+
+    expect(window.location.pathname).toBe('/movies');
+    expect(sidebar.dataset.sidebarMode).toBe('primary');
+    expect(sidebar.querySelector('[data-settings-sidebar-navigation]')).toBeNull();
+    expect(sidebar.textContent).toContain('Explore');
+    expect(sidebar.querySelector('a[href="/queue"]')).not.toBeNull();
+  });
+
+  it('moves settings search into the top bar and routes matching results', async () => {
+    navigate('/settings', { replace: true });
+    app = mount(App, { target: host });
+    await settle();
+
+    const searchContainer = host.querySelector<HTMLElement>('[data-settings-top-search]')!;
+    const search = searchContainer.querySelector<HTMLInputElement>('#settings-search')!;
+
+    expect(search).not.toBeNull();
+    expect(search.closest('header')?.classList).toContain('sticky');
+    expect(host.querySelector('main #settings-search')).toBeNull();
+    expect(host.textContent).not.toContain('Find a setting');
+    expect(
+      [...host.querySelectorAll('header button')].some((control) =>
+        control.textContent?.includes('Add movie or series'),
+      ),
+    ).toBe(false);
+
+    const cases = [
+      ['port', '/settings/downloads#downloads'],
+      ['schedule', '/settings/tasks#tasks'],
+      ['API token', '/settings/security#security'],
+      ['profile', '/settings/quality-profiles#quality-profiles'],
+      ['Jellyfin', '/settings/playback#playback'],
+    ] as const;
+
+    for (const [query, href] of cases) {
+      search.value = query;
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+      flushSync();
+      expect(searchContainer.querySelector(`[aria-live] a[href="${href}"]`), query).not.toBeNull();
+    }
+
+    search.blur();
+    const shortcut = new KeyboardEvent('keydown', {
+      key: 'k',
+      ctrlKey: true,
+      bubbles: true,
+      cancelable: true,
+    });
+    window.dispatchEvent(shortcut);
+    flushSync();
+
+    expect(shortcut.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(search);
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+
+    searchContainer
+      .querySelector<HTMLAnchorElement>('a[href="/settings/playback#playback"]')!
+      .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+    await settle();
+
+    expect(window.location.pathname).toBe('/settings/playback');
+    expect(window.location.hash).toBe('#playback');
+    expect(host.querySelector('[data-settings-top-search]')).not.toBeNull();
+    expect(host.querySelector('#settings-search-results')).toBeNull();
+  });
+
+  it('closes the narrow drawer after choosing a settings page', async () => {
+    stubViewport(true);
+    navigate('/settings', { replace: true });
+    app = mount(App, { target: host });
+    await settle();
+
+    const menu = host.querySelector<HTMLButtonElement>('[aria-controls="primary-navigation-drawer"]')!;
+    menu.click();
+    flushSync();
+
+    host
+      .querySelector<HTMLAnchorElement>(
+        '#primary-navigation-drawer [data-settings-sidebar-navigation] a[href="/settings/metadata#metadata"]',
+      )!
+      .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+    await settle();
+
+    expect(window.location.pathname).toBe('/settings/metadata');
+    expect(menu.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('closes the narrow drawer on Escape and restores focus to its opener', async () => {
+    stubViewport(true);
+    app = mount(App, { target: host });
+    await settle();
+
+    const menu = host.querySelector<HTMLButtonElement>('[aria-controls="primary-navigation-drawer"]')!;
+    menu.focus();
+    menu.click();
+    flushSync();
+
+    const escape = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    window.dispatchEvent(escape);
+    flushSync();
+
+    expect(escape.defaultPrevented).toBe(true);
+    expect(menu.getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(menu);
   });
 
   /**

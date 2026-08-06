@@ -16,6 +16,7 @@ const GEEK: Indexer = {
   has_api_key: true,
   type: 'newznab',
   categories: [2000],
+  priority: 25,
   enabled: true,
 };
 
@@ -94,6 +95,20 @@ function clickButton(label: string) {
   flushSync();
 }
 
+function editor(): HTMLElement {
+  const el = host.querySelector<HTMLElement>('[role="dialog"]');
+  expect(el, 'the indexer editor').not.toBeNull();
+  return el!;
+}
+
+function type(id: string, value: string) {
+  const el = host.querySelector<HTMLInputElement>(`#${id}`);
+  expect(el, `an input #${id}`).not.toBeNull();
+  el!.value = value;
+  el!.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
+}
+
 describe('IndexerSettings category picker', () => {
   it('loads the caps tree when the edit form opens', async () => {
     categoriesAnswers = [() => jsonResponse({ categories: FULL_TREE })];
@@ -167,17 +182,29 @@ describe('IndexerSettings category picker', () => {
 
     expect((host.querySelector('#indexer-key') as HTMLInputElement).value).toBe('');
     expect(host.textContent).toContain('A key is stored. Leave blank to keep it.');
+    expect(host.querySelector('#indexer-categories')?.closest('[data-settings-advanced]')).not.toBeNull();
+    expect((host.querySelector('#indexer-priority') as HTMLInputElement).value).toBe('25');
+    expect(host.textContent).toContain('Priority 25');
   });
 
-  it('omits a blank key on ordinary save and sends empty only on Clear', async () => {
+  it('disables unchanged Save and writes only changed drafts', async () => {
     categoriesAnswers = [() => jsonResponse({ categories: [] }), () => jsonResponse({ categories: [] })];
     app = mount(IndexerSettings, { target: host });
     await settle();
 
     clickButton('Edit');
     await settle();
+    const unchangedSave = [...editor().querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === 'No changes',
+    );
+    expect(unchangedSave).toBeDefined();
+    expect(unchangedSave!.disabled).toBe(true);
+    expect(indexerWrites).toHaveLength(0);
+
+    type('indexer-name', 'NZBGeek renamed');
     clickButton('Save');
     await settle();
+    expect(indexerWrites[0]?.body).toMatchObject({ name: 'NZBGeek renamed' });
     expect(indexerWrites[0]?.body).not.toHaveProperty('api_key');
 
     clickButton('Edit');
@@ -186,5 +213,59 @@ describe('IndexerSettings category picker', () => {
     clickButton('Save');
     await settle();
     expect(indexerWrites[1]?.body).toHaveProperty('api_key', '');
+  });
+
+  it('validates and saves search priority', async () => {
+    categoriesAnswers = [() => jsonResponse({ categories: [] })];
+    app = mount(IndexerSettings, { target: host });
+    await settle();
+
+    clickButton('Edit');
+    await settle();
+    type('indexer-priority', '-1');
+    expect(host.textContent).toContain('Priority must be a whole number of zero or greater.');
+    const invalidSave = [...editor().querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === 'Fix errors',
+    );
+    expect(invalidSave?.disabled).toBe(true);
+    expect(indexerWrites).toHaveLength(0);
+
+    type('indexer-priority', '7');
+    clickButton('Save');
+    await settle();
+    expect(indexerWrites[0]?.body).toMatchObject({ priority: 7 });
+  });
+
+  it('keeps a dirty draft open until Modal discards it', async () => {
+    categoriesAnswers = [() => jsonResponse({ categories: [] })];
+    app = mount(IndexerSettings, { target: host });
+    await settle();
+
+    clickButton('Edit');
+    await settle();
+    type('indexer-name', 'Unsaved');
+
+    const dialog = editor();
+    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await settle();
+    expect(host.textContent).toContain('Discard changes');
+    expect(host.querySelector('[role="dialog"]')).toBe(dialog);
+    clickButton('Keep editing');
+
+    const backdrop = host.querySelector<HTMLElement>('[data-modal-backdrop]');
+    expect(backdrop).not.toBeNull();
+    backdrop!.click();
+    await settle();
+    expect(host.textContent).toContain('Discard changes');
+    clickButton('Keep editing');
+
+    const close = dialog.querySelector<HTMLButtonElement>('button[aria-label="Close"]');
+    expect(close).not.toBeNull();
+    close!.click();
+    await settle();
+    expect(host.textContent).toContain('Discard changes');
+    clickButton('Discard changes');
+    await settle();
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
   });
 });

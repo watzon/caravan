@@ -2,6 +2,8 @@ package api
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -39,6 +41,27 @@ func TestSystemStatusReportsTheDirtyStart(t *testing.T) {
 	dirty, _, _ := newDirtyServer(t, true)
 	if !systemStatus(t, dirty).Dirty {
 		t.Fatal("a dirty start reported dirty=false")
+	}
+}
+
+func TestSystemStatusReportsRuntimeDiagnostics(t *testing.T) {
+	dir := t.TempDir()
+	database := filepath.Join(dir, "caravan.db")
+	if err := os.WriteFile(database, []byte("database"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h, _, _ := newTestServer(t, WithListenAddr("127.0.0.1:8677"), WithRuntimeDiagnostics(RuntimeConfig{
+		ConfigDir: dir, ConfigFile: filepath.Join(dir, "caravan.yaml"), DatabasePath: database, LogLevel: "info",
+	}))
+	runtime := systemStatus(t, h).Runtime
+	if runtime == nil {
+		t.Fatal("runtime diagnostics were absent")
+	}
+	if runtime.DatabasePath != database || runtime.DatabaseSize != int64(len("database")) {
+		t.Fatalf("runtime database = %+v", runtime)
+	}
+	if runtime.GoVersion == "" || runtime.UptimeSeconds < 0 || runtime.Goroutines < 1 {
+		t.Fatalf("runtime diagnostics are incomplete: %+v", runtime)
 	}
 }
 

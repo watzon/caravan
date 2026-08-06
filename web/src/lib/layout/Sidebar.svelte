@@ -12,7 +12,14 @@
    * which a granted member may read — so their Library group holds that row
    * alone rather than being suppressed wholesale.
    */
+  import { onMount } from 'svelte';
   import { isActive } from '../router.svelte';
+  import {
+    SETTINGS_CATALOG,
+    SETTINGS_CATEGORIES,
+    settingsEntryForSection,
+    settingsHref,
+  } from '../settings/catalog';
   import { auth } from '../state/auth.svelte';
   import { session } from '../state/session.svelte';
   import { BADGE_POLL_MS, downloads } from '../state/downloads.svelte';
@@ -26,6 +33,39 @@
   import Skeleton from '../components/Skeleton.svelte';
   import type { Tone } from '../status';
   import { TONE_DOT } from '../status';
+
+  interface Props {
+    open: boolean;
+    onclose: () => void;
+    /** Defined only for `/settings` routes; '' names the overview. */
+    settingsSection?: string;
+  }
+
+  let { open, onclose, settingsSection = undefined }: Props = $props();
+
+  let narrow = $state(false);
+  let closeButton = $state<HTMLButtonElement | undefined>(undefined);
+
+  onMount(() => {
+    // jsdom and SSR-adjacent hosts may expose `window` without matchMedia. In
+    // that case CSS still owns the layout; leave the drawer in its desktop
+    // state rather than making mounting the shell depend on a browser-only API.
+    if (typeof window.matchMedia !== 'function') return;
+
+    const media = window.matchMedia('(max-width: 767px)');
+    const sync = () => (narrow = media.matches);
+    sync();
+    media.addEventListener('change', sync);
+    return () => media.removeEventListener('change', sync);
+  });
+
+  function closeForNavigation() {
+    if (narrow) onclose();
+  }
+
+  $effect(() => {
+    if (narrow && open) closeButton?.focus();
+  });
 
   interface NavItem {
     href: string;
@@ -67,6 +107,11 @@
     { href: '/scan-review', label: 'Scan Review', icon: 'inbox' },
     { href: '/settings', label: 'Settings', icon: 'settings' },
   ];
+
+  const SETTINGS_GROUPS = SETTINGS_CATEGORIES.map((category) => ({
+    category,
+    items: SETTINGS_CATALOG.filter((entry) => entry.category === category),
+  }));
 
   // The badge is the only reason the shell polls downloads, so it does so
   // lazily; the queue screen subscribes at its own faster rate while open.
@@ -165,14 +210,45 @@
    * costs no upstream call however often the card refreshes.
    */
   let credentialLabel = $derived(metadataStateLabel(system.metadataCredential));
+
+  let settingsMode = $derived(settingsSection !== undefined);
+  let activeSettingsEntry = $derived(
+    settingsSection === undefined || settingsSection === ''
+      ? null
+      : settingsEntryForSection(settingsSection),
+  );
 </script>
 
+{#if narrow && open}
+  <button
+    type="button"
+    class="fixed inset-0 z-40 bg-ink/20"
+    data-sidebar-overlay
+    aria-hidden="true"
+    tabindex="-1"
+    onclick={onclose}></button>
+{/if}
+
 <aside
-  class="flex w-60 shrink-0 flex-col border-r border-border bg-surface"
-  aria-label="Primary navigation">
+  id="primary-navigation-drawer"
+  data-sidebar-mode={settingsMode ? 'settings' : 'primary'}
+  class="fixed inset-y-0 left-0 z-50 flex w-60 shrink-0 {open ? 'translate-x-0' : '-translate-x-full'} flex-col border-r border-border bg-surface transition-transform duration-150 ease-out md:static md:z-auto md:translate-x-0 md:transition-none"
+  aria-label={settingsMode ? 'Settings navigation' : 'Primary navigation'}
+  aria-hidden={narrow && !open ? 'true' : undefined}
+  inert={narrow && !open}>
+  <button
+    type="button"
+    class="absolute right-3 top-4 flex size-9 items-center justify-center rounded-md text-ink-secondary transition-colors duration-150 ease-out hover:bg-raised hover:text-ink md:hidden"
+    aria-label="Close navigation"
+    onclick={onclose}
+    bind:this={closeButton}>
+    <Icon name="close" size={18} />
+  </button>
+
   <a
     href={session.isAdmin ? '/movies' : '/discover'}
-    class="flex items-center gap-3 px-4 py-6 focus:outline-none">
+    class="flex items-center gap-3 px-4 py-6 focus:outline-none"
+    onclick={closeForNavigation}>
     <!-- The mark is the accent itself, not inverse-on-a-fill (the Paper mock,
          and §6's "never solid fills"). -->
     <span class="text-accent" aria-hidden="true">
@@ -200,7 +276,8 @@
         class="flex items-center gap-3 rounded-md border-l-2 py-2 pl-4 pr-3 text-base transition-colors duration-150 ease-out
                {active
           ? 'border-l-accent bg-accent-tint text-accent-text'
-          : 'border-l-transparent text-ink-secondary hover:bg-raised hover:text-ink'}">
+          : 'border-l-transparent text-ink-secondary hover:bg-raised hover:text-ink'}"
+        onclick={closeForNavigation}>
         <Icon name={item.icon} />
         <span class="flex-1">{item.label}</span>
         {#if badge}
@@ -224,36 +301,87 @@
       </a>
     {/snippet}
 
-    <div class="flex flex-col gap-1">
-      <p class="micro-label px-2 pb-1">Explore</p>
-      {#each EXPLORE as item (item.href)}
-        {@render navLink(item)}
-      {/each}
-    </div>
+    {#if settingsMode}
+      <div data-settings-sidebar-navigation class="flex flex-col gap-4">
+        <a
+          data-settings-back
+          href={session.isAdmin ? '/movies' : '/discover'}
+          class="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-ink-secondary transition-colors duration-150 ease-out hover:bg-raised hover:text-ink"
+          onclick={closeForNavigation}>
+          <Icon name="back" size={16} />
+          <span>Back to Caravan</span>
+        </a>
 
-    {#if libraryItems.length > 0}
+        <a
+          data-settings-overview
+          href="/settings"
+          aria-current={settingsSection === '' ? 'page' : undefined}
+          class="flex items-center gap-3 rounded-md border-l-2 py-2 pl-4 pr-3 text-base transition-colors duration-150 ease-out
+                 {settingsSection === ''
+            ? 'border-l-accent bg-accent-tint text-accent-text'
+            : 'border-l-transparent text-ink-secondary hover:bg-raised hover:text-ink'}"
+          onclick={closeForNavigation}>
+          <Icon name="settings" />
+          <span>Overview</span>
+        </a>
+
+        {#each SETTINGS_GROUPS as group (group.category)}
+          {@const categoryActive = activeSettingsEntry?.category === group.category}
+          <div
+            data-settings-category
+            data-category-active={categoryActive || undefined}
+            class="flex flex-col gap-1">
+            <p class="micro-label px-2 pb-1 {categoryActive ? 'text-accent-text' : ''}">
+              {group.category}
+            </p>
+            {#each group.items as item (item.route)}
+              {@const active = activeSettingsEntry?.route === item.route}
+              <a
+                href={settingsHref(item)}
+                aria-current={active ? 'page' : undefined}
+                class="flex rounded-md border-l-2 py-1.5 pl-4 pr-3 text-sm transition-colors duration-150 ease-out
+                       {active
+                  ? 'border-l-accent bg-accent-tint font-medium text-accent-text'
+                  : 'border-l-transparent text-ink-secondary hover:bg-raised hover:text-ink'}"
+                onclick={closeForNavigation}>
+                {item.label}
+              </a>
+            {/each}
+          </div>
+        {/each}
+      </div>
+    {:else}
       <div class="flex flex-col gap-1">
-        <p class="micro-label px-2 pb-1">Library</p>
-        {#each libraryItems as item (item.href)}
+        <p class="micro-label px-2 pb-1">Explore</p>
+        {#each EXPLORE as item (item.href)}
           {@render navLink(item)}
         {/each}
       </div>
-    {/if}
 
-    {#if session.isAdmin}
-      <div class="flex flex-col gap-1">
-        <p class="micro-label px-2 pb-1">Activity</p>
-        {#each ACTIVITY as item (item.href)}
-          {@render navLink(item)}
-        {/each}
-      </div>
+      {#if libraryItems.length > 0}
+        <div class="flex flex-col gap-1">
+          <p class="micro-label px-2 pb-1">Library</p>
+          {#each libraryItems as item (item.href)}
+            {@render navLink(item)}
+          {/each}
+        </div>
+      {/if}
 
-      <div class="flex flex-col gap-1">
-        <p class="micro-label px-2 pb-1">Manage</p>
-        {#each MANAGE as item (item.href)}
-          {@render navLink(item)}
-        {/each}
-      </div>
+      {#if session.isAdmin}
+        <div class="flex flex-col gap-1">
+          <p class="micro-label px-2 pb-1">Activity</p>
+          {#each ACTIVITY as item (item.href)}
+            {@render navLink(item)}
+          {/each}
+        </div>
+
+        <div class="flex flex-col gap-1">
+          <p class="micro-label px-2 pb-1">Manage</p>
+          {#each MANAGE as item (item.href)}
+            {@render navLink(item)}
+          {/each}
+        </div>
+      {/if}
     {/if}
   </nav>
 
@@ -278,7 +406,8 @@
         <a
           href="/settings/metadata"
           class="flex items-center gap-2 rounded-sm text-sm text-warning transition-colors duration-150 ease-out hover:underline"
-          title={system.metadataCredentialReason || undefined}>
+          title={system.metadataCredentialReason || undefined}
+          onclick={closeForNavigation}>
           <span class="size-2 shrink-0 rounded-full {TONE_DOT.warning}"></span>
           <span>{credentialLabel}</span>
         </a>

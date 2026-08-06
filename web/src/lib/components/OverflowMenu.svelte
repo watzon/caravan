@@ -100,10 +100,10 @@
   </button>
 
   {#if open}
-    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <div
       bind:this={menu}
       role="menu"
+      tabindex="-1"
       aria-label="More actions"
       onkeydown={onmenukeydown}
       class="absolute right-0 top-full z-30 mt-1 min-w-44 overflow-hidden rounded-lg border

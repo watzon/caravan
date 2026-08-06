@@ -61,6 +61,12 @@ describe('endpoints', () => {
     expect(endpoints.conversionRetry(4)).toBe('/api/v1/convert/4/retry');
   });
 
+  it('builds remote path mapping and editable task paths', () => {
+    expect(endpoints.remotePathMappings()).toBe('/api/v1/remote-path-mappings');
+    expect(endpoints.remotePathMapping(6)).toBe('/api/v1/remote-path-mappings/6');
+    expect(endpoints.task('rss/sync')).toBe('/api/v1/system/tasks/rss%2Fsync');
+  });
+
   it('escapes the engine-native download id, which is not a number', () => {
     // A DownloadID is whatever the engine calls it; SABnzbd ids contain
     // characters that would otherwise change the path.
@@ -193,6 +199,50 @@ describe('convert queue', () => {
   });
 });
 
+describe('quality profiles', () => {
+  it('builds the default and test paths under the selected profile', () => {
+    expect(endpoints.qualityProfileDefault(3)).toBe('/api/v1/quality-profiles/3/default');
+    expect(endpoints.qualityProfileTest(3)).toBe('/api/v1/quality-profiles/3/test');
+  });
+
+  it('sets a profile as default and receives the updated profile', async () => {
+    stubFetch({ id: 3, name: '4K', is_default: true });
+    const profile = await api.setDefaultQualityProfile(3);
+
+    expect(profile.is_default).toBe(true);
+    expect(only()).toMatchObject({
+      method: 'PUT',
+      url: '/api/v1/quality-profiles/3/default',
+      body: null,
+    });
+  });
+
+  it('posts pasted titles to the server-owned profile scorer', async () => {
+    stubFetch({
+      results: [{
+        title: 'Film.2026.1080p.WEB-DL',
+        parsed: { quality: '1080p', source: 'WEB-DL' },
+        decision: {
+          accepted: true,
+          profile_id: 3,
+          profile_name: 'HD',
+          score: 42,
+          reason: 'Accepted at the cutoff.',
+          contributions: { quality: 20, source: 10, proper: 0, repack: 0, seeders: 12 },
+        },
+      }],
+    });
+    const result = await api.testQualityProfile(3, { titles: ['Film.2026.1080p.WEB-DL'] });
+
+    expect(result.results[0]?.decision.score).toBe(42);
+    expect(only()).toMatchObject({
+      method: 'POST',
+      url: '/api/v1/quality-profiles/3/test',
+      body: { titles: ['Film.2026.1080p.WEB-DL'] },
+    });
+  });
+});
+
 describe('indexers', () => {
   it('unwraps the list envelope', async () => {
     stubFetch({ indexers: [{ id: 1, name: 'Jackett' }] });
@@ -253,6 +303,74 @@ describe('indexers', () => {
     stubFetch({ error: 'indexer returned 401' }, 502);
     await expect(api.testIndexer(4)).rejects.toThrow('indexer returned 401');
     await expect(api.testIndexer(4)).rejects.toBeInstanceOf(ApiError);
+  });
+});
+
+describe('remote path mappings', () => {
+  const mapping = { remote_path: '/downloads', local_path: '/mnt/downloads' };
+
+  it('unwraps the remote path mapping envelope', async () => {
+    stubFetch({ remote_path_mappings: [{ id: 6, ...mapping }] });
+
+    await expect(api.listRemotePathMappings()).resolves.toEqual([{ id: 6, ...mapping }]);
+    expect(only()).toMatchObject({ method: 'GET', url: '/api/v1/remote-path-mappings' });
+  });
+
+  it('POSTs, PUTs and DELETEs a mapping at the collection and item paths', async () => {
+    stubFetch({ id: 6, ...mapping });
+    await api.addRemotePathMapping(mapping);
+    expect(only()).toMatchObject({
+      method: 'POST',
+      url: '/api/v1/remote-path-mappings',
+      body: mapping,
+    });
+
+    stubFetch({ id: 6, ...mapping });
+    await api.updateRemotePathMapping(6, mapping);
+    expect(only()).toMatchObject({
+      method: 'PUT',
+      url: '/api/v1/remote-path-mappings/6',
+      body: mapping,
+    });
+
+    stubFetch(null);
+    await api.deleteRemotePathMapping(6);
+    expect(only()).toMatchObject({ method: 'DELETE', url: '/api/v1/remote-path-mappings/6' });
+  });
+});
+
+describe('request approvals', () => {
+  it('carries the edited monitored state independently from availability', async () => {
+    stubFetch({ request: { id: 12, monitored: false } });
+
+    await api.approveRequest(12, false, undefined, 'announced', 4, false);
+
+    expect(only()).toMatchObject({
+      method: 'POST',
+      url: '/api/v1/requests/12/approve',
+      body: {
+        search_now: false,
+        min_availability: 'announced',
+        quality_profile_id: 4,
+        monitored: false,
+      },
+    });
+  });
+});
+
+describe('task intervals', () => {
+  it('PUTs a whole-minute interval to the task item path', async () => {
+    stubFetch({ kind: 'rss_sync', interval_minutes: 30 });
+
+    await expect(api.updateTaskInterval('rss_sync', { interval_minutes: 30 })).resolves.toEqual({
+      kind: 'rss_sync',
+      interval_minutes: 30,
+    });
+    expect(only()).toMatchObject({
+      method: 'PUT',
+      url: '/api/v1/system/tasks/rss_sync',
+      body: { interval_minutes: 30 },
+    });
   });
 });
 

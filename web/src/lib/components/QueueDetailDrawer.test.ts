@@ -160,6 +160,27 @@ describe('QueueDetailDrawer', () => {
     );
   });
 
+  it('links a queued download to concurrency settings', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ insight: { availability: 1, peers: [], trackers: [] } })));
+    mountDrawer({ state: 'queued' });
+    await settle();
+
+    const link = host.querySelector<HTMLAnchorElement>('a[href="/settings/downloads#download-concurrency"]');
+    expect(link?.textContent?.trim()).toBe('Settings → Downloads → Concurrency');
+  });
+
+  it('links rate-limit help to concurrency settings', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ insight: { availability: 1, peers: [], trackers: [] } })));
+    mountDrawer();
+    await settle();
+
+    button('Limits').click();
+    flushSync();
+
+    const link = host.querySelector<HTMLAnchorElement>('a[href="/settings/downloads#download-concurrency"]');
+    expect(link?.textContent?.trim()).toBe('Settings → Downloads → Concurrency');
+  });
+
   it('degrades to limits when insight is unsupported', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ error: 'unsupported' }, 400)));
     mountDrawer();

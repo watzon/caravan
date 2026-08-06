@@ -88,6 +88,12 @@ type server struct {
 	// the UI can nag about listening on every interface without a password.
 	listenAddr string
 
+	// runtime is the serving process configuration reported to administrators
+	// for support diagnostics. It is nil in tests and embedded uses that do not
+	// supply process paths.
+	runtime   *RuntimeConfig
+	startedAt time.Time
+
 	// dirty says the previous session ended without a clean shutdown
 	// (SPEC §2.3). It is atomic because POST /system/verify clears it from one
 	// request while the status endpoint and the queue read it from others.
@@ -124,6 +130,7 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 		sessions:   newSessionStore(),
 		sessionTTL: defaultSessionTTL,
 		logins:     newLoginGuard(),
+		startedAt:  time.Now(),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -140,6 +147,8 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	// wizard can prove one before it is saved.
 	api.HandleFunc("POST /settings/metadata/test", s.handleMetadataTest)
 	api.HandleFunc("GET /system/status", s.handleSystemStatus)
+	api.HandleFunc("GET /system/backup", s.handleBackup)
+	api.HandleFunc("POST /system/restore", s.handleRestore)
 
 	// The portable integrity flow (SPEC §2.3, §13). Both are deliberately
 	// inside the auth gate: stopping the server and clearing the dirty flag
@@ -176,7 +185,16 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	// (task 2).
 	api.HandleFunc("GET /quality-profiles", s.handleListQualityProfiles)
 	api.HandleFunc("POST /quality-profiles", s.handleCreateQualityProfile)
+	api.HandleFunc("GET /quality-profiles/export", s.handleExportQualityProfiles)
+	api.HandleFunc("POST /quality-profiles/import", s.handleImportQualityProfiles)
 	api.HandleFunc("PUT /quality-profiles/{id}", s.handleUpdateQualityProfile)
+	api.HandleFunc("PUT /quality-profiles/{id}/default", s.handleSetDefaultQualityProfile)
+	api.HandleFunc("GET /notification-webhooks", s.handleListNotificationWebhooks)
+	api.HandleFunc("POST /notification-webhooks", s.handleCreateNotificationWebhook)
+	api.HandleFunc("PUT /notification-webhooks/{id}", s.handleUpdateNotificationWebhook)
+	api.HandleFunc("DELETE /notification-webhooks/{id}", s.handleDeleteNotificationWebhook)
+	api.HandleFunc("POST /notification-webhooks/{id}/test", s.handleTestNotificationWebhook)
+	api.HandleFunc("POST /quality-profiles/{id}/test", s.handleTestQualityProfile)
 	api.HandleFunc("DELETE /quality-profiles/{id}", s.handleDeleteQualityProfile)
 	api.HandleFunc("GET /wanted", s.handleWanted)
 	api.HandleFunc("POST /wanted/search", s.handleSearchWanted)
@@ -218,6 +236,7 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	// memberAllowed names neither.
 	api.HandleFunc("GET /system/tasks", s.handleListTasks)
 	api.HandleFunc("POST /system/tasks/{kind}/run", s.handleRunTask)
+	api.HandleFunc("PUT /system/tasks/{kind}", s.handleUpdateTaskInterval)
 
 	api.HandleFunc("GET /library/movies", s.handleListMovies)
 	api.HandleFunc("POST /library/movies", s.handleAddMovie)
@@ -361,6 +380,13 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("PUT /download-clients/{id}", s.handleUpdateDownloadClient)
 	api.HandleFunc("DELETE /download-clients/{id}", s.handleDeleteDownloadClient)
 	api.HandleFunc("POST /download-clients/{id}/test", s.handleTestDownloadClient)
+
+	// Remote path mappings translate paths reported by external clients into
+	// the mount points visible to this Caravan process.
+	api.HandleFunc("GET /remote-path-mappings", s.handleListRemotePathMappings)
+	api.HandleFunc("POST /remote-path-mappings", s.handleCreateRemotePathMapping)
+	api.HandleFunc("PUT /remote-path-mappings/{id}", s.handleUpdateRemotePathMapping)
+	api.HandleFunc("DELETE /remote-path-mappings/{id}", s.handleDeleteRemotePathMapping)
 
 	// News servers the embedded engine fetches article bodies from (SPEC §5.1,
 	// PLAN phase 7 task 2). These are article sources, not download clients:

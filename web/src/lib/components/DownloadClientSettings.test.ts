@@ -44,6 +44,15 @@ const QBIT: DownloadClient = {
   enabled: true,
 };
 
+const UNSUPPORTED: DownloadClient = {
+  ...QBIT,
+  type: 'sabnzbd',
+  name: 'Legacy SABnzbd',
+  username: '',
+  has_password: false,
+  has_api_key: false,
+};
+
 type Call = { url: string; method: string; body: Record<string, unknown> | null };
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -58,9 +67,13 @@ let app: Record<string, unknown>;
 let calls: Call[];
 /** Answers for the write/test endpoints, consumed in order. */
 let answers: Array<() => Response>;
+let availableTypes: DownloadClientTypeInfo[];
+let listedClients: DownloadClient[];
 
 beforeEach(() => {
   calls = [];
+  listedClients = [QBIT];
+  availableTypes = TYPES;
   answers = [];
   vi.stubGlobal(
     'fetch',
@@ -73,10 +86,10 @@ beforeEach(() => {
         body: typeof init?.body === 'string' ? JSON.parse(init.body) : null,
       });
       if (method === 'GET' && url.endsWith('/download-clients/types')) {
-        return jsonResponse({ types: TYPES });
+        return jsonResponse({ types: availableTypes });
       }
       if (method === 'GET' && url.endsWith('/download-clients')) {
-        return jsonResponse({ download_clients: [QBIT] });
+        return jsonResponse({ download_clients: listedClients });
       }
       // The routing pickers render inside this screen and own their own
       // settings fetch. It is answered here rather than from the queue so it
@@ -150,21 +163,47 @@ async function mountAndEdit() {
 }
 
 describe('DownloadClientSettings', () => {
-  it('lists stored clients and flags a backend this build cannot talk to', async () => {
+  it('disables unavailable types when adding a client and explains why', async () => {
+    app = mount(DownloadClientSettings, { target: host });
+    await settle();
+    expect(host.textContent).toContain('qBit');
+    expect(host.textContent).toContain('http://127.0.0.1:8080');
+    expect(host.textContent).not.toContain('Not supported yet');
+
+    clickButton('Add client');
+    await settle();
+
+    const sabnzbd = [...editor().querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === 'SABnzbd',
+    );
+    expect(sabnzbd).toBeDefined();
+    expect(sabnzbd!.disabled).toBe(true);
+    expect(sabnzbd!.getAttribute('title') ?? '').toContain('cannot connect');
+    expect(host.textContent).toContain('Unsupported types are unavailable for new clients');
+    expect(host.querySelector('#client-username')).not.toBeNull();
+    expect(host.querySelector('#client-api-key')).toBeNull();
+    expect(host.querySelector('#client-priority')?.closest('[data-settings-advanced]')).not.toBeNull();
+    expect(host.querySelector('#client-max-concurrent')?.closest('[data-settings-advanced]')).not.toBeNull();
+    expect(host.querySelector('#client-url')?.closest('[data-settings-advanced]')).toBeNull();
+  });
+
+  it('cannot save a new client when its type is unsupported', async () => {
+    availableTypes = TYPES.map((type) => ({ ...type, supported: false }));
     app = mount(DownloadClientSettings, { target: host });
     await settle();
 
-    expect(host.textContent).toContain('qBit');
-    expect(host.textContent).toContain('http://127.0.0.1:8080');
-    // The row's own backend is supported, so nothing is flagged yet.
-    expect(host.textContent).not.toContain('Not supported yet');
+    clickButton('Add client');
+    await settle();
+    type('client-name', 'Unavailable qBit');
+    type('client-url', 'http://nas.local:8080');
+    type('client-username', 'admin');
 
-    clickButton('Edit');
-    await settle();
-    // Switching to a backend the server reported as unsupported says so.
-    clickButton('SABnzbd', editor());
-    await settle();
-    expect(host.textContent).toContain('cannot talk to it yet');
+    const save = [...editor().querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === 'Fix errors',
+    );
+    expect(save!.disabled).toBe(true);
+    expect(host.textContent).toContain('not available for new clients');
+    expect(writeCalls()).toHaveLength(0);
   });
 
   it('never pre-fills a stored credential, and says it is unchanged', async () => {
@@ -177,11 +216,74 @@ describe('DownloadClientSettings', () => {
     expect(input('client-username').value).toBe('admin');
   });
 
+  it('shows No changes for an untouched edit', async () => {
+    await mountAndEdit();
+
+    const save = [...editor().querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === 'No changes',
+    );
+    expect(save).toBeDefined();
+    expect(save!.disabled).toBe(true);
+    expect(writeCalls()).toHaveLength(0);
+  });
+
+  it('keeps a dirty client draft open until Modal discards it', async () => {
+    await mountAndEdit();
+    type('client-name', 'Unsaved client');
+
+    const dialog = editor();
+    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await settle();
+    expect(host.textContent).toContain('Discard changes');
+    clickButton('Keep editing');
+
+    const backdrop = host.querySelector<HTMLElement>('[data-modal-backdrop]');
+    expect(backdrop).not.toBeNull();
+    backdrop!.click();
+    await settle();
+    expect(host.textContent).toContain('Discard changes');
+    clickButton('Keep editing');
+
+    const close = dialog.querySelector<HTMLButtonElement>('button[aria-label="Close"]');
+    expect(close).not.toBeNull();
+    close!.click();
+    await settle();
+    expect(host.textContent).toContain('Discard changes');
+    clickButton('Discard changes');
+    await settle();
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('refreshes the edit snapshot after saving, so unchanged Save is immediately disabled', async () => {
+    const saved = { ...QBIT, name: 'qBit renamed' };
+    answers = [() => jsonResponse(saved)];
+    await mountAndEdit();
+
+    type('client-name', saved.name);
+    clickButton('Save', editor());
+    await settle();
+
+    expect(editor().querySelector('form')).not.toBeNull();
+    const save = [...editor().querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === 'No changes',
+    );
+    expect(save).toBeDefined();
+    expect(save!.disabled).toBe(true);
+    expect(writeCalls().find((call) => call.method === 'PUT')?.body).toMatchObject({
+      name: saved.name,
+    });
+  });
+
   it('omits the password on save when it was left blank, so the stored one survives', async () => {
     answers = [() => jsonResponse({ ...QBIT, name: 'qBit renamed' })];
     await mountAndEdit();
 
     type('client-name', 'qBit renamed');
+    expect(
+      [...editor().querySelectorAll('button')].find(
+        (button) => button.textContent?.trim() === 'Save',
+      )!.disabled,
+    ).toBe(false);
     clickButton('Save', editor());
     await settle();
 
@@ -207,19 +309,25 @@ describe('DownloadClientSettings', () => {
     expect(save!.body).toMatchObject({ password: 'rotated' });
   });
 
-  it('tests the edit form against the stored row so a blank credential resolves', async () => {
+  it('tests unsaved draft values without saving them', async () => {
     answers = [() => jsonResponse({ status: 'ok' })];
     await mountAndEdit();
 
+    type('client-name', 'qBit draft');
     type('client-url', 'http://nas.local:8080');
     clickButton('Test', editor());
     await settle();
 
-    const test = writeCalls().find((c) => c.url.endsWith('/download-clients/test'));
+    const test = writeCalls().find((call) => call.url.endsWith('/download-clients/test'));
     expect(test, 'a POST to the unsaved-config test').toBeDefined();
     // The id is what lets the server fall back to the stored password.
-    expect(test!.body).toMatchObject({ id: 7, url: 'http://nas.local:8080' });
+    expect(test!.body).toMatchObject({
+      id: 7,
+      name: 'qBit draft',
+      url: 'http://nas.local:8080',
+    });
     expect(test!.body).not.toHaveProperty('password');
+    expect(writeCalls().some((call) => call.method === 'PUT')).toBe(false);
     expect(host.textContent).toContain('Reachable');
   });
 
@@ -235,19 +343,27 @@ describe('DownloadClientSettings', () => {
     expect(host.textContent).toContain('403 Forbidden');
   });
 
-  it('renders the credential fields the chosen backend uses, and no others', async () => {
+  it('keeps existing unsupported clients editable for safe changes', async () => {
+    listedClients = [UNSUPPORTED];
+    answers = [() => jsonResponse({ ...UNSUPPORTED, name: 'Legacy SABnzbd renamed' })];
     app = mount(DownloadClientSettings, { target: host });
     await settle();
-    clickButton('Add client');
-    await settle();
 
-    expect(host.querySelector('#client-username')).not.toBeNull();
-    expect(host.querySelector('#client-api-key')).toBeNull();
-
-    clickButton('SABnzbd', editor());
+    expect(host.textContent).toContain('Not supported yet');
+    clickButton('Edit');
     await settle();
-    expect(host.querySelector('#client-username')).toBeNull();
-    expect(host.querySelector('#client-api-key')).not.toBeNull();
+    type('client-name', 'Legacy SABnzbd renamed');
+
+    const save = [...editor().querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === 'Save',
+    );
+    expect(save!.disabled).toBe(false);
+    save!.click();
+    await settle();
+    expect(writeCalls().find((call) => call.method === 'PUT')?.body).toMatchObject({
+      type: 'sabnzbd',
+      name: 'Legacy SABnzbd renamed',
+    });
   });
 
   it('refuses to save a configuration the server would reject anyway', async () => {
@@ -259,8 +375,10 @@ describe('DownloadClientSettings', () => {
     type('client-name', 'new');
     type('client-url', 'nas.local');
     type('client-username', 'admin');
-    clickButton('Save', editor());
-    await settle();
+    const save = [...editor().querySelectorAll('button')].find(
+      (button) => button.textContent?.trim() === 'Fix errors',
+    );
+    expect(save!.disabled).toBe(true);
 
     expect(writeCalls()).toHaveLength(0);
     expect(host.textContent).toContain('http://');
@@ -305,9 +423,31 @@ describe('DownloadClientSettings concurrency', () => {
     expect(save!.body).toMatchObject({ max_concurrent: 2 });
   });
 
-  // Blank means "no limit", never "one at a time": a cap the user did not set
-  // must not be able to stop downloads.
-  it('sends a cleared cap as unlimited', async () => {
+  it('blocks invalid priority and concurrent-download values before any POST or PUT', async () => {
+    await mountAndEdit();
+
+    type('client-priority', '1.5');
+    expect(host.textContent).toContain('Priority must be a whole number of zero or greater.');
+    editor().querySelector('form')!.dispatchEvent(
+      new Event('submit', { bubbles: true, cancelable: true }),
+    );
+    await settle();
+    expect(writeCalls()).toEqual([]);
+
+    type('client-priority', '1');
+    type('client-max-concurrent', '-1');
+    expect(host.textContent).toContain(
+      'Max concurrent downloads must be blank or a whole number of zero or greater.',
+    );
+    editor().querySelector('form')!.dispatchEvent(
+      new Event('submit', { bubbles: true, cancelable: true }),
+    );
+    await settle();
+    expect(writeCalls()).toEqual([]);
+  });
+  // Blank carries the explicit no-cap value through the SPA. It is not parsed
+  // as zero before the request leaves the browser.
+  it('sends a cleared cap as null', async () => {
     answers = [() => jsonResponse(QBIT)];
     await mountAndEdit();
 
@@ -315,6 +455,13 @@ describe('DownloadClientSettings concurrency', () => {
     clickButton('Save', editor());
     await settle();
 
-    expect(writeCalls().find((c) => c.method === 'PUT')!.body).toMatchObject({ max_concurrent: 0 });
+    expect(writeCalls().find((c) => c.method === 'PUT')!.body).toMatchObject({ max_concurrent: null });
+  });
+
+  it('round-trips an unset client cap as an empty editor field', async () => {
+    listedClients = [{ ...QBIT, max_concurrent: null }];
+    await mountAndEdit();
+
+    expect(input('client-max-concurrent').value).toBe('');
   });
 });

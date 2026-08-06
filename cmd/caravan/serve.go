@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"syscall"
@@ -23,6 +24,7 @@ import (
 	"github.com/watzon/caravan/internal/dlna"
 	"github.com/watzon/caravan/internal/integrity"
 	"github.com/watzon/caravan/internal/jellyfin"
+	"github.com/watzon/caravan/internal/notify"
 	"github.com/watzon/caravan/internal/relocate"
 	"github.com/watzon/caravan/internal/stash"
 	"github.com/watzon/caravan/internal/store"
@@ -47,6 +49,19 @@ func runServe(args []string) error {
 	}
 	if *listen != "" {
 		cfg.Listen = *listen
+	}
+
+	configDir, err := filepath.Abs(cfg.ConfigDir)
+	if err != nil {
+		return fmt.Errorf("resolve config dir: %w", err)
+	}
+	configFile, err := filepath.Abs(*configPath)
+	if err != nil {
+		return fmt.Errorf("resolve config file: %w", err)
+	}
+	databasePath, err := filepath.Abs(cfg.DatabasePath())
+	if err != nil {
+		return fmt.Errorf("resolve database path: %w", err)
 	}
 
 	logger := newLogger(cfg.LogLevel)
@@ -221,6 +236,7 @@ func runServe(args []string) error {
 	// is handed the engine getter rather than an engine because it has to pause
 	// the queue for the duration, and the engine may not exist yet.
 	relocator := relocate.New(st, engines.Engine, logger)
+	notifier := notify.New(st)
 
 	// Conversions get a worker of their own: a two-hour transcode on the shared
 	// worker would hold up the Jellyfin handoff, the RSS sync and every
@@ -230,6 +246,10 @@ func runServe(args []string) error {
 		automation.WithDedicatedWorker(convert.JobKind, converter.Handle),
 		automation.WithDedicatedWorker(relocate.JobKind, relocator.Handle),
 		automation.WithHandler(jellyfin.JobKind, handoff.Handle),
+		automation.WithHandler(core.JobNotificationDispatch,
+			func(ctx context.Context, _ *store.Store, _ json.RawMessage) error {
+				return notifier.Dispatch(ctx)
+			}),
 		// The adult twin, in two kinds: one scoped scan per burst of scene
 		// imports, and one identity push per scene. The push retries on the
 		// queue's own backoff while Stash finishes indexing the file, which is
@@ -257,6 +277,7 @@ func runServe(args []string) error {
 					"movies", res.Movies, "series", res.Series, "problems", len(res.Errors))
 				return nil
 			}),
+		automation.WithHandler(core.JobRecycleCleanup, mgr.HandleRecycleCleanup),
 		// The deferred catalogue walk POST /adult/sites queues instead of
 		// making its caller wait. Registered from here for the same reason the
 		// refresh is: the walk is the library manager's, and the queue is not
@@ -292,6 +313,12 @@ func runServe(args []string) error {
 			// literally the signal context's cancel, so POST /system/shutdown
 			// and a Ctrl-C run the same teardown and both end in a clean marker.
 			api.WithDirtyStart(portableDirty),
+			api.WithRuntimeDiagnostics(api.RuntimeConfig{
+				ConfigDir:    configDir,
+				ConfigFile:   configFile,
+				DatabasePath: databasePath,
+				LogLevel:     cfg.LogLevel,
+			}),
 			api.WithShutdown(stop),
 			// SPEC §10.1's second first-run step, for the two modes that never
 			// see the first-run screen because they brought a storage root with

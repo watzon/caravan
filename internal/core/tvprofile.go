@@ -6,10 +6,10 @@ import (
 )
 
 // TV profiles (SPEC §8) describe what the set on the other end of the library
-// can actually decode. They are a *description of the target*, never a filter:
-// nothing in Caravan refuses a release because of one. The verdict this file
-// produces is shown next to a release and next to an imported file so the user
-// knows, before pressing Grab, whether the thing will play.
+// can actually decode. Playback display remains descriptive by default: the
+// verdict is shown next to a release and next to an imported file. An explicit
+// quality-profile policy may also use this verdict while it scores or requires
+// acquisition compatibility.
 //
 // The profiles are built in and code-owned rather than rows in a table: they
 // are a fixed vocabulary in v1 (same reasoning as QualityLadder), and the

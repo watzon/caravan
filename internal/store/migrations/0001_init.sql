@@ -142,7 +142,6 @@ CREATE TABLE indexers (
     api_key    TEXT NOT NULL DEFAULT '',
     categories TEXT NOT NULL DEFAULT '',      -- JSON array of ints
     enabled    INTEGER NOT NULL DEFAULT 1,
-    priority   INTEGER NOT NULL DEFAULT 25,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );

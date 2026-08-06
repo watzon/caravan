@@ -148,20 +148,24 @@ export function isAdultRoute(pattern: RoutePattern): boolean {
 }
 
 /**
- * Split a link target into the path the router matches and the query string
- * the screen reads. The hash is dropped: nothing in the SPA uses one.
+ * Split a link target into the path the router matches, query string the screen
+ * reads, and fragment the browser scrolls to.
  *
  * `search` is stored without its leading '?', so "" is unambiguously "no query
- * string" — `?` and no query are the same URL and must compare equal, or
- * navigate() would push a history entry for a no-op.
+ * string"; `?` and no query are the same URL and must compare equal, or
+ * navigate() would push a history entry for a no-op. `hash` retains its leading
+ * '#', matching `window.location.hash`.
  */
-export function splitLocation(to: string): { path: string; search: string } {
-  const withoutHash = to.replace(/#.*$/, '');
+export function splitLocation(to: string): { path: string; search: string; hash: string } {
+  const hashAt = to.indexOf('#');
+  const withoutHash = hashAt === -1 ? to : to.slice(0, hashAt);
+  const hash = hashAt === -1 ? '' : to.slice(hashAt);
   const mark = withoutHash.indexOf('?');
-  if (mark === -1) return { path: normalizePath(withoutHash), search: '' };
+  if (mark === -1) return { path: normalizePath(withoutHash), search: '', hash };
   return {
     path: normalizePath(withoutHash.slice(0, mark)),
     search: withoutHash.slice(mark + 1),
+    hash,
   };
 }
 

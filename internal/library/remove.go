@@ -2,33 +2,34 @@ package library
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/watzon/caravan/internal/core"
+	"github.com/watzon/caravan/internal/store"
 )
 
 // EventCategoryLibrary groups library-maintenance events in the activity feed.
 const EventCategoryLibrary = "library"
 
 // ErrOutsideLibrary is what a path that does not resolve inside one of the
-// library's section directories fails with. It is a refusal, not a warning:
-// nothing at such a path is deleted.
+// library's section directories fails with.
 var ErrOutsideLibrary = errors.New("path outside the library sections")
 
-// RemoveMovie stops tracking a movie and, when deleteFiles is set, deletes its
-// files from disk first.
+// RemoveMovie stops tracking a movie and, when deleteFiles is set, removes its
+// Caravan-owned files from the live library first.
 //
-// With deleteFiles false this is the untrack the API has always done: rows go,
-// the filesystem is untouched, and a rescan re-adds the movie (SPEC §1.2 — the
-// filesystem is the source of truth). With it set, the movie's media files and
-// the poster and NFO Caravan wrote beside them go too, and the folders that
-// held them are pruned while they are empty.
+// With deleteFiles false the filesystem is untouched and a rescan re-adds the
+// movie. With it set, media files and the poster and NFO Caravan wrote beside
+// them are either deleted or moved to a recycle batch when retention is set.
 func (m *Manager) RemoveMovie(ctx context.Context, id int64, deleteFiles bool) error {
 	if deleteFiles {
 		mv, err := m.store.GetMovie(ctx, id)
@@ -86,22 +87,33 @@ func (m *Manager) RemoveSeries(ctx context.Context, id int64, deleteFiles bool) 
 // folder alive with it: this deletes what Caravan put there, not the folder's
 // contents.
 func (m *Manager) removeItemFiles(ctx context.Context, dir, nfoName string, files []core.MediaFile) error {
+	retentionDays, err := m.recycleRetentionDays(ctx)
+	if err != nil {
+		return err
+	}
+	if retentionDays > 0 {
+		movedFiles, err := m.recycleItemFiles(ctx, dir, nfoName, files)
+		if err != nil {
+			return err
+		}
+		for _, path := range movedFiles {
+			if err := m.store.DeleteMediaFileByPath(ctx, path); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
 	prune := make([]string, 0, len(files)+1)
 	for _, f := range files {
 		abs, err := m.insideLibrary(f.Path)
 		if err != nil {
-			// A media_files row is data, not a command. One naming somewhere
-			// outside the library is a database Caravan cannot trust to steer
-			// os.Remove, so it is reported and skipped — the untrack still
-			// happens, which is what the caller asked for.
 			m.refuseRemoval(ctx, f.Path, err)
 			continue
 		}
 		if err := os.Remove(abs); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("library: delete %s: %w", f.Path, err)
 		}
-		// The file is gone either way — a row that outlived its file is stale,
-		// not a reason to keep describing something that is not there.
 		if err := m.store.DeleteMediaFileByPath(ctx, f.Path); err != nil {
 			return err
 		}
@@ -126,6 +138,125 @@ func (m *Manager) removeItemFiles(ctx context.Context, dir, nfoName string, file
 		if err := m.pruneEmpty(abs); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func (m *Manager) recycleRetentionDays(ctx context.Context) (int, error) {
+	value, err := m.store.GetSetting(ctx, store.SettingRecycleRetentionDays)
+	if errors.Is(err, store.ErrNotFound) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("library: get recycle retention: %w", err)
+	}
+	days, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("library: parse recycle retention %q: %w", value, err)
+	}
+	if days < 0 || days > 3650 {
+		return 0, fmt.Errorf("library: recycle retention %d is outside 0 to 3650 days", days)
+	}
+	return days, nil
+}
+
+func (m *Manager) recycleItemFiles(ctx context.Context, dir, nfoName string, files []core.MediaFile) ([]string, error) {
+	batch := time.Now().UTC().Format("20060102T150405Z")
+	prune := make([]string, 0, len(files)+1)
+	movedFiles := make([]string, 0, len(files))
+	moved := 0
+	move := func(rel string) (bool, error) {
+		abs, err := m.insideLibrary(rel)
+		if err != nil {
+			m.refuseRemoval(ctx, rel, err)
+			return false, nil
+		}
+		if _, err := os.Lstat(abs); errors.Is(err, fs.ErrNotExist) {
+			return false, nil
+		} else if err != nil {
+			return false, fmt.Errorf("library: inspect %s: %w", rel, err)
+		}
+		dst := filepath.Join(m.root, "recycle", batch, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return false, fmt.Errorf("library: create recycle destination for %s: %w", rel, err)
+		}
+		if err := os.Rename(abs, dst); err != nil {
+			return false, fmt.Errorf("library: recycle %s: %w", rel, err)
+		}
+		prune = append(prune, filepath.Dir(abs))
+		moved++
+		return true, nil
+	}
+
+	for _, file := range files {
+		moved, err := move(file.Path)
+		if err != nil {
+			return nil, err
+		}
+		if moved {
+			movedFiles = append(movedFiles, file.Path)
+		}
+	}
+	if dir != "" {
+		for _, name := range []string{PosterName, nfoName} {
+			if _, err := move(path.Join(dir, name)); err != nil {
+				return nil, err
+			}
+		}
+	}
+	for _, abs := range prune {
+		if err := m.pruneEmpty(abs); err != nil {
+			return nil, err
+		}
+	}
+	if moved > 0 {
+		_ = m.store.InsertEvent(ctx, &core.Event{
+			Level:    core.EventLevelInfo,
+			Category: EventCategoryLibrary,
+			Message:  "Moved deleted library files to recycle",
+			Detail:   fmt.Sprintf("batch %s: %d file(s)", batch, moved),
+		})
+	}
+	return movedFiles, nil
+}
+
+// HandleRecycleCleanup is an automation.Handler that removes expired recycle
+// batches. It never follows or removes entries the user placed beside batches.
+func (m *Manager) HandleRecycleCleanup(ctx context.Context, _ *store.Store, _ json.RawMessage) error {
+	days, err := m.recycleRetentionDays(ctx)
+	if err != nil {
+		return err
+	}
+	root := filepath.Join(m.root, "recycle")
+	entries, err := os.ReadDir(root)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("library: read recycle: %w", err)
+	}
+	cutoff := time.Now().UTC().AddDate(0, 0, -days)
+	removed := 0
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		batch, err := time.Parse("20060102T150405Z", entry.Name())
+		if err != nil || (days > 0 && !batch.Before(cutoff)) {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(root, entry.Name())); err != nil {
+			return fmt.Errorf("library: remove recycle batch %s: %w", entry.Name(), err)
+		}
+		removed++
+	}
+	if removed > 0 {
+		_ = m.store.InsertEvent(ctx, &core.Event{
+			Level:    core.EventLevelInfo,
+			Category: EventCategoryLibrary,
+			Message:  "Cleaned recycle batches",
+			Detail:   fmt.Sprintf("removed %d expired batch(es)", removed),
+		})
 	}
 	return nil
 }

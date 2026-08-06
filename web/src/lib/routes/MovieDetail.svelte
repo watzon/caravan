@@ -24,6 +24,7 @@
   import { movieStatus } from '../status';
   import { compatBadge } from '../tvcompat';
 
+  import ItemQualityProfileSelect from '../components/ItemQualityProfileSelect.svelte';
   interface Props {
     id: number;
   }
@@ -67,6 +68,12 @@
     } finally {
       savingMonitored = false;
     }
+  }
+
+  async function setQualityProfile(profileID: number) {
+    const current = movie;
+    if (!current) return;
+    movie = await api.setMovieQualityProfile(current.id, profileID);
   }
 
   /** Same optimistic shape as the monitored toggle, for the same reason. */
@@ -209,7 +216,7 @@
           {movie.overview || 'No overview available.'}
         </p>
 
-        <dl class="grid grid-cols-1 gap-4 sm:grid-cols-4">
+        <dl class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
           <div>
             <dt class="micro-label">Folder</dt>
             <dd class="mt-1 truncate font-mono text-sm text-ink" title={movie.path}>
@@ -242,6 +249,10 @@
               </select>
             </dd>
           </div>
+          <ItemQualityProfileSelect
+            profileID={movie.quality_profile_id}
+            kind="movie"
+            onassign={setQualityProfile} />
         </dl>
       </div>
     </div>

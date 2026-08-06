@@ -29,16 +29,11 @@ const ReasonImport = "import"
 // EventCategoryImport groups import events in the activity feed (SPEC §7).
 const EventCategoryImport = "import"
 
-// ImportPathConstraint is Caravan v1's requirement on an external download
-// client (PLAN phase 6 task 2, docs/external-clients.md).
-//
-// There is no remote path-mapping matrix: whatever directory the client says
-// it wrote into is the directory Caravan opens. A client in another container
-// or on another machine therefore has to expose that directory at the same
-// path here. When it does not, the import stops and says this — a visible
-// failure the user can fix, rather than a job that retries forever against a
-// path that will never exist.
-const ImportPathConstraint = "the client's download path must be accessible to Caravan at the same location"
+// ImportPathConstraint is the remediation shown when an external download
+// client reports a directory Caravan cannot read. A remote path mapping can
+// translate client-local paths; without one, both processes must see the same
+// absolute path.
+const ImportPathConstraint = "configure a remote path mapping or expose the download at the same path"
 
 // ImportDownload imports a finished download into the library (SPEC §5.1,
 // PLAN phase 2 task 5).
@@ -68,6 +63,11 @@ func (m *Manager) ImportDownload(ctx context.Context, dl core.DownloadStatus, gr
 	if err != nil || done {
 		return err
 	}
+	mappedPath, err := m.resolveDownloadPath(ctx, dl.SavePath)
+	if err != nil {
+		return fmt.Errorf("library: resolve remote download path: %w", err)
+	}
+	dl.SavePath = mappedPath
 
 	files, err := m.downloadFiles(dl.SavePath)
 	if err != nil {

@@ -29,6 +29,34 @@ const SERIES = {
   seasons: [],
 };
 
+const PROFILES = [
+  {
+    id: 1,
+    name: 'Balanced',
+    cutoff: '1080p',
+    items: ['1080p'],
+    upgrade_allowed: true,
+    is_default: true,
+    assignments: { libraries: 0, movies: 0, series: 0 },
+    created_at: '',
+    updated_at: '',
+  },
+];
+
+const LIBRARIES = [
+  {
+    id: 1,
+    kind: 'tv',
+    name: 'Television',
+    root_path: 'series',
+    dlna_visible: true,
+    route_torrent: '',
+    route_usenet: '',
+    quality_profile_id: 0,
+    indexers: [],
+  },
+];
+
 let host: HTMLElement;
 let app: Record<string, unknown> | undefined;
 let calls: { url: string; method: string; body?: Record<string, unknown> | null }[];
@@ -92,20 +120,39 @@ function episode(number: number, withFile: boolean) {
   };
 }
 
-function stubFetch(queued: number, series: unknown = SERIES) {
+function stubFetch(queued: number, series: unknown = SERIES, qualityProfileStatus = 200) {
   calls = [];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
       calls.push({
         url,
         method: init?.method ?? 'GET',
-        body: typeof init?.body === 'string' ? JSON.parse(init.body) : null,
+        body,
       });
+      if (url.endsWith('/quality-profiles')) {
+        return new Response(JSON.stringify({ profiles: PROFILES }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.endsWith('/libraries')) {
+        return new Response(JSON.stringify({ libraries: LIBRARIES }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
       if (url.endsWith('/search')) {
         return new Response(JSON.stringify({ queued }), {
           status: 202,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (body?.quality_profile_id !== undefined && qualityProfileStatus !== 200) {
+        return new Response(JSON.stringify({ error: 'Could not update quality profile' }), {
+          status: qualityProfileStatus,
           headers: { 'Content-Type': 'application/json' },
         });
       }
@@ -295,6 +342,32 @@ describe('SeriesDetail search actions', () => {
     await settle();
 
     expect(toasts.items.map((t) => t.message)).toEqual(['1 search started']);
+  });
+});
+
+describe('quality profile assignment', () => {
+  it('restores the stored series profile when the assignment fails', async () => {
+    const overriddenSeries = { ...SERIES, quality_profile_id: 1 };
+    stubFetch(0, overriddenSeries, 500);
+    app = mount(SeriesDetail, { target: host, props: { id: 3 } });
+    await settle();
+
+    const select = host.querySelector<HTMLSelectElement>('select[aria-label="Quality profile"]');
+    expect(select).not.toBeNull();
+    expect(select!.value).toBe('1');
+
+    select!.value = '0';
+    select!.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    expect(calls.find((call) => call.body?.quality_profile_id === 0)).toMatchObject({
+      url: '/api/v1/library/series/3',
+      method: 'PATCH',
+      body: { quality_profile_id: 0 },
+    });
+    expect(select!.value).toBe('1');
+    expect(toasts.items.map((toast) => toast.message)).toEqual(['Could not update quality profile']);
+    expect(toasts.items[0]?.tone).toBe('danger');
   });
 });
 

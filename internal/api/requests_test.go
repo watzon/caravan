@@ -154,6 +154,9 @@ func TestApproveRequestAddsMovieAndMarksApproved(t *testing.T) {
 	if body.Movie == nil || body.Movie.TMDBID != 78 {
 		t.Fatalf("movie = %+v, want the added movie 78", body.Movie)
 	}
+	if !body.Movie.Monitored {
+		t.Error("omitted monitored value should keep the default monitored state")
+	}
 	if body.Request.Status != core.RequestApproved {
 		t.Errorf("request status = %q, want %q", body.Request.Status, core.RequestApproved)
 	}
@@ -165,6 +168,83 @@ func TestApproveRequestAddsMovieAndMarksApproved(t *testing.T) {
 	}
 }
 
+func TestApproveMovieQualityProfileBeforeSearch(t *testing.T) {
+	t.Run("chosen profile is stored before the queued search", func(t *testing.T) {
+		ctx := context.Background()
+		h, st := discoverServer(t, &stubDiscoverProvider{})
+		p := seedSearchQualityProfile(t, st)
+		req := &core.Request{MediaType: MediaTypeMovie, TMDBID: 81, Title: "Profiled Movie"}
+		if err := st.CreateRequest(ctx, req); err != nil {
+			t.Fatalf("CreateRequest: %v", err)
+		}
+
+		rec := do(t, h, http.MethodPost, "/api/v1/requests/"+itoa(req.ID)+"/approve",
+			`{"search_now":true,"quality_profile_id":`+itoa(p.ID)+`}`)
+		wantStatus(t, rec, http.StatusOK)
+		movie, err := st.GetMovieByTMDBID(ctx, req.TMDBID)
+		if err != nil {
+			t.Fatalf("GetMovieByTMDBID: %v", err)
+		}
+		if movie.QualityProfileID != p.ID {
+			t.Fatalf("stored profile = %d, want %d", movie.QualityProfileID, p.ID)
+		}
+		wantEffectiveQualityProfile(t, st, core.LibraryKindMovie, movie.QualityProfileID, p.ID)
+		jobs := openJobs(t, st, core.JobSearchMovie)
+		if len(jobs) != 1 || jobs[0].Payload != `{"movie_id":`+itoa(movie.ID)+`}` {
+			t.Fatalf("search_movie jobs = %+v, want one for movie %d", jobs, movie.ID)
+		}
+	})
+
+	t.Run("omitted profile inherits the default", func(t *testing.T) {
+		ctx := context.Background()
+		h, st := discoverServer(t, &stubDiscoverProvider{})
+		def, err := st.ResolveQualityProfile(ctx, 0)
+		if err != nil {
+			t.Fatalf("ResolveQualityProfile: %v", err)
+		}
+		req := &core.Request{MediaType: MediaTypeMovie, TMDBID: 82, Title: "Default Movie"}
+		if err := st.CreateRequest(ctx, req); err != nil {
+			t.Fatalf("CreateRequest: %v", err)
+		}
+
+		rec := do(t, h, http.MethodPost, "/api/v1/requests/"+itoa(req.ID)+"/approve",
+			`{"search_now":true}`)
+		wantStatus(t, rec, http.StatusOK)
+		movie, err := st.GetMovieByTMDBID(ctx, req.TMDBID)
+		if err != nil {
+			t.Fatalf("GetMovieByTMDBID: %v", err)
+		}
+		if movie.QualityProfileID != 0 {
+			t.Fatalf("stored profile = %d, want inherited default", movie.QualityProfileID)
+		}
+		wantEffectiveQualityProfile(t, st, core.LibraryKindMovie, movie.QualityProfileID, def.ID)
+	})
+
+	t.Run("unknown profile leaves the request pending and queues no search", func(t *testing.T) {
+		ctx := context.Background()
+		h, st := discoverServer(t, &stubDiscoverProvider{})
+		req := &core.Request{MediaType: MediaTypeMovie, TMDBID: 83, Title: "Invalid Movie"}
+		if err := st.CreateRequest(ctx, req); err != nil {
+			t.Fatalf("CreateRequest: %v", err)
+		}
+
+		rec := do(t, h, http.MethodPost, "/api/v1/requests/"+itoa(req.ID)+"/approve",
+			`{"search_now":true,"quality_profile_id":999}`)
+		wantStatus(t, rec, http.StatusBadRequest)
+		wantErrorBody(t, rec)
+		stored, err := st.GetRequest(ctx, req.ID)
+		if err != nil {
+			t.Fatalf("GetRequest: %v", err)
+		}
+		if stored.Status != core.RequestPending {
+			t.Fatalf("request status = %q, want pending", stored.Status)
+		}
+		if jobs := openJobs(t, st, core.JobSearchMovie); len(jobs) != 0 {
+			t.Fatalf("search_movie jobs = %d, want none", len(jobs))
+		}
+	})
+}
+
 func TestApproveRequestAddsSeries(t *testing.T) {
 	h, _ := discoverServer(t, &stubDiscoverProvider{})
 
@@ -174,7 +254,7 @@ func TestApproveRequestAddsSeries(t *testing.T) {
 	var created requestJSON
 	decodeBody(t, create, &created)
 
-	rec := do(t, h, http.MethodPost, "/api/v1/requests/"+itoa(created.ID)+"/approve", `{}`)
+	rec := do(t, h, http.MethodPost, "/api/v1/requests/"+itoa(created.ID)+"/approve", `{"monitored":false}`)
 	wantStatus(t, rec, http.StatusOK)
 
 	var body approveBody
@@ -182,12 +262,98 @@ func TestApproveRequestAddsSeries(t *testing.T) {
 	if body.Series == nil || body.Series.TMDBID != 1396 {
 		t.Fatalf("series = %+v, want the added series 1396", body.Series)
 	}
+	if body.Series.Monitored {
+		t.Error("series monitored = true, want explicit false from approval")
+	}
 	if body.Movie != nil {
 		t.Errorf("movie = %+v, want it absent on a series approval", body.Movie)
 	}
 	if body.Request.Status != core.RequestApproved {
 		t.Errorf("request status = %q, want %q", body.Request.Status, core.RequestApproved)
 	}
+}
+
+func TestApproveSeriesQualityProfileBeforeSearch(t *testing.T) {
+	t.Run("chosen profile is stored before the queued search", func(t *testing.T) {
+		ctx := context.Background()
+		h, st, mgr := newTestServer(t)
+		mgr.addSeriesEpisodes = 1
+		p := seedSearchQualityProfile(t, st)
+		req := &core.Request{MediaType: MediaTypeSeries, TMDBID: 1401, Title: "Profiled Series"}
+		if err := st.CreateRequest(ctx, req); err != nil {
+			t.Fatalf("CreateRequest: %v", err)
+		}
+
+		rec := do(t, h, http.MethodPost, "/api/v1/requests/"+itoa(req.ID)+"/approve",
+			`{"search_now":true,"quality_profile_id":`+itoa(p.ID)+`}`)
+		wantStatus(t, rec, http.StatusOK)
+		series, err := st.GetSeriesByTMDBID(ctx, req.TMDBID)
+		if err != nil {
+			t.Fatalf("GetSeriesByTMDBID: %v", err)
+		}
+		if series.QualityProfileID != p.ID {
+			t.Fatalf("stored profile = %d, want %d", series.QualityProfileID, p.ID)
+		}
+		wantEffectiveQualityProfile(t, st, core.LibraryKindTV, series.QualityProfileID, p.ID)
+		episodes, err := st.ListEpisodes(ctx, series.ID)
+		if err != nil {
+			t.Fatalf("ListEpisodes: %v", err)
+		}
+		jobs := openJobs(t, st, core.JobSearchEpisode)
+		if len(episodes) != 1 || len(jobs) != 1 || jobs[0].Payload != `{"episode_id":`+itoa(episodes[0].ID)+`}` {
+			t.Fatalf("search_episode jobs = %+v, want one for series %d", jobs, series.ID)
+		}
+	})
+
+	t.Run("omitted profile inherits the default", func(t *testing.T) {
+		ctx := context.Background()
+		h, st, mgr := newTestServer(t)
+		mgr.addSeriesEpisodes = 1
+		def, err := st.ResolveQualityProfile(ctx, 0)
+		if err != nil {
+			t.Fatalf("ResolveQualityProfile: %v", err)
+		}
+		req := &core.Request{MediaType: MediaTypeSeries, TMDBID: 1402, Title: "Default Series"}
+		if err := st.CreateRequest(ctx, req); err != nil {
+			t.Fatalf("CreateRequest: %v", err)
+		}
+
+		rec := do(t, h, http.MethodPost, "/api/v1/requests/"+itoa(req.ID)+"/approve",
+			`{"search_now":true}`)
+		wantStatus(t, rec, http.StatusOK)
+		series, err := st.GetSeriesByTMDBID(ctx, req.TMDBID)
+		if err != nil {
+			t.Fatalf("GetSeriesByTMDBID: %v", err)
+		}
+		if series.QualityProfileID != 0 {
+			t.Fatalf("stored profile = %d, want inherited default", series.QualityProfileID)
+		}
+		wantEffectiveQualityProfile(t, st, core.LibraryKindTV, series.QualityProfileID, def.ID)
+	})
+
+	t.Run("unknown profile leaves the request pending and queues no search", func(t *testing.T) {
+		ctx := context.Background()
+		h, st, _ := newTestServer(t)
+		req := &core.Request{MediaType: MediaTypeSeries, TMDBID: 1403, Title: "Invalid Series"}
+		if err := st.CreateRequest(ctx, req); err != nil {
+			t.Fatalf("CreateRequest: %v", err)
+		}
+
+		rec := do(t, h, http.MethodPost, "/api/v1/requests/"+itoa(req.ID)+"/approve",
+			`{"search_now":true,"quality_profile_id":999}`)
+		wantStatus(t, rec, http.StatusBadRequest)
+		wantErrorBody(t, rec)
+		stored, err := st.GetRequest(ctx, req.ID)
+		if err != nil {
+			t.Fatalf("GetRequest: %v", err)
+		}
+		if stored.Status != core.RequestPending {
+			t.Fatalf("request status = %q, want pending", stored.Status)
+		}
+		if jobs := openJobs(t, st, core.JobSearchEpisode); len(jobs) != 0 {
+			t.Fatalf("search_episode jobs = %d, want none", len(jobs))
+		}
+	})
 }
 
 func TestApproveRequestTwiceIsConflict(t *testing.T) {

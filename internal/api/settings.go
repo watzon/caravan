@@ -13,6 +13,7 @@ import (
 	"github.com/watzon/caravan/internal/clients"
 	"github.com/watzon/caravan/internal/convert"
 	"github.com/watzon/caravan/internal/core"
+	"github.com/watzon/caravan/internal/library"
 	"github.com/watzon/caravan/internal/store"
 	"github.com/watzon/caravan/internal/wanted"
 )
@@ -55,16 +56,20 @@ var writableSettings = map[string]bool{
 	store.SettingMaxConcurrentDownloads:       true,
 	store.SettingEmbeddedTorrentMaxConcurrent: true,
 	store.SettingEmbeddedUsenetMaxConcurrent:  true,
-
-	store.SettingRouteTorrent:            true,
-	store.SettingRouteUsenet:             true,
-	store.SettingTVProfile:               true,
-	store.SettingConvertVideoPreset:      true,
-	store.SettingConvertVideoCRF:         true,
-	store.SettingConvertAudioBitrateKbps: true,
-	store.SettingDLNAEnabled:             true,
-	store.SettingDLNAFriendlyName:        true,
-	SettingMode:                          true,
+	store.SettingRouteTorrent:                 true,
+	store.SettingRouteUsenet:                  true,
+	store.SettingTVProfile:                    true,
+	store.SettingConvertVideoPreset:           true,
+	store.SettingConvertVideoCRF:              true,
+	store.SettingConvertAudioBitrateKbps:      true,
+	store.SettingDLNAEnabled:                  true,
+	store.SettingDLNAFriendlyName:             true,
+	store.SettingRecycleRetentionDays:         true,
+	store.SettingMovieFolderFormat:            true,
+	store.SettingMovieFileFormat:              true,
+	store.SettingSeriesFolderFormat:           true,
+	store.SettingSeasonFolderFormat:           true,
+	store.SettingEpisodeFileFormat:            true,
 }
 
 // trimmedSettings are written with their surrounding whitespace removed.
@@ -91,69 +96,96 @@ type engineSettingsApplier interface {
 	ApplyEngineSettings(context.Context, map[string]string) error
 }
 
-// hiddenSettings never leave the server. The password hash is not a value the
-// UI has any use for, and a credential the API hands back is a credential that
-// ends up in a browser cache, a screenshot or a bug report (SPEC §12).
+// publicSettingKeys is the complete projection of the settings table that may
+// appear in GET and PUT /settings responses. Credentials are write-only: a
+// browser response is not an acceptable place for a secret, regardless of
+// which settings screen wrote it.
 //
-// The TMDB key is redacted separately to expose only its presence. The Jellyfin
-// key has its own handoff endpoint that likewise exposes only whether a key is
-// stored, so neither secret belongs in the generic response.
-var hiddenSettings = map[string]bool{
-	store.SettingPasswordHash:   true,
-	store.SettingJellyfinAPIKey: true,
+// New persisted settings are private until they are deliberately added here.
+// That makes the secure behaviour the default and avoids a future credential
+// accidentally becoming readable because AllSettings grew a new key.
+var publicSettingKeys = map[string]bool{
+	store.SettingStorageRoot:                  true,
+	store.SettingStashboxEndpoint:             true,
+	store.SettingRSSSyncIntervalMinutes:       true,
+	store.SettingBacklogIntervalMinutes:       true,
+	store.SettingRefreshIntervalMinutes:       true,
+	store.SettingEngineListenPort:             true,
+	store.SettingEngineMaxConnections:         true,
+	store.SettingEngineMaxDownKBps:            true,
+	store.SettingEngineMaxUpKBps:              true,
+	store.SettingEngineSeedRatio:              true,
+	store.SettingEngineSeedDays:               true,
+	store.SettingMaxConcurrentDownloads:       true,
+	store.SettingEmbeddedTorrentMaxConcurrent: true,
+	store.SettingEmbeddedUsenetMaxConcurrent:  true,
+	store.SettingRouteTorrent:                 true,
+	store.SettingRouteUsenet:                  true,
+	store.SettingTVProfile:                    true,
+	store.SettingConvertVideoPreset:           true,
+	store.SettingConvertVideoCRF:              true,
+	store.SettingConvertAudioBitrateKbps:      true,
+	store.SettingJellyfinURL:                  true,
+	store.SettingJellyfinEnabled:              true,
+	store.SettingDLNAEnabled:                  true,
+	store.SettingDLNAFriendlyName:             true,
+	store.SettingDLNAUUID:                     true,
+	store.SettingDLNAUpdateID:                 true,
+	store.SettingRecycleRetentionDays:         true,
+	store.SettingMovieFolderFormat:            true,
+	store.SettingMovieFileFormat:              true,
+	store.SettingSeriesFolderFormat:           true,
+	store.SettingSeasonFolderFormat:           true,
+	store.SettingEpisodeFileFormat:            true,
 }
 
-// adultOnlySettings are readable only by a caller the adult module is visible
-// to. They are the Stash handoff's three keys (PLAN phase 11).
+// adultOnlySettings are public settings readable only by a caller the adult
+// module is visible to. They are the Stash handoff's non-secret settings and
+// the module switch (PLAN phase 11).
 //
 // The module's promise is to be *absent* when it is off, not merely disabled
 // (see requireAdult), and a settings object carrying a stash_url is a module
 // announcing itself. Their own endpoints already sit on the adult mux; this is
 // the same door on the one other path from the settings table to a response
 // body.
-//
-// The stash-box credential is deliberately not in here. It predates this rule
-// and is read by the first-run and metadata screens on an install where the
-// module has never been enabled, so hiding it would be a behaviour change
-// belonging to its own decision rather than to this one.
 var adultOnlySettings = map[string]bool{
+	store.SettingAdultEnabled: true,
 	store.SettingStashURL:     true,
-	store.SettingStashAPIKey:  true,
 	store.SettingStashEnabled: true,
 }
 
-// visibleSettings is every setting this caller is allowed to read. It is the
-// only path from the settings table to a response body, so a key added to
-// hiddenSettings is hidden everywhere at once, and a key added to
-// adultOnlySettings is gated everywhere at once.
-func (s *server) visibleSettings(r *http.Request) (map[string]string, error) {
-	settings, err := s.st.AllSettings(r.Context())
+// publicSettings is the only path from the settings table to a response body.
+func (s *server) publicSettings(r *http.Request) (map[string]string, error) {
+	stored, err := s.st.AllSettings(r.Context())
 	if err != nil {
 		return nil, err
 	}
-	for key := range hiddenSettings {
-		delete(settings, key)
+
+	settings := make(map[string]string, len(publicSettingKeys)+1)
+	for key := range publicSettingKeys {
+		if value, ok := stored[key]; ok {
+			settings[key] = value
+		}
 	}
-	tmdbSet := settings[store.SettingTMDBAPIKey] != ""
-	delete(settings, store.SettingTMDBAPIKey)
-	settings[settingTMDBAPIKeySet] = strconv.FormatBool(tmdbSet)
+	settings[settingTMDBAPIKeySet] = strconv.FormatBool(stored[store.SettingTMDBAPIKey] != "")
 
 	visible, err := s.adultVisible(r)
 	if err != nil {
 		return nil, err
 	}
-	if !visible {
+	if visible {
 		for key := range adultOnlySettings {
-			delete(settings, key)
+			if value, ok := stored[key]; ok {
+				settings[key] = value
+			}
 		}
 	}
 	return settings, nil
 }
 
-// handleGetSettings returns every setting as a flat object, minus the ones that
-// are never readable and the ones this caller may not see.
+// handleGetSettings returns the public settings projection.
 func (s *server) handleGetSettings(w http.ResponseWriter, r *http.Request) {
-	settings, err := s.visibleSettings(r)
+	settings, err := s.publicSettings(r)
 	if err != nil {
 		s.writeStoreError(w, "read settings", err)
 		return
@@ -206,6 +238,14 @@ func (s *server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if err := validateRecycleRetention(body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := library.ValidateNamingSettings(body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if !s.guardAdultCredentialEdit(w, r, body) {
 		return
 	}
@@ -235,7 +275,7 @@ func (s *server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		s.revalidateMetadataKey(r.Context(), strings.TrimSpace(key))
 	}
 
-	settings, err := s.visibleSettings(r)
+	settings, err := s.publicSettings(r)
 	if err != nil {
 		s.writeStoreError(w, "read settings", err)
 		return
@@ -616,9 +656,21 @@ func validateEngineSettings(settings map[string]string) error {
 		case store.SettingEngineSeedRatio:
 			ratio, err := strconv.ParseFloat(strings.TrimSpace(value), 64)
 			if err != nil || ratio < 0 {
+
 				return fmt.Errorf("invalid %s", key)
 			}
 		}
+	}
+	return nil
+}
+func validateRecycleRetention(settings map[string]string) error {
+	value, ok := settings[store.SettingRecycleRetentionDays]
+	if !ok {
+		return nil
+	}
+	days, err := strconv.Atoi(value)
+	if err != nil || days < 0 || days > 3650 {
+		return errors.New("recycle_retention_days must be an integer between 0 and 3650")
 	}
 	return nil
 }
@@ -685,6 +737,9 @@ type statusResponse struct {
 	// POST /system/verify passes, and while it is true downloads refuse to
 	// resume. Only portable mode ever sets it.
 	Dirty bool `json:"dirty"`
+	// Runtime carries process diagnostics when the serving command supplied
+	// them. It is absent for in-process tests and embedded servers.
+	Runtime *runtimeJSON `json:"runtime,omitempty"`
 }
 
 // unhealthyClientJSON is one unreachable download client on GET
@@ -852,6 +907,7 @@ func (s *server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 		PasswordSet:                 users > 0,
 		ListeningPublicly:           listeningPublicly(s.listenAddr),
 		Dirty:                       s.dirty.Load(),
+		Runtime:                     s.runtimeStatus(),
 	})
 }
 

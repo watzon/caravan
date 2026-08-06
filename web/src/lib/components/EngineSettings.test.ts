@@ -34,73 +34,115 @@ function mountCard(
   return onsave;
 }
 
+async function settle() {
+  await Promise.resolve();
+  await Promise.resolve();
+  flushSync();
+}
+
 function input(id: string): HTMLInputElement {
-  const el = host.querySelector(`#${id}`) as HTMLInputElement | null;
+  const el = host.querySelector<HTMLInputElement>(`#${id}`);
   expect(el, `#${id}`).not.toBeNull();
   return el!;
 }
 
-function clear(id: string) {
+function saveButton(): HTMLButtonElement {
+  const button = [...host.querySelectorAll('button')].find((candidate) =>
+    candidate.textContent?.match(/Save changes|No changes|Fix errors/),
+  );
+  expect(button, 'the save button').toBeDefined();
+  return button!;
+}
+
+function setInput(id: string, value: string) {
   const el = input(id);
-  el.value = '';
+  el.value = value;
   el.dispatchEvent(new Event('input', { bubbles: true }));
   flushSync();
 }
 
-function save() {
-  const btn = [...host.querySelectorAll('button')].find((b) => b.textContent?.includes('Save changes'));
-  expect(btn, 'the save button').toBeDefined();
-  btn!.click();
+function setTextInput(id: string, value: string) {
+  const el = input(id);
+  el.type = 'text';
+  el.value = value;
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  flushSync();
 }
 
 describe('EngineSettings', () => {
-  it('loads the stored values', () => {
+  it('loads normalized stored values and does not save unchanged settings', () => {
     mountCard();
+
     expect(input('engine-listen-port').value).toBe('51413');
     expect(input('engine-max-down-kbps').value).toBe('2048');
     expect(input('engine-seed-ratio').value).toBe('2.5');
+    expect(saveButton().disabled).toBe(true);
+    expect(saveButton().textContent).toContain('No changes');
+    expect(host.querySelectorAll('[data-settings-advanced]')).toHaveLength(3);
   });
 
-  /**
-   * A cleared number input binds null, not '', so String(value) is the four
-   * characters "null" — which the server rejects as an invalid setting. Every
-   * one of these fields is "0 means off", so clearing one is a legitimate way
-   * to say "no limit" and has to reach the server as 0.
-   *
-   * Before the fix this saved {"engine_max_down_kbps":"null", ...} and PUT
-   * /settings answered 400, so blanking any engine field silently failed.
-   */
-  it('saves a cleared number field as 0 rather than the string "null"', async () => {
+  it('accepts the listen port boundaries and normalizes a changed patch', async () => {
     const onsave = mountCard();
 
-    clear('engine-max-down-kbps');
-    clear('engine-max-up-kbps');
-    clear('engine-seed-days');
-    save();
+    setInput('engine-listen-port', '65535');
+    setInput('engine-max-down-kbps', '0004096');
+    setInput('engine-seed-ratio', '02.50');
+    expect(saveButton().disabled).toBe(false);
+
+    saveButton().click();
+    await settle();
+
+    expect(onsave).toHaveBeenCalledWith({
+      engine_listen_port: '65535',
+      engine_max_connections: '80',
+      engine_max_down_kbps: '4096',
+      engine_max_up_kbps: '256',
+      engine_seed_ratio: '2.5',
+      engine_seed_days: '14',
+    });
+    expect(saveButton().disabled).toBe(true);
+    expect(saveButton().textContent).toContain('No changes');
+    expect(host.textContent).toContain('Port and connection changes apply after a restart.');
+  });
+
+  it('blocks invalid text and out-of-range ports before they reach the API', () => {
+    const onsave = mountCard();
+
+    setTextInput('engine-listen-port', 'not-a-port');
+
+    expect(input('engine-listen-port').getAttribute('aria-invalid')).toBe('true');
+    expect(host.textContent).toContain('Enter a whole number from 0 to 65,535.');
+    expect(saveButton().disabled).toBe(true);
+    saveButton().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    expect(onsave).not.toHaveBeenCalled();
+
+    setInput('engine-listen-port', '65536');
+    expect(input('engine-listen-port').getAttribute('aria-invalid')).toBe('true');
+    expect(saveButton().disabled).toBe(true);
+  });
+
+  it('saves cleared settings as zero', async () => {
+    const onsave = mountCard();
+
+    setInput('engine-listen-port', '');
+    setInput('engine-max-connections', '');
+    setInput('engine-max-down-kbps', '');
+    setInput('engine-max-up-kbps', '');
+    setInput('engine-seed-ratio', '');
+    setInput('engine-seed-days', '');
+    expect(saveButton().disabled).toBe(false);
+
+    saveButton().click();
     await Promise.resolve();
-
-    expect(onsave).toHaveBeenCalledTimes(1);
-    const patch = onsave.mock.calls[0]![0];
-    for (const [key, value] of Object.entries(patch)) {
-      expect(value, `${key} must be a number the server will accept`).toMatch(/^\d+(\.\d+)?$/);
-    }
-    expect(patch.engine_max_down_kbps).toBe('0');
-    expect(patch.engine_max_up_kbps).toBe('0');
-    expect(patch.engine_seed_days).toBe('0');
-    // The fields the user did not touch keep their stored values.
-    expect(patch.engine_listen_port).toBe('51413');
-    expect(patch.engine_seed_ratio).toBe('2.5');
-  });
-
-  it('saves edited values', async () => {
-    const onsave = mountCard();
-    const down = input('engine-max-down-kbps');
-    down.value = '4096';
-    down.dispatchEvent(new Event('input', { bubbles: true }));
     flushSync();
 
-    save();
-    await Promise.resolve();
-    expect(onsave.mock.calls[0]![0].engine_max_down_kbps).toBe('4096');
+    expect(onsave).toHaveBeenCalledWith({
+      engine_listen_port: '0',
+      engine_max_connections: '0',
+      engine_max_down_kbps: '0',
+      engine_max_up_kbps: '0',
+      engine_seed_ratio: '0',
+      engine_seed_days: '0',
+    });
   });
 });

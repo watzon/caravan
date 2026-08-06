@@ -286,12 +286,13 @@ func TestSettingsCRUD(t *testing.T) {
 		t.Errorf("GetSetting(absent) = %v, want ErrNotFound", err)
 	}
 
+	baseline := map[string]string{SettingDefaultQualityProfileID: "1"}
 	all, err := st.AllSettings(ctx)
 	if err != nil {
 		t.Fatalf("AllSettings: %v", err)
 	}
-	if len(all) != 0 {
-		t.Errorf("AllSettings on a fresh db = %v, want empty", all)
+	if !reflect.DeepEqual(all, baseline) {
+		t.Errorf("AllSettings on a fresh db = %v, want seeded baseline %v", all, baseline)
 	}
 
 	if err := st.SetSetting(ctx, "naming_template", "{title} ({year})"); err != nil {
@@ -314,8 +315,12 @@ func TestSettingsCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AllSettings: %v", err)
 	}
-	if len(all) != 1 || all["naming_template"] != "{title}" {
-		t.Errorf("AllSettings = %v, want one naming_template entry", all)
+	want := map[string]string{
+		SettingDefaultQualityProfileID: "1",
+		"naming_template":              "{title}",
+	}
+	if !reflect.DeepEqual(all, want) {
+		t.Errorf("AllSettings = %v, want %v", all, want)
 	}
 
 	if err := st.DeleteSetting(ctx, "naming_template"); err != nil {
@@ -326,6 +331,14 @@ func TestSettingsCRUD(t *testing.T) {
 	}
 	if err := st.DeleteSetting(ctx, "naming_template"); err != nil {
 		t.Errorf("DeleteSetting on an absent key = %v, want nil", err)
+	}
+
+	all, err = st.AllSettings(ctx)
+	if err != nil {
+		t.Fatalf("AllSettings after delete: %v", err)
+	}
+	if !reflect.DeepEqual(all, baseline) {
+		t.Errorf("AllSettings after delete = %v, want seeded baseline %v", all, baseline)
 	}
 }
 

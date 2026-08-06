@@ -473,49 +473,78 @@ func TestSettingsRoundTrip(t *testing.T) {
 	wantStatus(t, rec, http.StatusOK)
 	var settings map[string]string
 	decodeBody(t, rec, &settings)
-	if settings["tmdb_api_key_set"] != "false" {
+	if settings[settingTMDBAPIKeySet] != "false" {
 		t.Fatalf("fresh settings = %v, want tmdb_api_key_set=false", settings)
 	}
 	if _, ok := settings[store.SettingTMDBAPIKey]; ok {
 		t.Fatalf("fresh settings exposed tmdb_api_key: %v", settings)
 	}
 
-	if err := st.SetSetting(ctx, store.SettingTMDBAPIKey, "tmdb-secret"); err != nil {
-		t.Fatalf("seed TMDB key: %v", err)
+	secretSettings := map[string]string{
+		store.SettingTMDBAPIKey:     "tmdb-secret",
+		store.SettingStashboxAPIKey: "stashbox-secret",
+		store.SettingJellyfinAPIKey: "jellyfin-secret",
+		store.SettingStashAPIKey:    "stash-secret",
+		store.SettingAPIKey:         "caravan-secret",
+		store.SettingPasswordHash:   "password-hash-secret",
 	}
-	if err := st.SetSetting(ctx, store.SettingJellyfinAPIKey, "jellyfin-secret"); err != nil {
-		t.Fatalf("seed Jellyfin key: %v", err)
+	for key, value := range secretSettings {
+		if err := st.SetSetting(ctx, key, value); err != nil {
+			t.Fatalf("seed %s: %v", key, err)
+		}
 	}
-	if err := st.SetSetting(ctx, store.SettingRSSSyncIntervalMinutes, "20"); err != nil {
-		t.Fatalf("seed interval: %v", err)
+	publicSettings := map[string]string{
+		store.SettingAdultEnabled:           "true",
+		store.SettingStashURL:               "http://stash.example.test",
+		store.SettingStashEnabled:           "true",
+		store.SettingJellyfinURL:            "http://jellyfin.example.test",
+		store.SettingJellyfinEnabled:        "true",
+		store.SettingRSSSyncIntervalMinutes: "20",
+	}
+	for key, value := range publicSettings {
+		if err := st.SetSetting(ctx, key, value); err != nil {
+			t.Fatalf("seed %s: %v", key, err)
+		}
+	}
+
+	assertCredentialsRedacted := func(rec *httptest.ResponseRecorder) {
+		t.Helper()
+		for key, value := range secretSettings {
+			if strings.Contains(rec.Body.String(), value) ||
+				strings.Contains(rec.Body.String(), `"`+key+`"`) {
+				t.Fatalf("settings response leaked %s: %s", key, rec.Body.String())
+			}
+		}
 	}
 
 	rec = do(t, h, http.MethodGet, "/api/v1/settings", "")
 	wantStatus(t, rec, http.StatusOK)
-	if strings.Contains(rec.Body.String(), "tmdb-secret") ||
-		strings.Contains(rec.Body.String(), "jellyfin-secret") ||
-		strings.Contains(rec.Body.String(), `"tmdb_api_key"`) ||
-		strings.Contains(rec.Body.String(), `"jellyfin_api_key"`) {
-		t.Fatalf("settings GET leaked credential: %s", rec.Body.String())
-	}
+	assertCredentialsRedacted(rec)
 	decodeBody(t, rec, &settings)
-	if _, ok := settings[store.SettingJellyfinAPIKey]; ok {
-		t.Fatalf("settings exposed jellyfin_api_key: %v", settings)
-	}
-	if settings["tmdb_api_key_set"] != "true" || settings[store.SettingRSSSyncIntervalMinutes] != "20" {
+	if settings[settingTMDBAPIKeySet] != "true" ||
+		settings[store.SettingRSSSyncIntervalMinutes] != "20" {
 		t.Fatalf("settings = %v, want redacted key flag and interval", settings)
 	}
+	if settings[store.SettingAdultEnabled] != "true" ||
+		settings[store.SettingStashURL] != "http://stash.example.test" ||
+		settings[store.SettingStashEnabled] != "true" {
+		t.Fatalf("adult-visible settings = %v, want public adult settings", settings)
+	}
 
-	// A partial update leaves the stored credential untouched.
+	// A partial update leaves stored credentials untouched and its response
+	// follows the same projection as GET, even while adult settings are visible.
 	rec = do(t, h, http.MethodPut, "/api/v1/settings", `{"rss_sync_interval_minutes":"45"}`)
 	wantStatus(t, rec, http.StatusOK)
-	if strings.Contains(rec.Body.String(), "tmdb-secret") ||
-		strings.Contains(rec.Body.String(), `"tmdb_api_key"`) {
-		t.Fatalf("settings PUT leaked credential: %s", rec.Body.String())
-	}
+	assertCredentialsRedacted(rec)
 	decodeBody(t, rec, &settings)
-	if settings[store.SettingRSSSyncIntervalMinutes] != "45" || settings["tmdb_api_key_set"] != "true" {
+	if settings[store.SettingRSSSyncIntervalMinutes] != "45" ||
+		settings[settingTMDBAPIKeySet] != "true" {
 		t.Fatalf("settings = %v, want partial update with preserved key flag", settings)
+	}
+	if settings[store.SettingAdultEnabled] != "true" ||
+		settings[store.SettingStashURL] != "http://stash.example.test" ||
+		settings[store.SettingStashEnabled] != "true" {
+		t.Fatalf("adult-visible PUT settings = %v, want public adult settings", settings)
 	}
 	stored, err := st.GetSetting(ctx, store.SettingTMDBAPIKey)
 	if err != nil {
@@ -528,11 +557,9 @@ func TestSettingsRoundTrip(t *testing.T) {
 	// An explicit empty value clears the credential.
 	rec = do(t, h, http.MethodPut, "/api/v1/settings", `{"tmdb_api_key":""}`)
 	wantStatus(t, rec, http.StatusOK)
-	if strings.Contains(rec.Body.String(), `"tmdb_api_key"`) {
-		t.Fatalf("settings clear response exposed secret field: %s", rec.Body.String())
-	}
+	assertCredentialsRedacted(rec)
 	decodeBody(t, rec, &settings)
-	if settings["tmdb_api_key_set"] != "false" {
+	if settings[settingTMDBAPIKeySet] != "false" {
 		t.Fatalf("settings after clear = %v, want tmdb_api_key_set=false", settings)
 	}
 	stored, err = st.GetSetting(ctx, store.SettingTMDBAPIKey)
@@ -561,6 +588,11 @@ func TestPutSettingsRejectsBadRequests(t *testing.T) {
 		{"stashbox endpoint with an undialable scheme", `{"stashbox_endpoint":"ftp://theporndb.net/graphql"}`},
 		{"stashbox endpoint with no host", `{"stashbox_endpoint":"https:///graphql"}`},
 	}
+	baseline, err := st.AllSettings(context.Background())
+	if err != nil {
+		t.Fatalf("AllSettings before rejected requests: %v", err)
+	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rec := do(t, h, http.MethodPut, "/api/v1/settings", tt.body)
@@ -572,29 +604,77 @@ func TestPutSettingsRejectsBadRequests(t *testing.T) {
 	// Nothing was written by any of the rejected requests.
 	settings, err := st.AllSettings(context.Background())
 	if err != nil {
-		t.Fatalf("AllSettings: %v", err)
+		t.Fatalf("AllSettings after rejected requests: %v", err)
 	}
-	if len(settings) != 0 {
-		t.Fatalf("settings = %v, want no writes from rejected requests", settings)
+	if !reflect.DeepEqual(settings, baseline) {
+		t.Fatalf("settings = %v, want unchanged baseline %v after rejected requests", settings, baseline)
+	}
+}
+
+func TestPutSettingsRejectsMode(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	ctx := t.Context()
+	if err := st.SetSetting(ctx, SettingMode, ModeServer); err != nil {
+		t.Fatalf("seed mode: %v", err)
+	}
+
+	rec := do(t, h, http.MethodPut, "/api/v1/settings", `{"mode":"portable"}`)
+	wantStatus(t, rec, http.StatusBadRequest)
+	var failure errorResponse
+	decodeBody(t, rec, &failure)
+	if failure.Error != "unknown setting: mode" {
+		t.Fatalf("mode rejection = %q, want normal unknown-setting error", failure.Error)
+	}
+
+	stored, err := st.GetSetting(ctx, SettingMode)
+	if err != nil {
+		t.Fatalf("GetSetting mode after rejected PUT: %v", err)
+	}
+	if stored != ModeServer {
+		t.Fatalf("stored mode after rejected PUT = %q, want %q", stored, ModeServer)
+	}
+
+	rec = do(t, h, http.MethodGet, "/api/v1/system/status", "")
+	wantStatus(t, rec, http.StatusOK)
+	var status statusResponse
+	decodeBody(t, rec, &status)
+	if status.Mode != ModeServer {
+		t.Fatalf("status mode = %q, want %q", status.Mode, ModeServer)
+	}
+
+	rec = do(t, h, http.MethodGet, "/api/v1/settings", "")
+	wantStatus(t, rec, http.StatusOK)
+	var settings map[string]string
+	decodeBody(t, rec, &settings)
+	if _, ok := settings[SettingMode]; ok {
+		t.Fatalf("settings exposed status-only mode: %v", settings)
 	}
 }
 
 func TestPutSettingsAcceptsStashboxCredentials(t *testing.T) {
-	h, _, _ := newTestServer(t)
+	h, st, _ := newTestServer(t)
 
 	// A blank endpoint is legal and means "the TPDB preset": pasting a key is
 	// the whole configuration for the default provider.
 	rec := do(t, h, http.MethodPut, "/api/v1/settings",
 		`{"stashbox_endpoint":"","stashbox_api_key":"sk-adult"}`)
 	wantStatus(t, rec, http.StatusOK)
+	if strings.Contains(rec.Body.String(), "sk-adult") ||
+		strings.Contains(rec.Body.String(), `"`+store.SettingStashboxAPIKey+`"`) {
+		t.Fatalf("settings response exposed stashbox credential: %s", rec.Body.String())
+	}
 
 	var settings map[string]string
 	decodeBody(t, rec, &settings)
-	if settings[store.SettingStashboxAPIKey] != "sk-adult" {
-		t.Fatalf("stashbox_api_key = %q, want it stored", settings[store.SettingStashboxAPIKey])
-	}
 	if _, ok := settings[store.SettingStashboxEndpoint]; !ok {
 		t.Fatalf("stashbox_endpoint missing from %v, want the blank value stored", settings)
+	}
+	stored, err := st.GetSetting(t.Context(), store.SettingStashboxAPIKey)
+	if err != nil {
+		t.Fatalf("GetSetting stashbox_api_key: %v", err)
+	}
+	if stored != "sk-adult" {
+		t.Fatalf("stored stashbox_api_key = %q, want %q", stored, "sk-adult")
 	}
 
 	// Naming another box — StashDB, FansDB, a self-hosted one — is a config
@@ -605,6 +685,20 @@ func TestPutSettingsAcceptsStashboxCredentials(t *testing.T) {
 	decodeBody(t, rec, &settings)
 	if settings[store.SettingStashboxEndpoint] != "https://stashdb.org/graphql" {
 		t.Fatalf("stashbox_endpoint = %q, want the new endpoint", settings[store.SettingStashboxEndpoint])
+	}
+
+	// An explicit empty field remains the credential's clear operation.
+	rec = do(t, h, http.MethodPut, "/api/v1/settings", `{"stashbox_api_key":""}`)
+	wantStatus(t, rec, http.StatusOK)
+	if strings.Contains(rec.Body.String(), `"`+store.SettingStashboxAPIKey+`"`) {
+		t.Fatalf("settings clear response exposed stashbox credential field: %s", rec.Body.String())
+	}
+	stored, err = st.GetSetting(t.Context(), store.SettingStashboxAPIKey)
+	if err != nil {
+		t.Fatalf("GetSetting cleared stashbox_api_key: %v", err)
+	}
+	if stored != "" {
+		t.Fatalf("stored stashbox_api_key after clear = %q, want empty", stored)
 	}
 }
 

@@ -31,6 +31,7 @@ func TestIndexerCRUD(t *testing.T) {
 		APIKey:     "secret",
 		Type:       core.IndexerTypeTorznab,
 		Categories: []int{2000, 5000},
+		Priority:   20,
 		Enabled:    true,
 	}
 	if err := st.UpsertIndexer(ctx, &idx); err != nil {
@@ -84,6 +85,28 @@ func TestIndexerCRUD(t *testing.T) {
 	// Deleting twice is not an error.
 	if err := st.DeleteIndexer(ctx, idx.ID); err != nil {
 		t.Errorf("DeleteIndexer twice: %v", err)
+	}
+}
+
+func TestListIndexersUsesPriorityThenName(t *testing.T) {
+	ctx := context.Background()
+	st, _ := openTemp(t)
+	for _, idx := range []core.IndexerConfig{
+		{Name: "Zulu", Type: core.IndexerTypeTorznab, Priority: 25, Enabled: true},
+		{Name: "Alpha", Type: core.IndexerTypeTorznab, Priority: 25, Enabled: true},
+		{Name: "First", Type: core.IndexerTypeNewznab, Priority: 5, Enabled: true},
+	} {
+		if err := st.UpsertIndexer(ctx, &idx); err != nil {
+			t.Fatalf("UpsertIndexer(%s): %v", idx.Name, err)
+		}
+	}
+
+	got, err := st.ListEnabledIndexers(ctx)
+	if err != nil {
+		t.Fatalf("ListEnabledIndexers: %v", err)
+	}
+	if len(got) != 3 || got[0].Name != "First" || got[1].Name != "Alpha" || got[2].Name != "Zulu" {
+		t.Fatalf("indexer order = %+v, want First, Alpha, Zulu", got)
 	}
 }
 

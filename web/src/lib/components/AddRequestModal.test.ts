@@ -216,11 +216,7 @@ describe('AddRequestModal — modes', () => {
     expect(calls.map((c) => c.url)).toContain('/api/v1/quality-profiles');
   });
 
-  /**
-   * POST /requests/{id}/approve takes a search flag and nothing else, so a
-   * profile select there would be a control with no effect.
-   */
-  it('offers the profile select when approving, and applies the choice after the add', async () => {
+  it('sends the selected profile with an approval before the series search', async () => {
     mountModal({ mode: 'add', requestID: 11 });
     await settle();
 
@@ -228,20 +224,92 @@ describe('AddRequestModal — modes', () => {
     expect(select).not.toBeNull();
     expect(host.querySelector('#add-root')).not.toBeNull();
 
-    // Choose the stubbed HD-1080p profile and approve.
     select!.value = '4';
     select!.dispatchEvent(new Event('change'));
     flushSync();
     primary().click();
     await settle();
 
-    // The profile rides as its own call after the approval lands, exactly as
-    // it does on a direct add — it was never part of the approve payload.
-    const approve = calls.find((c) => c.url.endsWith('/requests/11/approve'));
-    expect(approve).toBeTruthy();
-    expect(approve?.body?.quality_profile_id).toBeUndefined();
-    const applied = calls.find((c) => c.method === 'PATCH' && c.url.includes('/library/series/42'));
-    expect(applied?.body).toEqual({ quality_profile_id: 4 });
+    const writes = calls.filter((call) => call.method !== 'GET');
+    expect(writes.map((call) => `${call.method} ${call.url}`)).toEqual([
+      'POST /api/v1/requests/11/approve',
+      'POST /api/v1/library/series/42/search',
+    ]);
+    expect(writes[0]?.body).toEqual({ search_now: false, quality_profile_id: 4 });
+    expect(calls.filter((call) => call.method === 'PATCH')).toEqual([]);
+  });
+
+  it('shows profile loading, an explicit empty state, and no default-only select', async () => {
+    let resolveProfileResponse: ((response: Response) => void) | undefined;
+    const profileResponse = new Promise<Response>((resolve) => {
+      resolveProfileResponse = resolve;
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).endsWith('/quality-profiles')) return profileResponse;
+        return json(null, 204);
+      }),
+    );
+    mountModal({ mode: 'add' });
+
+    expect(host.querySelector('[aria-label="Loading quality profiles"]')).not.toBeNull();
+    resolveProfileResponse!(json({ profiles: [] }));
+    await settle();
+
+    expect(host.querySelector('#add-profile')).toBeNull();
+    expect(host.textContent).toContain('No quality profiles exist.');
+    expect(host.querySelector('a[href="/settings/quality-profiles"]')).not.toBeNull();
+  });
+
+  it('shows a failed profile load with Retry instead of Library default', async () => {
+    let profileLoads = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input).endsWith('/quality-profiles')) {
+          profileLoads += 1;
+          return profileLoads === 1
+            ? json({ error: 'profiles unavailable' }, 503)
+            : json({ profiles: [{ id: 4, name: 'HD-1080p' }] });
+        }
+        return json(null, 204);
+      }),
+    );
+    mountModal({ mode: 'add' });
+    await settle();
+
+    expect(host.textContent).toContain('profiles unavailable');
+    expect(host.querySelector('#add-profile')).toBeNull();
+    clickText('Retry');
+    await settle();
+
+    expect(profileLoads).toBe(2);
+    expect(host.querySelector('#add-profile')).not.toBeNull();
+  });
+
+  it('opens each new add session with a fresh profile choice and monitoring state', async () => {
+    mountModal({ mode: 'add', mediaType: 'movie', tmdbID: 78, title: 'Blade Runner', year: 1982, seasons: null });
+    await settle();
+
+    const firstProfile = host.querySelector<HTMLSelectElement>('#add-profile')!;
+    firstProfile.value = '4';
+    firstProfile.dispatchEvent(new Event('change', { bubbles: true }));
+    (host.querySelector<HTMLInputElement>('#add-monitored')!).click();
+    flushSync();
+    expect(firstProfile.value).toBe('4');
+    expect((host.querySelector<HTMLInputElement>('#add-monitored')!).checked).toBe(false);
+
+    unmount(app!);
+    app = undefined;
+    host.replaceChildren();
+
+    mountModal({ mode: 'add', mediaType: 'movie', tmdbID: 77, title: 'Alien', year: 1979, seasons: null });
+    await settle();
+
+    expect(host.querySelector<HTMLSelectElement>('#add-profile')!.value).toBe('0');
+    expect((host.querySelector<HTMLInputElement>('#add-monitored')!).checked).toBe(true);
+    expect(host.querySelector('#add-availability')).not.toBeNull();
   });
 });
 
@@ -383,7 +451,7 @@ describe('AddRequestModal — submitting', () => {
     expect(approve?.body).toEqual({ search_now: false, seasons: [1, 2] });
   });
 
-  it('applies a chosen quality profile after the add', async () => {
+  it('sends a chosen quality profile in the first direct add request', async () => {
     mountModal({ mode: 'add', mediaType: 'movie', tmdbID: 78, title: 'Blade Runner', year: 1982, seasons: null });
     await settle();
 
@@ -395,23 +463,28 @@ describe('AddRequestModal — submitting', () => {
     primary().click();
     await settle();
 
-    const writes = calls.filter((c) => c.method !== 'GET');
-    expect(writes.map((c) => `${c.method} ${c.url}`)).toEqual([
+    const writes = calls.filter((call) => call.method !== 'GET');
+    expect(writes.map((call) => `${call.method} ${call.url}`)).toEqual([
       'POST /api/v1/library/movies',
-      'PATCH /api/v1/library/movies/7',
     ]);
-    expect(writes[0]?.body).toMatchObject({ tmdb_id: 78, search_now: true });
-    expect(writes[1]?.body).toEqual({ quality_profile_id: 4 });
+    expect(writes[0]?.body).toMatchObject({
+      tmdb_id: 78,
+      search_now: true,
+      quality_profile_id: 4,
+    });
+    expect(calls.filter((call) => call.method === 'PATCH')).toEqual([]);
   });
 
-  it('leaves the profile alone on the library default', async () => {
+  it('omits the profile from a direct add on the library default', async () => {
     mountModal({ mode: 'add', mediaType: 'movie', tmdbID: 78, title: 'Blade Runner', year: 1982, seasons: null });
     await settle();
 
     primary().click();
     await settle();
 
-    expect(calls.filter((c) => c.method === 'PATCH')).toEqual([]);
+    const post = calls.find((call) => call.method === 'POST' && call.url.endsWith('/library/movies'));
+    expect(post?.body).not.toHaveProperty('quality_profile_id');
+    expect(calls.filter((call) => call.method === 'PATCH')).toEqual([]);
   });
 });
 
@@ -473,6 +546,32 @@ describe('AddRequestModal — minimum availability', () => {
 
     const post = calls.find((c) => c.url.endsWith('/requests/11/approve'));
     expect(post?.body?.min_availability).toBe('announced');
+  });
+
+  it('restores monitored independently from minimum availability and submits the explicit value', async () => {
+    mountModal({
+      mode: 'add',
+      mediaType: 'movie',
+      tmdbID: 78,
+      title: 'Blade Runner',
+      year: 1982,
+      seasons: null,
+      initialMonitored: false,
+      initialAvailability: 'announced',
+    });
+    await settle();
+
+    const monitored = host.querySelector<HTMLInputElement>('#add-monitored');
+    expect(monitored).not.toBeNull();
+    expect(monitored!.checked).toBe(false);
+    expect(availabilitySelect()?.value).toBe('announced');
+    monitored!.click();
+    flushSync();
+    primary().click();
+    await settle();
+
+    const post = calls.find((call) => call.method === 'POST' && call.url.endsWith('/library/movies'));
+    expect(post?.body).toMatchObject({ monitored: true, min_availability: 'announced' });
   });
 });
 

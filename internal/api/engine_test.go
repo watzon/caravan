@@ -310,16 +310,21 @@ func TestPutSettingsConcurrencyCaps(t *testing.T) {
 			`{"embedded_usenet_max_concurrent":"2.5"}`,
 		} {
 			h, st, _ := newTestServer(t)
+			baseline, err := st.AllSettings(context.Background())
+			if err != nil {
+				t.Fatalf("AllSettings before rejected request: %v", err)
+			}
+
 			rec := do(t, h, http.MethodPut, "/api/v1/settings", body)
 			wantStatus(t, rec, http.StatusBadRequest)
 			wantErrorBody(t, rec)
 
 			settings, err := st.AllSettings(context.Background())
 			if err != nil {
-				t.Fatalf("AllSettings: %v", err)
+				t.Fatalf("AllSettings after rejected request: %v", err)
 			}
-			if len(settings) != 0 {
-				t.Fatalf("%s wrote %v, want nothing", body, settings)
+			if !reflect.DeepEqual(settings, baseline) {
+				t.Fatalf("%s changed settings from baseline %v to %v", body, baseline, settings)
 			}
 		}
 	})

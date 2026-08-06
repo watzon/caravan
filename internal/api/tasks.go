@@ -38,6 +38,14 @@ var taskCopy = map[string]struct{ name, description string }{
 		"Metadata refresh",
 		"Updates titles, statuses, new seasons and scenes.",
 	},
+	core.JobRecycleCleanup: {
+		"Recycle cleanup",
+		"Removes recycle batches after their retention period.",
+	},
+	core.JobNotificationDispatch: {
+		"Notification delivery",
+		"Sends new grabs, imports, and health events to configured webhooks.",
+	},
 }
 
 type taskJSON struct {
@@ -123,20 +131,48 @@ func (s *server) handleRunTask(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreError(w, "run task", err)
 		return
 	}
-	// No open row at all means the self-scheduling chain was broken — a runner
-	// that was stopped mid-cycle, or a database that has never had one. The
-	// button still has to work, and enqueueing here restarts the chain rather
-	// than making the user wait for the next process start to bootstrap it.
-	// RunJobNow established there is no open row inside a transaction, so this
-	// needs no second HasOpenJob guard.
-	if result == store.RunNowNoOpenJob {
-		if err := s.st.EnqueueJob(r.Context(), &core.Job{Kind: kind, Payload: "{}"}); err != nil {
-			s.writeStoreError(w, "run task", err)
-			return
-		}
-	}
 	writeJSON(w, http.StatusOK, runTaskResponse{
 		Kind:           kind,
 		AlreadyRunning: result == store.RunNowRunning,
+	})
+}
+
+const (
+	minTaskIntervalMinutes = 5
+	maxTaskIntervalMinutes = 30 * 24 * 60
+)
+
+type updateTaskIntervalRequest struct {
+	IntervalMinutes int `json:"interval_minutes"`
+}
+
+type updateTaskIntervalResponse struct {
+	Kind            string `json:"kind"`
+	IntervalMinutes int    `json:"interval_minutes"`
+}
+
+// handleUpdateTaskInterval changes a recurring task's cadence. The pending run
+// is moved to the new interval from now, so the UI and queue change together.
+func (s *server) handleUpdateTaskInterval(w http.ResponseWriter, r *http.Request) {
+	kind := r.PathValue("kind")
+	if _, ok := store.RecurringIntervalFor(kind); !ok {
+		writeError(w, http.StatusNotFound, "unknown task")
+		return
+	}
+	var body updateTaskIntervalRequest
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	if body.IntervalMinutes < minTaskIntervalMinutes || body.IntervalMinutes > maxTaskIntervalMinutes {
+		writeError(w, http.StatusBadRequest, "interval_minutes must be between 5 and 43200")
+		return
+	}
+	if err := s.st.SetRecurringInterval(r.Context(), kind, body.IntervalMinutes); err != nil {
+		s.writeStoreError(w, "update task interval", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, updateTaskIntervalResponse{
+		Kind:            kind,
+		IntervalMinutes: body.IntervalMinutes,
 	})
 }

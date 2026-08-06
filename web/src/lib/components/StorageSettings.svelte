@@ -12,7 +12,7 @@
    * screen polls a row rather than holding a request open: closing the tab
    * does not stop it, and reopening it shows where the move got to.
    */
-  import { onDestroy, onMount } from 'svelte';
+  import { onDestroy, onMount, untrack } from 'svelte';
   import { api, errorText } from '../api/client';
   import {
     SETTING_STORAGE_ROOT,
@@ -29,6 +29,7 @@
   import Modal from './Modal.svelte';
   import ProgressBar from './ProgressBar.svelte';
   import TextInput from './TextInput.svelte';
+  import DatabaseSettings from './DatabaseSettings.svelte';
 
   interface Props {
     settings: Settings;
@@ -50,6 +51,101 @@
   let warnings = $state<string[]>([]);
   let restartRequired = $state(false);
   let migration = $state<StorageMigration | null>(null);
+
+  const namingKeys = {
+    recycle: 'recycle_retention_days',
+    movieFolder: 'movie_folder_format',
+    movieFile: 'movie_file_format',
+    seriesFolder: 'series_folder_format',
+    seasonFolder: 'season_folder_format',
+    episodeFile: 'episode_file_format',
+  } as const;
+  let recycleRetentionDays = $state(untrack(() => settings[namingKeys.recycle] || '0'));
+  let movieFolderFormat = $state(untrack(() => settings[namingKeys.movieFolder] || '{title}{year}'));
+  let movieFileFormat = $state(untrack(() => settings[namingKeys.movieFile] || '{title}{year}{edition}'));
+  let seriesFolderFormat = $state(untrack(() => settings[namingKeys.seriesFolder] || '{title}{year}'));
+  let seasonFolderFormat = $state(untrack(() => settings[namingKeys.seasonFolder] || 'Season {season:02}'));
+  let episodeFileFormat = $state(untrack(() => settings[namingKeys.episodeFile] || '{series}{year} - {episode}{title}'));
+  let namingBusy = $state(false);
+
+  function preview(format: string, tokens: Record<string, string>) {
+    return format.replace(/\{([^}]+)\}/g, (_, token) => tokens[token] ?? `{${token}}`);
+  }
+
+  let moviePreview = $derived(
+    preview(movieFileFormat, { title: 'Big Buck Bunny', year: ' (2008)', edition: " - Director's Cut" }) +
+      '.mkv',
+  );
+
+  function namingError() {
+    const retention = Number(recycleRetentionDays);
+    if (!Number.isInteger(retention) || retention < 0 || retention > 3650) {
+      return 'Recycle retention must be an integer between 0 and 3650.';
+    }
+    const formats: Array<[string, string, string[], string[]]> = [
+      ['Movie folder format', movieFolderFormat, ['title', 'year'], ['title']],
+      ['Movie file format', movieFileFormat, ['title', 'year', 'edition'], ['title']],
+      ['Series folder format', seriesFolderFormat, ['title', 'year'], ['title']],
+      ['Season folder format', seasonFolderFormat, ['season', 'season:02'], ['season']],
+      ['Episode file format', episodeFileFormat, ['series', 'year', 'episode', 'title'], ['series', 'episode']],
+    ];
+    for (const [label, format, allowed, required] of formats) {
+      const tokens = [...format.matchAll(/\{([^}]+)\}/g)].map((match) => match[1]);
+      if (!format || tokens.some((token) => !allowed.includes(token))) return `${label} has an invalid token.`;
+      if (required.some((token) => token === 'season'
+        ? !tokens.includes('season') && !tokens.includes('season:02')
+        : !tokens.includes(token))) return `${label} is missing a required token.`;
+    }
+    return '';
+  }
+
+  function namingSnapshot() {
+    return JSON.stringify({
+      recycleRetentionDays,
+      movieFolderFormat,
+      movieFileFormat,
+      seriesFolderFormat,
+      seasonFolderFormat,
+      episodeFileFormat,
+    });
+  }
+
+  let savedNaming = $state(untrack(() => namingSnapshot()));
+  let namingChanged = $derived(namingSnapshot() !== savedNaming);
+  let namingInvalid = $derived(namingError() !== '');
+  let episodePreview = $derived(
+    preview(episodeFileFormat, {
+      series: 'Planet Earth II',
+      year: ' (2016)',
+      episode: 'S01E01',
+      title: ' - Islands',
+    }) + '.mkv',
+  );
+
+  async function saveNaming() {
+    const error = namingError();
+    if (error) {
+      pushToast(error, 'danger');
+      return;
+    }
+    namingBusy = true;
+    try {
+      await api.putSettings({
+        [namingKeys.recycle]: String(recycleRetentionDays),
+        [namingKeys.movieFolder]: movieFolderFormat,
+        [namingKeys.movieFile]: movieFileFormat,
+        [namingKeys.seriesFolder]: seriesFolderFormat,
+        [namingKeys.seasonFolder]: seasonFolderFormat,
+        [namingKeys.episodeFile]: episodeFileFormat,
+      });
+      savedNaming = namingSnapshot();
+      pushToast('Recycle retention and naming settings saved.', 'success');
+    } catch (err) {
+      pushToast(errorText(err), 'danger');
+    } finally {
+      namingBusy = false;
+    }
+  }
 
   let timer: ReturnType<typeof setInterval> | null = null;
 
@@ -153,9 +249,51 @@
   <Field
     label="Current storage root"
     for="settings-storage-root-current"
+
     help="Every path in the database is relative to this folder. That is what makes re-pointing instant and a rescan enough to rebuild the library.">
     <TextInput id="settings-storage-root-current" value={currentRoot} mono readonly />
   </Field>
+  <div class="flex flex-col gap-4 rounded-md border border-border bg-surface p-4">
+    <div>
+      <h3 class="text-sm font-semibold">Recycle and library naming</h3>
+      <p class="mt-1 text-sm text-muted">
+        Deleted Caravan files can be retained under <code>recycle/&lt;UTC batch&gt;/</code>.
+        Naming changes apply to new imports only.
+      </p>
+    </div>
+    <Field
+      label="Recycle retention (days)"
+      for="settings-recycle-retention"
+      help="0 permanently deletes future Caravan-owned media, posters and NFO files. Use 1 to 3650 days to retain them."
+    >
+      <TextInput id="settings-recycle-retention" type="number" min="0" max="3650" bind:value={recycleRetentionDays} />
+    </Field>
+    <Field label="Movie folder format" for="settings-movie-folder-format" help={'Tokens: {title}, {year}.'}>
+      <TextInput id="settings-movie-folder-format" bind:value={movieFolderFormat} mono />
+    </Field>
+    <Field label="Movie file format" for="settings-movie-file-format" help={'Tokens: {title}, {year}, {edition}.'}>
+      <TextInput id="settings-movie-file-format" bind:value={movieFileFormat} mono />
+    </Field>
+    <Field label="Series folder format" for="settings-series-folder-format" help={'Tokens: {title}, {year}.'}>
+      <TextInput id="settings-series-folder-format" bind:value={seriesFolderFormat} mono />
+    </Field>
+    <Field label="Season folder format" for="settings-season-folder-format" help={'Tokens: {season}, {season:02}.'}>
+      <TextInput id="settings-season-folder-format" bind:value={seasonFolderFormat} mono />
+    </Field>
+    <Field
+      label="Episode file format"
+      for="settings-episode-file-format"
+      help={'Tokens: {series}, {year}, {episode}, {title}.'}
+    >
+      <TextInput id="settings-episode-file-format" bind:value={episodeFileFormat} mono />
+    </Field>
+    <div class="rounded bg-base px-3 py-2 text-sm text-muted">
+      <p>Movie preview: <code>{preview(movieFolderFormat, { title: 'Big Buck Bunny', year: ' (2008)' })}/{moviePreview}</code></p>
+      <p>Episode preview: <code>{preview(seriesFolderFormat, { title: 'Planet Earth II', year: ' (2016)' })}/{preview(seasonFolderFormat, { season: '1', 'season:02': '01' })}/{episodePreview}</code></p>
+    </div>
+    <div><Button variant="primary" onclick={saveNaming} disabled={namingBusy || !namingChanged || namingInvalid}>{namingBusy ? 'Saving…' : 'Save recycle and naming'}</Button></div>
+  </div>
+  <DatabaseSettings />
 
   {#if portable}
     <Banner

@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import FirstRun from './FirstRun.svelte';
 import { system } from '../state/system.svelte';
-import { clearToasts } from '../state/toast.svelte';
+import { clearToasts, toasts } from '../state/toast.svelte';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -113,7 +113,7 @@ function called(fragment: string): Call[] {
   return calls.filter((c) => c.url.includes(fragment));
 }
 
-/** Turn the scan step off so the happy paths do not have to poll a scan. */
+/** Turn the scan step off when a test needs to prove no scan was queued. */
 function scanOff() {
   const scanToggle = host.querySelector('[role="switch"]') as HTMLButtonElement;
   expect(scanToggle, 'the scan toggle').not.toBeNull();
@@ -159,7 +159,7 @@ describe('FirstRun', () => {
     expect(called('/settings')).toHaveLength(1); // the test route only
   });
 
-  it('saves the root and the proven key, then leaves the wizard', async () => {
+  it('saves the root and proven key, then goes to settings without a scan', async () => {
     mountWizard();
     typeInto('#storage-root', '/data');
     typeInto('#tmdb-key', 'abc123');
@@ -177,7 +177,8 @@ describe('FirstRun', () => {
     expect(calls.find((c) => c.method === 'PUT' && c.url.endsWith('/settings'))?.body).toEqual({
       tmdb_api_key: 'abc123',
     });
-    expect(window.location.pathname).toBe('/movies');
+    expect(called('/library/rescan')).toHaveLength(0);
+    expect(window.location.pathname).toBe('/settings');
   });
 
   // The acceptance criterion: a wrong key is caught at first run, and it is
@@ -221,7 +222,7 @@ describe('FirstRun', () => {
     expect(called('/storage-root/repoint')).toHaveLength(1);
   });
 
-  // The escape hatch, taken on purpose — and it names what it costs.
+  // The escape hatch, taken on purpose - and it names what it costs.
   it('lets the key be skipped, saying what that means, and saves no key', async () => {
     mountWizard();
     typeInto('#storage-root', '/data');
@@ -238,7 +239,63 @@ describe('FirstRun', () => {
     expect(called('/storage-root/repoint')).toHaveLength(1);
     expect(called('/settings/metadata/test')).toHaveLength(0);
     expect(calls.some((c) => c.method === 'PUT')).toBe(false);
-    expect(window.location.pathname).toBe('/movies');
+    expect(called('/library/rescan')).toHaveLength(0);
+    expect(window.location.pathname).toBe('/settings');
+  });
+
+  it('navigates to settings immediately after a scan queues', async () => {
+    responders.push({
+      match: '/system/status',
+      reply: () => jsonResponse({ ...STATUS, scanning: true }),
+    });
+    mountWizard();
+    typeInto('#storage-root', '/data');
+    button('Skip for now').click();
+    flushSync();
+
+    button('Start Caravan').click();
+    await settle();
+
+    expect(called('/library/rescan')).toHaveLength(1);
+    // Refresh observes the running scan once; waiting for completion would
+    // keep the wizard here and poll status again after the scan interval.
+    expect(called('/system/status')).toHaveLength(1);
+    expect(window.location.pathname).toBe('/settings');
+    expect(host.textContent).not.toContain('Starting…');
+  });
+
+  it('reports a scan start failure but still navigates to settings', async () => {
+    responders.push({
+      match: '/library/rescan',
+      reply: () => jsonResponse({ error: 'scanner unavailable' }, 503),
+    });
+    mountWizard();
+    typeInto('#storage-root', '/data');
+    button('Skip for now').click();
+    flushSync();
+
+    button('Start Caravan').click();
+    await settle();
+
+    expect(called('/storage-root/repoint')).toHaveLength(1);
+    expect(called('/library/rescan')).toHaveLength(1);
+    expect(toasts.items).toContainEqual(
+      expect.objectContaining({
+        tone: 'warning',
+        message: expect.stringContaining('could not start the scan: scanner unavailable'),
+      }),
+    );
+    expect(window.location.pathname).toBe('/settings');
+  });
+
+  it('links the remaining setup directly to its settings', () => {
+    mountWizard();
+
+    expect(host.querySelector('a[href="/settings/indexers"]')?.textContent?.trim()).toBe('Indexers');
+    expect(host.querySelector('a[href="/settings/downloads"]')?.textContent?.trim()).toBe('Downloads');
+    expect(host.querySelector('a[href="/settings/quality-profiles"]')?.textContent?.trim()).toBe(
+      'Download profiles',
+    );
   });
 
   // "I have not typed it yet" is not the same answer as "I am going without

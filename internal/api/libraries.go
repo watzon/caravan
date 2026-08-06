@@ -210,12 +210,23 @@ func (s *server) handleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
 	if body.RouteUsenet != nil {
 		lib.RouteUsenet = *body.RouteUsenet
 	}
+	selectedProfileID := int64(-1)
 	if body.QualityProfileID != nil {
-		lib.QualityProfileID = *body.QualityProfileID
+		selectedProfileID = *body.QualityProfileID
+		if selectedProfileID == 0 {
+			lib.QualityProfileID = 0
+		}
 	}
 	if err := s.st.UpdateLibrary(ctx, lib); err != nil {
 		s.writeStoreError(w, "update library", err)
 		return
+	}
+	if selectedProfileID > 0 {
+		if err := s.st.SetLibraryQualityProfile(ctx, id, selectedProfileID); err != nil {
+			s.writeStoreError(w, "set library quality profile", err)
+			return
+		}
+		lib.QualityProfileID = selectedProfileID
 	}
 	s.writeLibrary(w, r, *lib)
 }

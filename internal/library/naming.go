@@ -1,12 +1,15 @@
 package library
 
 import (
+	"context"
 	"fmt"
 	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/watzon/caravan/internal/store"
 )
 
 // cleanRoot normalizes the storage root once, at construction, so every
@@ -83,8 +86,7 @@ func sanitize(s string) string {
 	return s
 }
 
-// titleYear renders the "Title (Year)" stem shared by folder and file names.
-// A missing year degrades to the bare title rather than "(0)".
+// titleYear renders the "Title (Year)" stem shared by legacy default names.
 func titleYear(title string, year int) string {
 	t := sanitize(title)
 	if year <= 0 {
@@ -93,13 +95,119 @@ func titleYear(title string, year int) string {
 	return fmt.Sprintf("%s (%d)", t, year)
 }
 
+const (
+	defaultMovieFolderFormat  = "{title}{year}"
+	defaultMovieFileFormat    = "{title}{year}{edition}"
+	defaultSeriesFolderFormat = "{title}{year}"
+	defaultSeasonFolderFormat = "Season {season:02}"
+	defaultEpisodeFileFormat  = "{series}{year} - {episode}{title}"
+)
+
+type namingFormat struct {
+	setting  string
+	fallback string
+	tokens   map[string]bool
+	required []string
+}
+
+var namingFormats = []namingFormat{
+	{store.SettingMovieFolderFormat, defaultMovieFolderFormat, map[string]bool{"title": true, "year": true}, []string{"title"}},
+	{store.SettingMovieFileFormat, defaultMovieFileFormat, map[string]bool{"title": true, "year": true, "edition": true}, []string{"title"}},
+	{store.SettingSeriesFolderFormat, defaultSeriesFolderFormat, map[string]bool{"title": true, "year": true}, []string{"title"}},
+	{store.SettingSeasonFolderFormat, defaultSeasonFolderFormat, map[string]bool{"season": true, "season:02": true}, []string{"season"}},
+	{store.SettingEpisodeFileFormat, defaultEpisodeFileFormat, map[string]bool{"series": true, "year": true, "episode": true, "title": true}, []string{"series", "episode"}},
+}
+
+func namingFormatFor(setting string) (namingFormat, bool) {
+	for _, format := range namingFormats {
+		if format.setting == setting {
+			return format, true
+		}
+	}
+	return namingFormat{}, false
+}
+
+// ValidateNamingSettings refuses a format before it reaches the settings
+// table. It uses literal tokens only: formats are never Go templates or regex.
+func ValidateNamingSettings(settings map[string]string) error {
+	for key, value := range settings {
+		format, ok := namingFormatFor(key)
+		if !ok {
+			continue
+		}
+		if err := validateNamingFormat(format, value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateNamingFormat(format namingFormat, value string) error {
+	if value == "" {
+		return fmt.Errorf("%s must not be empty", format.setting)
+	}
+	used := make(map[string]bool)
+	for i := 0; i < len(value); {
+		switch value[i] {
+		case '{':
+			end := strings.IndexByte(value[i:], '}')
+			if end < 0 {
+				return fmt.Errorf("%s has an unclosed token", format.setting)
+			}
+			token := value[i+1 : i+end]
+			if !format.tokens[token] {
+				return fmt.Errorf("%s has unknown token {%s}", format.setting, token)
+			}
+			used[token] = true
+			i += end + 1
+		case '}':
+			return fmt.Errorf("%s has an unmatched closing brace", format.setting)
+		default:
+			if illegalChars.MatchString(string(value[i])) {
+				return fmt.Errorf("%s contains an invalid path character", format.setting)
+			}
+			i++
+		}
+	}
+	for _, token := range format.required {
+		if token == "season" {
+			if used["season"] || used["season:02"] {
+				continue
+			}
+		} else if used[token] {
+			continue
+		}
+		return fmt.Errorf("%s requires {%s}", format.setting, token)
+	}
+	return nil
+}
+
+func renderNamingFormat(format string, tokens map[string]string) string {
+	for token, value := range tokens {
+		format = strings.ReplaceAll(format, "{"+token+"}", value)
+	}
+	return format
+}
+
+func (m *Manager) format(setting, fallback string) string {
+	value, err := m.store.GetSetting(context.Background(), setting)
+	if err != nil || value == "" {
+		return fallback
+	}
+	return value
+}
+
 // movieFolderName is the per-movie folder: "Big Buck Bunny (2008)".
 func movieFolderName(title string, year int) string { return titleYear(title, year) }
 
-// movieFileName is the movie file: "Big Buck Bunny (2008).mkv", with any
-// edition appended Jellyfin-style — "Blade Runner (1982) - Director's Cut.mkv"
-// (SPEC §7: editions are free text rendered into the filename, with no
-// per-edition duplicate handling in v1).
+func (m *Manager) movieFolderName(title string, year int) string {
+	return renderNamingFormat(m.format(store.SettingMovieFolderFormat, defaultMovieFolderFormat), map[string]string{
+		"title": sanitize(title),
+		"year":  optionalYear(year),
+	})
+}
+
+// movieFileName is the movie file: "Big Buck Bunny (2008).mkv".
 func movieFileName(title string, year int, edition, ext string) string {
 	name := titleYear(title, year)
 	if e := sanitize(edition); edition != "" && e != "Unknown" {
@@ -108,25 +216,79 @@ func movieFileName(title string, year int, edition, ext string) string {
 	return name + ext
 }
 
+func (m *Manager) movieFileName(title string, year int, edition, ext string) string {
+	return renderNamingFormat(m.format(store.SettingMovieFileFormat, defaultMovieFileFormat), map[string]string{
+		"title":   sanitize(title),
+		"year":    optionalYear(year),
+		"edition": optionalEdition(edition),
+	}) + ext
+}
+
 // seriesFolderName is the per-series folder: "Planet Earth II (2016)".
 func seriesFolderName(title string, year int) string { return titleYear(title, year) }
 
-// seasonFolderName is "Season 01". Specials are season 0 and therefore
-// "Season 00", following the TMDB/Jellyfin convention SPEC §7 picked.
-func seasonFolderName(season int) string {
-	return fmt.Sprintf("Season %02d", season)
+func (m *Manager) seriesFolderName(title string, year int) string {
+	return renderNamingFormat(m.format(store.SettingSeriesFolderFormat, defaultSeriesFolderFormat), map[string]string{
+		"title": sanitize(title),
+		"year":  optionalYear(year),
+	})
 }
 
-// episodeFileName is
-// "Planet Earth II (2016) - S01E01 - Islands.mkv". A multi-episode file
-// collapses its range Jellyfin-style ("S01E01-E02") and joins the episode
-// titles, because one file legitimately covers several episodes (SPEC §7).
+func optionalYear(year int) string {
+	if year <= 0 {
+		return ""
+	}
+	return fmt.Sprintf(" (%d)", year)
+}
+
+func optionalEdition(edition string) string {
+	if edition == "" {
+		return ""
+	}
+	value := sanitize(edition)
+	if value == "Unknown" {
+		return ""
+	}
+	return " - " + value
+}
+
+// seasonFolderName is "Season 01".
+func seasonFolderName(season int) string { return fmt.Sprintf("Season %02d", season) }
+
+func (m *Manager) seasonFolderName(season int) string {
+	return renderNamingFormat(m.format(store.SettingSeasonFolderFormat, defaultSeasonFolderFormat), map[string]string{
+		"season":    fmt.Sprintf("%d", season),
+		"season:02": fmt.Sprintf("%02d", season),
+	})
+}
+
+// episodeFileName is "Planet Earth II (2016) - S01E01 - Islands.mkv".
 func episodeFileName(title string, year, season int, episodes []int, episodeTitle, ext string) string {
 	name := titleYear(title, year) + " - " + episodeTag(season, episodes)
 	if t := sanitize(episodeTitle); episodeTitle != "" && t != "Unknown" {
 		name += " - " + t
 	}
 	return name + ext
+}
+
+func (m *Manager) episodeFileName(title string, year, season int, episodes []int, episodeTitle, ext string) string {
+	return renderNamingFormat(m.format(store.SettingEpisodeFileFormat, defaultEpisodeFileFormat), map[string]string{
+		"series":  sanitize(title),
+		"year":    optionalYear(year),
+		"episode": episodeTag(season, episodes),
+		"title":   optionalEpisodeTitle(episodeTitle),
+	}) + ext
+}
+
+func optionalEpisodeTitle(title string) string {
+	if title == "" {
+		return ""
+	}
+	value := sanitize(title)
+	if value == "Unknown" {
+		return ""
+	}
+	return " - " + value
 }
 
 // sceneFileName is an adult episode's file:
@@ -167,6 +329,14 @@ func movieDir(title string, year int) string {
 // seriesDir returns a series folder's storage-root-relative path.
 func seriesDir(title string, year int) string {
 	return path.Join(LibraryDir, TVDir, seriesFolderName(title, year))
+}
+
+func (m *Manager) movieDir(title string, year int) string {
+	return path.Join(LibraryDir, MoviesDir, m.movieFolderName(title, year))
+}
+
+func (m *Manager) seriesDir(title string, year int) string {
+	return path.Join(LibraryDir, TVDir, m.seriesFolderName(title, year))
 }
 
 // sortTitle is the case-folded, article-stripped title the store orders by.

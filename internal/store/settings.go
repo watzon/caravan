@@ -17,6 +17,21 @@ const (
 	// rather than on a row so re-pointing the root is a single update
 	// (SPEC §10).
 	SettingStorageRoot = "storage_root"
+	// SettingRecycleRetentionDays keeps deleted Caravan-owned library files in
+	// recycle batches for this many days. Zero preserves permanent deletion.
+	SettingRecycleRetentionDays = "recycle_retention_days"
+	// SettingRecycleCleanupIntervalMinutes controls the recurring cleanup job.
+	SettingRecycleCleanupIntervalMinutes = "recycle_cleanup_interval_minutes"
+	// SettingNotificationIntervalMinutes controls webhook delivery cadence.
+	SettingNotificationIntervalMinutes = "notification_interval_minutes"
+	// Naming settings describe the generated Jellyfin-compatible paths. Unset
+	// values use the built-in formats so existing installations keep their
+	// exact paths.
+	SettingMovieFolderFormat  = "movie_folder_format"
+	SettingMovieFileFormat    = "movie_file_format"
+	SettingSeriesFolderFormat = "series_folder_format"
+	SettingSeasonFolderFormat = "season_folder_format"
+	SettingEpisodeFileFormat  = "episode_file_format"
 	// SettingTMDBAPIKey is the metadata provider credential.
 	SettingTMDBAPIKey = "tmdb_api_key"
 	// SettingStashboxEndpoint and SettingStashboxAPIKey configure the adult
@@ -51,6 +66,10 @@ const (
 	// SettingBacklogIntervalMinutes is how often the wanted list is swept for
 	// items that need a backlog search (PLAN phase 3, task 4).
 	SettingBacklogIntervalMinutes = "backlog_interval_minutes"
+	// SettingDefaultQualityProfileID is the id of the profile used when neither
+	// an item nor its library selects one. It is persisted rather than inferred
+	// from profile order so changing the system default is explicit and stable.
+	SettingDefaultQualityProfileID = "default_quality_profile_id"
 	// SettingRefreshIntervalMinutes is how often provider metadata is
 	// re-fetched for every monitored title (core.JobRefreshMetadata).
 	SettingRefreshIntervalMinutes = "refresh_interval_minutes"

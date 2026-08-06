@@ -52,8 +52,38 @@
   let hasAPIKey = $state(false);
   let clearAPIKey = $state(false);
   let categories = $state('');
+  let priority = $state('25');
   let enabled = $state(true);
 
+  /**
+   * A form's baseline is captured only when it opens. This keeps category-cap
+   * loading from looking like an edit, while treating the write-only key's
+   * explicit Clear action as a real change.
+   */
+  let initialDraft = $state('');
+
+  function draftSnapshot(): string {
+    return JSON.stringify({
+      name,
+      type,
+      url,
+      apiKey,
+      clearAPIKey,
+      categories,
+      priority,
+      selectedCategories,
+      enabled,
+    });
+  }
+
+  let isDirty = $derived(editingID !== null && draftSnapshot() !== initialDraft);
+  let priorityError = $derived.by(() => {
+    const value = Number(priority.trim());
+    return priority.trim() === '' || !Number.isInteger(value) || value < 0
+      ? 'Priority must be a whole number of zero or greater.'
+      : null;
+  });
+  let validationError = $derived(validateIndexer({ name, url }) ?? priorityError);
   /**
    * The category tree the indexer advertises (null = not loaded), and the ids
    * picked from it. While the tree is unloaded — or the indexer advertises
@@ -128,8 +158,10 @@
     hasAPIKey = false;
     clearAPIKey = false;
     categories = '';
+    priority = '25';
     enabled = true;
     resetCategoryPicker();
+    initialDraft = draftSnapshot();
   }
 
   function openEdit(indexer: Indexer) {
@@ -142,11 +174,13 @@
     hasAPIKey = indexer.has_api_key;
     clearAPIKey = false;
     categories = formatCategories(indexer.categories);
+    priority = String(indexer.priority ?? 25);
     enabled = indexer.enabled;
     resetCategoryPicker();
     selectedCategories = indexer.categories;
     // Best effort: a failure leaves the free-text field as the editor.
     void loadCategories();
+    initialDraft = draftSnapshot();
   }
 
   function closeForm() {
@@ -156,9 +190,9 @@
   }
 
   async function save() {
-    const problem = validateIndexer({ name, url });
-    if (problem) {
-      formError = problem;
+    if (saving || !isDirty) return;
+    if (validationError) {
+      formError = validationError;
       return;
     }
 
@@ -167,6 +201,7 @@
       type,
       url: url.trim(),
       categories: treeUsable ? selectedCategories : parseCategories(categories),
+      priority: Number(priority.trim()),
       enabled,
     };
     if (apiKey.trim() !== '' || clearAPIKey) {
@@ -273,6 +308,7 @@
               <Badge mono tone={indexer.type === 'torznab' ? 'accent' : 'info'}>
                 {indexer.type}
               </Badge>
+              <Badge mono tone="neutral">Priority {indexer.priority ?? 25}</Badge>
               {#if !indexer.enabled}
                 <Badge tone="neutral">Disabled</Badge>
               {/if}
@@ -315,6 +351,7 @@
   <Modal
     title={editingID === 0 ? 'Add indexer' : 'Edit indexer'}
     width="max-w-xl"
+    dirty={isDirty}
     onclose={closeForm}>
     <form
       class="flex flex-col gap-4 p-4"
@@ -373,47 +410,63 @@
       </Field>
 
       <Field
-        label="Categories"
-        for={treeUsable ? undefined : 'indexer-categories'}
-        help={treeUsable
-          ? 'Caravan searches only the selected categories. Nothing selected searches everything.'
-          : 'Load the list from the indexer, or enter category ids by hand. Empty searches everything.'}>
-        <div class="flex flex-col gap-2">
-          {#if treeUsable && categoryTree}
-            <CategoryPicker
-              tree={categoryTree}
-              selected={selectedCategories}
-              onchange={(ids) => (selectedCategories = ids)} />
-          {:else}
-            <TextInput id="indexer-categories" bind:value={categories} mono placeholder="2000, 5000" />
-          {/if}
-          <div class="flex flex-wrap items-center gap-2">
-            <Button
-              variant="secondary"
-              size="sm"
-              disabled={categoriesLoading || url.trim() === ''}
-              onclick={loadCategories}>
-              <Icon name="refresh" size={14} />
-              {categoriesLoading
-                ? 'Loading…'
-                : treeUsable
-                  ? 'Reload from indexer'
-                  : 'Load from indexer'}
-            </Button>
-            {#if categoriesError}
-              <p class="text-sm text-danger">{categoriesError}</p>
-            {/if}
-          </div>
-        </div>
+        label="Priority"
+        for="indexer-priority"
+        error={priorityError ?? undefined}
+        help="Lowest wins. Caravan searches lower-priority sources first, which also breaks otherwise equal release choices.">
+        <TextInput
+          id="indexer-priority"
+          bind:value={priority}
+          mono
+          aria-invalid={priorityError !== null}
+          aria-describedby={priorityError ? 'indexer-priority-error' : undefined}
+          placeholder="25" />
       </Field>
+
+      <div data-settings-advanced>
+        <Field
+          label="Categories"
+          for={treeUsable ? undefined : 'indexer-categories'}
+          help={treeUsable
+            ? 'Caravan searches only the selected categories. Nothing selected searches everything.'
+            : 'Load the list from the indexer, or enter category ids by hand. Empty searches everything.'}>
+          <div class="flex flex-col gap-2">
+            {#if treeUsable && categoryTree}
+              <CategoryPicker
+                tree={categoryTree}
+                selected={selectedCategories}
+                onchange={(ids) => (selectedCategories = ids)} />
+            {:else}
+              <TextInput id="indexer-categories" bind:value={categories} mono placeholder="2000, 5000" />
+            {/if}
+            <div class="flex flex-wrap items-center gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={categoriesLoading || url.trim() === ''}
+                onclick={loadCategories}>
+                <Icon name="refresh" size={14} />
+                {categoriesLoading
+                  ? 'Loading…'
+                  : treeUsable
+                    ? 'Reload from indexer'
+                    : 'Load from indexer'}
+              </Button>
+            </div>
+          </div>
+        </Field>
+      </div>
+      {#if categoriesError}
+        <p class="text-sm text-danger">{categoriesError}</p>
+      {/if}
 
       <Toggle
         checked={enabled}
         label="Enabled"
         onchange={(next) => (enabled = next)} />
 
-      {#if formError}
-        <p class="text-sm text-danger">{formError}</p>
+      {#if formError || (isDirty && validationError)}
+        <p class="text-sm text-danger">{formError ?? validationError}</p>
       {/if}
     </form>
 
@@ -426,9 +479,13 @@
         <span class="mx-1 h-5 w-px shrink-0 bg-border"></span>
       {/if}
       <Button variant="ghost" onclick={closeForm} disabled={saving}>Cancel</Button>
-      <Button variant="primary" disabled={saving} onclick={save}>
+      <Button
+        variant="primary"
+        disabled={saving || !isDirty || validationError !== null}
+        title={!isDirty ? 'No changes to save' : validationError ?? undefined}
+        onclick={save}>
         <Icon name="check" size={14} />
-        {saving ? 'Saving…' : 'Save'}
+        {saving ? 'Saving…' : !isDirty ? 'No changes' : validationError ? 'Fix errors' : 'Save'}
       </Button>
     {/snippet}
   </Modal>

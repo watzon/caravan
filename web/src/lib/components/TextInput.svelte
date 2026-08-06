@@ -1,5 +1,11 @@
 <script lang="ts">
   /** DESIGN.md §6: raised fill, strong border, 36px high, rust border on focus. */
+  import { getContext } from 'svelte';
+  import {
+    FIELD_ACCESSIBILITY_CONTEXT,
+    type FieldAccessibilityContext,
+  } from './fieldContext';
+
   interface Props {
     value: string;
     id?: string;
@@ -30,6 +36,10 @@
     onkeydown,
     class: klass = '',
   }: Props = $props();
+
+  const fieldAccessibility = getContext<FieldAccessibilityContext | undefined>(
+    FIELD_ACCESSIBILITY_CONTEXT,
+  );
 </script>
 
 <!-- svelte-ignore a11y_autofocus -->
@@ -41,6 +51,8 @@
   {readonly}
   {autofocus}
   aria-label={ariaLabel}
+  aria-describedby={fieldAccessibility?.describedBy}
+  aria-invalid={fieldAccessibility?.invalid ? 'true' : undefined}
   bind:value
   {oninput}
   {onkeydown}

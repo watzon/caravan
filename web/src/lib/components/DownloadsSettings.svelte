@@ -9,26 +9,40 @@
   import ConcurrencySettings from './ConcurrencySettings.svelte';
   import DownloadClientSettings from './DownloadClientSettings.svelte';
   import EngineSettings from './EngineSettings.svelte';
+  import RemotePathMappings from './RemotePathMappings.svelte';
   import UsenetServerSettings from './UsenetServerSettings.svelte';
 
   interface Props {
     settings: Settings;
     saving?: boolean;
+    /** The shell owns the persisted preference; this component applies it semantically. */
+    showAdvanced?: boolean;
     onsave: (patch: Settings, note: string) => Promise<boolean>;
   }
 
-  let { settings, saving = false, onsave }: Props = $props();
+  let { settings, saving = false, showAdvanced = false, onsave }: Props = $props();
 </script>
 
 <div class="flex flex-col gap-5">
-  <ConcurrencySettings
-    {settings}
-    {saving}
-    onsave={(patch) => onsave(patch, 'Concurrency limits saved.')} />
-  <EngineSettings
-    {settings}
-    {saving}
-    onsave={(patch) => onsave(patch, 'Engine settings saved.')} />
-  <UsenetServerSettings />
-  <DownloadClientSettings />
+  <section id="download-concurrency">
+    <ConcurrencySettings
+      {settings}
+      {saving}
+      onsave={(patch) => onsave(patch, 'Concurrency limits saved.')} />
+  </section>
+  <section id="torrent-engine" data-settings-advanced hidden={!showAdvanced} aria-hidden={!showAdvanced}>
+    <EngineSettings
+      {settings}
+      {saving}
+      onsave={(patch) => onsave(patch, 'Engine settings saved.')} />
+  </section>
+  <section id="usenet-servers">
+    <UsenetServerSettings />
+  </section>
+  <section id="download-clients">
+    <DownloadClientSettings />
+  </section>
+  <section id="remote-path-mappings">
+    <RemotePathMappings />
+  </section>
 </div>

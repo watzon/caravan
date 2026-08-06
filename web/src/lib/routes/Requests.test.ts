@@ -26,6 +26,7 @@ const ROWS: MediaRequest[] = [
     year: 2022,
     poster_path: '/p.jpg',
     poster_url: 'https://image.tmdb.org/t/p/w500/p.jpg',
+    monitored: false,
     seasons: [2],
     min_availability: '',
     requested_by_username: 'ada',
@@ -99,7 +100,7 @@ const SCENE_ROW: MediaRequest = {
 
 let host: HTMLElement;
 let app: Record<string, unknown> | undefined;
-let calls: { url: string; method: string }[];
+let calls: { url: string; method: string; body?: unknown }[];
 /** What GET /requests answers; a test sets it before mounting. */
 let served: MediaRequest[] = ROWS;
 
@@ -134,10 +135,18 @@ beforeEach(() => {
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const method = init?.method ?? 'GET';
-      calls.push({ url, method });
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
+      calls.push({ url, method, ...(body === null ? {} : { body }) });
       if (url.endsWith('/requests') && method === 'GET') return json({ requests: served });
       if (method === 'DELETE') return json(null, 204);
       if (url.endsWith('/quality-profiles')) return json({ profiles: [] });
+      if (url.endsWith('/approve')) {
+        return json({
+          request: { id: 11, monitored: false },
+          series: { id: 42, title: 'Severance' },
+        });
+      }
+      if (url.endsWith('/library/series/42/search')) return json(null, 204);
       return json(null, 204);
     }),
   );
@@ -208,6 +217,29 @@ describe('Requests', () => {
     expect(dialog?.textContent).toContain('Severance');
     // Nothing was written yet.
     expect(calls.filter((c) => c.method === 'POST')).toEqual([]);
+  });
+
+  it('passes the request monitoring state into the approval editor and approval write', async () => {
+    app = mount(Requests, { target: host }) as Record<string, unknown>;
+    await settle();
+
+    rowButtons('Approve')[0]!.click();
+    await settle();
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]');
+    const monitored = dialog?.querySelector<HTMLInputElement>('#add-monitored');
+    expect(monitored).not.toBeNull();
+    expect(monitored!.checked).toBe(false);
+
+    monitored!.click();
+    flushSync();
+    [...dialog!.querySelectorAll<HTMLButtonElement>('footer button')].at(-1)!.click();
+    await settle();
+
+    expect(calls).toContainEqual({
+      url: '/api/v1/requests/11/approve',
+      method: 'POST',
+      body: { search_now: false, monitored: true },
+    });
   });
 
   /**
@@ -324,7 +356,11 @@ describe('Requests — a scene row', () => {
     await settle();
 
     expect(document.querySelector('[role="dialog"]')).toBeNull();
-    expect(calls).toContainEqual({ url: '/api/v1/requests/14/approve', method: 'POST' });
+    expect(calls).toContainEqual({
+      url: '/api/v1/requests/14/approve',
+      method: 'POST',
+      body: { search_now: false },
+    });
     expect(toasts.items.map((t) => t.message)).toContain('Approved Deep Impact');
   });
 });

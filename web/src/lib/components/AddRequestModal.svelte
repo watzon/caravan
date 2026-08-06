@@ -22,7 +22,7 @@
    * The season maths is in lib/discover.ts and unit-tested there; this file is
    * wiring and I/O.
    */
-  import { onMount } from 'svelte';
+  import { untrack } from 'svelte';
   import { api, errorText } from '../api/client';
   import { metadataToast } from '../credentials';
   import type {
@@ -59,6 +59,7 @@
   import Badge from './Badge.svelte';
   import Button from './Button.svelte';
   import Field from './Field.svelte';
+  import LoadError from './LoadError.svelte';
   import Modal from './Modal.svelte';
   import Skeleton from './Skeleton.svelte';
 
@@ -76,8 +77,10 @@
     preselect?: number[] | null;
     /** Approving this pending request rather than adding from scratch. */
     requestID?: number | null;
+    /** Monitoring state to restore when reopening an existing request. */
+    initialMonitored?: boolean | null;
     /**
-     * The availability stage checked on open — an approval passes the
+     * The availability stage checked on open - an approval passes the
      * request's stored choice so the approver sees what was asked for.
      */
     initialAvailability?: MinAvailability | '' | null;
@@ -95,6 +98,7 @@
     seasons = null,
     preselect = null,
     requestID = null,
+    initialMonitored = null,
     initialAvailability = null,
     onclose,
     ondone,
@@ -107,26 +111,24 @@
   let seasonList = $state<DiscoverSeason[]>([]);
   let selected = $state<number[]>([]);
   let loadingSeasons = $state(false);
-  let profiles = $state<QualityProfile[]>([]);
-  /** 0 means "whatever the library defaults to" — the add endpoints' behaviour. */
+  let profiles = $state<QualityProfile[] | null>(null);
+  let loadingProfiles = $state(false);
+  let profilesError = $state<string | null>(null);
+  /** 0 uses the library default. */
   let profileID = $state(0);
-  let searchNow = $state(readSearchOnAdd());
+  let searchNow = $state(untrack(readSearchOnAdd));
+  /** Whether a direct add should continue searching for missing releases. */
+  let monitored = $state(true);
   /**
    * Movies only: the release stage the automatic search waits for. Requesters
-   * choose it too — it is part of the ask, not part of the approval — and the
+   * choose it too - it is part of the ask, not part of the approval - and the
    * approve endpoint accepts it as an override, so the field is live in every
    * mode the modal has.
    */
-  let minAvailability = $state<MinAvailability>(initialAvailability || 'released');
+  let minAvailability = $state<MinAvailability>(untrack(() => initialAvailability || 'released'));
   let busy = $state(false);
+  let sessionRevision = 0;
 
-  /**
-   * The profile select is add-mode only — a requester does not pick quality —
-   * but it works for approvals too: the profile was never part of the add or
-   * approve payloads, it is applied as its own call after the title lands
-   * (applyProfile), and that call does not care how the title got there.
-   */
-  let canChooseProfile = $derived(mode === 'add');
 
   let selectable = $derived(selectableSeasons(seasonList));
   let note = $derived(absorbNote(seasonList, selected, mode));
@@ -145,34 +147,74 @@
         : defaultSeasonSelection(list, mode);
   }
 
-  onMount(() => {
+  function beginSession() {
+    const revision = ++sessionRevision;
+    busy = false;
+    selected = [];
+    seasonList = [];
+    loadingSeasons = false;
+    profileID = 0;
+    searchNow = readSearchOnAdd();
+    monitored = initialMonitored ?? true;
+    minAvailability = initialAvailability || 'released';
+    profiles = null;
+    loadingProfiles = false;
+    profilesError = null;
+
     if (mediaType === 'series' && seasons === null) {
       loadingSeasons = true;
       void api
         .discoverTitle('series', tmdbID)
-        .then((detail) => seed(detail.seasons ?? []))
+        .then((detail) => {
+          if (revision === sessionRevision) seed(detail.seasons ?? []);
+        })
         .catch((err) => {
+          if (revision !== sessionRevision) return;
           // Without season data the modal still works as a whole-title ask,
-          // which is better than refusing to open. Say so rather than hide it —
-          // and say it the way submit() does, because this call needs the same
-          // credential and a member opening it from Discover or Requests would
-          // otherwise get the provider's raw complaint as a toast.
+          // which is better than refusing to open. Say so rather than hide it.
           pushToast(metadataToast(err, session.isAdmin) ?? errorText(err), 'warning');
           seed([]);
         })
-        .finally(() => (loadingSeasons = false));
+        .finally(() => {
+          if (revision === sessionRevision) loadingSeasons = false;
+        });
     } else {
       seed(mediaType === 'series' ? (seasons ?? []) : []);
     }
 
-    if (canChooseProfile) {
-      void api.listQualityProfiles().then((rows) => (profiles = rows)).catch(() => {
-        // A missing profile list is not a reason to block the add: 0 keeps the
-        // server's default.
-        profiles = [];
-      });
-    }
+    if (mode === 'add') void loadProfiles(revision);
+  }
+
+  $effect(() => {
+    mode;
+    mediaType;
+    tmdbID;
+    title;
+    year;
+    posterPath;
+    seasons;
+    preselect;
+    requestID;
+    initialMonitored;
+    initialAvailability;
+    beginSession();
   });
+
+  async function loadProfiles(revision = sessionRevision) {
+    loadingProfiles = true;
+    profilesError = null;
+    try {
+      const loaded = await api.listQualityProfiles();
+      if (revision !== sessionRevision) return;
+      profiles = loaded;
+    } catch (err) {
+      if (revision !== sessionRevision) return;
+      profiles = null;
+      profilesError = errorText(err);
+    } finally {
+      if (revision === sessionRevision) loadingProfiles = false;
+    }
+  }
 
   function setSearchNow(next: boolean) {
     searchNow = next;
@@ -218,11 +260,9 @@
 
   async function addToLibrary() {
     const added = requestID === null ? await addDirect() : await approve();
-    // Monitoring came with the add itself; the search is queued after it,
-    // never as part of it, so it cannot go after an unchecked season.
-    if (mediaType === 'series' && searchNow) await api.searchSeriesNow(added.id);
-    if (canChooseProfile && profileID > 0) await applyProfile(added.id);
-
+    // Monitoring and any chosen profile came with the add itself; the series
+    // search follows only after that request has returned successfully.
+    if (mediaType === 'series' && monitored && searchNow) await api.searchSeriesNow(added.id);
     pushToast(`Added ${added.title}`, 'success');
     ondone?.({ kind: 'added', mediaType, libraryID: added.id });
     onclose();
@@ -238,36 +278,32 @@
     return mediaType === 'movie'
       ? api.addMovie({
           tmdb_id: tmdbID,
-          monitored: true,
-          search_now: searchNow,
+          monitored,
+          search_now: monitored && searchNow,
           min_availability: minAvailability,
+          ...(profileID > 0 ? { quality_profile_id: profileID } : {}),
         })
       : api.addSeries({
           tmdb_id: tmdbID,
-          monitored: true,
+          monitored,
           search_missing: false,
           seasons: addSeasons(seasonList, selected),
+          ...(profileID > 0 ? { quality_profile_id: profileID } : {}),
         });
   }
 
   async function approve(): Promise<Movie | Series> {
     const result = await api.approveRequest(
       requestID as number,
-      mediaType === 'movie' && searchNow,
+      mediaType === 'movie' && monitored && searchNow,
       mediaType === 'series' ? addSeasons(seasonList, selected) : undefined,
       mediaType === 'movie' ? minAvailability : undefined,
+      profileID > 0 ? profileID : undefined,
+      initialMonitored === null ? undefined : monitored,
     );
     const added = mediaType === 'movie' ? result.movie : result.series;
     if (!added) throw new Error('the approval did not return the added title');
     return added;
-  }
-
-  async function applyProfile(id: number) {
-    if (mediaType === 'movie') {
-      await api.setMovieQualityProfile(id, profileID);
-    } else {
-      await api.setSeriesQualityProfile(id, profileID);
-    }
   }
 </script>
 
@@ -351,7 +387,21 @@
 
     {#if mode === 'add'}
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        {#if canChooseProfile}
+        {#if loadingProfiles}
+          <div class="flex flex-col gap-2" aria-label="Loading quality profiles">
+            <span class="micro-label">Quality profile</span>
+            <Skeleton class="h-9 w-full rounded-sm" />
+          </div>
+        {:else if profilesError}
+          <LoadError message={profilesError} onretry={() => void loadProfiles()} />
+        {:else if profiles !== null && profiles.length === 0}
+          <div class="flex flex-col gap-1 rounded-sm border border-border bg-raised px-3 py-2">
+            <p class="text-sm text-ink-secondary">No quality profiles exist.</p>
+            <a href="/settings/quality-profiles" class="text-sm text-accent-text hover:underline">
+              Manage quality profiles
+            </a>
+          </div>
+        {:else if profiles}
           <Field label="Quality profile" for="add-profile">
             <select id="add-profile" bind:value={profileID} class={SELECT_CLASS}>
               <option value={0}>Library default</option>
@@ -376,18 +426,31 @@
         </Field>
       </div>
 
-      <label class="flex items-center gap-3 rounded-md border border-border bg-raised px-3 py-2">
-        <input
-          type="checkbox"
-          checked={searchNow}
-          onchange={(event) => setSearchNow(event.currentTarget.checked)}
-          class="size-4 accent-accent" />
-        <span class="text-base text-ink">
-          {mediaType === 'series'
-            ? 'Search for selected seasons right away'
-            : 'Search for it right away'}
-        </span>
-      </label>
+      <div class="flex flex-col gap-2">
+        <label class="flex items-center gap-3 rounded-md border border-border bg-raised px-3 py-2">
+          <input
+            id="add-monitored"
+            type="checkbox"
+            checked={monitored}
+            onchange={(event) => (monitored = event.currentTarget.checked)}
+            class="size-4 accent-accent" />
+          <span class="text-base text-ink">Add and monitor</span>
+        </label>
+        {#if monitored}
+          <label class="ml-6 flex items-center gap-3 rounded-md border border-border bg-raised px-3 py-2">
+            <input
+              type="checkbox"
+              checked={searchNow}
+              onchange={(event) => setSearchNow(event.currentTarget.checked)}
+              class="size-4 accent-accent" />
+            <span class="text-base text-ink">
+              {mediaType === 'series'
+                ? 'Search for selected seasons right away'
+                : 'Search for it right away'}
+            </span>
+          </label>
+        {/if}
+      </div>
     {/if}
   </div>
 

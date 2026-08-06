@@ -54,6 +54,7 @@ function migrationRow(over: Partial<StorageMigration> = {}): StorageMigration {
 let host: HTMLElement;
 let app: Record<string, unknown>;
 let posted: { url: string; body: unknown }[] = [];
+let puts: { url: string; body: unknown }[] = [];
 let migration: StorageMigrationStatus = { migration: null, restart_required: false };
 let repointReply: unknown = { root: '/new-root', warnings: [], restart_required: false };
 let repointStatus = 200;
@@ -64,6 +65,7 @@ beforeEach(() => {
   host = document.createElement('div');
   document.body.appendChild(host);
   posted = [];
+  puts = [];
   migration = { migration: null, restart_required: false };
   repointReply = { root: '/new-root', warnings: [], restart_required: false };
   repointStatus = 200;
@@ -79,6 +81,9 @@ beforeEach(() => {
       const method = init?.method ?? 'GET';
       if (method === 'POST') {
         posted.push({ url, body: init?.body ? JSON.parse(String(init.body)) : null });
+      }
+      if (method === 'PUT') {
+        puts.push({ url, body: init?.body ? JSON.parse(String(init.body)) : null });
       }
       if (url.endsWith('/system/storage-root/repoint')) {
         if (repointStatus !== 200) return jsonResponse(repointReply, repointStatus);
@@ -274,7 +279,40 @@ describe('Storage settings', () => {
     // and useful on a drive.
     expect(button('Rescan library')).toBeDefined();
   });
+  it('saves recycle and naming settings with live previews', async () => {
+    await openStorageTab();
+    expect(button('Save recycle and naming').hasAttribute('disabled')).toBe(true);
+
+    type('#settings-recycle-retention', '30');
+    type('#settings-movie-folder-format', '{year} - {title}');
+    expect(host.textContent).toContain('(2008) - Big Buck Bunny');
+    expect(button('Save recycle and naming').hasAttribute('disabled')).toBe(false);
+
+    button('Save recycle and naming').click();
+    await settle();
+
+    expect(puts).toContainEqual({
+      url: '/api/v1/settings',
+      body: expect.objectContaining({
+        recycle_retention_days: '30',
+        movie_folder_format: '{year} - {title}',
+      }),
+    });
+    expect(button('Save recycle and naming').hasAttribute('disabled')).toBe(true);
+  });
+
+  it('rejects an invalid naming token before writing settings', async () => {
+    await openStorageTab();
+    type('#settings-movie-folder-format', '{edition}');
+    expect(button('Save recycle and naming').hasAttribute('disabled')).toBe(true);
+
+    button('Save recycle and naming').click();
+    await settle();
+
+    expect(puts).toEqual([]);
+  });
 });
+
 
 // openStorageTabAgain remounts the section so its onMount poll runs, which is
 // how these tests advance the migration without leaning on the 2s interval.

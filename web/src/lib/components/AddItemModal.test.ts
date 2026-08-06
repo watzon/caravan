@@ -75,31 +75,44 @@ describe('AddItemModal', () => {
     expect(document.activeElement).toBe(host!.querySelector('input'));
   });
 
-  function pressTab(shiftKey = false): KeyboardEvent {
-    const input = host!.querySelector('input')!;
+  function pressTab(target: Element, shiftKey = false): KeyboardEvent {
     const event = new KeyboardEvent('keydown', { key: 'Tab', shiftKey, cancelable: true, bubbles: true });
-    input.dispatchEvent(event);
+    target.dispatchEvent(event);
     flushSync();
     return event;
   }
 
   it('flips between Movies and Series on Tab in the search field', () => {
     mountModal();
-    expect(pressTab().defaultPrevented).toBe(true);
+    const input = host!.querySelector('input')!;
+    expect(pressTab(input).defaultPrevented).toBe(true);
     expect(selectedTab()).toBe('Series');
-    pressTab();
+    pressTab(input);
     expect(selectedTab()).toBe('Movies');
   });
 
-  it('leaves Shift+Tab alone so reverse focus navigation still works', () => {
-    mountModal();
-    expect(pressTab(true).defaultPrevented).toBe(false);
-    expect(selectedTab()).toBe('Movies');
-  });
-
-  it('leaves Tab alone when the kind is fixed', () => {
+  it('leaves interior Tab and Shift+Tab navigation native', () => {
     mountModal({ kind: 'movie' });
-    expect(pressTab().defaultPrevented).toBe(false);
+    const input = host!.querySelector('input')!;
+
+    input.focus();
+    expect(pressTab(input).defaultPrevented).toBe(false);
+    input.focus();
+    expect(pressTab(input, true).defaultPrevented).toBe(false);
+  });
+
+  it('wraps Tab only when focus would leave the dialog', () => {
+    mountModal();
+    const close = host!.querySelector<HTMLButtonElement>('[aria-label="Close"]')!;
+    const monitor = host!.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+
+    close.focus();
+    expect(pressTab(close, true).defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(monitor);
+
+    monitor.focus();
+    expect(pressTab(monitor).defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(close);
   });
 
   function press(target: Element, key: string) {

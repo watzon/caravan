@@ -25,23 +25,29 @@ var ErrNotFound = errors.New("store: not found")
 
 // Store is a handle on the Caravan database.
 type Store struct {
-	db *sql.DB
+	db   *sql.DB
+	path string
 }
 
 // Open opens (creating if needed) the sqlite database at path and runs every
-// pending migration. WAL journaling is enabled so readers never block the
-// writer, and foreign keys are enforced so the cascade rules in the schema
-// actually fire.
+// pending migration. If a validated restore is staged, it is installed before
+// the database is opened and the previous main file is retained for recovery.
+// WAL journaling is enabled so readers never block the writer, and foreign keys
+// are enforced so the cascade rules in the schema actually fire.
 //
 // The returned Store must be closed with Close.
 func Open(path string) (*Store, error) {
-	if err := hardenSQLiteArtifacts(path, true); err != nil {
+	appliedRestore, err := applyStagedRestore(path)
+	if err != nil {
 		return nil, err
+	}
+	if err := hardenSQLiteArtifacts(path, true); err != nil {
+		return nil, restoreOpenFailure(path, appliedRestore, err)
 	}
 
 	db, err := sql.Open("sqlite", dsn(path))
 	if err != nil {
-		return nil, fmt.Errorf("store: open %s: %w", path, err)
+		return nil, restoreOpenFailure(path, appliedRestore, fmt.Errorf("store: open %s: %w", path, err))
 	}
 
 	// sqlite takes a single writer. Serializing at the pool removes
@@ -51,17 +57,17 @@ func Open(path string) (*Store, error) {
 
 	if err := db.Ping(); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("store: connect %s: %w", path, err)
+		return nil, restoreOpenFailure(path, appliedRestore, fmt.Errorf("store: connect %s: %w", path, err))
 	}
 
-	s := &Store{db: db}
+	s := &Store{db: db, path: path}
 	if err := s.migrate(); err != nil {
 		db.Close()
-		return nil, err
+		return nil, restoreOpenFailure(path, appliedRestore, err)
 	}
 	if err := hardenSQLiteArtifacts(path, false); err != nil {
 		db.Close()
-		return nil, err
+		return nil, restoreOpenFailure(path, appliedRestore, err)
 	}
 	return s, nil
 }

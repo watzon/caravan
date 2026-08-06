@@ -28,6 +28,10 @@ const (
 	// cadence: a release date or a series status changes on the scale of days,
 	// and every sweep is one provider round trip per movie plus one per season.
 	DefaultRefreshIntervalMinutes = 720
+	// DefaultRecycleCleanupIntervalMinutes removes expired recycle batches daily.
+	DefaultRecycleCleanupIntervalMinutes = 1440
+	// DefaultNotificationIntervalMinutes sends selected events within five minutes.
+	DefaultNotificationIntervalMinutes = 5
 )
 
 // RecurringInterval says where one recurring kind's cadence is configured: the
@@ -39,12 +43,14 @@ type RecurringInterval struct {
 
 // recurringKinds is the order recurring jobs are bootstrapped and listed in —
 // most frequent first, which is also how a user reads them.
-var recurringKinds = []string{core.JobRSSSync, core.JobBacklogSweep, core.JobRefreshMetadata}
+var recurringKinds = []string{core.JobRSSSync, core.JobNotificationDispatch, core.JobBacklogSweep, core.JobRefreshMetadata, core.JobRecycleCleanup}
 
 var recurringIntervals = map[string]RecurringInterval{
-	core.JobRSSSync:         {SettingRSSSyncIntervalMinutes, DefaultRSSSyncIntervalMinutes},
-	core.JobBacklogSweep:    {SettingBacklogIntervalMinutes, DefaultBacklogIntervalMinutes},
-	core.JobRefreshMetadata: {SettingRefreshIntervalMinutes, DefaultRefreshIntervalMinutes},
+	core.JobRSSSync:              {SettingRSSSyncIntervalMinutes, DefaultRSSSyncIntervalMinutes},
+	core.JobBacklogSweep:         {SettingBacklogIntervalMinutes, DefaultBacklogIntervalMinutes},
+	core.JobRefreshMetadata:      {SettingRefreshIntervalMinutes, DefaultRefreshIntervalMinutes},
+	core.JobRecycleCleanup:       {SettingRecycleCleanupIntervalMinutes, DefaultRecycleCleanupIntervalMinutes},
+	core.JobNotificationDispatch: {SettingNotificationIntervalMinutes, DefaultNotificationIntervalMinutes},
 }
 
 // RecurringKinds returns every job kind that reschedules itself, in display
@@ -75,6 +81,68 @@ func (s *Store) IntervalMinutes(ctx context.Context, key string, fallback int) i
 		return fallback
 	}
 	return minutes
+}
+
+// recurringIntervalMinutesTx reads one recurring cadence within a write
+// transaction. Failure handling matches IntervalMinutes: an absent, malformed,
+// or unsafe setting falls back to the built-in cadence.
+func (s *Store) recurringIntervalMinutesTx(ctx context.Context, tx *sql.Tx, kind string) (int, bool, error) {
+	interval, recurring := RecurringIntervalFor(kind)
+	if !recurring {
+		return 0, false, nil
+	}
+
+	var value string
+	err := tx.QueryRowContext(ctx, "SELECT value FROM settings WHERE key = ?", interval.Key).Scan(&value)
+	if errors.Is(err, sql.ErrNoRows) {
+		return interval.DefaultMinutes, true, nil
+	}
+	if err != nil {
+		return 0, true, err
+	}
+	minutes, err := strconv.Atoi(value)
+	if err != nil || minutes <= 0 || int64(minutes) > int64(^uint64(0)>>1)/int64(time.Minute) {
+		return interval.DefaultMinutes, true, nil
+	}
+	return minutes, true, nil
+}
+
+// SetRecurringInterval changes a recurring kind's cadence and reschedules any
+// pending run from now. A running job is not interrupted; its successor will
+// use the stored interval when the handler schedules it.
+func (s *Store) SetRecurringInterval(ctx context.Context, kind string, minutes int) error {
+	interval, ok := RecurringIntervalFor(kind)
+	if !ok {
+		return fmt.Errorf("store: %q is not a recurring job kind", kind)
+	}
+	if minutes <= 0 {
+		return fmt.Errorf("store: recurring interval must be positive")
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: set %s interval: %w", kind, err)
+	}
+	defer tx.Rollback()
+
+	updated := now()
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+		ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+		interval.Key, strconv.Itoa(minutes), formatTime(updated)); err != nil {
+		return fmt.Errorf("store: set %s interval: %w", kind, err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE jobs SET run_after = ?, updated_at = ?
+		WHERE kind = ? AND state = ?`,
+		formatTime(updated.Add(time.Duration(minutes)*time.Minute)), formatTime(updated),
+		kind, core.JobStatePending); err != nil {
+		return fmt.Errorf("store: reschedule %s: %w", kind, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: set %s interval: %w", kind, err)
+	}
+	return nil
 }
 
 // JobStatus is one kind's place in the queue: the run that finished most
@@ -120,28 +188,26 @@ func (s *Store) RecurringJobStatus(ctx context.Context, kinds []string) ([]JobSt
 	return out, nil
 }
 
-// RunNowResult says what RunJobNow found to do.
+// RunNowResult says what RunJobNow did.
 type RunNowResult string
 
 const (
 	// RunNowAdvanced means a pending row is now eligible immediately.
 	RunNowAdvanced RunNowResult = "advanced"
+	// RunNowEnqueued means a broken recurring chain was restored with a new row
+	// that is eligible immediately.
+	RunNowEnqueued RunNowResult = "enqueued"
 	// RunNowRunning means the kind is already running, so there was nothing to
-	// pull forward — a polite no-op, not a failure.
+	// pull forward, a polite no-op, not a failure.
 	RunNowRunning RunNowResult = "running"
-	// RunNowNoOpenJob means the kind has no pending or running row at all. The
-	// self-scheduling chain keeps one open row per kind at all times, so this
-	// only happens with a stopped runner or a database that has never had one.
-	RunNowNoOpenJob RunNowResult = "no_open_job"
 )
 
-// RunJobNow makes a recurring kind's next run due now by clearing the run_after
-// of its earliest pending row, so the next poll claims it.
+// RunJobNow makes a recurring kind's next run due now. It moves the earliest
+// pending row forward, leaves a running row alone, or atomically creates an
+// immediate row when the chain is missing.
 //
-// It deliberately does not enqueue: the recurring chain keeps exactly one open
-// row per kind, each successor scheduled a full interval ahead, and adding a
-// second row would either be rejected by the HasOpenJob guard or double every
-// future cycle. Moving the row that already exists is what "run it now" means.
+// The missing-chain insert belongs in this transaction: two Run now requests
+// cannot both observe no open row and enqueue separate successors.
 func (s *Store) RunJobNow(ctx context.Context, kind string) (RunNowResult, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -164,7 +230,18 @@ func (s *Store) RunJobNow(ctx context.Context, kind string) (RunNowResult, error
 		"SELECT id FROM jobs WHERE kind = ? AND state = ? ORDER BY run_after, id LIMIT 1",
 		kind, core.JobStatePending).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
-		return RunNowNoOpenJob, nil
+		ts := now()
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO jobs (kind, payload, state, attempts, run_after, lease_expires_at,
+				last_error, created_at, updated_at)
+			VALUES (?, '{}', ?, 0, '', '', '', ?, ?)`,
+			kind, core.JobStatePending, formatTime(ts), formatTime(ts)); err != nil {
+			return "", fmt.Errorf("store: run %s now: %w", kind, err)
+		}
+		if err := tx.Commit(); err != nil {
+			return "", fmt.Errorf("store: run %s now: %w", kind, err)
+		}
+		return RunNowEnqueued, nil
 	}
 	if err != nil {
 		return "", fmt.Errorf("store: run %s now: %w", kind, err)

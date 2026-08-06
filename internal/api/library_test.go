@@ -13,6 +13,31 @@ import (
 	"github.com/watzon/caravan/internal/store"
 )
 
+func seedSearchQualityProfile(t *testing.T, st *store.Store) *core.QualityProfile {
+	t.Helper()
+	p := &core.QualityProfile{
+		Name:           "Search profile",
+		Cutoff:         core.Quality2160p,
+		Items:          []string{core.Quality2160p},
+		UpgradeAllowed: true,
+	}
+	if err := st.CreateQualityProfile(context.Background(), p); err != nil {
+		t.Fatalf("CreateQualityProfile: %v", err)
+	}
+	return p
+}
+
+func wantEffectiveQualityProfile(t *testing.T, st *store.Store, kind string, profileID, wantID int64) {
+	t.Helper()
+	got, err := st.ResolveItemQualityProfile(context.Background(), kind, profileID)
+	if err != nil {
+		t.Fatalf("ResolveItemQualityProfile: %v", err)
+	}
+	if got.ID != wantID {
+		t.Fatalf("effective profile = %d, want %d", got.ID, wantID)
+	}
+}
+
 func TestListMoviesEmpty(t *testing.T) {
 	h, _, _ := newTestServer(t)
 
@@ -132,6 +157,83 @@ func TestAddMovieRejectsBadRequests(t *testing.T) {
 			wantErrorBody(t, rec)
 		})
 	}
+}
+
+func TestAddMovieQualityProfileBeforeSearch(t *testing.T) {
+	t.Run("chosen profile is stored before the queued search", func(t *testing.T) {
+		h, st, _ := newTestServer(t)
+		p := seedSearchQualityProfile(t, st)
+
+		rec := do(t, h, http.MethodPost, "/api/v1/library/movies",
+			`{"tmdb_id":10378,"search_now":true,"quality_profile_id":`+itoa(p.ID)+`}`)
+		wantStatus(t, rec, http.StatusCreated)
+		var created movieJSON
+		decodeBody(t, rec, &created)
+
+		jobs := openJobs(t, st, core.JobSearchMovie)
+		if len(jobs) != 1 || jobs[0].Payload != `{"movie_id":`+itoa(created.ID)+`}` {
+			t.Fatalf("search_movie jobs = %+v, want one for movie %d", jobs, created.ID)
+		}
+		stored, err := st.GetMovie(context.Background(), created.ID)
+		if err != nil {
+			t.Fatalf("GetMovie: %v", err)
+		}
+		if stored.QualityProfileID != p.ID {
+			t.Fatalf("stored profile = %d, want %d", stored.QualityProfileID, p.ID)
+		}
+		wantEffectiveQualityProfile(t, st, core.LibraryKindMovie, stored.QualityProfileID, p.ID)
+	})
+
+	t.Run("omitted profile inherits the default", func(t *testing.T) {
+		h, st, _ := newTestServer(t)
+		def, err := st.ResolveQualityProfile(context.Background(), 0)
+		if err != nil {
+			t.Fatalf("ResolveQualityProfile: %v", err)
+		}
+
+		rec := do(t, h, http.MethodPost, "/api/v1/library/movies",
+			`{"tmdb_id":10379,"search_now":true}`)
+		wantStatus(t, rec, http.StatusCreated)
+		var created movieJSON
+		decodeBody(t, rec, &created)
+		stored, err := st.GetMovie(context.Background(), created.ID)
+		if err != nil {
+			t.Fatalf("GetMovie: %v", err)
+		}
+		if stored.QualityProfileID != 0 {
+			t.Fatalf("stored profile = %d, want inherited default", stored.QualityProfileID)
+		}
+		wantEffectiveQualityProfile(t, st, core.LibraryKindMovie, stored.QualityProfileID, def.ID)
+		if jobs := openJobs(t, st, core.JobSearchMovie); len(jobs) != 1 {
+			t.Fatalf("search_movie jobs = %d, want 1", len(jobs))
+		}
+	})
+
+	t.Run("zero profile inherits the default", func(t *testing.T) {
+		h, st, _ := newTestServer(t)
+		def, err := st.ResolveQualityProfile(context.Background(), 0)
+		if err != nil {
+			t.Fatalf("ResolveQualityProfile: %v", err)
+		}
+
+		rec := do(t, h, http.MethodPost, "/api/v1/library/movies",
+			`{"tmdb_id":10380,"search_now":true,"quality_profile_id":0}`)
+		wantStatus(t, rec, http.StatusCreated)
+		var created movieJSON
+		decodeBody(t, rec, &created)
+		wantEffectiveQualityProfile(t, st, core.LibraryKindMovie, created.QualityProfileID, def.ID)
+	})
+
+	t.Run("unknown profile does not queue a search", func(t *testing.T) {
+		h, st, _ := newTestServer(t)
+		rec := do(t, h, http.MethodPost, "/api/v1/library/movies",
+			`{"tmdb_id":10381,"search_now":true,"quality_profile_id":999}`)
+		wantStatus(t, rec, http.StatusBadRequest)
+		wantErrorBody(t, rec)
+		if jobs := openJobs(t, st, core.JobSearchMovie); len(jobs) != 0 {
+			t.Fatalf("search_movie jobs = %d, want none", len(jobs))
+		}
+	})
 }
 
 func TestAddMovieReportsManagerFailure(t *testing.T) {
@@ -459,6 +561,70 @@ func TestAddAndListSeries(t *testing.T) {
 	rec = do(t, h, http.MethodPost, "/api/v1/library/series", `{}`)
 	wantStatus(t, rec, http.StatusBadRequest)
 	wantErrorBody(t, rec)
+}
+
+func TestAddSeriesQualityProfileBeforeSearch(t *testing.T) {
+	t.Run("chosen profile is stored before the queued search", func(t *testing.T) {
+		h, st, mgr := newTestServer(t)
+		mgr.addSeriesEpisodes = 1
+		p := seedSearchQualityProfile(t, st)
+
+		rec := do(t, h, http.MethodPost, "/api/v1/library/series",
+			`{"tmdb_id":66732,"search_missing":true,"quality_profile_id":`+itoa(p.ID)+`}`)
+		wantStatus(t, rec, http.StatusCreated)
+		var created seriesJSON
+		decodeBody(t, rec, &created)
+
+		episodes, err := st.ListEpisodes(context.Background(), created.ID)
+		if err != nil {
+			t.Fatalf("ListEpisodes: %v", err)
+		}
+		jobs := openJobs(t, st, core.JobSearchEpisode)
+		if len(episodes) != 1 || len(jobs) != 1 || jobs[0].Payload != `{"episode_id":`+itoa(episodes[0].ID)+`}` {
+			t.Fatalf("search_episode jobs = %+v, want one for series %d", jobs, created.ID)
+		}
+		stored, err := st.GetSeries(context.Background(), created.ID)
+		if err != nil {
+			t.Fatalf("GetSeries: %v", err)
+		}
+		if stored.QualityProfileID != p.ID {
+			t.Fatalf("stored profile = %d, want %d", stored.QualityProfileID, p.ID)
+		}
+		wantEffectiveQualityProfile(t, st, core.LibraryKindTV, stored.QualityProfileID, p.ID)
+	})
+
+	t.Run("omitted profile inherits the default", func(t *testing.T) {
+		h, st, mgr := newTestServer(t)
+		mgr.addSeriesEpisodes = 1
+		def, err := st.ResolveQualityProfile(context.Background(), 0)
+		if err != nil {
+			t.Fatalf("ResolveQualityProfile: %v", err)
+		}
+
+		rec := do(t, h, http.MethodPost, "/api/v1/library/series",
+			`{"tmdb_id":66733,"search_missing":true}`)
+		wantStatus(t, rec, http.StatusCreated)
+		var created seriesJSON
+		decodeBody(t, rec, &created)
+		if created.QualityProfileID != 0 {
+			t.Fatalf("created profile = %d, want inherited default", created.QualityProfileID)
+		}
+		wantEffectiveQualityProfile(t, st, core.LibraryKindTV, created.QualityProfileID, def.ID)
+		if jobs := openJobs(t, st, core.JobSearchEpisode); len(jobs) != 1 {
+			t.Fatalf("search_episode jobs = %d, want 1", len(jobs))
+		}
+	})
+
+	t.Run("unknown profile does not queue a search", func(t *testing.T) {
+		h, st, _ := newTestServer(t)
+		rec := do(t, h, http.MethodPost, "/api/v1/library/series",
+			`{"tmdb_id":66734,"search_missing":true,"quality_profile_id":999}`)
+		wantStatus(t, rec, http.StatusBadRequest)
+		wantErrorBody(t, rec)
+		if jobs := openJobs(t, st, core.JobSearchEpisode); len(jobs) != 0 {
+			t.Fatalf("search_episode jobs = %d, want none", len(jobs))
+		}
+	})
 }
 
 func TestGetSeriesIncludesSeasonsAndEpisodes(t *testing.T) {

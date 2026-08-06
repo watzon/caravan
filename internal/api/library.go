@@ -204,6 +204,10 @@ func firstFileDTO(files []core.MediaFile, profile core.TVProfile) *mediaFileJSON
 // behaviour — add and wait for the next backlog sweep.
 type addRequest struct {
 	TMDBID int64 `json:"tmdb_id"`
+	// QualityProfileID is the optional item override. Zero, including an
+	// omitted field, leaves the new item to inherit its library or system
+	// default.
+	QualityProfileID int64 `json:"quality_profile_id"`
 	// Monitored is the dialog's "Add and monitor" checkbox.
 	//
 	// It is a pointer so that ABSENT and false are different answers. Absent is
@@ -280,8 +284,11 @@ func (s *server) handleAddMovie(w http.ResponseWriter, r *http.Request) {
 	if !validAvailability(w, body.MinAvailability) {
 		return
 	}
+	if !s.validQualityProfileID(w, r, body.QualityProfileID) {
+		return
+	}
 
-	m, err := s.addMovieToLibrary(r.Context(), body.TMDBID, body.SearchNow, body.MinAvailability, body.Monitored)
+	m, err := s.addMovieToLibrary(r.Context(), body.TMDBID, body.SearchNow, body.MinAvailability, body.Monitored, body.QualityProfileID)
 	if err != nil {
 		s.writeManagerError(w, "add movie", err)
 		return
@@ -300,15 +307,38 @@ func validAvailability(w http.ResponseWriter, s string) bool {
 	return true
 }
 
+// validQualityProfileID validates the item override used by add and PATCH
+// requests. Zero deliberately names no override, so the item inherits the
+// library or system default.
+func (s *server) validQualityProfileID(w http.ResponseWriter, r *http.Request, profileID int64) bool {
+	if profileID < 0 {
+		writeError(w, http.StatusBadRequest, "invalid quality_profile_id")
+		return false
+	}
+	if profileID > 0 {
+		if _, err := s.st.GetQualityProfile(r.Context(), profileID); err != nil {
+			writeError(w, http.StatusBadRequest, "unknown quality_profile_id")
+			return false
+		}
+	}
+	return true
+}
+
 // addMovieToLibrary is the single path a movie enters the library through from
 // the HTTP layer: the add button and approving a request both come here. That
 // is what makes "a pending request is absorbed when its title arrives" true
 // however the title arrived, and it is the one place a permission check goes
 // when Caravan grows more than one kind of user.
-func (s *server) addMovieToLibrary(ctx context.Context, tmdbID int64, searchNow bool, minAvailability string, monitored *bool) (*core.Movie, error) {
+func (s *server) addMovieToLibrary(ctx context.Context, tmdbID int64, searchNow bool, minAvailability string, monitored *bool, qualityProfileID int64) (*core.Movie, error) {
 	m, err := s.mgr.AddMovie(ctx, tmdbID, minAvailability, monitored)
 	if err != nil {
 		return nil, err
+	}
+	if qualityProfileID > 0 {
+		if err := s.st.SetMovieQualityProfile(ctx, m.ID, qualityProfileID); err != nil {
+			return nil, err
+		}
+		m.QualityProfileID = qualityProfileID
 	}
 	s.absorbRequests(ctx, MediaTypeMovie, tmdbID)
 	if searchNow {
@@ -328,10 +358,16 @@ func (s *server) addMovieToLibrary(ctx context.Context, tmdbID int64, searchNow 
 // else the provider knows about lands unmonitored. It is the same season
 // selection the add dialog shows, and it is what makes a partial add absorb
 // only the part of a pending request it actually granted.
-func (s *server) addSeriesToLibrary(ctx context.Context, tmdbID int64, searchMissing bool, seasons []int, monitored *bool) (*core.Series, error) {
+func (s *server) addSeriesToLibrary(ctx context.Context, tmdbID int64, searchMissing bool, seasons []int, monitored *bool, qualityProfileID int64) (*core.Series, error) {
 	sr, err := s.mgr.AddSeries(ctx, tmdbID, monitored)
 	if err != nil {
 		return nil, err
+	}
+	if qualityProfileID > 0 {
+		if err := s.st.SetSeriesQualityProfile(ctx, sr.ID, qualityProfileID); err != nil {
+			return nil, err
+		}
+		sr.QualityProfileID = qualityProfileID
 	}
 	ungranted, err := s.applySeasonSelection(ctx, sr.ID, seasons)
 	if err != nil {
@@ -480,15 +516,8 @@ func (s *server) applyItemPatch(w http.ResponseWriter, r *http.Request, body ite
 	profileID := int64(-1)
 	if body.QualityProfileID != nil {
 		profileID = *body.QualityProfileID
-		if profileID < 0 {
-			writeError(w, http.StatusBadRequest, "invalid quality_profile_id")
+		if !s.validQualityProfileID(w, r, profileID) {
 			return false
-		}
-		if profileID > 0 {
-			if _, err := s.st.GetQualityProfile(r.Context(), profileID); err != nil {
-				writeError(w, http.StatusBadRequest, "unknown quality_profile_id")
-				return false
-			}
 		}
 	}
 	apply(body.Monitored, profileID)
@@ -518,12 +547,16 @@ func (s *server) handlePatchMovie(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreError(w, "get movie", err)
 		return
 	}
+	selectedProfileID := int64(-1)
 	if !s.applyItemPatch(w, r, body, func(monitored *bool, profileID int64) {
 		if monitored != nil {
 			m.Monitored = *monitored
 		}
 		if profileID >= 0 {
-			m.QualityProfileID = profileID
+			selectedProfileID = profileID
+			if profileID == 0 {
+				m.QualityProfileID = 0
+			}
 		}
 	}) {
 		return
@@ -534,6 +567,13 @@ func (s *server) handlePatchMovie(w http.ResponseWriter, r *http.Request) {
 	if err := s.st.UpsertMovie(ctx, m); err != nil {
 		s.writeStoreError(w, "update movie", err)
 		return
+	}
+	if selectedProfileID > 0 {
+		if err := s.st.SetMovieQualityProfile(ctx, id, selectedProfileID); err != nil {
+			s.writeStoreError(w, "set movie quality profile", err)
+			return
+		}
+		m.QualityProfileID = selectedProfileID
 	}
 
 	dto, err := s.movieDetail(ctx, id)
@@ -677,8 +717,11 @@ func (s *server) handleAddSeries(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "min_availability is only valid for a movie")
 		return
 	}
+	if !s.validQualityProfileID(w, r, body.QualityProfileID) {
+		return
+	}
 
-	sr, err := s.addSeriesToLibrary(r.Context(), body.TMDBID, body.SearchMissing, body.Seasons, body.Monitored)
+	sr, err := s.addSeriesToLibrary(r.Context(), body.TMDBID, body.SearchMissing, body.Seasons, body.Monitored, body.QualityProfileID)
 	if err != nil {
 		s.writeManagerError(w, "add series", err)
 		return
@@ -790,13 +833,17 @@ func (s *server) handlePatchSeries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cascade := false
+	selectedProfileID := int64(-1)
 	if !s.applyItemPatch(w, r, body, func(monitored *bool, profileID int64) {
 		if monitored != nil {
 			sr.Monitored = *monitored
 			cascade = true
 		}
 		if profileID >= 0 {
-			sr.QualityProfileID = profileID
+			selectedProfileID = profileID
+			if profileID == 0 {
+				sr.QualityProfileID = 0
+			}
 		}
 	}) {
 		return
@@ -804,6 +851,13 @@ func (s *server) handlePatchSeries(w http.ResponseWriter, r *http.Request) {
 	if err := s.st.UpsertSeries(ctx, sr); err != nil {
 		s.writeStoreError(w, "update series", err)
 		return
+	}
+	if selectedProfileID > 0 {
+		if err := s.st.SetSeriesQualityProfile(ctx, id, selectedProfileID); err != nil {
+			s.writeStoreError(w, "set series quality profile", err)
+			return
+		}
+		sr.QualityProfileID = selectedProfileID
 	}
 	// SPEC §7: the series flag cascades down to every season and episode as a
 	// bulk update. Children can be toggled back individually afterwards.

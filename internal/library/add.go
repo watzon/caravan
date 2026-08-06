@@ -41,7 +41,7 @@ func (m *Manager) AddMovie(ctx context.Context, tmdbID int64, minAvailability st
 		return nil, fmt.Errorf("library: movie %d not found", tmdbID)
 	}
 
-	mv, _, err := m.upsertMovieRow(ctx, meta, movieDir(meta.Title, meta.Year), "", minAvailability, monitored)
+	mv, _, err := m.upsertMovieRow(ctx, meta, m.movieDir(meta.Title, meta.Year), "", minAvailability, monitored)
 	return mv, err
 }
 
@@ -72,7 +72,7 @@ func (m *Manager) AddSeries(ctx context.Context, tmdbID int64, monitored *bool) 
 		return nil, fmt.Errorf("library: series %d not found", tmdbID)
 	}
 
-	sr, _, err := m.upsertSeriesRow(ctx, meta, seriesDir(meta.Title, meta.Year), "", monitored)
+	sr, _, err := m.upsertSeriesRow(ctx, meta, m.seriesDir(meta.Title, meta.Year), "", monitored)
 	if err != nil {
 		return nil, err
 	}

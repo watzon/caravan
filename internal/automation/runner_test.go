@@ -74,6 +74,58 @@ func TestWithHandlerFailuresRetry(t *testing.T) {
 	}
 }
 
+func TestRecurringTerminalFailureSchedulesSuccessor(t *testing.T) {
+	ctx := context.Background()
+	st := openStore(t)
+	runner := NewRunner(st, nil, nil, WithHandler(core.JobRefreshMetadata,
+		func(context.Context, *store.Store, json.RawMessage) error {
+			return errors.New("provider unavailable")
+		}))
+
+	if err := st.EnqueueJob(ctx, &core.Job{Kind: core.JobRefreshMetadata, Payload: "{}"}); err != nil {
+		t.Fatalf("EnqueueJob: %v", err)
+	}
+	for attempt := 1; attempt <= store.JobMaxAttempts; attempt++ {
+		worked, err := runner.ProcessOne(ctx)
+		if err != nil {
+			t.Fatalf("ProcessOne attempt %d: %v", attempt, err)
+		}
+		if !worked {
+			t.Fatalf("ProcessOne attempt %d did not claim the retry", attempt)
+		}
+		if attempt == store.JobMaxAttempts {
+			continue
+		}
+		result, err := st.RunJobNow(ctx, core.JobRefreshMetadata)
+		if err != nil {
+			t.Fatalf("RunJobNow attempt %d: %v", attempt, err)
+		}
+		if result != store.RunNowAdvanced {
+			t.Fatalf("RunJobNow attempt %d = %q, want %q", attempt, result, store.RunNowAdvanced)
+		}
+	}
+
+	jobs, err := st.ListJobs(ctx, 0)
+	if err != nil {
+		t.Fatalf("ListJobs: %v", err)
+	}
+	var failed, successor *core.Job
+	for i := range jobs {
+		switch jobs[i].State {
+		case core.JobStateFailed:
+			failed = &jobs[i]
+		case core.JobStatePending:
+			successor = &jobs[i]
+		}
+	}
+	if failed == nil || failed.Attempts != store.JobMaxAttempts || failed.LastError != "provider unavailable" {
+		t.Fatalf("failed job = %+v, want the terminal failed attempt", failed)
+	}
+	if successor == nil || successor.Kind != core.JobRefreshMetadata || successor.RunAfter.Before(time.Now()) {
+		t.Fatalf("successor = %+v, want the next refresh job at normal cadence", successor)
+	}
+}
+
 // TestWithHandlerDoesNotDisplaceTheBuiltIns is the guard on the option: it
 // registers, it does not replace the phase-3 handler table.
 func TestWithHandlerDoesNotDisplaceTheBuiltIns(t *testing.T) {
@@ -214,8 +266,8 @@ func TestBootstrapDefersTheFirstMetadataRefresh(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListJobs: %v", err)
 	}
-	if len(jobs) != 3 {
-		t.Fatalf("jobs after a second Bootstrap = %d, want still 3", len(jobs))
+	if want := len(store.RecurringKinds()); len(jobs) != want {
+		t.Fatalf("jobs after a second Bootstrap = %d, want still %d", len(jobs), want)
 	}
 }
 

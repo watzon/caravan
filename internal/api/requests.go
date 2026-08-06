@@ -58,12 +58,12 @@ type requestCreateRequest struct {
 }
 
 // approveRequestRequest is the body of POST /requests/{id}/approve. It mirrors
-// the add endpoints, which take a search flag and a season selection and
-// nothing else: a quality profile and a root folder are not part of the add
-// contract today, so this endpoint does not pretend to accept them.
+// the direct add endpoints: zero quality_profile_id leaves the item to inherit
+// its library or system default.
 type approveRequestRequest struct {
-	SearchNow bool `json:"search_now"`
-	// Seasons narrows a series approval to those seasons, exactly as it does on
+	SearchNow        bool  `json:"search_now"`
+	Monitored        *bool `json:"monitored"`
+	QualityProfileID int64 `json:"quality_profile_id"`
 	// POST /library/series. A request that asked for more than was granted
 	// stays pending for the remainder rather than being closed.
 	Seasons []int `json:"seasons"`
@@ -295,6 +295,9 @@ func (s *server) handleApproveRequest(w http.ResponseWriter, r *http.Request) {
 	if !validAvailability(w, body.MinAvailability) {
 		return
 	}
+	if req.MediaType != MediaTypeScene && !s.validQualityProfileID(w, r, body.QualityProfileID) {
+		return
+	}
 
 	out := map[string]any{}
 	switch {
@@ -311,17 +314,17 @@ func (s *server) handleApproveRequest(w http.ResponseWriter, r *http.Request) {
 		if minAvailability == "" {
 			minAvailability = req.MinAvailability
 		}
-		// An approval carries no monitored choice: granting somebody's request
-		// and then not following the title would be a strange thing to mean, so
-		// nil keeps the historical "monitored" answer.
-		m, err := s.addMovieToLibrary(ctx, req.TMDBID, body.SearchNow, minAvailability, nil)
+		// Omission keeps the historical monitored default. An explicit false is
+		// useful when an admin approves a request but does not want automatic
+		// searches for future releases.
+		m, err := s.addMovieToLibrary(ctx, req.TMDBID, body.SearchNow, minAvailability, body.Monitored, body.QualityProfileID)
 		if err != nil {
 			s.writeManagerError(w, "add movie", err)
 			return
 		}
 		out["movie"] = movieDTO(*m)
 	default:
-		sr, err := s.addSeriesToLibrary(ctx, req.TMDBID, body.SearchNow, body.Seasons, nil)
+		sr, err := s.addSeriesToLibrary(ctx, req.TMDBID, body.SearchNow, body.Seasons, body.Monitored, body.QualityProfileID)
 		if err != nil {
 			s.writeManagerError(w, "add series", err)
 			return

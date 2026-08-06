@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -208,23 +209,72 @@ func TestRunJobNowMakesThePendingRowClaimable(t *testing.T) {
 	}
 }
 
-// The two answers that are not "advanced": already working, and nothing to
-// advance. Both are states the button has to render honestly rather than fail.
-func TestRunJobNowReportsRunningAndMissingRows(t *testing.T) {
+func TestRunJobNowConcurrentMissingChainCreatesOneOpenJob(t *testing.T) {
 	ctx := context.Background()
 	st, _ := openTemp(t)
 
-	if result, err := st.RunJobNow(ctx, core.JobRSSSync); err != nil || result != RunNowNoOpenJob {
-		t.Fatalf("RunJobNow on an empty queue = %q, %v, want %q", result, err, RunNowNoOpenJob)
+	type outcome struct {
+		result RunNowResult
+		err    error
 	}
+	start := make(chan struct{})
+	outcomes := make(chan outcome, 2)
+	var callers sync.WaitGroup
+	for range 2 {
+		callers.Add(1)
+		go func() {
+			defer callers.Done()
+			<-start
+			result, err := st.RunJobNow(ctx, core.JobRSSSync)
+			outcomes <- outcome{result: result, err: err}
+		}()
+	}
+	close(start)
+	callers.Wait()
+	close(outcomes)
+
+	var enqueued, advanced int
+	for outcome := range outcomes {
+		if outcome.err != nil {
+			t.Fatalf("RunJobNow: %v", outcome.err)
+		}
+		switch outcome.result {
+		case RunNowEnqueued:
+			enqueued++
+		case RunNowAdvanced:
+			advanced++
+		default:
+			t.Fatalf("RunJobNow result = %q, want enqueued or advanced", outcome.result)
+		}
+	}
+	if enqueued != 1 || advanced != 1 {
+		t.Fatalf("results = %d enqueued, %d advanced, want one of each", enqueued, advanced)
+	}
+
+	open, err := st.OpenJobsByKind(ctx, core.JobRSSSync)
+	if err != nil {
+		t.Fatalf("OpenJobsByKind: %v", err)
+	}
+	if len(open) != 1 {
+		t.Fatalf("open jobs = %d, want one after concurrent Run now calls", len(open))
+	}
+	if open[0].State != core.JobStatePending || open[0].Payload != "{}" || !open[0].RunAfter.IsZero() {
+		t.Fatalf("open job = %+v, want one immediate recurring row", open[0])
+	}
+}
+
+// A running task cannot be pulled forward, even if a successor is already
+// pending behind it.
+func TestRunJobNowReportsRunning(t *testing.T) {
+	ctx := context.Background()
+	st, _ := openTemp(t)
 
 	id := enqueued(t, st, core.JobRSSSync, time.Time{})
 	if _, err := st.ClaimJob(ctx, []string{core.JobRSSSync}, time.Minute); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	// The successor the handler enqueues before finishing: a pending row exists,
-	// but the kind is busy, so run-now must still report running rather than
-	// pulling the next generation forward on top of the current one.
+	// The successor the handler enqueues before finishing must remain scheduled
+	// while the current generation is still running.
 	successor := enqueued(t, st, core.JobRSSSync, time.Now().Add(15*time.Minute))
 
 	result, err := st.RunJobNow(ctx, core.JobRSSSync)
@@ -269,5 +319,44 @@ func TestIntervalMinutesFallsBackOnUnusableValues(t *testing.T) {
 	}
 	if got := st.IntervalMinutes(ctx, SettingRSSSyncIntervalMinutes, DefaultRSSSyncIntervalMinutes); got != 45 {
 		t.Errorf("configured value = %d, want 45", got)
+	}
+}
+
+func TestSetRecurringIntervalReschedulesPendingRun(t *testing.T) {
+	ctx := context.Background()
+	st, _ := openTemp(t)
+	job := core.Job{
+		Kind:     core.JobRSSSync,
+		Payload:  "{}",
+		RunAfter: time.Now().Add(24 * time.Hour),
+	}
+	if err := st.EnqueueJob(ctx, &job); err != nil {
+		t.Fatalf("EnqueueJob: %v", err)
+	}
+
+	before := time.Now().UTC()
+	if err := st.SetRecurringInterval(ctx, core.JobRSSSync, 45); err != nil {
+		t.Fatalf("SetRecurringInterval: %v", err)
+	}
+	after := time.Now().UTC()
+
+	if got := st.IntervalMinutes(ctx, SettingRSSSyncIntervalMinutes, DefaultRSSSyncIntervalMinutes); got != 45 {
+		t.Fatalf("stored interval = %d, want 45", got)
+	}
+	rescheduled, err := st.GetJob(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	earliest := before.Add(45 * time.Minute).Add(-time.Second)
+	latest := after.Add(45 * time.Minute).Add(time.Second)
+	if rescheduled.RunAfter.Before(earliest) || rescheduled.RunAfter.After(latest) {
+		t.Fatalf("run_after = %s, want between %s and %s", rescheduled.RunAfter, earliest, latest)
+	}
+}
+
+func TestSetRecurringIntervalRejectsUnknownKind(t *testing.T) {
+	st, _ := openTemp(t)
+	if err := st.SetRecurringInterval(context.Background(), "not-recurring", 30); err == nil {
+		t.Fatal("unknown recurring kind was accepted")
 	}
 }

@@ -67,6 +67,223 @@ func TestScoreReleaseProperBreaksTies(t *testing.T) {
 	}
 }
 
+func TestScoreReleaseWithContributionsPreservesTotal(t *testing.T) {
+	r := release(core.Quality1080p, core.SourceWebDL, 75)
+	r.Parsed.Proper = true
+	r.Parsed.Repack = true
+
+	score, reject, contributions := ScoreReleaseWithContributions(r, testProfile())
+	if reject != "" {
+		t.Fatalf("ScoreReleaseWithContributions rejected an accepted release: %q", reject)
+	}
+	if score != 2_000+500+40+20+50 {
+		t.Fatalf("score = %d, want 2610", score)
+	}
+	if contributions != (ScoreContributions{
+		Quality: 2_000,
+		Source:  500,
+		Proper:  properBonus,
+		Repack:  repackBonus,
+		Seeders: seedersCap,
+	}) {
+		t.Fatalf("contributions = %+v", contributions)
+	}
+	if contributions.Total() != score {
+		t.Fatalf("contributions total = %d, want score %d", contributions.Total(), score)
+	}
+
+	legacyScore, legacyReject := ScoreRelease(r, testProfile())
+	if legacyScore != score || legacyReject != reject {
+		t.Fatalf("ScoreRelease = (%d, %q), want (%d, %q)", legacyScore, legacyReject, score, reject)
+	}
+}
+
+func TestScoreReleaseAppliesAcquisitionPolicy(t *testing.T) {
+	t.Run("preferred source order", func(t *testing.T) {
+		p := testProfile()
+		p.PreferredSources = []string{core.SourceCam, core.SourceBluray}
+		cam, reject := ScoreRelease(release(core.Quality1080p, core.SourceCam, 0), p)
+		if reject != "" {
+			t.Fatalf("CAM rejected: %q", reject)
+		}
+		bluray, reject := ScoreRelease(release(core.Quality1080p, core.SourceBluray, 0), p)
+		if reject != "" || cam <= bluray {
+			t.Fatalf("source scores = CAM %d, BluRay %d, reject %q; want configured order", cam, bluray, reject)
+		}
+	})
+	t.Run("neutral proper repack", func(t *testing.T) {
+		p := testProfile()
+		p.ProperRepackPreference = core.ProperRepackPreferenceNeutral
+		plain := release(core.Quality1080p, core.SourceWebDL, 0)
+		tagged := plain
+		tagged.Parsed.Proper = true
+		tagged.Parsed.Repack = true
+		plainScore, _ := ScoreRelease(plain, p)
+		taggedScore, _ := ScoreRelease(tagged, p)
+		if taggedScore != plainScore {
+			t.Fatalf("neutral tagged score = %d, plain score = %d", taggedScore, plainScore)
+		}
+	})
+	t.Run("torrent seeders do not reject usenet", func(t *testing.T) {
+		p := testProfile()
+		p.MinSeeders = 10
+		torrent := release(core.Quality1080p, core.SourceWebDL, 9)
+		torrent.Protocol = core.ProtocolTorrent
+		if _, reject := ScoreRelease(torrent, p); reject == "" {
+			t.Fatal("torrent below the seeder minimum was accepted")
+		}
+		usenet := torrent
+		usenet.Protocol = core.ProtocolUsenet
+		if _, reject := ScoreRelease(usenet, p); reject != "" {
+			t.Fatalf("usenet release rejected by torrent seeder minimum: %q", reject)
+		}
+	})
+	t.Run("known size bounds accept unknown size", func(t *testing.T) {
+		p := testProfile()
+		p.MinSizeMB = 2
+		p.MaxSizeMB = 4
+		small := release(core.Quality1080p, core.SourceWebDL, 0)
+		small.Size = 1 * bytesPerMB
+		if _, reject := ScoreRelease(small, p); reject == "" {
+			t.Fatal("known small release was accepted")
+		}
+		large := small
+		large.Size = 4*bytesPerMB + 1
+		if _, reject := ScoreRelease(large, p); reject == "" {
+			t.Fatal("known large release was accepted")
+		}
+		unknown := small
+		unknown.Size = 0
+		if _, reject := ScoreRelease(unknown, p); reject != "" {
+			t.Fatalf("unknown release size rejected: %q", reject)
+		}
+	})
+	t.Run("custom formats sum and respect exclusions", func(t *testing.T) {
+		p := testProfile()
+		p.CustomFormats = []core.CustomFormat{
+			{Name: "HDR", IncludeTerms: []string{"hdr"}, Score: 25},
+			{Name: "BluRay", IncludeTerms: []string{"bluray"}, ExcludeTerms: []string{"remux"}, Score: -10},
+		}
+		r := release(core.Quality1080p, core.SourceWebDL, 0)
+		r.Title = "Example.1080p.HDR.BluRay"
+		_, reject, contributions := ScoreReleaseWithContributions(r, p)
+		if reject != "" || contributions.CustomFormats != 15 {
+			t.Fatalf("custom format contribution = %+v, reject %q; want 15", contributions, reject)
+		}
+		r.Title += ".REMUX"
+		_, reject, contributions = ScoreReleaseWithContributions(r, p)
+		if reject != "" || contributions.CustomFormats != 25 {
+			t.Fatalf("excluded custom format contribution = %+v, reject %q; want 25", contributions, reject)
+		}
+	})
+}
+
+func TestScoreReleaseBoundsCustomFormatScores(t *testing.T) {
+	maxInt := int(^uint(0) >> 1)
+	minInt := -maxInt - 1
+	tests := []struct {
+		name   string
+		scores []int
+		want   int
+	}{
+		{
+			name:   "caps a positive individual score",
+			scores: []int{maxInt},
+			want:   MaxCustomFormatScore,
+		},
+		{
+			name:   "caps a negative individual score",
+			scores: []int{minInt},
+			want:   -MaxCustomFormatScore,
+		},
+		{
+			name:   "does not overflow a positive aggregate",
+			scores: []int{maxInt, maxInt},
+			want:   MaxCustomFormatScore,
+		},
+		{
+			name:   "does not overflow a negative aggregate",
+			scores: []int{minInt, minInt},
+			want:   -MaxCustomFormatScore,
+		},
+		{
+			name:   "caps a positive aggregate",
+			scores: []int{MaxCustomFormatScore, MaxCustomFormatScore},
+			want:   MaxCustomFormatScore,
+		},
+		{
+			name:   "caps a negative aggregate",
+			scores: []int{-MaxCustomFormatScore, -MaxCustomFormatScore},
+			want:   -MaxCustomFormatScore,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p := testProfile()
+			for _, score := range tt.scores {
+				p.CustomFormats = append(p.CustomFormats, core.CustomFormat{
+					IncludeTerms: []string{"match"},
+					Score:        score,
+				})
+			}
+			r := release(core.Quality1080p, core.SourceWebDL, 0)
+			r.Title = "Example.Release.1080p.match"
+
+			_, reject, contributions := ScoreReleaseWithContributions(r, p)
+			if reject != "" {
+				t.Fatalf("matching release was rejected: %q", reject)
+			}
+			if contributions.CustomFormats != tt.want {
+				t.Fatalf("custom format score = %d, want %d", contributions.CustomFormats, tt.want)
+			}
+		})
+	}
+}
+
+func TestScoreReleaseAppliesTVCompatibilityPolicy(t *testing.T) {
+	p := testProfile()
+	p.TVProfile = core.TVProfileSafe
+	r := release(core.Quality1080p, core.SourceWebDL, 0)
+	r.Title = "Example.1080p.x265.10bit.DTS.mkv"
+	r.Parsed.Codec = "x265"
+	r.Parsed.BitDepth = 10
+	r.Parsed.Audio = "DTS"
+
+	p.TVCompatibilityPolicy = core.TVCompatibilityPolicyIgnore
+	ignored, reject, contributions := ScoreReleaseWithContributions(r, p)
+	if reject != "" || contributions.TVCompatibility != 0 {
+		t.Fatalf("ignored compatibility = %d, %+v, %q", ignored, contributions, reject)
+	}
+	p.TVCompatibilityPolicy = core.TVCompatibilityPolicyPrefer
+	preferred, reject, contributions := ScoreReleaseWithContributions(r, p)
+	if reject != "" || contributions.TVCompatibility != -60 || preferred != ignored-60 {
+		t.Fatalf("preferred compatibility = %d, %+v, %q", preferred, contributions, reject)
+	}
+	p.TVCompatibilityPolicy = core.TVCompatibilityPolicyRequire
+	if _, reject := ScoreRelease(r, p); reject != `release is incompatible for required TV profile "safe"` {
+		t.Fatalf("required compatibility rejection = %q", reject)
+	}
+
+	r = release(core.Quality1080p, core.SourceWebDL, 0)
+	p.TVCompatibilityPolicy = core.TVCompatibilityPolicyRequire
+	if _, reject := ScoreRelease(r, p); reject != "" {
+		t.Fatalf("unknown TV tags were rejected: %q", reject)
+	}
+}
+
+func TestScoreReleaseWithContributionsRejectsWithoutScore(t *testing.T) {
+	score, reject, contributions := ScoreReleaseWithContributions(
+		release(core.Quality480p, core.SourceWebDL, 10),
+		testProfile(),
+	)
+	if score != 0 || contributions != (ScoreContributions{}) {
+		t.Fatalf("rejected score and contributions = %d, %+v; want zero", score, contributions)
+	}
+	if want := `quality 480p is not in profile "HD"`; reject != want {
+		t.Fatalf("rejection = %q, want %q", reject, want)
+	}
+}
+
 func TestBelowCutoff(t *testing.T) {
 	p := testProfile()
 	if !BelowCutoff(core.Quality720p, p) {
@@ -115,6 +332,36 @@ func TestSelectBestPicksWinnerAndExplainsLosers(t *testing.T) {
 		if d.Reject == "" {
 			t.Errorf("rejected %q carries no reason", d.Release.Title)
 		}
+	}
+}
+
+func TestSelectBestReturnsSoleAcceptedNegativeScore(t *testing.T) {
+	p := testProfile()
+	p.CustomFormats = []core.CustomFormat{{
+		Name:         "Unwanted",
+		IncludeTerms: []string{"unwanted"},
+		Score:        -10_000,
+	}}
+	candidate := release(core.Quality1080p, core.SourceWebDL, 0)
+	candidate.Title = "Example.Release.1080p.unwanted"
+
+	score, reject := ScoreRelease(candidate, p)
+	if reject != "" {
+		t.Fatalf("accepted candidate was rejected: %q", reject)
+	}
+	if score >= -1 {
+		t.Fatalf("candidate score = %d, want less than -1", score)
+	}
+
+	best, rejected := SelectBest([]core.Release{candidate}, p)
+	if best == nil {
+		t.Fatal("sole accepted candidate was not selected")
+	}
+	if best.Title != candidate.Title {
+		t.Fatalf("winner = %q, want %q", best.Title, candidate.Title)
+	}
+	if len(rejected) != 0 {
+		t.Fatalf("rejected = %+v, want none", rejected)
 	}
 }
 

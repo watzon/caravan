@@ -223,8 +223,31 @@ type MediaFile struct {
 	ModifiedAt   time.Time
 }
 
-// QualityProfile is a quality ladder plus a cutoff: Caravan keeps searching
-// for an item until it owns a file at or above Cutoff (SPEC §9).
+// ProperRepackPreference controls whether PROPER and REPACK tags affect a
+// release score.
+const (
+	ProperRepackPreferencePrefer  = "prefer"
+	ProperRepackPreferenceNeutral = "neutral"
+)
+
+// TVCompatibilityPolicy controls how a quality profile uses its TV profile.
+const (
+	TVCompatibilityPolicyIgnore  = "ignore"
+	TVCompatibilityPolicyPrefer  = "prefer"
+	TVCompatibilityPolicyRequire = "require"
+)
+
+// CustomFormat adjusts a release score when its title matches all include
+// terms and none of its exclude terms.
+type CustomFormat struct {
+	Name         string   `json:"name"`
+	IncludeTerms []string `json:"include_terms"`
+	ExcludeTerms []string `json:"exclude_terms"`
+	Score        int      `json:"score"`
+}
+
+// QualityProfile is a quality ladder plus acquisition policy: Caravan keeps
+// searching for an item until it owns a file at or above Cutoff (SPEC §9).
 type QualityProfile struct {
 	ID   int64
 	Name string
@@ -235,8 +258,27 @@ type QualityProfile struct {
 	Items []string
 	// UpgradeAllowed disables upgrade searches entirely when false.
 	UpgradeAllowed bool
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	// PreferredSources ranks release sources best-first. An empty list uses
+	// SourceLadder and preserves legacy profile behavior.
+	PreferredSources []string
+	// ProperRepackPreference is ProperRepackPreferencePrefer or
+	// ProperRepackPreferenceNeutral. Empty reads as "prefer" for old rows.
+	ProperRepackPreference string
+	// MinSeeders is the torrent-only minimum seeder count. Zero disables it.
+	MinSeeders int
+	// MinSizeMB and MaxSizeMB constrain known release sizes. Zero disables
+	// each bound, and an unknown size is always accepted.
+	MinSizeMB int64
+	MaxSizeMB int64
+	// CustomFormats contributes the summed score of every matching rule.
+	CustomFormats []CustomFormat
+	// TVProfile names the target playback profile. Empty reads as "safe".
+	TVProfile string
+	// TVCompatibilityPolicy controls whether TV compatibility is ignored,
+	// preferred, or required. Empty reads as "ignore".
+	TVCompatibilityPolicy string
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
 }
 
 // Event levels for the activity feed.
@@ -262,6 +304,22 @@ type Event struct {
 	MovieID   int64
 	SeriesID  int64
 	CreatedAt time.Time
+}
+
+// NotificationWebhook receives selected activity events outside Caravan.
+// LastEventID is the delivery cursor: events at or below it have been
+// considered for this webhook, whether they matched its toggles or not.
+type NotificationWebhook struct {
+	ID          int64
+	Name        string
+	URL         string
+	OnGrab      bool
+	OnImport    bool
+	OnHealth    bool
+	Enabled     bool
+	LastEventID int64
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 // UnmatchedFile is a media file the scanner found but could not confidently

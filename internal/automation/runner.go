@@ -123,14 +123,13 @@ func Bootstrap(ctx context.Context, st *store.Store) error {
 			continue
 		}
 		job := &core.Job{Kind: kind, Payload: "{}"}
-		// The searches run right away — a restart must not delay a release
-		// that appeared while the process was down. The metadata refresh
-		// waits a full interval instead: it is one provider round trip per
-		// movie plus one per season, dates change on the scale of days, and a
-		// dev loop restarting the process must not hammer TMDB every time.
+		// Metadata refresh waits a full interval instead: it is one provider
+		// round trip per movie plus one per season, dates change on the scale
+		// of days, and a dev loop restart must not hammer TMDB.
 		if kind == core.JobRefreshMetadata {
+			interval, _ := store.RecurringIntervalFor(kind)
 			job.RunAfter = time.Now().Add(time.Duration(st.IntervalMinutes(ctx,
-				store.SettingRefreshIntervalMinutes, store.DefaultRefreshIntervalMinutes)) * time.Minute)
+				interval.Key, interval.DefaultMinutes)) * time.Minute)
 		}
 		if err := st.EnqueueJob(ctx, job); err != nil {
 			return fmt.Errorf("store: enqueue %s bootstrap job: %w", kind, err)
@@ -220,8 +219,13 @@ func (r *Runner) process(ctx context.Context, claim claimFunc) (bool, error) {
 		err = handler(ctx, r.st, json.RawMessage(job.Payload))
 	}
 	if err != nil {
-		if failErr := r.st.FailJob(ctx, job.ID, err.Error()); failErr != nil {
-			return true, fmt.Errorf("store: fail job %d: %w", job.ID, failErr)
+		if _, recurring := store.RecurringIntervalFor(job.Kind); recurring {
+			err = r.st.FailJobAndScheduleRecurring(ctx, job.ID, err.Error())
+		} else {
+			err = r.st.FailJob(ctx, job.ID, err.Error())
+		}
+		if err != nil {
+			return true, fmt.Errorf("store: fail job %d: %w", job.ID, err)
 		}
 		return true, nil
 	}
@@ -230,10 +234,8 @@ func (r *Runner) process(ctx context.Context, claim claimFunc) (bool, error) {
 	}
 
 	// A running recurring job counts as open while its handler executes. Once it
-	// is complete, schedule the successor under the normal singleton check. The
-	// refresh handler is registered from outside the package (cmd/caravan), so
-	// this hook is the only thing that keeps its chain going.
-	if job.Kind == core.JobRSSSync || job.Kind == core.JobBacklogSweep || job.Kind == core.JobRefreshMetadata {
+	// is complete, schedule the successor under the normal singleton check.
+	if _, recurring := store.RecurringIntervalFor(job.Kind); recurring {
 		if err := r.scheduleRecurring(ctx, job.Kind); err != nil {
 			return true, err
 		}

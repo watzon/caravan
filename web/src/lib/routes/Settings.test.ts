@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import Settings from './Settings.svelte';
+import { reactiveProps } from '../reactiveprops.svelte';
 import { system } from '../state/system.svelte';
-
+import { navigate, router } from '../router.svelte';
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
@@ -34,6 +35,7 @@ let app: Record<string, unknown>;
 beforeEach(() => {
   host = document.createElement('div');
   document.body.appendChild(host);
+  localStorage.clear();
   vi.useFakeTimers();
 });
 
@@ -42,6 +44,7 @@ afterEach(() => {
   system.status = null;
   unmount(app);
   host.remove();
+  localStorage.clear();
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
@@ -97,55 +100,139 @@ function stubFetch() {
   }));
 }
 
-describe('Settings rail', () => {
-  it('groups the ten sections and links each as a route', async () => {
+describe('Settings overview and route resolution', () => {
+  it('renders the bare route as a task-based overview, not Metadata', async () => {
     stubFetch();
-    app = mount(Settings, { target: host, props: { section: 'playback' } });
+    app = mount(Settings, { target: host });
     await settle();
 
-    for (const group of ['Library', 'Acquisition', 'Playback', 'System']) {
-      expect(host.textContent).toContain(group);
-    }
-    const hrefs = [...host.querySelectorAll('nav a')].map((a) => a.getAttribute('href'));
-    expect(hrefs).toEqual([
-      '/settings/libraries',
-      '/settings/metadata',
-      '/settings/quality-profiles',
-      '/settings/storage',
-      '/settings/adult',
-      '/settings/indexers',
-      '/settings/downloads',
-      '/settings/playback',
-      '/settings/users',
-      '/settings/tasks',
-      '/settings/security',
-    ]);
-    const active = host.querySelector('nav a[aria-current="page"]');
-    expect(active?.getAttribute('href')).toBe('/settings/playback');
+    expect(host.querySelector('#settings-overview')?.textContent).toContain('Settings');
+    expect(host.querySelector('#tmdb-key')).toBeNull();
+    expect(host.textContent).not.toContain('Find a setting');
+    expect(host.textContent).toContain('Set up Caravan');
+    expect(host.textContent).toContain('Browse settings');
   });
 
-  it('lands unknown and absent sections on Metadata', async () => {
+
+  it('renders content only because shell settings navigation owns the category links', async () => {
     stubFetch();
-    app = mount(Settings, { target: host, props: { section: 'not-a-section' } });
+    app = mount(Settings, { target: host });
     await settle();
 
-    expect(host.querySelector('#tmdb-key')).not.toBeNull();
-    expect(host.querySelector('nav a[aria-current="page"]')?.getAttribute('href')).toBe(
-      '/settings/metadata',
-    );
+    const layout = host.querySelector<HTMLElement>('[data-settings-layout]');
+    const main = host.querySelector<HTMLElement>('[data-settings-main]');
+
+    expect(layout?.className).toContain('flex-1');
+    expect(layout?.className).not.toContain('lg:flex-row');
+    expect(main?.className).toContain('flex-1');
+    expect(host.querySelector('[data-settings-sidebar]')).toBeNull();
+    expect(host.querySelector('[data-settings-navigation]')).toBeNull();
+    expect(host.querySelector('[data-settings-navigation-toggle]')).toBeNull();
+    expect(host.querySelector('aside')).toBeNull();
+    expect(host.querySelector('nav[aria-label="Settings pages"]')).toBeNull();
   });
 
-  // The eleven-section rail is gone, but its links are in browser histories and
-  // bookmarks. Each one still has to land on the pane that absorbed it.
-  it('resolves the retired slugs onto the pane that absorbed them', async () => {
+  it('derives setup states from settings and live API results', async () => {
+    stubFetch();
+    app = mount(Settings, { target: host });
+    await settle();
+
+    expect(host.textContent).toContain('Choose a storage location');
+    expect(host.textContent).toContain('Needs setup');
+    expect(host.textContent).toContain('Create a library');
+    expect(host.textContent).toContain('Add a search or download source');
+  });
+
+  it('keeps one mounted instance synchronized with section, fragment, and overview routes', async () => {
+    stubFetch();
+    navigate('/settings', { replace: true });
+    const props = reactiveProps({ section: router.match?.params.section ?? '' });
+    app = mount(Settings, { target: host, props: props.props });
+    await settle();
+
+    expect(host.querySelector('#settings-overview')).not.toBeNull();
+    expect(host.querySelector('#settings-search')).toBeNull();
+
+    navigate('/settings/downloads#download-clients');
+    props.set({ section: router.match?.params.section ?? '' });
+    await settle();
+
+    expect(router.hash).toBe('#download-clients');
+    expect(host.querySelector('#settings-overview')).toBeNull();
+    expect(host.querySelector('#settings-search')).toBeNull();
+    expect(host.querySelector('h1#downloads')?.textContent).toContain('Downloads');
+    expect(host.querySelector('#download-clients')).not.toBeNull();
+
+    navigate('/settings');
+    props.set({ section: router.match?.params.section ?? '' });
+    await settle();
+
+    expect(router.hash).toBe('');
+    expect(host.querySelector('#settings-overview')).not.toBeNull();
+    expect(host.querySelector('#settings-search')).toBeNull();
+    expect(host.querySelector('#download-clients')).toBeNull();
+  });
+
+  it('fails closed when loading settings fails', async () => {
+    const fetch = vi.fn(async () => jsonResponse({ error: 'settings unavailable' }, 503));
+    vi.stubGlobal('fetch', fetch);
+    app = mount(Settings, { target: host, props: { section: 'libraries' } });
+    await settle();
+
+    expect(host.textContent).toContain('settings unavailable');
+    expect(host.querySelector('#settings-search')).toBeNull();
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it('keeps direct and retired deep routes compatible', async () => {
     stubFetch();
     app = mount(Settings, { target: host, props: { section: 'engine' } });
     await settle();
 
     expect(host.querySelector('#engine-listen-port')).not.toBeNull();
-    expect(host.querySelector('nav a[aria-current="page"]')?.getAttribute('href')).toBe(
-      '/settings/downloads',
-    );
+    expect(host.querySelector('h1#downloads')?.textContent).toContain('Downloads');
+  });
+
+  it('uses the resolved page title without rendering a nested settings navigation', async () => {
+    stubFetch();
+    app = mount(Settings, { target: host, props: { section: 'playback' } });
+    await settle();
+
+    expect(host.querySelector('h1#playback')?.textContent).toContain('Playback');
+    expect(host.querySelector('[data-settings-sidebar]')).toBeNull();
+    expect(host.querySelector('[data-settings-navigation-toggle]')).toBeNull();
+  });
+
+  it('persists the advanced-settings preference and hides marked descendants by default', async () => {
+    stubFetch();
+    app = mount(Settings, { target: host, props: { section: 'downloads' } });
+    await settle();
+
+    const engine = host.querySelector('#torrent-engine') as HTMLElement;
+    expect(engine.getAttribute('aria-hidden')).toBe('true');
+    expect(engine.hidden).toBe(true);
+    expect(getComputedStyle(engine).display).toBe('none');
+
+    button('Show advanced').click();
+    flushSync();
+    expect(localStorage.getItem('caravan.settings.show-advanced')).toBe('true');
+    expect(engine.getAttribute('aria-hidden')).toBe('false');
+    expect(engine.hidden).toBe(false);
+    expect(getComputedStyle(engine).display).not.toBe('none');
+
+    unmount(app);
+    app = mount(Settings, { target: host, props: { section: 'downloads' } });
+    await settle();
+    expect(button('Hide advanced')).toBeDefined();
+  });
+
+  it('lands unknown sections on Metadata', async () => {
+    stubFetch();
+    app = mount(Settings, { target: host, props: { section: 'not-a-section' } });
+    await settle();
+
+    expect(host.querySelector('#tmdb-key')).not.toBeNull();
+    expect(host.querySelector('h1#metadata')?.textContent).toContain('Metadata');
   });
 
   it('resolves a retired playback slug onto the Playback pane', async () => {
@@ -155,9 +242,6 @@ describe('Settings rail', () => {
 
     expect(host.querySelector('#dlna-friendly-name')).not.toBeNull();
     expect(host.querySelector('#jellyfin-url')).not.toBeNull();
-    expect(host.querySelector('nav a[aria-current="page"]')?.getAttribute('href')).toBe(
-      '/settings/playback',
-    );
   });
 });
 

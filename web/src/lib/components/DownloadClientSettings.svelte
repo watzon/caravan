@@ -24,8 +24,6 @@
     DEFAULT_DOWNLOAD_CLIENT_PRIORITY,
     FALLBACK_DOWNLOAD_CLIENT_TYPES,
     describeType,
-    parseCount,
-  parsePriority,
     validateDownloadClient,
   } from '../downloadClient';
   import { pushToast } from '../state/toast.svelte';
@@ -69,7 +67,7 @@
   let apiKey = $state('');
   let category = $state('');
   let priority = $state(String(DEFAULT_DOWNLOAD_CLIENT_PRIORITY));
-  let maxConcurrent = $state('0');
+  let maxConcurrent = $state('');
   let enabled = $state(true);
 
   /**
@@ -80,6 +78,71 @@
   let storedAPIKey = $state(false);
 
   let typeInfo = $derived(describeType(types, type));
+
+  /** Captured once per open form, so Save reflects a real draft change. */
+  let initialDraft = $state('');
+
+  function draftSnapshot(): string {
+    return JSON.stringify({
+      type,
+      name,
+      url,
+      username,
+      password,
+      apiKey,
+      category,
+      priority,
+      maxConcurrent,
+      enabled,
+    });
+  }
+
+  function nonNegativeInteger(
+    value: string,
+    label: string,
+    allowEmpty = false,
+  ): { value: number | null; error: string | null } {
+    const trimmed = value.trim();
+    if (allowEmpty && trimmed === '') return { value: null, error: null };
+    if (!allowEmpty && trimmed === '') {
+      return { value: null, error: `${label} must be a whole number of zero or greater.` };
+    }
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed) || !Number.isSafeInteger(parsed) || parsed < 0) {
+      return {
+        value: null,
+        error: allowEmpty
+          ? `${label} must be blank or a whole number of zero or greater.`
+          : `${label} must be a whole number of zero or greater.`,
+      };
+    }
+    return { value: parsed, error: null };
+  }
+
+  function validationIssue(): string | null {
+    const clientError = validateDownloadClient({
+      name,
+      url,
+      username,
+      apiKey,
+      type:
+        editingID !== 0 && !typeInfo.supported
+          ? { ...typeInfo, uses_login: false, uses_api_key: false }
+          : typeInfo,
+      hasStoredCredential: storedAPIKey,
+    });
+    if (clientError) return clientError;
+    if (editingID === 0 && !typeInfo.supported) {
+      return `${typeInfo.label} is not available for new clients in this Caravan build.`;
+    }
+    return (
+      nonNegativeInteger(priority, 'Priority').error ??
+      nonNegativeInteger(maxConcurrent, 'Max concurrent downloads', true).error
+    );
+  }
+
+  let isDirty = $derived(editingID !== null && draftSnapshot() !== initialDraft);
+  let validationError = $derived(validationIssue());
 
   async function load() {
     loading = true;
@@ -113,10 +176,11 @@
     apiKey = '';
     category = '';
     priority = String(DEFAULT_DOWNLOAD_CLIENT_PRIORITY);
-    maxConcurrent = '0';
+    maxConcurrent = '';
     enabled = true;
     storedPassword = false;
     storedAPIKey = false;
+    initialDraft = draftSnapshot();
   }
 
   function openEdit(client: DownloadClient) {
@@ -132,10 +196,11 @@
     apiKey = '';
     category = client.category;
     priority = String(client.priority);
-    maxConcurrent = String(client.max_concurrent ?? 0);
+    maxConcurrent = client.max_concurrent === null ? '' : String(client.max_concurrent);
     enabled = client.enabled;
     storedPassword = client.has_password;
     storedAPIKey = client.has_api_key;
+    initialDraft = draftSnapshot();
   }
 
   function closeForm() {
@@ -147,6 +212,9 @@
   /**
    * The body for a save or a test. A blank credential is omitted rather than
    * sent as "", which is what makes the server keep the stored one.
+   *
+   * validate() runs immediately before every caller, so these values are known
+   * to be safe non-negative integers when a request is made.
    */
   function formBody(): DownloadClientInput {
     const body: DownloadClientInput = {
@@ -155,8 +223,8 @@
       url: url.trim(),
       username: typeInfo.uses_login ? username.trim() : '',
       category: category.trim(),
-      priority: parsePriority(priority),
-      max_concurrent: parseCount(maxConcurrent),
+      priority: nonNegativeInteger(priority, 'Priority').value!,
+      max_concurrent: nonNegativeInteger(maxConcurrent, 'Max concurrent downloads', true).value,
       enabled,
     };
     if (typeInfo.uses_login && password !== '') body.password = password;
@@ -165,20 +233,12 @@
   }
 
   function validate(): boolean {
-    const problem = validateDownloadClient({
-      name,
-      url,
-      username,
-      apiKey,
-      type: typeInfo,
-      hasStoredCredential: storedAPIKey,
-    });
-    formError = problem;
-    return problem === null;
+    formError = validationError;
+    return validationError === null;
   }
 
   async function save() {
-    if (!validate()) return;
+    if (saving || !isDirty || !validate()) return;
     const body = formBody();
 
     saving = true;
@@ -186,12 +246,17 @@
       if (editingID === 0) {
         await api.addDownloadClient(body);
         pushToast(`Added ${body.name}.`, 'success');
+        closeForm();
+        await load();
       } else if (editingID !== null) {
-        await api.updateDownloadClient(editingID, body);
+        const saved = await api.updateDownloadClient(editingID, body);
+        clients = (clients ?? []).map((client) => (client.id === saved.id ? saved : client));
+        // Keep the editor open after an update and take a fresh snapshot of the
+        // server's canonical values. Save is disabled until the user changes
+        // the new draft again.
+        openEdit(saved);
         pushToast(`Saved ${body.name}.`, 'success');
       }
-      closeForm();
-      await load();
     } catch (err) {
       formError = errorText(err);
     } finally {
@@ -356,6 +421,7 @@
   <Modal
     title={editingID === 0 ? 'Add download client' : 'Edit download client'}
     width="max-w-xl"
+    dirty={isDirty}
     onclose={closeForm}>
     <form
       class="flex flex-col gap-4 p-4"
@@ -370,10 +436,15 @@
         }`}>
         <div class="flex flex-wrap gap-2" role="radiogroup" aria-label="Download client type">
           {#each types as option (option.type)}
+            {@const unavailable = !option.supported && (editingID === 0 || type !== option.type)}
             <button
               type="button"
               role="radio"
               aria-checked={type === option.type}
+              disabled={unavailable}
+              title={unavailable
+                ? `${option.label} is unavailable because this Caravan build cannot connect to it.`
+                : undefined}
               onclick={() => (type = option.type)}
               class="h-8 rounded-full border px-3 text-sm transition-colors duration-150 ease-out
                      {type === option.type
@@ -383,6 +454,12 @@
             </button>
           {/each}
         </div>
+        {#if editingID === 0 && types.some((option) => !option.supported)}
+          <p class="text-sm text-ink-secondary">
+            Unsupported types are unavailable for new clients because this Caravan build cannot
+            connect to them yet.
+          </p>
+        {/if}
       </Field>
 
       <Field label="Name" for="client-name" help="How this client is labelled in the queue.">
@@ -439,24 +516,28 @@
         <TextInput id="client-category" bind:value={category} mono placeholder="caravan" />
       </Field>
 
-      <Field
-        label="Priority"
-        for="client-priority"
-        help="Lowest wins when more than one enabled client can take a release.">
-        <TextInput id="client-priority" bind:value={priority} mono placeholder="25" />
-      </Field>
+      <div data-settings-advanced>
+        <Field
+          label="Priority"
+          for="client-priority"
+          help="Lowest wins when more than one enabled client can take a release.">
+          <TextInput id="client-priority" bind:value={priority} oninput={() => (formError = null)} mono placeholder="25" />
+        </Field>
+      </div>
 
-      <Field
-        label="Max concurrent downloads"
-        for="client-max-concurrent"
-        help="How many downloads Caravan runs here at once. 0 is unlimited — the client's own limits still apply. Anything over it is handed over paused and started when a slot frees.">
-        <TextInput id="client-max-concurrent" bind:value={maxConcurrent} mono placeholder="0" />
-      </Field>
+      <div data-settings-advanced>
+        <Field
+          label="Max concurrent downloads"
+          for="client-max-concurrent"
+          help="How many downloads Caravan runs here at once. 0 is unlimited, the client's own limits still apply. Anything over it is handed over paused and started when a slot frees.">
+          <TextInput id="client-max-concurrent" bind:value={maxConcurrent} oninput={() => (formError = null)} mono placeholder="0" />
+        </Field>
+      </div>
 
       <Toggle checked={enabled} label="Enabled" onchange={(next) => (enabled = next)} />
 
-      {#if formError}
-        <p class="text-sm text-danger">{formError}</p>
+      {#if formError || (isDirty && validationError)}
+        <p class="text-sm text-danger">{formError ?? validationError}</p>
       {/if}
     </form>
 
@@ -480,9 +561,13 @@
         <span class="mx-1 h-5 w-px shrink-0 bg-border"></span>
       {/if}
       <Button variant="ghost" onclick={closeForm} disabled={saving}>Cancel</Button>
-      <Button variant="primary" disabled={saving} onclick={save}>
+      <Button
+        variant="primary"
+        disabled={saving || !isDirty || validationError !== null}
+        title={!isDirty ? 'No changes to save' : validationError ?? undefined}
+        onclick={save}>
         <Icon name="check" size={14} />
-        {saving ? 'Saving…' : 'Save'}
+        {saving ? 'Saving…' : !isDirty ? 'No changes' : validationError ? 'Fix errors' : 'Save'}
       </Button>
     {/snippet}
   </Modal>

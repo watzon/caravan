@@ -65,6 +65,10 @@ type releaseJSON struct {
 	// (SPEC §8). It remains grabbable, but an incompatible release sorts after
 	// releases with every other verdict.
 	Compatibility compatibilityJSON `json:"compatibility"`
+	// ProfileDecision is the effective item, library, or system quality
+	// profile's scoring explanation. It is advisory in the picker: a user can
+	// still grab any displayed release.
+	ProfileDecision profileDecisionJSON `json:"profile_decision"`
 }
 
 // indexerErrorJSON reports an indexer that failed during a fan-out. Partial
@@ -117,7 +121,12 @@ func (s *server) handleMovieReleases(w http.ResponseWriter, r *http.Request) {
 	if m.Year > 0 {
 		query = fmt.Sprintf("%s %d", m.Title, m.Year)
 	}
-	s.serveReleases(w, r, core.LibraryKindMovie, []string{query}, func(rel core.Release) []string {
+	profile, err := s.st.ResolveItemQualityProfile(r.Context(), core.LibraryKindMovie, m.QualityProfileID)
+	if err != nil {
+		s.writeStoreError(w, "resolve movie quality profile", err)
+		return
+	}
+	s.serveReleases(w, r, core.LibraryKindMovie, []string{query}, profile, func(rel core.Release) []string {
 		return movieReleaseFlags(rel, *m)
 	})
 }
@@ -136,13 +145,20 @@ func (s *server) handleSeriesReleases(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	kind := core.LibraryKindForSeries(sr.Kind)
+	profile, err := s.st.ResolveItemQualityProfile(r.Context(), kind, sr.QualityProfileID)
+	if err != nil {
+		s.writeStoreError(w, "resolve series quality profile", err)
+		return
+	}
+
 	// A site is a series row too, and it must not be searched like one: the
 	// library kind decides which indexers answer and with which categories, so
 	// a hardcoded TV kind here would fan a scene search out over the television
-	// library's 5000-series categories — the exact thing searchScene exists to
+	// library's 5000-series categories, the exact thing searchScene exists to
 	// avoid (PLAN phase 9 task 3).
-	if core.LibraryKindForSeries(sr.Kind) == core.LibraryKindAdult {
-		s.serveSceneReleases(w, r, *sr, season, episode)
+	if kind == core.LibraryKindAdult {
+		s.serveSceneReleases(w, r, *sr, season, episode, profile)
 		return
 	}
 
@@ -155,7 +171,7 @@ func (s *server) handleSeriesReleases(w http.ResponseWriter, r *http.Request) {
 	case season >= 0:
 		query = fmt.Sprintf("%s S%02d", sr.Title, season)
 	}
-	s.serveReleases(w, r, core.LibraryKindTV, []string{query}, func(rel core.Release) []string {
+	s.serveReleases(w, r, kind, []string{query}, profile, func(rel core.Release) []string {
 		return seriesReleaseFlags(rel, season, episode)
 	})
 }
@@ -175,7 +191,7 @@ func (s *server) handleSeriesReleases(w http.ResponseWriter, r *http.Request) {
 // release date, searches the site's name alone. That is deliberately weaker
 // than searchScene's silent no-op: this is a human at the picker who asked to
 // see what the indexers have, and a list to choose from beats an empty table.
-func (s *server) serveSceneReleases(w http.ResponseWriter, r *http.Request, sr core.Series, season, episode int) {
+func (s *server) serveSceneReleases(w http.ResponseWriter, r *http.Request, sr core.Series, season, episode int, profile *core.QualityProfile) {
 	var airDate time.Time
 	var title string
 	if season >= 0 && episode > 0 {
@@ -205,16 +221,17 @@ func (s *server) serveSceneReleases(w http.ResponseWriter, r *http.Request, sr c
 		queries = []string{sr.Title}
 	}
 
-	s.serveReleases(w, r, core.LibraryKindAdult, queries, func(rel core.Release) []string {
+	s.serveReleases(w, r, core.LibraryKindAdult, queries, profile, func(rel core.Release) []string {
 		return sceneReleaseFlags(rel, airDate)
 	})
 }
 
 // serveReleases runs one interactive search and writes the picker payload:
-// fan out, merge, cache, flag, sort. kind is the core.LibraryKind* the searched
-// item belongs to, which decides which indexers answer and with which
-// categories (PLAN phase 8 task 4).
-func (s *server) serveReleases(w http.ResponseWriter, r *http.Request, kind string, queries []string, flags func(core.Release) []string) {
+// fan out, merge, cache, flag, score, sort. kind is the core.LibraryKind* the
+// searched item belongs to, which decides which indexers answer and with which
+// categories (PLAN phase 8 task 4). profile is resolved once from the item,
+// its library, and then the system default.
+func (s *server) serveReleases(w http.ResponseWriter, r *http.Request, kind string, queries []string, profile *core.QualityProfile, flags func(core.Release) []string) {
 	newClient, ok := s.requireIndexerClients(w)
 	if !ok {
 		return
@@ -227,9 +244,9 @@ func (s *server) serveReleases(w http.ResponseWriter, r *http.Request, kind stri
 	}
 	indexers := settings.Indexers
 
-	// Resolved once for the whole fan-out so every row in one table is judged
-	// against the same profile.
-	profile := s.activeTVProfile(r.Context())
+	// The TV profile is resolved once for the whole fan-out so every row's
+	// compatibility check uses the same playback capability.
+	tvProfile := s.activeTVProfile(r.Context())
 
 	ctx, cancel := context.WithTimeout(r.Context(), releaseSearchTimeout)
 	defer cancel()
@@ -250,7 +267,7 @@ func (s *server) serveReleases(w http.ResponseWriter, r *http.Request, kind stri
 			s.writeStoreError(w, "cache release", err)
 			return
 		}
-		out.Releases = append(out.Releases, releaseDTO(rel, flags(rel), profile))
+		out.Releases = append(out.Releases, releaseDTO(rel, flags(rel), tvProfile, profile))
 	}
 	sortReleases(out.Releases)
 	writeJSON(w, http.StatusOK, out)
@@ -371,7 +388,7 @@ func releaseTags(rel core.Release) core.MediaTags {
 	}
 }
 
-func releaseDTO(rel core.Release, flags []string, profile core.TVProfile) releaseJSON {
+func releaseDTO(rel core.Release, flags []string, tvProfile core.TVProfile, qualityProfile *core.QualityProfile) releaseJSON {
 	if flags == nil {
 		flags = []string{}
 	}
@@ -390,7 +407,8 @@ func releaseDTO(rel core.Release, flags []string, profile core.TVProfile) releas
 		Parsed:      parsedDTO(rel.Parsed),
 		Flags:       flags,
 
-		Compatibility: compatibilityDTO(profile.Check(releaseTags(rel))),
+		Compatibility:   compatibilityDTO(tvProfile.Check(releaseTags(rel))),
+		ProfileDecision: profileDecisionDTO(rel, qualityProfile),
 	}
 }
 

@@ -211,6 +211,49 @@ func TestRunTaskRejectsKindsThatDoNotRecur(t *testing.T) {
 	}
 }
 
+func TestUpdateTaskIntervalPersistsAndReschedules(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	ctx := context.Background()
+	job := core.Job{Kind: core.JobRSSSync, Payload: "{}", RunAfter: time.Now().Add(24 * time.Hour)}
+	if err := st.EnqueueJob(ctx, &job); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	rec := do(t, h, http.MethodPut, "/api/v1/system/tasks/rss_sync", `{"interval_minutes":45}`)
+	wantStatus(t, rec, http.StatusOK)
+	var body updateTaskIntervalResponse
+	decodeBody(t, rec, &body)
+	if body.Kind != core.JobRSSSync || body.IntervalMinutes != 45 {
+		t.Fatalf("response = %+v, want rss_sync at 45 minutes", body)
+	}
+	if task := listTasks(t, h)[core.JobRSSSync]; task.IntervalMinutes != 45 {
+		t.Fatalf("task interval = %d, want 45", task.IntervalMinutes)
+	}
+	updated, err := st.GetJob(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if updated.RunAfter.After(time.Now().Add(46 * time.Minute)) {
+		t.Fatalf("next run = %s, want it rescheduled from now", updated.RunAfter)
+	}
+}
+
+func TestUpdateTaskIntervalValidatesKindAndBounds(t *testing.T) {
+	h, _, _ := newTestServer(t)
+	for _, tc := range []struct {
+		target string
+		body   string
+		status int
+	}{
+		{"/api/v1/system/tasks/search_movie", `{"interval_minutes":30}`, http.StatusNotFound},
+		{"/api/v1/system/tasks/rss_sync", `{"interval_minutes":4}`, http.StatusBadRequest},
+		{"/api/v1/system/tasks/rss_sync", `{"interval_minutes":43201}`, http.StatusBadRequest},
+	} {
+		rec := do(t, h, http.MethodPut, tc.target, tc.body)
+		wantStatus(t, rec, tc.status)
+	}
+}
+
 // The Tasks screen is an admin's, like the rest of Settings: a member is turned
 // away by the gate, never shown the queue or handed the button.
 func TestTaskEndpointsAreAdminOnly(t *testing.T) {
@@ -222,6 +265,7 @@ func TestTaskEndpointsAreAdminOnly(t *testing.T) {
 	for _, tc := range []struct{ method, target string }{
 		{http.MethodGet, "/api/v1/system/tasks"},
 		{http.MethodPost, "/api/v1/system/tasks/rss_sync/run"},
+		{http.MethodPut, "/api/v1/system/tasks/rss_sync"},
 	} {
 		rec := doAuth(t, h, tc.method, tc.target, "", withCookie(member))
 		if rec.Code != http.StatusForbidden {

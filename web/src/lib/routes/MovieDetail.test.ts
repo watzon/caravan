@@ -29,6 +29,45 @@ const MOVIE = {
   file: null,
 };
 
+const PROFILES = [
+  {
+    id: 1,
+    name: 'Balanced',
+    cutoff: '1080p',
+    items: ['1080p'],
+    upgrade_allowed: true,
+    is_default: true,
+    assignments: { libraries: 0, movies: 0, series: 0 },
+    created_at: '',
+    updated_at: '',
+  },
+  {
+    id: 2,
+    name: 'Archive',
+    cutoff: '2160p',
+    items: ['2160p', '1080p'],
+    upgrade_allowed: true,
+    is_default: false,
+    assignments: { libraries: 0, movies: 0, series: 0 },
+    created_at: '',
+    updated_at: '',
+  },
+];
+
+const LIBRARIES = [
+  {
+    id: 1,
+    kind: 'movie',
+    name: 'Cinema',
+    root_path: 'movies',
+    dlna_visible: true,
+    route_torrent: '',
+    route_usenet: '',
+    quality_profile_id: 2,
+    indexers: [],
+  },
+];
+
 let host: HTMLElement;
 let app: Record<string, unknown> | undefined;
 let calls: { url: string; method: string; body: unknown }[];
@@ -52,20 +91,49 @@ const MOVIE_WITH_FILE = {
   },
 };
 
-function stubFetch(queued: number, movie: unknown = MOVIE) {
+function stubFetch(
+  queued: number,
+  movie: unknown = MOVIE,
+  assignedMovie: unknown = movie,
+  profileChoicesStatus = 200,
+) {
   calls = [];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
       calls.push({
         url,
         method: init?.method ?? 'GET',
-        body: typeof init?.body === 'string' ? JSON.parse(init.body) : null,
+        body,
       });
+      if (url.endsWith('/quality-profiles')) {
+        return new Response(
+          JSON.stringify(
+            profileChoicesStatus === 200 ? { profiles: PROFILES } : { error: 'Profiles unavailable' },
+          ),
+          {
+            status: profileChoicesStatus,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        );
+      }
+      if (url.endsWith('/libraries')) {
+        return new Response(JSON.stringify({ libraries: LIBRARIES }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
       if (url.endsWith('/search')) {
         return new Response(JSON.stringify({ queued }), {
           status: 202,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (body?.quality_profile_id !== undefined) {
+        return new Response(JSON.stringify(assignedMovie), {
+          status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
       }
@@ -276,6 +344,49 @@ describe('minimum availability', () => {
     expect(patch?.body).toEqual({ min_availability: 'in_cinemas' });
   });
 });
+
+describe('quality profile assignment', () => {
+  it('saves an item override immediately', async () => {
+    const assignedMovie = { ...MOVIE, quality_profile_id: 1 };
+    stubFetch(0, MOVIE, assignedMovie);
+    app = mount(MovieDetail, { target: host, props: { id: 7 } });
+    await settle();
+
+    const select = host.querySelector<HTMLSelectElement>('select[aria-label="Quality profile"]');
+    expect(select).not.toBeNull();
+    expect(select!.value).toBe('0');
+
+    select!.value = '1';
+    select!.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+
+    expect(
+      calls.find(
+        (call) => (call.body as { quality_profile_id?: number } | null)?.quality_profile_id === 1,
+      ),
+    ).toMatchObject({
+      url: '/api/v1/library/movies/7',
+      method: 'PATCH',
+      body: { quality_profile_id: 1 },
+    });
+    expect(select!.value).toBe('1');
+    expect(host.textContent).toContain('Override: Balanced');
+  });
+  it('keeps the detail visible when profile choices cannot load', async () => {
+    stubFetch(0, MOVIE, MOVIE, 500);
+    app = mount(MovieDetail, { target: host, props: { id: 7 } });
+    await settle();
+
+    expect(host.textContent).toContain('Dune');
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain(
+      'Could not load profile choices: Profiles unavailable',
+    );
+    expect(
+      [...host.querySelectorAll('button')].some((button) => button.textContent?.trim() === 'Retry'),
+    ).toBe(true);
+  });
+});
+
 
 /**
  * The redesigned action row (Option A): the labeled switch became an icon

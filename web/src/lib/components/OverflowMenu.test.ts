@@ -81,6 +81,7 @@ describe('OverflowMenu', () => {
     open();
 
     expect(trigger().getAttribute('aria-expanded')).toBe('true');
+    expect(host!.querySelector('[role="menu"]')?.getAttribute('tabindex')).toBe('-1');
     expect(items().map((i) => i.textContent?.trim())).toEqual([
       'Do something',
       'Remove from library…',

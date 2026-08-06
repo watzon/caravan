@@ -250,8 +250,11 @@
              and "my queue is stuck". -->
         {#if download.state === 'queued' && (usenet || download.size > 0)}
           <p class="rounded-sm border border-border bg-raised px-3 py-2 text-sm text-ink-secondary">
-            Waiting for a free download slot. Raise the limit under Settings →
-            Downloads → Concurrency, or pause something that is running.
+            Waiting for a free download slot. Raise the limit under
+            <a
+              class="text-accent-text hover:underline"
+              href="/settings/downloads#download-concurrency">Settings → Downloads → Concurrency</a
+            >, or pause something that is running.
           </p>
         {/if}
 
@@ -472,7 +475,13 @@
                 </span>
               </label>
             </div>
-            <p class="mt-2 text-xs text-ink-muted">0 is unlimited. Empty inherits the global limit from Settings.</p>
+            <p class="mt-2 text-xs text-ink-muted">
+              0 is unlimited. Empty inherits the global limit from
+              <a
+                class="text-accent-text hover:underline"
+                href="/settings/downloads#download-concurrency">Settings → Downloads → Concurrency</a
+              >.
+            </p>
           </div>
 
           <div>

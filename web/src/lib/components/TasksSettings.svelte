@@ -17,8 +17,8 @@
    */
   import { onMount } from 'svelte';
   import { api, errorText } from '../api/client';
-  import type { SystemTask } from '../api/types';
-  import { UNKNOWN, formatAge, formatInterval, formatUntil } from '../format';
+  import type { SystemTask, TaskIntervalUpdate } from '../api/types';
+  import { UNKNOWN, formatAge, formatUntil } from '../format';
   import { pushToast } from '../state/toast.svelte';
   import Badge from './Badge.svelte';
   import Button from './Button.svelte';
@@ -31,6 +31,10 @@
   let error = $state<string | null>(null);
   /** The kinds whose Run now is in flight, so each row's button busies alone. */
   let starting = $state<Record<string, boolean>>({});
+  /** Draft interval text exists only after a user edits that task. */
+  let intervalDrafts = $state<Record<string, string>>({});
+  /** The kinds whose interval update is in flight. */
+  let updating = $state<Record<string, boolean>>({});
 
   /**
    * A poll that fails leaves the last good list on screen: this pane is a
@@ -38,9 +42,18 @@
    * worse than showing a reading a few seconds old. Only the first load turns
    * a failure into an error screen, because then there is nothing to show.
    */
-  async function load(initial = false) {
+  async function load(initial = false, confirmedInterval?: TaskIntervalUpdate) {
     try {
-      tasks = await api.listTasks();
+      const latest = await api.listTasks();
+      // A successful PUT response is authoritative for that task even if a
+      // concurrent list read was served from an older scheduler snapshot.
+      tasks = confirmedInterval
+        ? latest.map((task) =>
+            task.kind === confirmedInterval.kind
+              ? { ...task, interval_minutes: confirmedInterval.interval_minutes }
+              : task,
+          )
+        : latest;
       error = null;
     } catch (err) {
       if (initial || tasks === null) error = errorText(err);
@@ -72,6 +85,54 @@
     }
   }
 
+  function intervalValue(task: SystemTask): string {
+    return intervalDrafts[task.kind] ?? String(task.interval_minutes);
+  }
+
+  function setIntervalValue(task: SystemTask, event: Event) {
+    intervalDrafts = {
+      ...intervalDrafts,
+      [task.kind]: (event.currentTarget as HTMLInputElement).value,
+    };
+  }
+
+  function intervalIssue(task: SystemTask): string | null {
+    const value = intervalValue(task).trim();
+    const minutes = Number(value);
+    if (!value || !Number.isInteger(minutes) || minutes < 5 || minutes > 43_200) {
+      return 'Enter a whole number from 5 to 43,200 minutes.';
+    }
+    return null;
+  }
+
+  function intervalChanged(task: SystemTask): boolean {
+    const issue = intervalIssue(task);
+    return issue === null && Number(intervalValue(task)) !== task.interval_minutes;
+  }
+
+  async function saveInterval(task: SystemTask) {
+    const issue = intervalIssue(task);
+    if (updating[task.kind] || !intervalChanged(task) || issue !== null) return;
+
+    updating = { ...updating, [task.kind]: true };
+    try {
+      const result = await api.updateTaskInterval(task.kind, {
+        interval_minutes: Number(intervalValue(task)),
+      });
+      const nextDrafts = { ...intervalDrafts };
+      delete nextDrafts[task.kind];
+      intervalDrafts = nextDrafts;
+      pushToast(`${task.name} interval saved.`, 'success');
+      // Unlike ordinary polling, this request follows a user action: refresh
+      // now so the scheduler state and displayed cadence agree immediately.
+      await load(false, result);
+    } catch (err) {
+      pushToast(errorText(err), 'danger');
+    } finally {
+      updating = { ...updating, [task.kind]: false };
+    }
+  }
+
   /** How long ago the last run finished. "Never" is a real answer here. */
   function lastRunText(task: SystemTask): string {
     if (task.last_result === '') return 'Never';
@@ -91,7 +152,7 @@
 
 <SettingsCard
   title="Tasks"
-  description="The work Caravan does on a timer. Intervals are set on the panes that own them; anything here can also be run on demand.">
+  description="The work Caravan does on a timer. Set each recurring interval in minutes, or run a task on demand.">
   {#if error}
     <LoadError message={error} onretry={() => load(true)} />
   {:else if tasks === null}
@@ -119,11 +180,33 @@
             {/if}
           </div>
 
-          <dl class="grid shrink-0 grid-cols-3 gap-4 lg:w-72">
+          <dl class="grid shrink-0 grid-cols-1 gap-4 sm:grid-cols-3 lg:w-80">
             <div>
-              <dt class="micro-label">Every</dt>
-              <dd class="mt-1 text-sm tabular-nums text-ink">
-                {formatInterval(task.interval_minutes)}
+              <dt class="micro-label">
+                <label for={`task-${task.kind}-interval`}>Every (minutes)</label>
+              </dt>
+              <dd class="mt-1">
+                <input
+                  id={`task-${task.kind}-interval`}
+                  type="number"
+                  min="5"
+                  max="43200"
+                  step="1"
+                  value={intervalValue(task)}
+                  aria-invalid={intervalIssue(task) ? 'true' : undefined}
+                  aria-describedby={intervalIssue(task) ? `task-${task.kind}-interval-error` : undefined}
+                  oninput={(event) => setIntervalValue(task, event)}
+                  class="h-9 w-full min-w-0 rounded-sm border border-border-strong bg-raised px-2 font-mono text-sm tabular-nums text-ink
+                         focus:border-accent focus:outline-none disabled:opacity-50 transition-colors duration-150 ease-out"
+                  disabled={updating[task.kind]} />
+                {#if intervalIssue(task)}
+                  <p
+                    id={`task-${task.kind}-interval-error`}
+                    class="mt-1 text-sm text-danger"
+                    role="alert">
+                    {intervalIssue(task)}
+                  </p>
+                {/if}
               </dd>
             </div>
             <div>
@@ -145,13 +228,23 @@
             </div>
           </dl>
 
-          <Button
-            class="shrink-0 lg:ml-4"
-            disabled={starting[task.kind]}
-            onclick={() => run(task)}>
-            <Icon name="refresh" size={14} />
-            {starting[task.kind] ? 'Starting…' : 'Run now'}
-          </Button>
+          <div class="flex shrink-0 flex-wrap items-center gap-2 lg:ml-4">
+            <Button
+              variant="secondary"
+              disabled={updating[task.kind] || !intervalChanged(task)}
+              title={!intervalChanged(task)
+                ? intervalIssue(task) ?? 'No changes to save'
+                : undefined}
+              onclick={() => saveInterval(task)}>
+              {updating[task.kind] ? 'Saving…' : 'Save interval'}
+            </Button>
+            <Button
+              disabled={starting[task.kind]}
+              onclick={() => run(task)}>
+              <Icon name="refresh" size={14} />
+              {starting[task.kind] ? 'Starting…' : 'Run now'}
+            </Button>
+          </div>
         </li>
       {/each}
     </ul>

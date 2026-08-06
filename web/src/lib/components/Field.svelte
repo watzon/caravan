@@ -1,6 +1,11 @@
 <script lang="ts">
   /** Label + control + help/error, so every form row is spaced identically. */
+  import { setContext } from 'svelte';
   import type { Snippet } from 'svelte';
+  import {
+    FIELD_ACCESSIBILITY_CONTEXT,
+    type FieldAccessibilityContext,
+  } from './fieldContext';
 
   interface Props {
     label: string;
@@ -22,6 +27,19 @@
     class: klass = '',
     children,
   }: Props = $props();
+
+  const fieldID = $props.id();
+  const helpID = `${fieldID}-help`;
+  const errorID = `${fieldID}-error`;
+
+  setContext<FieldAccessibilityContext>(FIELD_ACCESSIBILITY_CONTEXT, {
+    get describedBy() {
+      return error ? errorID : help ? helpID : undefined;
+    },
+    get invalid() {
+      return Boolean(error);
+    },
+  });
 </script>
 
 <div class="flex flex-col gap-2 {klass}">
@@ -35,8 +53,8 @@
   {/if}
   {@render children()}
   {#if error}
-    <p class="text-sm text-danger">{error}</p>
+    <p id={errorID} class="text-sm text-danger">{error}</p>
   {:else if help}
-    <p class="text-sm text-ink-secondary">{help}</p>
+    <p id={helpID} class="text-sm text-ink-secondary">{help}</p>
   {/if}
 </div>

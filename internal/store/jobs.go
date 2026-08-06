@@ -128,14 +128,28 @@ func (s *Store) CompleteJob(ctx context.Context, id int64) error {
 // exponentially backed-off run_after until JobMaxAttempts is reached, after
 // which it parks in JobStateFailed. Failing an absent job is ErrNotFound.
 func (s *Store) FailJob(ctx context.Context, id int64, reason string) error {
+	return s.failJob(ctx, id, reason, false)
+}
+
+// FailJobAndScheduleRecurring records a failed attempt and, when the final
+// attempt belongs to a recurring kind, atomically creates its normal-cadence
+// successor. A retry remains the one open row, so it never creates a duplicate.
+func (s *Store) FailJobAndScheduleRecurring(ctx context.Context, id int64, reason string) error {
+	return s.failJob(ctx, id, reason, true)
+}
+
+func (s *Store) failJob(ctx context.Context, id int64, reason string, scheduleRecurring bool) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("store: fail job %d: %w", id, err)
 	}
 	defer tx.Rollback()
 
-	var attempts int
-	err = tx.QueryRowContext(ctx, "SELECT attempts FROM jobs WHERE id = ?", id).Scan(&attempts)
+	var (
+		kind     string
+		attempts int
+	)
+	err = tx.QueryRowContext(ctx, "SELECT kind, attempts FROM jobs WHERE id = ?", id).Scan(&kind, &attempts)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("store: fail job %d: %w", id, ErrNotFound)
 	}
@@ -143,10 +157,12 @@ func (s *Store) FailJob(ctx context.Context, id int64, reason string) error {
 		return fmt.Errorf("store: fail job %d: %w", id, err)
 	}
 
+	ts := now()
 	attempts++
 	state := core.JobStatePending
-	runAfter := now().Add(RetryDelay(attempts))
-	if attempts >= JobMaxAttempts {
+	runAfter := ts.Add(RetryDelay(attempts))
+	terminal := attempts >= JobMaxAttempts
+	if terminal {
 		state = core.JobStateFailed
 		runAfter = time.Time{}
 	}
@@ -155,9 +171,36 @@ func (s *Store) FailJob(ctx context.Context, id int64, reason string) error {
 		UPDATE jobs SET state = ?, attempts = ?, run_after = ?, lease_expires_at = '',
 			last_error = ?, updated_at = ?
 		WHERE id = ?`,
-		state, attempts, formatTime(runAfter), reason, formatTime(now()), id); err != nil {
+		state, attempts, formatTime(runAfter), reason, formatTime(ts), id); err != nil {
 		return fmt.Errorf("store: fail job %d: %w", id, err)
 	}
+
+	if terminal && scheduleRecurring {
+		minutes, recurring, err := s.recurringIntervalMinutesTx(ctx, tx, kind)
+		if err != nil {
+			return fmt.Errorf("store: schedule %s successor after failing job %d: %w", kind, id, err)
+		}
+		if recurring {
+			var open int
+			if err := tx.QueryRowContext(ctx, `
+				SELECT COUNT(*) FROM jobs
+				WHERE kind = ? AND state IN (?, ?)`,
+				kind, core.JobStatePending, core.JobStateRunning).Scan(&open); err != nil {
+				return fmt.Errorf("store: check open %s successor after failing job %d: %w", kind, id, err)
+			}
+			if open == 0 {
+				if _, err := tx.ExecContext(ctx, `
+					INSERT INTO jobs (kind, payload, state, attempts, run_after, lease_expires_at,
+						last_error, created_at, updated_at)
+					VALUES (?, '{}', ?, 0, ?, '', '', ?, ?)`,
+					kind, core.JobStatePending, formatTime(ts.Add(time.Duration(minutes)*time.Minute)),
+					formatTime(ts), formatTime(ts)); err != nil {
+					return fmt.Errorf("store: schedule %s successor after failing job %d: %w", kind, id, err)
+				}
+			}
+		}
+	}
+
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("store: fail job %d: %w", id, err)
 	}

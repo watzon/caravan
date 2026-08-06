@@ -2,6 +2,9 @@ package api
 
 import (
 	"net/http"
+	"os"
+	goruntime "runtime"
+	"time"
 
 	"github.com/watzon/caravan/internal/core"
 )
@@ -22,6 +25,63 @@ import (
 // EventCategorySystem groups process-lifecycle events in the activity feed:
 // the dirty start itself, and the verification that cleared it.
 const EventCategorySystem = "system"
+
+// RuntimeConfig describes process paths and settings supplied by the serving
+// command. GET /system/status is admin-only, so these diagnostics stay private.
+type RuntimeConfig struct {
+	ConfigDir    string
+	ConfigFile   string
+	DatabasePath string
+	LogLevel     string
+}
+
+// WithRuntimeDiagnostics adds process diagnostics to GET /system/status.
+func WithRuntimeDiagnostics(config RuntimeConfig) Option {
+	return func(s *server) { s.runtime = &config }
+}
+
+type runtimeJSON struct {
+	StartedAt     string `json:"started_at"`
+	UptimeSeconds int64  `json:"uptime_seconds"`
+	GoVersion     string `json:"go_version"`
+	OS            string `json:"os"`
+	Arch          string `json:"arch"`
+	ConfigDir     string `json:"config_dir"`
+	ConfigFile    string `json:"config_file"`
+	DatabasePath  string `json:"database_path"`
+	DatabaseSize  int64  `json:"database_size_bytes"`
+	LogLevel      string `json:"log_level"`
+	ListenAddress string `json:"listen_address"`
+	Goroutines    int    `json:"goroutines"`
+	MemoryAlloc   uint64 `json:"memory_alloc_bytes"`
+}
+
+func (s *server) runtimeStatus() *runtimeJSON {
+	if s.runtime == nil {
+		return nil
+	}
+	var memory goruntime.MemStats
+	goruntime.ReadMemStats(&memory)
+	size := int64(0)
+	if info, err := os.Stat(s.runtime.DatabasePath); err == nil {
+		size = info.Size()
+	}
+	return &runtimeJSON{
+		StartedAt:     s.startedAt.UTC().Format(time.RFC3339),
+		UptimeSeconds: int64(time.Since(s.startedAt).Seconds()),
+		GoVersion:     goruntime.Version(),
+		OS:            goruntime.GOOS,
+		Arch:          goruntime.GOARCH,
+		ConfigDir:     s.runtime.ConfigDir,
+		ConfigFile:    s.runtime.ConfigFile,
+		DatabasePath:  s.runtime.DatabasePath,
+		DatabaseSize:  size,
+		LogLevel:      s.runtime.LogLevel,
+		ListenAddress: s.listenAddr,
+		Goroutines:    goruntime.NumGoroutine(),
+		MemoryAlloc:   memory.Alloc,
+	}
+}
 
 // WithDirtyStart tells the API that this session followed an unclean shutdown.
 //

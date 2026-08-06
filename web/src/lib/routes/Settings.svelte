@@ -1,236 +1,119 @@
 <script lang="ts">
-  /** Settings for general configuration, indexers, engine defaults, profiles and storage. */
+  /** Settings overview and the route-compatible configuration panes. */
   import { onMount } from 'svelte';
   import { api, errorText } from '../api/client';
   import { SETTING_TMDB_API_KEY, SETTING_TMDB_API_KEY_SET, type Settings } from '../api/types';
   import AdultSettings from '../components/AdultSettings.svelte';
+  import Badge from '../components/Badge.svelte';
   import Banner from '../components/Banner.svelte';
   import Button from '../components/Button.svelte';
   import Field from '../components/Field.svelte';
   import Icon from '../components/Icon.svelte';
   import DownloadsSettings from '../components/DownloadsSettings.svelte';
   import IndexerSettings from '../components/IndexerSettings.svelte';
+  import InterfaceSettings from '../components/InterfaceSettings.svelte';
   import LibrariesSettings from '../components/LibrariesSettings.svelte';
   import LoadError from '../components/LoadError.svelte';
+  import NotificationSettings from '../components/NotificationSettings.svelte';
   import PlaybackSettings from '../components/PlaybackSettings.svelte';
   import Skeleton from '../components/Skeleton.svelte';
   import TextInput from '../components/TextInput.svelte';
   import QualityProfiles from '../components/QualityProfiles.svelte';
   import SecuritySettings from '../components/SecuritySettings.svelte';
   import SettingsCard from '../components/SettingsCard.svelte';
+  import RuntimeDiagnostics from '../components/RuntimeDiagnostics.svelte';
   import StorageSettings from '../components/StorageSettings.svelte';
   import TasksSettings from '../components/TasksSettings.svelte';
   import UsersSettings from '../components/UsersSettings.svelte';
   import { UNKNOWN } from '../format';
+  import {
+    SETTINGS_CATALOG,
+    SETTINGS_CATEGORIES,
+    settingsEntryForSection,
+    settingsHref,
+    settingsMatches,
+    type SettingsCatalogEntry,
+  } from '../settings/catalog';
   import { pushToast } from '../state/toast.svelte';
+  import { page } from '../state/page.svelte';
   import { system } from '../state/system.svelte';
 
   interface Props {
-    /** The /settings/:section route param; '' means the bare /settings. */
+    /** The /settings/:section route param; '' means the overview. */
     section?: string;
   }
 
   let { section = '' }: Props = $props();
-
-  type SectionKey =
-    | 'libraries'
-    | 'metadata'
-    | 'quality-profiles'
-    | 'storage'
-    | 'adult'
-    | 'indexers'
-    | 'downloads'
-    | 'playback'
-    | 'users'
-    | 'tasks'
-    | 'security';
-
-  interface SectionDef {
-    key: SectionKey;
-    label: string;
-    title: string;
-    /** One plain-language sentence under the pane title. */
-    blurb: string;
-    /** Pure-form panes keep a narrow column; card and list panes fill
-     * the content column, as the Paper mocks have it. */
-    narrow?: boolean;
-  }
-
-  /**
-   * Nine sections grouped the way the product thinks (the Paper redesign).
-   * Downloads and Playback each hold several cards rather than several rail
-   * entries: the things inside them are one decision, not four.
-   */
-  const GROUPS: { label: string; items: SectionDef[] }[] = [
-    {
-      label: 'Library',
-      items: [
-        {
-          key: 'libraries',
-          label: 'Libraries',
-          title: 'Libraries',
-          blurb:
-            'Movies and Series each carry their own indexers, categories, routing and reach. Anything a library does not answer falls back to the global setting.',
-        },
-        {
-          key: 'metadata',
-          narrow: true,
-          label: 'Metadata',
-          title: 'Metadata',
-          blurb: 'TMDB supplies titles, artwork and episode data. The key lives in the database, never in logs.',
-        },
-        {
-          key: 'quality-profiles',
-          label: 'Quality profiles',
-          title: 'Quality profiles',
-          blurb: 'What to grab and when to upgrade: the scoring rules search runs releases through.',
-        },
-        {
-          key: 'storage',
-          narrow: true,
-          label: 'Storage',
-          title: 'Storage',
-          blurb: 'The storage root — where the library, downloads and database live.',
-        },
-        // The module's own control plane. It is listed whatever the module's
-        // state, because turning it on is what this pane is FOR — it is the
-        // one adult surface that has to exist while the module does not, the
-        // same reason POST /settings/adult sits outside the gated route
-        // subtree. Only admins ever see the Settings screen.
-        {
-          key: 'adult',
-          label: 'Adult content',
-          title: 'Adult content',
-          blurb:
-            'An adult library with its own metadata source and its own access list. Off by default, and hidden from everyone — including DLNA and prepared drives — until you say otherwise.',
-        },
-      ],
-    },
-    {
-      label: 'Acquisition',
-      items: [
-        {
-          key: 'indexers',
-          label: 'Indexers',
-          title: 'Indexers',
-          blurb: 'Torznab and Newznab sources. Point Prowlarr here, or add indexers directly.',
-        },
-        {
-          key: 'downloads',
-          label: 'Downloads',
-          title: 'Downloads',
-          blurb: 'What actually pulls a release down. Both engines are built in; external clients are optional.',
-        },
-      ],
-    },
-    {
-      label: 'Playback',
-      items: [
-        {
-          key: 'playback',
-          label: 'Playback',
-          title: 'Playback',
-          blurb: 'How the library reaches a screen, and what the screen on the other end can decode.',
-        },
-      ],
-    },
-    {
-      label: 'System',
-      items: [
-        {
-          key: 'users',
-          narrow: true,
-          label: 'Users',
-          title: 'Users',
-          blurb: 'Who can sign in, and what each of them may do. With no accounts, Caravan is open to anyone who can reach it.',
-        },
-        {
-          key: 'tasks',
-          label: 'Tasks',
-          title: 'Tasks',
-          blurb:
-            'The work Caravan does on a timer: when each task last ran, how it went, and when the next one is due.',
-        },
-        {
-          key: 'security',
-          narrow: true,
-          label: 'Security',
-          title: 'Security',
-          blurb: 'Your own password, the API key external tools use, and what this Caravan is running.',
-        },
-      ],
-    },
-  ];
-
-  /**
-   * The slugs the eleven-section rail used. An old deep link lands on the pane
-   * that absorbed it rather than falling through to Metadata.
-   */
-  const LEGACY_SECTIONS: Record<string, SectionKey> = {
-    engine: 'downloads',
-    'usenet-servers': 'downloads',
-    'download-clients': 'downloads',
-    dlna: 'playback',
-    jellyfin: 'playback',
-    'tv-profile': 'playback',
-    general: 'metadata',
-  };
-
-  const SECTIONS = new Map<string, SectionDef>(
-    GROUPS.flatMap((g) => g.items).map((item) => [item.key, item]),
+  const GROUPS = SETTINGS_CATEGORIES.map((category) => ({
+    category,
+    items: SETTINGS_CATALOG.filter((entry) => entry.category === category),
+  }));
+  const SHOW_ADVANCED_KEY = 'caravan.settings.show-advanced';
+  const SETTINGS_SEARCH_SHORTCUT =
+    typeof navigator !== 'undefined' && /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent)
+      ? '⌘K'
+      : 'Ctrl K';
+  let isOverview = $derived(section === '');
+  let activeEntry = $derived<SettingsCatalogEntry | null>(
+    isOverview ? null : settingsEntryForSection(section),
   );
+  let headerEntry = $derived(activeEntry ?? SETTINGS_CATALOG[0]);
+  let query = $state('');
 
-  /** An unknown or absent section slug lands on Metadata rather than a 404:
-   * the pane exists either way, and old /settings links keep working. */
-  let tab = $derived<SectionKey>(
-    SECTIONS.has(section) ? (section as SectionKey) : (LEGACY_SECTIONS[section] ?? 'metadata'),
-  );
-  let def = $derived(SECTIONS.get(tab)!);
-
-  /** Quiet rail counts for the list sections, fetched lazily and best-effort:
-   * a count that fails to load renders as no count, never as an error. */
-  let railCounts = $state<Partial<Record<SectionKey, number>>>({});
-  onMount(() => {
-    void (async () => {
-      try {
-        railCounts.indexers = (await api.listIndexers()).length;
-      } catch {
-        // No count is the honest render for "could not ask".
-      }
-      // Downloads holds both lists, so it carries one number. A partial sum
-      // would misreport, so either both answer or nothing is shown.
-      try {
-        const [servers, clients] = await Promise.all([
-          api.listUsenetServers(),
-          api.listDownloadClients(),
-        ]);
-        railCounts.downloads = servers.length + clients.length;
-      } catch {
-        // Same reason.
-      }
-    })();
-  });
   let settings = $state<Settings | null>(null);
+  let showAdvanced = $state(false);
   let loading = $state(true);
   let error = $state<string | null>(null);
   let saving = $state(false);
+  let overviewState = $state({ libraries: null as number | null, sources: null as number | null });
 
   let tmdbKey = $state('');
-  /**
-   * The Test button's last verdict, in the indexer card's own shape and idiom
-   * (PLAN phase 10 task 4): an inline ✓/✕ under the field rather than a toast,
-   * because it is about the field you are looking at.
-   */
   let tmdbTest = $state<{ ok: boolean; message: string } | null>(null);
   let testingTMDB = $state(false);
 
+  let status = $derived(system.status);
+  let metadataState = $derived(system.metadataCredential);
+  let hasTMDBKey = $derived(settings?.[SETTING_TMDB_API_KEY_SET] === 'true');
+  let metadataConfigured = $derived(
+    hasTMDBKey || (status !== null && metadataState === 'ok'),
+  );
+  let storageConfigured = $derived(Boolean(settings?.storage_root || status?.storage_root));
+  let results = $derived(SETTINGS_CATALOG.filter((entry) => settingsMatches(entry, query)));
+  let setup = $derived([
+    {
+      label: 'Choose a storage location',
+      description: 'Set the root that will hold the library and downloads.',
+      href: '/settings/storage#storage',
+      complete: storageConfigured,
+    },
+    {
+      label: 'Connect metadata',
+      description: 'Add a TMDB API key for search, titles, and artwork.',
+      href: '/settings/metadata#metadata',
+      complete: metadataConfigured,
+    },
+    {
+      label: 'Create a library',
+      description: 'Add a movie or series library before importing media.',
+      href: '/settings/libraries#libraries',
+      complete: overviewState.libraries === null ? null : overviewState.libraries > 0,
+    },
+    {
+      label: 'Add a search or download source',
+      description: 'Configure an indexer, Usenet server, or download client.',
+      href: '/settings/indexers#indexers',
+      complete: overviewState.sources === null ? null : overviewState.sources > 0,
+    },
+  ]);
+
   async function load() {
     loading = true;
+    settings = null;
+    error = null;
     try {
       const loaded = await api.getSettings();
       settings = loaded;
       tmdbKey = '';
-      error = null;
     } catch (err) {
       error = errorText(err);
     } finally {
@@ -238,7 +121,42 @@
     }
   }
 
-  onMount(load);
+  async function loadOverviewState(request: number) {
+    const [libraries, indexers, servers, clients] = await Promise.allSettled([
+      api.listLibraries(),
+      api.listIndexers(),
+      api.listUsenetServers(),
+      api.listDownloadClients(),
+    ]);
+
+    if (request !== overviewRequest || !isOverview) return;
+    if (libraries.status === 'fulfilled') overviewState.libraries = libraries.value.length;
+    if (indexers.status === 'fulfilled' && servers.status === 'fulfilled' && clients.status === 'fulfilled') {
+      overviewState.sources = indexers.value.length + servers.value.length + clients.value.length;
+    }
+  }
+
+  function toggleAdvanced() {
+    showAdvanced = !showAdvanced;
+    localStorage.setItem(SHOW_ADVANCED_KEY, String(showAdvanced));
+  }
+
+  onMount(() => {
+    showAdvanced = localStorage.getItem(SHOW_ADVANCED_KEY) === 'true';
+    void load();
+  });
+
+  let overviewRequest = 0;
+  $effect(() => {
+    const request = ++overviewRequest;
+    overviewState = { libraries: null, sources: null };
+    if (isOverview) void loadOverviewState(request);
+  });
+
+  $effect(() => {
+    page.actions = settingsSearch;
+    return () => (page.actions = null);
+  });
 
   async function save(patch: Settings, note: string): Promise<boolean> {
     saving = true;
@@ -255,16 +173,6 @@
     }
   }
 
-  /**
-   * Prove the key in the field, not the one on disk.
-   *
-   * The field's value is sent so a key can be checked before it is saved —
-   * the same thing the first-run wizard does, and the reason a typo never has
-   * to be committed to find out it was one. An empty field falls back to the
-   * stored key, which is what "Test" means on a card that has already been
-   * saved. The server caches the verdict against the key's value, so testing
-   * and then saving costs one upstream call rather than two.
-   */
   async function testMetadata() {
     testingTMDB = true;
     try {
@@ -274,67 +182,32 @@
       tmdbTest = { ok: false, message: errorText(err) };
     } finally {
       testingTMDB = false;
-      // The verdict the server just cached is what the sidebar badge reads.
       await system.refresh();
     }
   }
-
-  let status = $derived(system.status);
-  let metadataState = $derived(system.metadataCredential);
-  let hasTMDBKey = $derived(settings?.[SETTING_TMDB_API_KEY_SET] === 'true');
 </script>
 
-<div class="flex flex-col gap-6 md:flex-row md:gap-7">
-  <!-- The settings rail (Paper redesign): grouped sections in the sidebar's
-       own grammar. On narrow screens it wraps into rows above the pane. -->
-  <nav
-    class="flex flex-row flex-wrap gap-x-6 gap-y-4 md:w-52 md:shrink-0 md:flex-col md:gap-6"
-    aria-label="Settings sections">
-    {#each GROUPS as group (group.label)}
-      <div class="flex flex-col gap-0.5">
-        <p class="micro-label px-2.5 pb-1.5">{group.label}</p>
-        {#each group.items as item (item.key)}
-          {@const active = tab === item.key}
-          <a
-            href="/settings/{item.key}"
-            aria-current={active ? 'page' : undefined}
-            class="flex items-center justify-between gap-3 rounded-md border-l-2 py-1.5 pl-2.5 pr-2.5 text-base transition-colors duration-150 ease-out
-                   {active
-              ? 'border-l-accent bg-accent-tint text-accent-text'
-              : 'border-l-transparent text-ink-secondary hover:bg-raised hover:text-ink'}">
-            <span>{item.label}</span>
-            {#if railCounts[item.key]}
-              <span
-                class="text-sm font-medium tabular-nums {active
-                  ? 'text-accent-text'
-                  : 'text-ink-muted'}">
-                {railCounts[item.key]}
-              </span>
-            {/if}
-          </a>
-        {/each}
+<div data-settings-layout data-settings-main class="flex min-w-0 flex-1 flex-col gap-5">
+  <header class="flex flex-col gap-4 border-b border-border pb-4">
+    <div class="flex flex-wrap items-start justify-between gap-3">
+      <div class="flex min-w-0 flex-1 flex-col gap-1">
+        <h1 id={isOverview ? 'settings-overview' : headerEntry.anchor} class="text-lg font-semibold text-ink">
+          {isOverview ? 'Settings' : headerEntry.label}
+        </h1>
+        <p class="text-sm text-ink-secondary">
+          {isOverview
+            ? 'Find the next configuration task or open a settings page directly.'
+            : headerEntry.description}
+        </p>
       </div>
-    {/each}
-  </nav>
+      <Button variant="secondary" size="sm" onclick={toggleAdvanced}>
+        {showAdvanced ? 'Hide advanced' : 'Show advanced'}
+      </Button>
+    </div>
+  </header>
 
-  <div class="flex min-w-0 flex-1 flex-col gap-5 {def.narrow ? 'max-w-3xl' : ''}">
-    <header class="flex flex-col gap-1 border-b border-border pb-4">
-      <h3 class="text-md font-semibold text-ink">{def.title}</h3>
-      <p class="text-sm text-ink-secondary">{def.blurb}</p>
-    </header>
-
-    <!-- These own their fetches, so they render whether or not /settings loaded. -->
-    {#if tab === 'libraries'}
-      <LibrariesSettings />
-    {:else if tab === 'indexers'}
-      <IndexerSettings />
-    {:else if tab === 'quality-profiles'}
-      <QualityProfiles />
-    {:else if tab === 'users'}
-      <UsersSettings />
-    {:else if tab === 'tasks'}
-      <TasksSettings />
-    {:else if error}
+  <div class:settings-advanced-hidden={!showAdvanced} class="flex min-w-0 flex-1 flex-col gap-5 {headerEntry.narrow ? 'max-w-3xl' : ''}">
+    {#if error}
       <LoadError message={error} onretry={load} />
     {:else if loading && settings === null}
       <div class="flex flex-col gap-4">
@@ -342,47 +215,113 @@
         <Skeleton class="h-9 w-full" />
         <Skeleton class="h-8 w-24" />
       </div>
-    {:else if tab === 'downloads' && settings}
-      <DownloadsSettings {settings} {saving} onsave={save} />
-    {:else if tab === 'playback' && settings}
+    {:else if settings === null}
+      <LoadError message="Settings could not be loaded." onretry={load} />
+    {:else if isOverview}
+
+      <section aria-labelledby="setup-heading" class="flex flex-col gap-3">
+        <div>
+          <h2 id="setup-heading" class="text-base font-medium text-ink">Set up Caravan</h2>
+          <p class="mt-1 text-sm text-ink-secondary">Complete these in order. Each status comes from Caravan’s current state.</p>
+        </div>
+        <ol class="flex flex-col gap-2">
+          {#each setup as item}
+            <li class="flex items-center justify-between gap-4 rounded-md bg-raised px-3 py-2">
+              <div class="min-w-0">
+                <a href={item.href} class="text-sm font-medium text-ink hover:text-accent-text">{item.label}</a>
+                <p class="text-sm text-ink-secondary">{item.description}</p>
+              </div>
+              <Badge tone={item.complete ? 'success' : item.complete === null ? 'neutral' : 'warning'}>
+                {item.complete ? 'Done' : item.complete === null ? 'Checking' : 'Needs setup'}
+              </Badge>
+            </li>
+          {/each}
+        </ol>
+      </section>
+
+      <section aria-labelledby="settings-categories-heading" class="flex flex-col gap-3">
+        <div>
+          <h2 id="settings-categories-heading" class="text-base font-medium text-ink">Browse settings</h2>
+          <p class="mt-1 text-sm text-ink-secondary">Open a page by the job it handles.</p>
+        </div>
+        <div class="grid gap-4 lg:grid-cols-2">
+          {#each GROUPS as group (group.category)}
+            <SettingsCard title={group.category}>
+              <ul class="flex flex-col gap-1">
+                {#each group.items as item (item.route)}
+                  <li>
+                    <a href={settingsHref(item)} class="flex flex-col rounded-md px-2 py-1.5 hover:bg-raised">
+                      <span class="flex items-center gap-2 text-sm font-medium text-ink">
+                        {item.label}
+                        {#if item.advanced}<Badge tone="neutral">Advanced</Badge>{/if}
+                      </span>
+                      <span class="text-sm text-ink-secondary">{item.description}</span>
+                    </a>
+                  </li>
+                {/each}
+              </ul>
+            </SettingsCard>
+          {/each}
+        </div>
+      </section>
+    {:else if activeEntry?.route === '/settings/libraries'}
+      <LibrariesSettings />
+    {:else if activeEntry?.route === '/settings/indexers'}
+      <IndexerSettings />
+    {:else if activeEntry?.route === '/settings/storage' && settings}
+      <StorageSettings {settings} />
+    {:else if activeEntry?.route === '/settings/quality-profiles'}
+      <QualityProfiles />
+    {:else if activeEntry?.route === '/settings/users'}
+      <UsersSettings />
+    {:else if activeEntry?.route === '/settings/tasks'}
+      <TasksSettings />
+    {:else if activeEntry?.route === '/settings/notifications'}
+      <NotificationSettings />
+    {:else if activeEntry?.route === '/settings/downloads' && settings}
+      <DownloadsSettings {settings} {saving} {showAdvanced} onsave={save} />
+    {:else if activeEntry?.route === '/settings/playback' && settings}
       <PlaybackSettings {settings} {saving} onsave={save} />
-    {:else if tab === 'adult' && settings}
+    {:else if activeEntry?.route === '/settings/adult' && settings}
       <AdultSettings {settings} {saving} onsave={save} />
-    {:else if tab === 'security' && settings}
+    {:else if activeEntry?.route === '/settings/interface'}
+      <InterfaceSettings />
+    {:else if activeEntry?.route === '/settings/security' && settings}
       <SecuritySettings {settings} />
 
-      <!-- About lives here rather than under Metadata: what this Caravan is
-           running is a system fact, not a library one. -->
-      <SettingsCard title="About" description="This Caravan.">
-        <dl class="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <div>
-            <dt class="micro-label">Version</dt>
-            <dd class="mt-1 font-mono text-sm text-ink">{status?.version || UNKNOWN}</dd>
-          </div>
-          <div>
-            <dt class="micro-label">Mode</dt>
-            <dd class="mt-1 font-mono text-sm text-ink">{status?.mode || UNKNOWN}</dd>
-          </div>
-          <div>
-            <dt class="micro-label">Schema</dt>
-            <dd class="mt-1 font-mono text-sm text-ink">
-              {status ? `v${status.schema_version}` : UNKNOWN}
-            </dd>
-          </div>
-          <div>
-            <dt class="micro-label">Library files</dt>
-            <dd class="mt-1 font-mono text-sm text-ink">
-              {status ? status.counts.media_files : UNKNOWN}
-            </dd>
-          </div>
-        </dl>
-      </SettingsCard>
-    {:else if tab === 'metadata'}
+      <section id="about">
+        <SettingsCard title="About" description="This Caravan.">
+          <dl class="grid grid-cols-2 gap-4 sm:grid-cols-4">
+            <div>
+              <dt class="micro-label">Version</dt>
+              <dd class="mt-1 font-mono text-sm text-ink">{status?.version || UNKNOWN}</dd>
+            </div>
+            <div>
+              <dt class="micro-label">Mode</dt>
+              <dd class="mt-1 font-mono text-sm text-ink">{status?.mode || UNKNOWN}</dd>
+            </div>
+            <div>
+              <dt class="micro-label">Schema</dt>
+              <dd class="mt-1 font-mono text-sm text-ink">
+                {status ? `v${status.schema_version}` : UNKNOWN}
+              </dd>
+            </div>
+            <div>
+              <dt class="micro-label">Library files</dt>
+              <dd class="mt-1 font-mono text-sm text-ink">
+                {status ? status.counts.media_files : UNKNOWN}
+              </dd>
+            </div>
+          </dl>
+        </SettingsCard>
+      {#if status?.runtime}
+        <RuntimeDiagnostics diagnostics={status.runtime} />
+      {/if}
+
+      </section>
+    {:else if activeEntry?.route === '/settings/metadata'}
       <section class="flex flex-col gap-6">
         {#if metadataState !== 'ok'}
-          <!-- Every metadata surface is degraded while this is true, and this
-               is the screen that fixes it, so it is stated here rather than
-               left for the user to infer from the empty states elsewhere. -->
           <Banner
             tone="warning"
             icon="warning"
@@ -398,10 +337,6 @@
           for="tmdb-key"
           help="Stored in the database, never in caravan.yaml or logs."
           error={tmdbTest && !tmdbTest.ok ? tmdbTest.message : null}>
-          <!-- Typing invalidates a verdict about a different string, exactly as
-               it does in the first-run wizard: a green ✓ under a key that is no
-               longer the one that was tested is a lie, and a red ✕ under a key
-               the user has just corrected is a worse one. -->
           <TextInput
             id="tmdb-key"
             bind:value={tmdbKey}
@@ -432,17 +367,76 @@
             onclick={() => save({ [SETTING_TMDB_API_KEY]: '' }, 'TMDB API key cleared.')}>
             Clear
           </Button>
-          <!-- The indexer card's idiom, on the credential every other card
-               assumes: ask the provider, report what it said. -->
           <Button variant="secondary" disabled={testingTMDB} onclick={testMetadata}>
             {testingTMDB ? 'Testing…' : 'Test'}
           </Button>
         </div>
       </section>
-    {:else if settings}
-      <!-- Storage owns two operations with very different consequences, so it
-           owns its own component and its own migration polling. -->
-      <StorageSettings {settings} />
     {/if}
   </div>
 </div>
+
+{#snippet settingsSearch()}
+  <div data-settings-top-search class="relative w-32 sm:w-72">
+    <Icon
+      name="search"
+      size={14}
+      class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-muted" />
+    <input
+      id="settings-search"
+      type="search"
+      value={query}
+      aria-label="Search settings"
+      aria-controls={query.trim() ? 'settings-search-results' : undefined}
+      placeholder="Search"
+      oninput={(event) => (query = event.currentTarget.value)}
+      onkeydown={(event) => {
+        if (event.key !== 'Escape') return;
+        query = '';
+        event.currentTarget.blur();
+      }}
+      class="h-8 w-full rounded-md border border-border-strong bg-raised pl-9 pr-3 text-sm text-ink sm:pr-14
+             placeholder:text-ink-muted transition-colors duration-150 ease-out
+             focus:border-accent focus:outline-none" />
+    <kbd
+      class="pointer-events-none absolute right-2 top-1/2 hidden -translate-y-1/2 rounded-sm
+             bg-surface px-1.5 py-0.5 font-mono text-xs text-ink-muted sm:block">
+      {SETTINGS_SEARCH_SHORTCUT}
+    </kbd>
+
+    {#if query.trim()}
+      <div
+        id="settings-search-results"
+        aria-live="polite"
+        class="absolute right-0 top-full z-50 mt-2 max-h-80 w-[min(24rem,calc(100vw-2rem))]
+               overflow-y-auto rounded-md border border-border-strong bg-surface shadow-xl">
+        <p class="border-b border-border px-3 py-2 text-xs text-ink-secondary">
+          {results.length === 1 ? '1 matching setting' : `${results.length} matching settings`}
+        </p>
+        {#if results.length}
+          <ul class="flex flex-col gap-1 p-1">
+            {#each results as item (item.route)}
+              <li>
+                <a
+                  href={settingsHref(item)}
+                  class="flex flex-col rounded-sm px-3 py-2 hover:bg-raised"
+                  onclick={() => (query = '')}>
+                  <span class="text-sm font-medium text-ink">{item.label}</span>
+                  <span class="text-xs text-ink-secondary">{item.description}</span>
+                </a>
+              </li>
+            {/each}
+          </ul>
+        {:else}
+          <p class="px-3 py-3 text-sm text-ink-secondary">No settings match that search.</p>
+        {/if}
+      </div>
+    {/if}
+  </div>
+{/snippet}
+
+<style>
+  .settings-advanced-hidden :global([data-settings-advanced]) {
+    display: none;
+  }
+</style>

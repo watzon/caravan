@@ -18,6 +18,7 @@ type indexerJSON struct {
 	HasAPIKey  bool   `json:"has_api_key"`
 	Type       string `json:"type"`
 	Categories []int  `json:"categories"`
+	Priority   int    `json:"priority"`
 	Enabled    bool   `json:"enabled"`
 }
 
@@ -29,6 +30,7 @@ func indexerDTO(c core.IndexerConfig) indexerJSON {
 		HasAPIKey:  c.APIKey != "",
 		Type:       c.Type,
 		Categories: categoryList(c.Categories),
+		Priority:   c.Priority,
 		Enabled:    c.Enabled,
 	}
 }
@@ -42,6 +44,7 @@ type indexerRequest struct {
 	APIKey     *string `json:"api_key"`
 	Type       string  `json:"type"`
 	Categories []int   `json:"categories"`
+	Priority   *int    `json:"priority"`
 	Enabled    *bool   `json:"enabled"`
 }
 
@@ -71,6 +74,13 @@ func (b indexerRequest) config(apiKey string) (core.IndexerConfig, string) {
 			return core.IndexerConfig{}, "categories must be positive integers"
 		}
 	}
+	priority := core.IndexerDefaultPriority
+	if b.Priority != nil {
+		if *b.Priority < 0 {
+			return core.IndexerConfig{}, "priority must be zero or greater"
+		}
+		priority = *b.Priority
+	}
 
 	enabled := true
 	if b.Enabled != nil {
@@ -82,6 +92,7 @@ func (b indexerRequest) config(apiKey string) (core.IndexerConfig, string) {
 		APIKey:     strings.TrimSpace(apiKey),
 		Type:       b.Type,
 		Categories: b.Categories,
+		Priority:   priority,
 		Enabled:    enabled,
 	}, ""
 }

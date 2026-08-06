@@ -52,8 +52,8 @@ func TestMigrate0013PreservesThePhase8Install(t *testing.T) {
 
 	path := atSchema12(t, func(db *sql.DB) {
 		exec(t, db, `INSERT INTO indexers (id, name, protocol, url, api_key, categories,
-			enabled, priority, created_at, updated_at)
-			VALUES (7, 'Nzbee', 'newznab', 'http://nzb.example', 'k', '[5000]', 1, 30,
+			enabled, created_at, updated_at)
+			VALUES (7, 'Nzbee', 'newznab', 'http://nzb.example', 'k', '[5000]', 1,
 			        '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')`)
 
 		// The library rows the owner has since edited: a hidden TV shelf with a

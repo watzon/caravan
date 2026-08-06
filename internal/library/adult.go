@@ -647,7 +647,7 @@ func (m *Manager) importScene(ctx context.Context, sr *core.Series, rel string, 
 	if dir == "" {
 		dir = adultSeriesDir(sr.Title)
 	}
-	dst := path.Join(dir, seasonFolderName(p.Season),
+	dst := path.Join(dir, m.seasonFolderName(p.Season),
 		sceneFileName(sr.Title, airDate, episodeTitle, path.Ext(rel)))
 
 	finalRel, err := m.placeFile(rel, dst, disp)

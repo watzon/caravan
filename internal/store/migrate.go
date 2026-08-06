@@ -1,7 +1,9 @@
 package store
 
 import (
+	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 	"path"
@@ -77,8 +79,14 @@ func (s *Store) applyMigration(m migration) error {
 	}
 	defer tx.Rollback()
 
-	if _, err := tx.Exec(m.sql); err != nil {
-		return fmt.Errorf("store: apply migration %04d_%s: %w", m.version, m.name, err)
+	handled, err := applyCompatibilityMigration(tx, m)
+	if err != nil {
+		return fmt.Errorf("store: prepare migration %04d_%s: %w", m.version, m.name, err)
+	}
+	if !handled {
+		if _, err := tx.Exec(m.sql); err != nil {
+			return fmt.Errorf("store: apply migration %04d_%s: %w", m.version, m.name, err)
+		}
 	}
 	if _, err := tx.Exec(
 		"INSERT INTO schema_version (version, name, applied_at) VALUES (?, ?, ?)",
@@ -90,6 +98,89 @@ func (s *Store) applyMigration(m migration) error {
 		return fmt.Errorf("store: commit migration %04d: %w", m.version, err)
 	}
 	return nil
+}
+
+// migrationColumn is one final column definition a compatibility migration
+// can validate or add. The SQL is static repository data, never user input.
+type migrationColumn struct {
+	table        string
+	name         string
+	columnType   string
+	defaultValue string
+	addSQL       string
+}
+
+var (
+	indexerPriorityColumn = migrationColumn{
+		table:        "indexers",
+		name:         "priority",
+		columnType:   "INTEGER",
+		defaultValue: "25",
+		addSQL:       "ALTER TABLE indexers ADD COLUMN priority INTEGER NOT NULL DEFAULT 25 CHECK (priority >= 0)",
+	}
+	profilePolicyColumns = [...]migrationColumn{
+		{"quality_profiles", "preferred_sources", "TEXT", "'[]'", "ALTER TABLE quality_profiles ADD COLUMN preferred_sources TEXT NOT NULL DEFAULT '[]'"},
+		{"quality_profiles", "proper_repack_preference", "TEXT", "'prefer'", "ALTER TABLE quality_profiles ADD COLUMN proper_repack_preference TEXT NOT NULL DEFAULT 'prefer'"},
+		{"quality_profiles", "min_seeders", "INTEGER", "0", "ALTER TABLE quality_profiles ADD COLUMN min_seeders INTEGER NOT NULL DEFAULT 0"},
+		{"quality_profiles", "min_size_mb", "INTEGER", "0", "ALTER TABLE quality_profiles ADD COLUMN min_size_mb INTEGER NOT NULL DEFAULT 0"},
+		{"quality_profiles", "max_size_mb", "INTEGER", "0", "ALTER TABLE quality_profiles ADD COLUMN max_size_mb INTEGER NOT NULL DEFAULT 0"},
+		{"quality_profiles", "custom_formats", "TEXT", "'[]'", "ALTER TABLE quality_profiles ADD COLUMN custom_formats TEXT NOT NULL DEFAULT '[]'"},
+		{"quality_profiles", "tv_profile", "TEXT", "'safe'", "ALTER TABLE quality_profiles ADD COLUMN tv_profile TEXT NOT NULL DEFAULT 'safe'"},
+		{"quality_profiles", "tv_compatibility_policy", "TEXT", "'ignore'", "ALTER TABLE quality_profiles ADD COLUMN tv_compatibility_policy TEXT NOT NULL DEFAULT 'ignore'"},
+	}
+)
+
+// applyCompatibilityMigration handles two schema shapes written by prerelease
+// builds. SQLite has no ADD COLUMN IF NOT EXISTS, so these upgrades must first
+// validate any existing column and add only those that are absent.
+func applyCompatibilityMigration(tx *sql.Tx, m migration) (bool, error) {
+	switch {
+	case m.version == 18 && m.name == "indexer_priority":
+		present, err := migrationColumnPresent(tx, indexerPriorityColumn)
+		return present, err
+	case m.version == 20 && m.name == "profile_policy_repair":
+		for _, column := range profilePolicyColumns {
+			present, err := migrationColumnPresent(tx, column)
+			if err != nil {
+				return false, err
+			}
+			if present {
+				continue
+			}
+			if _, err := tx.Exec(column.addSQL); err != nil {
+				return false, fmt.Errorf("add %s.%s: %w", column.table, column.name, err)
+			}
+		}
+		return true, nil
+	default:
+		return false, nil
+	}
+}
+
+func migrationColumnPresent(tx *sql.Tx, column migrationColumn) (bool, error) {
+	var columnType string
+	var notNull int
+	var defaultValue sql.NullString
+	err := tx.QueryRow(
+		`SELECT type, [notnull], dflt_value
+		 FROM pragma_table_info(?)
+		 WHERE name = ?`,
+		column.table, column.name,
+	).Scan(&columnType, &notNull, &defaultValue)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if !strings.EqualFold(columnType, column.columnType) || notNull != 1 ||
+		!defaultValue.Valid || defaultValue.String != column.defaultValue {
+		return false, fmt.Errorf(
+			"existing %s.%s column has an incompatible definition",
+			column.table, column.name,
+		)
+	}
+	return true, nil
 }
 
 // loadMigrations reads and orders the migrations in dir. Filenames must be

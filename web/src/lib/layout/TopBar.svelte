@@ -17,9 +17,19 @@
      * library to add to — the button goes with it rather than being disabled.
      */
     onsearch?: () => void;
+    /** The narrow-screen navigation drawer; absent from the desktop layout. */
+    onmenu?: () => void;
+    menuOpen?: boolean;
+    menuButton?: HTMLButtonElement;
   }
 
-  let { title, onsearch }: Props = $props();
+  let {
+    title,
+    onsearch,
+    onmenu,
+    menuOpen = false,
+    menuButton = $bindable(),
+  }: Props = $props();
 
   const isMac =
     typeof navigator !== 'undefined' && /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent);
@@ -27,6 +37,17 @@
 
 <header
   class="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-4 bg-bg/95 px-6 backdrop-blur">
+  <button
+    type="button"
+    class="flex h-9 items-center rounded-md border border-border-strong bg-raised px-3 text-sm text-ink-secondary transition-colors duration-150 ease-out hover:bg-overlay hover:text-ink md:hidden"
+    aria-label={menuOpen ? 'Close navigation menu' : 'Open navigation menu'}
+    aria-controls="primary-navigation-drawer"
+    aria-expanded={menuOpen}
+    onclick={onmenu}
+    bind:this={menuButton}>
+    Menu
+  </button>
+
   <h1 class="truncate font-display text-xl font-semibold tracking-tight text-ink">
     {title}
   </h1>

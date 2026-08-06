@@ -168,6 +168,21 @@ describe('DownloadRouting', () => {
     expect(host.textContent).toContain('Usenet servers');
   });
 
+  it('links related settings destinations', async () => {
+    await render([]);
+
+    expect(
+      [...host.querySelectorAll<HTMLAnchorElement>('a')].map((link) => ({
+        href: link.getAttribute('href'),
+        label: link.textContent?.trim(),
+      })),
+    ).toEqual([
+      { href: '/settings/downloads#download-clients', label: 'external client' },
+      { href: '/settings/libraries', label: 'Settings → Libraries' },
+      { href: '/settings/downloads#usenet-servers', label: 'Settings → Usenet servers' },
+    ]);
+  });
+
   it('loads the stored routing and saves both protocols', async () => {
     await render([QBIT, SAB], { route_torrent: '7', route_usenet: '9' });
 

@@ -92,6 +92,32 @@
     color-scheme: dark;
   }
 
+  :root[data-theme="light"] {
+    color-scheme: light;
+    --color-bg: #F5F1EA;
+    --color-surface: #EDE7DD;
+    --color-raised: #E3DBCF;
+    --color-overlay: #D9CFC1;
+    --color-border: #CBBFB1;
+    --color-border-strong: #AA9B8A;
+    --color-ink: #211F1C;
+    --color-ink-secondary: #625C54;
+    --color-ink-muted: #81796E;
+    --color-ink-inverse: #F5F1EA;
+    --color-accent: #B94B1E;
+    --color-accent-hover: #9E3E18;
+    --color-accent-tint: #F3D5C5;
+    --color-accent-text: #9E3E18;
+    --color-success: #567038;
+    --color-success-tint: #DFE9D3;
+    --color-warning: #8A6511;
+    --color-warning-tint: #F3E6BD;
+    --color-danger: #B52E2E;
+    --color-danger-tint: #F3D1D1;
+    --color-info: #426B9B;
+    --color-info-tint: #D6E2EF;
+  }
+
   html,
   body,
   #app {
@@ -120,6 +146,15 @@
       animation-iteration-count: 1 !important;
       scroll-behavior: auto !important;
     }
+  }
+
+  :root[data-reduced-motion="true"] *,
+  :root[data-reduced-motion="true"] *::before,
+  :root[data-reduced-motion="true"] *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
   }
 }
 

@@ -205,6 +205,57 @@ func TestFailJobBacksOffThenGivesUp(t *testing.T) {
 	}
 }
 
+func TestFailJobAndScheduleRecurringCreatesSuccessorOnlyAfterTerminalFailure(t *testing.T) {
+	ctx := context.Background()
+	st, _ := openTemp(t)
+
+	job := core.Job{Kind: core.JobRSSSync, Payload: "{}"}
+	if err := st.EnqueueJob(ctx, &job); err != nil {
+		t.Fatalf("EnqueueJob: %v", err)
+	}
+
+	beforeTerminalFailure := time.Now().UTC()
+	var successor core.Job
+	for attempt := 1; attempt <= JobMaxAttempts; attempt++ {
+		if err := st.FailJobAndScheduleRecurring(ctx, job.ID, "indexer unreachable"); err != nil {
+			t.Fatalf("FailJobAndScheduleRecurring attempt %d: %v", attempt, err)
+		}
+
+		open, err := st.OpenJobsByKind(ctx, core.JobRSSSync)
+		if err != nil {
+			t.Fatalf("OpenJobsByKind attempt %d: %v", attempt, err)
+		}
+		if len(open) != 1 {
+			t.Fatalf("open jobs after attempt %d = %d, want 1", attempt, len(open))
+		}
+		if attempt < JobMaxAttempts {
+			if open[0].ID != job.ID || open[0].State != core.JobStatePending {
+				t.Fatalf("retry after attempt %d = %+v, want original pending job %d", attempt, open[0], job.ID)
+			}
+			continue
+		}
+		successor = open[0]
+	}
+	afterTerminalFailure := time.Now().UTC()
+
+	failed, err := st.GetJob(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("GetJob failed attempt: %v", err)
+	}
+	if failed.State != core.JobStateFailed || failed.Attempts != JobMaxAttempts {
+		t.Fatalf("failed job = %+v, want terminal failure after %d attempts", failed, JobMaxAttempts)
+	}
+	if successor.ID == job.ID || successor.State != core.JobStatePending || successor.Payload != "{}" {
+		t.Fatalf("successor = %+v, want a distinct pending recurring row", successor)
+	}
+	interval := time.Duration(DefaultRSSSyncIntervalMinutes) * time.Minute
+	if successor.RunAfter.Before(beforeTerminalFailure.Add(interval)) ||
+		successor.RunAfter.After(afterTerminalFailure.Add(interval)) {
+		t.Fatalf("successor run_after = %s, want normal cadence between %s and %s",
+			successor.RunAfter, beforeTerminalFailure.Add(interval), afterTerminalFailure.Add(interval))
+	}
+}
+
 func TestRetryDelayGrowsAndCaps(t *testing.T) {
 	if got := RetryDelay(1); got != JobRetryBaseDelay {
 		t.Errorf("RetryDelay(1) = %v, want %v", got, JobRetryBaseDelay)

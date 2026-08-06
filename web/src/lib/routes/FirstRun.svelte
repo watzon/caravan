@@ -132,24 +132,23 @@
       }
 
       if (scanNow) {
-        // The scan is the slow part; failing it must not strand the user on
-        // the first-run screen with a saved root.
+        // Starting is a quick, detached request. A large library must not hold
+        // first run open while the scan walks the storage root.
         try {
           await api.rescan();
-          const summary = await api.awaitScan();
-          pushToast(
-            `Scan finished: ${summary.media_files} files in the library, ${summary.unmatched} unmatched.`,
-            summary.unmatched > 0 ? 'warning' : 'success',
-          );
+          pushToast('Scan started in the background.', 'success');
         } catch (err) {
-          pushToast(`Storage root saved, but the scan failed: ${errorText(err)}`, 'warning');
+          pushToast(
+            `Storage root saved, but Caravan could not start the scan: ${errorText(err)}`,
+            'warning',
+          );
         }
       }
 
       // Last, not first: refreshing publishes "setup is done", and the route
       // gate in App.svelte acts on that the moment it lands.
       await system.refresh();
-      navigate(scanNow ? '/scan-review' : '/movies');
+      navigate('/settings');
     } catch (err) {
       error = errorText(err);
     } finally {
@@ -271,8 +270,12 @@
       </Button>
 
       <p class="text-center text-sm text-ink-muted">
-        Indexers, download clients and quality profiles are configured in Settings whenever you’re
-        ready.
+        Finish setup in <a href="/settings/indexers" class="text-accent-text hover:underline"
+          >Indexers</a
+        >, <a href="/settings/downloads" class="text-accent-text hover:underline">Downloads</a>,
+        or <a href="/settings/quality-profiles" class="text-accent-text hover:underline"
+          >Download profiles</a
+        >.
       </p>
     </form>
   </div>

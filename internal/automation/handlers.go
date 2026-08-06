@@ -652,6 +652,7 @@ func (r *Runner) searchEpisodes(ctx context.Context, st *store.Store, title stri
 type indexerSearch func(context.Context, api.IndexerClient, core.IndexerConfig) ([]core.Release, error)
 
 type indexerResult struct {
+	index    int
 	cfg      core.IndexerConfig
 	releases []core.Release
 }
@@ -670,22 +671,27 @@ func (r *Runner) searchIndexers(ctx context.Context, st *store.Store, kind strin
 	}
 
 	results := make(chan indexerResult, len(indexers))
-	for _, cfg := range indexers {
-		go func() {
+	for index, cfg := range indexers {
+		go func(index int, cfg core.IndexerConfig) {
 			searchCtx, cancel := context.WithTimeout(ctx, searchTimeout)
 			releases, err := search(searchCtx, r.indexers(cfg), cfg)
 			cancel()
 			if err == nil {
-				results <- indexerResult{cfg: cfg, releases: releases}
+				results <- indexerResult{index: index, cfg: cfg, releases: releases}
 				return
 			}
-			results <- indexerResult{cfg: cfg}
-		}()
+			results <- indexerResult{index: index, cfg: cfg}
+		}(index, cfg)
+	}
+
+	indexerResults := make([]indexerResult, len(indexers))
+	for range indexers {
+		result := <-results
+		indexerResults[result.index] = result
 	}
 
 	candidates := []core.Release{}
-	for range indexers {
-		result := <-results
+	for _, result := range indexerResults {
 		for _, release := range result.releases {
 			release.IndexerID = result.cfg.ID
 			release.Indexer = result.cfg.Name

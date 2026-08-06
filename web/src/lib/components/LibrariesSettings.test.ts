@@ -237,15 +237,18 @@ describe('LibrariesSettings — indexer rows', () => {
     expect(host.querySelector('li span.bg-success')).not.toBeNull();
   });
 
-  it('says an indexer that is off everywhere is off everywhere', async () => {
+  it('points to Indexers when an indexer is off everywhere', async () => {
     libraries = [
       library({ indexers: [indexerRow({ indexer_enabled: false, enabled: true })] }),
       SERIES,
     ];
     await mountLoaded();
 
-    expect(host.textContent).toContain('Disabled in Settings → Indexers');
+    expect(host.textContent).toContain('This indexer is disabled globally');
     expect(host.textContent).not.toContain('Not searched for this library');
+    expect(host.querySelector('a[href="/settings/indexers"]')?.textContent?.trim()).toBe(
+      'Open Indexers',
+    );
     expect(host.querySelector('li span.bg-ink-muted')).not.toBeNull();
     // Still on for this library: the row must not offer to "re-enable" it.
     expect(host.querySelector('[role="switch"]')?.getAttribute('aria-checked')).toBe('true');
@@ -326,6 +329,26 @@ describe('LibrariesSettings — indexer rows', () => {
     await settle();
 
     expect(write(1).body).toEqual({ enabled: true, categories: null });
+  });
+});
+
+describe('LibrariesSettings - actionable setup links', () => {
+  it('links each related settings task from the library controls', async () => {
+    libraries = [library({ indexers: [] }), SERIES];
+    await mountLoaded();
+
+    expect(host.querySelector('a[href="/settings/indexers"]')?.textContent?.trim()).toBe(
+      'Manage indexers',
+    );
+    expect(
+      host.querySelector('a[href="/settings/quality-profiles"]')?.textContent?.trim(),
+    ).toBe('Manage download profiles');
+    expect(host.querySelector('a[href="/settings/downloads"]')?.textContent?.trim()).toBe(
+      'Configure global download routing',
+    );
+    expect(host.querySelector('a[href="/settings/playback"]')?.textContent?.trim()).toBe(
+      'Playback',
+    );
   });
 });
 

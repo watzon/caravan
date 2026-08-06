@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   ROUTES,
   isAdultRoute,
@@ -10,6 +10,7 @@ import {
   ordinalParam,
   splitLocation,
 } from './router';
+import { navigate, router, startRouter } from './router.svelte';
 
 describe('normalizePath', () => {
   const cases: [string, string][] = [
@@ -274,28 +275,35 @@ describe('numericParam', () => {
 });
 
 /**
- * The path/query split (PLAN phase 12 task 5). `normalizePath` cuts the query
- * string because the ROUTE table has no room for one; `splitLocation` is where
- * it is kept, so a filtered view can be addressed at all.
+ * The path/query/fragment split. `normalizePath` cuts query and fragment
+ * strings because the ROUTE table has no room for either. `splitLocation`
+ * keeps both parts that navigation must retain.
  */
 describe('splitLocation', () => {
-  const cases: [string, { path: string; search: string }][] = [
-    ['/discover/movies', { path: '/discover/movies', search: '' }],
+  const cases: [string, { path: string; search: string; hash: string }][] = [
+    ['/discover/movies', { path: '/discover/movies', search: '', hash: '' }],
     // '?' with nothing after it is the same URL as no query string at all, and
     // must compare equal or navigate() would push a history entry for a no-op.
-    ['/discover/movies?', { path: '/discover/movies', search: '' }],
+    ['/discover/movies?', { path: '/discover/movies', search: '', hash: '' }],
     [
       '/discover/movies?genres=878&people=1245',
-      { path: '/discover/movies', search: 'genres=878&people=1245' },
+      { path: '/discover/movies', search: 'genres=878&people=1245', hash: '' },
     ],
     // Repeated keys survive: two people is two parameters, not one joined.
     [
       '/discover/movies?people=1&people=2',
-      { path: '/discover/movies', search: 'people=1&people=2' },
+      { path: '/discover/movies', search: 'people=1&people=2', hash: '' },
     ],
-    ['/discover/movies#top', { path: '/discover/movies', search: '' }],
-    ['/discover/movies/?genres=878', { path: '/discover/movies', search: 'genres=878' }],
-    ['/adult/scenes', { path: '/adult/scenes', search: '' }],
+    ['/discover/movies#top', { path: '/discover/movies', search: '', hash: '#top' }],
+    [
+      '/settings/downloads?tab=engine#download-clients',
+      { path: '/settings/downloads', search: 'tab=engine', hash: '#download-clients' },
+    ],
+    [
+      '/discover/movies/?genres=878',
+      { path: '/discover/movies', search: 'genres=878', hash: '' },
+    ],
+    ['/adult/scenes', { path: '/adult/scenes', search: '', hash: '' }],
   ];
 
   for (const [input, want] of cases) {
@@ -306,5 +314,72 @@ describe('splitLocation', () => {
 
   it('leaves normalizePath dropping the query, which is what routing wants', () => {
     expect(normalizePath('/discover/movies?genres=878')).toBe('/discover/movies');
+  });
+});
+
+describe('router document navigation', () => {
+  it('leaves download and same-origin API links to the browser', () => {
+    navigate('/router-test-start', { replace: true });
+    const stop = startRouter();
+    const pushState = vi.spyOn(window.history, 'pushState');
+    const links = [
+      '<a href="/movies" download>Movie export</a>',
+      '<a href="/api/v1/system/backup">Download backup</a>',
+      '<a href="/api/v1/quality-profiles/export">Export profiles</a>',
+    ];
+
+    try {
+      for (const markup of links) {
+        const container = document.createElement('div');
+        container.innerHTML = markup;
+        const link = container.firstElementChild as HTMLAnchorElement;
+        document.body.appendChild(link);
+        const event = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
+        link.dispatchEvent(event);
+        link.remove();
+
+        expect(event.defaultPrevented, link.textContent).toBe(false);
+      }
+      expect(pushState).not.toHaveBeenCalled();
+      expect(router.path).toBe('/router-test-start');
+    } finally {
+      pushState.mockRestore();
+      stop();
+    }
+  });
+
+  it('keeps settings fragments, then scrolls the rendered anchor into view', async () => {
+    navigate('/router-test-start', { replace: true });
+    const target = document.createElement('section');
+    target.id = 'download-clients';
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(target, 'scrollIntoView', { configurable: true, value: scrollIntoView });
+    document.body.appendChild(target);
+    const link = document.createElement('a');
+    link.href = '/settings/downloads#download-clients';
+    document.body.appendChild(link);
+    const stop = startRouter();
+
+    try {
+      const event = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
+      link.dispatchEvent(event);
+      await Promise.resolve();
+
+      expect(event.defaultPrevented).toBe(true);
+      expect(router.path).toBe('/settings/downloads');
+      expect(router.hash).toBe('#download-clients');
+      expect(window.location.pathname).toBe('/settings/downloads');
+      expect(window.location.hash).toBe('#download-clients');
+      expect(scrollIntoView).toHaveBeenCalledOnce();
+
+      navigate('/settings');
+      expect(router.path).toBe('/settings');
+      expect(router.hash).toBe('');
+      expect(window.location.hash).toBe('');
+    } finally {
+      stop();
+      link.remove();
+      target.remove();
+    }
   });
 });

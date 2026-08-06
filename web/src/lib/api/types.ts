@@ -246,6 +246,22 @@ export interface StashHealth {
   since: string;
 }
 
+export interface RuntimeDiagnostics {
+  started_at: string;
+  uptime_seconds: number;
+  go_version: string;
+  os: string;
+  arch: string;
+  config_dir: string;
+  config_file: string;
+  database_path: string;
+  database_size_bytes: number;
+  log_level: string;
+  listen_address: string;
+  goroutines: number;
+  memory_alloc_bytes: number;
+}
+
 export interface SystemStatus {
   version: string;
   /** "server" | "portable" (SPEC §2). */
@@ -311,6 +327,8 @@ export interface SystemStatus {
   metadata_credential_reason?: string;
   /** RFC3339 timestamp of the verdict. Absent when nothing has checked yet. */
   metadata_credential_checked_at?: string;
+  /** Admin-only process and path diagnostics supplied by the serving command. */
+  runtime?: RuntimeDiagnostics;
 }
 
 /** POST /auth/login, POST /settings/password — never carries a credential. */
@@ -639,12 +657,11 @@ export interface ScanSummary {
 export interface AddItemRequest {
   tmdb_id: number;
   /**
-   * The "Add and monitor" checkbox. Omitting it means monitored, which is the
-   * behaviour these endpoints have always had and what request approval still
-   * relies on; sending false lands the new row unmonitored. A title already in
-   * the library keeps its owner's flag either way.
+   * Whether Caravan should keep searching for missing releases after the add.
+   * Omitting it preserves the endpoint's historical monitored default.
    */
   monitored?: boolean;
+  /** Optional explicit profile; omitting it (or sending 0) uses the library default. */
   quality_profile_id?: number;
   /** Movies only: queue the automatic search as soon as the add succeeds. */
   search_now?: boolean;
@@ -714,6 +731,8 @@ export interface Indexer {
   type: IndexerType;
   /** Indexer-side category ids; exactly these are searched, empty = unfiltered. */
   categories: number[];
+  /** Lower values run first and break otherwise equal release scores. */
+  priority: number;
   enabled: boolean;
 }
 
@@ -724,6 +743,7 @@ export interface IndexerInput {
   api_key?: string;
   type: IndexerType;
   categories: number[];
+  priority?: number;
   enabled: boolean;
 }
 
@@ -780,8 +800,8 @@ export interface DownloadClient {
   category: string;
   /** Lowest wins when more than one enabled client can take a release. */
   priority: number;
-  /** How many downloads Caravan runs at this client at once; 0 is unlimited. */
-  max_concurrent: number;
+  /** Null means no explicit per-client cap; zero is also an unlimited stored cap. */
+  max_concurrent: number | null;
   enabled: boolean;
 }
 
@@ -801,9 +821,35 @@ export interface DownloadClientInput {
   password?: string;
   api_key?: string;
   category: string;
-  priority: number;
-  max_concurrent?: number;
+  /** Null clears the explicit per-client cap. */
+  max_concurrent: number | null;
   enabled: boolean;
+}
+
+/**
+ * A translation from a download client's reported filesystem root to the
+ * corresponding root on the host running Caravan.
+ *
+ * Caravan chooses the longest matching remote prefix when more than one mapping
+ * applies. Both paths are deliberately opaque strings: their syntax belongs to
+ * the remote client and Caravan host respectively.
+ */
+export interface RemotePathMapping {
+  id: number;
+  remote_path: string;
+  local_path: string;
+  /** Number of imports or events this root translation has resolved. */
+  match_count: number;
+  /** Empty until the mapping resolves a path for the first time. */
+  last_matched_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Body for POST/PUT /remote-path-mappings. */
+export interface RemotePathMappingInput {
+  remote_path: string;
+  local_path: string;
 }
 
 /**
@@ -880,6 +926,8 @@ export interface Release {
   published_at: string;
   parsed: ParsedRelease;
   compatibility: TVCompatibility;
+  /** Active quality profile's score and accept/reject rationale when evaluated. */
+  profile_decision?: ProfileDecision;
 }
 
 /**
@@ -1122,6 +1170,41 @@ export interface SystemTask {
   queued: boolean;
 }
 
+export interface NotificationWebhook {
+  id: number;
+  name: string;
+  /** The endpoint is stored, but never returned because its path/query can contain a token. */
+  has_url: boolean;
+  on_grab: boolean;
+  on_import: boolean;
+  on_health: boolean;
+  enabled: boolean;
+  last_event_id: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NotificationWebhookInput {
+  name: string;
+  /** Omit on update to preserve the write-only endpoint. */
+  url?: string;
+  on_grab: boolean;
+  on_import: boolean;
+  on_health: boolean;
+  enabled: boolean;
+}
+
+/** Body for PUT /system/tasks/{kind}. */
+export interface TaskIntervalInput {
+  interval_minutes: number;
+}
+
+/** Response from PUT /system/tasks/{kind}. */
+export interface TaskIntervalUpdate {
+  kind: string;
+  interval_minutes: number;
+}
+
 /** POST /system/tasks/{kind}/run. */
 export interface RunTaskResult {
   kind: string;
@@ -1144,9 +1227,63 @@ export interface CalendarEntry {
   has_file: boolean;
   status: CalendarStatus;
 }
+/** Score components that make a quality-profile decision explainable. */
+export interface ProfileScoreContributions {
+  quality: number;
+  source: number;
+  proper: number;
+  repack: number;
+  seeders: number;
+  custom_formats: number;
+  tv_compatibility: number;
+}
 
+/** Caravan's evaluation of a parsed release against one quality profile. */
+export interface ProfileDecision {
+  accepted: boolean;
+  profile_id: number;
+  profile_name: string;
+  score: number;
+  /** Exact rejection text or a concise explanation of an accepted release. */
+  reason: string;
+  contributions: ProfileScoreContributions;
+}
+
+/** One pasted release title evaluated through POST /quality-profiles/{id}/test. */
+export interface ProfileTestResult {
+  title: string;
+  parsed: ParsedRelease;
+  decision: ProfileDecision;
+}
+
+/** Body for POST /quality-profiles/{id}/test. */
+export interface QualityProfileTestRequest {
+  titles: string[];
+}
+
+/** Server-owned parsing and scoring response for a profile test. */
+export interface QualityProfileTestResponse {
+  results: ProfileTestResult[];
+}
+
+/** The server-owned, best-first quality ladder exposed by quality profiles. */
 export const QUALITY_LADDER = ['2160p', '1080p', '720p', '480p'] as const;
 export type Quality = (typeof QUALITY_LADDER)[number];
+
+export interface QualityProfileAssignments {
+  libraries: number;
+  movies: number;
+  series: number;
+}
+export type ProperRepackPreference = 'prefer' | 'neutral';
+export type TVCompatibilityPolicy = 'ignore' | 'prefer' | 'require';
+
+export interface QualityProfileCustomFormat {
+  name: string;
+  include_terms: string[];
+  exclude_terms: string[];
+  score: number;
+}
 
 export interface QualityProfile {
   id: number;
@@ -1154,6 +1291,16 @@ export interface QualityProfile {
   cutoff: Quality;
   items: Quality[];
   upgrade_allowed: boolean;
+  preferred_sources: string[];
+  proper_repack_preference: ProperRepackPreference;
+  min_seeders: number;
+  min_size_mb: number;
+  max_size_mb: number;
+  custom_formats: QualityProfileCustomFormat[];
+  tv_profile: 'safe' | 'capable';
+  tv_compatibility_policy: TVCompatibilityPolicy;
+  is_default: boolean;
+  assignments: QualityProfileAssignments;
   created_at: string;
   updated_at: string;
 }
@@ -1163,6 +1310,14 @@ export interface QualityProfileInput {
   cutoff: Quality;
   items: Quality[];
   upgrade_allowed: boolean;
+  preferred_sources?: string[];
+  proper_repack_preference?: ProperRepackPreference;
+  min_seeders?: number;
+  min_size_mb?: number;
+  max_size_mb?: number;
+  custom_formats?: QualityProfileCustomFormat[];
+  tv_profile?: 'safe' | 'capable';
+  tv_compatibility_policy?: TVCompatibilityPolicy;
 }
 
 /* ---------------------------------------------------------------------------
@@ -1406,6 +1561,8 @@ export interface MediaRequest {
   poster_path: string;
   /** "" when no metadata provider is configured; the list still works. */
   poster_url: string;
+  /** Whether approval adds the title to the library as monitored. */
+  monitored?: boolean;
   /** null means the whole title: every movie, and an all-seasons series ask. */
   seasons: number[] | null;
   /** "" when unspecified — every series request. */
@@ -1439,6 +1596,20 @@ export interface CreateRequestBody {
   seasons?: number[];
   /** Movies only: the release stage the asker wants the movie held for. */
   min_availability?: MinAvailability;
+}
+
+/** Body for POST /requests/{id}/approve. */
+export interface ApproveRequestBody {
+  /** Movies only: queue a search as soon as the add succeeds. */
+  search_now: boolean;
+  /** Series only; omitting it grants the whole title. */
+  seasons?: number[];
+  /** Movies only: override the requester's saved release stage. */
+  min_availability?: MinAvailability;
+  /** Optional explicit profile; omitting it (or sending 0) uses the library default. */
+  quality_profile_id?: number;
+  /** Whether the approved library item should stay monitored. */
+  monitored?: boolean;
 }
 
 /** POST /requests/{id}/approve — the add happened, and the row is approved. */

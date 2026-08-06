@@ -18,6 +18,8 @@ const (
 //
 // Caravan ships with none preconfigured (SPEC §12): every entry here is
 // something the user added.
+const IndexerDefaultPriority = 25
+
 type IndexerConfig struct {
 	ID int64
 	// Name is the user-facing label, unique across indexers.
@@ -33,6 +35,9 @@ type IndexerConfig struct {
 	// these, never an inferred default. Empty searches the indexer
 	// unfiltered.
 	Categories []int
+	// Priority orders search sources and breaks otherwise equal release ties.
+	// Lower values run first. Existing and omitted configurations use 25.
+	Priority int
 	// Enabled excludes the indexer from search fan-out when false, without
 	// losing its configuration.
 	Enabled bool

@@ -12,7 +12,7 @@ import (
 
 // The `protocol` column holds core.IndexerConfig.Type: 0001 named it for the
 // wire dialect (torznab/newznab), which is exactly what Type selects.
-const indexerColumns = `id, name, url, api_key, protocol, categories, enabled`
+const indexerColumns = `id, name, url, api_key, protocol, categories, priority, enabled`
 
 // UpsertIndexer inserts or updates c and writes back the assigned ID.
 // Identity is c.ID when set; otherwise a new indexer is inserted.
@@ -26,9 +26,9 @@ func (s *Store) UpsertIndexer(ctx context.Context, c *core.IndexerConfig) error 
 	if c.ID != 0 {
 		res, err := s.db.ExecContext(ctx, `
 			UPDATE indexers SET name = ?, url = ?, api_key = ?, protocol = ?,
-				categories = ?, enabled = ?, updated_at = ?
+				categories = ?, priority = ?, enabled = ?, updated_at = ?
 			WHERE id = ?`,
-			c.Name, c.URL, c.APIKey, c.Type, string(categories), c.Enabled, ts, c.ID)
+			c.Name, c.URL, c.APIKey, c.Type, string(categories), c.Priority, c.Enabled, ts, c.ID)
 		if err != nil {
 			return fmt.Errorf("store: update indexer %d: %w", c.ID, err)
 		}
@@ -43,9 +43,9 @@ func (s *Store) UpsertIndexer(ctx context.Context, c *core.IndexerConfig) error 
 	}
 
 	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO indexers (name, url, api_key, protocol, categories, enabled, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		c.Name, c.URL, c.APIKey, c.Type, string(categories), c.Enabled, ts, ts)
+		INSERT INTO indexers (name, url, api_key, protocol, categories, priority, enabled, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		c.Name, c.URL, c.APIKey, c.Type, string(categories), c.Priority, c.Enabled, ts, ts)
 	if err != nil {
 		return fmt.Errorf("store: insert indexer %q: %w", c.Name, err)
 	}
@@ -70,15 +70,15 @@ func (s *Store) GetIndexer(ctx context.Context, id int64) (*core.IndexerConfig, 
 	return c, nil
 }
 
-// ListIndexers returns every configured indexer ordered by name.
+// ListIndexers returns every configured indexer in search order.
 func (s *Store) ListIndexers(ctx context.Context) ([]core.IndexerConfig, error) {
-	return s.listIndexers(ctx, "SELECT "+indexerColumns+" FROM indexers ORDER BY name")
+	return s.listIndexers(ctx, "SELECT "+indexerColumns+" FROM indexers ORDER BY priority, name")
 }
 
-// ListEnabledIndexers returns only the indexers search fans out to. A disabled
-// indexer keeps its configuration but is skipped.
+// ListEnabledIndexers returns only the indexers search fans out to, in search
+// order. A disabled indexer keeps its configuration but is skipped.
 func (s *Store) ListEnabledIndexers(ctx context.Context) ([]core.IndexerConfig, error) {
-	return s.listIndexers(ctx, "SELECT "+indexerColumns+" FROM indexers WHERE enabled = 1 ORDER BY name")
+	return s.listIndexers(ctx, "SELECT "+indexerColumns+" FROM indexers WHERE enabled = 1 ORDER BY priority, name")
 }
 
 func (s *Store) listIndexers(ctx context.Context, query string) ([]core.IndexerConfig, error) {
@@ -117,7 +117,7 @@ func scanIndexer(sc scanner) (*core.IndexerConfig, error) {
 		c          core.IndexerConfig
 		categories string
 	)
-	if err := sc.Scan(&c.ID, &c.Name, &c.URL, &c.APIKey, &c.Type, &categories, &c.Enabled); err != nil {
+	if err := sc.Scan(&c.ID, &c.Name, &c.URL, &c.APIKey, &c.Type, &categories, &c.Priority, &c.Enabled); err != nil {
 		return nil, err
 	}
 	if categories != "" {

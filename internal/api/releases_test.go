@@ -155,6 +155,99 @@ func TestMovieReleasesFanOutMergesSortsAndCaches(t *testing.T) {
 	}
 }
 
+func TestReleasePickerIncludesEffectiveProfileDecision(t *testing.T) {
+	h, st, _, fake := newAcquisitionServer(t)
+	ctx := context.Background()
+	movie := addMovie(t, st, "Profiled Movie", 2024)
+	series, _ := addSeries(t, st, "Profiled Series")
+	addIndexer(t, st, fake, "alpha")
+	fake.serve("alpha",
+		torrentRelease("Profiled.Release.1080p.WEB-DL", "profiled", 25, core.ParsedRelease{
+			Title: "Profiled Release", Quality: core.Quality1080p, Source: core.SourceWebDL,
+		}),
+	)
+
+	libraryProfile := &core.QualityProfile{
+		Name:           "Movie library",
+		Cutoff:         core.Quality1080p,
+		Items:          []string{core.Quality1080p},
+		UpgradeAllowed: true,
+	}
+	if err := st.CreateQualityProfile(ctx, libraryProfile); err != nil {
+		t.Fatalf("CreateQualityProfile(movie library): %v", err)
+	}
+	itemProfile := &core.QualityProfile{
+		Name:           "Series item",
+		Cutoff:         core.Quality2160p,
+		Items:          []string{core.Quality2160p},
+		UpgradeAllowed: true,
+	}
+	if err := st.CreateQualityProfile(ctx, itemProfile); err != nil {
+		t.Fatalf("CreateQualityProfile(series item): %v", err)
+	}
+	movieLibrary, err := st.GetLibraryByKind(ctx, core.LibraryKindMovie)
+	if err != nil {
+		t.Fatalf("GetLibraryByKind(movie): %v", err)
+	}
+	movieLibrary.QualityProfileID = libraryProfile.ID
+	if err := st.UpdateLibrary(ctx, movieLibrary); err != nil {
+		t.Fatalf("UpdateLibrary(movie): %v", err)
+	}
+	series.QualityProfileID = itemProfile.ID
+	if err := st.UpsertSeries(ctx, &series); err != nil {
+		t.Fatalf("UpsertSeries(profile): %v", err)
+	}
+
+	rec := do(t, h, http.MethodGet, "/api/v1/library/movies/"+itoa(movie.ID)+"/releases", "")
+	wantStatus(t, rec, http.StatusOK)
+	var movieResults releasesResponse
+	decodeBody(t, rec, &movieResults)
+	if len(movieResults.Releases) != 1 {
+		t.Fatalf("movie releases = %+v, want one", movieResults.Releases)
+	}
+	movieDecision := movieResults.Releases[0].ProfileDecision
+	if !movieDecision.Accepted || movieDecision.ProfileID != libraryProfile.ID || movieDecision.ProfileName != libraryProfile.Name {
+		t.Fatalf("movie profile decision = %+v, want library profile", movieDecision)
+	}
+	if movieDecision.Score != movieDecision.Contributions.Quality+
+		movieDecision.Contributions.Source+
+		movieDecision.Contributions.Proper+
+		movieDecision.Contributions.Repack+
+		movieDecision.Contributions.Seeders {
+		t.Fatalf("movie profile decision = %+v, want score components to add up", movieDecision)
+	}
+
+	rec = do(t, h, http.MethodGet, "/api/v1/library/series/"+itoa(series.ID)+"/releases", "")
+	wantStatus(t, rec, http.StatusOK)
+	var seriesResults releasesResponse
+	decodeBody(t, rec, &seriesResults)
+	if len(seriesResults.Releases) != 1 {
+		t.Fatalf("series releases = %+v, want one", seriesResults.Releases)
+	}
+	seriesDecision := seriesResults.Releases[0].ProfileDecision
+	if seriesDecision.Accepted || seriesDecision.ProfileID != itemProfile.ID || seriesDecision.ProfileName != itemProfile.Name {
+		t.Fatalf("series profile decision = %+v, want item profile rejection", seriesDecision)
+	}
+	if want := `quality 1080p is not in profile "Series item"`; seriesDecision.Reason != want {
+		t.Fatalf("series rejection = %q, want %q", seriesDecision.Reason, want)
+	}
+
+	movieLibrary.QualityProfileID = 0
+	if err := st.UpdateLibrary(ctx, movieLibrary); err != nil {
+		t.Fatalf("clear movie library profile: %v", err)
+	}
+	defaultProfile, err := st.GetDefaultQualityProfile(ctx)
+	if err != nil {
+		t.Fatalf("GetDefaultQualityProfile: %v", err)
+	}
+	rec = do(t, h, http.MethodGet, "/api/v1/library/movies/"+itoa(movie.ID)+"/releases", "")
+	wantStatus(t, rec, http.StatusOK)
+	decodeBody(t, rec, &movieResults)
+	if got := movieResults.Releases[0].ProfileDecision.ProfileID; got != defaultProfile.ID {
+		t.Fatalf("movie system-default profile = %d, want %d", got, defaultProfile.ID)
+	}
+}
+
 // An indexer that carries its own categories is searched with exactly those,
 // on every search type.
 func TestReleaseSearchUsesConfiguredCategories(t *testing.T) {

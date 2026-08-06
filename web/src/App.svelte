@@ -89,8 +89,34 @@
     '/settings/:section': 'Settings',
   };
 
+  let sidebarOpen = $state(false);
+  let sidebarMenuButton = $state<HTMLButtonElement | undefined>(undefined);
+
   let addOpen = $state(false);
   let addKind = $state<'movie' | 'series'>('movie');
+
+  function closeSidebar() {
+    if (!sidebarOpen) return;
+    sidebarOpen = false;
+    sidebarMenuButton?.focus();
+  }
+
+  function toggleSidebar() {
+    if (sidebarOpen) {
+      closeSidebar();
+      return;
+    }
+    sidebarOpen = true;
+  }
+
+  let sidebarPath = router.path;
+  $effect(() => {
+    const path = router.path;
+    if (path === sidebarPath) return;
+    sidebarPath = path;
+    closeSidebar();
+  });
+
 
   function openAdd(kind: 'movie' | 'series' = 'movie') {
     addKind = kind;
@@ -228,7 +254,19 @@
   });
 
   function onKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape' && sidebarOpen) {
+      event.preventDefault();
+      closeSidebar();
+      return;
+    }
+
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+      if (settingsSection !== undefined) {
+        event.preventDefault();
+        document.getElementById('settings-search')?.focus();
+        return;
+      }
+
       // Adding straight to the library is an admin's to do; a member's ⌘K
       // would open a dialog whose submit is a 403.
       if (!session.isAdmin) return;
@@ -238,6 +276,12 @@
   }
 
   let match = $derived(router.match);
+  let settingsSection = $derived.by(() => {
+    if (!match || (match.pattern !== '/settings' && match.pattern !== '/settings/:section')) {
+      return undefined;
+    }
+    return match.params.section ?? '';
+  });
   let title = $derived(match ? TITLES[match.pattern] : 'Not found');
   let document_title = $derived(match ? `${TITLES[match.pattern]} · Caravan` : 'Caravan');
 </script>
@@ -258,10 +302,15 @@
   <FirstRun />
 {:else}
   <div class="flex h-full">
-    <Sidebar />
+    <Sidebar open={sidebarOpen} onclose={closeSidebar} {settingsSection} />
 
     <div class="flex min-w-0 flex-1 flex-col overflow-y-auto">
-      <TopBar {title} onsearch={session.isAdmin ? () => openAdd() : undefined} />
+      <TopBar
+        {title}
+        onsearch={settingsSection === undefined && session.isAdmin ? () => openAdd() : undefined}
+        onmenu={toggleSidebar}
+        menuOpen={sidebarOpen}
+        bind:menuButton={sidebarMenuButton} />
 
       <main class="flex flex-1 flex-col gap-4 px-6 py-6">
         <!-- Every banner here reports on the server itself, and every one of

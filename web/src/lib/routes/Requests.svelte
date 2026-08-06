@@ -240,6 +240,7 @@
     posterPath={approving.poster_path}
     preselect={approving.seasons}
     requestID={approving.id}
+    initialMonitored={approving.monitored}
     initialAvailability={approving.min_availability}
     onclose={() => (approving = null)}
     ondone={() => {

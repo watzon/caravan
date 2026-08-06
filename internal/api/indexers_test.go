@@ -27,7 +27,7 @@ func TestIndexerCRUD(t *testing.T) {
 	}
 
 	rec = do(t, h, http.MethodPost, "/api/v1/indexers",
-		`{"name":"nyaa","url":"https://nyaa.example/api/","api_key":"index-secret","type":"torznab","categories":[5000]}`)
+		`{"name":"nyaa","url":"https://nyaa.example/api/","api_key":"index-secret","type":"torznab","categories":[5000],"priority":5}`)
 	wantStatus(t, rec, http.StatusCreated)
 	if strings.Contains(rec.Body.String(), "index-secret") ||
 		strings.Contains(rec.Body.String(), `"api_key"`) {
@@ -44,7 +44,7 @@ func TestIndexerCRUD(t *testing.T) {
 	if !created.Enabled || !created.HasAPIKey {
 		t.Fatalf("created indexer = %+v, want enabled with a stored-key flag", created)
 	}
-	if created.Type != core.IndexerTypeTorznab || len(created.Categories) != 1 {
+	if created.Type != core.IndexerTypeTorznab || len(created.Categories) != 1 || created.Priority != 5 {
 		t.Fatalf("created indexer = %+v, want the submitted configuration", created)
 	}
 
@@ -69,8 +69,9 @@ func TestIndexerCRUD(t *testing.T) {
 	}
 	var updated indexerJSON
 	decodeBody(t, rec, &updated)
-	if updated.ID != created.ID || !updated.HasAPIKey || updated.Type != core.IndexerTypeNewznab || updated.Enabled {
-		t.Fatalf("updated indexer = %+v, want replacement fields and preserved key state", updated)
+	if updated.ID != created.ID || !updated.HasAPIKey || updated.Type != core.IndexerTypeNewznab || updated.Enabled ||
+		updated.Priority != core.IndexerDefaultPriority {
+		t.Fatalf("updated indexer = %+v, want replacement fields, default priority, and preserved key state", updated)
 	}
 	stored, err := st.GetIndexer(ctx, created.ID)
 	if err != nil {
@@ -158,6 +159,7 @@ func TestIndexerRequestsAreValidated(t *testing.T) {
 		{"unknown type", `{"name":"a","url":"https://a.example","type":"rss"}`},
 		{"missing type", `{"name":"a","url":"https://a.example"}`},
 		{"negative category", `{"name":"a","url":"https://a.example","type":"torznab","categories":[-1]}`},
+		{"negative priority", `{"name":"a","url":"https://a.example","type":"torznab","priority":-1}`},
 		{"malformed json", `{`},
 	}
 	for _, tt := range tests {

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/watzon/caravan/internal/api"
 	"github.com/watzon/caravan/internal/core"
@@ -39,6 +40,36 @@ func (f *fakeIndexer) Categories(context.Context) ([]core.IndexerCategory, error
 
 func (f *fakeIndexer) factory() api.IndexerFactory {
 	return func(core.IndexerConfig) api.IndexerClient { return f }
+}
+
+type delayedMovieIndexer struct {
+	fakeIndexer
+	started chan<- struct{}
+	release <-chan struct{}
+}
+
+func (f *delayedMovieIndexer) SearchMovie(ctx context.Context, _ string, _ []int) ([]core.Release, error) {
+	select {
+	case f.started <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	select {
+	case <-f.release:
+		return f.movies, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+type completedMovieIndexer struct {
+	fakeIndexer
+	completed chan<- struct{}
+}
+
+func (f *completedMovieIndexer) SearchMovie(_ context.Context, _ string, _ []int) ([]core.Release, error) {
+	f.completed <- struct{}{}
+	return f.movies, nil
 }
 
 type fakeEngine struct {
@@ -126,6 +157,82 @@ func TestRunnerHandleSearchMovieGrabsBestOnce(t *testing.T) {
 	}
 	if grabs[0].ReleaseTitle != "Example Movie 2024 1080p" || grabs[0].Reason == "" {
 		t.Fatalf("winning grab = %#v, want scored best release with a reason", grabs[0])
+	}
+}
+
+func TestRunnerHandleSearchMovieKeepsIndexerPriorityWhenResultsFinishOutOfOrder(t *testing.T) {
+	ctx := context.Background()
+	st := openStore(t)
+	highConfig := &core.IndexerConfig{
+		Name: "high-priority", URL: "https://high.invalid", Enabled: true, Priority: 1,
+	}
+	if err := st.UpsertIndexer(ctx, highConfig); err != nil {
+		t.Fatalf("upsert high-priority indexer: %v", err)
+	}
+	if err := st.UpsertIndexer(ctx, &core.IndexerConfig{
+		Name: "low-priority", URL: "https://low.invalid", Enabled: true, Priority: 2,
+	}); err != nil {
+		t.Fatalf("upsert low-priority indexer: %v", err)
+	}
+	movie := addMovie(t, ctx, st, "Example Movie", 2024, true)
+	highStarted := make(chan struct{}, 1)
+	lowCompleted := make(chan struct{}, 1)
+	releaseHigh := make(chan struct{})
+	defer func() {
+		select {
+		case <-releaseHigh:
+		default:
+			close(releaseHigh)
+		}
+	}()
+	high := &delayedMovieIndexer{
+		fakeIndexer: fakeIndexer{movies: []core.Release{{
+			GUID: "high", Title: "Example Movie 2024 1080p high", Protocol: core.ProtocolTorrent,
+			Parsed: core.ParsedRelease{Quality: core.Quality1080p, Source: core.SourceWebDL},
+		}}},
+		started: highStarted,
+		release: releaseHigh,
+	}
+	low := &completedMovieIndexer{
+		fakeIndexer: fakeIndexer{movies: []core.Release{{
+			GUID: "low", Title: "Example Movie 2024 1080p low", Protocol: core.ProtocolTorrent,
+			Parsed: core.ParsedRelease{Quality: core.Quality1080p, Source: core.SourceWebDL},
+		}}},
+		completed: lowCompleted,
+	}
+	engine := &fakeEngine{}
+	runner := NewRunner(st, func(cfg core.IndexerConfig) api.IndexerClient {
+		if cfg.ID == highConfig.ID {
+			return high
+		}
+		return low
+	}, func(context.Context, string) core.Engine { return engine })
+	payload, _ := json.Marshal(core.JobSearchMoviePayload{MovieID: movie.ID})
+	done := make(chan error, 1)
+	go func() { done <- runner.handleSearchMovie(ctx, st, payload) }()
+
+	select {
+	case <-highStarted:
+	case <-time.After(time.Second):
+		t.Fatal("higher-priority indexer did not start")
+	}
+	select {
+	case <-lowCompleted:
+	case <-time.After(time.Second):
+		t.Fatal("lower-priority indexer did not complete first")
+	}
+	close(releaseHigh)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("handle search movie: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("search did not finish")
+	}
+	if len(engine.added) != 1 || engine.added[0].GUID != "high" {
+		t.Fatalf("selected releases = %+v, want the higher-priority equal-score release", engine.added)
 	}
 }
 
