@@ -46,7 +46,7 @@ export function conversionStateMeta(status: string): ConversionStateMeta {
  */
 export const CONVERSION_STRATEGIES: Record<Exclude<ConversionStrategy, ''>, string> = {
   none: 'Nothing to do',
-  remux: 'Remux (stream copy)',
+  remux: 'Convert (stream copy)',
   transcode: 'Transcode (re-encode)',
 };
 

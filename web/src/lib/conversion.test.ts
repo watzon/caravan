@@ -43,9 +43,10 @@ describe('conversionStateMeta', () => {
 });
 
 describe('strategyLabel', () => {
-  it('says what the strategy costs, not just what it is called', () => {
-    expect(strategyLabel('remux')).toContain('stream copy');
-    expect(strategyLabel('transcode')).toContain('re-encode');
+  it('describes each strategy in user language without exposing internal vocabulary', () => {
+    expect(strategyLabel('remux')).toBe('Convert (stream copy)');
+    expect(strategyLabel('remux')).not.toMatch(/remux/i);
+    expect(strategyLabel('transcode')).toBe('Transcode (re-encode)');
     expect(strategyLabel('none')).toBe('Nothing to do');
   });
 

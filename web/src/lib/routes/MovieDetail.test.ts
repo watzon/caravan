@@ -218,6 +218,30 @@ function deletes(): { url: string; method: string }[] {
   return calls.filter((c) => c.method === 'DELETE').map(({ url, method }) => ({ url, method }));
 }
 
+describe('MovieDetail facts', () => {
+  it('renders one detail list without repeating the hero facts', async () => {
+    stubFetch(0, { ...MOVIE, release_date: '2021-10-22' });
+    app = mount(MovieDetail, { target: host, props: { id: 7 } });
+    await settle();
+
+    const heroFacts = host.querySelector('h2')?.nextElementSibling;
+    expect(heroFacts?.textContent).toContain('2021');
+    expect(heroFacts?.textContent).toContain('Released');
+
+    const labels = [...host.querySelectorAll('dt')].map((term) => term.textContent?.trim());
+    expect(host.querySelectorAll('dl')).toHaveLength(1);
+    expect(labels).toEqual([
+      'Folder',
+      'TMDB id',
+      'Added',
+      'Minimum availability',
+      'Quality profile',
+    ]);
+    expect(new Set(labels).size).toBe(labels.length);
+    expect(labels).not.toEqual(expect.arrayContaining(['Year', 'Status', 'Release date']));
+  });
+});
+
 describe('MovieDetail remove', () => {
   it('untracks without touching files when the checkbox is left alone', async () => {
     stubFetch(0);

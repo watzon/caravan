@@ -20,14 +20,18 @@ describe('compatBadge', () => {
     expect(badge?.title).toContain('DTS audio (profile allows AAC)');
   });
 
-  it('separates a container-only problem from a stream problem', () => {
+  it('describes a container-only conversion without exposing remux terminology', () => {
     const badge = compatBadge({
       verdict: 'needs-remux',
       reasons: ['MKV container (profile allows MP4/M4V)'],
     });
-    expect(badge?.label).toBe('NEEDS REMUX');
-    expect(badge?.title).toContain('remux');
-    expect(badge?.title).toContain('MKV container');
+    expect(badge?.key).toBe('tv-remux');
+    expect(badge?.tone).toBe('warning');
+    expect(badge?.label).toBe('NEEDS CONVERT');
+    expect(badge?.title).toBe(
+      'The streams are fine; only the container needs conversion, so no re-encoding is required. MKV container (profile allows MP4/M4V).',
+    );
+    expect(`${badge?.label} ${badge?.title}`).not.toMatch(/remux/i);
   });
 
   it('renders without reasons rather than printing an empty tail', () => {

@@ -238,6 +238,60 @@ function deletes(): { url: string; method: string }[] {
   return calls.filter((c) => c.method === 'DELETE').map(({ url, method }) => ({ url, method }));
 }
 
+describe('SeriesDetail season inventory', () => {
+  it('states the on-disk count and names both missing-file cells', async () => {
+    stubFetch(0, SERIES_WITH_FILES);
+    app = mount(SeriesDetail, { target: host, props: { id: 3 } });
+    await settle();
+
+    const headers = [...host.querySelectorAll('section > header')].map(
+      (header) => header.textContent?.replace(/\s+/g, ' ').trim() ?? '',
+    );
+    expect(headers[0]).toContain('Season 01 2 of 2 on disk');
+    expect(headers[1]).toContain('Season 02 1 of 2 on disk');
+
+    const rows = [...host.querySelectorAll('tbody tr')];
+    const missingFileRow = rows.find((row) => row.textContent?.includes('No file'));
+    expect(missingFileRow, 'episode without a file').toBeDefined();
+    const missingFileCells = [...missingFileRow!.querySelectorAll('td')];
+    expect(missingFileCells[4]?.textContent?.trim()).toBe('No file');
+    expect(missingFileCells[5]?.textContent?.trim()).toBe('No file');
+
+    const importedFileRow = rows.find((row) => row.textContent?.includes('1080p'));
+    expect(importedFileRow, 'episode with an imported file').toBeDefined();
+    const importedFileCells = [...importedFileRow!.querySelectorAll('td')];
+    expect(importedFileCells[4]?.textContent?.trim()).toBe('1080p');
+    expect(importedFileCells[5]?.textContent?.trim()).toBe('1 B');
+  });
+
+  it('PATCHes the season monitor flag and reloads its cascaded episode state', async () => {
+    stubFetch(0, SERIES_WITH_FILES);
+    app = mount(SeriesDetail, { target: host, props: { id: 3 } });
+    await settle();
+
+    const seasonToggle = host.querySelector<HTMLButtonElement>(
+      'button[role="switch"][aria-label="Monitor Season 01"]',
+    );
+    expect(seasonToggle, 'Season 01 monitor switch').not.toBeNull();
+    expect(seasonToggle!.getAttribute('aria-checked')).toBe('true');
+
+    seasonToggle!.click();
+    await settle();
+
+    expect(
+      calls.find(
+        (call) =>
+          call.url === '/api/v1/library/series/3/seasons/1' && call.method === 'PATCH',
+      ),
+    ).toMatchObject({ body: { monitored: false } });
+    expect(
+      calls.filter(
+        (call) => call.url === '/api/v1/library/series/3' && call.method === 'GET',
+      ),
+    ).toHaveLength(2);
+  });
+});
+
 describe('SeriesDetail remove', () => {
   it('untracks without touching files by default', async () => {
     stubFetch(0, SERIES_WITH_FILES);

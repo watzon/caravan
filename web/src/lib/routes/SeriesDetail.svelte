@@ -281,7 +281,7 @@
                     : ownedCount(season) > 0
                       ? 'warning'
                       : 'neutral'}>
-                  {ownedCount(season)} / {episodes.length}
+                  {ownedCount(season)} of {episodes.length} on disk
                 </Badge>
               </button>
 
@@ -367,11 +367,11 @@
                                 {/if}
                               </div>
                             {:else}
-                              <span class="text-ink-muted">{UNKNOWN}</span>
+                              <span class="text-ink-muted">No file</span>
                             {/if}
                           </td>
                           <td class="px-3 py-2 text-right font-mono text-ink-secondary">
-                            {episode.file ? formatBytes(episode.file.size) : UNKNOWN}
+                            {episode.file ? formatBytes(episode.file.size) : 'No file'}
                           </td>
                           <td class="px-3 py-2">
                             <div class="flex justify-end">

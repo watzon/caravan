@@ -45,9 +45,9 @@ export function compatBadge(compat: TVCompatibility | undefined | null): CompatB
     case 'needs-remux':
       return {
         key: 'tv-remux',
-        label: 'NEEDS REMUX',
+        label: 'NEEDS CONVERT',
         tone: 'warning',
-        title: `The streams are fine; only the container is wrong, so a copy-only remux fixes it.${reasons}`,
+        title: `The streams are fine; only the container needs conversion, so no re-encoding is required.${reasons}`,
       };
     default:
       return null;

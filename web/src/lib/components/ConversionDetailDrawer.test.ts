@@ -73,6 +73,13 @@ describe('ConversionDetailDrawer', () => {
     expect(host.textContent).toContain('40s');
   });
 
+  it('presents stream-copy conversion without internal vocabulary', () => {
+    render({ ...RUNNING, strategy: 'remux' });
+
+    expect(host.textContent).toContain('Convert (stream copy)');
+    expect(host.textContent).not.toMatch(/remux/i);
+  });
+
   it('keeps queued cancellation in the drawer', () => {
     const oncancel = vi.fn();
     const onclose = vi.fn();
