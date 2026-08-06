@@ -56,7 +56,7 @@ func TestSceneSearchSendsOnlyTheAdultLibrarysCategories(t *testing.T) {
 
 	_, scene := addSite(t, ctx, st, "Brazzers", time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC))
 	episode := addEpisode(t, ctx, st, "Example Series")
-	runner := NewRunner(st, fake.factory(), func(context.Context, string) core.Engine { return &fakeEngine{} })
+	runner := NewRunner(st, fake.factory(), func(context.Context, int64, string) core.Engine { return &fakeEngine{} })
 
 	searchEpisodeJob(t, ctx, runner, st, scene.ID)
 	got := fake.recorded()
@@ -100,7 +100,7 @@ func TestSceneSearchIsDroppedWhenTheModuleIsDisabled(t *testing.T) {
 	if err := st.SetAdultEnabled(ctx, false); err != nil {
 		t.Fatalf("SetAdultEnabled: %v", err)
 	}
-	runner := NewRunner(st, fake.factory(), func(context.Context, string) core.Engine { return &fakeEngine{} })
+	runner := NewRunner(st, fake.factory(), func(context.Context, int64, string) core.Engine { return &fakeEngine{} })
 	searchEpisodeJob(t, ctx, runner, st, scene.ID)
 
 	if got := fake.recorded(); len(got) != 0 {
@@ -251,7 +251,7 @@ func TestSceneSearchSendsAdultCategoriesWithNoOverrideConfigured(t *testing.T) {
 	addTorznabIndexer(t, ctx, st, fake, "shared", 5000, 2000)
 
 	_, scene := addSite(t, ctx, st, "Brazzers", time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC))
-	runner := NewRunner(st, fake.factory(), func(context.Context, string) core.Engine { return &fakeEngine{} })
+	runner := NewRunner(st, fake.factory(), func(context.Context, int64, string) core.Engine { return &fakeEngine{} })
 
 	searchEpisodeJob(t, ctx, runner, st, scene.ID)
 	got := fake.recorded()
@@ -277,7 +277,7 @@ func TestSceneSearchKeepsTheIndexersOwnAdultSubcategories(t *testing.T) {
 	addTorznabIndexer(t, ctx, st, fake, "shared", 5000, 6040, 6090)
 
 	_, scene := addSite(t, ctx, st, "Brazzers", time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC))
-	runner := NewRunner(st, fake.factory(), func(context.Context, string) core.Engine { return &fakeEngine{} })
+	runner := NewRunner(st, fake.factory(), func(context.Context, int64, string) core.Engine { return &fakeEngine{} })
 
 	searchEpisodeJob(t, ctx, runner, st, scene.ID)
 	got := fake.recorded()
@@ -309,7 +309,7 @@ func TestRSSSyncDropsTheAdultLibraryWhenTheModuleIsDisabled(t *testing.T) {
 	overrideLibraryIndexer(t, ctx, st, core.LibraryKindMovie, cfg.ID, true, []int{2000})
 	overrideLibraryIndexer(t, ctx, st, core.LibraryKindTV, cfg.ID, true, []int{5000})
 	overrideLibraryIndexer(t, ctx, st, core.LibraryKindAdult, cfg.ID, true, []int{6000})
-	runner := NewRunner(st, fake.factory(), func(context.Context, string) core.Engine { return &fakeEngine{} })
+	runner := NewRunner(st, fake.factory(), func(context.Context, int64, string) core.Engine { return &fakeEngine{} })
 
 	// While it is on, the adult library is a subscriber like any other.
 	if err := runner.handleRSSSync(ctx, st, json.RawMessage("{}")); err != nil {
@@ -394,7 +394,7 @@ func TestSceneSearchStopsAtTheDateVariantWhenItFinds(t *testing.T) {
 		guid:  "by-date",
 	})
 
-	runner := NewRunner(st, fake.factory(), func(context.Context, string) core.Engine { return &fakeEngine{} })
+	runner := NewRunner(st, fake.factory(), func(context.Context, int64, string) core.Engine { return &fakeEngine{} })
 	searchEpisodeJob(t, ctx, runner, st, scene.ID)
 
 	if got := fake.queries(); len(got) != 1 || got[0] != "Brazzers 22.03.14" {
@@ -427,7 +427,7 @@ func TestSceneSearchFallsBackToTheTitleVariant(t *testing.T) {
 		guid:  "by-title",
 	})
 
-	runner := NewRunner(st, fake.factory(), func(context.Context, string) core.Engine { return &fakeEngine{} })
+	runner := NewRunner(st, fake.factory(), func(context.Context, int64, string) core.Engine { return &fakeEngine{} })
 	searchEpisodeJob(t, ctx, runner, st, scene.ID)
 
 	want := []string{"Brazzers 22.03.14", "Brazzers Deep Impact"}
@@ -453,7 +453,7 @@ func TestSceneSearchRecordsWhichVariantsItTried(t *testing.T) {
 	released := time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC)
 	_, scene := addSceneWithTitle(t, ctx, st, "Brazzers", "Deep Impact", released)
 
-	runner := NewRunner(st, fake.factory(), func(context.Context, string) core.Engine { return &fakeEngine{} })
+	runner := NewRunner(st, fake.factory(), func(context.Context, int64, string) core.Engine { return &fakeEngine{} })
 	searchEpisodeJob(t, ctx, runner, st, scene.ID)
 
 	if got := fake.queries(); len(got) != 2 {
@@ -490,7 +490,7 @@ func TestSceneSearchWithoutADateUsesTheTitleAlone(t *testing.T) {
 	overrideLibraryIndexer(t, ctx, st, core.LibraryKindAdult, cfg.ID, true, []int{6000})
 
 	_, dated := addSceneWithTitle(t, ctx, st, "Brazzers", "Deep Impact", time.Time{})
-	runner := NewRunner(st, fake.factory(), func(context.Context, string) core.Engine { return &fakeEngine{} })
+	runner := NewRunner(st, fake.factory(), func(context.Context, int64, string) core.Engine { return &fakeEngine{} })
 	searchEpisodeJob(t, ctx, runner, st, dated.ID)
 
 	if got := fake.queries(); len(got) != 1 || got[0] != "Brazzers Deep Impact" {

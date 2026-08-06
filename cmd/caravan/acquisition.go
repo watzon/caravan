@@ -194,18 +194,19 @@ func (p *engineProvider) Health() string {
 // import watcher, which takes one engine at startup and drives it for the
 // life of the process.
 func (p *engineProvider) Engine() core.Engine {
-	return p.EngineFor("")
+	return p.EngineFor(0, "")
 }
 
-// EngineFor is Engine for a grab made on behalf of one library: kind is one of
-// the core.LibraryKind* constants, and "" is an operation that belongs to no
+// EngineFor is Engine for a grab made on behalf of one library: libraryID is
+// the item's own library, kind (a core.LibraryKind* constant) answers for an
+// item that names none, and (0, "") is an operation that belongs to no
 // library — polling the queue, pausing a download — which routes globally.
 //
 // A library's routing override only ever moves a protocol's *default* (PLAN
 // phase 8 task 2). Every other engine stays in the table, because a download
 // the library took yesterday through a client it no longer defaults to still
 // has to be listable, pausable and removable.
-func (p *engineProvider) EngineFor(kind string) core.Engine {
+func (p *engineProvider) EngineFor(libraryID int64, kind string) core.Engine {
 	if p.embedded() == nil {
 		// No storage root, or the engine would not start. Without it there is
 		// nowhere for an external client's downloads to be imported to
@@ -213,13 +214,13 @@ func (p *engineProvider) EngineFor(kind string) core.Engine {
 		return nil
 	}
 	return download.NewRouter(func(ctx context.Context) ([]download.Route, error) {
-		return p.routesFor(ctx, kind)
+		return p.routesFor(ctx, libraryID, kind)
 	})
 }
 
 // routes is the download.Table for an operation that belongs to no library.
 func (p *engineProvider) routes(ctx context.Context) ([]download.Route, error) {
-	return p.routesFor(ctx, "")
+	return p.routesFor(ctx, 0, "")
 }
 
 // routesFor is the download.Table the router resolves through: the embedded
@@ -231,12 +232,12 @@ func (p *engineProvider) routes(ctx context.Context) ([]download.Route, error) {
 // that was the default yesterday is still holding the downloads it took, and
 // those have to stay listable, pausable and removable — the `downloads.engine`
 // column addresses them, not the current routing settings.
-func (p *engineProvider) routesFor(ctx context.Context, kind string) ([]download.Route, error) {
+func (p *engineProvider) routesFor(ctx context.Context, libraryID int64, kind string) ([]download.Route, error) {
 	embedded := p.embedded()
 	if embedded == nil {
 		return nil, nil
 	}
-	torrentPick, usenetPick, err := p.routePicks(ctx, kind)
+	torrentPick, usenetPick, err := p.routePicks(ctx, libraryID, kind)
 	if err != nil {
 		return nil, err
 	}
@@ -327,14 +328,14 @@ func (p *engineProvider) routesFor(ctx context.Context, kind string) ([]download
 // back to the globals rather than failing. Routing is how a download reaches
 // an engine at all, and it must keep working while the rest of the schema
 // catches up.
-func (p *engineProvider) routePicks(ctx context.Context, kind string) (torrent, usenet int64, err error) {
+func (p *engineProvider) routePicks(ctx context.Context, libraryID int64, kind string) (torrent, usenet int64, err error) {
 	settings, err := p.adapter.st.AllSettings(ctx)
 	if err != nil {
 		return 0, 0, err
 	}
 	torrentValue, usenetValue := settings[store.SettingRouteTorrent], settings[store.SettingRouteUsenet]
-	if kind != "" {
-		resolved, err := p.adapter.st.ResolveLibrarySettingsByKind(ctx, kind)
+	if libraryID != 0 || kind != "" {
+		resolved, err := p.adapter.st.ResolveLibrarySettingsForItem(ctx, libraryID, kind)
 		switch {
 		case err == nil:
 			torrentValue, usenetValue = resolved.RouteTorrent, resolved.RouteUsenet

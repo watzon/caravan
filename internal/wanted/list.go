@@ -36,6 +36,10 @@ type Episode struct {
 	// on a wanted episode has to know it: the indexer fan-out, the quality
 	// profile, and whether the item may be shown to a given caller at all.
 	SeriesKind string
+	// SeriesLibraryID is the series' own library, for SeriesKind's reason —
+	// two libraries of one kind may search different indexers and default to
+	// different profiles. Zero resolves through the kind's default library.
+	SeriesLibraryID int64
 	// Reason is one of the Reason* constants. An unaired episode is never
 	// wanted: there is nothing to find yet.
 	Reason string
@@ -74,20 +78,22 @@ func Compute(ctx context.Context, st *store.Store) (*Lists, error) {
 	}
 
 	// Profiles are resolved once and cached: a library shares a handful of
-	// profiles across thousands of items. The kind is part of the key because
-	// an item naming no profile of its own resolves to its own library's
-	// default, and the two libraries may have picked different ones.
+	// profiles across thousands of items. The LIBRARY is part of the key
+	// because an item naming no profile of its own resolves to its own
+	// library's default, and two libraries — even of one kind — may have
+	// picked different ones.
 	type profileKey struct {
-		kind string
-		id   int64
+		libraryID int64
+		kind      string
+		id        int64
 	}
 	profiles := map[profileKey]*core.QualityProfile{}
-	resolve := func(kind string, id int64) (*core.QualityProfile, error) {
-		key := profileKey{kind: kind, id: id}
+	resolve := func(libraryID int64, kind string, id int64) (*core.QualityProfile, error) {
+		key := profileKey{libraryID: libraryID, kind: kind, id: id}
 		if p, ok := profiles[key]; ok {
 			return p, nil
 		}
-		p, err := st.ResolveItemQualityProfile(ctx, kind, id)
+		p, err := st.ResolveItemQualityProfileByLibrary(ctx, libraryID, kind, id)
 		if err != nil {
 			return nil, err
 		}
@@ -129,7 +135,7 @@ func Compute(ctx context.Context, st *store.Store) (*Lists, error) {
 		// The item's own library, not television's: a site's default quality
 		// profile is the adult library's, and grading a scene against the TV
 		// library's cutoff would search for releases nobody asked for.
-		p, err := resolve(core.LibraryKindForSeries(es.SeriesKind), es.SeriesProfileID)
+		p, err := resolve(es.SeriesLibraryID, core.LibraryKindForSeries(es.SeriesKind), es.SeriesProfileID)
 		if err != nil {
 			return nil, err
 		}
@@ -140,8 +146,8 @@ func Compute(ctx context.Context, st *store.Store) (*Lists, error) {
 		out.Episodes = append(out.Episodes, Episode{
 			Episode: es.Episode, SeriesTitle: es.SeriesTitle,
 			SeriesPosterPath: es.SeriesPosterPath, SeriesPosterURL: es.SeriesPosterURL,
-			SeriesKind: es.SeriesKind,
-			Reason:     reason, FileQuality: es.FileQuality,
+			SeriesKind: es.SeriesKind, SeriesLibraryID: es.SeriesLibraryID,
+			Reason: reason, FileQuality: es.FileQuality,
 		})
 	}
 	return out, nil
@@ -204,11 +210,11 @@ func homeRelease(m core.Movie) time.Time {
 }
 
 // movieReason applies the wanted rules to one movie file state.
-func movieReason(ctx context.Context, ms store.MovieFileState, resolve func(string, int64) (*core.QualityProfile, error)) (string, error) {
+func movieReason(ctx context.Context, ms store.MovieFileState, resolve func(int64, string, int64) (*core.QualityProfile, error)) (string, error) {
 	if !ms.HasFile {
 		return ReasonMissing, nil
 	}
-	p, err := resolve(core.LibraryKindMovie, ms.Movie.QualityProfileID)
+	p, err := resolve(ms.Movie.LibraryID, core.LibraryKindMovie, ms.Movie.QualityProfileID)
 	if err != nil {
 		return "", err
 	}

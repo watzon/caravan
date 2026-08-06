@@ -437,6 +437,22 @@ func DefaultLibraryCategories(kind string, own []int) []int {
 	return adult
 }
 
+// ResolveLibrarySettingsForItem resolves the effective settings of the library
+// an item names, falling back to the kind's default library when the item
+// names none — an item from before 0022 — or names one that has vanished.
+func (s *Store) ResolveLibrarySettingsForItem(ctx context.Context, libraryID int64, kind string) (*core.LibrarySettings, error) {
+	if libraryID != 0 {
+		settings, err := s.ResolveLibrarySettings(ctx, libraryID)
+		if err == nil {
+			return settings, nil
+		}
+		if !errors.Is(err, ErrNotFound) {
+			return nil, err
+		}
+	}
+	return s.ResolveLibrarySettingsByKind(ctx, kind)
+}
+
 // ResolveLibrarySettingsByKind resolves the settings of the library that items
 // of the given core.LibraryKind* belong to.
 //
@@ -451,18 +467,20 @@ func (s *Store) ResolveLibrarySettingsByKind(ctx context.Context, kind string) (
 	return s.ResolveLibrarySettings(ctx, lib.ID)
 }
 
-// ResolveItemQualityProfile returns the effective profile for one library item:
-// the profile the item names, the default of the library its kind maps to when
-// it names none, and the store-wide default when neither answers.
+// ResolveItemQualityProfileByLibrary returns the effective profile for one
+// library item: the profile the item names, its library's default when it
+// names none, and the store-wide default when neither answers.
 //
 // It is the library step ResolveQualityProfile deliberately has no notion of.
-// Every scoring site goes through here rather than through ResolveQualityProfile
-// directly, because a library default nobody reads is a setting that saves,
-// renders as an override, and changes nothing (PLAN phase 8 task 2).
+// Every scoring site goes through here (or the by-kind wrapper below) rather
+// than through ResolveQualityProfile directly, because a library default
+// nobody reads is a setting that saves, renders as an override, and changes
+// nothing (PLAN phase 8 task 2).
 //
-// A missing libraries row — a database not yet migrated past 0012 — resolves
-// exactly as it did before there were libraries.
-func (s *Store) ResolveItemQualityProfile(ctx context.Context, kind string, itemProfileID int64) (*core.QualityProfile, error) {
+// libraryID 0 — an item from before 0022, or one whose library vanished — and
+// kind fill the gap: the kind's default library answers, which is exactly what
+// the item's zero means everywhere else (see core.Movie.LibraryID).
+func (s *Store) ResolveItemQualityProfileByLibrary(ctx context.Context, libraryID int64, kind string, itemProfileID int64) (*core.QualityProfile, error) {
 	if itemProfileID > 0 {
 		p, err := s.GetQualityProfile(ctx, itemProfileID)
 		if err == nil {
@@ -472,14 +490,34 @@ func (s *Store) ResolveItemQualityProfile(ctx context.Context, kind string, item
 			return nil, err
 		}
 	}
-	lib, err := s.GetLibraryByKind(ctx, kind)
-	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return s.ResolveQualityProfile(ctx, 0)
+	var (
+		lib *core.Library
+		err error
+	)
+	if libraryID != 0 {
+		lib, err = s.GetLibrary(ctx, libraryID)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return nil, err
 		}
-		return nil, err
+	}
+	if lib == nil {
+		lib, err = s.GetLibraryByKind(ctx, kind)
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				return s.ResolveQualityProfile(ctx, 0)
+			}
+			return nil, err
+		}
 	}
 	return s.ResolveQualityProfile(ctx, lib.QualityProfileID)
+}
+
+// ResolveItemQualityProfile is the by-kind form of the resolution above, for
+// call sites that have no item row in hand (a kind-scoped sweep, a default).
+// It reads the kind's DEFAULT library, which is what every caller written
+// before 0022 meant.
+func (s *Store) ResolveItemQualityProfile(ctx context.Context, kind string, itemProfileID int64) (*core.QualityProfile, error) {
+	return s.ResolveItemQualityProfileByLibrary(ctx, 0, kind, itemProfileID)
 }
 
 // overrideOrGlobal is the whole fallback rule: the library answers when it has

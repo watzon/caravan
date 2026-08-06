@@ -101,9 +101,14 @@ type EpisodeFileState struct {
 	// profile grades it, which indexers search for it, whether it may be shown
 	// at all — is a decision about the series it belongs to, and a second query
 	// per episode to find that out is a query per episode.
-	SeriesKind  string
-	HasFile     bool
-	FileQuality string
+	SeriesKind string
+	// SeriesLibraryID is the series' own library, for SeriesKind's reason: a
+	// wanted episode is searched with its library's indexers and graded
+	// against its library's default profile, and two libraries of one kind may
+	// configure both differently.
+	SeriesLibraryID int64
+	HasFile         bool
+	FileQuality     string
 }
 
 // EpisodeFileStates returns every monitored episode with its best file
@@ -113,7 +118,7 @@ type EpisodeFileState struct {
 func (s *Store) EpisodeFileStates(ctx context.Context) ([]EpisodeFileState, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT `+episodeStateColumns+`, s.title, s.poster_path, s.poster_url,
-			s.quality_profile_id, s.kind, COALESCE(mf.quality, '')
+			s.quality_profile_id, s.kind, s.library_id, COALESCE(mf.quality, '')
 		FROM episodes e
 		JOIN series s ON s.id = e.series_id
 		LEFT JOIN episode_files ef ON ef.episode_id = e.id
@@ -130,9 +135,9 @@ func (s *Store) EpisodeFileStates(ctx context.Context) ([]EpisodeFileState, erro
 	for rows.Next() {
 		var (
 			seriesTitle, posterPath, posterURL, seriesKind, quality string
-			profileID                                               int64
+			profileID, libraryID                                    int64
 		)
-		e, err := scanEpisodeWith(rows, &seriesTitle, &posterPath, &posterURL, &profileID, &seriesKind, &quality)
+		e, err := scanEpisodeWith(rows, &seriesTitle, &posterPath, &posterURL, &profileID, &seriesKind, &libraryID, &quality)
 		if err != nil {
 			return nil, fmt.Errorf("store: scan episode file state: %w", err)
 		}
@@ -142,6 +147,7 @@ func (s *Store) EpisodeFileStates(ctx context.Context) ([]EpisodeFileState, erro
 				Episode: *e, SeriesTitle: seriesTitle,
 				SeriesPosterPath: posterPath, SeriesPosterURL: posterURL,
 				SeriesProfileID: profileID, SeriesKind: seriesKind,
+				SeriesLibraryID: libraryID,
 			}
 			byID[e.ID] = st
 			order = append(order, e.ID)

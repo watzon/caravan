@@ -222,7 +222,7 @@ func TestSearchSendsOnlyItsLibrarysCategories(t *testing.T) {
 
 	movie := addMovie(t, ctx, st, "Example Movie", 2024, true)
 	episode := addEpisode(t, ctx, st, "Example Series")
-	runner := NewRunner(st, fake.factory(), func(context.Context, string) core.Engine { return &fakeEngine{} })
+	runner := NewRunner(st, fake.factory(), func(context.Context, int64, string) core.Engine { return &fakeEngine{} })
 
 	searchMovieJob(t, ctx, runner, st, movie.ID)
 	searchEpisodeJob(t, ctx, runner, st, episode.ID)
@@ -263,7 +263,7 @@ func TestPerLibraryIndexerDisableLeavesOtherLibrariesUnaffected(t *testing.T) {
 
 	movie := addMovie(t, ctx, st, "Example Movie", 2024, true)
 	episode := addEpisode(t, ctx, st, "Example Series")
-	runner := NewRunner(st, fake.factory(), func(context.Context, string) core.Engine { return &fakeEngine{} })
+	runner := NewRunner(st, fake.factory(), func(context.Context, int64, string) core.Engine { return &fakeEngine{} })
 
 	searchMovieJob(t, ctx, runner, st, movie.ID)
 	movieRequests := fake.recorded()
@@ -303,7 +303,7 @@ func TestRSSSyncFetchesEachIndexerOncePerCycleWithTheCategoryUnion(t *testing.T)
 
 	addMovie(t, ctx, st, "Example Movie", 2024, true)
 	addEpisode(t, ctx, st, "Example Series")
-	runner := NewRunner(st, fake.factory(), func(context.Context, string) core.Engine { return &fakeEngine{} })
+	runner := NewRunner(st, fake.factory(), func(context.Context, int64, string) core.Engine { return &fakeEngine{} })
 
 	if err := runner.handleRSSSync(ctx, st, json.RawMessage("{}")); err != nil {
 		t.Fatalf("handle rss sync: %v", err)
@@ -327,7 +327,7 @@ func TestRSSSyncUnionOfUnfilteredLibraryIsUnfiltered(t *testing.T) {
 	cfg := addTorznabIndexer(t, ctx, st, fake, "shared", 2000)
 	overrideLibraryIndexer(t, ctx, st, core.LibraryKindTV, cfg.ID, true, []int{})
 
-	runner := NewRunner(st, fake.factory(), func(context.Context, string) core.Engine { return &fakeEngine{} })
+	runner := NewRunner(st, fake.factory(), func(context.Context, int64, string) core.Engine { return &fakeEngine{} })
 	if err := runner.handleRSSSync(ctx, st, json.RawMessage("{}")); err != nil {
 		t.Fatalf("handle rss sync: %v", err)
 	}
@@ -507,5 +507,56 @@ func TestRSSSyncKeepsReleasesTheIndexerPublishedNoCategoryFor(t *testing.T) {
 	}
 	if len(engine.added) != 1 {
 		t.Fatalf("grabbed %+v, want the episode: the indexer published no category to reject it by", engine.added)
+	}
+}
+
+// Two libraries of ONE kind are two different search fan-outs: each episode is
+// searched with its own library's indexer set, not with the kind's. Before the
+// sweep to library ids this grouped by kind, and a second tv library silently
+// searched the default library's indexers.
+func TestSameKindLibrariesSearchTheirOwnIndexers(t *testing.T) {
+	ctx := context.Background()
+	st := openStore(t)
+	fake := startFakeTorznab(t)
+	alpha := addTorznabIndexer(t, ctx, st, fake, "alpha", 5000)
+	beta := addTorznabIndexer(t, ctx, st, fake, "beta", 5000)
+
+	anime := &core.Library{Kind: core.LibraryKindTV, Name: "Anime",
+		RootPath: "library/Anime", Provider: core.ProviderTMDB}
+	if err := st.CreateLibrary(ctx, anime); err != nil {
+		t.Fatalf("create anime library: %v", err)
+	}
+	// The default tv library searches only alpha; Anime searches only beta.
+	overrideLibraryIndexer(t, ctx, st, core.LibraryKindTV, beta.ID, false, nil)
+	if err := st.SetLibraryIndexer(ctx, &core.LibraryIndexer{
+		LibraryID: anime.ID, IndexerID: alpha.ID, Enabled: false,
+	}); err != nil {
+		t.Fatalf("disable alpha for anime: %v", err)
+	}
+
+	tvEpisode := addEpisode(t, ctx, st, "Example Series")
+	animeSeries := core.Series{TMDBID: 4242, Title: "Frieren", SortTitle: "frieren",
+		Year: 2023, Monitored: true, LibraryID: anime.ID}
+	if err := st.UpsertSeries(ctx, &animeSeries); err != nil {
+		t.Fatalf("upsert anime series: %v", err)
+	}
+	animeEpisode := core.Episode{SeriesID: animeSeries.ID, SeasonNumber: 1, EpisodeNumber: 1, Monitored: true}
+	if err := st.UpsertEpisode(ctx, &animeEpisode); err != nil {
+		t.Fatalf("upsert anime episode: %v", err)
+	}
+
+	runner := NewRunner(st, fake.factory(), func(context.Context, int64, string) core.Engine { return &fakeEngine{} })
+
+	searchEpisodeJob(t, ctx, runner, st, tvEpisode.ID)
+	got := fake.recorded()
+	if len(got) != 1 || got[0].indexer != "alpha" {
+		t.Fatalf("default tv search hit %s, want only alpha", formatRequests(got))
+	}
+
+	fake.reset()
+	searchEpisodeJob(t, ctx, runner, st, animeEpisode.ID)
+	got = fake.recorded()
+	if len(got) != 1 || got[0].indexer != "beta" {
+		t.Fatalf("anime search hit %s, want only beta", formatRequests(got))
 	}
 }

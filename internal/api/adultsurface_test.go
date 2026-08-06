@@ -1298,7 +1298,7 @@ func (p *routingEngineProvider) Engine() core.Engine { return p.byKind[core.Libr
 
 func (p *routingEngineProvider) Name() string { return "routing-stub" }
 
-func (p *routingEngineProvider) EngineFor(kind string) core.Engine {
+func (p *routingEngineProvider) EngineFor(_ int64, kind string) core.Engine {
 	p.mu.Lock()
 	p.asked = append(p.asked, kind)
 	p.mu.Unlock()
