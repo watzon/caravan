@@ -19,6 +19,7 @@ function mountModal(props: {
   kind?: 'movie' | 'series' | 'site' | null;
   initialKind?: 'movie' | 'series' | 'site';
   onpick?: (kind: 'movie' | 'series', tmdbID: number) => void;
+  onadded?: (kind: 'movie' | 'series', item: { id: number; title: string }) => void;
   onclose?: () => void;
 } = {}): HTMLElement {
   host = document.createElement('div');
@@ -378,6 +379,49 @@ describe('AddItemModal', () => {
     expect(post?.url).toBe('/api/v1/library/series');
     expect(post?.body).toMatchObject({ tmdb_id: 2, monitored: true, search_missing: true });
     expect((post?.body as Record<string, unknown>).search_now).toBeUndefined();
+  });
+
+  /**
+   * The grab-target dialog adds a title mid-flow and then ties a release to
+   * it, so the add must not navigate: it would abandon the release the user
+   * came in with. `onadded` is what suppresses that, and nothing else.
+   */
+  it('hands a created movie back instead of navigating, when asked to', async () => {
+    vi.useFakeTimers();
+    const calls = stubSearchAndAdd(undefined, { id: 9, title: 'Dune' });
+    const handed: unknown[] = [];
+    let closed = 0;
+    mountModal({
+      onadded: (kind, item) => handed.push([kind, item]),
+      onclose: () => (closed += 1),
+    });
+
+    await addFirstResult();
+
+    // The add itself is unchanged; only what happens afterwards is.
+    expect(calls.find((c) => c.method === 'POST')?.url).toBe('/api/v1/library/movies');
+    expect(handed).toEqual([['movie', { id: 9, title: 'Dune' }]]);
+    expect(closed).toBe(0);
+    expect(window.location.pathname).not.toBe('/movies/9');
+  });
+
+  it('hands a created series back under its own kind', async () => {
+    vi.useFakeTimers();
+    stubSearchAndAdd(undefined, { id: 12, title: 'Severance' });
+    const handed: unknown[] = [];
+    mountModal({ initialKind: 'series', onadded: (kind, item) => handed.push([kind, item]) });
+
+    await addFirstResult('series');
+
+    expect(handed).toEqual([['series', { id: 12, title: 'Severance' }]]);
+  });
+
+  it('drops the adult scope for a hand-back caller, which can only tie two kinds', () => {
+    session.user = { username: 'admin', role: 'admin', open: false, adult: true } as SessionUser;
+    mountModal({ onadded: () => {} });
+
+    const tabs = [...host!.querySelectorAll('[role="tab"]')].map((t) => t.textContent?.trim());
+    expect(tabs).toEqual(['Movies', 'Series']);
   });
 
   it('forgets the choice between modals: the options are per-add, not a habit', async () => {

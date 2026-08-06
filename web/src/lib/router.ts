@@ -67,6 +67,11 @@ export const ROUTES = [
   '/adult/sites/:id/search',
   '/adult/sites/:id/search/:year',
   '/adult/sites/:id/search/:year/:number',
+  // The universal indexer search (plan part B8). Deliberately absent from
+  // MEMBER_ROUTES: it grabs, and grabbing is an admin write. Its query lives
+  // in the query string (?q=&cats=&indexers=), per the split documented above
+  // — a search is a filter over one screen, not a screen per query.
+  '/search',
   '/queue',
   '/convert',
   '/wanted',

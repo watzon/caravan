@@ -40,6 +40,7 @@
   import Queue from './lib/routes/Queue.svelte';
   import ReleaseSearch from './lib/routes/ReleaseSearch.svelte';
   import SafeToEject from './lib/routes/SafeToEject.svelte';
+import Search from './lib/routes/Search.svelte';
   import ScanReview from './lib/routes/ScanReview.svelte';
   import Series from './lib/routes/Series.svelte';
   import SeriesDetail from './lib/routes/SeriesDetail.svelte';
@@ -79,6 +80,7 @@
     '/adult/sites/:id/search': 'Interactive Search',
     '/adult/sites/:id/search/:year': 'Interactive Search',
     '/adult/sites/:id/search/:year/:number': 'Interactive Search',
+    '/search': 'Search',
     '/queue': 'Queue',
     '/convert': 'Convert',
     '/wanted': 'Wanted',
@@ -477,6 +479,8 @@
               season={ordinalParam(match.params, 'year')}
               episode={ordinalParam(match.params, 'number')} />
           {/key}
+        {:else if match.pattern === '/search'}
+          <Search />
         {:else if match.pattern === '/queue'}
           <Queue />
         {:else if match.pattern === '/convert'}

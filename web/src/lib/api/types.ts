@@ -168,6 +168,12 @@ export interface UnmatchedFile {
   size: number;
   parsed: ParsedRelease;
   reason: string;
+  /**
+   * The library the manual match is scoped to. An untied universal-search grab
+   * already chose one, and the review screen names it; 0 — every scan-parked
+   * file — means unscoped.
+   */
+  library_id: number;
   seen_at: string;
 }
 

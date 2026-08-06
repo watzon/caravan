@@ -67,6 +67,20 @@
      * scope — see PickKind.
      */
     onpick?: (kind: PickKind, tmdbID: number) => Promise<void> | void;
+    /**
+     * When supplied the add still happens, but the caller keeps the user
+     * instead of the router: the created item is handed back and the modal
+     * neither closes itself nor navigates to the new item's page.
+     *
+     * The grab-target dialog is what needs it — "add this title, then tie this
+     * release to it" is one flow, and navigating away mid-flow would abandon
+     * the release the user came in with. Everything else about the add is
+     * unchanged, monitoring and search-on-add included.
+     *
+     * Sites are deliberately out of scope, exactly as they are for `onpick`:
+     * the tie a caller builds from this names a movie or a series.
+     */
+    onadded?: (kind: PickKind, item: { id: number; title: string }) => void;
   }
 
   let {
@@ -76,6 +90,7 @@
     initialQuery = '',
     title = 'Add to library',
     onpick,
+    onadded,
   }: Props = $props();
 
   /**
@@ -119,9 +134,11 @@
    * combined answer (module on AND this account reaches it), the same one the
    * sidebar row reads, and an unknown identity reads as false.
    *
-   * Pick mode drops it too: a manual match is a TMDB id by definition.
+   * Pick mode drops it too: a manual match is a TMDB id by definition, and a
+   * hand-back caller (`onadded`) builds a tie, which names a movie or a
+   * series. Neither could do anything with a site, so neither is offered one.
    */
-  let siteScope = $derived(!onpick && session.adult);
+  let siteScope = $derived(!onpick && !onadded && session.adult);
 
   // Add mode offers a target library when the scope's kind has more than one.
   // Pick mode adds nothing, so it neither needs the list nor may fetch it —
@@ -322,6 +339,10 @@
           library_id: targetLibraryID || undefined,
         });
         pushToast(`Added ${added.title}`, 'success');
+        if (onadded) {
+          onadded('movie', { id: added.id, title: added.title });
+          return;
+        }
         onclose();
         navigate(`/movies/${added.id}`);
       } else {
@@ -332,6 +353,10 @@
           library_id: targetLibraryID || undefined,
         });
         pushToast(`Added ${added.title}`, 'success');
+        if (onadded) {
+          onadded('series', { id: added.id, title: added.title });
+          return;
+        }
         onclose();
         navigate(`/series/${added.id}`);
       }

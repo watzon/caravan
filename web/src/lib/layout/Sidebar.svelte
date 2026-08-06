@@ -95,11 +95,18 @@
     // with the shelves rather than in Explore, even for the granted member
     // whose Library group holds nothing else.
     { href: '/adult', label: 'Adult', icon: 'flame', adult: true },
-    { href: '/wanted', label: 'Wanted', icon: 'search' },
+    // Not the search icon any more: that belongs to the Activity group's
+    // Search row, and two nav rows wearing one glyph is two rows you cannot
+    // tell apart at a glance. A bookmark is what Wanted is — a list of titles
+    // set aside to be found later.
+    { href: '/wanted', label: 'Wanted', icon: 'bookmark' },
     { href: '/calendar', label: 'Calendar', icon: 'inbox' },
   ];
 
   const ACTIVITY: NavItem[] = [
+    // First: it is where a download starts. Queue, Convert and History are all
+    // about a download that already exists.
+    { href: '/search', label: 'Search', icon: 'search' },
     { href: '/queue', label: 'Queue', icon: 'download' },
     { href: '/convert', label: 'Convert', icon: 'refresh' },
     { href: '/history', label: 'History', icon: 'pulse' },
