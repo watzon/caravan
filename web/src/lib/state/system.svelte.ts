@@ -12,9 +12,9 @@ class SystemState {
   error = $state<string | null>(null);
   loading = $state(true);
 
-  /** True once we know the server has no storage root yet (SPEC §10.1). */
+  /** True until an administrator exists and storage has been configured. */
   get needsSetup(): boolean {
-    return this.status !== null && this.status.storage_root === '';
+    return this.status !== null && (this.status.needs_setup ?? this.status.storage_root === '');
   }
 
   /**

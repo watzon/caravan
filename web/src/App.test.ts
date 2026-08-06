@@ -834,6 +834,27 @@ describe('App shell', () => {
     expect(host.textContent).not.toContain('CARAVAN');
   });
 
+  it('prefers first run over login while the open server still needs setup', async () => {
+    statusBody = { ...STATUS, needs_setup: true };
+
+    app = mount(App, { target: host });
+    await settle();
+
+    expect(window.location.pathname).toBe('/first-run');
+    expect(host.textContent).toContain('Create your administrator account');
+    expect(host.textContent).not.toContain('Sign in');
+  });
+
+  it('links the public-bind warning to account settings', async () => {
+    statusBody = { ...STATUS, listening_publicly: true, password_set: false };
+
+    app = mount(App, { target: host });
+    await settle();
+
+    expect(host.querySelector('a[href="/settings/users"]')).not.toBeNull();
+    expect(host.textContent).toContain('Settings → Users');
+  });
+
   it('sends the user to first run when there is no storage root', async () => {
     vi.stubGlobal(
       'fetch',

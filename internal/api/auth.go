@@ -632,6 +632,59 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, authResponse{PasswordSet: true})
 }
 
+// handleSetupAdmin creates the one account allowed during first-run setup.
+// It is intentionally separate from POST /users: unlike that admin-only route,
+// this is the unauthenticated forcing function that closes the implicit-admin
+// server and signs the new administrator in immediately.
+func (s *server) handleSetupAdmin(w http.ResponseWriter, r *http.Request) {
+	var body loginRequest
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	if !s.logins.enter() {
+		writeError(w, http.StatusTooManyRequests, "too many login attempts; wait a moment and try again")
+		return
+	}
+	defer s.logins.leave()
+
+	// Count and insert are serialized for this process. The first successful
+	// insert closes the open-server path before another request can pass this
+	// check, so this endpoint can never create a second account.
+	s.setupMu.Lock()
+	defer s.setupMu.Unlock()
+	users, err := s.st.CountUsers(r.Context())
+	if err != nil {
+		s.writeStoreError(w, "count users", err)
+		return
+	}
+	if users != 0 {
+		writeError(w, http.StatusForbidden, "administrator setup is already complete")
+		return
+	}
+
+	username, ok := validUsername(w, body.Username)
+	if !ok {
+		return
+	}
+	hash, ok := hashNewPassword(w, s.log, body.Password)
+	if !ok {
+		return
+	}
+	user := &core.User{Username: username, PasswordHash: hash, Role: core.RoleAdmin}
+	if err := s.st.CreateUser(r.Context(), user); err != nil {
+		if errors.Is(err, store.ErrUsernameTaken) {
+			writeError(w, http.StatusForbidden, "administrator setup is already complete")
+			return
+		}
+		s.writeStoreError(w, "create administrator", err)
+		return
+	}
+	if !s.startSession(w, user.ID) {
+		return
+	}
+	writeJSON(w, http.StatusCreated, authResponse{PasswordSet: true})
+}
+
 // meResponse is who the caller is, as GET /auth/me reports it.
 type meResponse struct {
 	Username string `json:"username"`

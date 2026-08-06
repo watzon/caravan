@@ -32,7 +32,13 @@
   import { pushToast } from '../state/toast.svelte';
   import { system } from '../state/system.svelte';
 
+  import { session } from '../state/session.svelte';
   let root = $state(system.status?.storage_root ?? '');
+  let adminUsername = $state('');
+  let adminPassword = $state('');
+  let adminConfirm = $state('');
+  let accountReady = $state(false);
+  let accountError = $state<string | null>(null);
   let tmdbKey = $state('');
   let scanNow = $state(true);
   let saving = $state(false);
@@ -93,11 +99,38 @@
     proven = null;
     testResult = null;
   }
+  async function createAccount() {
+    accountError = null;
+    if (adminUsername.trim() === '') {
+      accountError = 'Enter a username for the administrator account.';
+      return;
+    }
+    if (adminPassword.length < 8) {
+      accountError = 'Use a password with at least 8 characters.';
+      return;
+    }
+    if (adminPassword !== adminConfirm) {
+      accountError = 'The passwords do not match.';
+      return;
+    }
+    try {
+      await api.setupAdmin(adminUsername.trim(), adminPassword);
+      await session.refresh();
+      accountReady = true;
+      accountError = null;
+    } catch (err) {
+      accountError = errorText(err);
+    }
+  }
 
   async function save() {
     const value = root.trim();
     if (value === '') {
       error = 'Enter the folder Caravan should treat as its storage root.';
+      return;
+    }
+    if (!accountReady) {
+      error = 'Create the administrator account before finishing setup.';
       return;
     }
     if (trimmedKey === '' && !skipped) {
@@ -183,7 +216,7 @@
         Let’s load the caravan
       </h1>
       <p class="max-w-md text-base text-ink-secondary">
-        Three decisions and you’re done. Everything else ships with sensible defaults and can be
+        Four decisions and you’re done. Everything else ships with sensible defaults and can be
         changed later in Settings.
       </p>
     </header>
@@ -195,7 +228,38 @@
         save();
       }}>
       <section class="flex flex-col gap-4 rounded-lg border border-border bg-surface p-5">
-        {@render step(1, 'Where does your media live?')}
+        {@render step(1, 'Create your administrator account')}
+        {#if accountReady}
+          <p class="flex items-center gap-2 text-sm text-success">
+            <span class="size-2 shrink-0 rounded-full bg-success"></span>
+            Administrator account created. Keep these credentials safe.
+          </p>
+        {:else}
+          <Field label="Username" for="admin-username" error={accountError}>
+            <TextInput id="admin-username" bind:value={adminUsername} autocomplete="username" />
+          </Field>
+          <div class="grid gap-4 sm:grid-cols-2">
+            <Field label="Password" for="admin-password" help="At least 8 characters.">
+              <TextInput
+                id="admin-password"
+                bind:value={adminPassword}
+                type="password"
+                autocomplete="new-password" />
+            </Field>
+            <Field label="Confirm password" for="admin-confirm">
+              <TextInput
+                id="admin-confirm"
+                bind:value={adminConfirm}
+                type="password"
+                autocomplete="new-password" />
+            </Field>
+          </div>
+          <Button variant="secondary" type="button" onclick={createAccount}>Create account</Button>
+        {/if}
+      </section>
+
+      <section class="flex flex-col gap-4 rounded-lg border border-border bg-surface p-5">
+        {@render step(2, 'Where does your media live?')}
         <Field
           label="Storage root"
           for="storage-root"
@@ -205,7 +269,7 @@
       </section>
 
       <section class="flex flex-col gap-4 rounded-lg border border-border bg-surface p-5">
-        {@render step(2, 'How should Caravan identify it?')}
+        {@render step(3, 'How should Caravan identify it?')}
         <Field
           label="TMDB API key"
           for="tmdb-key"
@@ -247,7 +311,7 @@
 
       <section class="flex flex-col gap-3 rounded-lg border border-border bg-surface p-5">
         <div class="flex items-start justify-between gap-4">
-          {@render step(3, 'Already have a library?')}
+          {@render step(4, 'Already have a library?')}
           <Toggle
             checked={scanNow}
             labelHidden

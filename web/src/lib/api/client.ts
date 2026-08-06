@@ -200,6 +200,9 @@ export const endpoints = {
   calendarFeed: (apiKey: string) => `${API_BASE}/calendar.ics?apikey=${encodeURIComponent(apiKey)}`,
   regenerateAPIKey: () => `${API_BASE}/settings/apikey`,
 
+  // The first-run administrator is the one unauthenticated account write. The
+  // response sets the HttpOnly session cookie used by all later setup calls.
+  setupAdmin: () => `${API_BASE}/setup/admin`,
   // The optional login (SPEC §11). The session lives in an HttpOnly cookie, so
   // no token is ever handled here.
   login: () => `${API_BASE}/auth/login`,
@@ -985,6 +988,8 @@ export const api = {
    * nothing here reads or stores a token; a 401 from any other call is what
    * tells the SPA the session is gone.
    * --------------------------------------------------------------------- */
+  setupAdmin: (username: string, password: string) =>
+    request<AuthState>(endpoints.setupAdmin(), { method: 'POST', body: { username, password } }),
 
   login: (username: string, password: string) =>
     request<AuthState>(endpoints.login(), { method: 'POST', body: { username, password } }),

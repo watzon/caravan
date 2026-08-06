@@ -694,6 +694,7 @@ func TestMemberIsForbiddenNotUnauthorized(t *testing.T) {
 		"/api/v1/library/movies",
 		"/api/v1/wanted",
 		"/api/v1/downloads",
+		"/api/v1/events",
 		"/api/v1/users",
 	} {
 		rec := doAuth(t, h, http.MethodGet, target, "", withCookie(member))

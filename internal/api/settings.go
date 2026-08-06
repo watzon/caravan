@@ -725,10 +725,14 @@ type statusResponse struct {
 	// False hides the whole convert-for-TV affordance and degrades the
 	// TV-incompatible warning to informational (SPEC §8).
 	FFmpegAvailable bool `json:"ffmpeg_available"`
+	// NeedsSetup keeps the SPA on first-run until both an administrator exists
+	// and the storage step is complete. It is public through this endpoint while
+	// the server is still open, so the SPA can choose setup before login.
+	NeedsSetup bool `json:"needs_setup"`
 	// PasswordSet and ListeningPublicly are the two halves of the nag in
 	// SPEC §11: a server reachable from other machines with no login on it.
 	// Since accounts replaced the single password, PasswordSet means "this
-	// server has at least one account and is therefore gated" — the same
+	// server has at least one account and is therefore gated" - the same
 	// question the SPA has always asked of it. Neither is a credential.
 	PasswordSet       bool `json:"password_set"`
 	ListeningPublicly bool `json:"listening_publicly"`
@@ -904,6 +908,7 @@ func (s *server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 		UnhealthyDownloadClients:    s.unhealthyDownloadClients(),
 		StashUnreachable:            s.stashHealth(adultVisible),
 		FFmpegAvailable:             s.ffmpegAvailable(),
+		NeedsSetup:                  root == "" || users == 0,
 		PasswordSet:                 users > 0,
 		ListeningPublicly:           listeningPublicly(s.listenAddr),
 		Dirty:                       s.dirty.Load(),
