@@ -25,28 +25,60 @@
   let scroller = $state<HTMLDivElement | null>(null);
   let canScrollLeft = $state(false);
   let canScrollRight = $state(false);
+  let requestedScrollLeft: number | null = null;
 
   function updateArrows() {
     const el = scroller;
     if (!el) return;
-    // The 1px slack absorbs fractional scroll positions on zoomed displays.
-    canScrollLeft = el.scrollLeft > 1;
+    // Once the browser has arrived, there is no longer a pending destination
+    // for later clicks to extend.
+    if (requestedScrollLeft !== null && Math.abs(el.scrollLeft - requestedScrollLeft) <= 1) {
+      requestedScrollLeft = null;
+    }
+    canScrollLeft = el.scrollLeft > 0;
     canScrollRight = el.scrollLeft + el.clientWidth < el.scrollWidth - 1;
+  }
+
+  function cancelPendingScroll() {
+    requestedScrollLeft = null;
+  }
+
+  function cancelPendingScrollOnKeydown(event: KeyboardEvent) {
+    switch (event.key) {
+      case 'ArrowLeft':
+      case 'ArrowRight':
+      case 'ArrowUp':
+      case 'ArrowDown':
+      case 'PageUp':
+      case 'PageDown':
+      case 'Home':
+      case 'End':
+      case ' ':
+        cancelPendingScroll();
+    }
   }
 
   // Arrow state depends on content width, so recompute when the list changes,
   // not only when it scrolls.
   $effect(() => {
     void items.length;
+    requestedScrollLeft = null;
     updateArrows();
   });
 
   function page(direction: -1 | 1) {
     const el = scroller;
     if (!el) return;
-    // A near-full viewport per step keeps the last visible card on screen as
-    // the first card of the next page, so the reader keeps their place.
-    el.scrollBy({ left: direction * el.clientWidth * 0.9, behavior: 'smooth' });
+    // Keep an explicit destination while a smooth scroll is in flight. A
+    // second click can then extend the pending destination instead of asking
+    // the browser to scroll again from a position it has not updated yet.
+    const step = el.clientWidth * 0.9;
+    const pending = requestedScrollLeft;
+    const continuesPendingScroll = pending !== null && direction * (pending - el.scrollLeft) > 1;
+    const base = continuesPendingScroll ? pending : el.scrollLeft;
+    const target = Math.max(0, Math.min(el.scrollWidth - el.clientWidth, base + direction * step));
+    requestedScrollLeft = target;
+    el.scrollTo({ left: target, behavior: 'smooth' });
   }
 </script>
 
@@ -87,7 +119,16 @@
       {/if}
     </div>
 
-    <div bind:this={scroller} onscroll={updateArrows} class="flex gap-4 overflow-x-auto pb-1">
+    <!-- These handlers only reconcile paging state; the browser still owns scrolling. -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      bind:this={scroller}
+      onscroll={updateArrows}
+      onpointerdown={cancelPendingScroll}
+      onwheel={cancelPendingScroll}
+      ontouchstart={cancelPendingScroll}
+      onkeydown={cancelPendingScrollOnKeydown}
+      class="flex gap-4 overflow-x-auto pb-1">
       {#each items as item (`${item.media_type}-${item.tmdb_id}`)}
         <div class="w-32 shrink-0 sm:w-40">
           <DiscoverCard {item} {showType} />

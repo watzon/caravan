@@ -59,6 +59,7 @@
       return `${item.file_quality || 'Unknown quality'} on disk, cutoff 1080p`;
     }
     if ('air_date' in item && item.air_date) return `Aired ${formatDate(item.air_date)}`;
+    if ('air_date' in item) return 'Air date unknown';
     return 'No file in the library';
   }
 

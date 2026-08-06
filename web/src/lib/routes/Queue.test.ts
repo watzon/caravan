@@ -122,6 +122,19 @@ describe('Queue filtering', () => {
     expect(rowNames()).toEqual(['finished-parked-torrent', 'imported-and-done']);
   });
 
+  it('replaces dead rate and ETA metrics on finished rows', async () => {
+    await mountQueue();
+    pill('Done').click();
+    flushSync();
+
+    for (const row of host.querySelectorAll('li')) {
+      expect(row.textContent).toContain('Download complete');
+      expect(row.textContent).not.toContain('ETA');
+      expect(row.textContent).not.toContain('↓');
+      expect(row.textContent).not.toContain('↑');
+    }
+  });
+
   it('shows everything under All', async () => {
     await mountQueue();
     pill('All').click();

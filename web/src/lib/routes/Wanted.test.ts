@@ -30,6 +30,7 @@ beforeEach(() => {
         ],
         episodes: [
           { id: 10, series_id: 3, series_title: 'Severance', season_number: 1, episode_number: 2, title: 'Half Loop', air_date: '2026-07-14', poster_path: 'TV/Severance/poster.jpg', poster_url: '', reason: 'missing', file_quality: '' },
+          { id: 11, series_id: 3, series_title: 'Severance', season_number: 1, episode_number: 3, title: 'In Perpetuity', air_date: '', poster_path: 'TV/Severance/poster.jpg', poster_url: '', reason: 'missing', file_quality: '' },
         ],
       });
     }
@@ -63,6 +64,8 @@ describe('Wanted', () => {
     expect(host.textContent).toContain('Episodes');
     expect(host.textContent).toContain('Arrival (2016)');
     expect(host.textContent).toContain('Severance - S01E02 - Half Loop');
+    expect(host.textContent).toContain('Severance - S01E03 - In Perpetuity');
+    expect(host.textContent).toContain('Air date unknown');
     expect(host.textContent).not.toContain('Blade Runner');
 
     const belowCutoff = [...host.querySelectorAll('[role="tab"]')].find((tab) =>

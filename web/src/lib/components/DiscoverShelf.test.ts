@@ -78,11 +78,11 @@ describe('DiscoverShelf', () => {
     expect(host.querySelectorAll('button')).toHaveLength(0);
   });
 
-  it('pages the scroller and flips the arrows with the position', () => {
+  it('keeps rapid paging clicks instead of dropping them during smooth scroll', () => {
     show(Array.from({ length: 12 }, (_, i) => item(i + 1)));
     const el = scroller(0);
-    const scrollBy = vi.fn();
-    el.scrollBy = scrollBy;
+    const scrollTo = vi.fn();
+    el.scrollTo = scrollTo;
 
     // At the far left only the right arrow is live.
     expect(arrow('Scroll Trending left')?.disabled).toBe(true);
@@ -90,7 +90,16 @@ describe('DiscoverShelf', () => {
     expect(right?.disabled).toBe(false);
 
     right?.click();
-    expect(scrollBy).toHaveBeenCalledWith({ left: 600 * 0.9, behavior: 'smooth' });
+    right?.click();
+    expect(scrollTo.mock.calls).toEqual([
+      [{ left: 600 * 0.9, behavior: 'smooth' }],
+      [{ left: 600 * 0.9 * 2, behavior: 'smooth' }],
+    ]);
+
+    el.scrollLeft = 0.5;
+    el.dispatchEvent(new Event('scroll'));
+    flushSync();
+    expect(arrow('Scroll Trending left')?.disabled).toBe(false);
 
     // At the far right the arrows trade places.
     el.scrollLeft = 1200;
@@ -98,5 +107,43 @@ describe('DiscoverShelf', () => {
     flushSync();
     expect(arrow('Scroll Trending left')?.disabled).toBe(false);
     expect(arrow('Scroll Trending right')?.disabled).toBe(true);
+  });
+
+  it('pages from the current position after user scrolling interrupts a pending page', () => {
+    show(Array.from({ length: 12 }, (_, i) => item(i + 1)));
+    const el = scroller(0);
+    const scrollTo = vi.fn();
+    el.scrollTo = scrollTo;
+
+    arrow('Scroll Trending right')?.click();
+    expect(scrollTo).toHaveBeenLastCalledWith({ left: 540, behavior: 'smooth' });
+
+    // Input arrives before the browser reports the manually changed position.
+    el.dispatchEvent(new Event('wheel'));
+    el.scrollLeft = 240;
+    el.dispatchEvent(new Event('scroll'));
+    flushSync();
+
+    arrow('Scroll Trending right')?.click();
+    expect(scrollTo).toHaveBeenLastCalledWith({ left: 780, behavior: 'smooth' });
+  });
+
+  it('reconciles a pending page once the browser reaches its destination', () => {
+    show(Array.from({ length: 12 }, (_, i) => item(i + 1)));
+    const el = scroller(0);
+    const scrollTo = vi.fn();
+    el.scrollTo = scrollTo;
+
+    arrow('Scroll Trending right')?.click();
+    el.scrollLeft = 540;
+    el.dispatchEvent(new Event('scroll'));
+    flushSync();
+
+    el.scrollLeft = 240;
+    el.dispatchEvent(new Event('scroll'));
+    flushSync();
+    arrow('Scroll Trending right')?.click();
+
+    expect(scrollTo).toHaveBeenLastCalledWith({ left: 780, behavior: 'smooth' });
   });
 });

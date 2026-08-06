@@ -55,8 +55,26 @@
     if (entry.kind === 'movie') return entry.title;
     const code = entry.season_number === undefined || entry.episode_number === undefined
       ? ''
-      : `${episodeCode(entry.season_number, entry.episode_number)} `;
-    return `${code}${entry.episode_title || entry.title}`;
+      : episodeCode(entry.season_number, entry.episode_number);
+    const episodeTitle = entry.episode_title?.trim() ?? '';
+    if (!episodeTitle || /^Episode(?:\s+\d+)?$/i.test(episodeTitle)) {
+      return [entry.title, code].filter(Boolean).join(' ');
+    }
+    return [code, episodeTitle].filter(Boolean).join(' ');
+  }
+
+  function entryLabel(entry: CalendarEntry, status: string) {
+    const title = entryTitle(entry);
+    const identified = entry.kind === 'episode' && !title.startsWith(entry.title)
+      ? `${entry.title} ${title}`
+      : title;
+    return `${identified}, ${status}`;
+  }
+
+  function agendaTitle(entry: CalendarEntry) {
+    const title = entryTitle(entry);
+    if (entry.kind === 'movie' || !entry.series_id || title.startsWith(entry.title)) return title;
+    return `${entry.title} - ${title}`;
   }
 
   let month = $state(todayMonth());
@@ -147,22 +165,30 @@
 <div class="flex max-w-[1360px] flex-col gap-5">
   <div class="flex flex-wrap items-center gap-3">
     <div class="flex items-center gap-1" aria-label="Calendar month navigation">
-      <Button variant="ghost" size="sm" title="Previous month" onclick={() => (month = addMonths(month, -1))}>
+      <button
+        type="button"
+        aria-label="Previous month"
+        title="Previous month"
+        onclick={() => (month = addMonths(month, -1))}
+        class="inline-flex h-7 items-center justify-center rounded-md px-2 text-sm font-medium text-ink-secondary transition-colors duration-150 ease-out hover:bg-raised hover:text-ink">
         <Icon name="back" size={14} />
-        <span class="sr-only">Previous month</span>
-      </Button>
+      </button>
       <p class="min-w-44 text-center font-display text-lg font-semibold tracking-tight text-ink">{MONTH_FORMAT.format(month)}</p>
-      <Button variant="ghost" size="sm" title="Next month" onclick={() => (month = addMonths(month, 1))}>
+      <button
+        type="button"
+        aria-label="Next month"
+        title="Next month"
+        onclick={() => (month = addMonths(month, 1))}
+        class="inline-flex h-7 items-center justify-center rounded-md px-2 text-sm font-medium text-ink-secondary transition-colors duration-150 ease-out hover:bg-raised hover:text-ink">
         <Icon name="chevronRight" size={14} />
-        <span class="sr-only">Next month</span>
-      </Button>
+      </button>
       <Button variant="secondary" size="sm" onclick={() => (month = todayMonth())}>Today</Button>
     </div>
   </div>
 
   <div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-ink-secondary" aria-label="Calendar status legend">
     {#each Object.entries(STATUS) as [status, meta] (status)}
-      <span class="inline-flex items-center gap-2"><span class="size-2 rounded-full {TONE_DOT[meta.tone]}"></span>{meta.label}</span>
+      <span class="inline-flex items-center gap-2"><span class="size-2 rounded-full {TONE_DOT[meta.tone]}" aria-hidden="true"></span>{meta.label}</span>
     {/each}
   </div>  {#if error && entries === null}
     <LoadError message={error} onretry={() => load(rangeStart, rangeEnd)} />
@@ -182,13 +208,20 @@
             {@const cellEntries = byDate.get(dateKey) ?? []}
             {@const inMonth = date.getMonth() === month.getMonth()}
             {@const isToday = dateKey === iso(new Date())}
-            <div class="min-h-28 border-b border-r border-border p-2 last:border-r-0 {inMonth ? 'bg-surface' : 'bg-bg/40'} {isToday ? 'ring-1 ring-inset ring-accent' : ''}">
-              <p class="mb-1 font-mono text-xs {inMonth ? 'text-ink-secondary' : 'text-ink-muted'}">{date.getDate()}</p>
+            <div
+              data-today={isToday ? 'true' : undefined}
+              class="min-h-28 border-b border-r border-border p-2 last:border-r-0 {isToday ? 'bg-accent-tint' : inMonth ? 'bg-surface' : 'bg-bg/40'}">
+              <p class="mb-1 font-mono text-xs {isToday ? 'inline-flex size-5 items-center justify-center rounded-full bg-accent text-ink-inverse' : inMonth ? 'text-ink-secondary' : 'text-ink-muted'}">{date.getDate()}</p>
               <div class="flex flex-col gap-1">
                 {#each cellEntries.slice(0, 3) as entry (entry.kind + entry.title + entry.date)}
                   {@const meta = STATUS[entry.status]}
-                  <a href={entry.kind === 'movie' && entry.movie_id ? `/movies/${entry.movie_id}` : entry.series_id ? `/series/${entry.series_id}` : undefined} class="truncate rounded-sm px-1.5 py-0.5 text-xs {TONE_TINT[meta.tone]} {TONE_TEXT[meta.tone]}" title={entryTitle(entry)}>
-                    {entryTitle(entry)}
+                  <a
+                    href={entry.kind === 'movie' && entry.movie_id ? `/movies/${entry.movie_id}` : entry.series_id ? `/series/${entry.series_id}` : undefined}
+                    class="flex min-w-0 items-center gap-1.5 rounded-sm px-1.5 py-0.5 text-xs {TONE_TINT[meta.tone]} {TONE_TEXT[meta.tone]}"
+                    title={entryTitle(entry)}
+                    aria-label={entryLabel(entry, meta.label)}>
+                    <span class="min-w-0 truncate">{entryTitle(entry)}</span>
+                    <span class="shrink-0 font-medium">{meta.label}</span>
                   </a>
                 {/each}
                 {#if cellEntries.length > 3}
@@ -213,7 +246,7 @@
               <li class="flex items-center gap-3 border-b border-border px-3 py-3 last:border-b-0">
                 <span class="size-2 shrink-0 rounded-full {TONE_DOT[meta.tone]}" title={meta.label}></span>
                 <Badge tone={entry.kind === 'movie' ? 'neutral' : 'info'}>{entry.kind === 'movie' ? 'Movie' : 'Episode'}</Badge>
-                <a href={entry.kind === 'movie' && entry.movie_id ? `/movies/${entry.movie_id}` : entry.series_id ? `/series/${entry.series_id}` : undefined} class="min-w-0 flex-1 truncate font-medium text-ink hover:text-accent-text">{entry.kind === 'episode' && entry.series_id ? `${entry.title} - ${entryTitle(entry)}` : entryTitle(entry)}</a>
+                <a href={entry.kind === 'movie' && entry.movie_id ? `/movies/${entry.movie_id}` : entry.series_id ? `/series/${entry.series_id}` : undefined} class="min-w-0 flex-1 truncate font-medium text-ink hover:text-accent-text">{agendaTitle(entry)}</a>
                 <span class="text-sm {TONE_TEXT[meta.tone]}">{meta.label}</span>
               </li>
             {/each}

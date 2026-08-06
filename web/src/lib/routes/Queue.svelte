@@ -200,6 +200,7 @@
         {@const meta = downloadStateMeta(download.state)}
         {@const paused = download.state === 'paused'}
         {@const phaseLabel = downloadPhaseLabel(download)}
+        {@const finished = isFinishedDownload(download)}
         {@const seedingContext = download.state === 'seeding' || (paused && download.progress >= 1)}
         {@const pauseLabel = paused
           ? seedingContext
@@ -291,11 +292,15 @@
                 : UNKNOWN}
             </span>
             <span>{Math.round(Math.max(0, Math.min(1, download.progress)) * 100)}%</span>
-            <span title="Download rate">↓ {formatRate(download.down_rate)}</span>
-            <span title="Upload rate">↑ {formatRate(download.up_rate)}</span>
-            <span title="Estimated time remaining">
-              ETA {formatDuration(download.eta_seconds)}
-            </span>
+            {#if finished}
+              <span title="Transfer finished">Download complete</span>
+            {:else}
+              <span title="Download rate">↓ {formatRate(download.down_rate)}</span>
+              <span title="Upload rate">↑ {formatRate(download.up_rate)}</span>
+              <span title="Estimated time remaining">
+                ETA {formatDuration(download.eta_seconds)}
+              </span>
+            {/if}
             {#if download.state === 'seeding' || download.ratio > 0}
               <span title="Share ratio">ratio {download.ratio.toFixed(2)}</span>
             {/if}

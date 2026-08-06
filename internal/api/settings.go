@@ -892,6 +892,8 @@ func (s *server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 			Sites:      sites,
 			MediaFiles: len(files),
 			Unmatched:  len(unmatched),
+			// The shell badge covers both wanted scopes. The Movies page chip is
+			// intentionally movie-only, so the two counts can differ.
 			Wanted:     len(wantedLists.Movies) + len(wantedLists.Episodes),
 			Converting: converting,
 		},

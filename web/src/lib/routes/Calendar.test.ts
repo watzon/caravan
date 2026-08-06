@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import Calendar from './Calendar.svelte';
+import TopBar from '../layout/TopBar.svelte';
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -19,6 +20,7 @@ function tomorrowISO() {
 }
 let host: HTMLElement;
 let app: Record<string, unknown>;
+let topbar: Record<string, unknown> | undefined;
 
 beforeEach(() => {
   const date = todayISO();
@@ -30,6 +32,7 @@ beforeEach(() => {
         { kind: 'movie', date, title: 'In Progress', movie_id: 2, monitored: true, has_file: false, status: 'downloading' },
         { kind: 'movie', date, title: 'Still Missing', movie_id: 3, monitored: true, has_file: false, status: 'missing' },
         { kind: 'episode', date: tomorrow, title: 'Future', series_id: 4, season_number: 1, episode_number: 2, episode_title: 'Future', monitored: true, has_file: false, status: 'unaired' },
+        { kind: 'episode', date: tomorrow, title: 'Chainsmoker Cat', series_id: 5, season_number: 1, episode_number: 6, episode_title: 'Episode 6', monitored: true, has_file: false, status: 'unaired' },
       ] });
     }
     throw new Error(`unexpected fetch: ${String(input)}`);
@@ -37,10 +40,12 @@ beforeEach(() => {
   vi.useFakeTimers();
   host = document.createElement('div');
   document.body.appendChild(host);
+  topbar = undefined;
 });
 
 afterEach(() => {
   unmount(app);
+  if (topbar) unmount(topbar);
   host.remove();
   vi.unstubAllGlobals();
   vi.useRealTimers();
@@ -69,5 +74,54 @@ describe('Calendar', () => {
       expect(entry, `${title} calendar entry`).not.toBeNull();
       expect(entry?.className).toContain(expectedClass);
     }
+
+    expect(host.querySelector('[title="Chainsmoker Cat S01E06"]')).not.toBeNull();
+  });
+
+  it('names month controls and shows and announces status in each day chip', async () => {
+    app = mount(Calendar, { target: host });
+    await settle();
+
+    expect(host.querySelector('button[aria-label="Previous month"]')).not.toBeNull();
+    expect(host.querySelector('button[aria-label="Next month"]')).not.toBeNull();
+
+    const expectations: Array<[string, string, string]> = [
+      ['On Disk', 'On disk', 'On Disk, On disk'],
+      ['In Progress', 'Downloading', 'In Progress, Downloading'],
+      ['Still Missing', 'Missing', 'Still Missing, Missing'],
+      ['S01E02 Future', 'Not yet released', 'Future S01E02 Future, Not yet released'],
+      ['Chainsmoker Cat S01E06', 'Not yet released', 'Chainsmoker Cat S01E06, Not yet released'],
+    ];
+    for (const [title, visibleStatus, accessibleName] of expectations) {
+      const entry = host.querySelector(`[title="${title}"]`);
+      expect(entry?.querySelector('span:last-child')?.textContent).toBe(visibleStatus);
+      expect(entry?.getAttribute('aria-label')).toBe(accessibleName);
+    }
+  });
+
+  it('shows a generic episode once in Agenda with its episode code', async () => {
+    app = mount(Calendar, { target: host });
+    await settle();
+    topbar = mount(TopBar, { target: host, props: { title: 'Calendar' } });
+    flushSync();
+
+    const agendaButton = Array.from(host.querySelectorAll('button')).find((button) => button.textContent === 'Agenda');
+    expect(agendaButton).toBeDefined();
+    agendaButton?.click();
+    flushSync();
+
+    const agenda = host.querySelector('[aria-label="Calendar agenda"]');
+    expect(agenda?.querySelector('a[href="/series/5"]')?.textContent).toBe('Chainsmoker Cat S01E06');
+  });
+
+  it('marks today without a focus-style ring', async () => {
+    app = mount(Calendar, { target: host });
+    await settle();
+
+    const today = host.querySelector('[data-today="true"]');
+    expect(today).not.toBeNull();
+    expect(today?.className).toContain('bg-accent-tint');
+    expect(today?.className).not.toContain('ring-');
+    expect(today?.querySelector('p')?.className).toContain('rounded-full');
   });
 });

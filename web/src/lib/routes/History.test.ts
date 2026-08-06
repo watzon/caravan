@@ -8,14 +8,21 @@ function jsonResponse(body: unknown): Response {
 
 let host: HTMLElement;
 let app: Record<string, unknown>;
+let eventRows: Array<Record<string, unknown>>;
 
 beforeEach(() => {
+  eventRows = [
+    { id: 6, level: 'info', category: 'system', message: 'Database verified after an unclean shutdown', detail: 'Downloads can be resumed.', movie_id: 0, series_id: 0, created_at: '2026-08-01T10:06:00Z' },
+    { id: 5, level: 'info', category: 'system', message: 'Database verified after an unclean shutdown', detail: 'Downloads can be resumed.', movie_id: 0, series_id: 0, created_at: '2026-08-01T10:05:00Z' },
+    { id: 4, level: 'info', category: 'scan', message: 'Newest event', detail: '', movie_id: 0, series_id: 0, created_at: '2026-08-01T10:04:00Z' },
+    { id: 3, level: 'info', category: 'system', message: 'Database verified after an unclean shutdown', detail: 'Downloads can be resumed.', movie_id: 0, series_id: 0, created_at: '2026-08-01T10:03:00Z' },
+  ];
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url.includes('/events?')) {
       return jsonResponse(url.includes('cursor=events-next')
         ? { events: [{ id: 1, level: 'info', category: 'scan', message: 'Older event', detail: '', movie_id: 0, series_id: 0, created_at: '2026-08-01T10:00:00Z' }], next_cursor: '' }
-        : { events: [{ id: 2, level: 'info', category: 'scan', message: 'Newest event', detail: '', movie_id: 0, series_id: 0, created_at: '2026-08-01T10:01:00Z' }], next_cursor: 'events-next' });
+        : { events: eventRows, next_cursor: 'events-next' });
     }
     if (url.includes('/jobs?')) {
       return jsonResponse(url.includes('cursor=jobs-next')
@@ -65,6 +72,25 @@ async function settle() {
 }
 
 describe('History', () => {
+  it('coalesces only consecutive recovery confirmations', async () => {
+    app = mount(History, { target: host });
+    await settle();
+
+    const rows = host.querySelectorAll('[aria-label="Activity events"] li');
+    expect(rows).toHaveLength(3);
+    expect(rows[0]?.textContent).toContain('2 times');
+    expect(rows[2]?.textContent).not.toContain('2 times');
+  });
+
+  it('keeps history separate from current system health', async () => {
+    eventRows = [];
+    app = mount(History, { target: host });
+    await settle();
+
+    expect(host.textContent).toContain('No activity recorded');
+    expect(host.textContent).toContain('Current health appears in the system status panel.');
+  });
+
   it('renders the jobs feed with job state, attempts and failure detail', async () => {
     app = mount(History, { target: host });
     await settle();
