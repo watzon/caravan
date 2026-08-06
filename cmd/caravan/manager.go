@@ -390,6 +390,25 @@ func (a *libraryAdapter) SyncSite(ctx context.Context, seriesID int64) error {
 	return mgr.SyncSite(ctx, seriesID)
 }
 
+// MoveMovie and MoveSeries run the core.JobMoveItem handler's body. Through
+// current for the usual reason: the storage root and providers are whatever
+// the settings say when the job RUNS, not when it was queued.
+func (a *libraryAdapter) MoveMovie(ctx context.Context, movieID, libraryID int64) error {
+	mgr, err := a.current(ctx)
+	if err != nil {
+		return err
+	}
+	return mgr.MoveMovie(ctx, movieID, libraryID)
+}
+
+func (a *libraryAdapter) MoveSeries(ctx context.Context, seriesID, libraryID int64) error {
+	mgr, err := a.current(ctx)
+	if err != nil {
+		return err
+	}
+	return mgr.MoveSeries(ctx, seriesID, libraryID)
+}
+
 // AdultMetadata is the provider the HTTP layer searches sites and scenes
 // through. It reads the settings table on every call, exactly as Metadata does,
 // so enabling the module or pasting a key takes effect without a restart — and,

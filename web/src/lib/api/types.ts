@@ -86,6 +86,8 @@ export interface Movie {
   poster_url: string;
   monitored: boolean;
   quality_profile_id: number;
+  /** The library that owns the movie; 0 on rows from before libraries were plural. */
+  library_id: number;
   release_date: string;
   /** The release stage the movie's automatic search waits for. */
   min_availability: MinAvailability;
@@ -146,6 +148,8 @@ export interface Series {
   poster_url: string;
   monitored: boolean;
   quality_profile_id: number;
+  /** The library that owns the series; 0 on rows from before libraries were plural. */
+  library_id: number;
   first_aired: string;
   added_at: string;
   updated_at: string;
@@ -1780,6 +1784,8 @@ export interface Site {
   poster_url: string;
   monitored: boolean;
   quality_profile_id: number;
+  /** The adult library that owns the site. */
+  library_id: number;
   added_at: string;
   updated_at: string;
   /** The grid's "18 / 240" badge — episode counts under this screen's nouns. */

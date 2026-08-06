@@ -14,7 +14,9 @@
   import RemoveItemModal from '../components/RemoveItemModal.svelte';
   import Skeleton from '../components/Skeleton.svelte';
   import MonitorButton from '../components/MonitorButton.svelte';
+  import MoveItemModal from '../components/MoveItemModal.svelte';
   import OverflowMenu from '../components/OverflowMenu.svelte';
+  import { libraries } from '../state/libraries.svelte';
   import StatusDot from '../components/StatusDot.svelte';
   import { UNKNOWN, formatBytes, formatDate, titleWithYear, truncateMiddle } from '../format';
   import MetadataLinks from '../components/MetadataLinks.svelte';
@@ -37,6 +39,13 @@
   let savingMonitored = $state(false);
   let searching = $state(false);
   let confirmingRemove = $state(false);
+  let movingLibrary = $state(false);
+  // Loaded once per session; the menu offers a move only when there is
+  // somewhere else of this kind to move to.
+  $effect(() => {
+    void libraries.load();
+  });
+  let canMove = $derived(libraries.ofKind('movie').length > 1);
   let removing = $state(false);
   let cast = $state<CastMember[]>([]);
   let loadAbort: AbortController | null = null;
@@ -224,6 +233,14 @@
             <OverflowMenu
               subject={movie.title}
               items={[
+                ...(canMove
+                  ? [
+                      {
+                        label: 'Move to library…',
+                        onselect: () => (movingLibrary = true),
+                      },
+                    ]
+                  : []),
                 {
                   label: 'Remove from library…',
                   danger: true,
@@ -372,6 +389,15 @@
         busy={removing}
         onconfirm={remove}
         onclose={() => (confirmingRemove = false)} />
+    {/if}
+    {#if movingLibrary}
+      <MoveItemModal
+        itemType="movie"
+        itemID={movie.id}
+        itemTitle={movie.title}
+        kind="movie"
+        currentLibraryID={movie.library_id}
+        onclose={() => (movingLibrary = false)} />
     {/if}
   {/if}
 </div>

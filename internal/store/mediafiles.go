@@ -152,6 +152,20 @@ func (s *Store) UpdateMediaFileConverted(ctx context.Context, id int64, path str
 	return affectedOne(res, "update converted media file", id)
 }
 
+// UpdateMediaFilePath repoints one media file row at the location a move put
+// its file. The row id survives on purpose — episode links reference it, and
+// a delete-and-reinsert would orphan them (the same reason
+// UpdateMediaFileConverted updates in place).
+func (s *Store) UpdateMediaFilePath(ctx context.Context, id int64, path string) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE media_files SET path = ?, modified_at = ? WHERE id = ?`,
+		path, formatTime(now()), id)
+	if err != nil {
+		return fmt.Errorf("store: update media file %d path: %w", id, err)
+	}
+	return affectedOne(res, "update media file path", id)
+}
+
 // ListMediaFiles returns every media file ordered by path.
 func (s *Store) ListMediaFiles(ctx context.Context) ([]core.MediaFile, error) {
 	return s.queryMediaFiles(ctx, "SELECT "+mediaFileColumns+" FROM media_files ORDER BY path")

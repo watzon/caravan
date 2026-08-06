@@ -49,6 +49,7 @@ type siteJSON struct {
 	PosterURL        string `json:"poster_url"`
 	Monitored        bool   `json:"monitored"`
 	QualityProfileID int64  `json:"quality_profile_id"`
+	LibraryID        int64  `json:"library_id"`
 	AddedAt          string `json:"added_at"`
 	UpdatedAt        string `json:"updated_at"`
 	// SceneCount and SceneFileCount are the grid's "18 / 240" badge, carried on
@@ -752,6 +753,7 @@ func siteDTO(sr core.Series) siteJSON {
 		PosterURL:        sr.PosterURL,
 		Monitored:        sr.Monitored,
 		QualityProfileID: sr.QualityProfileID,
+		LibraryID:        sr.LibraryID,
 		AddedAt:          jsonTime(sr.AddedAt),
 		UpdatedAt:        jsonTime(sr.UpdatedAt),
 	}

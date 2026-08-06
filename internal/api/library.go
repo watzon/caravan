@@ -31,6 +31,7 @@ type movieJSON struct {
 	PosterURL        string `json:"poster_url"`
 	Monitored        bool   `json:"monitored"`
 	QualityProfileID int64  `json:"quality_profile_id"`
+	LibraryID        int64  `json:"library_id"`
 	ReleaseDate      string `json:"release_date"`
 	// MinAvailability is the release stage the movie's automatic search waits
 	// for: announced, in_cinemas or released.
@@ -58,6 +59,7 @@ type seriesJSON struct {
 	PosterURL        string `json:"poster_url"`
 	Monitored        bool   `json:"monitored"`
 	QualityProfileID int64  `json:"quality_profile_id"`
+	LibraryID        int64  `json:"library_id"`
 	FirstAired       string `json:"first_aired"`
 	AddedAt          string `json:"added_at"`
 	UpdatedAt        string `json:"updated_at"`
@@ -133,6 +135,7 @@ func movieDTO(m core.Movie) movieJSON {
 		PosterURL:        m.PosterURL,
 		Monitored:        m.Monitored,
 		QualityProfileID: m.QualityProfileID,
+		LibraryID:        m.LibraryID,
 		ReleaseDate:      jsonTime(m.ReleaseDate),
 		MinAvailability:  m.MinAvailability,
 		AddedAt:          jsonTime(m.AddedAt),
@@ -156,6 +159,7 @@ func seriesDTO(sr core.Series) seriesJSON {
 		PosterURL:        sr.PosterURL,
 		Monitored:        sr.Monitored,
 		QualityProfileID: sr.QualityProfileID,
+		LibraryID:        sr.LibraryID,
 		FirstAired:       jsonTime(sr.FirstAired),
 		AddedAt:          jsonTime(sr.AddedAt),
 		UpdatedAt:        jsonTime(sr.UpdatedAt),
@@ -239,6 +243,83 @@ type addRequest struct {
 	// re-added title stays in the library it already lives in whatever this
 	// says: a move is an explicit operation, never a side effect of an add.
 	LibraryID int64 `json:"library_id"`
+}
+
+// moveRequest is the body of the two move endpoints: the target library.
+type moveRequest struct {
+	LibraryID int64 `json:"library_id"`
+}
+
+// handleMoveMovie queues a movie's move into another library. 202 rather
+// than 200: the transfer is a durable job, because a move is file I/O the
+// request must not own. The validation happens now, while the user is
+// watching — the job re-checks, but a target of the wrong kind should be a
+// 400 today, not a failed job tomorrow.
+func (s *server) handleMoveMovie(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var body moveRequest
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	if _, err := s.st.GetMovie(r.Context(), id); err != nil {
+		s.writeStoreError(w, "get movie", err)
+		return
+	}
+	if !s.validMoveTarget(w, r, body.LibraryID, core.LibraryKindMovie) {
+		return
+	}
+	s.enqueueMove(w, r, core.MediaTypeMovie, id, body.LibraryID)
+}
+
+// handleMoveSeries is handleMoveMovie's series twin, covering adult sites
+// too: the series must be visible to the caller, and the target must speak
+// the series' kind.
+func (s *server) handleMoveSeries(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var body moveRequest
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	sr, ok := s.getVisibleSeries(w, r, id)
+	if !ok {
+		return
+	}
+	if !s.validMoveTarget(w, r, body.LibraryID, core.LibraryKindForSeries(sr.Kind)) {
+		return
+	}
+	s.enqueueMove(w, r, core.MediaTypeSeries, id, body.LibraryID)
+}
+
+func (s *server) validMoveTarget(w http.ResponseWriter, r *http.Request, libraryID int64, kind string) bool {
+	if libraryID <= 0 {
+		writeError(w, http.StatusBadRequest, "library_id is required")
+		return false
+	}
+	lib, ok := s.getVisibleLibrary(w, r, libraryID)
+	if !ok {
+		return false
+	}
+	if lib.Kind != kind {
+		writeError(w, http.StatusBadRequest, "library holds a different kind of item")
+		return false
+	}
+	return true
+}
+
+func (s *server) enqueueMove(w http.ResponseWriter, r *http.Request, itemType string, itemID, libraryID int64) {
+	if _, err := s.enqueueSearchJob(r.Context(), core.JobMoveItem, core.JobMoveItemPayload{
+		ItemType: itemType, ItemID: itemID, LibraryID: libraryID,
+	}); err != nil {
+		s.writeStoreError(w, "queue move", err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"status": "moving"})
 }
 
 // validAddLibraryID validates an add's library target, writing the refusal

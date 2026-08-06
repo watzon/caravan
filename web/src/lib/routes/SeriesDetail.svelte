@@ -17,7 +17,9 @@
   import Poster from '../components/Poster.svelte';
   import RemoveItemModal from '../components/RemoveItemModal.svelte';
   import MonitorButton from '../components/MonitorButton.svelte';
+  import MoveItemModal from '../components/MoveItemModal.svelte';
   import OverflowMenu from '../components/OverflowMenu.svelte';
+  import { libraries } from '../state/libraries.svelte';
   import Skeleton from '../components/Skeleton.svelte';
   import StatusDot from '../components/StatusDot.svelte';
   import Toggle from '../components/Toggle.svelte';
@@ -49,6 +51,11 @@
   let busy = $state(false);
   let searching = $state(false);
   let confirmingRemove = $state(false);
+  let movingLibrary = $state(false);
+  $effect(() => {
+    void libraries.load();
+  });
+  let canMove = $derived(libraries.ofKind('tv').length > 1);
   let removing = $state(false);
   let collapsed = $state<Record<number, boolean>>({});
 
@@ -212,6 +219,14 @@
             <OverflowMenu
               subject={current.title}
               items={[
+                ...(canMove
+                  ? [
+                      {
+                        label: 'Move to library…',
+                        onselect: () => (movingLibrary = true),
+                      },
+                    ]
+                  : []),
                 {
                   label: 'Remove from library…',
                   danger: true,
@@ -424,6 +439,15 @@
         busy={removing}
         onconfirm={remove}
         onclose={() => (confirmingRemove = false)} />
+    {/if}
+    {#if movingLibrary}
+      <MoveItemModal
+        itemType="series"
+        itemID={current.id}
+        itemTitle={current.title}
+        kind="tv"
+        currentLibraryID={current.library_id}
+        onclose={() => (movingLibrary = false)} />
     {/if}
   {/if}
 </div>

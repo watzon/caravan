@@ -40,6 +40,7 @@ function site(
     poster_url: '',
     monitored,
     quality_profile_id: 0,
+    library_id: 1,
     added_at: addedAt,
     updated_at: addedAt,
     scene_count: sceneCount,

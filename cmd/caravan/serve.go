@@ -282,7 +282,24 @@ func runServe(args []string) error {
 		// making its caller wait. Registered from here for the same reason the
 		// refresh is: the walk is the library manager's, and the queue is not
 		// allowed to know about it.
-		automation.WithHandler(core.JobSyncSite, automation.SyncSiteHandler(mgr.SyncSite)))
+		automation.WithHandler(core.JobSyncSite, automation.SyncSiteHandler(mgr.SyncSite)),
+		// One item's directory moving between libraries. Durable because a
+		// series can be hundreds of files; registered from here because the
+		// move is the library manager's, like the refresh and the site walk.
+		automation.WithHandler(core.JobMoveItem,
+			func(ctx context.Context, _ *store.Store, payload json.RawMessage) error {
+				var input core.JobMoveItemPayload
+				if err := json.Unmarshal(payload, &input); err != nil || input.ItemID <= 0 || input.LibraryID <= 0 {
+					return fmt.Errorf("decode %s payload", core.JobMoveItem)
+				}
+				switch input.ItemType {
+				case core.MediaTypeMovie:
+					return mgr.MoveMovie(ctx, input.ItemID, input.LibraryID)
+				case core.MediaTypeSeries:
+					return mgr.MoveSeries(ctx, input.ItemID, input.LibraryID)
+				}
+				return fmt.Errorf("unknown move item type %q", input.ItemType)
+			}))
 
 	var watcher sync.WaitGroup
 	watcher.Add(2)

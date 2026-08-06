@@ -1083,6 +1083,20 @@ export const api = {
 
   deleteLibrary: (id: number) => request<void>(endpoints.library(id), { method: 'DELETE' }),
 
+  /** Queue a movie's move into another library; the transfer is a durable job. */
+  moveMovie: (id: number, libraryID: number) =>
+    request<{ status: string }>(`${endpoints.movie(id)}/move`, {
+      method: 'POST',
+      body: { library_id: libraryID },
+    }),
+
+  /** moveMovie's series twin, covering adult sites too. */
+  moveSeries: (id: number, libraryID: number) =>
+    request<{ status: string }>(`${endpoints.series(id)}/move`, {
+      method: 'POST',
+      body: { library_id: libraryID },
+    }),
+
   listMetadataProviders: (signal?: AbortSignal) =>
     listOf<MetadataProviderInfo>(`${endpoints.libraries()}/providers`, 'providers', signal),
 
