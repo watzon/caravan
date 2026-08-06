@@ -51,15 +51,16 @@ const scenePageSize = 100
 // a refresh that never terminates is worse than one that stops early.
 const maxScenePages = 200
 
-// adultSeriesDir returns a site's folder, storage-root-relative.
+// adultSeriesDir returns a site's folder under its adult library's root.
 //
 // There is no year in the name, unlike a television series: a site is not a
 // production with a first-air year, it is a publisher that has been releasing
 // since it opened. "library/Adult/Site Name" is the whole layout, and it is
-// under the adult root rather than under TV so that excluding adult content
-// from a prepared drive or a DLNA tree is one path prefix (PLAN phase 9 task 6).
-func adultSeriesDir(title string) string {
-	return path.Join(LibraryDir, AdultDir, sanitize(title))
+// under an adult root rather than under TV so that excluding adult content
+// from a prepared drive or a DLNA tree is a path-prefix check per adult
+// library (PLAN phase 9 task 6).
+func adultSeriesDir(lib *core.Library, title string) string {
+	return path.Join(lib.RootPath, sanitize(title))
 }
 
 // adultReady answers whether this Manager may talk to the adult provider right
@@ -130,7 +131,11 @@ func (m *Manager) addSite(ctx context.Context, stashID string, monitored *bool, 
 		return nil, fmt.Errorf("library: site %s not found", stashID)
 	}
 
-	sr, _, err := m.upsertSiteRow(ctx, meta, adultSeriesDir(meta.Name), "", monitored)
+	lib, err := m.siteLibrary(ctx, stashID, "", 0)
+	if err != nil {
+		return nil, err
+	}
+	sr, _, err := m.upsertSiteRow(ctx, meta, adultSeriesDir(lib, meta.Name), "", monitored, lib.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +182,7 @@ func (m *Manager) SyncSite(ctx context.Context, seriesID int64) error {
 // none. Status stays empty for the same reason: stash-box has no notion of a
 // site having ended, and inventing "Continuing" would put a claim in the UI
 // that no provider made.
-func (m *Manager) upsertSiteRow(ctx context.Context, meta *core.SiteMeta, dir, posterRel string, monitored *bool) (*core.Series, bool, error) {
+func (m *Manager) upsertSiteRow(ctx context.Context, meta *core.SiteMeta, dir, posterRel string, monitored *bool, libraryID int64) (*core.Series, bool, error) {
 	sr := &core.Series{
 		StashID:    meta.StashID,
 		Title:      meta.Name,
@@ -187,6 +192,7 @@ func (m *Manager) upsertSiteRow(ctx context.Context, meta *core.SiteMeta, dir, p
 		PosterPath: posterRel,
 		PosterURL:  meta.ImageURL,
 		Monitored:  monitoredOrDefault(monitored),
+		LibraryID:  libraryID,
 	}
 
 	created := true
@@ -199,6 +205,9 @@ func (m *Manager) upsertSiteRow(ctx context.Context, meta *core.SiteMeta, dir, p
 			sr.Monitored = existing.Monitored
 			sr.QualityProfileID = existing.QualityProfileID
 			sr.AddedAt = existing.AddedAt
+			if existing.LibraryID != 0 {
+				sr.LibraryID = existing.LibraryID
+			}
 			// The folder on disk is ground truth, exactly as it is for a movie
 			// refresh: a site renamed upstream must not point the row at a
 			// directory that does not exist.
@@ -616,7 +625,7 @@ func (m *Manager) refreshSites(ctx context.Context, res *RefreshResult) error {
 		if meta == nil {
 			continue
 		}
-		row, _, err := m.upsertSiteRow(ctx, meta, sr.Path, "", nil)
+		row, _, err := m.upsertSiteRow(ctx, meta, sr.Path, "", nil, sr.LibraryID)
 		if err != nil {
 			return err
 		}
@@ -645,7 +654,11 @@ func (m *Manager) importScene(ctx context.Context, sr *core.Series, rel string, 
 
 	dir := sr.Path
 	if dir == "" {
-		dir = adultSeriesDir(sr.Title)
+		lib, err := m.seriesLibraryOf(ctx, sr)
+		if err != nil {
+			return "", 0, err
+		}
+		dir = adultSeriesDir(lib, sr.Title)
 	}
 	dst := path.Join(dir, m.seasonFolderName(p.Season),
 		sceneFileName(sr.Title, airDate, episodeTitle, path.Ext(rel)))
@@ -858,7 +871,7 @@ func (m *Manager) matchAndImportScene(ctx context.Context, rel string, size int6
 	}
 
 	if reason != "" && (sr == nil || !m.syncedSites[sr.ID]) {
-		sr, err = m.syncSiteFor(ctx, sr, p.Title, res, park)
+		sr, err = m.syncSiteFor(ctx, sr, p.Title, rel, res, park)
 		if err != nil || sr == nil {
 			return "", err
 		}
@@ -876,9 +889,11 @@ func (m *Manager) matchAndImportScene(ctx context.Context, rel string, size int6
 }
 
 // syncSiteFor brings one site's catalogue up to date, finding it in the
-// provider first when the library does not have it yet. It reports nil (having
-// already parked) when the site cannot be resolved at all.
-func (m *Manager) syncSiteFor(ctx context.Context, sr *core.Series, title string, res *ScanResult, park func(string)) (*core.Series, error) {
+// provider first when the library does not have it yet. rel is the scanned
+// file that prompted the sync: a brand-new site is created in the adult
+// library whose root holds it. It reports nil (having already parked) when
+// the site cannot be resolved at all.
+func (m *Manager) syncSiteFor(ctx context.Context, sr *core.Series, title, rel string, res *ScanResult, park func(string)) (*core.Series, error) {
 	if sr == nil {
 		sites, err := m.adult.SearchSites(ctx, title)
 		if err != nil {
@@ -895,7 +910,11 @@ func (m *Manager) syncSiteFor(ctx context.Context, sr *core.Series, title string
 			park(reasonNoMatch)
 			return nil, nil
 		}
-		sr, _, err = m.upsertSiteRow(ctx, &sites[idx], adultSeriesDir(sites[idx].Name), "", nil)
+		lib, err := m.siteLibrary(ctx, sites[idx].StashID, rel, 0)
+		if err != nil {
+			return nil, err
+		}
+		sr, _, err = m.upsertSiteRow(ctx, &sites[idx], adultSeriesDir(lib, sites[idx].Name), "", nil, lib.ID)
 		if err != nil {
 			return nil, err
 		}

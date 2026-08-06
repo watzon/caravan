@@ -31,7 +31,7 @@ func TestNamingSettingsRenderSanitizedTokens(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got, want := h.mgr.movieDir("A/B", 2008), "library/Movies/ (2008) - AB"; got != want {
+	if got, want := h.mgr.movieDir(stockMovieLib(), "A/B", 2008), "library/Movies/ (2008) - AB"; got != want {
 		t.Errorf("movie dir = %q, want %q", got, want)
 	}
 	if got, want := h.mgr.episodeFileName("Show/Name", 2016, 1, []int{2}, "Part: one", ".mkv"), "ShowName.S01E02 - Part one.mkv"; got != want {

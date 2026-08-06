@@ -67,7 +67,7 @@ func (m *Manager) RefreshLibrary(ctx context.Context) (*RefreshResult, error) {
 		// The row's own path, not a recomputed one: the folder on disk is
 		// ground truth, and a provider retitle must not point the row at a
 		// directory that does not exist.
-		if _, _, err := m.upsertMovieRow(ctx, meta, mv.Path, "", "", nil); err != nil {
+		if _, _, err := m.upsertMovieRow(ctx, meta, mv.Path, "", "", nil, mv.LibraryID); err != nil {
 			return res, err
 		}
 		res.Movies++
@@ -95,7 +95,7 @@ func (m *Manager) RefreshLibrary(ctx context.Context) (*RefreshResult, error) {
 		if meta == nil {
 			continue
 		}
-		row, _, err := m.upsertSeriesRow(ctx, meta, sr.Path, "", nil)
+		row, _, err := m.upsertSeriesRow(ctx, meta, sr.Path, "", nil, sr.LibraryID)
 		if err != nil {
 			return res, err
 		}

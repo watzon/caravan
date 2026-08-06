@@ -56,6 +56,11 @@ const (
 	reasonNoSceneMatch   = "no scene released on that date"
 	reasonAmbiguousScene = "several scenes released on that date"
 	reasonSceneNotInGrab = "file is a different scene than the one grabbed"
+	// reasonNoLibrary parks a file loose under library/ that no library root
+	// claims. Before 0022 such a file was silently read as a movie; with
+	// several libraries there is no defensible default, and a visible park
+	// beats a silent misfile.
+	reasonNoLibrary = "not under any library root"
 )
 
 // ScanResult summarizes one library scan.
@@ -93,6 +98,15 @@ func (m *Manager) Scan(ctx context.Context) (*ScanResult, error) {
 	res := &ScanResult{}
 	m.syncedSites = map[int64]bool{}
 
+	// The library set is snapshotted once per scan, like syncedSites: a walk
+	// over thousands of files must not re-query the table per file, and a
+	// library created mid-scan is the next scan's business.
+	libs, err := m.store.ListLibraries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	m.scanLibs = libs
+
 	libAbs := m.abs(LibraryDir)
 	info, err := os.Stat(libAbs)
 	switch {
@@ -117,7 +131,15 @@ func (m *Manager) Scan(ctx context.Context) (*ScanResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	adultAbs := m.abs(path.Join(LibraryDir, AdultDir))
+	// Every adult-kind library root is skipped, not just the seed one: a
+	// second adult library missed here would park scene filenames in the
+	// review queue with the module off, the exact trace this promises against.
+	adultAbs := map[string]bool{}
+	for _, lib := range libs {
+		if lib.Kind == core.LibraryKindAdult {
+			adultAbs[m.abs(lib.RootPath)] = true
+		}
+	}
 
 	// The pre-scan snapshots serve two purposes: they tell an added file from
 	// an updated one, and they are the removal candidates once the walk knows
@@ -159,7 +181,7 @@ func (m *Manager) Scan(ctx context.Context) (*ScanResult, error) {
 				if p != libAbs && strings.HasPrefix(name, ".") {
 					return fs.SkipDir
 				}
-				if !adultEnabled && p == adultAbs {
+				if !adultEnabled && adultAbs[p] {
 					return fs.SkipDir
 				}
 				return nil
@@ -247,9 +269,11 @@ func fileExists(p string) bool {
 // everything it can go wrong about is either a park reason or a scan error.
 func (m *Manager) scanFile(ctx context.Context, rel string, size int64, res *ScanResult, known, seenFiles, seenUnmatched map[string]bool) {
 	// Which parser reads the name is decided by where the file is, not by what
-	// the name looks like: a date under library/TV is a daily episode and a
-	// date under library/Adult is a scene, and the same string means both.
-	isScene := sectionOf(rel) == AdultDir
+	// the name looks like: a date under a tv root is a daily episode and a
+	// date under an adult root is a scene, and the same string means both.
+	// "Where the file is" is the library whose root holds it (libraries.go).
+	lib := libraryForPath(m.scanLibs, rel)
+	isScene := lib != nil && lib.Kind == core.LibraryKindAdult
 	parse := m.parse
 	if isScene {
 		parse = m.parseScene
@@ -271,12 +295,17 @@ func (m *Manager) scanFile(ctx context.Context, rel string, size int64, res *Sca
 		res.Unmatched++
 	}
 
+	if lib == nil {
+		park(reasonNoLibrary)
+		return
+	}
+
 	isEpisode := p.IsEpisode()
 	switch {
 	case isScene && !p.IsScene():
 		park(reasonNoSceneDate)
 		return
-	case !isScene && !isEpisode && sectionOf(rel) == TVDir:
+	case !isScene && !isEpisode && lib.Kind == core.LibraryKindTV:
 		park(reasonNoEpisodeNum)
 		return
 	}
@@ -404,7 +433,13 @@ func (m *Manager) matchAndImportEpisode(ctx context.Context, rel string, size in
 // reconciliation that quietly dropped every adult media_files row would make
 // that promise false at the first rescan.
 func (m *Manager) reconcileRemovals(ctx context.Context, res *ScanResult, before []core.MediaFile, beforeUnmatched []core.UnmatchedFile, seenFiles, seenUnmatched map[string]bool, adultEnabled bool) error {
-	skipped := func(rel string) bool { return !adultEnabled && sectionOf(rel) == AdultDir }
+	skipped := func(rel string) bool {
+		if adultEnabled {
+			return false
+		}
+		lib := libraryForPath(m.scanLibs, rel)
+		return lib != nil && lib.Kind == core.LibraryKindAdult
+	}
 
 	for _, f := range before {
 		// A file that moved into the unmatched queue during this scan already
@@ -438,12 +473,3 @@ func (m *Manager) reconcileRemovals(ctx context.Context, res *ScanResult, before
 	return nil
 }
 
-// sectionOf returns the library section a path sits in ("Movies", "TV"), or
-// the empty string for a file loose at the library root.
-func sectionOf(rel string) string {
-	parts := strings.Split(rel, "/")
-	if len(parts) < 3 || parts[0] != LibraryDir {
-		return ""
-	}
-	return parts[1]
-}

@@ -25,7 +25,12 @@ import (
 //
 // monitored is the "Add and monitor" choice and follows the same rule
 // (monitoredOrDefault): nil means monitored, and it decides a new row only.
-func (m *Manager) AddMovie(ctx context.Context, tmdbID int64, minAvailability string, monitored *bool) (*core.Movie, error) {
+//
+// libraryID is the add's target library; 0 means the default movie library.
+// It decides a NEW row only — re-adding a movie refreshes its metadata in the
+// library it already lives in, because a move is an explicit operation, never
+// a side effect of an add (see libraries.go).
+func (m *Manager) AddMovie(ctx context.Context, tmdbID int64, minAvailability string, monitored *bool, libraryID int64) (*core.Movie, error) {
 	if m.provider == nil {
 		return nil, core.ErrNoMetadataProvider
 	}
@@ -41,7 +46,11 @@ func (m *Manager) AddMovie(ctx context.Context, tmdbID int64, minAvailability st
 		return nil, fmt.Errorf("library: movie %d not found", tmdbID)
 	}
 
-	mv, _, err := m.upsertMovieRow(ctx, meta, m.movieDir(meta.Title, meta.Year), "", minAvailability, monitored)
+	lib, err := m.movieLibrary(ctx, tmdbID, "", libraryID)
+	if err != nil {
+		return nil, err
+	}
+	mv, _, err := m.upsertMovieRow(ctx, meta, m.movieDir(lib, meta.Title, meta.Year), "", minAvailability, monitored, lib.ID)
 	return mv, err
 }
 
@@ -56,7 +65,7 @@ func (m *Manager) AddMovie(ctx context.Context, tmdbID int64, minAvailability st
 // touches: the season and episode rows the tree writes keep the monitored
 // semantics they have always had, because unmonitoring a whole tree row by row
 // would be a different decision from not following the series.
-func (m *Manager) AddSeries(ctx context.Context, tmdbID int64, monitored *bool) (*core.Series, error) {
+func (m *Manager) AddSeries(ctx context.Context, tmdbID int64, monitored *bool, libraryID int64) (*core.Series, error) {
 	if m.provider == nil {
 		return nil, core.ErrNoMetadataProvider
 	}
@@ -72,7 +81,11 @@ func (m *Manager) AddSeries(ctx context.Context, tmdbID int64, monitored *bool) 
 		return nil, fmt.Errorf("library: series %d not found", tmdbID)
 	}
 
-	sr, _, err := m.upsertSeriesRow(ctx, meta, m.seriesDir(meta.Title, meta.Year), "", monitored)
+	lib, err := m.seriesLibrary(ctx, tmdbID, "", libraryID)
+	if err != nil {
+		return nil, err
+	}
+	sr, _, err := m.upsertSeriesRow(ctx, meta, m.seriesDir(lib, meta.Title, meta.Year), "", monitored, lib.ID)
 	if err != nil {
 		return nil, err
 	}

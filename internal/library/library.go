@@ -90,6 +90,10 @@ type Manager struct {
 	// library does not know would walk the same catalogue again — see
 	// matchAndImportScene. It is scan-scoped state and Scan is the only writer.
 	syncedSites map[int64]bool
+	// scanLibs is the library set one Scan resolves file locations against,
+	// snapshotted at its start. Scan-scoped for syncedSites' reason: a walk
+	// over thousands of files must not query the libraries table per file.
+	scanLibs []core.Library
 	// notify is the playback handoff, or nil when none is configured.
 	notify Notifier
 	// notifyAdult is the adult library's handoff (Stash), or nil. It is a

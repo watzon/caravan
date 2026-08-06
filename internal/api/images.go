@@ -98,9 +98,15 @@ func (s *server) handleImage(w http.ResponseWriter, r *http.Request) {
 // housemate. That is the one adult surface reachable with no credential at all,
 // so it is closed here.
 func (s *server) imageAllowed(r *http.Request, rel string) (bool, error) {
-	lib, err := s.st.GetLibraryByKind(r.Context(), core.LibraryKindAdult)
-	switch {
-	case errors.Is(err, store.ErrNotFound):
+	// EVERY adult-kind library root is checked, not a single one: since 0022
+	// an install may hold several, and one missed here would be an
+	// unauthenticated yes/no oracle for its sites. A path under none of them
+	// is ordinary artwork.
+	libs, err := s.st.ListLibrariesByKind(r.Context(), core.LibraryKindAdult)
+	if err != nil {
+		return false, err
+	}
+	if len(libs) == 0 {
 		// The module was never enabled, so there is no row to read a root
 		// from. The seed root is a constant, though, and anything sitting
 		// under it on such an install is not artwork this endpoint should hand
@@ -108,14 +114,14 @@ func (s *server) imageAllowed(r *http.Request, rel string) (bool, error) {
 		// and deleted the row by hand, say. adultArtworkVisible then refuses
 		// it for everyone, because a module that is off has no visible
 		// artwork.
-		lib = &core.Library{RootPath: store.AdultLibraryRoot}
-	case err != nil:
-		return false, err
+		libs = []core.Library{{RootPath: store.AdultLibraryRoot}}
 	}
-	if !underRoot(rel, lib.RootPath) {
-		return true, nil
+	for _, lib := range libs {
+		if underRoot(rel, lib.RootPath) {
+			return s.adultArtworkVisible(r, lib)
+		}
 	}
-	return s.adultArtworkVisible(r, *lib)
+	return true, nil
 }
 
 // adultArtworkVisible answers "may this request see the adult library's

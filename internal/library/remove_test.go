@@ -16,7 +16,7 @@ import (
 // the NFO Caravan would have written beside it, and returns the movie.
 func (h *harness) addMovieWithFile(title string, year int) (*core.Movie, string) {
 	h.t.Helper()
-	dir := movieDir(title, year)
+	dir := movieDir(stockMovieLib(), title, year)
 	rel := dir + "/" + movieFileName(title, year, "", ".mkv")
 	h.writeVideo(rel, "movie")
 	h.writeVideo(dir+"/"+PosterName, "poster")
@@ -45,7 +45,7 @@ func (h *harness) addMediaFile(rel string, movieID int64) *core.MediaFile {
 func (h *harness) addSeriesWithEpisodes(title string, year, season int, episodes ...int) (*core.Series, []string) {
 	h.t.Helper()
 	ctx := context.Background()
-	dir := seriesDir(title, year)
+	dir := seriesDir(stockTVLib(), title, year)
 	h.writeVideo(dir+"/"+PosterName, "poster")
 	h.writeVideo(dir+"/"+TVShowNFOName, "<tvshow/>")
 
@@ -111,7 +111,7 @@ func TestRemoveMovieUntrackOnlyLeavesFiles(t *testing.T) {
 	if !h.exists(rel) {
 		t.Fatalf("%s was deleted by an untrack-only removal", rel)
 	}
-	if !h.exists(movieDir("Big Buck Bunny", 2008) + "/" + PosterName) {
+	if !h.exists(movieDir(stockMovieLib(), "Big Buck Bunny", 2008) + "/" + PosterName) {
 		t.Fatal("the poster was deleted by an untrack-only removal")
 	}
 }
@@ -119,7 +119,7 @@ func TestRemoveMovieUntrackOnlyLeavesFiles(t *testing.T) {
 func TestRemoveMovieDeletesFilesAndPrunesFolder(t *testing.T) {
 	h := newHarness(t)
 	mv, rel := h.addMovieWithFile("Big Buck Bunny", 2008)
-	dir := movieDir("Big Buck Bunny", 2008)
+	dir := movieDir(stockMovieLib(), "Big Buck Bunny", 2008)
 
 	if err := h.mgr.RemoveMovie(context.Background(), mv.ID, true); err != nil {
 		t.Fatalf("RemoveMovie: %v", err)
@@ -161,7 +161,7 @@ func TestRemoveMovieLeavesSiblingsAlone(t *testing.T) {
 	if !h.exists(keptRel) {
 		t.Fatalf("%s was deleted by another movie's removal", keptRel)
 	}
-	if !h.exists(movieDir("Sintel", 2010) + "/" + PosterName) {
+	if !h.exists(movieDir(stockMovieLib(), "Sintel", 2010) + "/" + PosterName) {
 		t.Fatal("a sibling movie's poster was deleted")
 	}
 }
@@ -281,7 +281,7 @@ func TestRemoveMovieToleratesAMissingFile(t *testing.T) {
 	if !h.movieGone(mv.ID) {
 		t.Fatal("movie is still tracked after RemoveMovie")
 	}
-	if h.exists(movieDir("Big Buck Bunny", 2008)) {
+	if h.exists(movieDir(stockMovieLib(), "Big Buck Bunny", 2008)) {
 		t.Fatal("the movie folder survived, but nothing was left in it")
 	}
 }
@@ -291,7 +291,7 @@ func TestRemoveMovieToleratesAMissingFile(t *testing.T) {
 func TestRemoveMovieKeepsFilesCaravanDidNotWrite(t *testing.T) {
 	h := newHarness(t)
 	mv, rel := h.addMovieWithFile("Big Buck Bunny", 2008)
-	dir := movieDir("Big Buck Bunny", 2008)
+	dir := movieDir(stockMovieLib(), "Big Buck Bunny", 2008)
 	h.writeVideo(dir+"/subtitles.srt", "1\n")
 
 	if err := h.mgr.RemoveMovie(context.Background(), mv.ID, true); err != nil {
@@ -330,7 +330,7 @@ func TestRemoveSeriesUntrackOnlyLeavesFiles(t *testing.T) {
 func TestRemoveSeriesDeletesEveryEpisodeFileAndTheFolderTree(t *testing.T) {
 	h := newHarness(t)
 	sr, rels := h.addSeriesWithEpisodes("Planet Earth II", 2016, 1, 1, 2)
-	dir := seriesDir("Planet Earth II", 2016)
+	dir := seriesDir(stockTVLib(), "Planet Earth II", 2016)
 
 	if err := h.mgr.RemoveSeries(context.Background(), sr.ID, true); err != nil {
 		t.Fatalf("RemoveSeries: %v", err)
@@ -357,7 +357,7 @@ func TestRemoveSeriesDeletesEveryEpisodeFileAndTheFolderTree(t *testing.T) {
 func TestRemoveSeriesDeletesAMultiEpisodeFileOnce(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
-	dir := seriesDir("Planet Earth II", 2016)
+	dir := seriesDir(stockTVLib(), "Planet Earth II", 2016)
 	rel := dir + "/" + seasonFolderName(1) + "/" +
 		episodeFileName("Planet Earth II", 2016, 1, []int{1, 2}, "", ".mkv")
 	h.writeVideo(rel, "double")

@@ -320,7 +320,9 @@ func (a *libraryAdapter) AddMovie(ctx context.Context, tmdbID int64, minAvailabi
 	if err != nil {
 		return nil, err
 	}
-	return mgr.AddMovie(ctx, tmdbID, minAvailability, monitored)
+	// Library selection is not exposed through this adapter yet; 0 targets
+	// the kind's default library, which is what every add meant before 0022.
+	return mgr.AddMovie(ctx, tmdbID, minAvailability, monitored, 0)
 }
 
 func (a *libraryAdapter) AddSeries(ctx context.Context, tmdbID int64, monitored *bool) (*core.Series, error) {
@@ -328,7 +330,7 @@ func (a *libraryAdapter) AddSeries(ctx context.Context, tmdbID int64, monitored 
 	if err != nil {
 		return nil, err
 	}
-	return mgr.AddSeries(ctx, tmdbID, monitored)
+	return mgr.AddSeries(ctx, tmdbID, monitored, 0)
 }
 
 // AddSite adds a site by stash-box id. It goes through current like every other

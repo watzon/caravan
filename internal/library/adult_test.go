@@ -186,14 +186,14 @@ func TestAdultRootMatchesTheAdultLibraryRow(t *testing.T) {
 	if got := path.Join(LibraryDir, AdultDir); got != store.AdultLibraryRoot {
 		t.Errorf("library adult root = %q, store.AdultLibraryRoot = %q", got, store.AdultLibraryRoot)
 	}
-	if got := adultSeriesDir("Brazzers"); got != "library/Adult/Brazzers" {
+	if got := adultSeriesDir(stockAdultLib(), "Brazzers"); got != "library/Adult/Brazzers" {
 		t.Errorf("adultSeriesDir = %q, want library/Adult/Brazzers", got)
 	}
 	// A site with characters no filesystem accepts still lands under the adult
 	// root rather than escaping it.
-	if got := adultSeriesDir("Bad/Name:*"); !strings.HasPrefix(got, "library/Adult/") ||
+	if got := adultSeriesDir(stockAdultLib(), "Bad/Name:*"); !strings.HasPrefix(got, "library/Adult/") ||
 		strings.Count(got, "/") != 2 {
-		t.Errorf("adultSeriesDir(unsafe) = %q, want a single component under library/Adult", got)
+		t.Errorf("adultSeriesDir(stockAdultLib(), unsafe) = %q, want a single component under library/Adult", got)
 	}
 }
 

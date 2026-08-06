@@ -435,18 +435,18 @@ func (s *Service) HandleScan(ctx context.Context, _ *store.Store, payload json.R
 		s.markReachable()
 		return nil
 	}
-	root, err := s.adultRoot(ctx)
+	roots, err := s.adultRoots(ctx)
 	if err != nil {
 		return err
 	}
-	if root == "" {
+	if len(roots) == 0 {
 		// No storage root means no library on disk to point at. There is
 		// nothing to retry into, so this is a log line rather than a failed job.
 		s.log.Warn("stash: no storage root configured, skipping scan")
 		return nil
 	}
 
-	if _, err := NewClient(cfg.URL, cfg.APIKey, s.hc).Scan(ctx, []string{root}); err != nil {
+	if _, err := NewClient(cfg.URL, cfg.APIKey, s.hc).Scan(ctx, roots); err != nil {
 		if !s.note(ctx, "Stash library scan could not be triggered", cfg.URL, err) {
 			// A server that answered and refused will refuse the same request
 			// again. Asking every thirty seconds for two hours would fill the
@@ -461,7 +461,7 @@ func (s *Service) HandleScan(ctx context.Context, _ *store.Store, payload json.R
 	// Deliberately a log line and not an event: every import already writes an
 	// "Imported X" entry, and a successful handoff that doubles the feed is
 	// noise rather than news.
-	s.log.Info("stash: scoped library scan triggered", "url", redactURL(cfg.URL), "path", root)
+	s.log.Info("stash: scoped library scan triggered", "url", redactURL(cfg.URL), "paths", strings.Join(roots, ", "))
 	return nil
 }
 
@@ -815,14 +815,28 @@ func redactURL(raw string) string {
 	return parsed.Scheme + "://" + parsed.Host
 }
 
-// adultRoot is the absolute path of the adult library, the one directory a scan
-// is ever pointed at.
-func (s *Service) adultRoot(ctx context.Context) (string, error) {
+// adultRoots are the absolute paths of every adult library — the only
+// directories a scan is ever pointed at. Plural since 0022: a second adult
+// library missed here would simply never be scanned by Stash, so the roots
+// come from the rows rather than the seed constant, with the constant as the
+// fallback for an install whose rows predate the module.
+func (s *Service) adultRoots(ctx context.Context) ([]string, error) {
 	root, err := s.storageRoot(ctx)
 	if err != nil || root == "" {
-		return "", err
+		return nil, err
 	}
-	return filepath.Join(root, filepath.FromSlash(store.AdultLibraryRoot)), nil
+	libs, err := s.st.ListLibrariesByKind(ctx, core.LibraryKindAdult)
+	if err != nil {
+		return nil, err
+	}
+	if len(libs) == 0 {
+		return []string{filepath.Join(root, filepath.FromSlash(store.AdultLibraryRoot))}, nil
+	}
+	out := make([]string, 0, len(libs))
+	for _, lib := range libs {
+		out = append(out, filepath.Join(root, filepath.FromSlash(lib.RootPath)))
+	}
+	return out, nil
 }
 
 func (s *Service) storageRoot(ctx context.Context) (string, error) {

@@ -22,7 +22,14 @@ type warnf func(format string, args ...any)
 // correctly named. disp says whether rel survives the move (see
 // sourceDisposition): a scan consumes its source, an import keeps it.
 func (m *Manager) importMovie(ctx context.Context, meta *core.MovieMeta, rel string, size int64, p core.ParsedRelease, warn warnf, disp sourceDisposition) (string, int64, error) {
-	dir := m.movieDir(meta.Title, meta.Year)
+	// The library is decided before the file is placed: the movie's own row
+	// when it has one, else the library whose root holds rel, else the movie
+	// default (libraries.go). Only then is a destination path built from it.
+	lib, err := m.movieLibrary(ctx, meta.TMDBID, rel, 0)
+	if err != nil {
+		return "", 0, err
+	}
+	dir := m.movieDir(lib, meta.Title, meta.Year)
 	dst := path.Join(dir, m.movieFileName(meta.Title, meta.Year, p.Edition, path.Ext(rel)))
 
 	finalRel, err := m.placeFile(rel, dst, disp)
@@ -38,7 +45,7 @@ func (m *Manager) importMovie(ctx context.Context, meta *core.MovieMeta, rel str
 		warn("%v", err)
 	}
 
-	mv, created, err := m.upsertMovieRow(ctx, meta, dir, posterRel, "", nil)
+	mv, created, err := m.upsertMovieRow(ctx, meta, dir, posterRel, "", nil, lib.ID)
 	if err != nil {
 		return "", 0, err
 	}
@@ -67,7 +74,11 @@ func (m *Manager) importEpisode(ctx context.Context, meta *core.SeriesMeta, rel 
 		return "", 0, fmt.Errorf("library: %s has no episode number", rel)
 	}
 
-	dir := m.seriesDir(meta.Title, meta.Year)
+	lib, err := m.seriesLibrary(ctx, meta.TMDBID, rel, 0)
+	if err != nil {
+		return "", 0, err
+	}
+	dir := m.seriesDir(lib, meta.Title, meta.Year)
 	dst := path.Join(dir, m.seasonFolderName(p.Season),
 		m.episodeFileName(meta.Title, meta.Year, p.Season, p.Episodes, episodeTitles(meta, p), path.Ext(rel)))
 
@@ -84,7 +95,7 @@ func (m *Manager) importEpisode(ctx context.Context, meta *core.SeriesMeta, rel 
 		warn("%v", err)
 	}
 
-	sr, created, err := m.upsertSeriesRow(ctx, meta, dir, posterRel, nil)
+	sr, created, err := m.upsertSeriesRow(ctx, meta, dir, posterRel, nil, lib.ID)
 	if err != nil {
 		return "", 0, err
 	}
@@ -225,7 +236,12 @@ func monitoredOrDefault(monitored *bool) bool {
 // user intent and overrides; the scan and import paths pass "". monitored is
 // the add's own choice for a new row and is ignored for an existing one — see
 // monitoredOrDefault.
-func (m *Manager) upsertMovieRow(ctx context.Context, meta *core.MovieMeta, dir, posterRel, minAvailability string, monitored *bool) (*core.Movie, bool, error) {
+//
+// libraryID is the resolved owning library. Like monitored it decides a new
+// row only: an existing row keeps its own library (a refresh never moves an
+// item), except that a zero — a row from before 0022, or one whose library
+// vanished — is healed to the resolved value.
+func (m *Manager) upsertMovieRow(ctx context.Context, meta *core.MovieMeta, dir, posterRel, minAvailability string, monitored *bool, libraryID int64) (*core.Movie, bool, error) {
 	mv := &core.Movie{
 		TMDBID:          meta.TMDBID,
 		IMDBID:          meta.IMDBID,
@@ -237,6 +253,7 @@ func (m *Manager) upsertMovieRow(ctx context.Context, meta *core.MovieMeta, dir,
 		PosterPath:      posterRel,
 		PosterURL:       meta.PosterURL,
 		Monitored:       monitoredOrDefault(monitored),
+		LibraryID:       libraryID,
 		ReleaseDate:     meta.ReleaseDate,
 		DigitalRelease:  meta.DigitalRelease,
 		PhysicalRelease: meta.PhysicalRelease,
@@ -253,6 +270,9 @@ func (m *Manager) upsertMovieRow(ctx context.Context, meta *core.MovieMeta, dir,
 			mv.Monitored = existing.Monitored
 			mv.QualityProfileID = existing.QualityProfileID
 			mv.AddedAt = existing.AddedAt
+			if existing.LibraryID != 0 {
+				mv.LibraryID = existing.LibraryID
+			}
 			if posterRel == "" {
 				mv.PosterPath = existing.PosterPath
 			}
@@ -271,8 +291,8 @@ func (m *Manager) upsertMovieRow(ctx context.Context, meta *core.MovieMeta, dir,
 }
 
 // upsertSeriesRow is upsertMovieRow's series twin, with the same
-// preserve-user-intent rule.
-func (m *Manager) upsertSeriesRow(ctx context.Context, meta *core.SeriesMeta, dir, posterRel string, monitored *bool) (*core.Series, bool, error) {
+// preserve-user-intent rule (including libraryID's decide-new-heal-zero rule).
+func (m *Manager) upsertSeriesRow(ctx context.Context, meta *core.SeriesMeta, dir, posterRel string, monitored *bool, libraryID int64) (*core.Series, bool, error) {
 	sr := &core.Series{
 		TMDBID:     meta.TMDBID,
 		TVDBID:     meta.TVDBID,
@@ -286,6 +306,7 @@ func (m *Manager) upsertSeriesRow(ctx context.Context, meta *core.SeriesMeta, di
 		PosterPath: posterRel,
 		PosterURL:  meta.PosterURL,
 		Monitored:  monitoredOrDefault(monitored),
+		LibraryID:  libraryID,
 		FirstAired: meta.FirstAirDate,
 	}
 
@@ -299,6 +320,9 @@ func (m *Manager) upsertSeriesRow(ctx context.Context, meta *core.SeriesMeta, di
 			sr.Monitored = existing.Monitored
 			sr.QualityProfileID = existing.QualityProfileID
 			sr.AddedAt = existing.AddedAt
+			if existing.LibraryID != 0 {
+				sr.LibraryID = existing.LibraryID
+			}
 			if posterRel == "" {
 				sr.PosterPath = existing.PosterPath
 			}

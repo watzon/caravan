@@ -19,7 +19,7 @@ func TestWriteMovieNFO(t *testing.T) {
 		ReleaseDate:   time.Date(2008, 5, 20, 0, 0, 0, 0, time.UTC),
 	}
 
-	dir := movieDir(meta.Title, meta.Year)
+	dir := movieDir(stockMovieLib(), meta.Title, meta.Year)
 	if err := h.mgr.writeMovieNFO(dir, meta); err != nil {
 		t.Fatalf("writeMovieNFO: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestWriteTVShowNFO(t *testing.T) {
 		FirstAirDate: time.Date(2015, 12, 14, 0, 0, 0, 0, time.UTC),
 	}
 
-	dir := seriesDir(meta.Title, meta.Year)
+	dir := seriesDir(stockTVLib(), meta.Title, meta.Year)
 	if err := h.mgr.writeTVShowNFO(dir, meta); err != nil {
 		t.Fatalf("writeTVShowNFO: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestWriteTVShowNFO(t *testing.T) {
 // a provider with no image, and a poster that is already on disk.
 func TestEnsurePosterSkipsWhenThereIsNothingToFetch(t *testing.T) {
 	h := newHarness(t)
-	dir := movieDir("Movie", 2000)
+	dir := movieDir(stockMovieLib(), "Movie", 2000)
 
 	rel, err := h.mgr.ensurePoster(t.Context(), dir, "")
 	if err != nil {
