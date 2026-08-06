@@ -118,13 +118,14 @@ func (f *adultOwnershipFilter) ownerVisible(ctx context.Context, movieID, series
 	return !adult, nil
 }
 
-// eventVisible applies intrinsic event provenance before ownership IDs. Stash
-// rows are adult even without IDs because their detail may contain scene paths.
+// eventVisible applies intrinsic event provenance before ownership IDs. Adult-
+// only and Stash rows remain adult even without IDs; their detail may contain
+// scene paths or handoff failures whose episode can no longer be resolved.
 func (f *adultOwnershipFilter) eventVisible(ctx context.Context, event core.Event) (bool, error) {
 	if f.adultVisible {
 		return true, nil
 	}
-	if event.Category == stash.EventCategory {
+	if event.Category == core.EventCategoryAdultOnly || event.Category == stash.EventCategory {
 		return false, nil
 	}
 	return f.ownerVisible(ctx, event.MovieID, event.SeriesID)

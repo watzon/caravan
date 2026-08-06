@@ -281,6 +281,11 @@ type QualityProfile struct {
 	UpdatedAt             time.Time
 }
 
+// EventCategoryAdultOnly marks activity whose content is intrinsically adult,
+// even when no library ownership ID is available to establish that provenance.
+// History suppresses this category when shared adult visibility is disabled.
+const EventCategoryAdultOnly = "adult"
+
 // Event levels for the activity feed.
 const (
 	EventLevelInfo  = "info"

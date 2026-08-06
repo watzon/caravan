@@ -110,6 +110,84 @@ func TestEventsRespectAdultVisibility(t *testing.T) {
 	}
 }
 
+func TestEventsHideAdultHandoffFailureWhenVisibilityDisabled(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	ctx := context.Background()
+	setPassword(t, st, testPassword)
+	cookie := login(t, h, testAdmin, testPassword)
+
+	const (
+		importMessage = "Ordinary import failure"
+		adultMessage  = "Adult library handoff could not be notified"
+	)
+	for _, event := range []*core.Event{
+		{Category: "import", Message: importMessage},
+		{Category: core.EventCategoryAdultOnly, Message: adultMessage},
+	} {
+		if err := st.InsertEvent(ctx, event); err != nil {
+			t.Fatalf("InsertEvent(%q): %v", event.Message, err)
+		}
+	}
+
+	read := func(path string) struct {
+		Events []eventJSON `json:"events"`
+		Next   string      `json:"next_cursor"`
+	} {
+		t.Helper()
+		rec := doAuth(t, h, http.MethodGet, path, "", withCookie(cookie))
+		wantStatus(t, rec, http.StatusOK)
+		var body struct {
+			Events []eventJSON `json:"events"`
+			Next   string      `json:"next_cursor"`
+		}
+		decodeBody(t, rec, &body)
+		return body
+	}
+	assertRows := func(label string, events []eventJSON, wantAdult bool) {
+		t.Helper()
+		var sawImport, sawAdult bool
+		for _, event := range events {
+			sawImport = sawImport || event.Message == importMessage
+			sawAdult = sawAdult || event.Message == adultMessage
+		}
+		if !sawImport {
+			t.Errorf("%s omitted ordinary zero-ID import failure: %+v", label, events)
+		}
+		if sawAdult != wantAdult {
+			t.Errorf("%s adult handoff visibility = %t, want %t: %+v", label, sawAdult, wantAdult, events)
+		}
+	}
+
+	if err := st.SetAdultEnabled(ctx, true); err != nil {
+		t.Fatalf("SetAdultEnabled(true): %v", err)
+	}
+	assertRows("enabled legacy history", read("/api/v1/events").Events, true)
+	enabledFirst := read("/api/v1/events?limit=1")
+	if len(enabledFirst.Events) != 1 || enabledFirst.Events[0].Message != adultMessage {
+		t.Fatalf("enabled first history page = %+v, want adult handoff failure", enabledFirst.Events)
+	}
+	if enabledFirst.Next == "" {
+		t.Fatal("enabled first history page has no cursor, want ordinary import failure on next page")
+	}
+	enabledSecond := read("/api/v1/events?limit=1&cursor=" + enabledFirst.Next)
+	assertRows("enabled cursor history", append(enabledFirst.Events, enabledSecond.Events...), true)
+
+	if err := st.SetAdultEnabled(ctx, false); err != nil {
+		t.Fatalf("SetAdultEnabled(false): %v", err)
+	}
+	assertRows("disabled legacy history", read("/api/v1/events").Events, false)
+	disabledPage := read("/api/v1/events?limit=1")
+	if len(disabledPage.Events) != 1 || disabledPage.Events[0].Message != importMessage {
+		t.Fatalf("disabled first history page = %+v, want refilled ordinary zero-ID import failure", disabledPage.Events)
+	}
+	assertRows("disabled cursor first page", disabledPage.Events, false)
+	disabledAfterCursor := read("/api/v1/events?limit=1&cursor=" + enabledFirst.Next)
+	if len(disabledAfterCursor.Events) != 1 || disabledAfterCursor.Events[0].Message != importMessage {
+		t.Fatalf("disabled history after cursor = %+v, want ordinary zero-ID import failure", disabledAfterCursor.Events)
+	}
+	assertRows("disabled history after cursor", disabledAfterCursor.Events, false)
+}
+
 func TestEventsHideUnownedStashPathsWhenAdultVisibilityDisabled(t *testing.T) {
 	h, st, _ := newTestServer(t)
 	ctx := context.Background()
