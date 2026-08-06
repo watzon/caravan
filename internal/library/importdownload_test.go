@@ -907,3 +907,52 @@ func TestParkedImportIsResolvableByHand(t *testing.T) {
 		t.Errorf("unmatched queue = %+v, want empty after the manual match", parked)
 	}
 }
+
+// An untied universal-search grab has a library and no item: every video file
+// of the payload parks in scan review scoped to that library, the grab closes
+// as imported (that status is the redelivery guard), and nothing lands in the
+// library itself.
+func TestUntiedGrabParksEveryFileForManualMatch(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	movies, err := h.st.GetDefaultLibrary(ctx, core.LibraryKindMovie)
+	if err != nil {
+		t.Fatalf("GetDefaultLibrary: %v", err)
+	}
+
+	h.writeVideo("downloads/mixed-pack/One.Thing.2020.mkv", "one")
+	h.writeVideo("downloads/mixed-pack/Another.Thing.2021.mkv", "two")
+	dl := core.DownloadStatus{
+		ID: "infohash-untied", State: core.DownloadSeeding, Name: "mixed-pack",
+		Progress: 1, SavePath: "downloads/mixed-pack",
+	}
+	grab := h.grabFor(core.GrabInfo{LibraryID: movies.ID, ReleaseTitle: "Mixed.Pack"})
+
+	if err := h.mgr.ImportDownload(ctx, dl, grab); err != nil {
+		t.Fatalf("ImportDownload: %v", err)
+	}
+
+	parked := h.unmatched()
+	if len(parked) != 2 {
+		t.Fatalf("unmatched queue = %+v, want both payload files parked", parked)
+	}
+	for _, u := range parked {
+		if u.Reason != ReasonManualGrab || u.LibraryID != movies.ID {
+			t.Errorf("parked row = %+v, want reason %q scoped to library %d", u, ReasonManualGrab, movies.ID)
+		}
+	}
+	if got := h.grabStatus(grab.GrabID); got != core.GrabStatusImported {
+		t.Errorf("grab status = %q, want %q (the redelivery guard)", got, core.GrabStatusImported)
+	}
+
+	// Redelivery is a no-op: the imported status short-circuits before any
+	// file is re-parked or re-announced.
+	eventsBefore := len(h.events())
+	if err := h.mgr.ImportDownload(ctx, dl, grab); err != nil {
+		t.Fatalf("ImportDownload(redelivered): %v", err)
+	}
+	if len(h.unmatched()) != 2 || len(h.events()) != eventsBefore {
+		t.Errorf("redelivery changed state: %d parked, %d events (was %d)",
+			len(h.unmatched()), len(h.events()), eventsBefore)
+	}
+}

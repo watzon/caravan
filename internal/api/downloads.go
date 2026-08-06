@@ -371,6 +371,13 @@ func (f *adultOwnershipFilter) downloadVisible(ctx context.Context, download cor
 	if err != nil {
 		return false, err
 	}
+	// An untied universal-search grab has no movie and no series — exactly
+	// the shape ownerVisible waves through — so its LIBRARY answers first: a
+	// download bound for an adult library must not sit in an ungranted
+	// caller's queue.
+	if visible, err := f.libraryVisibleTo(ctx, grab.LibraryID); err != nil || !visible {
+		return visible, err
+	}
 	return f.ownerVisible(ctx, grab.MovieID, grab.SeriesID)
 }
 

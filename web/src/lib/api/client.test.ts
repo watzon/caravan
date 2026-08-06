@@ -376,10 +376,20 @@ describe('task intervals', () => {
 });
 
 describe('interactive search', () => {
-  it('fetches movie releases and unwraps them', async () => {
-    stubFetch({ releases: [{ guid: 'a' }, { guid: 'b' }] });
-    expect(await api.movieReleases(7)).toHaveLength(2);
+  it('fetches movie releases with the whole envelope', async () => {
+    // The envelope, not bare rows: the picker seeds its editable query box
+    // from `query` and surfaces the per-indexer `errors`.
+    stubFetch({ query: 'dune 2021', releases: [{ guid: 'a' }, { guid: 'b' }], errors: [] });
+    const found = await api.movieReleases(7);
+    expect(found.releases).toHaveLength(2);
+    expect(found.query).toBe('dune 2021');
     expect(only().url).toBe('/api/v1/library/movies/7/releases');
+  });
+
+  it('encodes the universal search params comma-joined and omits empties', async () => {
+    stubFetch({ query: 'x', releases: [], errors: [] });
+    await api.searchReleases({ q: 'ubuntu iso', cats: [2000, 5000], indexer_ids: [] });
+    expect(only().url).toBe('/api/v1/search/releases?q=ubuntu+iso&cats=2000%2C5000');
   });
 
   it('sends no season or episode for a bare series search', async () => {

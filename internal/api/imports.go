@@ -1,21 +1,27 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/watzon/caravan/internal/core"
+	"github.com/watzon/caravan/internal/store"
 )
 
 // unmatchedJSON is one file parked in the scan-review queue (SPEC §10.1,
 // §13): what the scanner found, the parser's best guess, and why it could not
 // be matched.
 type unmatchedJSON struct {
-	ID     int64      `json:"id"`
-	Path   string     `json:"path"`
-	Size   int64      `json:"size"`
-	Reason string     `json:"reason"`
-	SeenAt string     `json:"seen_at"`
-	Parsed parsedJSON `json:"parsed"`
+	ID     int64  `json:"id"`
+	Path   string `json:"path"`
+	Size   int64  `json:"size"`
+	Reason string `json:"reason"`
+	SeenAt string `json:"seen_at"`
+	// LibraryID scopes the manual match: an untied universal-search grab
+	// already chose a library, and the review screen pre-selects it. 0 —
+	// every scan-parked file — means unscoped.
+	LibraryID int64      `json:"library_id"`
+	Parsed    parsedJSON `json:"parsed"`
 }
 
 type parsedJSON struct {
@@ -74,13 +80,21 @@ func (s *server) handleImportQueue(w http.ResponseWriter, r *http.Request) {
 
 	out := make([]unmatchedJSON, 0, len(files))
 	for _, f := range files {
+		// A file parked into an adult library — an untied grab's payload — is
+		// as invisible to callers the module is absent to as the library is.
+		if visible, ok := s.unmatchedVisible(w, r, &f); !ok {
+			return
+		} else if !visible {
+			continue
+		}
 		out = append(out, unmatchedJSON{
-			ID:     f.ID,
-			Path:   f.Path,
-			Size:   f.Size,
-			Reason: f.Reason,
-			SeenAt: jsonTime(f.SeenAt),
-			Parsed: parsedDTO(f.Parsed),
+			ID:        f.ID,
+			Path:      f.Path,
+			Size:      f.Size,
+			Reason:    f.Reason,
+			SeenAt:    jsonTime(f.SeenAt),
+			LibraryID: f.LibraryID,
+			Parsed:    parsedDTO(f.Parsed),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": out})
@@ -109,8 +123,15 @@ func (s *server) handleImportMatch(w http.ResponseWriter, r *http.Request) {
 
 	// Resolve the queue entry here so an unknown id is a 404 regardless of how
 	// the manager reports it.
-	if _, err := s.st.GetUnmatchedFile(r.Context(), id); err != nil {
+	u, err := s.st.GetUnmatchedFile(r.Context(), id)
+	if err != nil {
 		s.writeStoreError(w, "get unmatched file", err)
+		return
+	}
+	if visible, ok := s.unmatchedVisible(w, r, u); !ok {
+		return
+	} else if !visible {
+		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
 	if err := s.mgr.MatchUnmatched(r.Context(), id, body.Type, body.TMDBID); err != nil {
@@ -137,9 +158,42 @@ func (s *server) handleImportDelete(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreError(w, "get unmatched file", err)
 		return
 	}
+	if visible, ok := s.unmatchedVisible(w, r, f); !ok {
+		return
+	} else if !visible {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
 	if err := s.st.DeleteUnmatchedFileByPath(r.Context(), f.Path); err != nil {
 		s.writeStoreError(w, "delete unmatched file", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// unmatchedVisible reports whether a parked file may be shown to this caller:
+// only a file scoped to an adult library is ever hidden, and only while the
+// module is absent to the caller. The second return is false when the check
+// itself failed and the response has been written.
+func (s *server) unmatchedVisible(w http.ResponseWriter, r *http.Request, u *core.UnmatchedFile) (bool, bool) {
+	if u.LibraryID == 0 {
+		return true, true
+	}
+	lib, err := s.st.GetLibrary(r.Context(), u.LibraryID)
+	if errors.Is(err, store.ErrNotFound) {
+		return true, true
+	}
+	if err != nil {
+		s.writeStoreError(w, "get library", err)
+		return false, false
+	}
+	if lib.Kind != core.LibraryKindAdult {
+		return true, true
+	}
+	visible, err := s.adultVisible(r)
+	if err != nil {
+		s.writeStoreError(w, "read adult settings", err)
+		return false, false
+	}
+	return visible, true
 }

@@ -952,6 +952,55 @@ export interface Release {
   profile_decision?: ProfileDecision;
 }
 
+/** One indexer that failed during a fan-out; partial results still come back. */
+export interface IndexerError {
+  indexer_id: number;
+  indexer: string;
+  error: string;
+}
+
+/**
+ * The release-search envelope every picker endpoint answers with: the exact
+ * queries the server sent, the rows, and the indexers that failed. The
+ * universal search adds `truncated` and echoes the scoring library.
+ */
+export interface ReleasesResponse {
+  query: string;
+  queries: string[];
+  truncated?: boolean;
+  library_id?: number;
+  releases: Release[];
+  errors: IndexerError[];
+}
+
+/** Query for GET /search/releases — the Prowlarr-style universal search. */
+export interface SearchReleasesParams {
+  q: string;
+  /** Indexer category ids; empty searches genuinely unfiltered. */
+  cats?: number[];
+  /** Restrict to these indexers; empty asks every enabled one. */
+  indexer_ids?: number[];
+  /** Score rows against this library's profile instead of the default. */
+  library_id?: number;
+  limit?: number;
+}
+
+/**
+ * Body for POST /search/grab. Without `tie` the grab is untied: the finished
+ * download parks in scan review scoped to `library_id`.
+ */
+export interface SearchGrabRequest {
+  release_id: number;
+  library_id: number;
+  tie?: {
+    media_type: 'movie' | 'series';
+    media_id: number;
+    /** Season/episode narrowing for a series tie; absent grabs the whole series. */
+    season?: number;
+    episode?: number;
+  };
+}
+
 /**
  * Body for POST /library/movies/{id}/grab and /library/series/{id}/grab.
  *

@@ -140,9 +140,15 @@ type harness struct {
 
 // Stock library rows matching the seeded defaults, for tests that assert the
 // paths the builders produce without caring which row they came from.
-func stockMovieLib() *core.Library { return &core.Library{Kind: core.LibraryKindMovie, RootPath: "library/Movies"} }
-func stockTVLib() *core.Library    { return &core.Library{Kind: core.LibraryKindTV, RootPath: "library/TV"} }
-func stockAdultLib() *core.Library { return &core.Library{Kind: core.LibraryKindAdult, RootPath: "library/Adult"} }
+func stockMovieLib() *core.Library {
+	return &core.Library{Kind: core.LibraryKindMovie, RootPath: "library/Movies"}
+}
+func stockTVLib() *core.Library {
+	return &core.Library{Kind: core.LibraryKindTV, RootPath: "library/TV"}
+}
+func stockAdultLib() *core.Library {
+	return &core.Library{Kind: core.LibraryKindAdult, RootPath: "library/Adult"}
+}
 
 // newHarness builds a Manager over a temp storage root, a real sqlite store,
 // a stub provider, and a stub image host.

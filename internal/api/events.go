@@ -90,6 +90,33 @@ type adultOwnershipFilter struct {
 	server       *server
 	adultVisible bool
 	seriesAdult  map[int64]bool
+	libraryAdult map[int64]bool
+}
+
+// libraryVisibleTo reports whether a row owned only by a LIBRARY — an untied
+// universal-search grab, or the file it parked — may be shown. An adult-kind
+// library hides its rows exactly as an adult series does; kind is cached per
+// request for seriesAdult's reason.
+func (f *adultOwnershipFilter) libraryVisibleTo(ctx context.Context, libraryID int64) (bool, error) {
+	if f.adultVisible || libraryID == 0 {
+		return true, nil
+	}
+	if adult, ok := f.libraryAdult[libraryID]; ok {
+		return !adult, nil
+	}
+	lib, err := f.server.st.GetLibrary(ctx, libraryID)
+	if errors.Is(err, store.ErrNotFound) {
+		return true, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	adult := lib.Kind == core.LibraryKindAdult
+	if f.libraryAdult == nil {
+		f.libraryAdult = make(map[int64]bool)
+	}
+	f.libraryAdult[libraryID] = adult
+	return !adult, nil
 }
 
 func (f *adultOwnershipFilter) ownerVisible(ctx context.Context, movieID, seriesID int64) (bool, error) {

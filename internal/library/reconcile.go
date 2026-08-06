@@ -21,11 +21,11 @@ type warnf func(format string, args ...any)
 // where it ended up, which differs from rel whenever the file was not already
 // correctly named. disp says whether rel survives the move (see
 // sourceDisposition): a scan consumes its source, an import keeps it.
-func (m *Manager) importMovie(ctx context.Context, meta *core.MovieMeta, rel string, size int64, p core.ParsedRelease, warn warnf, disp sourceDisposition) (string, int64, error) {
+func (m *Manager) importMovie(ctx context.Context, meta *core.MovieMeta, rel string, size int64, p core.ParsedRelease, warn warnf, disp sourceDisposition, targetLibraryID int64) (string, int64, error) {
 	// The library is decided before the file is placed: the movie's own row
 	// when it has one, else the library whose root holds rel, else the movie
 	// default (libraries.go). Only then is a destination path built from it.
-	lib, err := m.movieLibrary(ctx, meta.TMDBID, rel, 0)
+	lib, err := m.movieLibrary(ctx, meta.TMDBID, rel, targetLibraryID)
 	if err != nil {
 		return "", 0, err
 	}
@@ -69,12 +69,12 @@ func (m *Manager) importMovie(ctx context.Context, meta *core.MovieMeta, rel str
 // importEpisode organizes an episode file and reconciles the database against
 // it, including the series' full season/episode tree so the library view and
 // the calendar have something to show for episodes that are not on disk yet.
-func (m *Manager) importEpisode(ctx context.Context, meta *core.SeriesMeta, rel string, size int64, p core.ParsedRelease, warn warnf, disp sourceDisposition) (string, int64, error) {
+func (m *Manager) importEpisode(ctx context.Context, meta *core.SeriesMeta, rel string, size int64, p core.ParsedRelease, warn warnf, disp sourceDisposition, targetLibraryID int64) (string, int64, error) {
 	if len(p.Episodes) == 0 {
 		return "", 0, fmt.Errorf("library: %s has no episode number", rel)
 	}
 
-	lib, err := m.seriesLibrary(ctx, meta.TMDBID, rel, 0)
+	lib, err := m.seriesLibrary(ctx, meta.TMDBID, rel, targetLibraryID)
 	if err != nil {
 		return "", 0, err
 	}

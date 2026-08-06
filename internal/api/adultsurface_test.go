@@ -1965,3 +1965,73 @@ func TestSiteDetailIgnoresAnotherSitesWalk(t *testing.T) {
 		t.Error("the site actually being walked does not read as cataloguing")
 	}
 }
+
+// The universal search is a new door to cached adult rows, so it carries the
+// same promise of absence every other surface does: with the module off, an
+// adult category search answers empty without asking any indexer, a cached
+// adult release id is not grabbable, and a file parked into an adult library
+// is absent from the review queue.
+func TestUniversalSearchKeepsAdultAbsentWithTheModuleOff(t *testing.T) {
+	ctx := context.Background()
+	fake := newFakeIndexer(t)
+	h, st, _ := newTestServer(t, WithIndexerClients(fake.factory()))
+	enableAdult(t, st)
+	addIndexer(t, st, fake, "alpha", 6000)
+
+	// Cached while the module was on: an adult release and a file parked into
+	// the adult library by an untied grab.
+	adultRel := torrentRelease("Site.22.03.14.Scene", "guid-adult", 5,
+		core.ParsedRelease{Title: "Site"})
+	adultRel.IndexerID = 1
+	adultRel.Categories = []int{6010}
+	if err := st.UpsertRelease(ctx, &adultRel); err != nil {
+		t.Fatalf("UpsertRelease: %v", err)
+	}
+	adultLib, err := st.GetDefaultLibrary(ctx, core.LibraryKindAdult)
+	if err != nil {
+		t.Fatalf("GetDefaultLibrary(adult): %v", err)
+	}
+	if err := st.UpsertUnmatchedFile(ctx, &core.UnmatchedFile{
+		Path: "downloads/scene.mkv", Size: 1, Reason: "manual-grab", LibraryID: adultLib.ID,
+	}); err != nil {
+		t.Fatalf("UpsertUnmatchedFile: %v", err)
+	}
+
+	if err := st.SetAdultEnabled(ctx, false); err != nil {
+		t.Fatalf("SetAdultEnabled(false): %v", err)
+	}
+	createUser(t, st, testAdmin, testPassword, core.RoleAdmin)
+	cookie := login(t, h, testAdmin, testPassword)
+
+	// An all-adult category request short-circuits: empty answer, zero
+	// outbound searches — indistinguishable from a search that matched nothing.
+	rec := doAuth(t, h, http.MethodGet, "/api/v1/search/releases?q=scene&cats=6000,6010", "",
+		withCookie(cookie))
+	wantStatus(t, rec, http.StatusOK)
+	var body releasesResponse
+	decodeBody(t, rec, &body)
+	if len(body.Releases) != 0 || len(fake.recorded()) != 0 {
+		t.Fatalf("releases = %+v, searches = %+v; want silence", body.Releases, fake.recorded())
+	}
+
+	// The cached adult release id is not a grabbable handle.
+	movies, err := st.GetDefaultLibrary(ctx, core.LibraryKindMovie)
+	if err != nil {
+		t.Fatalf("GetDefaultLibrary(movie): %v", err)
+	}
+	rec = doAuth(t, h, http.MethodPost, "/api/v1/search/grab",
+		`{"release_id":`+itoa(adultRel.ID)+`,"library_id":`+itoa(movies.ID)+`}`,
+		withCookie(cookie))
+	wantStatus(t, rec, http.StatusNotFound)
+
+	// The parked file is absent from the review queue, and unreachable by id.
+	rec = doAuth(t, h, http.MethodGet, "/api/v1/import/queue", "", withCookie(cookie))
+	wantStatus(t, rec, http.StatusOK)
+	var queue struct {
+		Items []unmatchedJSON `json:"items"`
+	}
+	decodeBody(t, rec, &queue)
+	if len(queue.Items) != 0 {
+		t.Fatalf("import queue = %+v, want the adult-parked file hidden", queue.Items)
+	}
+}

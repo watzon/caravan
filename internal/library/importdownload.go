@@ -26,6 +26,14 @@ import (
 // feed alongside it.
 const ReasonImport = "import"
 
+// ReasonManualGrab marks a file parked by an UNTIED universal-search grab: the
+// user chose a library and nothing else, so parking for a manual match is the
+// grab doing exactly what it was asked. A bare token for ReasonImport's
+// reason — the review screen labels it — and a distinct one because "needs a
+// manual match" (something went wrong) and "awaiting your match" (working as
+// designed) deserve different framing.
+const ReasonManualGrab = "manual-grab"
+
 // EventCategoryImport groups import events in the activity feed (SPEC §7).
 const EventCategoryImport = "import"
 
@@ -94,6 +102,12 @@ func (m *Manager) ImportDownload(ctx context.Context, dl core.DownloadStatus, gr
 		imported, parked, err = m.importDownloadedMovie(ctx, files, grab)
 	case grab.SeriesID > 0:
 		imported, parked, err = m.importDownloadedEpisodes(ctx, files, grab)
+	case grab.LibraryID > 0:
+		// An untied universal-search grab: the user chose a library and no
+		// item, so every payload file parks in scan review scoped to it. The
+		// default below survives on purpose — a grab with no target AND no
+		// library is still a bug that must fail loudly.
+		imported, parked, err = m.parkUntiedDownload(ctx, files, grab)
 	default:
 		return fmt.Errorf("library: grab %d targets neither a movie nor a series", grab.GrabID)
 	}
@@ -140,7 +154,14 @@ func (m *Manager) recordGrabOutcome(ctx context.Context, grab core.GrabInfo, imp
 
 	status := core.GrabStatusImported
 	reason := fmt.Sprintf("imported %d file(s)", imported)
-	if imported == 0 {
+	switch {
+	case grab.MovieID == 0 && grab.SeriesID == 0 && grab.LibraryID > 0:
+		// An untied grab that parked its payload did exactly what it was
+		// asked. The status is NOT cosmetic: alreadyImported keys on
+		// GrabStatusImported, and it is what keeps a redelivered job from
+		// parking the same files twice under an expired lease.
+		reason = fmt.Sprintf("parked %d file(s) for manual match", parked)
+	case imported == 0:
 		status = core.GrabStatusFailed
 		reason = fmt.Sprintf("no file matched the grab; %d parked for manual match", parked)
 	}
@@ -194,7 +215,7 @@ func (m *Manager) importDownloadedMovie(ctx context.Context, files []downloadedF
 	warn := func(format string, args ...any) {
 		warnings = append(warnings, fmt.Sprintf(format, args...))
 	}
-	rel, movieID, err := m.importMovie(ctx, meta, file.rel, file.size, p, warn, keepSource)
+	rel, movieID, err := m.importMovie(ctx, meta, file.rel, file.size, p, warn, keepSource, grab.LibraryID)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -271,7 +292,7 @@ func (m *Manager) importDownloadedEpisodes(ctx context.Context, files []download
 		warn := func(format string, args ...any) {
 			warnings = append(warnings, fmt.Sprintf(format, args...))
 		}
-		rel, seriesID, err := m.importEpisode(ctx, meta, file.rel, file.size, p, warn, keepSource)
+		rel, seriesID, err := m.importEpisode(ctx, meta, file.rel, file.size, p, warn, keepSource, grab.LibraryID)
 		if err != nil {
 			return imported, parked, err
 		}
@@ -708,20 +729,63 @@ func (m *Manager) recordGrabFailure(ctx context.Context, grab core.GrabInfo, rea
 // docs/external-clients.md recommends anyway, since it is also what makes
 // imports hardlink — gets the queue row back.
 func (m *Manager) parkImport(ctx context.Context, f downloadedFile, p core.ParsedRelease, grab core.GrabInfo, reason string) error {
+	return m.parkFile(ctx, f, p, grab, ReasonImport, EventCategoryImport,
+		fmt.Sprintf("Import of %s needs a manual match", filepath.Base(f.rel)), reason)
+}
+
+// parkFile is the queue-row-plus-event tail parkImport and the untied grab
+// path share: the queue reason and the event framing differ, everything else
+// must not drift.
+func (m *Manager) parkFile(ctx context.Context, f downloadedFile, p core.ParsedRelease, grab core.GrabInfo, queueReason, eventCategory, message, detail string) error {
 	if !foreignPath(f.rel) {
-		u := &core.UnmatchedFile{Path: f.rel, Size: f.size, Parsed: p, Reason: ReasonImport}
+		u := &core.UnmatchedFile{
+			Path: f.rel, Size: f.size, Parsed: p,
+			Reason: queueReason, LibraryID: grab.LibraryID,
+		}
 		if err := m.store.UpsertUnmatchedFile(ctx, u); err != nil {
 			return err
 		}
 	}
 	return m.store.InsertEvent(ctx, &core.Event{
 		Level:    core.EventLevelWarn,
-		Category: EventCategoryImport,
-		Message:  fmt.Sprintf("Import of %s needs a manual match", filepath.Base(f.rel)),
-		Detail:   fmt.Sprintf("%s: %s", grabLabel(grab), reason),
+		Category: eventCategory,
+		Message:  message,
+		Detail:   fmt.Sprintf("%s: %s", grabLabel(grab), detail),
 		MovieID:  grab.MovieID,
 		SeriesID: grab.SeriesID,
 	})
+}
+
+// parkUntiedDownload parks every video file of an untied universal-search
+// grab. Every file, honestly: a manual grab can be a season pack, an album,
+// an ISO — Caravan has no idea how many items it holds, and the user asked to
+// decide by hand. Which parser reads each name follows the chosen library's
+// kind, the same "where it is decides" rule the scanner applies.
+func (m *Manager) parkUntiedDownload(ctx context.Context, files []downloadedFile, grab core.GrabInfo) (int, int, error) {
+	lib, err := m.store.GetLibrary(ctx, grab.LibraryID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return 0, 0, err
+	}
+	parseName := m.parse
+	eventCategory := EventCategoryImport
+	if lib != nil && lib.Kind == core.LibraryKindAdult {
+		parseName = m.parseScene
+		// An untied grab into an adult library must stay as invisible to
+		// ungranted callers as the library itself; the adult-only category is
+		// what the event feed's gate reads.
+		eventCategory = core.EventCategoryAdultOnly
+	}
+	parked := 0
+	for _, f := range files {
+		if err := m.parkFile(ctx, f, parseName(filepath.Base(f.rel)), grab,
+			ReasonManualGrab, eventCategory,
+			fmt.Sprintf("%s is ready for a manual match", filepath.Base(f.rel)),
+			"grabbed without a library item"); err != nil {
+			return 0, parked, err
+		}
+		parked++
+	}
+	return 0, parked, nil
 }
 
 // recordImport writes the activity-feed entry for one imported file.

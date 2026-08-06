@@ -101,7 +101,7 @@
         // slow half, so they run together rather than in sequence.
         const [item, found] = await Promise.all([api.getMovie(id), api.movieReleases(id)]);
         movie = item;
-        releases = found;
+        releases = found.releases;
       } else {
         const [item, found] = await Promise.all([
           api.getSeries(id),
@@ -111,7 +111,7 @@
           }),
         ]);
         series = item;
-        releases = found;
+        releases = found.releases;
       }
       error = null;
     } catch (err) {

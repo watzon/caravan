@@ -70,7 +70,7 @@ func (m *Manager) ImportUnmatched(ctx context.Context, unmatchedID, tmdbID int64
 	case MediaTypeMovie:
 		// The same library the import below will resolve, so its provider
 		// choice answers the metadata fetch.
-		lib, err := m.movieLibrary(ctx, tmdbID, u.Path, 0)
+		lib, err := m.movieLibrary(ctx, tmdbID, u.Path, u.LibraryID)
 		if err != nil {
 			return nil, err
 		}
@@ -81,7 +81,7 @@ func (m *Manager) ImportUnmatched(ctx context.Context, unmatchedID, tmdbID int64
 		if meta == nil {
 			return nil, fmt.Errorf("library: movie %d not found", tmdbID)
 		}
-		res.Path, res.MovieID, err = m.importMovie(ctx, meta, u.Path, info.Size(), u.Parsed, warn, dispositionFor(u.Path))
+		res.Path, res.MovieID, err = m.importMovie(ctx, meta, u.Path, info.Size(), u.Parsed, warn, dispositionFor(u.Path), u.LibraryID)
 		if err != nil {
 			return nil, err
 		}
@@ -90,7 +90,7 @@ func (m *Manager) ImportUnmatched(ctx context.Context, unmatchedID, tmdbID int64
 		if !u.Parsed.IsEpisode() {
 			return nil, fmt.Errorf("library: %q has no season/episode number to import as an episode", u.Path)
 		}
-		lib, err := m.seriesLibrary(ctx, tmdbID, u.Path, 0)
+		lib, err := m.seriesLibrary(ctx, tmdbID, u.Path, u.LibraryID)
 		if err != nil {
 			return nil, err
 		}
@@ -101,7 +101,7 @@ func (m *Manager) ImportUnmatched(ctx context.Context, unmatchedID, tmdbID int64
 		if meta == nil {
 			return nil, fmt.Errorf("library: series %d not found", tmdbID)
 		}
-		res.Path, res.SeriesID, err = m.importEpisode(ctx, meta, u.Path, info.Size(), u.Parsed, warn, dispositionFor(u.Path))
+		res.Path, res.SeriesID, err = m.importEpisode(ctx, meta, u.Path, info.Size(), u.Parsed, warn, dispositionFor(u.Path), u.LibraryID)
 		if err != nil {
 			return nil, err
 		}

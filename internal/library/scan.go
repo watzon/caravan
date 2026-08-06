@@ -378,7 +378,7 @@ func (m *Manager) matchAndImportMovie(ctx context.Context, lib *core.Library, re
 	}
 
 	meta := results[idx]
-	finalRel, _, err := m.importMovie(ctx, &meta, rel, size, p, res.addErr, consumeSource)
+	finalRel, _, err := m.importMovie(ctx, &meta, rel, size, p, res.addErr, consumeSource, lib.ID)
 	return finalRel, err
 }
 
@@ -416,7 +416,7 @@ func (m *Manager) matchAndImportEpisode(ctx context.Context, lib *core.Library, 
 		return "", nil
 	}
 
-	finalRel, _, err := m.importEpisode(ctx, full, rel, size, p, res.addErr, consumeSource)
+	finalRel, _, err := m.importEpisode(ctx, full, rel, size, p, res.addErr, consumeSource, lib.ID)
 	return finalRel, err
 }
 
@@ -473,4 +473,3 @@ func (m *Manager) reconcileRemovals(ctx context.Context, res *ScanResult, before
 	}
 	return nil
 }
-

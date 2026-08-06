@@ -59,7 +59,9 @@ import type {
   QualityProfileInput,
   QualityProfileTestRequest,
   QualityProfileTestResponse,
-  Release,
+  ReleasesResponse,
+  SearchGrabRequest,
+  SearchReleasesParams,
   NotificationWebhook,
   NotificationWebhookInput,
   RemotePathMapping,
@@ -837,26 +839,46 @@ export const api = {
    * skeleton rows.
    */
   movieReleases: (id: number, signal?: AbortSignal) =>
-    listOf<Release>(endpoints.movieReleases(id), 'releases', signal),
+    request<ReleasesResponse>(endpoints.movieReleases(id), { signal }),
 
   /**
    * Episode and season search. `season`/`episode` are numbers as they appear on
    * screen, because they are what the query sent to the indexer is built from;
    * the grab that follows targets episodes by id.
+   *
+   * Both return the whole envelope rather than the bare rows: the picker
+   * seeds its editable query box with the exact string the server sent, and
+   * finally surfaces the per-indexer failures it always answered with.
    */
   seriesReleases: (
     id: number,
     opts: { season?: number; episode?: number } = {},
     signal?: AbortSignal,
   ) =>
-    listOf<Release>(
+    request<ReleasesResponse>(
       withQuery(endpoints.seriesReleases(id), {
         season: opts.season,
         episode: opts.episode,
       }),
-      'releases',
-      signal,
+      { signal },
     ),
+
+  /** The Prowlarr-style universal search: any query, any categories. */
+  searchReleases: (params: SearchReleasesParams, signal?: AbortSignal) =>
+    request<ReleasesResponse>(
+      withQuery(`${API_BASE}/search/releases`, {
+        q: params.q,
+        cats: params.cats?.length ? params.cats.join(',') : undefined,
+        indexer_ids: params.indexer_ids?.length ? params.indexer_ids.join(',') : undefined,
+        library_id: params.library_id || undefined,
+        limit: params.limit,
+      }),
+      { signal },
+    ),
+
+  /** Grab from the universal search: into a library, optionally tied to an item. */
+  grabFromSearch: (body: SearchGrabRequest) =>
+    request<void>(`${API_BASE}/search/grab`, { method: 'POST', body }),
 
   grabForMovie: (id: number, body: GrabRequest) =>
     request<void>(endpoints.movieGrab(id), { method: 'POST', body }),

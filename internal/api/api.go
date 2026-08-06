@@ -265,6 +265,8 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("POST /library/movies/{id}/grab", s.handleMovieGrab)
 	api.HandleFunc("POST /library/movies/{id}/move", s.handleMoveMovie)
 	api.HandleFunc("POST /library/series/{id}/move", s.handleMoveSeries)
+	api.HandleFunc("GET /search/releases", s.handleSearchReleases)
+	api.HandleFunc("POST /search/grab", s.handleSearchGrab)
 	api.HandleFunc("GET /library/series/{id}/releases", s.handleSeriesReleases)
 	api.HandleFunc("POST /library/series/{id}/grab", s.handleSeriesGrab)
 
