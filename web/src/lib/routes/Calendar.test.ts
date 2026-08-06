@@ -33,6 +33,7 @@ beforeEach(() => {
         { kind: 'movie', date, title: 'Still Missing', movie_id: 3, monitored: true, has_file: false, status: 'missing' },
         { kind: 'episode', date: tomorrow, title: 'Future', series_id: 4, season_number: 1, episode_number: 2, episode_title: 'Future', monitored: true, has_file: false, status: 'unaired' },
         { kind: 'episode', date: tomorrow, title: 'Chainsmoker Cat', series_id: 5, season_number: 1, episode_number: 6, episode_title: 'Episode 6', monitored: true, has_file: false, status: 'unaired' },
+        { kind: 'episode', date: tomorrow, title: 'Series Name', series_id: 6, episode_number: 4, episode_title: 'Episode 4', monitored: true, has_file: false, status: 'unaired' },
       ] });
     }
     throw new Error(`unexpected fetch: ${String(input)}`);
@@ -99,11 +100,16 @@ describe('Calendar', () => {
     }
   });
 
-  it('shows a generic episode once in Agenda with its episode code', async () => {
+  it('renders a generic season-zero episode once in Month and Agenda when the wire omits its season number', async () => {
     app = mount(Calendar, { target: host });
     await settle();
     topbar = mount(TopBar, { target: host, props: { title: 'Calendar' } });
     flushSync();
+
+    const month = host.querySelector('[aria-label="Month calendar"]');
+    const monthEntries = month?.querySelectorAll('[title="Series Name S00E04"]');
+    expect(monthEntries).toHaveLength(1);
+    expect(monthEntries?.[0]?.querySelector('span')?.textContent).toBe('Series Name S00E04');
 
     const agendaButton = Array.from(host.querySelectorAll('button')).find((button) => button.textContent === 'Agenda');
     expect(agendaButton).toBeDefined();
@@ -112,6 +118,9 @@ describe('Calendar', () => {
 
     const agenda = host.querySelector('[aria-label="Calendar agenda"]');
     expect(agenda?.querySelector('a[href="/series/5"]')?.textContent).toBe('Chainsmoker Cat S01E06');
+    const specialEntries = Array.from(agenda?.querySelectorAll('a[href="/series/6"]') ?? []);
+    expect(specialEntries).toHaveLength(1);
+    expect(specialEntries[0]?.textContent).toBe('Series Name S00E04');
   });
 
   it('marks today without a focus-style ring', async () => {

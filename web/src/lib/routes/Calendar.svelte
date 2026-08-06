@@ -53,9 +53,9 @@
 
   function entryTitle(entry: CalendarEntry) {
     if (entry.kind === 'movie') return entry.title;
-    const code = entry.season_number === undefined || entry.episode_number === undefined
+    const code = entry.episode_number === undefined
       ? ''
-      : episodeCode(entry.season_number, entry.episode_number);
+      : episodeCode(entry.season_number ?? 0, entry.episode_number);
     const episodeTitle = entry.episode_title?.trim() ?? '';
     if (!episodeTitle || /^Episode(?:\s+\d+)?$/i.test(episodeTitle)) {
       return [entry.title, code].filter(Boolean).join(' ');
