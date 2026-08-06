@@ -8,7 +8,7 @@
  * Pure — unit-tested in indexer.test.ts.
  */
 
-import type { IndexerCategory, IndexerType } from './api/types';
+import type { Indexer, IndexerCategory, IndexerType } from './api/types';
 
 export const INDEXER_TYPES: { value: IndexerType; label: string; help: string }[] = [
   { value: 'torznab', label: 'Torznab', help: 'Torrent indexer (Jackett, Prowlarr, private trackers).' },
@@ -98,6 +98,67 @@ export function unknownCategoryIds(
 ): number[] {
   const known = new Set(allCategoryIds(tree));
   return [...selected].filter((id) => !known.has(id)).sort((a, b) => a - b);
+}
+
+/* ----------------------------------------------------------------------------
+ * Category blocks for the free-text search rail. Unlike the picker above, this
+ * is not one indexer's advertised tree: a universal search fans out over every
+ * enabled indexer at once, and there is no tree that is true of all of them.
+ * The Newznab/Torznab top-level blocks are the vocabulary they DO share, so
+ * they are what the rail offers.
+ * ------------------------------------------------------------------------- */
+
+/** The standard Newznab/Torznab top-level blocks, in their numeric order. */
+export const STANDARD_CATEGORY_BLOCKS: readonly { id: number; name: string }[] = [
+  { id: 2000, name: 'Movies' },
+  { id: 3000, name: 'Audio' },
+  { id: 4000, name: 'PC' },
+  { id: 5000, name: 'TV' },
+  { id: 6000, name: 'XXX' },
+  { id: 7000, name: 'Books' },
+  { id: 8000, name: 'Other' },
+];
+
+/** The adult block, mirroring core.AdultCategoryBase (internal/core/release.go). */
+export const ADULT_CATEGORY_BASE = 6000;
+
+/** Whether an id falls in the adult block — core.IsAdultCategory's twin. */
+export function isAdultCategory(id: number): boolean {
+  return id >= ADULT_CATEGORY_BASE && id < ADULT_CATEGORY_BASE + 1000;
+}
+
+/**
+ * What the search rail offers as categories: the standard blocks, plus every
+ * id somebody has already configured on an indexer.
+ *
+ * The union matters because a private tracker's ids are frequently outside the
+ * standard blocks entirely (a 100000-series scheme is common), and an option
+ * list that only knew the blocks would make those indexers unsearchable by
+ * category. A configured id keeps its block's name when it has one, and is
+ * otherwise named by its number — the id is what the indexer documents.
+ *
+ * `adult` is the module's visibility, not a preference: with the module absent
+ * the XXX block is not on the list at all. The server strips adult categories
+ * out of the request anyway (handleSearchReleases); this is the courtesy half.
+ */
+export function searchCategoryOptions(
+  indexers: readonly Indexer[],
+  adult: boolean,
+): { id: number; name: string }[] {
+  const named = new Map<number, string>();
+  for (const block of STANDARD_CATEGORY_BLOCKS) {
+    if (!adult && isAdultCategory(block.id)) continue;
+    named.set(block.id, `${block.id} ${block.name}`);
+  }
+  for (const indexer of indexers) {
+    for (const id of indexer.categories) {
+      if (!adult && isAdultCategory(id)) continue;
+      if (!named.has(id)) named.set(id, String(id));
+    }
+  }
+  return [...named.entries()]
+    .map(([id, name]) => ({ id, name }))
+    .sort((a, b) => a.id - b.id);
 }
 
 /**

@@ -7,27 +7,25 @@
    * linkable, reloadable and readable at a glance. Every result is grabbable,
    * including the flagged ones — the UI de-emphasizes a bad release, it does
    * not decide for the user (SPEC §13).
+   *
+   * The query is editable (plan part B7). The server's derived query is a guess
+   * at what an indexer calls this item, and it is wrong often enough that the
+   * screen it lands on has to let the user say otherwise. What is NOT editable
+   * is the target: the grab always posts to this item's own endpoint with the
+   * season and episode ids the route named, whatever the query box says. That
+   * split is the whole point — a wrong query is a bad search, a wrong target is
+   * a file in the wrong place.
    */
   import { onMount } from 'svelte';
   import { api, errorText } from '../api/client';
-  import type { Movie, Release, Series } from '../api/types';
-  import Badge from '../components/Badge.svelte';
-  import Button from '../components/Button.svelte';
-  import EmptyState from '../components/EmptyState.svelte';
+  import type { Indexer, IndexerError, Movie, Release, Series } from '../api/types';
   import Icon from '../components/Icon.svelte';
+  import IndexerErrors from '../components/IndexerErrors.svelte';
   import LoadError from '../components/LoadError.svelte';
-  import Skeleton from '../components/Skeleton.svelte';
-  import {
-    UNKNOWN,
-    episodeCode,
-    formatAge,
-    formatBytes,
-    seasonLabel,
-    truncateMiddle,
-  } from '../format';
+  import ReleaseSearchControls from '../components/ReleaseSearchControls.svelte';
+  import ReleaseTable from '../components/ReleaseTable.svelte';
+  import { episodeCode, seasonLabel } from '../format';
   import { sceneNumber } from '../adult';
-  import { isFlagged, releaseFlags, releaseScore, sortReleases } from '../release';
-  import { compatBadge } from '../tvcompat';
   import { navigate } from '../router.svelte';
   import { pushToast } from '../state/toast.svelte';
 
@@ -58,6 +56,16 @@
   let error = $state<string | null>(null);
   /** Keyed by GUID, not row id: an uncached result has id 0. */
   let grabbingGUID = $state<string | null>(null);
+
+  /* The editable rail. `query` starts as whatever the server derived, and
+     `derivedQuery` remembers that so an untouched box can go back to the
+     per-item endpoint rather than to the free-text one — see runSearch. */
+  let query = $state('');
+  let derivedQuery = $state('');
+  let categories = $state<number[]>([]);
+  let indexerIDs = $state<number[]>([]);
+  let indexers = $state<Indexer[]>([]);
+  let failures = $state<IndexerError[]>([]);
 
   /** Where the "back" link points. */
   let itemHref = $derived.by(() => {
@@ -92,6 +100,27 @@
     return `${title} · ${seasonLabel(season)}`;
   });
 
+  /** The chip that keeps the locked grab target visible above an edited query. */
+  let contextLabel = $derived(
+    `${kind === 'movie' ? 'Movie' : kind === 'site' ? 'Site' : 'Series'} · ${heading}`,
+  );
+
+  /**
+   * The library whose quality profile scores a free-text re-search, so an
+   * edited query ranks rows the same way the derived one did. 0 — a row from
+   * before libraries were plural — falls back to the store-wide default.
+   */
+  let libraryID = $derived((kind === 'movie' ? movie?.library_id : series?.library_id) ?? 0);
+
+  /** One search against this item's own endpoint, whatever the rail says. */
+  function perItemSearch() {
+    if (!asSeries) return api.movieReleases(id);
+    return api.seriesReleases(id, {
+      season: season >= 0 ? season : undefined,
+      episode: episode >= 0 ? episode : undefined,
+    });
+  }
+
   async function load() {
     loading = true;
     releases = null;
@@ -99,19 +128,13 @@
       if (!asSeries) {
         // The item load is what gives the screen a title; the search is the
         // slow half, so they run together rather than in sequence.
-        const [item, found] = await Promise.all([api.getMovie(id), api.movieReleases(id)]);
+        const [item, found] = await Promise.all([api.getMovie(id), perItemSearch()]);
         movie = item;
-        releases = found.releases;
+        applyResponse(found);
       } else {
-        const [item, found] = await Promise.all([
-          api.getSeries(id),
-          api.seriesReleases(id, {
-            season: season >= 0 ? season : undefined,
-            episode: episode >= 0 ? episode : undefined,
-          }),
-        ]);
+        const [item, found] = await Promise.all([api.getSeries(id), perItemSearch()]);
         series = item;
-        releases = found.releases;
+        applyResponse(found);
       }
       error = null;
     } catch (err) {
@@ -121,11 +144,90 @@
     }
   }
 
-  onMount(load);
+  /**
+   * Seed the rail from the server's own answer. `query` is only overwritten on
+   * a per-item search, which is the only one that derives a query at all — a
+   * free-text search echoes back what the user typed.
+   */
+  function applyResponse(found: { query: string; releases: Release[]; errors: IndexerError[] }, seed = true) {
+    releases = found.releases;
+    failures = found.errors ?? [];
+    askedCount = countAsked();
+    if (!seed) return;
+    derivedQuery = found.query;
+    query = found.query;
+  }
+
+  /**
+   * How many indexers this search reached. Snapshotted with the answer rather
+   * than derived at render time: the rail is editable, so "2 of 5 answered"
+   * must keep meaning the search on screen after the user ticks a sixth box.
+   * Zero — the indexer list has not arrived — reads as "we do not know".
+   */
+  let askedCount = $state(0);
+
+  function countAsked(): number {
+    const enabled = indexers.filter((indexer) => indexer.enabled);
+    if (indexerIDs.length === 0) return enabled.length;
+    return enabled.filter((indexer) => indexerIDs.includes(indexer.id)).length;
+  }
+
+  onMount(() => {
+    void load();
+    // The rail's indexer list and the ids behind its category union. A failure
+    // here is not the screen failing: the rail simply offers no indexer filter,
+    // and the search still fans out over every enabled one.
+    void api
+      .listIndexers()
+      .then((list) => (indexers = list))
+      .catch(() => (indexers = []));
+  });
+
+  /**
+   * Re-run the search from the rail.
+   *
+   * An untouched rail goes back to the per-item endpoint rather than to
+   * /search/releases, and not as an optimization: the per-item builders send
+   * SEVERAL queries per search (an adult scene is looked up by two different
+   * naming conventions at once), and the free-text endpoint sends exactly the
+   * one string it was handed. Routing an unedited re-search through it would
+   * quietly lose half the results the first load found.
+   */
+  async function runSearch() {
+    const asked = query.trim();
+    if (asked === '') return;
+    const untouched =
+      asked === derivedQuery.trim() && categories.length === 0 && indexerIDs.length === 0;
+
+    loading = true;
+    releases = null;
+    try {
+      if (untouched) {
+        applyResponse(await perItemSearch());
+      } else {
+        applyResponse(
+          await api.searchReleases({
+            q: asked,
+            cats: categories,
+            indexer_ids: indexerIDs,
+            library_id: libraryID,
+          }),
+          false,
+        );
+      }
+      error = null;
+    } catch (err) {
+      error = errorText(err);
+    } finally {
+      loading = false;
+    }
+  }
 
   async function grab(release: Release) {
     grabbingGUID = release.guid;
     try {
+      // Always the per-item endpoints, with the ids the ROUTE named. The query
+      // box decides what was searched for; it never decides what is grabbed.
       if (!asSeries) {
         await api.grabForMovie(id, { release_id: release.id });
       } else {
@@ -144,7 +246,6 @@
     }
   }
 
-  let rows = $derived(sortReleases(releases ?? []));
 </script>
 
 <div class="flex flex-col gap-6">
@@ -162,147 +263,27 @@
         Every enabled indexer, searched now. Nothing is grabbed until you say so.
       </p>
     </div>
-    <div class="ml-auto flex items-center gap-2">
-      {#if releases}
-        <span class="text-sm text-ink-secondary">
-          {rows.length} release{rows.length === 1 ? '' : 's'}
-        </span>
-      {/if}
-      <Button variant="secondary" onclick={load} disabled={loading}>
-        <Icon name="refresh" size={14} />
-        {loading ? 'Searching…' : 'Search again'}
-      </Button>
-    </div>
+    {#if releases}
+      <span class="ml-auto text-sm text-ink-secondary">
+        {releases.length} release{releases.length === 1 ? '' : 's'}
+      </span>
+    {/if}
   </div>
+
+  <ReleaseSearchControls
+    bind:query
+    bind:categories
+    bind:indexerIDs
+    {indexers}
+    busy={loading}
+    onsearch={runSearch}
+    {contextLabel} />
+
+  <IndexerErrors errors={failures} total={askedCount || undefined} />
 
   {#if error}
     <LoadError message={error} onretry={load} />
-  {:else if loading}
-    <div class="overflow-hidden rounded-md border border-border">
-      {#each Array.from({ length: 6 }) as _, i (i)}
-        <div class="flex items-center gap-3 border-b border-border px-3 py-3 last:border-b-0">
-          <Skeleton class="h-4 w-24" />
-          <Skeleton class="h-4 flex-1" />
-          <Skeleton class="h-4 w-12" />
-          <Skeleton class="h-4 w-16" />
-          <Skeleton class="h-4 w-14" />
-          <Skeleton class="h-7 w-16 rounded-md" />
-        </div>
-      {/each}
-    </div>
-  {:else if rows.length === 0}
-    <EmptyState
-      icon="search"
-      title="No releases found"
-      message="No enabled indexer returned anything for this item. Check that at least one indexer is configured and passing its test, then search again.">
-      {#snippet action()}
-        <Button variant="secondary" href="/settings">Open indexer settings</Button>
-      {/snippet}
-    </EmptyState>
   {:else}
-    <div class="overflow-x-auto rounded-md border border-border">
-      <table class="w-full min-w-[1000px] border-collapse text-sm">
-        <thead>
-          <tr class="bg-surface text-left">
-            <th class="micro-label px-3 py-2 font-semibold">Source</th>
-            <th class="micro-label px-3 py-2 font-semibold">Release</th>
-            <th class="micro-label px-3 py-2 font-semibold">Age</th>
-            <th class="micro-label px-3 py-2 text-right font-semibold">Size</th>
-            <th class="micro-label px-3 py-2 text-right font-semibold">Peers</th>
-            <th class="micro-label px-3 py-2 font-semibold">Quality</th>
-            <th class="micro-label px-3 py-2 text-right font-semibold">Score</th>
-            <th class="micro-label px-3 py-2 text-right font-semibold">Grab</th>
-          </tr>
-        </thead>
-        <tbody>
-          {#each rows as release, index (release.guid || `${release.indexer_id}:${release.title}`)}
-            {@const flags = releaseFlags(release)}
-            {@const tv = compatBadge(release.compatibility)}
-            {@const flagged = isFlagged(release)}
-            {@const best = index === 0}
-            <tr
-              class="relative border-t border-border align-top transition-colors duration-150
-                     {best ? 'bg-accent-tint' : 'hover:bg-raised'} {flagged ? 'opacity-60' : ''}">
-              <td class="px-3 py-3">
-                <span class="flex items-center gap-2">
-                  {#if best}
-                    <span class="h-4 w-0.5 shrink-0 rounded-full bg-accent" aria-hidden="true"></span>
-                    <span class="text-xs font-semibold uppercase tracking-wide text-accent-text">Best</span>
-                  {/if}
-                  <span class="truncate text-ink-secondary" title={release.indexer}>
-                    {release.indexer || UNKNOWN}
-                  </span>
-                </span>
-              </td>
-
-              <td class="px-3 py-3 font-mono text-ink" title={release.title}>
-                {truncateMiddle(release.title, 58)}
-              </td>
-
-              <td class="px-3 py-3 text-ink-secondary">{formatAge(release.published_at)}</td>
-
-              <td class="px-3 py-3 text-right font-mono text-ink-secondary">
-                {release.size > 0 ? formatBytes(release.size) : UNKNOWN}
-              </td>
-
-              <td class="px-3 py-3 text-right font-mono">
-                {#if release.protocol === 'torrent'}
-                  <span class={release.seeders > 0 ? 'text-success' : 'text-danger'}>
-                    {release.seeders}
-                  </span>
-                  <span class="text-ink-muted">/{release.leechers}</span>
-                {:else}
-                  <span class="text-ink-muted">{UNKNOWN}</span>
-                {/if}
-              </td>
-
-              <td class="px-3 py-3">
-                <div class="flex flex-wrap items-center gap-1.5">
-                  {#if release.parsed.quality && release.parsed.quality !== 'unknown'}
-                    <Badge mono>{release.parsed.quality}</Badge>
-                  {/if}
-                  {#if release.parsed.source && release.parsed.source !== 'unknown'}
-                    <Badge mono>{release.parsed.source}</Badge>
-                  {/if}
-                  {#if release.parsed.codec}
-                    <Badge mono>{release.parsed.codec}</Badge>
-                  {/if}
-                  {#if release.parsed.proper}
-                    <Badge mono tone="success">PROPER</Badge>
-                  {/if}
-                  {#if release.parsed.repack}
-                    <Badge mono tone="success">REPACK</Badge>
-                  {/if}
-                  {#each flags as flag (flag.key)}
-                    <Badge mono tone={flag.tone} title={flag.title}>{flag.label}</Badge>
-                  {/each}
-                  {#if tv}
-                    <Badge mono tone={tv.tone} title={tv.title}>{tv.label}</Badge>
-                  {/if}
-                </div>
-              </td>
-
-              <td class="px-3 py-3 text-right font-mono {best ? 'text-accent-text' : 'text-ink-secondary'}">
-                {releaseScore(release)}
-              </td>
-
-              <td class="px-3 py-3">
-                <div class="flex justify-end">
-                  <Button
-                    variant={best ? 'primary' : 'secondary'}
-                    size="sm"
-                    disabled={grabbingGUID !== null}
-                    title={flagged ? flags.map((f) => f.title).join(' ') : undefined}
-                    onclick={() => grab(release)}>
-                    <Icon name="download" size={14} />
-                    {grabbingGUID === release.guid ? 'Grabbing…' : 'Grab'}
-                  </Button>
-                </div>
-              </td>
-            </tr>
-          {/each}
-        </tbody>
-      </table>
-    </div>
+    <ReleaseTable {releases} {loading} busyGUID={grabbingGUID} ongrab={grab} />
   {/if}
 </div>

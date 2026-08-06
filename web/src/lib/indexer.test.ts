@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import type { IndexerCategory } from './api/types';
+import type { Indexer, IndexerCategory } from './api/types';
 import {
   allCategoryIds,
   formatCategories,
+  isAdultCategory,
   parseCategories,
+  searchCategoryOptions,
   selectionState,
   toggleCategory,
   unknownCategoryIds,
@@ -144,5 +146,57 @@ describe('unknownCategoryIds', () => {
 
   it('is empty when every selected id is advertised', () => {
     expect(unknownCategoryIds(new Set([2000, 5070]), TREE)).toEqual([]);
+  });
+});
+
+describe('searchCategoryOptions', () => {
+  function indexer(id: number, categories: number[], enabled = true): Indexer {
+    return {
+      id,
+      name: `Indexer ${id}`,
+      url: 'http://localhost',
+      has_api_key: true,
+      type: 'torznab',
+      categories,
+      priority: 0,
+      enabled,
+    };
+  }
+
+  it('offers the standard blocks named by id and label', () => {
+    const ids = searchCategoryOptions([], true).map((o) => o.id);
+    expect(ids).toEqual([2000, 3000, 4000, 5000, 6000, 7000, 8000]);
+    expect(searchCategoryOptions([], true)[0]).toEqual({ id: 2000, name: '2000 Movies' });
+  });
+
+  it('hides the adult block when the module is not visible', () => {
+    const ids = searchCategoryOptions([], false).map((o) => o.id);
+    expect(ids).not.toContain(6000);
+  });
+
+  it('adds ids configured on an indexer that the blocks do not cover', () => {
+    const options = searchCategoryOptions([indexer(1, [2000, 100042])], true);
+    expect(options.map((o) => o.id)).toContain(100042);
+    // A private tracker's id has no standard name; the number is what it documents.
+    expect(options.find((o) => o.id === 100042)?.name).toBe('100042');
+  });
+
+  it('never leaks a configured adult id to a caller the module is absent to', () => {
+    const options = searchCategoryOptions([indexer(1, [6010, 6060])], false);
+    expect(options.map((o) => o.id)).toEqual([2000, 3000, 4000, 5000, 7000, 8000]);
+  });
+
+  it('keeps a configured id that duplicates a block under the block name', () => {
+    const options = searchCategoryOptions([indexer(1, [2000])], true);
+    expect(options.filter((o) => o.id === 2000)).toEqual([{ id: 2000, name: '2000 Movies' }]);
+  });
+});
+
+describe('isAdultCategory', () => {
+  it('matches the whole 6000 block and nothing else', () => {
+    expect(isAdultCategory(6000)).toBe(true);
+    expect(isAdultCategory(6999)).toBe(true);
+    expect(isAdultCategory(5999)).toBe(false);
+    expect(isAdultCategory(7000)).toBe(false);
   });
 });
