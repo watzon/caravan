@@ -99,11 +99,12 @@ func (g *libraryGate) load(ctx context.Context) error {
 	}
 
 	// `library_access` is the whole answer. users.adult_access was bridged onto
-	// adult libraries here while both existed; it is not consulted any more, and
-	// must not be again — nothing writes it since the access API replaced the
-	// module switch, so an account whose grant was revoked through PUT
-	// /libraries/{id}/access still carries a stale 1 in that column, and reading
-	// it would hand back the access that was just taken away.
+	// adult libraries here while both existed; migration 0028 dropped the column
+	// so that it cannot be consulted again. It had stopped being writable when
+	// the access API replaced the module switch, which made every value in it
+	// stale by construction — an account whose grant was revoked through PUT
+	// /libraries/{id}/access still carried a 1, and reading it would have handed
+	// back the access that was just taken away.
 	g.grants = map[int64]bool{}
 	if g.user.Role != core.RoleAdmin && g.user.ID != 0 {
 		// User id 0 — the API key and the open install — holds nothing, and

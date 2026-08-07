@@ -95,9 +95,9 @@ type Library struct {
 }
 
 // LibraryVisible is the whole per-library access rule, in one pure function so
-// there is exactly one truth table to read and exactly one to test. It is
-// AdultVisible generalized: the module switch became lib.Active and the
-// per-account grant became a per-library one.
+// there is exactly one truth table to read and exactly one to test. It is the
+// adult module's old rule generalized: the server-wide switch became lib.Active
+// and the per-account grant became a per-library one.
 //
 // Two rules, applied in this order and no other:
 //

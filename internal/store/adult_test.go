@@ -230,13 +230,15 @@ func TestMigrate0013PreservesThePhase8Install(t *testing.T) {
 			episode.StashID, episode.Scene)
 	}
 
-	// Nobody is granted by an upgrade.
-	user, err := st.GetUser(ctx, 4)
+	// Nobody is granted by an upgrade. 0013's per-account flag was the thing
+	// being asserted here until 0028 dropped it; the promise outlived the column
+	// and is now asked of the grants that replaced it.
+	grants, err := st.ListLibraryAccessForUser(ctx, 4)
 	if err != nil {
-		t.Fatalf("GetUser(4): %v", err)
+		t.Fatalf("ListLibraryAccessForUser(4): %v", err)
 	}
-	if user.AdultAccess {
-		t.Error("the upgrade granted an existing account adult access")
+	if len(grants) != 0 {
+		t.Errorf("the upgrade granted an existing account %v", grants)
 	}
 
 	// And the module is off, which is now the same sentence as "there is no
@@ -314,31 +316,6 @@ func TestFreshInstallHasNoAdultLibrary(t *testing.T) {
 
 	if _, err := st.GetLibraryByKind(t.Context(), core.LibraryKindAdult); !errors.Is(err, ErrNotFound) {
 		t.Errorf("GetLibraryByKind(adult) on a fresh install = %v, want ErrNotFound", err)
-	}
-}
-
-func TestAdultEnabledDefaultsOff(t *testing.T) {
-	ctx := context.Background()
-	st, _ := openTemp(t)
-
-	enabled, err := st.AdultEnabled(ctx)
-	if err != nil {
-		t.Fatalf("AdultEnabled: %v", err)
-	}
-	if enabled {
-		t.Error("AdultEnabled on a fresh install = true, want false")
-	}
-
-	// A value nobody meant must not be what turns the module on.
-	if err := st.SetSetting(ctx, SettingAdultEnabled, "sure"); err != nil {
-		t.Fatalf("SetSetting: %v", err)
-	}
-	enabled, err = st.AdultEnabled(ctx)
-	if err != nil {
-		t.Fatalf("AdultEnabled: %v", err)
-	}
-	if enabled {
-		t.Error("an unparseable adult_enabled read as on")
 	}
 }
 

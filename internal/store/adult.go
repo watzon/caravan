@@ -2,10 +2,7 @@ package store
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"strconv"
-	"strings"
 
 	"github.com/watzon/caravan/internal/core"
 )
@@ -19,30 +16,6 @@ const (
 	AdultLibraryName = "Adult"
 	AdultLibraryRoot = "library/Adult"
 )
-
-// AdultEnabled reports whether the adult module is switched on server-wide.
-//
-// NOTHING WRITES THE SETTING ANY MORE: per-library `active` replaced it, and
-// the only writer went with POST /settings/adult. What it reports is therefore
-// whatever an install was carrying when it upgraded, frozen — useful to
-// migration 0027, which backfills from it, and to nobody else. It survives only
-// until 0028 deletes the key; ask AnyActiveLibraryOfKind instead.
-//
-// Absent means off, and so does anything that will not parse. That is the
-// mirror image of SettingDLNAEnabled's rule and the reason is the same one read
-// backwards: a default is a decision about what a typo means, and for a setting
-// whose job is to keep a whole module absent, the only safe answer is "off".
-func (s *Store) AdultEnabled(ctx context.Context) (bool, error) {
-	raw, err := s.GetSetting(ctx, SettingAdultEnabled)
-	if errors.Is(err, ErrNotFound) {
-		return false, nil
-	}
-	if err != nil {
-		return false, err
-	}
-	enabled, _ := strconv.ParseBool(strings.TrimSpace(raw))
-	return enabled, nil
-}
 
 // EpisodeIDsByStashID reports which of the given scenes the library already
 // holds an episode row for, keyed by stash id. It is GetEpisodeByStashID's bulk

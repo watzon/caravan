@@ -17,35 +17,6 @@ import (
 // turned it on is the place that has to say so.
 var ErrNoAdultProvider = errors.New("core: no adult metadata provider configured")
 
-// AdultVisible is the whole access rule for the adult module (PLAN phase 9
-// task 5), in one pure function so there is exactly one truth table to read and
-// exactly one to test.
-//
-// Two switches, and both must be on:
-//
-//   - enabled is the server-wide `adult_enabled` setting. Nobody bypasses it,
-//     including an admin: it is the switch that makes the module absent rather
-//     than merely locked, and an admin who can see adult routes on a server
-//     they turned the module off on is a trace this phase promises not to
-//     leave. It is also what guarantees zero stash-box traffic when off.
-//   - granted is the per-account `adult_access` flag. An admin is implicitly
-//     granted — the person who can flip the global switch and hand out the
-//     grants gains nothing from being made to grant themselves — so the flag
-//     is only ever consulted for a member.
-//
-// The open server (no accounts at all) authenticates as an implicit admin, so
-// it reaches this with role RoleAdmin and needs only the global switch, which
-// is the same trusted-LAN default the rest of Caravan has.
-func AdultVisible(enabled bool, role string, granted bool) bool {
-	if !enabled {
-		return false
-	}
-	if role == RoleAdmin {
-		return true
-	}
-	return granted
-}
-
 // StashboxInstance is one configured stash-box endpoint.
 //
 // "stash-box" is a protocol, so a single endpoint setting could only ever

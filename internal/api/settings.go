@@ -147,17 +147,20 @@ var publicSettingKeys = map[string]bool{
 	store.SettingEpisodeFileFormat:            true,
 }
 
-// adultOnlySettings are public settings readable only by a caller the adult
-// module is visible to. They are the Stash handoff's non-secret settings and
-// the module switch (PLAN phase 11).
+// adultOnlySettings are public settings readable only by a caller some adult
+// library is visible to. They are the Stash handoff's non-secret settings
+// (PLAN phase 11).
 //
-// The module's promise is to be *absent* when it is off, not merely disabled
-// (see requireAdult), and a settings object carrying a stash_url is a module
-// announcing itself. Their own endpoints already sit on the adult mux; this is
-// the same door on the one other path from the settings table to a response
-// body.
+// The promise is to be *absent* when there is nothing to see, not merely
+// disabled (see requireAdult), and a settings object carrying a stash_url is
+// the handoff announcing itself. Their own endpoints already sit on the adult
+// mux; this is the same door on the one other path from the settings table to a
+// response body.
+//
+// The module switch used to be the third entry. It is gone with migration 0028
+// — the switch is per-library now, and a library reports its own `active` on
+// the surface that owns it, not through the settings bag.
 var adultOnlySettings = map[string]bool{
-	store.SettingAdultEnabled: true,
 	store.SettingStashURL:     true,
 	store.SettingStashEnabled: true,
 }

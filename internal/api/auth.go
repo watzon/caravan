@@ -466,10 +466,11 @@ func (s *server) resolveUser(r *http.Request) (requestUser, bool, error) {
 			case err != nil:
 				return requestUser{}, false, err
 			}
-			// The row's adult_access column is deliberately not carried: per-library
-			// grants live in `library_access` and the gate reads them there, so a
-			// grant revoked on the access card takes effect on the next request
-			// with nothing stale riding along in the identity.
+			// The identity carries no grant of its own, deliberately. Grants live
+			// in `library_access` and the gate reads them there per request, so a
+			// grant revoked on the access card takes effect on the next one with
+			// nothing stale riding along. The account row has no permission
+			// column left to be tempted by since migration 0028.
 			return requestUser{ID: user.ID, Role: user.Role}, true, nil
 		}
 	}

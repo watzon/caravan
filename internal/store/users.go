@@ -19,7 +19,7 @@ var ErrUsernameTaken = errors.New("store: username already taken")
 // exists. The setup endpoint maps it to its stable "already complete" reply.
 var ErrFirstUserExists = errors.New("store: first user already exists")
 
-const userColumns = `id, username, password_hash, role, adult_access, created_at, updated_at`
+const userColumns = `id, username, password_hash, role, created_at, updated_at`
 
 // CreateUser inserts a new account and writes back the assigned ID. The
 // username is compared case-insensitively by the column's collation, so a
@@ -33,9 +33,9 @@ func (s *Store) CreateUser(ctx context.Context, u *core.User) error {
 	u.UpdatedAt = ts
 
 	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO users (username, password_hash, role, adult_access, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)`,
-		u.Username, u.PasswordHash, u.Role, u.AdultAccess, formatTime(ts), formatTime(ts))
+		INSERT INTO users (username, password_hash, role, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)`,
+		u.Username, u.PasswordHash, u.Role, formatTime(ts), formatTime(ts))
 	if err != nil {
 		if isUniqueViolation(err) {
 			return fmt.Errorf("store: create user %q: %w", u.Username, ErrUsernameTaken)
@@ -65,10 +65,10 @@ func (s *Store) CreateFirstAdmin(ctx context.Context, u *core.User) error {
 	u.UpdatedAt = ts
 
 	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO users (username, password_hash, role, adult_access, created_at, updated_at)
-		SELECT ?, ?, ?, ?, ?, ?
+		INSERT INTO users (username, password_hash, role, created_at, updated_at)
+		SELECT ?, ?, ?, ?, ?
 		WHERE NOT EXISTS (SELECT 1 FROM users)`,
-		u.Username, u.PasswordHash, u.Role, u.AdultAccess, formatTime(ts), formatTime(ts))
+		u.Username, u.PasswordHash, u.Role, formatTime(ts), formatTime(ts))
 	if err != nil {
 		if isUniqueViolation(err) {
 			return fmt.Errorf("store: create first administrator %q: %w", u.Username, ErrFirstUserExists)
@@ -236,7 +236,7 @@ func scanUser(sc scanner) (*core.User, error) {
 		created string
 		updated string
 	)
-	if err := sc.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &u.AdultAccess, &created, &updated); err != nil {
+	if err := sc.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &created, &updated); err != nil {
 		return nil, err
 	}
 	u.CreatedAt = parseTime(created)

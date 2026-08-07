@@ -598,28 +598,146 @@ func TestMigrate0027LeavesANonAdultInstallAlone(t *testing.T) {
 	}
 }
 
-// The migration reads users.adult_access and settings.adult_enabled and removes
-// neither. An old backup re-migrates from its own version on every open, so
-// 0027 has to be able to read them forever — retirement is 0028's, and folding
-// the two together would make this file unable to run against the backups it
-// exists to upgrade.
+// ---------------------------------------------------------------------------
+// 0028, and the seam between the two.
+// ---------------------------------------------------------------------------
+
+// atSchema27 is the state 0028 has to run against: an install seeded at 26,
+// carried across by 0027, and stopped there. It is the only schema version at
+// which the two columns 0028 removes still hold anything, so it is where both
+// halves of the seam have to be asserted.
+func atSchema27(t *testing.T, seed func(*sql.DB)) string {
+	t.Helper()
+	path := atSchema26(t, seed)
+	openAtSchemaVersion(t, path, 27)
+	return path
+}
+
+// 0027 reads users.adult_access and settings.adult_enabled and removes NEITHER.
+// An old backup re-migrates from its own version on every open, so 0027 has to
+// be able to read them forever — retirement is 0028's job, and folding the two
+// together would make 0027 unable to run against the backups it exists to
+// upgrade. Merged, the pair would delete what it was about to read.
+//
+// This asserts the seam at the one schema version where it is visible: at 27,
+// both are still there. The assertions are raw SQL because the store's own
+// readers have been retired along with the columns — which is the point.
 func TestMigrate0027LeavesTheOldColumnsInPlace(t *testing.T) {
+	path := atSchema27(t, func(db *sql.DB) { seedAdultInstall(db, t, "true") })
+
+	db, err := sql.Open("sqlite", dsn(path))
+	if err != nil {
+		t.Fatalf("open database at schema 27: %v", err)
+	}
+	defer db.Close()
+
+	var enabled string
+	if err := db.QueryRow(
+		"SELECT value FROM settings WHERE key = 'adult_enabled'").Scan(&enabled); err != nil {
+		t.Fatalf("read settings.adult_enabled after 0027: %v", err)
+	}
+	if enabled != "true" {
+		t.Errorf("settings.adult_enabled = %q after 0027, want the seeded %q", enabled, "true")
+	}
+
+	var granted int
+	if err := db.QueryRow(
+		"SELECT adult_access FROM users WHERE id = 4").Scan(&granted); err != nil {
+		t.Fatalf("read users.adult_access after 0027: %v", err)
+	}
+	if granted != 1 {
+		t.Errorf("users.adult_access = %d after 0027, want the seeded 1", granted)
+	}
+}
+
+// 0028 then takes both away, and takes away nothing else.
+//
+// The stale-permission argument is the whole reason: neither has had a writer
+// since the access endpoints replaced the module switch, so a column called
+// `adult_access` is a plausible-looking answer to "may this account see the
+// adult library" that is wrong for anybody whose grant was revoked afterwards.
+// Removing it is what makes wiring it back up impossible rather than merely
+// discouraged.
+func TestMigrate0028RetiresTheAdultSwitch(t *testing.T) {
 	ctx := context.Background()
-	path := atSchema26(t, func(db *sql.DB) { seedAdultInstall(db, t, "true") })
+	path := atSchema27(t, func(db *sql.DB) { seedAdultInstall(db, t, "true") })
 	st := upgraded(t, path)
 
-	enabled, err := st.AdultEnabled(ctx)
-	if err != nil {
-		t.Fatalf("AdultEnabled: %v", err)
+	var rows int
+	if err := st.DB().QueryRowContext(ctx,
+		"SELECT COUNT(*) FROM settings WHERE key = 'adult_enabled'").Scan(&rows); err != nil {
+		t.Fatalf("count adult_enabled rows: %v", err)
 	}
-	if !enabled {
-		t.Error("adult_enabled did not survive 0027")
+	if rows != 0 {
+		t.Errorf("settings still holds %d adult_enabled row(s) after 0028", rows)
 	}
+
+	for _, column := range usersColumns(t, st) {
+		if column == "adult_access" {
+			t.Error("users.adult_access survived 0028")
+		}
+	}
+
+	// The accounts still round-trip, which is what proves userColumns, the two
+	// INSERTs and scanUser all dropped the column together. A mismatch between
+	// the schema and any one of them is a scan error on every login.
 	u, err := st.GetUser(ctx, 4)
 	if err != nil {
-		t.Fatalf("GetUser: %v", err)
+		t.Fatalf("GetUser(4) after 0028: %v", err)
 	}
-	if !u.AdultAccess {
-		t.Error("users.adult_access did not survive 0027")
+	if u.Username != "granted" || u.Role != core.RoleMember {
+		t.Errorf("GetUser(4) = %+v, want the seeded member 'granted'", u)
 	}
+	fresh := &core.User{Username: "newcomer", PasswordHash: "hash", Role: core.RoleMember}
+	if err := st.CreateUser(ctx, fresh); err != nil {
+		t.Fatalf("CreateUser after 0028: %v", err)
+	}
+	if _, err := st.GetUser(ctx, fresh.ID); err != nil {
+		t.Fatalf("GetUser(%d) after 0028: %v", fresh.ID, err)
+	}
+
+	// And what 0027 built out of the two is untouched. 0028 removes the sources;
+	// erasing what they were read into would undo the upgrade it comes after.
+	lib, err := st.GetLibraryByKind(ctx, core.LibraryKindAdult)
+	if err != nil {
+		t.Fatalf("GetLibraryByKind(adult): %v", err)
+	}
+	if !lib.Active || !lib.Restricted {
+		t.Errorf("adult library = {active:%t, restricted:%t} after 0028, want both", lib.Active, lib.Restricted)
+	}
+	roster, err := st.ListLibraryAccess(ctx, lib.ID)
+	if err != nil {
+		t.Fatalf("ListLibraryAccess: %v", err)
+	}
+	if want := []int64{4}; !reflect.DeepEqual(roster, want) {
+		t.Errorf("roster = %v after 0028, want %v — the grants 0027 wrote survive it", roster, want)
+	}
+}
+
+// usersColumns reads the users table's column names straight out of SQLite,
+// because "the column is gone" is a fact about the schema and asserting it
+// through a Go struct would only prove the struct forgot about it.
+func usersColumns(t *testing.T, st *Store) []string {
+	t.Helper()
+	rows, err := st.DB().QueryContext(context.Background(), "SELECT name FROM pragma_table_info('users')")
+	if err != nil {
+		t.Fatalf("pragma table_info(users): %v", err)
+	}
+	defer rows.Close()
+
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatalf("scan column name: %v", err)
+		}
+		names = append(names, name)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("pragma table_info(users): %v", err)
+	}
+	if len(names) == 0 {
+		t.Fatal("pragma table_info(users) named no columns")
+	}
+	return names
 }
