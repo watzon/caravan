@@ -32,6 +32,7 @@ function library(over: Partial<Library> = {}): Library {
     name: 'Movies',
     root_path: 'library/Movies',
     provider: 'tmdb',
+    providers: ['tmdb'],
     is_default: true,
     item_count: 0,
     dlna_visible: true,
@@ -110,6 +111,9 @@ beforeEach(() => {
         return jsonResponse({
           providers: [
             { id: 'tmdb', name: 'TMDB', kinds: ['movie', 'tv'] },
+            // Television only: it is what makes the chain editor's eligibility
+            // filter a real rule rather than a formality.
+            { id: 'anilist', name: 'AniList', kinds: ['tv'] },
             { id: 'stashbox', name: 'Stash-box', kinds: ['adult'] },
           ],
         });
@@ -303,6 +307,154 @@ describe('LibrariesSettings — override vs global default', () => {
   });
 });
 
+/**
+ * The provider chain editor.
+ *
+ * A library identifies new items through an ORDERED list of providers, and the
+ * order is the setting: the first that recognizes a title wins a scan. So every
+ * control here writes the whole list — the server validates it as one thing —
+ * and the screen must never be able to send an empty one.
+ */
+describe('LibrariesSettings — provider chain', () => {
+  /** The chain rows, in the order the screen renders them. */
+  function chain(): string[] {
+    return [...host.querySelectorAll('[data-provider-row]')].map(
+      (row) => row.getAttribute('data-provider-row') ?? '',
+    );
+  }
+
+  /** A chain row's control, found by the accessible name inside it. */
+  function rowButton(provider: string, label: string): HTMLButtonElement {
+    const row = host.querySelector(`[data-provider-row="${provider}"]`);
+    expect(row, `chain row for ${provider}`).not.toBeNull();
+    const found = [...row!.querySelectorAll('button')].find((candidate) =>
+      candidate.textContent?.includes(label),
+    );
+    expect(found, `${label} control for ${provider}`).toBeDefined();
+    return found as HTMLButtonElement;
+  }
+
+  const ANIME = library({
+    id: 9,
+    kind: 'tv',
+    name: 'Anime',
+    root_path: 'library/Anime',
+    is_default: false,
+    provider: 'anilist',
+    providers: ['anilist', 'tmdb'],
+  });
+
+  async function openAnime() {
+    libraries = [MOVIES, SERIES, ANIME];
+    await mountLoaded();
+    button('Anime').click();
+    await settle();
+  }
+
+  it('renders the stored chain in its stored order, numbered', async () => {
+    await openAnime();
+
+    expect(chain()).toEqual(['anilist', 'tmdb']);
+    // Named, and positioned: the order is the setting, so it is shown rather
+    // than left to be counted off the rows.
+    const rows = [...host.querySelectorAll('[data-provider-row]')];
+    expect(rows[0]!.textContent).toContain('AniList');
+    expect(rows[0]!.textContent).toContain('1');
+    expect(rows[1]!.textContent).toContain('TMDB');
+    expect(rows[1]!.textContent).toContain('2');
+  });
+
+  it('PATCHes the whole reordered chain when one entry moves up', async () => {
+    await openAnime();
+    writeReplies = [library({ ...ANIME, provider: 'tmdb', providers: ['tmdb', 'anilist'] })];
+
+    rowButton('tmdb', 'Move TMDB earlier').click();
+    await settle();
+
+    expect(writes).toEqual([
+      { method: 'PATCH', url: '/api/v1/libraries/9', body: { providers: ['tmdb', 'anilist'] } },
+    ]);
+    expect(chain()).toEqual(['tmdb', 'anilist']);
+  });
+
+  it('PATCHes the whole reordered chain when one entry moves down', async () => {
+    await openAnime();
+    writeReplies = [library({ ...ANIME, provider: 'tmdb', providers: ['tmdb', 'anilist'] })];
+
+    rowButton('anilist', 'Move AniList later').click();
+    await settle();
+
+    expect(write(0).body).toEqual({ providers: ['tmdb', 'anilist'] });
+  });
+
+  it('cannot move the ends off either end of the chain', async () => {
+    await openAnime();
+
+    expect(rowButton('anilist', 'Move AniList earlier').disabled).toBe(true);
+    expect(rowButton('tmdb', 'Move TMDB later').disabled).toBe(true);
+    // Not merely disabled controls: nothing was written either.
+    expect(writes).toEqual([]);
+  });
+
+  it('PATCHes the grown chain when a provider is added, and stops offering it', async () => {
+    // A library that names one of the two eligible providers, so the add
+    // select has exactly one thing to offer.
+    libraries = [MOVIES, library({ ...SERIES, provider: 'tmdb', providers: ['tmdb'] })];
+    await mountLoaded();
+    button('Series').click();
+    await settle();
+
+    const add = select('library-provider-add');
+    expect([...add.options].map((o) => o.value)).toEqual(['', 'anilist']);
+
+    writeReplies = [library({ ...SERIES, provider: 'tmdb', providers: ['tmdb', 'anilist'] })];
+    pick(add, 'anilist');
+    await settle();
+
+    expect(writes).toEqual([
+      { method: 'PATCH', url: '/api/v1/libraries/2', body: { providers: ['tmdb', 'anilist'] } },
+    ]);
+    expect(chain()).toEqual(['tmdb', 'anilist']);
+    // Nothing left to add, so the select goes away rather than offering the
+    // duplicate the server would refuse.
+    expect(host.querySelector('#library-provider-add')).toBeNull();
+  });
+
+  it('PATCHes the shortened chain when a provider is removed', async () => {
+    await openAnime();
+    writeReplies = [library({ ...ANIME, provider: 'anilist', providers: ['anilist'] })];
+
+    rowButton('tmdb', 'Remove').click();
+    await settle();
+
+    expect(write(0).body).toEqual({ providers: ['anilist'] });
+    expect(chain()).toEqual(['anilist']);
+  });
+
+  it('refuses to remove the last provider, which would leave nothing to identify with', async () => {
+    // The movie library names one provider, which is the common install.
+    await mountLoaded();
+
+    expect(chain()).toEqual(['tmdb']);
+    expect(rowButton('tmdb', 'Remove').disabled).toBe(true);
+    expect(writes).toEqual([]);
+  });
+
+  it('offers a library only the providers that serve its kind', async () => {
+    // AniList serves television, so it must not be offered to a movie library
+    // however many providers exist.
+    await mountLoaded();
+    expect(host.querySelector('#library-provider-add')).toBeNull();
+
+    button('Series').click();
+    await settle();
+    expect([...select('library-provider-add').options].map((o) => o.value)).toEqual([
+      '',
+      'anilist',
+    ]);
+  });
+});
+
 describe('LibrariesSettings — indexer rows', () => {
   it('says a row is not searched here, without blaming the indexer', async () => {
     libraries = [library({ indexers: [indexerRow({ enabled: false })] }), SERIES];
@@ -352,7 +504,8 @@ describe('LibrariesSettings — indexer rows', () => {
     const chips = [...host.querySelectorAll('li span.font-mono')].map((c) => c.textContent?.trim());
     expect(chips).toContain('2000');
     expect(chips).not.toContain('5000');
-    expect(host.querySelector('li')?.className).toContain('border-accent');
+    // The indexer list, not the provider chain's ordered one above it.
+    expect(host.querySelector('ul li')?.className).toContain('border-accent');
   });
 
   // The server rewrites the whole row, so a toggle that forgets the category
@@ -504,7 +657,14 @@ describe('LibrariesSettings — switcher and reach', () => {
     libraries = [
       MOVIES,
       SERIES,
-      library({ id: 3, kind: 'adult', name: 'Adult', root_path: 'library/Adult' }),
+      library({
+        id: 3,
+        kind: 'adult',
+        name: 'Adult',
+        root_path: 'library/Adult',
+        provider: 'stashbox',
+        providers: ['stashbox'],
+      }),
     ];
     await mountLoaded();
 
@@ -581,7 +741,9 @@ describe('LibrariesSettings — multiple libraries', () => {
       kind: 'tv',
       name: 'Anime',
       root_path: 'library/Anime',
-      provider: 'tmdb',
+      // A chain of one: the create form picks the head, and growing it is the
+      // identity card's job once the library exists.
+      providers: ['tmdb'],
     });
     // The new library is selected and its pill rendered.
     expect(host.textContent).toContain('Anime');

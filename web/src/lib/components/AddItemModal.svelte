@@ -4,11 +4,14 @@
    * monitoring on. Also reusable as a plain picker for the scan-review manual
    * match, where `onpick` replaces the add call.
    *
-   * Two providers, one dialog. Movies and series come from TMDB; the Adult
-   * scope searches the stash-box endpoint and adds a site. The scope only
-   * exists where the module does — `session.adult`, the same single boolean the
-   * sidebar row reads — and a caller cannot select it into being: see `scope`.
-   * With it absent, nothing here touches an adult type or an adult route.
+   * Two worlds, one dialog. Movies and series come from the target library's
+   * provider chain — one provider on almost every install, several once a
+   * library names several, and the badges and copy below turn on exactly at
+   * that boundary. The Adult scope searches the stash-box endpoint and adds a
+   * site instead; it exists only where the module does — `session.adult`, the
+   * same single boolean the sidebar row reads — and a caller cannot select it
+   * into being: see `scope`. With it absent, nothing here touches an adult
+   * type or an adult route.
    */
   import { untrack } from 'svelte';
   import { api, errorText } from '../api/client';
@@ -19,6 +22,7 @@
   import { metadataFault, type CredentialFault } from '../credentials';
   import { navigate } from '../router.svelte';
   import { libraries } from '../state/libraries.svelte';
+  import { providers } from '../state/providers.svelte';
   import { session } from '../state/session.svelte';
   import { pushToast } from '../state/toast.svelte';
   import { focusFirstResult, moveResultFocus } from '../typeahead';
@@ -41,9 +45,9 @@
    *
    * Sites are not among them, and that is a statement about the flow rather
    * than a gap: pick mode exists for the scan-review manual match, which points
-   * a file on disk at a TMDB id. A site is identified by a stash-box id, a
-   * string — so rather than widen `tmdbID` into something that means two things
-   * depending on a sibling argument, pick mode simply has no adult scope.
+   * a file on disk at a movie or a series. A site is identified by a stash-box
+   * id and imported by a different endpoint entirely, so pick mode simply has
+   * no adult scope.
    */
   type PickKind = 'movie' | 'series';
   interface AddTarget {
@@ -62,11 +66,22 @@
     initialQuery?: string;
     title?: string;
     /**
-     * When supplied the modal picks instead of adding: the caller decides what
-     * to do with the chosen TMDB id. Its presence also removes the adult
-     * scope — see PickKind.
+     * Pick mode only: the library whose provider chain answers the search.
+     *
+     * Add mode has the target select for this. A pick-mode caller has no
+     * select — scan review already knows which library the parked file belongs
+     * to — so it says so here instead, and the same chain that would identify
+     * the file automatically is the one the user searches by hand.
      */
-    onpick?: (kind: PickKind, tmdbID: number) => Promise<void> | void;
+    libraryID?: number;
+    /**
+     * When supplied the modal picks instead of adding: the caller decides what
+     * to do with the chosen row. It is handed the whole hit rather than an id
+     * because a chain hit is identified by `provider` + `provider_ref`, and a
+     * hit from anywhere but TMDB carries a zero `tmdb_id`. Its presence also
+     * removes the adult scope — see PickKind.
+     */
+    onpick?: (kind: PickKind, row: MovieMeta | SeriesMeta) => Promise<void> | void;
     /**
      * When supplied the add still happens, but the caller keeps the user
      * instead of the router: the created item is handed back and the modal
@@ -89,6 +104,7 @@
     initialKind = 'movie',
     initialQuery = '',
     title = 'Add to library',
+    libraryID = 0,
     onpick,
     onadded,
   }: Props = $props();
@@ -123,7 +139,12 @@
   // Both props seed local state once: the modal is remounted per use, so
   // reading them untracked is the intent, not an oversight.
   let kind = $state<Scope>(untrack(() => fixedKind ?? initialKind));
-  let busyID = $state<number | null>(null);
+  /**
+   * The row whose add is in flight, named by `rowKey` rather than by tmdb_id:
+   * every hit from a provider that is not TMDB carries tmdb_id 0, so on a
+   * merged chain a numeric busy id would mark every one of them at once.
+   */
+  let busyKey = $state<string | null>(null);
   /** The site whose add is in flight; sites are named by a string, not an id. */
   let busyStashID = $state<string | null>(null);
   /** A future- or unknown-release title waiting for the user's explicit approval. */
@@ -134,11 +155,32 @@
    * combined answer (module on AND this account reaches it), the same one the
    * sidebar row reads, and an unknown identity reads as false.
    *
-   * Pick mode drops it too: a manual match is a TMDB id by definition, and a
-   * hand-back caller (`onadded`) builds a tie, which names a movie or a
-   * series. Neither could do anything with a site, so neither is offered one.
+   * Pick mode drops it too: a manual match names a movie or a series, and a
+   * hand-back caller (`onadded`) builds a tie, which names one of the same
+   * two. Neither could do anything with a site, so neither is offered one.
    */
   let siteScope = $derived(!onpick && !onadded && session.adult);
+
+  /**
+   * What identifies one result row, for the keyed each and the busy marker.
+   *
+   * `provider:provider_ref` is the only identity a merged chain has: two
+   * providers number different things the same way, and every non-TMDB hit
+   * carries tmdb_id 0 — so keying on tmdb_id gave a whole AniList page the
+   * same key and crashed the list. tmdb_id is the fallback for a stub from
+   * before the pair existed, where provider_ref is empty.
+   */
+  function rowKey(row: MovieMeta | SeriesMeta): string {
+    return `${row.provider ?? ''}:${row.provider_ref || row.tmdb_id}`;
+  }
+
+  /** The ref pair an add sends, or nothing when the row predates it. */
+  function refOf(row: MovieMeta | SeriesMeta): { provider: string; provider_ref: string } | null {
+    // Both or neither: the server rejects half a pair, because a ref read in
+    // the wrong vocabulary is a different title rather than a failed lookup.
+    if (!row.provider || !row.provider_ref) return null;
+    return { provider: row.provider, provider_ref: row.provider_ref };
+  }
 
   // Add mode offers a target library when the scope's kind has more than one.
   // Pick mode adds nothing, so it neither needs the list nor may fetch it —
@@ -159,6 +201,17 @@
     void scope;
     targetLibraryID = 0;
   });
+  /**
+   * The library whose provider chain answers the search. Add mode reads the
+   * target select — the chain that will identify the item is the chain that
+   * should find it — and pick mode reads the caller's prop, where
+   * `targetLibraryID` is always 0 because there is no select.
+   */
+  let searchLibraryID = $derived(targetLibraryID || libraryID || 0);
+  /** The Library row behind that id, for its chain; null while the list loads. */
+  let targetLibrary = $derived(
+    libraryChoices.find((l) => (l.is_default ? 0 : l.id) === targetLibraryID) ?? null,
+  );
 
   let scopes = $derived<{ key: Scope; label: string }[]>([
     { key: 'movie', label: 'Movies' },
@@ -179,22 +232,64 @@
   // scope.
   const search = createTypeahead<SearchResults & { sites: SiteMeta[] }>({
     initial: untrack(() => initialQuery),
-    blank: () => ({ movies: [], series: [], sites: [] }),
+    blank: () => ({ movies: [], series: [], sites: [], providers: [], library_id: 0 }),
     run: async (q, signal) => {
       if (scope === 'site') {
-        return { movies: [], series: [], sites: await api.searchSites(q, signal) };
+        return {
+          movies: [],
+          series: [],
+          sites: await api.searchSites(q, signal),
+          providers: [],
+          library_id: 0,
+        };
       }
-      const found = await api.search(q, scope, signal);
-      return { movies: found.movies ?? [], series: found.series ?? [], sites: [] };
+      const found = await api.search(q, scope, searchLibraryID || undefined, signal);
+      return {
+        movies: found.movies ?? [],
+        series: found.series ?? [],
+        sites: [],
+        providers: found.providers ?? [],
+        library_id: found.library_id ?? 0,
+      };
     },
-    // The scope is part of the search: flipping the tab re-runs it.
-    depends: () => scope,
+    // Both are part of the search: flipping the tab re-runs it, and so does
+    // changing the target library — a different library is a different chain,
+    // so the same query has a different answer.
+    depends: () => [scope, searchLibraryID],
   });
 
   let rows = $derived<(MovieMeta | SeriesMeta)[]>(
     scope === 'movie' ? search.results.movies : search.results.series,
   );
   let sites = $derived<SiteMeta[]>(search.results.sites);
+
+  /**
+   * The chain in force, for the copy and the badges.
+   *
+   * The last answer is authoritative — it is the chain that actually ran — but
+   * it is empty before the first search, so the target library's own chain
+   * stands in until then. Both are empty on a browser that never loaded the
+   * admin-only library list, and that is the case the TMDB wording covers.
+   */
+  let chain = $derived<string[]>(
+    search.results.providers.length > 0
+      ? search.results.providers
+      : (targetLibrary?.providers ?? []),
+  );
+  /**
+   * Whether more than one provider is answering. It gates both the badges and
+   * the copy: on the overwhelmingly common single-provider install a badge on
+   * every row is noise, and "the metadata providers" is a plural describing
+   * one thing.
+   */
+  let manyProviders = $derived(chain.length > 1);
+
+  // Named badges need the provider list, which is admin-only — so it is
+  // fetched only once a chain has actually come back longer than one, and a
+  // caller that cannot fetch it falls back to the raw provider id.
+  $effect(() => {
+    if (search.results.providers.length > 1) void providers.load();
+  });
 
   /**
    * The TMDB credential fault behind the last failure, from whichever half of
@@ -324,16 +419,20 @@
 
   async function choose(target: AddTarget) {
     const { kind: targetKind, row } = target;
-    busyID = row.tmdb_id;
+    busyKey = rowKey(row);
     addFault = null;
+    // tmdb_id travels beside the pair rather than instead of it: the server
+    // lets the pair win, and a stub with no pair still identifies itself.
+    const ref = refOf(row);
     try {
       if (onpick) {
-        await onpick(targetKind, row.tmdb_id);
+        await onpick(targetKind, row);
         return;
       }
       if (targetKind === 'movie') {
         const added = await api.addMovie({
           tmdb_id: row.tmdb_id,
+          ...(ref ?? {}),
           monitored: monitorOnAdd,
           search_now: searchOnAdd,
           library_id: targetLibraryID || undefined,
@@ -348,6 +447,7 @@
       } else {
         const added = await api.addSeries({
           tmdb_id: row.tmdb_id,
+          ...(ref ?? {}),
           monitored: monitorOnAdd,
           search_missing: searchOnAdd,
           library_id: targetLibraryID || undefined,
@@ -367,7 +467,7 @@
       if (fault) addFault = fault;
       else pushToast(errorText(err), 'danger');
     } finally {
-      busyID = null;
+      busyKey = null;
     }
   }
 </script>
@@ -406,9 +506,17 @@
       placeholder={scope === 'site'
         ? 'Site name…'
         : scope === 'movie'
-          ? 'Search TMDB for a movie…'
-          : 'Search TMDB for a series…'}
-      ariaLabel={scope === 'site' ? 'Search the metadata provider for a site' : 'Search TMDB'} />
+          ? manyProviders
+            ? 'Search the metadata providers for a movie…'
+            : 'Search TMDB for a movie…'
+          : manyProviders
+            ? 'Search the metadata providers for a series…'
+            : 'Search TMDB for a series…'}
+      ariaLabel={scope === 'site'
+        ? 'Search the metadata provider for a site'
+        : manyProviders
+          ? 'Search the metadata providers'
+          : 'Search TMDB'} />
 
     {#if credentialFault}
       <!-- TMDB is what names a movie or a series, so with no usable key there
@@ -480,17 +588,21 @@
     {:else if search.idle}
       <EmptyState
         icon="search"
-        title="Search the metadata provider"
-        message="Type at least two characters to look up a title on TMDB." />
+        title={manyProviders ? 'Search the metadata providers' : 'Search the metadata provider'}
+        message={manyProviders
+          ? 'Type at least two characters to look up a title.'
+          : 'Type at least two characters to look up a title on TMDB.'} />
     {:else if rows.length === 0}
       <EmptyState
         icon="search"
         title="No matches"
-        message="TMDB returned nothing for “{search.trimmed}”. Try the original-language title, or add the year." />
+        message={manyProviders
+          ? `The metadata providers returned nothing for “${search.trimmed}”. Try the original-language title, or add the year.`
+          : `TMDB returned nothing for “${search.trimmed}”. Try the original-language title, or add the year.`} />
     {:else}
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
       <ul class="flex flex-col gap-2" onkeydown={onListKeydown}>
-        {#each rows as row (row.tmdb_id)}
+        {#each rows as row (rowKey(row))}
           {@const releaseDate = 'release_date' in row ? row.release_date : row.first_air_date}
           {@const rating = ratingPresentation(row.vote_average, row.vote_count, releaseDate)}
           <li class="flex items-start gap-3 rounded-md border border-border p-2 transition-colors duration-150 ease-out hover:bg-raised focus-within:bg-raised">
@@ -507,6 +619,12 @@
                 <Badge mono tone="neutral" title={rating.title}>
                   {rating.text ?? rating.title}
                 </Badge>
+                <!-- Only on a merged chain: with one provider answering, a
+                     badge saying so on every row names the obvious. With
+                     several it is what tells two same-titled hits apart. -->
+                {#if manyProviders && row.provider}
+                  <Badge tone="info">{providers.name(row.provider)}</Badge>
+                {/if}
               </div>
               <p
                 class="line-clamp-2 text-sm text-ink-secondary"
@@ -517,9 +635,9 @@
             <Button
               variant="primary"
               size="sm"
-              disabled={busyID !== null}
+              disabled={busyKey !== null}
               onclick={() => select(row)}>
-              {busyID === row.tmdb_id ? 'Working…' : onpick ? 'Match' : 'Add'}
+              {busyKey === rowKey(row) ? 'Working…' : onpick ? 'Match' : 'Add'}
             </Button>
           </li>
         {/each}
@@ -601,9 +719,9 @@
     {#snippet footer()}
       <Button
         variant="ghost"
-        disabled={busyID !== null}
+        disabled={busyKey !== null}
         onclick={() => (confirmingRelease = null)}>Cancel</Button>
-      <Button variant="primary" disabled={busyID !== null} onclick={confirmRelease}>
+      <Button variant="primary" disabled={busyKey !== null} onclick={confirmRelease}>
         {unknownReleaseDate ? 'Add title anyway' : 'Add unreleased title'}
       </Button>
     {/snippet}

@@ -411,6 +411,30 @@ describe('interactive search', () => {
   });
 });
 
+/**
+ * Metadata search. The library is what picks the provider chain, so it is part
+ * of the question: the same query asked of two libraries has two answers.
+ */
+describe('metadata search', () => {
+  it('names the library whose chain should answer', async () => {
+    stubFetch({ movies: [], series: [], providers: ['tmdb'], library_id: 9, errors: [] });
+    await api.search('frieren', 'series', 9);
+    expect(only().url).toBe('/api/v1/search?q=frieren&type=series&library_id=9');
+  });
+
+  it.each([
+    { name: 'omitted', libraryID: undefined },
+    // Zero is "the kind's default library", which is what an absent parameter
+    // already means — sending it would be a filter on library 0, which is not
+    // a library.
+    { name: 'zero', libraryID: 0 },
+  ])('sends no library_id when it is $name', async ({ libraryID }) => {
+    stubFetch({ movies: [], series: [], providers: ['tmdb'], library_id: 1, errors: [] });
+    await api.search('dune', 'movie', libraryID);
+    expect(only().url).toBe('/api/v1/search?q=dune&type=movie');
+  });
+});
+
 describe('automatic search', () => {
   it('POSTs an exact episode search with no body and returns the queued count', async () => {
     stubFetch({ queued: 1 }, 202);

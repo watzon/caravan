@@ -69,6 +69,7 @@ function library(overrides: Partial<Library> = {}): Library {
     name: 'Kids Movies',
     root_path: 'library/Kids',
     provider: 'tmdb',
+    providers: ['tmdb'],
     is_default: false,
     item_count: 0,
     dlna_visible: true,

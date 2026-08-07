@@ -65,6 +65,7 @@ function library(overrides: Partial<Library> = {}): Library {
     name: 'Movies',
     root_path: 'library/Movies',
     provider: 'tmdb',
+    providers: ['tmdb'],
     is_default: true,
     item_count: 0,
     dlna_visible: true,

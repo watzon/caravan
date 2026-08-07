@@ -692,8 +692,23 @@ export const api = {
   dismissUnmatched: (id: number) =>
     request<void>(endpoints.unmatchedItem(id), { method: 'DELETE' }),
 
-  search: (q: string, kind: 'movie' | 'series' | 'all' = 'all', signal?: AbortSignal) =>
-    request<SearchResults>(endpoints.search(), { query: { q, type: kind }, signal }),
+  /**
+   * Identify a title through a library's provider chain.
+   *
+   * `libraryID` names the shelf the add will land on, and therefore the chain
+   * that answers. Zero or omitted lets the kind's default library answer —
+   * which is the shelf an untargeted add lands on anyway.
+   */
+  search: (
+    q: string,
+    kind: 'movie' | 'series' | 'all' = 'all',
+    libraryID?: number,
+    signal?: AbortSignal,
+  ) =>
+    request<SearchResults>(endpoints.search(), {
+      query: { q, type: kind, library_id: libraryID || undefined },
+      signal,
+    }),
 
   /* ------------------------------------------------------------------------
    * Phase 2 — search & download.

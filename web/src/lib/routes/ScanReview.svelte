@@ -6,7 +6,7 @@
    */
   import { onMount } from 'svelte';
   import { api, errorText } from '../api/client';
-  import type { UnmatchedFile } from '../api/types';
+  import type { MovieMeta, SeriesMeta, UnmatchedFile } from '../api/types';
   import AddItemModal from '../components/AddItemModal.svelte';
   import Badge from '../components/Badge.svelte';
   import Banner from '../components/Banner.svelte';
@@ -82,11 +82,21 @@
     }
   }
 
-  async function confirmMatch(kind: 'movie' | 'series', tmdbID: number) {
+  async function confirmMatch(kind: 'movie' | 'series', row: MovieMeta | SeriesMeta) {
     const file = matching;
     if (!file) return;
     try {
-      await api.matchUnmatched(file.id, { type: kind, tmdb_id: tmdbID });
+      // The ref pair travels beside tmdb_id, not instead of it: the pair is the
+      // only thing that names a hit from a provider other than TMDB (which
+      // carries tmdb_id 0), and the server lets it win where both are present.
+      // Half a pair is refused, so an old stub with no ref sends neither.
+      await api.matchUnmatched(file.id, {
+        type: kind,
+        tmdb_id: row.tmdb_id,
+        ...(row.provider && row.provider_ref
+          ? { provider: row.provider, provider_ref: row.provider_ref }
+          : {}),
+      });
       files = (files ?? []).filter((f) => f.id !== file.id);
       matching = null;
       pushToast('Matched and queued for import.', 'success');
@@ -103,7 +113,8 @@
    * already said which library it belongs to, and a library has exactly one
    * kind — so that answer beats the parser's guess. An adult library is the
    * one case it cannot answer, because a site is named by a stash-box id and
-   * the match dialog resolves TMDB ids; there the parse still decides.
+   * the match dialog resolves movie and series refs; there the parse still
+   * decides.
    */
   function guessKind(file: UnmatchedFile): 'movie' | 'series' {
     const kind = libraryOf(file)?.kind;
@@ -115,6 +126,22 @@
   function libraryOf(file: UnmatchedFile) {
     if (!file.library_id) return undefined;
     return libraries.all.find((l) => l.id === file.library_id);
+  }
+
+  /**
+   * The library whose provider chain the match dialog should search — the one
+   * that will identify the file, so the hand match sees what the automatic
+   * one would have.
+   *
+   * It is 0 for a row with no library, for one whose library the store has not
+   * loaded, and deliberately for an adult one: GET /search refuses an adult
+   * library id, exactly as `guessKind` cannot answer for one. Zero there means
+   * "the kind's default", which is what this dialog searched before libraries
+   * were plural.
+   */
+  function matchLibraryID(file: UnmatchedFile): number {
+    const kind = libraryOf(file)?.kind;
+    return kind === 'movie' || kind === 'tv' ? file.library_id : 0;
   }
 
   /**
@@ -303,6 +330,7 @@
     title="Match “{matching.path}”"
     kind={guessKind(matching)}
     initialQuery={matching.parsed.title}
+    libraryID={matchLibraryID(matching)}
     onpick={confirmMatch}
     onclose={() => (matching = null)} />
 {/if}

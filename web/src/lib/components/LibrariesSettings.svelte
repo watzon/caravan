@@ -77,9 +77,13 @@
   let autosaveStates = $state<Record<string, AutosaveStatus>>({});
 
   /** The add-library modal's staged fields; null when closed. */
-  let adding = $state<{ kind: LibraryKind; name: string; root: string; provider: string } | null>(
-    null,
-  );
+  let adding = $state<{
+    kind: LibraryKind;
+    name: string;
+    root: string;
+    /** A chain of one. It grows on the identity card once the library exists. */
+    providers: string[];
+  } | null>(null);
   /** Set while the delete confirmation is open for the selected library. */
   let confirmingDelete = $state(false);
 
@@ -136,6 +140,58 @@
 
   function providerName(id: string): string {
     return providers.find((p) => p.id === id)?.name ?? id;
+  }
+
+  /**
+   * The chain editor writes the WHOLE list every time, never a delta.
+   *
+   * Order is the setting — the first provider that recognizes a title wins a
+   * scan — so "move this one up" and "add this one" are both just a new list,
+   * and the server validates it as one thing: non-empty, no duplicates, every
+   * element serving the kind. Sending a delta would ask the screen to guess
+   * what the stored list was, and a rejected write would leave it guessing
+   * wrong.
+   */
+  function saveChain(lib: Library, next: string[], note: string) {
+    void patch({ providers: next }, note, autosaveKey(lib, 'provider'));
+  }
+
+  /** Swap a chain entry with its neighbour; `to` outside the list is a no-op. */
+  function moveProvider(lib: Library, from: number, to: number) {
+    if (to < 0 || to >= lib.providers.length) return;
+    const next = [...lib.providers];
+    const moved = next[from]!;
+    next[from] = next[to]!;
+    next[to] = moved;
+    saveChain(
+      lib,
+      next,
+      to === 0
+        ? `${providerName(moved)} identifies ${lib.name} first.`
+        : `${lib.name} asks ${providerName(moved)} ${to + 1}${to === 1 ? 'nd' : to === 2 ? 'rd' : 'th'}.`,
+    );
+  }
+
+  function removeProvider(lib: Library, id: string) {
+    // A library with no provider could never identify anything, so the last
+    // one is not removable — the control is disabled rather than the write
+    // being left to fail.
+    if (lib.providers.length <= 1) return;
+    saveChain(
+      lib,
+      lib.providers.filter((p) => p !== id),
+      `${lib.name} no longer asks ${providerName(id)}.`,
+    );
+  }
+
+  function addProvider(lib: Library, id: string) {
+    if (id === '' || lib.providers.includes(id)) return;
+    saveChain(lib, [...lib.providers, id], `${lib.name} also asks ${providerName(id)}.`);
+  }
+
+  /** Providers eligible for this library's kind that its chain does not name yet. */
+  function addableProviders(lib: Library): MetadataProviderInfo[] {
+    return providersFor(lib.kind).filter((p) => !lib.providers.includes(p.id));
   }
 
   /**
@@ -346,19 +402,24 @@
 
   function openAddLibrary() {
     const kind = creatableKinds[0] ?? 'movie';
-    adding = { kind, name: '', root: '', provider: providersFor(kind)[0]?.id ?? '' };
+    adding = { kind, name: '', root: '', providers: chainSeed(kind) };
+  }
+
+  /** The chain a new library of this kind starts with: its first eligible provider. */
+  function chainSeed(kind: LibraryKind): string[] {
+    const head = providersFor(kind)[0]?.id;
+    return head ? [head] : [];
   }
 
   /** Reseed the provider and root suggestions when the staged kind changes. */
   function stageKind(kind: LibraryKind) {
     if (!adding) return;
     const eligible = providersFor(kind);
+    const head = adding.providers[0];
     adding = {
       ...adding,
       kind,
-      provider: eligible.some((p) => p.id === adding.provider)
-        ? adding.provider
-        : (eligible[0]?.id ?? ''),
+      providers: head && eligible.some((p) => p.id === head) ? [head] : chainSeed(kind),
     };
   }
 
@@ -383,7 +444,7 @@
         kind: adding.kind,
         name: adding.name.trim(),
         root_path: adding.root.trim(),
-        provider: adding.provider,
+        providers: adding.providers,
       });
       libraries = [...libraries, created];
       selectedID = created.id;
@@ -540,28 +601,70 @@
         </div>
       </Field>
 
+      <!-- No `for`: the field is a list plus an optional control, and the
+           control disappears once every eligible provider is on the chain — a
+           label pointing at an element that is not there names nothing. The
+           list and the select carry their own accessible names instead. -->
       <Field
-        label="Metadata provider"
-        for="library-provider"
-        help="Which provider refreshes this library's items.">
+        label="Metadata providers"
+        help="Asked in this order. The first that recognizes a title identifies it; the add dialog searches all of them.">
         {#snippet note()}
           {@render autosaveStatus(autosaveKey(lib, 'provider'))}
         {/snippet}
-        <select
-          id="library-provider"
-          value={lib.provider}
-          disabled={busy || providersFor(lib.kind).length <= 1}
-          onchange={(event) =>
-            patch(
-              { provider: event.currentTarget.value },
-              `${lib.name} uses ${providerName(event.currentTarget.value)} for metadata.`,
-              autosaveKey(lib, 'provider'),
-            )}
-          class="{SELECT_CLASS} border-border-strong">
-          {#each providersFor(lib.kind) as option (option.id)}
-            <option value={option.id}>{option.name}</option>
+        <ol class="flex flex-col gap-2" aria-label="Provider chain for {lib.name}">
+          {#each lib.providers as id, index (id)}
+            <li
+              data-provider-row={id}
+              class="flex items-center gap-2 rounded-md border border-border bg-surface px-3 py-2">
+              <!-- The position is the setting, so it is shown rather than left
+                   to be counted off the rows. -->
+              <span class="micro-label w-4 shrink-0 text-ink-muted">{index + 1}</span>
+              <span class="min-w-0 flex-1 truncate text-base text-ink">{providerName(id)}</span>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={busy || index === 0}
+                onclick={() => moveProvider(lib, index, index - 1)}>
+                ↑<span class="sr-only">Move {providerName(id)} earlier</span>
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={busy || index === lib.providers.length - 1}
+                onclick={() => moveProvider(lib, index, index + 1)}>
+                ↓<span class="sr-only">Move {providerName(id)} later</span>
+              </Button>
+              <!-- A library with an empty chain could identify nothing, so the
+                   last provider is not removable. -->
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={busy || lib.providers.length <= 1}
+                onclick={() => removeProvider(lib, id)}>
+                Remove<span class="sr-only"> {providerName(id)} from the chain</span>
+              </Button>
+            </li>
           {/each}
-        </select>
+        </ol>
+        {#if addableProviders(lib).length > 0}
+          <select
+            id="library-provider-add"
+            value=""
+            aria-label="Add a provider to {lib.name}"
+            disabled={busy}
+            onchange={(event) => {
+              addProvider(lib, event.currentTarget.value);
+              // The select is a verb, not a value: it goes back to its prompt
+              // so the next add starts from the same place.
+              event.currentTarget.value = '';
+            }}
+            class="{SELECT_CLASS} border-border-strong">
+            <option value="">Add provider…</option>
+            {#each addableProviders(lib) as option (option.id)}
+              <option value={option.id}>{option.name}</option>
+            {/each}
+          </select>
+        {/if}
       </Field>
 
       <div class="flex flex-wrap items-center gap-3">
@@ -854,10 +957,14 @@
       </Field>
 
       {#if providersFor(draft.kind).length > 1}
-        <Field label="Metadata provider" for="new-library-provider" help="Which provider refreshes this library's items.">
+        <Field
+          label="Metadata provider"
+          for="new-library-provider"
+          help="Which provider identifies this library's items. Add more, and reorder them, from the library's own card afterwards.">
           <select
             id="new-library-provider"
-            bind:value={draft.provider}
+            value={draft.providers[0] ?? ''}
+            onchange={(event) => (draft.providers = [event.currentTarget.value])}
             class="{SELECT_CLASS} border-border-strong">
             {#each providersFor(draft.kind) as option (option.id)}
               <option value={option.id}>{option.name}</option>

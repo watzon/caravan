@@ -177,9 +177,23 @@ export interface UnmatchedFile {
   seen_at: string;
 }
 
-/** internal/core.MovieMeta — a TMDB search hit, not yet a library item. */
+/** internal/core.MovieMeta — a provider search hit, not yet a library item. */
 export interface MovieMeta {
+  /**
+   * The TMDB id, and zero for a hit from any other provider — which is honest
+   * rather than missing: an AniList title has no TMDB id. It stays because it
+   * is the compatibility spelling every add still accepts; `provider` and
+   * `provider_ref` are what actually identify a row in a chain.
+   */
   tmdb_id: number;
+  /** The provider that answered: 'tmdb', 'anilist'. */
+  provider: string;
+  /**
+   * This title's id in that provider's own numbering. With `provider` it is
+   * the only thing that tells two chain hits apart — two providers' ids are
+   * different numbers for different things.
+   */
+  provider_ref: string;
   imdb_id: string;
   title: string;
   original_title: string;
@@ -193,9 +207,14 @@ export interface MovieMeta {
   poster_url: string;
 }
 
-/** internal/core.SeriesMeta — a TMDB search hit, not yet a library item. */
+/** internal/core.SeriesMeta — a provider search hit, not yet a library item. */
 export interface SeriesMeta {
+  /** Reads exactly as MovieMeta.tmdb_id does. */
   tmdb_id: number;
+  /** The provider that answered. */
+  provider: string;
+  /** This title's id in that provider's own numbering. */
+  provider_ref: string;
   tvdb_id: number;
   imdb_id: string;
   title: string;
@@ -214,6 +233,32 @@ export interface SeriesMeta {
 export interface SearchResults {
   movies: MovieMeta[];
   series: SeriesMeta[];
+  /**
+   * The provider chain that actually ran, in order and deduplicated.
+   *
+   * The LENGTH matters as much as the contents: a per-row provider badge is
+   * noise on the overwhelmingly common single-provider install, and is the
+   * only way to tell two hits apart once the chain is longer than one.
+   */
+  providers: string[];
+  /**
+   * The library whose chain answered, echoed so the add lands where the user
+   * searched. Zero means the request named none and the kind's default
+   * answered.
+   */
+  library_id: number;
+  /**
+   * The providers that ran and failed while others succeeded. They arrive on a
+   * 200: one provider being down must not hide what the others returned. A
+   * chain where every provider failed is a 502/503 instead.
+   */
+  errors?: SearchProviderError[];
+}
+
+/** One provider's refusal inside an otherwise successful search. */
+export interface SearchProviderError {
+  provider: string;
+  message: string;
 }
 
 /** How much is in the library right now, from GET /system/status. */
@@ -676,7 +721,20 @@ export interface ScanSummary {
 
 /** Body for POST /library/movies and POST /library/series. */
 export interface AddItemRequest {
+  /**
+   * The compatibility spelling of "which title". Send it for a TMDB hit; send
+   * `provider`/`provider_ref` for a hit from anywhere else. Sending both is
+   * harmless — the pair wins.
+   */
   tmdb_id: number;
+  /**
+   * The general spelling: the provider that identified the title and its id in
+   * that provider's numbering, straight off a search hit. They travel as a
+   * pair — half of one is rejected, because a ref read in the wrong vocabulary
+   * is a different title rather than a failed lookup.
+   */
+  provider?: string;
+  provider_ref?: string;
   /**
    * Whether Caravan should keep searching for missing releases after the add.
    * Omitting it preserves the endpoint's historical monitored default.
@@ -737,7 +795,11 @@ export interface SearchQueued {
 /** Body for POST /import/queue/{id}/match. */
 export interface MatchRequest {
   type: 'movie' | 'series';
+  /** Reads exactly as AddItemRequest.tmdb_id does. */
   tmdb_id: number;
+  /** Reads exactly as AddItemRequest's pair does; both or neither. */
+  provider?: string;
+  provider_ref?: string;
 }
 
 /* ---------------------------------------------------------------------------
@@ -1751,8 +1813,18 @@ export interface Library {
   name: string;
   /** Storage-root-relative and read-only: moving it is the Storage screen's job. */
   root_path: string;
-  /** Metadata provider id, one of GET /libraries/providers. */
+  /**
+   * The chain's head, READ-ONLY: it is what a client written before chains
+   * reads, and the server keeps it in step with `providers`. Write through
+   * `providers` instead.
+   */
   provider: string;
+  /**
+   * The ordered chain this library identifies new items through, each one of
+   * the ids GET /libraries/providers lists. The first that recognizes a title
+   * wins a scan; a search asks all of them.
+   */
+  providers: string[];
   /** The one library per kind that answers by-kind lookups and untargeted adds. */
   is_default: boolean;
   /** How many movies and series this library owns — what the delete guard counts. */
@@ -1772,7 +1844,13 @@ export interface Library {
  */
 export interface LibraryPatch {
   name?: string;
+  /**
+   * The pre-chain spelling, still accepted and read as a chain of one. New
+   * writes send `providers`, which wins when both are present.
+   */
   provider?: string;
+  /** The whole ordered chain: non-empty, no duplicates, all serving the kind. */
+  providers?: string[];
   is_default?: boolean;
   dlna_visible?: boolean;
   route_torrent?: string;
@@ -1786,8 +1864,10 @@ export interface LibraryCreate {
   name: string;
   /** Storage-root-relative, must sit under library/. */
   root_path: string;
-  /** Empty picks the kind's default provider. */
+  /** The pre-chain spelling, read as a chain of one. Empty picks the kind's default. */
   provider?: string;
+  /** The ordered chain, validated as LibraryPatch.providers is. */
+  providers?: string[];
 }
 
 /** One compiled-in metadata provider (GET /libraries/providers). */

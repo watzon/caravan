@@ -33,6 +33,7 @@ const ADULT_LIBRARY: Library = {
   name: 'Adult',
   root_path: 'library/Adult',
   provider: 'stashbox',
+  providers: ['stashbox'],
   is_default: true,
   item_count: 0,
   dlna_visible: false,
