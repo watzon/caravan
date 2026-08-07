@@ -186,10 +186,12 @@ func (s *Store) ListMediaFiles(ctx context.Context) ([]core.MediaFile, error) {
 }
 
 // ConversionCandidate is a current library file with no queued or running
-// conversion. LibraryKind lets shared API surfaces apply the adult visibility
-// rule without an ownership query per file.
+// conversion. LibraryID and LibraryKind let shared API surfaces apply the
+// per-library visibility rule without an ownership query per file — the id when
+// the owning row names one, the kind for a row that still answers by kind.
 type ConversionCandidate struct {
 	File        core.MediaFile
+	LibraryID   int64
 	LibraryKind string
 }
 
@@ -205,8 +207,10 @@ func (s *Store) ListConversionCandidates(ctx context.Context) ([]ConversionCandi
 		SELECT `+mediaFileColumnsQualified+`,
 			COUNT(ef.episode_id),
 			COUNT(DISTINCT CASE WHEN s.kind = ? THEN ? ELSE ? END),
-			MAX(CASE WHEN s.kind = ? THEN 1 ELSE 0 END)
+			MAX(CASE WHEN s.kind = ? THEN 1 ELSE 0 END),
+			COALESCE(MAX(m.library_id), 0), COALESCE(MAX(s.library_id), 0)
 		FROM media_files mf
+		LEFT JOIN movies m ON m.id = mf.movie_id
 		LEFT JOIN episode_files ef ON ef.media_file_id = mf.id
 		LEFT JOIN episodes e ON e.id = ef.episode_id
 		LEFT JOIN series s ON s.id = e.series_id
@@ -233,12 +237,15 @@ func (s *Store) ListConversionCandidates(ctx context.Context) ([]ConversionCandi
 			episodeCount     int
 			libraryKindCount int
 			hasAdult         int
+			movieLibraryID   int64
+			seriesLibraryID  int64
 		)
 		err := rows.Scan(
 			&candidate.File.ID, &candidate.File.Path, &candidate.File.Size,
 			&candidate.File.MovieID, &candidate.File.Quality, &candidate.File.Source,
 			&candidate.File.Codec, &candidate.File.Audio, &candidate.File.ReleaseGroup,
 			&addedAt, &modifiedAt, &episodeCount, &libraryKindCount, &hasAdult,
+			&movieLibraryID, &seriesLibraryID,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("store: scan conversion candidate: %w", err)
@@ -246,11 +253,13 @@ func (s *Store) ListConversionCandidates(ctx context.Context) ([]ConversionCandi
 		switch {
 		case candidate.File.MovieID != 0 && episodeCount == 0:
 			candidate.LibraryKind = core.LibraryKindMovie
+			candidate.LibraryID = movieLibraryID
 		case candidate.File.MovieID == 0 && episodeCount > 0 && libraryKindCount == 1:
 			candidate.LibraryKind = core.LibraryKindTV
 			if hasAdult != 0 {
 				candidate.LibraryKind = core.LibraryKindAdult
 			}
+			candidate.LibraryID = seriesLibraryID
 		default:
 			continue
 		}

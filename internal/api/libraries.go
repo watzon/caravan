@@ -38,6 +38,12 @@ type libraryJSON struct {
 	// IsDefault marks the one library per kind that answers by-kind lookups
 	// and receives items added without an explicit target.
 	IsDefault bool `json:"is_default"`
+	// Active is the library's master switch: false is dormant for everyone,
+	// admins included, and deletes nothing.
+	Active bool `json:"active"`
+	// Restricted narrows the library to the accounts named in its access
+	// roster, plus admins. False is every account.
+	Restricted bool `json:"restricted"`
 	// ItemCount is how many movies and series name this library as theirs —
 	// the number the delete guard reports, so the screen can explain a
 	// refusal before the user reaches it.
@@ -127,22 +133,6 @@ type libraryIndexerRequest struct {
 	Categories []int `json:"categories"`
 }
 
-// libraryVisible reports whether this caller may see a library at all.
-//
-// Every library but one is visible to everybody who can reach this API. The
-// adult library is the exception, and not because of what it holds: its row is
-// never deleted (store.SetAdultEnabled), so an install that enabled the module
-// once and turned it off again would otherwise keep answering with an "Adult"
-// pill, its root path and its DLNA state forever. "Off" means the module is
-// absent, and a settings screen that still lists its shelf is the trace this
-// phase promises not to leave (PLAN phase 9 task 3).
-func (s *server) libraryVisible(r *http.Request, kind string) (bool, error) {
-	if kind != core.LibraryKindAdult {
-		return true, nil
-	}
-	return s.adultVisible(r)
-}
-
 // handleListProviders lists the providers the create form and the chain editor
 // may offer.
 //
@@ -151,14 +141,19 @@ func (s *server) libraryVisible(r *http.Request, kind string) (bool, error) {
 // of them — the static "Stash-box" descriptor therefore never ships, because
 // "stash-box" is a wire dialect and a chain element has to name a catalogue with
 // an account and its own UUIDs behind it. Those are the configured instances,
-// one descriptor each, and they are added only for a caller the module is
-// visible to: a name in a picker is a trace of a module whose promise is absence
-// (see libraryVisible).
+// one descriptor each, and they are added only for a caller who can see an
+// adult library: a name in a picker is a trace of a shelf whose promise is
+// absence.
+//
+// An admin who could CREATE an adult library still sees no instance here, which
+// is today's rule kept deliberately: widening the picker to "anyone who could
+// make one" is a decision for the phase that opens library creation, not a side
+// effect of generalizing the gate.
 func (s *server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	adult, err := s.adultVisible(r)
+	adult, err := s.gate(r).seesAdult(ctx)
 	if err != nil {
-		s.writeStoreError(w, "read adult settings", err)
+		s.writeStoreError(w, "read library access", err)
 		return
 	}
 	type providerJSON struct {
@@ -220,9 +215,9 @@ func (s *server) handleCreateLibrary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.Kind == core.LibraryKindAdult {
-		visible, err := s.adultVisible(r)
+		visible, err := s.gate(r).seesAdult(ctx)
 		if err != nil {
-			s.writeStoreError(w, "read adult settings", err)
+			s.writeStoreError(w, "read library access", err)
 			return
 		}
 		if !visible {
@@ -359,7 +354,7 @@ func (s *server) handleDeleteLibrary(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	lib, ok := s.getVisibleLibrary(w, r, id)
+	lib, ok := s.manageableLibrary(w, r, id)
 	if !ok {
 		return
 	}
@@ -394,11 +389,15 @@ func (s *server) handleListLibraries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	gate := s.gate(r)
 	out := make([]libraryJSON, 0, len(libraries))
 	for _, l := range libraries {
-		visible, err := s.libraryVisible(r, l.Kind)
+		// A library the caller cannot see is dropped rather than greyed: a row
+		// carrying a name, a root path and a DLNA state is exactly the trace
+		// that "this shelf is not here for you" promises not to leave.
+		visible, err := gate.visible(ctx, l.ID)
 		if err != nil {
-			s.writeStoreError(w, "read adult settings", err)
+			s.writeStoreError(w, "read library access", err)
 			return
 		}
 		if !visible {
@@ -414,26 +413,53 @@ func (s *server) handleListLibraries(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"libraries": out})
 }
 
-// getVisibleLibrary is GetLibrary plus libraryVisible, writing the refusal
-// itself. A library the caller may not see is 404 rather than 403, for the
-// reason requireAdult gives: "this exists and you may not have it" is a worse
-// answer than "there is nothing here" on a module whose promise is absence.
-func (s *server) getVisibleLibrary(w http.ResponseWriter, r *http.Request, id int64) (*core.Library, bool) {
-	lib, err := s.st.GetLibrary(r.Context(), id)
+// visibleLibrary resolves a library for a CONTENT route — searching it,
+// grabbing into it, adding to it, moving into it, reading its parked files —
+// writing the refusal itself.
+//
+// A library the caller may not see is 404 rather than 403, for the reason
+// requireAdult gives: "this exists and you may not have it" is a worse answer
+// than "there is nothing here" on a shelf whose promise is absence. A library
+// that is not there at all gets the identical answer, so the two cannot be told
+// apart from outside.
+func (s *server) visibleLibrary(w http.ResponseWriter, r *http.Request, id int64) (*core.Library, bool) {
+	gate := s.gate(r)
+	lib, ok, err := gate.library(r.Context(), id)
 	if err != nil {
 		s.writeStoreError(w, "get library", err)
 		return nil, false
 	}
-	visible, err := s.libraryVisible(r, lib.Kind)
-	if err != nil {
-		s.writeStoreError(w, "read adult settings", err)
-		return nil, false
+	if ok {
+		visible, err := gate.allows(r.Context(), lib)
+		if err != nil {
+			s.writeStoreError(w, "read library access", err)
+			return nil, false
+		}
+		if visible {
+			return &lib, true
+		}
 	}
-	if !visible {
-		writeError(w, http.StatusNotFound, "not found")
-		return nil, false
-	}
-	return lib, true
+	writeError(w, http.StatusNotFound, "not found")
+	return nil, false
+}
+
+// manageableLibrary resolves a library for an admin MANAGEMENT route — the
+// settings card behind it: PATCH, DELETE, the per-indexer matrix.
+//
+// It is a separate door from visibleLibrary on purpose, and the two must never
+// be swapped. Content routes ask "may this caller have what is on the shelf";
+// management routes ask "may this caller work the shelf's switches", and those
+// diverge the moment a library can be switched off: the toggle that undoes
+// `active=0` has to stay reachable, or an owner who hid a library from
+// themselves has hidden the only way back.
+//
+// Today the two answer identically, because the only thing that can clear
+// `active` is the adult module switch and that already hid the row from these
+// routes. Widening this one to admit inactive rows is the phase that lands the
+// Active toggle; it is one predicate, in one place, precisely so that widening
+// cannot leak into a content route by accident.
+func (s *server) manageableLibrary(w http.ResponseWriter, r *http.Request, id int64) (*core.Library, bool) {
+	return s.visibleLibrary(w, r, id)
 }
 
 // handleUpdateLibrary edits the settings a library may answer for itself. It is
@@ -450,7 +476,7 @@ func (s *server) handleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 
-	lib, ok := s.getVisibleLibrary(w, r, id)
+	lib, ok := s.manageableLibrary(w, r, id)
 	if !ok {
 		return
 	}
@@ -573,7 +599,7 @@ func (s *server) handleSetLibraryIndexer(w http.ResponseWriter, r *http.Request)
 
 	// Both rows are read first so an override against something that does not
 	// exist is a 404 rather than a row pointing at nothing.
-	lib, ok := s.getVisibleLibrary(w, r, id)
+	lib, ok := s.manageableLibrary(w, r, id)
 	if !ok {
 		return
 	}
@@ -670,6 +696,8 @@ func (s *server) libraryDTO(ctx context.Context, l core.Library, indexers []core
 		Provider:         l.Provider,
 		Providers:        l.ProviderChain(),
 		IsDefault:        l.IsDefault,
+		Active:           l.Active,
+		Restricted:       l.Restricted,
 		ItemCount:        count,
 		DLNAVisible:      l.DLNAVisible,
 		RouteTorrent:     l.RouteTorrent,

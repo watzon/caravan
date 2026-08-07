@@ -145,15 +145,19 @@ func (s *server) handleListConversions(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreError(w, "list conversion candidates", err)
 		return
 	}
-	adultAllowed, err := s.adultVisible(r)
-	if err != nil {
-		s.writeStoreError(w, "read adult settings", err)
-		return
-	}
+	gate := s.gate(r)
 	profile := s.activeTVProfile(r.Context())
 	pending := make([]mediaFileJSON, 0, len(candidates))
 	for _, candidate := range candidates {
-		if candidate.LibraryKind == core.LibraryKindAdult && !adultAllowed {
+		// The candidate's own library, by kind when the owning row still
+		// answers by kind: a file the caller cannot reach through any screen
+		// must not turn up here as something to convert.
+		visible, err := gate.visibleKind(r.Context(), candidate.LibraryID, candidate.LibraryKind)
+		if err != nil {
+			s.writeStoreError(w, "read library access", err)
+			return
+		}
+		if !visible {
 			continue
 		}
 		file := mediaFileDTO(candidate.File, profile)

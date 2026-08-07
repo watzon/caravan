@@ -364,7 +364,7 @@ func (s *server) validMoveTarget(w http.ResponseWriter, r *http.Request, library
 		writeError(w, http.StatusBadRequest, "library_id is required")
 		return false
 	}
-	lib, ok := s.getVisibleLibrary(w, r, libraryID)
+	lib, ok := s.visibleLibrary(w, r, libraryID)
 	if !ok {
 		return false
 	}
@@ -396,7 +396,7 @@ func (s *server) validAddLibraryID(w http.ResponseWriter, r *http.Request, libra
 	if libraryID == 0 {
 		return true
 	}
-	lib, ok := s.getVisibleLibrary(w, r, libraryID)
+	lib, ok := s.visibleLibrary(w, r, libraryID)
 	if !ok {
 		return false
 	}
@@ -429,9 +429,22 @@ func (s *server) handleListMovies(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// The Movies screen's first visibility filter. It changes nothing while
+	// every movie library is on and open to everybody — which is the point:
+	// the shelf a movie sits on is now allowed to be somebody else's, and this
+	// list is where that has to be true before it can be true anywhere.
+	gate := s.gate(r)
 	profile := s.activeTVProfile(ctx)
 	out := make([]movieJSON, 0, len(movies))
 	for _, m := range movies {
+		visible, err := gate.visibleKind(ctx, m.LibraryID, core.LibraryKindMovie)
+		if err != nil {
+			s.writeStoreError(w, "read library access", err)
+			return
+		}
+		if !visible {
+			continue
+		}
 		dto := movieDTO(m)
 		dto.File = firstFileDTO(byMovie[m.ID], profile)
 		out = append(out, dto)
@@ -880,8 +893,22 @@ func (s *server) handleListSeries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The television filter above says which VOCABULARY belongs on this shelf;
+	// the gate says which shelves this caller has. Both, in that order: a site
+	// is not a television series however visible its library is, and a
+	// restricted television library is not this caller's however television it
+	// is.
+	gate := s.gate(r)
 	out := make([]seriesJSON, 0, len(series))
 	for _, sr := range series {
+		visible, err := gate.visibleKind(ctx, sr.LibraryID, core.LibraryKindForSeries(sr.Kind))
+		if err != nil {
+			s.writeStoreError(w, "read library access", err)
+			return
+		}
+		if !visible {
+			continue
+		}
 		dto := seriesDTO(sr)
 		dto.EpisodeCount = counts[sr.ID].Total
 		dto.EpisodeFileCount = counts[sr.ID].WithFile
@@ -921,8 +948,8 @@ func (s *server) handleAddSeries(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, seriesDTO(*sr))
 }
 
-// getVisibleSeries is GetSeries plus the adult gate, writing the refusal
-// itself.
+// getVisibleSeries is GetSeries plus its library's access rule, writing the
+// refusal itself.
 //
 // A site is stored as a series row (PLAN phase 9 task 3), so every by-id series
 // route can be handed a site's id. handleListSeries was narrowed to television
@@ -931,22 +958,24 @@ func (s *server) handleAddSeries(w http.ResponseWriter, r *http.Request) {
 // GET /library/series/{siteID} with the site's title, its root under
 // library/Adult and its whole season/episode tree — scene titles and release
 // dates — which the SPA then renders as an ordinary television detail page.
+// The same now holds for a television library somebody restricted.
 //
-// The refusal is 404 rather than 403, the answer getVisibleLibrary and
+// The refusal is 404 rather than 403, the answer visibleLibrary and
 // requireAdult both give: "this exists and you may not have it" is the worse
-// leak on a module whose promise is absence.
+// leak on a shelf whose promise is absence.
 func (s *server) getVisibleSeries(w http.ResponseWriter, r *http.Request, id int64) (*core.Series, bool) {
 	sr, err := s.st.GetSeries(r.Context(), id)
 	if err != nil {
 		s.writeStoreError(w, "get series", err)
 		return nil, false
 	}
-	if sr.Kind != core.SeriesKindAdult {
-		return sr, true
-	}
-	visible, err := s.adultVisible(r)
+	// The row's own library answers, and its KIND is what a row still carrying
+	// library_id 0 resolves through — a site added before libraries had ids
+	// belongs to the adult shelf just as surely as one that names it.
+	visible, err := s.gate(r).visibleKind(r.Context(), sr.LibraryID,
+		core.LibraryKindForSeries(sr.Kind))
 	if err != nil {
-		s.writeStoreError(w, "read adult settings", err)
+		s.writeStoreError(w, "read library access", err)
 		return nil, false
 	}
 	if !visible {

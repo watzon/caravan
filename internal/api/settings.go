@@ -187,7 +187,7 @@ func (s *server) publicSettings(r *http.Request) (map[string]string, error) {
 			strconv.FormatBool(stored[p.CredentialSetting] != "")
 	}
 
-	visible, err := s.adultVisible(r)
+	visible, err := s.gate(r).seesAdult(r.Context())
 	if err != nil {
 		return nil, err
 	}
@@ -771,9 +771,9 @@ func (s *server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 	// The adult shelf's count, only for a caller the module is visible to —
 	// the same predicate that decides whether the nav item this badge sits on
 	// exists at all.
-	adultVisible, err := s.adultVisible(r)
+	adultVisible, err := s.gate(r).seesAdult(ctx)
 	if err != nil {
-		s.writeStoreError(w, "resolve adult visibility", err)
+		s.writeStoreError(w, "read library access", err)
 		return
 	}
 	sites := 0

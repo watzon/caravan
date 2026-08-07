@@ -423,7 +423,11 @@ func (s *server) requireAuth(next http.Handler) http.Handler {
 			writeError(w, http.StatusForbidden, "admins only")
 			return
 		}
-		next.ServeHTTP(w, withRequestUser(r, user))
+		// The gate is attached here so every helper one handler reaches shares
+		// it, and the two queries behind it happen once per request rather than
+		// once per surface that asks.
+		r = withRequestUser(r, user)
+		next.ServeHTTP(w, withLibraryGate(r, s.gateFor(user)))
 	})
 }
 
@@ -775,9 +779,9 @@ func (s *server) sceneFilters(ctx context.Context, adult bool) *sceneFiltersJSON
 // truth: there is nobody to name, and whoever asked may do anything. So does
 // the API key, for the same reason.
 func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
-	adult, err := s.adultVisible(r)
+	adult, err := s.gate(r).seesAdult(r.Context())
 	if err != nil {
-		s.writeStoreError(w, "read adult settings", err)
+		s.writeStoreError(w, "read library access", err)
 		return
 	}
 	filters := s.sceneFilters(r.Context(), adult)

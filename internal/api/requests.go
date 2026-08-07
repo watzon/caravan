@@ -95,9 +95,9 @@ func (s *server) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	adult, err := s.adultVisible(r)
+	adult, err := s.gate(r).seesAdult(r.Context())
 	if err != nil {
-		s.writeStoreError(w, "read adult settings", err)
+		s.writeStoreError(w, "read library access", err)
 		return
 	}
 	if !validRequestMediaType(w, body.MediaType, adult) {
@@ -247,9 +247,9 @@ func (s *server) handleListRequests(w http.ResponseWriter, r *http.Request) {
 	// it existed — including an ADMIN on a server with the module switched
 	// off, whose own approved scene requests go quiet rather than reappearing
 	// as evidence of a module they turned off.
-	adult, err := s.adultVisible(r)
+	adult, err := s.gate(r).seesAdult(ctx)
 	if err != nil {
-		s.writeStoreError(w, "read adult settings", err)
+		s.writeStoreError(w, "read library access", err)
 		return
 	}
 	if !adult {
@@ -418,9 +418,9 @@ func (s *server) loadRequest(w http.ResponseWriter, r *http.Request, id int64) (
 		return nil, false
 	}
 	if req.MediaType == MediaTypeScene {
-		adult, err := s.adultVisible(r)
+		adult, err := s.gate(r).seesAdult(r.Context())
 		if err != nil {
-			s.writeStoreError(w, "read adult settings", err)
+			s.writeStoreError(w, "read library access", err)
 			return nil, false
 		}
 		if !adult {

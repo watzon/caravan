@@ -104,12 +104,11 @@ func (s *server) handleListDownloads(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	adultVisible, err := s.adultVisible(r)
+	ownership, err := s.ownershipFilter(r)
 	if err != nil {
-		s.writeStoreError(w, "read adult settings", err)
+		s.writeStoreError(w, "read library access", err)
 		return
 	}
-	ownership := adultOwnershipFilter{server: s, adultVisible: adultVisible}
 	out := make([]downloadJSON, 0, limit)
 	var nextStored int64
 	if cursor.stage == downloadCursorStored {
@@ -184,12 +183,11 @@ func (s *server) handleListDownloads(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) writeLegacyDownloads(w http.ResponseWriter, r *http.Request) {
-	adultVisible, err := s.adultVisible(r)
+	ownership, err := s.ownershipFilter(r)
 	if err != nil {
-		s.writeStoreError(w, "read adult settings", err)
+		s.writeStoreError(w, "read library access", err)
 		return
 	}
-	ownership := adultOwnershipFilter{server: s, adultVisible: adultVisible}
 	rows, err := s.st.ListDownloads(r.Context())
 	if err != nil {
 		s.writeStoreError(w, "list downloads", err)
@@ -360,8 +358,8 @@ func (c downloadCursor) encode() string {
 // inferring ownership from the engine category, save path, or release title.
 // An out-of-band download or a row whose historical grab is gone remains
 // visible because its ownership cannot be established.
-func (f *adultOwnershipFilter) downloadVisible(ctx context.Context, download core.Download) (bool, error) {
-	if f.adultVisible || download.GrabID == 0 {
+func (f *libraryOwnershipFilter) downloadVisible(ctx context.Context, download core.Download) (bool, error) {
+	if f.seesAll || download.GrabID == 0 {
 		return true, nil
 	}
 	grab, err := f.server.st.GetGrab(ctx, download.GrabID)
@@ -373,8 +371,8 @@ func (f *adultOwnershipFilter) downloadVisible(ctx context.Context, download cor
 	}
 	// An untied universal-search grab has no movie and no series — exactly
 	// the shape ownerVisible waves through — so its LIBRARY answers first: a
-	// download bound for an adult library must not sit in an ungranted
-	// caller's queue.
+	// download bound for a library the caller cannot see must not sit in
+	// their queue.
 	if visible, err := f.libraryVisibleTo(ctx, grab.LibraryID); err != nil || !visible {
 		return visible, err
 	}

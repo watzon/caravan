@@ -65,14 +65,13 @@ func (s *server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 // calendar app subscribes to a URL and cannot hold a session cookie, so the API
 // key is the only credential it can present (SPEC §11).
 //
-// That exemption is also why the feed carries NO adult rows, for anybody, ever.
-// The URL is a bearer credential handed to Google Calendar, a wall display or a
-// housemate's phone, so the request has no account behind it — nobody's grant
-// can be consulted, and inheriting the API key's implicit-admin identity would
-// put every scene title and site name on a shared calendar the moment the
-// module was switched on. So the ICS path asks for the unfiltered-of-adult view
-// explicitly rather than resolving a caller (PLAN phase 9 task 3: an ungranted
-// reader sees nothing adult in the calendar).
+// That exemption is also why the feed carries only the libraries an accountless
+// reader may have. The URL is a bearer credential handed to Google Calendar, a
+// wall display or a housemate's phone, so the request has no account behind it —
+// nobody's grant can be consulted, and inheriting the API key's implicit-admin
+// identity would put every scene title and site name on a shared calendar the
+// moment an adult library existed. So the ICS path asks the ANONYMOUS gate
+// rather than resolving a caller: active and unrestricted, nothing else.
 func (s *server) handleCalendarICS(w http.ResponseWriter, r *http.Request) {
 	authorized, err := s.calendarKeyAuthenticated(r)
 	if err != nil {
@@ -85,7 +84,7 @@ func (s *server) handleCalendarICS(w http.ResponseWriter, r *http.Request) {
 	}
 
 	today := calendarDate(time.Now())
-	entries, err := s.calendarEntries(r.Context(), false,
+	entries, err := s.calendarEntries(r.Context(), s.anonymousGate(),
 		today.AddDate(0, 0, -30), today.AddDate(0, 0, 365), today)
 	if err != nil {
 		s.writeStoreError(w, "list calendar entries", err)
@@ -169,23 +168,20 @@ func calendarDate(t time.Time) time.Time {
 //
 // Routes without an identity (the ICS feed, which authenticates with a bearer
 // URL and names no account) must NOT come through here: they call
-// calendarEntries with adultVisible false rather than inheriting currentUser's
+// calendarEntries with the anonymous gate rather than inheriting currentUser's
 // implicit admin.
 func (s *server) calendarEntriesFor(r *http.Request, start, end, today time.Time) ([]calendarEntry, error) {
-	adultVisible, err := s.adultVisible(r)
-	if err != nil {
-		return nil, err
-	}
-	return s.calendarEntries(r.Context(), adultVisible, start, end, today)
+	return s.calendarEntries(r.Context(), s.gate(r), start, end, today)
 }
 
 // calendarEntries merges rows before assigning status so a grab can cover a
 // season pack and a single download lookup remains enough for every entry.
 //
-// adultVisible is a parameter rather than something resolved in here because
-// the answer is not always a property of the caller: on the ICS feed there is
-// no caller, and the honest answer there is a flat no (PLAN phase 9 task 5).
-func (s *server) calendarEntries(ctx context.Context, adultVisible bool, start, end, today time.Time) ([]calendarEntry, error) {
+// The gate is a parameter rather than something resolved in here because the
+// answer is not always a property of the caller: on the ICS feed there is no
+// caller, and the honest identity there is an account with no grants at all
+// (PLAN phase 9 task 5).
+func (s *server) calendarEntries(ctx context.Context, gate *libraryGate, start, end, today time.Time) ([]calendarEntry, error) {
 	episodes, err := s.st.CalendarEpisodes(ctx, start, end)
 	if err != nil {
 		return nil, err
@@ -210,7 +206,12 @@ func (s *server) calendarEntries(ctx context.Context, adultVisible bool, start, 
 
 	entries := make([]calendarEntry, 0, len(episodes)+len(movies))
 	for _, episode := range episodes {
-		if episode.SeriesKind == core.SeriesKindAdult && !adultVisible {
+		visible, err := gate.visibleKind(ctx, episode.SeriesLibraryID,
+			core.LibraryKindForSeries(episode.SeriesKind))
+		if err != nil {
+			return nil, err
+		}
+		if !visible {
 			continue
 		}
 		entries = append(entries, calendarEntry{
@@ -229,6 +230,13 @@ func (s *server) calendarEntries(ctx context.Context, adultVisible bool, start, 
 		})
 	}
 	for _, movie := range movies {
+		visible, err := gate.visibleKind(ctx, movie.Movie.LibraryID, core.LibraryKindMovie)
+		if err != nil {
+			return nil, err
+		}
+		if !visible {
+			continue
+		}
 		entries = append(entries, calendarEntry{
 			ID:        movie.Movie.ID,
 			Year:      movie.Movie.Year,

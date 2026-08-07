@@ -244,7 +244,7 @@ func (s *server) resolveSearchLibrary(w http.ResponseWriter, r *http.Request) (*
 	if id == 0 {
 		return nil, 0, true
 	}
-	lib, ok := s.getVisibleLibrary(w, r, id)
+	lib, ok := s.visibleLibrary(w, r, id)
 	if !ok {
 		return nil, 0, false
 	}

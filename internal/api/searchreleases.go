@@ -61,9 +61,9 @@ func (s *server) handleSearchReleases(w http.ResponseWriter, r *http.Request) {
 		limit = min(parsed, searchReleaseMaxLimit)
 	}
 
-	adult, err := s.adultVisible(r)
+	adult, err := s.gate(r).seesAdult(ctx)
 	if err != nil {
-		s.writeStoreError(w, "read adult settings", err)
+		s.writeStoreError(w, "read library access", err)
 		return
 	}
 	// The adult gate on the way OUT: requested adult categories are stripped
@@ -100,7 +100,7 @@ func (s *server) handleSearchReleases(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "invalid library_id")
 			return
 		}
-		lib, ok := s.getVisibleLibrary(w, r, id)
+		lib, ok := s.visibleLibrary(w, r, id)
 		if !ok {
 			return
 		}
@@ -214,7 +214,7 @@ func (s *server) handleSearchGrab(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	lib, ok := s.getVisibleLibrary(w, r, body.LibraryID)
+	lib, ok := s.visibleLibrary(w, r, body.LibraryID)
 	if !ok {
 		return
 	}
@@ -229,9 +229,9 @@ func (s *server) handleSearchGrab(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if core.HasAdultCategory(rel.Categories) {
-		adult, err := s.adultVisible(r)
+		adult, err := s.gate(r).seesAdult(ctx)
 		if err != nil {
-			s.writeStoreError(w, "read adult settings", err)
+			s.writeStoreError(w, "read library access", err)
 			return
 		}
 		if !adult {

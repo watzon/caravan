@@ -528,6 +528,107 @@ func newTestServer(t *testing.T, opts ...Option) (http.Handler, *store.Store, *s
 	return NewServer(st, mgr, testDist(), opts...), st, mgr
 }
 
+// libraryFixture is the shape every per-library access test needs: one shelf of
+// each interesting state, and the identities that do and do not reach them.
+//
+// It exists once rather than per test because the matrix is the point — a
+// surface is only proved when the SAME restricted library is invisible to the
+// SAME ungranted account across all of them, and a fixture rebuilt per file
+// drifts until two surfaces are answering about two different libraries.
+type libraryFixture struct {
+	// openTV and openMovie are the seeded shelves: active, unrestricted, and
+	// the answer to "did the filter break the ordinary case".
+	openTV    core.Library
+	openMovie core.Library
+	// kids and kidsFilms are active ORDINARY libraries narrowed to one account.
+	// Non-adult on purpose: the promise of absence must hold on an everyday
+	// shelf, not only on the one it was written for.
+	kids      core.Library
+	kidsFilms core.Library
+	// dormantTV and dormantMovie are switched off, which binds everyone —
+	// admins included.
+	dormantTV    core.Library
+	dormantMovie core.Library
+
+	admin     *core.User
+	granted   *core.User
+	ungranted *core.User
+}
+
+// restrictedLibraryFixture builds the matrix against a fresh store.
+func restrictedLibraryFixture(t *testing.T, st *store.Store) libraryFixture {
+	t.Helper()
+	ctx := context.Background()
+
+	f := libraryFixture{
+		admin:     createUser(t, st, testAdmin, testPassword, core.RoleAdmin),
+		granted:   createUser(t, st, "granted", testPassword, core.RoleMember),
+		ungranted: createUser(t, st, "ungranted", testPassword, core.RoleMember),
+	}
+
+	seeded, err := st.ListLibraries(ctx)
+	if err != nil {
+		t.Fatalf("ListLibraries: %v", err)
+	}
+	for _, l := range seeded {
+		switch l.Kind {
+		case core.LibraryKindTV:
+			f.openTV = l
+		case core.LibraryKindMovie:
+			f.openMovie = l
+		}
+	}
+	if f.openTV.ID == 0 || f.openMovie.ID == 0 {
+		t.Fatalf("seeded libraries = %+v, want one of each ordinary kind", seeded)
+	}
+
+	create := func(kind, name, root string) core.Library {
+		t.Helper()
+		lib := &core.Library{Kind: kind, Name: name, RootPath: root}
+		if err := st.CreateLibrary(ctx, lib); err != nil {
+			t.Fatalf("CreateLibrary(%s): %v", name, err)
+		}
+		return *lib
+	}
+	f.kids = create(core.LibraryKindTV, "Kids", "library/Kids")
+	f.kidsFilms = create(core.LibraryKindMovie, "Kids Films", "library/KidsFilms")
+	f.dormantTV = create(core.LibraryKindTV, "Dormant Shows", "library/Dormant")
+	f.dormantMovie = create(core.LibraryKindMovie, "Dormant Films", "library/Shelved")
+
+	for _, lib := range []*core.Library{&f.kids, &f.kidsFilms} {
+		if err := st.SetLibraryAccess(ctx, lib.ID, true, []int64{f.granted.ID}); err != nil {
+			t.Fatalf("SetLibraryAccess(%s): %v", lib.Name, err)
+		}
+		lib.Restricted = true
+	}
+	for _, lib := range []*core.Library{&f.dormantTV, &f.dormantMovie} {
+		if err := st.SetLibraryActive(ctx, lib.ID, false); err != nil {
+			t.Fatalf("SetLibraryActive(%s): %v", lib.Name, err)
+		}
+		lib.Active = false
+	}
+	return f
+}
+
+// as is the identity a directly-called handler acts under, wired the way
+// requireAuth wires one: the user AND the gate that reads their grants.
+func (f libraryFixture) as(s *server, u requestUser, method, target string) *http.Request {
+	r := withRequestUser(httptest.NewRequest(method, target, nil), u)
+	return withLibraryGate(r, s.gateFor(u))
+}
+
+func (f libraryFixture) adminUser() requestUser {
+	return requestUser{ID: f.admin.ID, Role: core.RoleAdmin}
+}
+
+func (f libraryFixture) grantedUser() requestUser {
+	return requestUser{ID: f.granted.ID, Role: core.RoleMember}
+}
+
+func (f libraryFixture) ungrantedUser() requestUser {
+	return requestUser{ID: f.ungranted.ID, Role: core.RoleMember}
+}
+
 // do issues a request against h. body may be empty.
 func do(t *testing.T, h http.Handler, method, target, body string) *httptest.ResponseRecorder {
 	t.Helper()
@@ -676,8 +777,13 @@ func TestSettingsRoundTrip(t *testing.T) {
 			t.Fatalf("seed %s: %v", key, err)
 		}
 	}
+	// Through the real door: the adult switch is a library's own state now, so
+	// writing the settings key alone would describe a module with no shelf.
+	// SetAdultEnabled writes both, which is what the assertion below reads.
+	if err := st.SetAdultEnabled(ctx, true); err != nil {
+		t.Fatalf("SetAdultEnabled: %v", err)
+	}
 	publicSettings := map[string]string{
-		store.SettingAdultEnabled:           "true",
 		store.SettingStashURL:               "http://stash.example.test",
 		store.SettingStashEnabled:           "true",
 		store.SettingJellyfinURL:            "http://jellyfin.example.test",

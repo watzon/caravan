@@ -1,11 +1,9 @@
 package api
 
 import (
-	"errors"
 	"net/http"
 
 	"github.com/watzon/caravan/internal/core"
-	"github.com/watzon/caravan/internal/store"
 )
 
 // unmatchedJSON is one file parked in the scan-review queue (SPEC §10.1,
@@ -84,8 +82,8 @@ func (s *server) handleImportQueue(w http.ResponseWriter, r *http.Request) {
 
 	out := make([]unmatchedJSON, 0, len(files))
 	for _, f := range files {
-		// A file parked into an adult library — an untied grab's payload — is
-		// as invisible to callers the module is absent to as the library is.
+		// A file parked into a library — an untied grab's payload — is as
+		// invisible as that library is to this caller.
 		if visible, ok := s.unmatchedVisible(w, r, &f); !ok {
 			return
 		} else if !visible {
@@ -184,27 +182,14 @@ func (s *server) handleImportDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 // unmatchedVisible reports whether a parked file may be shown to this caller:
-// only a file scoped to an adult library is ever hidden, and only while the
-// module is absent to the caller. The second return is false when the check
+// a file scoped to a library is as visible as that library is. A file with no
+// library — every scan-parked one — is unscoped and belongs to nobody in
+// particular, so it stays visible. The second return is false when the check
 // itself failed and the response has been written.
 func (s *server) unmatchedVisible(w http.ResponseWriter, r *http.Request, u *core.UnmatchedFile) (bool, bool) {
-	if u.LibraryID == 0 {
-		return true, true
-	}
-	lib, err := s.st.GetLibrary(r.Context(), u.LibraryID)
-	if errors.Is(err, store.ErrNotFound) {
-		return true, true
-	}
+	visible, err := s.gate(r).visible(r.Context(), u.LibraryID)
 	if err != nil {
-		s.writeStoreError(w, "get library", err)
-		return false, false
-	}
-	if lib.Kind != core.LibraryKindAdult {
-		return true, true
-	}
-	visible, err := s.adultVisible(r)
-	if err != nil {
-		s.writeStoreError(w, "read adult settings", err)
+		s.writeStoreError(w, "read library access", err)
 		return false, false
 	}
 	return visible, true
