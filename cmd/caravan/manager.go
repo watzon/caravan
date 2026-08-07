@@ -401,6 +401,17 @@ func (a *libraryAdapter) AddMovie(ctx context.Context, ref core.ItemRef, minAvai
 	return mgr.AddMovie(ctx, ref, minAvailability, monitored, libraryID)
 }
 
+// SearchLibrary walks a library's provider chain. Through current for the usual
+// reason: which providers are on the chain is a settings-table fact, and so is
+// whether each one has the credential it needs to be built at all.
+func (a *libraryAdapter) SearchLibrary(ctx context.Context, libraryID int64, mediaType, q string) (*library.SearchHits, error) {
+	mgr, err := a.current(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return mgr.SearchLibrary(ctx, libraryID, mediaType, q)
+}
+
 func (a *libraryAdapter) AddSeries(ctx context.Context, ref core.ItemRef, monitored *bool, libraryID int64) (*core.Series, error) {
 	mgr, err := a.current(ctx)
 	if err != nil {

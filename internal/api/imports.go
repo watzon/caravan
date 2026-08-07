@@ -69,6 +69,10 @@ func parsedDTO(p core.ParsedRelease) parsedJSON {
 type matchRequest struct {
 	Type   string `json:"type"`
 	TMDBID int64  `json:"tmdb_id"`
+	// Provider and ProviderRef are the general spelling of the same answer,
+	// resolved by the rules addRequest's pair follows; see itemRefFrom.
+	Provider    string `json:"provider"`
+	ProviderRef string `json:"provider_ref"`
 }
 
 func (s *server) handleImportQueue(w http.ResponseWriter, r *http.Request) {
@@ -116,8 +120,15 @@ func (s *server) handleImportMatch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "type must be movie or series")
 		return
 	}
-	if body.TMDBID <= 0 {
-		writeError(w, http.StatusBadRequest, "tmdb_id is required")
+	// The endpoint's kind is the media type the caller just named, so a match
+	// that says "series" may only be pinned to a provider that serves
+	// television.
+	kind := core.LibraryKindMovie
+	if body.Type == MediaTypeSeries {
+		kind = core.LibraryKindTV
+	}
+	ref, ok := itemRefFrom(w, body.Provider, body.ProviderRef, body.TMDBID, kind)
+	if !ok {
 		return
 	}
 
@@ -134,13 +145,14 @@ func (s *server) handleImportMatch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
-	if err := s.mgr.MatchUnmatched(r.Context(), id, body.Type, core.TMDBRef(body.TMDBID)); err != nil {
+	if err := s.mgr.MatchUnmatched(r.Context(), id, body.Type, ref); err != nil {
 		s.writeManagerError(w, "match unmatched file", err)
 		return
 	}
 	// Matching a parked file puts the title in the library, which is what a
-	// pending request was asking for. See absorbRequests.
-	s.absorbRequests(r.Context(), body.Type, body.TMDBID)
+	// pending request was asking for. See absorbRequests — including why a
+	// non-TMDB ref absorbs nothing.
+	s.absorbRequests(r.Context(), body.Type, ref.TMDBID())
 	writeJSON(w, http.StatusOK, map[string]string{"status": "matched"})
 }
 

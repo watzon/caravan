@@ -87,9 +87,54 @@ func TestImportMatch(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("match calls = %+v, want 1", calls)
 	}
-	want := matchCall{id: u.ID, mediaType: MediaTypeMovie, tmdbID: 603}
+	// A tmdb_id body still resolves to a TMDB ref, spelled out: that is the
+	// compatibility path, and it has to keep pinning to the provider it always
+	// pinned to.
+	want := matchCall{id: u.ID, mediaType: MediaTypeMovie, tmdbID: 603, ref: core.TMDBRef(603)}
 	if calls[0] != want {
 		t.Fatalf("match call = %+v, want %+v", calls[0], want)
+	}
+}
+
+// A manual match names the title the same way an add does. The parked file is
+// resolved against the ref the user picked, not against a TMDB id the body may
+// never have carried.
+func TestImportMatchByProviderRef(t *testing.T) {
+	h, st, mgr := newTestServer(t)
+	u := parkFile(t, st, "incoming/show.mkv", core.ParsedRelease{Title: "Frieren", Season: 1})
+
+	rec := do(t, h, http.MethodPost, "/api/v1/import/queue/"+itoa(u.ID)+"/match",
+		`{"type":"series","provider":"anilist","provider_ref":"154587"}`)
+	wantStatus(t, rec, http.StatusOK)
+
+	calls := mgr.matchCalls()
+	want := matchCall{id: u.ID, mediaType: MediaTypeSeries,
+		ref: core.ItemRef{Provider: core.ProviderAniList, Ref: "154587"}}
+	if len(calls) != 1 || calls[0] != want {
+		t.Fatalf("match calls = %+v, want %+v", calls, want)
+	}
+}
+
+// The same four refusals the add endpoints give, and the kind is the media type
+// the body named: a movie match may not be pinned to a television-only provider.
+func TestImportMatchRefValidationRefusals(t *testing.T) {
+	h, st, mgr := newTestServer(t)
+	u := parkFile(t, st, "incoming/movie.mkv", core.ParsedRelease{Title: "Movie"})
+	id := itoa(u.ID)
+
+	for name, body := range map[string]string{
+		"provider without a ref":     `{"type":"series","provider":"anilist"}`,
+		"ref without a provider":     `{"type":"series","provider_ref":"154587"}`,
+		"neither spelling":           `{"type":"movie"}`,
+		"provider of the wrong kind": `{"type":"movie","provider":"anilist","provider_ref":"1"}`,
+	} {
+		rec := do(t, h, http.MethodPost, "/api/v1/import/queue/"+id+"/match", body)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400", name, rec.Code)
+		}
+	}
+	if calls := mgr.matchCalls(); len(calls) != 0 {
+		t.Fatalf("a refused match still reached the manager: %+v", calls)
 	}
 }
 

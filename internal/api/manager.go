@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/watzon/caravan/internal/core"
+	"github.com/watzon/caravan/internal/library"
 )
 
 // Manager is the slice of the library manager (internal/library) the HTTP
@@ -79,6 +80,22 @@ type Manager interface {
 	// creates. Queueing the walk instead would answer "approved" for a request
 	// that has, at that moment, made nothing wanted.
 	AddSiteAndWait(ctx context.Context, stashID string, monitored *bool, libraryID int64) (*core.Series, error)
+
+	// SearchLibrary identifies a title through one library's whole provider
+	// chain, merging what every provider on it offered. libraryID 0 means the
+	// kind's default library for mediaType, which is the shelf an add made
+	// without choosing one would land on anyway.
+	//
+	// It is the search half of the ref-based world: the hits carry the provider
+	// that offered them, so the add that follows can name what the user picked
+	// rather than assume TMDB.
+	//
+	// A provider that failed while others answered is a SearchHits.Failure and
+	// the call still succeeds — one provider being down must not hide the rest
+	// of the chain's hits. An error means the whole chain failed (its first
+	// failure's error, so core.ErrMetadataUnauthorized survives) or that
+	// nothing on the chain is configured at all (core.ErrNoMetadataProvider).
+	SearchLibrary(ctx context.Context, libraryID int64, mediaType, q string) (*library.SearchHits, error)
 
 	// Metadata returns the configured metadata provider, or nil when none is
 	// configured (no TMDB API key yet). The search endpoint reports that as a

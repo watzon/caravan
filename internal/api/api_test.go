@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/watzon/caravan/internal/core"
+	"github.com/watzon/caravan/internal/library"
 	"github.com/watzon/caravan/internal/store"
 )
 
@@ -82,7 +83,14 @@ type stubManager struct {
 	// default: the enable gate's happy path.
 	adultCredentialErr error
 
+	// searchHits, when set, is what SearchLibrary answers instead of asking
+	// provider — the seam a chain of more than one provider is proved through,
+	// since the stub provider is a single TMDB.
+	searchHits *library.SearchHits
+
 	mu                   sync.Mutex
+	adds                 []addCall
+	searches             []searchCall
 	matches              []matchCall
 	removes              []removeCall
 	validateCalls        []string
@@ -93,6 +101,17 @@ type matchCall struct {
 	id        int64
 	mediaType string
 	tmdbID    int64
+	// ref is the whole identity the handler resolved, so a match made by
+	// provider/provider_ref can be told apart from one made by tmdb_id — the
+	// tmdbID above is zero for every ref that is not TMDB's.
+	ref core.ItemRef
+}
+
+// searchCall is one SearchLibrary the handlers made.
+type searchCall struct {
+	libraryID int64
+	mediaType string
+	q         string
 }
 
 // removeCall records what the handlers asked the manager to remove. Deleting
@@ -115,7 +134,24 @@ func (m *stubManager) Scan(ctx context.Context) error {
 	return m.scanErr
 }
 
+// addCall records the identity an add was made with, so a test can prove the
+// handler forwarded the ref the body named rather than a TMDB one built from a
+// field the body did not carry.
+type addCall struct {
+	kind string
+	ref  core.ItemRef
+}
+
+func (m *stubManager) addCalls() []addCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]addCall(nil), m.adds...)
+}
+
 func (m *stubManager) AddMovie(ctx context.Context, ref core.ItemRef, minAvailability string, monitored *bool, libraryID int64) (*core.Movie, error) {
+	m.mu.Lock()
+	m.adds = append(m.adds, addCall{kind: MediaTypeMovie, ref: ref})
+	m.mu.Unlock()
 	if m.addErr != nil {
 		return nil, m.addErr
 	}
@@ -133,6 +169,9 @@ func (m *stubManager) AddMovie(ctx context.Context, ref core.ItemRef, minAvailab
 }
 
 func (m *stubManager) AddSeries(ctx context.Context, ref core.ItemRef, monitored *bool, libraryID int64) (*core.Series, error) {
+	m.mu.Lock()
+	m.adds = append(m.adds, addCall{kind: MediaTypeSeries, ref: ref})
+	m.mu.Unlock()
 	if m.addErr != nil {
 		return nil, m.addErr
 	}
@@ -192,9 +231,51 @@ func (m *stubManager) removeCalls() []removeCall {
 
 func (m *stubManager) MatchUnmatched(ctx context.Context, id int64, mediaType string, ref core.ItemRef) error {
 	m.mu.Lock()
-	m.matches = append(m.matches, matchCall{id: id, mediaType: mediaType, tmdbID: ref.TMDBID()})
+	m.matches = append(m.matches, matchCall{id: id, mediaType: mediaType, tmdbID: ref.TMDBID(), ref: ref})
 	m.mu.Unlock()
 	return m.matchErr
+}
+
+// SearchLibrary answers from the same stub provider Metadata does, so every
+// test written before search was per-library keeps meaning what it meant: a
+// stock database chains both default libraries to TMDB, and the stub provider
+// IS that TMDB. What it adds is the record of which library and media type the
+// handler asked about, and the searchHits seam for a longer chain.
+func (m *stubManager) SearchLibrary(ctx context.Context, libraryID int64, mediaType, q string) (*library.SearchHits, error) {
+	m.mu.Lock()
+	m.searches = append(m.searches, searchCall{libraryID: libraryID, mediaType: mediaType, q: q})
+	m.mu.Unlock()
+
+	if m.searchHits != nil {
+		return m.searchHits, nil
+	}
+	// A nil provider is a chain with nothing configured on it, which is what
+	// the real manager reports when no provider on the chain could be built.
+	if m.provider == nil {
+		return nil, core.ErrNoMetadataProvider
+	}
+	hits := &library.SearchHits{Providers: []string{core.ProviderTMDB}}
+	switch mediaType {
+	case MediaTypeMovie:
+		movies, err := m.provider.SearchMovies(ctx, q)
+		if err != nil {
+			return nil, err
+		}
+		hits.Movies = movies
+	case MediaTypeSeries:
+		series, err := m.provider.SearchSeries(ctx, q)
+		if err != nil {
+			return nil, err
+		}
+		hits.Series = series
+	}
+	return hits, nil
+}
+
+func (m *stubManager) searchCalls() []searchCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]searchCall(nil), m.searches...)
 }
 
 // AddSite writes an adult-kind series the way library.AddSite does, so the

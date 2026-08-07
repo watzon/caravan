@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/watzon/caravan/internal/core"
 	"github.com/watzon/caravan/internal/parse"
@@ -208,6 +209,11 @@ func firstFileDTO(files []core.MediaFile, profile core.TVProfile) *mediaFileJSON
 // behaviour — add and wait for the next backlog sweep.
 type addRequest struct {
 	TMDBID int64 `json:"tmdb_id"`
+	// Provider and ProviderRef are the general spelling of "which title": the
+	// provider that identified it and its id in that provider's own numbering,
+	// straight off a search hit. They travel as a pair; see itemRefFrom.
+	Provider    string `json:"provider"`
+	ProviderRef string `json:"provider_ref"`
 	// QualityProfileID is the optional item override. Zero, including an
 	// omitted field, leaves the new item to inherit its library or system
 	// default.
@@ -243,6 +249,48 @@ type addRequest struct {
 	// re-added title stays in the library it already lives in whatever this
 	// says: a move is an explicit operation, never a side effect of an add.
 	LibraryID int64 `json:"library_id"`
+}
+
+// itemRefFrom resolves the two spellings of "which title" a body may carry
+// into one core.ItemRef, writing the refusal itself. kind is the LibraryKind
+// the ENDPOINT is about: LibraryKindMovie for the movie routes, LibraryKindTV
+// for the series ones.
+//
+// tmdb_id is the compatibility spelling, and it is what every client written
+// before providers were plural still sends; provider + provider_ref is the
+// general one, and it is what a search hit from any chain hands back.
+//
+// The pair travels together or not at all. Half a pair has named a provider
+// with nothing to look up, or a ref written in a vocabulary nobody named, and
+// there is no safe guess: a ref read in the wrong vocabulary is a different
+// title, not a failed lookup, so the item would be pinned to something real
+// and wrong.
+//
+// The provider is validated against the endpoint's kind and NOT against the
+// target library's chain. The chain governs IDENTIFICATION — which providers
+// are asked when Caravan has to work out what a file is — and this is the user
+// telling it the answer outright. A ref pasted from a provider that is not on
+// the chain is still a true ref, and refusing it would quietly turn the chain
+// into a second allow-list nobody asked for.
+func itemRefFrom(w http.ResponseWriter, provider, providerRef string, tmdbID int64, kind string) (core.ItemRef, bool) {
+	provider = strings.TrimSpace(provider)
+	providerRef = strings.TrimSpace(providerRef)
+
+	switch {
+	case provider != "" && providerRef != "":
+		if !core.ProviderServes(provider, kind) {
+			writeError(w, http.StatusBadRequest, "provider does not serve this kind of item")
+			return core.ItemRef{}, false
+		}
+		return core.ItemRef{Provider: provider, Ref: providerRef}, true
+	case provider != "" || providerRef != "":
+		writeError(w, http.StatusBadRequest, "provider and provider_ref must be sent together")
+		return core.ItemRef{}, false
+	case tmdbID > 0:
+		return core.TMDBRef(tmdbID), true
+	}
+	writeError(w, http.StatusBadRequest, "tmdb_id or provider/provider_ref is required")
+	return core.ItemRef{}, false
 }
 
 // moveRequest is the body of the two move endpoints: the target library.
@@ -381,8 +429,8 @@ func (s *server) handleAddMovie(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	if body.TMDBID <= 0 {
-		writeError(w, http.StatusBadRequest, "tmdb_id is required")
+	ref, ok := itemRefFrom(w, body.Provider, body.ProviderRef, body.TMDBID, core.LibraryKindMovie)
+	if !ok {
 		return
 	}
 	if len(body.Seasons) > 0 {
@@ -399,7 +447,7 @@ func (s *server) handleAddMovie(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	m, err := s.addMovieToLibrary(r.Context(), core.TMDBRef(body.TMDBID), body.SearchNow, body.MinAvailability, body.Monitored, body.QualityProfileID, body.LibraryID)
+	m, err := s.addMovieToLibrary(r.Context(), ref, body.SearchNow, body.MinAvailability, body.Monitored, body.QualityProfileID, body.LibraryID)
 	if err != nil {
 		s.writeManagerError(w, "add movie", err)
 		return
@@ -505,7 +553,15 @@ func (s *server) addSeriesToLibrary(ctx context.Context, ref core.ItemRef, searc
 // It never fails the caller: the add already happened, and a request row left
 // saying "pending" is a cosmetic wrong, not a reason to tell the client the
 // add did not work.
+//
+// A title added by a non-TMDB ref has no TMDB id, and requests are still
+// TMDB-keyed, so there is nothing it could have granted. Asking the store about
+// id 0 would be a query for rows that cannot exist and, worse, one that any
+// malformed request row carrying a zero would answer.
 func (s *server) absorbRequests(ctx context.Context, mediaType string, tmdbID int64) {
+	if tmdbID == 0 {
+		return
+	}
 	n, err := s.st.ApproveRequestsFor(ctx, mediaType, tmdbID)
 	if err != nil {
 		s.log.Error("absorb requests", "media_type", mediaType, "tmdb_id", tmdbID, "error", err)
@@ -525,6 +581,10 @@ func (s *server) absorbRequests(ctx context.Context, mediaType string, tmdbID in
 // pending: closing it would throw away the ask with no record that only part of
 // it was granted.
 func (s *server) absorbSeriesRequests(ctx context.Context, tmdbID int64, ungranted []int) {
+	// See absorbRequests: no TMDB id, nothing a request could have asked for.
+	if tmdbID == 0 {
+		return
+	}
 	if len(ungranted) == 0 {
 		s.absorbRequests(ctx, MediaTypeSeries, tmdbID)
 		return
@@ -820,8 +880,8 @@ func (s *server) handleAddSeries(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	if body.TMDBID <= 0 {
-		writeError(w, http.StatusBadRequest, "tmdb_id is required")
+	ref, ok := itemRefFrom(w, body.Provider, body.ProviderRef, body.TMDBID, core.LibraryKindTV)
+	if !ok {
 		return
 	}
 	if !validSeasonNumbers(w, body.Seasons) {
@@ -838,7 +898,7 @@ func (s *server) handleAddSeries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sr, err := s.addSeriesToLibrary(r.Context(), core.TMDBRef(body.TMDBID), body.SearchMissing, body.Seasons, body.Monitored, body.QualityProfileID, body.LibraryID)
+	sr, err := s.addSeriesToLibrary(r.Context(), ref, body.SearchMissing, body.Seasons, body.Monitored, body.QualityProfileID, body.LibraryID)
 	if err != nil {
 		s.writeManagerError(w, "add series", err)
 		return

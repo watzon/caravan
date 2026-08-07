@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -962,6 +963,76 @@ func TestSearchFailureModes(t *testing.T) {
 // itoa keeps the URL building in the tests readable.
 func itoa(id int64) string {
 	return strconv.FormatInt(id, 10)
+}
+
+// An add names the title by provider ref, which is the whole point of a chain:
+// what the user picked out of an AniList result is an AniList id, and building
+// a TMDB ref out of a field the body never carried would pin the item to a
+// provider that never identified it.
+func TestAddByProviderRef(t *testing.T) {
+	h, _, mgr := newTestServer(t)
+
+	rec := do(t, h, http.MethodPost, "/api/v1/library/series",
+		`{"provider":"anilist","provider_ref":"154587"}`)
+	wantStatus(t, rec, http.StatusCreated)
+
+	// The compatibility spelling still resolves to the ref it always meant.
+	rec = do(t, h, http.MethodPost, "/api/v1/library/movies", `{"tmdb_id":603}`)
+	wantStatus(t, rec, http.StatusCreated)
+
+	want := []addCall{
+		{kind: MediaTypeSeries, ref: core.ItemRef{Provider: core.ProviderAniList, Ref: "154587"}},
+		{kind: MediaTypeMovie, ref: core.TMDBRef(603)},
+	}
+	if got := mgr.addCalls(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("add calls = %+v, want %+v", got, want)
+	}
+}
+
+// The four ways of naming a title wrongly. Half a pair is refused rather than
+// guessed at: a ref read in the wrong vocabulary is a different title, not a
+// failed lookup, so the guess would pin the item to something real and wrong.
+func TestAddRefValidationRefusals(t *testing.T) {
+	h, _, mgr := newTestServer(t)
+
+	cases := map[string]struct{ path, body string }{
+		"provider without a ref": {"/api/v1/library/series", `{"provider":"anilist"}`},
+		"ref without a provider": {"/api/v1/library/series", `{"provider_ref":"154587"}`},
+		"neither spelling":       {"/api/v1/library/movies", `{"quality_profile_id":0}`},
+		// AniList serves television only, so it may not identify a movie.
+		"provider of the wrong kind": {"/api/v1/library/movies", `{"provider":"anilist","provider_ref":"1"}`},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			rec := do(t, h, http.MethodPost, c.path, c.body)
+			wantStatus(t, rec, http.StatusBadRequest)
+			wantErrorBody(t, rec)
+		})
+	}
+	if calls := mgr.addCalls(); len(calls) != 0 {
+		t.Fatalf("a refused add still reached the manager: %+v", calls)
+	}
+}
+
+// A chain the user's ref is NOT on still accepts the ref. The chain governs
+// identification — which providers are asked when Caravan has to work out what
+// something is — and an add is the user answering that question outright.
+func TestAddAcceptsARefOffTheLibraryChain(t *testing.T) {
+	h, _, mgr := newTestServer(t)
+	rec := do(t, h, http.MethodPost, "/api/v1/libraries",
+		`{"kind":"tv","name":"Anime","root_path":"library/Anime","providers":["tmdb"]}`)
+	wantStatus(t, rec, http.StatusCreated)
+	var anime libraryJSON
+	decodeBody(t, rec, &anime)
+
+	rec = do(t, h, http.MethodPost, "/api/v1/library/series",
+		`{"provider":"anilist","provider_ref":"154587","library_id":`+itoa(anime.ID)+`}`)
+	wantStatus(t, rec, http.StatusCreated)
+
+	calls := mgr.addCalls()
+	if len(calls) != 1 || calls[0].ref.Provider != core.ProviderAniList {
+		t.Fatalf("add calls = %+v, want the anilist ref", calls)
+	}
 }
 
 // POST /library/movies carries the availability choice onto the row, and both

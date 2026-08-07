@@ -171,17 +171,33 @@ func (s *server) metadataProvider(w http.ResponseWriter, r *http.Request) (core.
 		return nil, false
 	}
 
+	if s.tmdbKeyRejected(w, r) {
+		return nil, false
+	}
+	return provider, true
+}
+
+// tmdbKeyRejected reports whether the stored TMDB key is one TMDB has already
+// refused, writing the typed 503 itself.
+//
+// It is separate from metadataProvider because the verdict and the provider are
+// separate questions once a library can be chained to something other than
+// TMDB: a per-library search has to ask "is this chain's key bad" without
+// asking "is TMDB configured", and answers the second for itself by walking the
+// chain (see handleSearch). A store read that fails counts as refused — the
+// response has been written either way, and the caller must stop.
+func (s *server) tmdbKeyRejected(w http.ResponseWriter, r *http.Request) bool {
 	key, err := s.settingValue(r.Context(), store.SettingTMDBAPIKey)
 	if err != nil {
 		s.writeStoreError(w, "read metadata credential", err)
-		return nil, false
+		return true
 	}
 	if rejected, _, _ := s.credentials.verdict(key); rejected {
 		writeCodedError(w, http.StatusServiceUnavailable, CodeMetadataCredentialInvalid,
 			"the TMDB API key was rejected")
-		return nil, false
+		return true
 	}
-	return provider, true
+	return false
 }
 
 // noteMetadataFailure records a rejected credential seen by a live metadata
@@ -215,6 +231,16 @@ func (s *server) noteMetadataFailure(err error) bool {
 // credential into the typed answer the guarded surfaces use and leaving every
 // other failure as the bad gateway it was.
 func (s *server) writeMetadataError(w http.ResponseWriter, msg string, err error) {
+	// A chain with nothing configured on it is the absent-credential answer,
+	// not a bad gateway. Before per-library search this could not be reached
+	// here — the caller had already resolved a provider — but a chain resolves
+	// inside the manager now, so "no provider" arrives as an error rather than
+	// as a nil, and the SPA needs the same directed empty state either way.
+	if errors.Is(err, core.ErrNoMetadataProvider) {
+		writeCodedError(w, http.StatusServiceUnavailable, CodeMetadataCredentialAbsent,
+			"no metadata provider configured")
+		return
+	}
 	if s.noteMetadataFailure(err) {
 		writeCodedError(w, http.StatusServiceUnavailable, CodeMetadataCredentialInvalid,
 			"the TMDB API key was rejected")
