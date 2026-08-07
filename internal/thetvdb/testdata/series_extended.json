@@ -1,0 +1,25 @@
+{
+  "status": "success",
+  "data": {
+    "id": 81189,
+    "name": "Breaking Bad",
+    "slug": "breaking-bad",
+    "image": "https://artworks.thetvdb.com/banners/posters/81189-1.jpg",
+    "firstAired": "2008-01-20",
+    "lastAired": "2013-09-29",
+    "year": "2008",
+    "score": 328476,
+    "averageRuntime": 47,
+    "status": {
+      "id": 2,
+      "name": "Ended",
+      "recordType": "series",
+      "keepUpdated": false
+    },
+    "overview": "Walter White, a New Mexico chemistry teacher, is diagnosed with terminal lung cancer.",
+    "remoteIds": [
+      { "id": "tt0903747", "type": 2, "sourceName": "IMDB" },
+      { "id": "1396", "type": 12, "sourceName": "TheMovieDB.com" }
+    ]
+  }
+}

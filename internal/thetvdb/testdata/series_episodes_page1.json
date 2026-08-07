@@ -1,0 +1,40 @@
+{
+  "status": "success",
+  "data": {
+    "series": {
+      "id": 81189,
+      "name": "Breaking Bad"
+    },
+    "episodes": [
+      {
+        "id": 340372,
+        "seriesId": 81189,
+        "name": "Grilled",
+        "aired": "2009-03-15",
+        "runtime": 47,
+        "seasonNumber": 2,
+        "number": 2,
+        "absoluteNumber": 10,
+        "overview": ""
+      },
+      {
+        "id": 340371,
+        "seriesId": 81189,
+        "name": "Seven Thirty-Seven",
+        "aired": "2009-03-08",
+        "runtime": 47,
+        "seasonNumber": 2,
+        "number": 1,
+        "absoluteNumber": 9,
+        "overview": "<p>Walt and Jesse deal with the aftermath.</p>"
+      }
+    ]
+  },
+  "links": {
+    "prev": "https://api4.thetvdb.com/v4/series/81189/episodes/default?page=0",
+    "self": "https://api4.thetvdb.com/v4/series/81189/episodes/default?page=1",
+    "next": null,
+    "total_items": 5,
+    "page_size": 3
+  }
+}

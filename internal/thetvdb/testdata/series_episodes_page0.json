@@ -1,0 +1,51 @@
+{
+  "status": "success",
+  "data": {
+    "series": {
+      "id": 81189,
+      "name": "Breaking Bad"
+    },
+    "episodes": [
+      {
+        "id": 349232,
+        "seriesId": 81189,
+        "name": "Good Cop / Bad Cop",
+        "aired": "2009-02-17",
+        "runtime": 3,
+        "seasonNumber": 0,
+        "number": 1,
+        "absoluteNumber": 0,
+        "overview": "A promotional short. TheTVDB numbers it inside the specials season."
+      },
+      {
+        "id": 340362,
+        "seriesId": 81189,
+        "name": "Pilot",
+        "aired": "2008-01-20",
+        "runtime": 58,
+        "seasonNumber": 1,
+        "number": 1,
+        "absoluteNumber": 1,
+        "overview": "Diagnosed with terminal lung cancer, Walter White turns to cooking."
+      },
+      {
+        "id": 340363,
+        "seriesId": 81189,
+        "name": "Cat's in the Bag...",
+        "aired": "2008-01-27",
+        "runtime": 48,
+        "seasonNumber": 1,
+        "number": 2,
+        "absoluteNumber": 2,
+        "overview": ""
+      }
+    ]
+  },
+  "links": {
+    "prev": null,
+    "self": "https://api4.thetvdb.com/v4/series/81189/episodes/default?page=0",
+    "next": "https://api4.thetvdb.com/v4/series/81189/episodes/default?page=1",
+    "total_items": 5,
+    "page_size": 3
+  }
+}
