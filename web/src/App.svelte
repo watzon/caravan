@@ -307,7 +307,12 @@ import Search from './lib/routes/Search.svelte';
   <div class="flex h-full">
     <Sidebar open={sidebarOpen} onclose={closeSidebar} {settingsSection} />
 
-    <div class="flex min-w-0 flex-1 flex-col overflow-y-auto">
+    <!-- `relative` makes this column the containing block for absolutely
+         positioned descendants (every `sr-only` label is one). Without it
+         they anchor to <body>, and one sitting below the fold extends the
+         document's scrollable area: the whole shell, sidebar included,
+         scrolls behind this column's own scrollbar. -->
+    <div class="relative flex min-w-0 flex-1 flex-col overflow-y-auto">
       <TopBar
         {title}
         onadd={
