@@ -2,13 +2,13 @@ package anilist
 
 import (
 	"context"
-	"html"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/watzon/caravan/internal/core"
+	"github.com/watzon/caravan/internal/htmltext"
 )
 
 // GraphQL operation names. They are the Operation on every APIError and the
@@ -207,8 +207,8 @@ func (c *Client) SearchSeries(ctx context.Context, q string) ([]core.SeriesMeta,
 //	Year              startDate.year
 //	FirstAirDate      startDate, widened to the 1st of the period when the month
 //	                  or day is unknown — Caravan's convention everywhere
-//	Overview          description with its HTML stripped: AniList emits <br> and
-//	                  <i>, and this string is written into tvshow.nfo as XML
+//	Overview          description run through htmltext.Strip: AniList emits <br>
+//	                  and <i>, and this string is written into tvshow.nfo as XML
 //	Status            FINISHED→Ended, RELEASING→Continuing,
 //	                  NOT_YET_RELEASED→Planned, CANCELLED→Canceled,
 //	                  HIATUS→Hiatus
@@ -291,7 +291,7 @@ func seriesMeta(m mediaResult) core.SeriesMeta {
 		Title:         title,
 		OriginalTitle: originalTitle(m, title),
 		Year:          yearOf(start),
-		Overview:      stripHTML(m.Description),
+		Overview:      htmltext.Strip(m.Description),
 		VoteAverage:   float64(m.AverageScore) / 10,
 		VoteCount:     voteCount(m),
 		Status:        statuses[m.Status],
@@ -454,68 +454,3 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
-// stripHTML turns an AniList description into plain text.
-//
-// AniList serves descriptions as HTML even with asHtml:false — <br> between
-// paragraphs, <i> around a Japanese phrase, and named entities throughout. This
-// string is written verbatim into tvshow.nfo, so leaving the markup in would put
-// unescaped-looking tags in an XML document and show them literally in every
-// player that reads it. Block tags become newlines so the paragraphs survive;
-// everything else is dropped.
-func stripHTML(s string) string {
-	var b strings.Builder
-	b.Grow(len(s))
-	for i := 0; i < len(s); {
-		if s[i] != '<' {
-			b.WriteByte(s[i])
-			i++
-			continue
-		}
-		end := strings.IndexByte(s[i:], '>')
-		if end < 0 {
-			// An unterminated '<' is a literal less-than in the prose, not a
-			// tag: keep it rather than swallow the rest of the description.
-			b.WriteString(s[i:])
-			break
-		}
-		if isBlockTag(s[i+1 : i+end]) {
-			b.WriteByte('\n')
-		}
-		i += end + 1
-	}
-	// Unescaping last is deliberate: an entity-escaped "&lt;i&gt;" in the prose
-	// stays text instead of being re-read as a tag.
-	return tidyLines(html.UnescapeString(b.String()))
-}
-
-// isBlockTag reports whether a tag's contents end a line of prose.
-func isBlockTag(tag string) bool {
-	name := strings.TrimPrefix(strings.TrimSpace(tag), "/")
-	if i := strings.IndexAny(name, " \t/"); i >= 0 {
-		name = name[:i]
-	}
-	switch strings.ToLower(name) {
-	case "br", "p", "div":
-		return true
-	}
-	return false
-}
-
-// tidyLines trims each line and collapses the runs of blank lines that stripping
-// <br><br></p> leaves behind, so the paragraph breaks survive and nothing else
-// does.
-func tidyLines(s string) string {
-	lines := strings.Split(s, "\n")
-	out := make([]string, 0, len(lines))
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" && (len(out) == 0 || out[len(out)-1] == "") {
-			continue
-		}
-		out = append(out, line)
-	}
-	for len(out) > 0 && out[len(out)-1] == "" {
-		out = out[:len(out)-1]
-	}
-	return strings.Join(out, "\n")
-}
