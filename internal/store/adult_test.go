@@ -450,10 +450,18 @@ func TestUpsertSeriesDefaultsToTVAndRejectsAnUnknownKind(t *testing.T) {
 	}
 }
 
-// stash_id gets tmdb_id's treatment: unique among matched rows, unconstrained
-// among unmatched ones. A scan that found scene files before it found metadata
-// produces any number of the latter.
-func TestSeriesStashIDIsUniqueOnlyWhenSet(t *testing.T) {
+// Where a site's identity is enforced, after 0026 moved it.
+//
+// 0013 made stash_id itself globally unique, because there was one box and its
+// UUIDs were therefore unambiguous. 0026 demoted that index: the public boxes
+// are forks of one another and mint identical UUIDs, so a global rule would
+// refuse the second box's copy of a site outright. The rule did not go away, it
+// moved to 0024's UNIQUE (provider, provider_ref) — which is where a site's
+// identity has actually lived since every matched row started carrying both.
+//
+// Unmatched rows stay unconstrained either way: a scan that found scene files
+// before it found metadata produces any number of them.
+func TestAdultSeriesIdentityIsUniquePerProvider(t *testing.T) {
 	ctx := context.Background()
 	st, _ := openTemp(t)
 
@@ -468,13 +476,17 @@ func TestSeriesStashIDIsUniqueOnlyWhenSet(t *testing.T) {
 	if err := st.UpsertSeries(ctx, first); err != nil {
 		t.Fatalf("UpsertSeries: %v", err)
 	}
-	// A different row claiming the same site id is a duplicate the index must
-	// refuse; the upsert path below is how a legitimate refresh gets there.
+	if first.Provider != core.ProviderStashbox || first.ProviderRef != "site-1" {
+		t.Fatalf("site identity = %q/%q, want the write door to fill in stashbox/site-1",
+			first.Provider, first.ProviderRef)
+	}
+	// A different row claiming the same site on the SAME instance is the
+	// duplicate that must still be refused.
 	_, err := st.DB().ExecContext(ctx, `
-		INSERT INTO series (kind, stash_id, title, added_at, updated_at)
-		VALUES ('adult', 'site-1', 'Impostor', '', '')`)
+		INSERT INTO series (kind, stash_id, provider, provider_ref, title, added_at, updated_at)
+		VALUES ('adult', 'site-1', 'stashbox', 'site-1', 'Impostor', '', '')`)
 	if err == nil {
-		t.Error("a second series claimed the same stash id")
+		t.Error("a second series claimed the same site on the same instance")
 	}
 }
 

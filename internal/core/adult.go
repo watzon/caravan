@@ -46,6 +46,42 @@ func AdultVisible(enabled bool, role string, granted bool) bool {
 	return granted
 }
 
+// StashboxInstance is one configured stash-box endpoint.
+//
+// "stash-box" is a protocol, so a single endpoint setting could only ever
+// describe one of the catalogues speaking it. Each configured endpoint is its
+// own provider: it has its own account, its own capabilities, and its own
+// UUIDs, and the public boxes are forks of one another that mint identical
+// UUIDs for different rows of different catalogues.
+type StashboxInstance struct {
+	ID int64
+	// ProviderID is the id stored in `series.provider` and in a library's
+	// provider chain. It is the instance's identity — 'stashbox' for the
+	// endpoint configured before instances existed, 'stashbox:<slug>' for every
+	// one minted since — and it is immutable: renaming an instance must never
+	// re-point the rows pinned to it.
+	ProviderID string
+	// Name is the user-facing label, unique across instances.
+	Name string
+	// Endpoint is the box's GraphQL URL, always absolute. There is no "" means
+	// the preset here: with several instances that sentinel would let two of
+	// them be silently the same box. The preset belongs to the picker that
+	// offers it, not to the stored value.
+	//
+	// It is immutable after creation for the reason the provider id is: every
+	// item pinned to this instance carries a UUID that only this box minted, and
+	// re-pointing it at another box would have the next refresh overwrite those
+	// rows with whatever the new box happens to hold under the same ids. Moving
+	// to another box is adding an instance.
+	Endpoint string
+	// APIKey is the credential. It lives in the database, never in the bootstrap
+	// YAML and never in logs (SPEC §12). Empty is legitimate: a box that serves
+	// anonymous reads needs none.
+	APIKey    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 // AdultMetadataProvider is the metadata source behind the adult library
 // (stash-box in phase 9, TPDB by default). It is the seam that keeps the
 // library, automation and API layers testable without network access, exactly
