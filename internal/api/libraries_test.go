@@ -527,6 +527,32 @@ func TestListProvidersOmitsAdultWithoutTheModule(t *testing.T) {
 	}
 }
 
+// AniList is a non-adult provider, so the create form offers it to everybody —
+// and it offers it for television ONLY, which is what stops a movie library
+// being chained to a provider that refuses every movie lookup.
+func TestListProvidersOffersAniListForTV(t *testing.T) {
+	h, _, _ := newTestServer(t)
+	rec := do(t, h, http.MethodGet, "/api/v1/libraries/providers", "")
+	wantStatus(t, rec, http.StatusOK)
+	var body struct {
+		Providers []struct {
+			ID    string   `json:"id"`
+			Kinds []string `json:"kinds"`
+		} `json:"providers"`
+	}
+	decodeBody(t, rec, &body)
+	for _, p := range body.Providers {
+		if p.ID != core.ProviderAniList {
+			continue
+		}
+		if !reflect.DeepEqual(p.Kinds, []string{core.LibraryKindTV}) {
+			t.Errorf("anilist kinds = %v, want [tv]", p.Kinds)
+		}
+		return
+	}
+	t.Errorf("providers = %+v, want anilist listed", body.Providers)
+}
+
 // A library carries an ordered provider CHAIN, and the wire keeps both
 // spellings: `providers` is the list, `provider` is its read-only head, so a
 // client written before chains keeps reading exactly what it always did.

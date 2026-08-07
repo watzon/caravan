@@ -34,13 +34,28 @@ func TestProviderServesRejectsMismatches(t *testing.T) {
 		{ProviderTMDB, LibraryKindAdult, false},
 		{ProviderStashbox, LibraryKindAdult, true},
 		{ProviderStashbox, LibraryKindMovie, false},
-		{"anilist", LibraryKindTV, false},
+		{ProviderAniList, LibraryKindTV, true},
+		// AniList is television-only: internal/anilist refuses movie lookups
+		// with ErrProviderKindUnsupported, so a movie library must not be
+		// creatable against it.
+		{ProviderAniList, LibraryKindMovie, false},
+		{ProviderAniList, LibraryKindAdult, false},
 		{"", LibraryKindMovie, false},
 	}
 	for _, c := range cases {
 		if got := ProviderServes(c.id, c.kind); got != c.want {
 			t.Errorf("ProviderServes(%q, %q) = %v, want %v", c.id, c.kind, got, c.want)
 		}
+	}
+}
+
+// Registering a second television provider must not change which one a library
+// gets when nobody chose: migration 0022 backfilled every pre-existing tv row
+// onto TMDB, and moving the default would make the create form disagree with
+// the rows already on disk.
+func TestDefaultTVProviderStaysTMDB(t *testing.T) {
+	if got := DefaultProviderForKind(LibraryKindTV); got != ProviderTMDB {
+		t.Errorf("DefaultProviderForKind(tv) = %q, want %q", got, ProviderTMDB)
 	}
 }
 

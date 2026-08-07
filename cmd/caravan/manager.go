@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/watzon/caravan/internal/anilist"
 	"github.com/watzon/caravan/internal/api"
 	"github.com/watzon/caravan/internal/core"
 	"github.com/watzon/caravan/internal/library"
@@ -64,6 +65,12 @@ type libraryAdapter struct {
 	// tmdb is the last TMDB client built, kept alongside the API key it was
 	// built from; see tmdbClient.
 	tmdb *cachedTMDB
+	// anilistMu guards anilist, which is read and replaced from concurrent
+	// HTTP handlers.
+	anilistMu sync.Mutex
+	// anilist is THE AniList client for this process — there is no cache key
+	// beside it because there is no setting to key on; see anilistClient.
+	anilist *anilist.Client
 }
 
 // cachedTMDB is one TMDB client and the setting that defines it.
@@ -117,8 +124,11 @@ func (a *libraryAdapter) current(ctx context.Context) (*library.Manager, error) 
 type providerRegistry struct{ a *libraryAdapter }
 
 func (p providerRegistry) Metadata(ctx context.Context, providerID string) core.MetadataProvider {
-	if providerID == core.ProviderTMDB {
+	switch providerID {
+	case core.ProviderTMDB:
 		return p.a.metadata(ctx)
+	case core.ProviderAniList:
+		return p.a.anilistClient()
 	}
 	return nil
 }
@@ -134,6 +144,10 @@ func (p providerRegistry) Adult(ctx context.Context, providerID string) core.Adu
 // watcher is the one Manager that outlives a settings change, and the reason
 // it carries no adult provider (see watcherManager) is unchanged by its
 // needing the metadata half.
+//
+// It EMBEDS providerRegistry rather than restating the metadata switch, so a
+// provider added there reaches the watcher without a second edit — which is
+// how AniList got there.
 type metadataOnlyRegistry struct{ providerRegistry }
 
 func (metadataOnlyRegistry) Adult(context.Context, string) core.AdultMetadataProvider { return nil }
@@ -201,6 +215,30 @@ func (a *libraryAdapter) stashboxClient(key, endpoint string) *stashbox.Client {
 	client := stashbox.New(key, endpoint, a.hc)
 	a.adult = &cachedStashbox{key: key, endpoint: endpoint, client: client}
 	return client
+}
+
+// anilistClient returns THE AniList client, building it once.
+//
+// It takes no cache key because there is nothing to key on: AniList serves
+// anonymous reads, so no setting can change what a client for it would be, and
+// the endpoint is a constant rather than a preset (see anilist.DefaultEndpoint).
+// "Same settings, same client" therefore collapses into "same client, always".
+//
+// Reuse is not an optimisation here, it is the contract. The client carries the
+// rate limiter for a per-minute budget that AniList enforces per CALLER, not per
+// connection — one logical lookup can cost several requests — so a client built
+// per call would hand every caller a fresh, empty budget and the process would
+// walk straight into the limit it exists to respect. That is the same
+// provider-local state stashboxClient's cache exists to preserve; only the key
+// differs.
+func (a *libraryAdapter) anilistClient() *anilist.Client {
+	a.anilistMu.Lock()
+	defer a.anilistMu.Unlock()
+
+	if a.anilist == nil {
+		a.anilist = anilist.New(a.hc)
+	}
+	return a.anilist
 }
 
 // watcherManager builds the one library.Manager the import watcher holds for

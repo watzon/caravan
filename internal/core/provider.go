@@ -9,6 +9,7 @@ package core
 const (
 	ProviderTMDB     = "tmdb"
 	ProviderStashbox = "stashbox"
+	ProviderAniList  = "anilist"
 )
 
 // ProviderDescriptor describes one compiled-in metadata provider.
@@ -30,6 +31,13 @@ type ProviderDescriptor struct {
 var providers = []ProviderDescriptor{
 	{ID: ProviderTMDB, Name: "TMDB", Kinds: []string{LibraryKindMovie, LibraryKindTV}},
 	{ID: ProviderStashbox, Name: "Stash-box", Kinds: []string{LibraryKindAdult}},
+	// AniList serves television only. Anime films exist, but AniList's own
+	// vocabulary files them as a MEDIA entry of format MOVIE under the same
+	// anime catalogue, and internal/anilist answers GetMovie with
+	// ErrProviderKindUnsupported rather than pretend otherwise. Claiming the
+	// movie kind here would let a movie library be created against a provider
+	// that refuses every movie lookup.
+	{ID: ProviderAniList, Name: "AniList", Kinds: []string{LibraryKindTV}},
 }
 
 // Providers returns the compiled-in provider descriptors. The result is a
