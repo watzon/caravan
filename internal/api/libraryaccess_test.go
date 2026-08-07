@@ -273,12 +273,27 @@ func TestInactiveLibraryIsAbsentToTheAdminToo(t *testing.T) {
 		}
 	}
 
-	// And it is not on the Libraries screen either, so nothing describes a shelf
-	// that answers nothing.
+	// It IS on the Libraries screen, carrying active=false for the badge — and
+	// that is the one exception, not a leak. GET /libraries is the management
+	// surface, and the toggle that undoes dormancy is reachable only from it; a
+	// shelf that vanished from the list the moment it was switched off would be
+	// a one-way door. Every route above is a CONTENT route, and those stay shut.
 	rec = doAuth(t, h, http.MethodGet, "/api/v1/libraries", "", adminCookie)
 	wantStatus(t, rec, http.StatusOK)
-	if strings.Contains(rec.Body.String(), "Dormant Shows") {
-		t.Errorf("GET /libraries names an inactive library: %s", rec.Body.String())
+	var listed libraryListBody
+	decodeBody(t, rec, &listed)
+	var dormant *libraryJSON
+	for i, l := range listed.Libraries {
+		if l.ID == f.dormantTV.ID {
+			dormant = &listed.Libraries[i]
+		}
+	}
+	if dormant == nil {
+		t.Fatalf("GET /libraries dropped the inactive library the admin has to switch back on: %s",
+			rec.Body.String())
+	}
+	if dormant.Active {
+		t.Errorf("the inactive library reads as active on the Libraries screen: %+v", *dormant)
 	}
 }
 
@@ -413,4 +428,186 @@ func TestLibraryGateReadsTheStoreOncePerRequest(t *testing.T) {
 	if visible {
 		t.Error("a revoked grant still opens the library on a new request")
 	}
+}
+
+// ---------------------------------------------------------------------------
+// The access endpoints: the doors that replaced the module switch.
+// ---------------------------------------------------------------------------
+
+// Restricting a library and sharing it on the LAN cannot both be true.
+//
+// DLNA has no accounts: a container on the tree is readable by every device on
+// the network, so "restricted to two people" and "advertised to the house" are
+// contradictory, and of the two it is the restriction that was just asked for.
+// Unrestricting does NOT put the flag back — nobody asked for the LAN to see it
+// again, and silently re-advertising a shelf would be exactly the surprise
+// clearing it prevented.
+func TestRestrictingALibraryTakesItOffTheLAN(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	f := restrictedLibraryFixture(t, st)
+	cookie := withCookie(login(t, h, testAdmin, testPassword))
+	path := "/api/v1/libraries/" + itoa(f.openTV.ID)
+
+	// The seeded Series library is shared, which is what makes the point.
+	before := libraryByID(t, h, cookie, f.openTV.ID)
+	if !before.DLNAVisible {
+		t.Fatalf("the seeded library is not shared: %+v", before)
+	}
+
+	wantStatus(t, doAuth(t, h, http.MethodPut, path+"/access",
+		`{"restricted":true,"user_ids":[`+itoa(f.granted.ID)+`]}`, cookie), http.StatusOK)
+
+	after := libraryByID(t, h, cookie, f.openTV.ID)
+	if !after.Restricted || after.DLNAVisible {
+		t.Fatalf("restricted library = %+v, want restricted and off the LAN", after)
+	}
+
+	// Unrestricting leaves it dark; re-sharing is a second, deliberate act.
+	wantStatus(t, doAuth(t, h, http.MethodPut, path+"/access",
+		`{"restricted":false}`, cookie), http.StatusOK)
+	open := libraryByID(t, h, cookie, f.openTV.ID)
+	if open.Restricted || open.DLNAVisible {
+		t.Fatalf("unrestricted library = %+v, want open but still off the LAN", open)
+	}
+}
+
+// The flag and the roster are one decision, written in one transaction. A body
+// naming an account that does not exist is refused whole rather than written
+// half: a grant on an id nobody holds is a row waiting to match whichever
+// account is created with that id next.
+func TestSetLibraryAccessRefusesAnUnknownAccountWithoutWritingAnything(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	f := restrictedLibraryFixture(t, st)
+	cookie := withCookie(login(t, h, testAdmin, testPassword))
+	path := "/api/v1/libraries/" + itoa(f.openMovie.ID) + "/access"
+
+	rec := doAuth(t, h, http.MethodPut, path,
+		`{"restricted":true,"user_ids":[`+itoa(f.ungranted.ID+999)+`]}`, cookie)
+	wantStatus(t, rec, http.StatusBadRequest)
+	wantErrorBody(t, rec)
+
+	if got := libraryByID(t, h, cookie, f.openMovie.ID); got.Restricted {
+		t.Errorf("a refused access write still restricted the library: %+v", got)
+	}
+}
+
+// A restricted library's roster is editable while the library is DORMANT, which
+// is the whole reason management and content routes ask different questions: an
+// owner fixing who may see a shelf before switching it back on must not have to
+// make it visible to the wrong people first.
+func TestAccessCardReachesAnInactiveLibrary(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	f := restrictedLibraryFixture(t, st)
+	cookie := withCookie(login(t, h, testAdmin, testPassword))
+	path := "/api/v1/libraries/" + itoa(f.dormantTV.ID) + "/access"
+
+	wantStatus(t, doAuth(t, h, http.MethodGet, path, "", cookie), http.StatusOK)
+	rec := doAuth(t, h, http.MethodPut, path,
+		`{"restricted":true,"user_ids":[`+itoa(f.granted.ID)+`]}`, cookie)
+	wantStatus(t, rec, http.StatusOK)
+
+	var body libraryAccessJSON
+	decodeBody(t, rec, &body)
+	if !body.Restricted {
+		t.Fatalf("access on a dormant library = %+v, want restricted", body)
+	}
+	for _, u := range body.Users {
+		if u.ID == f.granted.ID && !u.Granted {
+			t.Errorf("the grant on a dormant library did not stick: %+v", u)
+		}
+	}
+}
+
+// Deleting an adult library is an ordinary deletion now, under the ordinary
+// guards. Which leaves one install that cannot delete: a single adult library
+// that is its kind's default. That refusal is correct and must stay — every
+// by-kind lookup needs an answer, and `active=0` is already the "off" that
+// deletion was never the right spelling of. Anyone tempted to "fix" it should
+// demote the library or make another default first.
+func TestDeletingTheDefaultAdultLibraryIsStillRefused(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	lib := enableAdultLibrary(t, st)
+	setAdultLibrariesActive(t, st, false)
+
+	rec := do(t, h, http.MethodDelete, "/api/v1/libraries/"+itoa(lib.ID), "")
+	wantStatus(t, rec, http.StatusConflict)
+	wantErrorBody(t, rec)
+
+	if _, err := st.GetLibrary(context.Background(), lib.ID); err != nil {
+		t.Fatalf("the refused delete removed the row: %v", err)
+	}
+}
+
+// GET /auth/me is the only route outside /adult that says anything about the
+// module, and since it also carries the member-safe library projection it is
+// where the whole access rule becomes visible to a client.
+func TestMeCarriesOnlyTheLibrariesTheSessionMaySee(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	f := restrictedLibraryFixture(t, st)
+	adult := enableAdultLibrary(t, st)
+	ctx := context.Background()
+	if err := st.SetLibraryAccess(ctx, adult.ID, true, []int64{f.granted.ID}); err != nil {
+		t.Fatalf("SetLibraryAccess: %v", err)
+	}
+
+	me := func(username string) meResponse {
+		t.Helper()
+		rec := doAuth(t, h, http.MethodGet, "/api/v1/auth/me", "",
+			withCookie(login(t, h, username, testPassword)))
+		wantStatus(t, rec, http.StatusOK)
+		var body meResponse
+		decodeBody(t, rec, &body)
+		return body
+	}
+	names := func(m meResponse) map[string]bool {
+		out := map[string]bool{}
+		for _, l := range m.Libraries {
+			out[l.Name] = true
+		}
+		return out
+	}
+
+	granted := me("granted")
+	if !granted.Adult {
+		t.Error("a granted member is not told the adult shelf is theirs")
+	}
+	if got := names(granted); !got[store.AdultLibraryName] || !got["Kids"] {
+		t.Errorf("granted member sees %v, want their restricted shelves", got)
+	}
+
+	ungranted := me("ungranted")
+	if ungranted.Adult {
+		t.Error("an ungranted member is told the adult shelf is theirs")
+	}
+	if got := names(ungranted); got[store.AdultLibraryName] || got["Kids"] {
+		t.Errorf("ungranted member sees %v, want neither restricted shelf", got)
+	}
+
+	// An inactive library is absent for everybody, the admin included: a nav
+	// entry for a dormant shelf leads to routes that 404.
+	for _, m := range []meResponse{me(testAdmin), granted, ungranted} {
+		if got := names(m); got["Dormant Shows"] || got["Dormant Films"] {
+			t.Errorf("%q sees a dormant shelf: %v", m.Username, got)
+		}
+	}
+	if got := names(me(testAdmin)); !got["Kids"] || !got[store.AdultLibraryName] {
+		t.Errorf("the admin sees %v, want every active shelf", got)
+	}
+}
+
+// libraryByID reads one library off the Libraries screen, which is the only
+// place a whole library DTO is returned from.
+func libraryByID(t *testing.T, h http.Handler, cookie func(*http.Request), id int64) libraryJSON {
+	t.Helper()
+	rec := doAuth(t, h, http.MethodGet, "/api/v1/libraries", "", cookie)
+	wantStatus(t, rec, http.StatusOK)
+	var body libraryListBody
+	decodeBody(t, rec, &body)
+	for _, l := range body.Libraries {
+		if l.ID == id {
+			return l
+		}
+	}
+	t.Fatalf("library %d is not on the Libraries screen: %s", id, rec.Body.String())
+	return libraryJSON{}
 }

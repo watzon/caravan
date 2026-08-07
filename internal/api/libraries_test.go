@@ -284,22 +284,23 @@ func putLibraryIndexer(t *testing.T, h http.Handler, libraryID, indexerID int64,
 		"/api/v1/libraries/"+itoa(libraryID)+"/indexers/"+itoa(indexerID), body)
 }
 
-// A disabled module leaves no library behind either.
+// A dormant library is still the admin's to work, and nobody else's to see.
 //
-// The Adult row is never deleted — that is deliberate, so turning the module
-// back on finds the sites, the scenes and the files as they were — but a row
-// that outlives the switch would keep GET /libraries answering with an "Adult"
-// pill, its root path and its DLNA state on an install whose owner turned the
-// whole thing off. The Libraries screen renders one pill per returned row, so
-// the response IS the UI trace.
-func TestLibrariesHideTheAdultRowWhenTheModuleIsOff(t *testing.T) {
-	ctx := context.Background()
+// The two halves are the whole point of the manageable/visible split. Every
+// CONTENT route answers 404 for an inactive library, an admin included — that
+// is what "dormant for everyone" means. The MANAGEMENT surface keeps answering,
+// because the toggle that undoes dormancy lives on it: a library switched off
+// and then dropped from the only list it appears in would be a one-way door.
+//
+// GET /libraries is admin-only (routePolicies; memberAllowed names none of it),
+// so the row a member was never meant to see does not reach one here — the
+// filter that hides it from a member is the same `manages` predicate, with the
+// role rule inside core.LibraryVisible doing the work.
+func TestDormantLibrariesStayManageableAndUnreachable(t *testing.T) {
 	h, st, _ := newTestServer(t)
 	seedIndexer(t, st, "jackett", []int{2000, 5000}, true)
 
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	enableAdultLibrary(t, st)
 
 	list := func() libraryListBody {
 		t.Helper()
@@ -319,39 +320,55 @@ func TestLibrariesHideTheAdultRowWhenTheModuleIsOff(t *testing.T) {
 	rec := do(t, h, http.MethodPatch, "/api/v1/libraries/"+itoa(adult.ID), `{"dlna_visible":true}`)
 	wantStatus(t, rec, http.StatusOK)
 
-	if err := st.SetAdultEnabled(ctx, false); err != nil {
-		t.Fatalf("SetAdultEnabled(false): %v", err)
+	// Switched off through the door that does it, which is the toggle the
+	// screen renders and not a store call reaching around it.
+	wantStatus(t, do(t, h, http.MethodPatch, "/api/v1/libraries/"+itoa(adult.ID),
+		`{"active":false}`), http.StatusOK)
+
+	dormant := libraryOfKind(t, list(), core.LibraryKindAdult)
+	if dormant.Active {
+		t.Fatalf("the switched-off library reads as active: %+v", dormant)
+	}
+	// Its DLNA state is remembered rather than cleared: dormancy is not
+	// un-sharing, and switching it back on must not need the owner to redo a
+	// decision they never revoked.
+	if !dormant.DLNAVisible {
+		t.Errorf("switching the library off forgot that it was shared: %+v", dormant)
 	}
 
-	body := list()
-	for _, l := range body.Libraries {
-		if l.Kind == core.LibraryKindAdult {
-			t.Fatalf("GET /libraries still names the adult library with the module off: %+v", l)
+	// Content routes are shut for the admin too. 404, not 403: "there is
+	// nothing here" is the same answer every gated route gives.
+	for _, target := range []string{
+		"/api/v1/adult/sites",
+		"/api/v1/adult/discover",
+	} {
+		if rec := do(t, h, http.MethodGet, target, ""); rec.Code != http.StatusNotFound {
+			t.Errorf("GET %s = %d with the library off, want 404", target, rec.Code)
 		}
 	}
-	if len(body.Libraries) != 2 {
-		t.Errorf("libraries = %+v, want only Movies and Series", body.Libraries)
-	}
 
-	// And the row is not reachable by id either, or the pill would be gone
-	// while the card behind it stayed fully editable. 404, not 403: "there is
-	// nothing here" is the same answer every adult route gives.
+	// The management routes are not, or there would be no way back.
 	for _, tc := range []struct{ method, target, body string }{
-		{http.MethodPatch, "/api/v1/libraries/" + itoa(adult.ID), `{"dlna_visible":false}`},
+		{http.MethodPatch, "/api/v1/libraries/" + itoa(adult.ID), `{"dlna_visible":true}`},
 		{http.MethodPut, "/api/v1/libraries/" + itoa(adult.ID) + "/indexers/1", `{"enabled":false}`},
+		{http.MethodGet, "/api/v1/libraries/" + itoa(adult.ID) + "/access", ""},
+		{http.MethodPut, "/api/v1/libraries/" + itoa(adult.ID) + "/access", `{"restricted":true}`},
 	} {
 		rec := do(t, h, tc.method, tc.target, tc.body)
-		if rec.Code != http.StatusNotFound {
-			t.Errorf("%s %s = %d, want 404", tc.method, tc.target, rec.Code)
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s %s = %d with the library off, want 200 (body %q)",
+				tc.method, tc.target, rec.Code, rec.Body.String())
 		}
 	}
 
-	// Turning it back on finds the row exactly as it was left.
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled(true): %v", err)
-	}
-	if back := libraryOfKind(t, list(), core.LibraryKindAdult); !back.DLNAVisible {
-		t.Errorf("re-enabling the module forgot the library's state: %+v", back)
+	// And back on, through the same toggle, with the state it was left in. The
+	// access write above restricted it, which clears dlna_visible — so the
+	// PATCH that re-shared it is what this reads back.
+	wantStatus(t, do(t, h, http.MethodPatch, "/api/v1/libraries/"+itoa(adult.ID),
+		`{"active":true,"dlna_visible":true}`), http.StatusOK)
+	back := libraryOfKind(t, list(), core.LibraryKindAdult)
+	if !back.Active || !back.DLNAVisible {
+		t.Errorf("switching the library back on forgot its state: %+v", back)
 	}
 }
 
@@ -364,9 +381,7 @@ func TestAdultLibraryCardShowsTheAdultCategoriesAsItsDefault(t *testing.T) {
 	ctx := context.Background()
 	h, st, _ := newTestServer(t)
 	cfg := seedIndexer(t, st, "jackett", []int{2000, 5000}, true)
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	enableAdultLibrary(t, st)
 
 	rec := do(t, h, http.MethodGet, "/api/v1/libraries", "")
 	wantStatus(t, rec, http.StatusOK)
@@ -432,8 +447,11 @@ func TestCreateLibraryValidatesAndCreates(t *testing.T) {
 		"dotdot root":           `{"kind":"tv","name":"X","root_path":"library/../etc"}`,
 		"wrong provider":        `{"kind":"movie","name":"X","root_path":"library/X","provider":"stashbox"}`,
 		"unknown kind":          `{"kind":"music","name":"X","root_path":"library/X"}`,
-		"adult without module":  `{"kind":"adult","name":"X","root_path":"library/X"}`,
 		"empty name":            `{"kind":"tv","name":"  ","root_path":"library/X"}`,
+		// An adult chain that names a PARTICULAR box gets no bootstrap benefit:
+		// only the bare legacy id is a forward reference to the instance about
+		// to be minted, and a qualified one has nothing to resolve into.
+		"adult on a named box": `{"kind":"adult","name":"X","root_path":"library/X","providers":["stashbox:fansdb"]}`,
 	} {
 		rec := do(t, h, http.MethodPost, "/api/v1/libraries", body)
 		if rec.Code != http.StatusBadRequest {

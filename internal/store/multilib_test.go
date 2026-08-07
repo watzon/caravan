@@ -14,8 +14,8 @@ import (
 // 0022 rebuilds `libraries` again — the same cascade trap 0013 documents — and
 // backfills ownership onto every media row. An upgraded install must come out
 // the other side describing exactly what it was already doing: same library
-// rows with their edits, same overrides, every item owned by the library its
-// kind used to imply, and the adult enable still idempotent.
+// rows with their edits, same overrides, and every item owned by the library
+// its kind used to imply.
 func TestMigrate0022PreservesExistingInstall(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "caravan.db")
@@ -32,7 +32,7 @@ func TestMigrate0022PreservesExistingInstall(t *testing.T) {
 	exec(t, db, `UPDATE libraries SET route_torrent = 'embedded' WHERE kind = 'tv'`)
 	exec(t, db, `INSERT INTO library_indexers (library_id, indexer_id, enabled, categories)
 		VALUES ((SELECT id FROM libraries WHERE kind = 'tv'), 7, 0, '[5030,5040]')`)
-	// The adult row as pre-0022 SetAdultEnabled created it.
+	// The adult row in the shape a pre-0022 install carried it.
 	exec(t, db, `INSERT INTO libraries (kind, name, root_path, dlna_visible)
 		VALUES ('adult', 'Adult', 'library/Adult', 0)`)
 	exec(t, db, `INSERT INTO settings (key, value, updated_at)
@@ -111,19 +111,6 @@ func TestMigrate0022PreservesExistingInstall(t *testing.T) {
 		if sr.LibraryID != want {
 			t.Errorf("series %d library_id = %d, want %d", id, sr.LibraryID, want)
 		}
-	}
-
-	// Re-enabling the module must reuse the migrated row, not add a second one
-	// now that UNIQUE(kind) is gone.
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
-	adult, err := st.ListLibrariesByKind(ctx, core.LibraryKindAdult)
-	if err != nil {
-		t.Fatalf("ListLibrariesByKind(adult): %v", err)
-	}
-	if len(adult) != 1 {
-		t.Errorf("adult libraries = %+v, want exactly the migrated row", adult)
 	}
 }
 

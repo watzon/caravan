@@ -307,11 +307,6 @@ type requestUser struct {
 	// its trusted-LAN default. It is what distinguishes "everyone is an admin
 	// because nobody has signed up" from "this person is an admin".
 	Open bool
-	// AdultAccess is the account's adult_access grant, carried here because
-	// requireAuth has already read the row and the adult gate would otherwise
-	// re-read it on every request. It is meaningless without Role and without
-	// the server-wide switch — read it through core.AdultVisible, never alone.
-	AdultAccess bool
 }
 
 // userContextKey is the private key requestUser is stored under. It is an
@@ -471,9 +466,11 @@ func (s *server) resolveUser(r *http.Request) (requestUser, bool, error) {
 			case err != nil:
 				return requestUser{}, false, err
 			}
-			return requestUser{
-				ID: user.ID, Role: user.Role, AdultAccess: user.AdultAccess,
-			}, true, nil
+			// The row's adult_access column is deliberately not carried: per-library
+			// grants live in `library_access` and the gate reads them there, so a
+			// grant revoked on the access card takes effect on the next request
+			// with nothing stale riding along in the identity.
+			return requestUser{ID: user.ID, Role: user.Role}, true, nil
 		}
 	}
 	// The API key is the owner's own credential, configured in the settings
@@ -697,16 +694,32 @@ type meResponse struct {
 	// is an admin. The SPA renders the full navigation for it, exactly as it
 	// did before roles existed.
 	Open bool `json:"open"`
-	// Adult says the adult module is visible to this caller: the server-wide
-	// switch is on AND this account reaches it (core.AdultVisible). It is what
-	// the SPA renders the Adult nav item from, and it is false — not absent —
-	// for everyone else, so a client cannot tell "the module is off" from "I
-	// was not granted it", which is the same thing the 404 on /adult says.
+	// Adult says the adult module is visible to this caller: at least one
+	// adult-kind library is switched on AND this account reaches it
+	// (libraryGate.seesAdult). The name and the type are the ones every client
+	// has always read; only what makes it true moved, from a server-wide switch
+	// onto the libraries themselves. It is false — not absent — for everyone
+	// else, so a client cannot tell "there is no adult library" from "I was not
+	// granted one", which is the same thing the 404 on /adult says.
 	//
 	// This is the only route outside /adult that reports anything about the
 	// module, and it has to be: the SPA must decide what to draw before it
 	// makes a request that would 404.
 	Adult bool `json:"adult"`
+	// Libraries is every library this session may see, active ones only.
+	//
+	// It exists because a member has to know which shelves are theirs before
+	// asking for anything on one, and GET /libraries is routeAdmin and must
+	// stay so: its DTO carries root paths, provider chains, routing overrides
+	// and the per-indexer matrix, which are an operator's business. This is the
+	// member-safe projection — an id, a kind and a name, which is what a
+	// navigation entry is made of and nothing more.
+	//
+	// Inactive libraries are absent for everyone, admins included: `active=0`
+	// is dormant, and a nav entry for a dormant shelf leads to routes that 404.
+	// The Libraries settings screen is where an admin sees those, greyed, with
+	// the toggle that brings them back.
+	Libraries []meLibraryJSON `json:"libraries"`
 	// SceneFilters says which controls the Explore rail's Adult scope may
 	// draw, because "stash-box" is a protocol with dialects and the configured
 	// endpoint decides: TPDB serves a release year, a runtime, a widened site
@@ -723,6 +736,18 @@ type meResponse struct {
 	// module at all, and absent likewise when no credential is configured,
 	// where the screen's own 503 has the better answer.
 	SceneFilters *sceneFiltersJSON `json:"scene_filters,omitempty"`
+}
+
+// meLibraryJSON is one library as a session may know it: what it is called,
+// what kind of thing is on it, and the id to ask about it with.
+//
+// Root paths, provider chains, indexer overrides and DLNA state are all
+// deliberately absent. This travels to every member, and a member is not being
+// told where the files live.
+type meLibraryJSON struct {
+	ID   int64  `json:"id"`
+	Kind string `json:"kind"`
+	Name string `json:"name"`
 }
 
 // sceneFiltersJSON is core.SceneFilterSupport on the wire. Positive: true is
@@ -779,16 +804,29 @@ func (s *server) sceneFilters(ctx context.Context, adult bool) *sceneFiltersJSON
 // truth: there is nobody to name, and whoever asked may do anything. So does
 // the API key, for the same reason.
 func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
-	adult, err := s.gate(r).seesAdult(r.Context())
+	gate := s.gate(r)
+	adult, err := gate.seesAdult(r.Context())
 	if err != nil {
 		s.writeStoreError(w, "read library access", err)
 		return
+	}
+	libs, err := gate.visibleLibraries(r.Context())
+	if err != nil {
+		s.writeStoreError(w, "read library access", err)
+		return
+	}
+	// An array rather than null: the client indexes into it, and a session with
+	// no library at all is a real state on a fresh install.
+	shelves := make([]meLibraryJSON, 0, len(libs))
+	for _, l := range libs {
+		shelves = append(shelves, meLibraryJSON{ID: l.ID, Kind: l.Kind, Name: l.Name})
 	}
 	filters := s.sceneFilters(r.Context(), adult)
 	user := currentUser(r)
 	if user.ID == 0 {
 		writeJSON(w, http.StatusOK, meResponse{
-			Role: user.Role, Open: user.Open, Adult: adult, SceneFilters: filters,
+			Role: user.Role, Open: user.Open, Adult: adult,
+			Libraries: shelves, SceneFilters: filters,
 		})
 		return
 	}
@@ -798,7 +836,8 @@ func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, meResponse{
-		Username: row.Username, Role: row.Role, Adult: adult, SceneFilters: filters,
+		Username: row.Username, Role: row.Role, Adult: adult,
+		Libraries: shelves, SceneFilters: filters,
 	})
 }
 

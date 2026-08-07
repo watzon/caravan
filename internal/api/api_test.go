@@ -610,6 +610,96 @@ func restrictedLibraryFixture(t *testing.T, st *store.Store) libraryFixture {
 	return f
 }
 
+// enableAdultLibrary makes the adult module reachable the only way it is
+// reachable: an adult library exists and is switched on.
+//
+// It stands where a call to the server-wide switch used to, and the difference
+// is the point of the whole restructure — there is nothing to enable, only a
+// shelf to have. The row is created restricted and DLNA-dark, which is what
+// POST /libraries writes for kind=adult, so a test seeding through here sees
+// the state the real door produces.
+//
+// Idempotent: an adult library that already exists is switched back on rather
+// than duplicated, so a test may say "and now it is on again" without tracking
+// whether it once was.
+func enableAdultLibrary(t *testing.T, st *store.Store) core.Library {
+	t.Helper()
+	ctx := context.Background()
+
+	libs, err := st.ListLibraries(ctx)
+	if err != nil {
+		t.Fatalf("ListLibraries: %v", err)
+	}
+	for _, l := range libs {
+		if l.Kind != core.LibraryKindAdult {
+			continue
+		}
+		if err := st.SetLibraryActive(ctx, l.ID, true); err != nil {
+			t.Fatalf("SetLibraryActive(%s): %v", l.Name, err)
+		}
+		l.Active = true
+		return l
+	}
+
+	lib := &core.Library{
+		Kind: core.LibraryKindAdult, Name: store.AdultLibraryName,
+		RootPath: store.AdultLibraryRoot, Providers: []string{core.ProviderStashbox},
+		// The kind's default because this branch is the one where there was no
+		// adult library at all; a second one would contend with the partial
+		// unique index that admits one default per kind.
+		IsDefault: true, Restricted: true,
+	}
+	if err := st.CreateLibrary(ctx, lib); err != nil {
+		t.Fatalf("CreateLibrary(adult): %v", err)
+	}
+	return *lib
+}
+
+// setAdultLibrariesActive switches every adult library at once, which is what
+// the module-wide switch did and is now only ever a convenience: a test that
+// cares which library is off should name it.
+func setAdultLibrariesActive(t *testing.T, st *store.Store, active bool) {
+	t.Helper()
+	ctx := context.Background()
+
+	libs, err := st.ListLibraries(ctx)
+	if err != nil {
+		t.Fatalf("ListLibraries: %v", err)
+	}
+	for _, l := range libs {
+		if l.Kind != core.LibraryKindAdult {
+			continue
+		}
+		if err := st.SetLibraryActive(ctx, l.ID, active); err != nil {
+			t.Fatalf("SetLibraryActive(%s): %v", l.Name, err)
+		}
+	}
+}
+
+// grantAdultAccess names one account on every adult library, which is what the
+// account-wide adult_access flag used to mean.
+func grantAdultAccess(t *testing.T, st *store.Store, userID int64, granted bool) {
+	t.Helper()
+	ctx := context.Background()
+
+	libs, err := st.ListLibraries(ctx)
+	if err != nil {
+		t.Fatalf("ListLibraries: %v", err)
+	}
+	for _, l := range libs {
+		if l.Kind != core.LibraryKindAdult {
+			continue
+		}
+		ids := []int64{}
+		if granted {
+			ids = append(ids, userID)
+		}
+		if err := st.SetLibraryAccess(ctx, l.ID, true, ids); err != nil {
+			t.Fatalf("SetLibraryAccess(%s): %v", l.Name, err)
+		}
+	}
+}
+
 // as is the identity a directly-called handler acts under, wired the way
 // requireAuth wires one: the user AND the gate that reads their grants.
 func (f libraryFixture) as(s *server, u requestUser, method, target string) *http.Request {
@@ -777,12 +867,10 @@ func TestSettingsRoundTrip(t *testing.T) {
 			t.Fatalf("seed %s: %v", key, err)
 		}
 	}
-	// Through the real door: the adult switch is a library's own state now, so
-	// writing the settings key alone would describe a module with no shelf.
-	// SetAdultEnabled writes both, which is what the assertion below reads.
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	// The Stash keys below are adult-only in the settings projection, so the
+	// caller has to be able to see an adult library at all for the assertion
+	// about them to mean anything.
+	enableAdultLibrary(t, st)
 	publicSettings := map[string]string{
 		store.SettingStashURL:               "http://stash.example.test",
 		store.SettingStashEnabled:           "true",
@@ -814,8 +902,7 @@ func TestSettingsRoundTrip(t *testing.T) {
 		settings[store.SettingRSSSyncIntervalMinutes] != "20" {
 		t.Fatalf("settings = %v, want redacted key flag and interval", settings)
 	}
-	if settings[store.SettingAdultEnabled] != "true" ||
-		settings[store.SettingStashURL] != "http://stash.example.test" ||
+	if settings[store.SettingStashURL] != "http://stash.example.test" ||
 		settings[store.SettingStashEnabled] != "true" {
 		t.Fatalf("adult-visible settings = %v, want public adult settings", settings)
 	}
@@ -830,8 +917,7 @@ func TestSettingsRoundTrip(t *testing.T) {
 		settings[settingTMDBAPIKeySet] != "true" {
 		t.Fatalf("settings = %v, want partial update with preserved key flag", settings)
 	}
-	if settings[store.SettingAdultEnabled] != "true" ||
-		settings[store.SettingStashURL] != "http://stash.example.test" ||
+	if settings[store.SettingStashURL] != "http://stash.example.test" ||
 		settings[store.SettingStashEnabled] != "true" {
 		t.Fatalf("adult-visible PUT settings = %v, want public adult settings", settings)
 	}

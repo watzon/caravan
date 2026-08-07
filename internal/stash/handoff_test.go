@@ -3,6 +3,7 @@ package stash
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -64,16 +65,81 @@ func newTestService(t *testing.T, hc *http.Client) (*Service, *store.Store) {
 // two independent conditions every handoff path checks.
 func configure(t *testing.T, st *store.Store, url, key string, enabled, adult bool) {
 	t.Helper()
-	ctx := context.Background()
-	if err := st.SetSettings(ctx, map[string]string{
+	if err := st.SetSettings(context.Background(), map[string]string{
 		store.SettingStashURL:     url,
 		store.SettingStashAPIKey:  key,
 		store.SettingStashEnabled: strconv.FormatBool(enabled),
 	}); err != nil {
 		t.Fatalf("SetSettings: %v", err)
 	}
-	if err := st.SetAdultEnabled(ctx, adult); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
+	if adult {
+		enableAdultLibrary(t, st)
+		return
+	}
+	setAdultLibrariesActive(t, st, false)
+}
+
+// enableAdultLibrary says the adult half of that configuration directly: the
+// Adult library exists and is switched on. An adult library IS the module — the
+// handoff's own gate is AnyActiveLibraryOfKind, never a setting — so a fixture
+// that wants scenes handed over has to own a row rather than a flag.
+//
+// The row it writes is the one an install carries, and each field is load
+// bearing. Restricted and NOT dlna_visible because the LAN tree has no accounts:
+// a shelf on it is readable by every device in the house, which is the one
+// mistake this module may not make. The legacy `stashbox` chain because that is
+// what a single-box install is named by, here and in every pre-instances client
+// (0026). IsDefault only where no adult library exists yet — the partial unique
+// index admits one default per kind — and Active is CreateLibrary's own doing,
+// so nothing here sets it.
+//
+// Idempotent, so a fixture may call it on a store some earlier step already
+// switched off: an existing row is switched back on rather than duplicated,
+// which would leave two shelves fighting over one root path.
+func enableAdultLibrary(t *testing.T, st *store.Store) core.Library {
+	t.Helper()
+	ctx := context.Background()
+	lib, err := st.GetDefaultLibrary(ctx, core.LibraryKindAdult)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("GetDefaultLibrary(adult): %v", err)
+	}
+	if lib != nil {
+		if err := st.SetLibraryActive(ctx, lib.ID, true); err != nil {
+			t.Fatalf("SetLibraryActive(%d, true): %v", lib.ID, err)
+		}
+		lib.Active = true
+		return *lib
+	}
+	created := &core.Library{
+		Kind: core.LibraryKindAdult, Name: store.AdultLibraryName,
+		RootPath: store.AdultLibraryRoot, Providers: []string{core.ProviderStashbox},
+		DLNAVisible: false, Restricted: true, IsDefault: true,
+	}
+	if err := st.CreateLibrary(ctx, created); err != nil {
+		t.Fatalf("CreateLibrary(adult): %v", err)
+	}
+	return *created
+}
+
+// setAdultLibrariesActive is the other half of the same switch, spelled per
+// library because that is where it lives now.
+//
+// It has to reach EVERY adult library or it says nothing: the handoff asks
+// whether any adult library is active, so an off that left a sibling on would
+// leave scenes flowing to Stash while the test believed it had shut the module.
+// Nothing is deleted by the flip — the rows and the queued jobs all wait — which
+// is what the tests below then check.
+func setAdultLibrariesActive(t *testing.T, st *store.Store, active bool) {
+	t.Helper()
+	ctx := context.Background()
+	libs, err := st.ListLibrariesByKind(ctx, core.LibraryKindAdult)
+	if err != nil {
+		t.Fatalf("ListLibrariesByKind(adult): %v", err)
+	}
+	for _, lib := range libs {
+		if err := st.SetLibraryActive(ctx, lib.ID, active); err != nil {
+			t.Fatalf("SetLibraryActive(%d, %t): %v", lib.ID, active, err)
+		}
 	}
 }
 
@@ -1056,10 +1122,13 @@ func TestRedactURLKeepsUserinfoOutOfLogs(t *testing.T) {
 	}
 }
 
-// The same gate, driven by the switch that survives the module setting's
-// retirement: the adult LIBRARY is switched off while the setting is left on.
-// The two agree today (store.SetAdultEnabled dual-writes the column), so this is
-// the half that proves the handoff reads the rows rather than the setting.
+// The same gate reached the other way round: the adult library is there, with
+// its scenes and its Stash card intact, and only its `active` column is off.
+//
+// A library switched off is not a library removed, which is the case
+// TestModuleOffQueuesNothingAndTalksToNobody cannot reach: there the shelf never
+// existed, here every row the handoff reads is still in front of it and the
+// column alone has to be what stops it.
 func TestInactiveAdultLibraryQueuesNothingAndTalksToNobody(t *testing.T) {
 	srv := stashtest.New(stashtest.Options{})
 	t.Cleanup(srv.Close)
@@ -1074,9 +1143,6 @@ func TestInactiveAdultLibraryQueuesNothingAndTalksToNobody(t *testing.T) {
 	}
 	if err := st.SetLibraryActive(ctx, lib.ID, false); err != nil {
 		t.Fatalf("SetLibraryActive: %v", err)
-	}
-	if on, err := st.AdultEnabled(ctx); err != nil || !on {
-		t.Fatalf("adult_enabled = %t, %v — the setting was meant to stay on", on, err)
 	}
 
 	if err := svc.AdultLibraryChanged(ctx, []int64{episode.ID}); err != nil {

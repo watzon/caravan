@@ -23,9 +23,10 @@ import (
 // mux would keep compiling and silently lose its gate, which is why api.go says
 // so at the registration site too.
 //
-// The one adult-shaped route that is NOT here is the master switch
-// (POST /settings/adult, in settings.go): it has to be reachable while the
-// module is off, because turning it on is its whole job.
+// There is no master switch outside this mux any more. Turning the module on is
+// POST /libraries with kind=adult, which is an ordinary library route — and
+// which is why the library has to exist before anything here, including the
+// instance CRUD, can answer.
 
 // siteJSON is one site on the Adult grid.
 //
@@ -667,94 +668,6 @@ func (s *server) siteIDsByStashID(ctx context.Context, sites []core.SiteMeta) (m
 		}
 	}
 	return out, nil
-}
-
-// adultUserJSON is one account and its grant, for the member-access card.
-//
-// It is a DTO of its own rather than a field added to userJSON so that
-// GET /users — which is reachable whether or not the module exists — carries no
-// adult field at all. A `"adult_access": false` on every row of an install that
-// has never turned the module on is precisely the trace this phase promises not
-// to leave.
-type adultUserJSON struct {
-	ID       int64  `json:"id"`
-	Username string `json:"username"`
-	Role     string `json:"role"`
-	// Granted is the account's own adult_access flag. It is false on an admin
-	// row and meaningless there: AlwaysGranted is what the card renders.
-	Granted bool `json:"granted"`
-	// AlwaysGranted says the account reaches the module through its role rather
-	// than through a grant, which is true of every admin (core.AdultVisible).
-	// The client shows "Always has access" instead of a toggle.
-	AlwaysGranted bool `json:"always_granted"`
-}
-
-func adultUserDTO(u core.User) adultUserJSON {
-	return adultUserJSON{
-		ID:            u.ID,
-		Username:      u.Username,
-		Role:          u.Role,
-		Granted:       u.AdultAccess,
-		AlwaysGranted: u.Role == core.RoleAdmin,
-	}
-}
-
-// handleListAdultUsers answers the member-access card. Admin-only by absence
-// from memberAllowed — a member who could read this would learn the household's
-// account roster, which is the one thing a failed login goes out of its way not
-// to confirm.
-func (s *server) handleListAdultUsers(w http.ResponseWriter, r *http.Request) {
-	users, err := s.st.ListUsers(r.Context())
-	if err != nil {
-		s.writeStoreError(w, "list users", err)
-		return
-	}
-	out := make([]adultUserJSON, 0, len(users))
-	for _, u := range users {
-		out = append(out, adultUserDTO(u))
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"users": out})
-}
-
-// adultAccessRequest is the body of PUT /adult/users/{id}/access.
-type adultAccessRequest struct {
-	// Granted is a pointer so an absent field is a client bug rather than a
-	// silent revoke, exactly as monitorRequest treats Monitored.
-	Granted *bool `json:"granted"`
-}
-
-// handleSetAdultAccess grants or revokes one account's access.
-//
-// Revoking takes effect on the account's very next request without a logout:
-// requireAuth reads the row every time (see requestUser.AdultAccess), so there
-// is no session to invalidate and no window in which a revoked grant is still
-// good. That is why this does not touch the session store, unlike a password
-// reset — the grant is not a credential.
-func (s *server) handleSetAdultAccess(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
-	}
-	var body adultAccessRequest
-	if !decodeJSON(w, r, &body) {
-		return
-	}
-	if body.Granted == nil {
-		writeError(w, http.StatusBadRequest, "granted is required")
-		return
-	}
-
-	ctx := r.Context()
-	if err := s.st.SetUserAdultAccess(ctx, id, *body.Granted); err != nil {
-		s.writeStoreError(w, "set adult access", err)
-		return
-	}
-	user, err := s.st.GetUser(ctx, id)
-	if err != nil {
-		s.writeStoreError(w, "read user", err)
-		return
-	}
-	writeJSON(w, http.StatusOK, adultUserDTO(*user))
 }
 
 // adultProvider returns the stash-box instance this request is about, and the

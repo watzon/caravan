@@ -306,9 +306,7 @@ func TestConvertPendingRespectsAdultVisibility(t *testing.T) {
 		t.Fatalf("pending with adult module off = %+v, want empty", got)
 	}
 
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	enableAdultLibrary(t, st)
 	got := listPending()
 	if len(got) != 1 || got[0].ID != file.ID {
 		t.Fatalf("pending with adult module on = %+v, want file %d", got, file.ID)

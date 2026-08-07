@@ -119,13 +119,21 @@ func TestNoUsersLeavesTheAPIOpen(t *testing.T) {
 		}
 	}
 
-	// And the caller is an implicit admin, not a nobody.
+	// And the caller is an implicit admin, not a nobody — holding every seeded
+	// shelf, because an open install hides nothing from anybody.
 	rec := do(t, h, http.MethodGet, "/api/v1/auth/me", "")
 	wantStatus(t, rec, http.StatusOK)
 	var me meResponse
 	decodeBody(t, rec, &me)
-	if me != (meResponse{Username: "", Role: core.RoleAdmin, Open: true}) {
+	if me.Username != "" || me.Role != core.RoleAdmin || !me.Open || me.Adult {
 		t.Fatalf("auth/me on an open server = %+v, want an anonymous open admin", me)
+	}
+	kinds := map[string]bool{}
+	for _, l := range me.Libraries {
+		kinds[l.Kind] = true
+	}
+	if !kinds[core.LibraryKindMovie] || !kinds[core.LibraryKindTV] {
+		t.Fatalf("open admin sees %+v, want both seeded libraries", me.Libraries)
 	}
 }
 
@@ -730,16 +738,21 @@ func TestMeReportsTheCallingIdentity(t *testing.T) {
 	tests := []struct {
 		name     string
 		decorate func(*http.Request)
-		want     meResponse
+		// wantUsername and wantRole are the whole identity. Libraries is
+		// asserted below rather than in the table: every identity here sees the
+		// two seeded shelves, and repeating them per row would only make the
+		// table say the same thing three times.
+		wantUsername string
+		wantRole     string
 	}{
 		{"admin session", withCookie(login(t, h, testAdmin, testPassword)),
-			meResponse{Username: testAdmin, Role: core.RoleAdmin}},
+			testAdmin, core.RoleAdmin},
 		{"member session", withCookie(login(t, h, testMember, testPassword)),
-			meResponse{Username: testMember, Role: core.RoleMember}},
+			testMember, core.RoleMember},
 		// The API key is the owner's own credential, so it is an admin — but
 		// it names no account, so there is nobody to report.
 		{"api key", func(r *http.Request) { r.Header.Set("X-Api-Key", "deadbeef") },
-			meResponse{Role: core.RoleAdmin}},
+			"", core.RoleAdmin},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -747,8 +760,13 @@ func TestMeReportsTheCallingIdentity(t *testing.T) {
 			wantStatus(t, rec, http.StatusOK)
 			var got meResponse
 			decodeBody(t, rec, &got)
-			if got != tc.want {
-				t.Fatalf("auth/me = %+v, want %+v", got, tc.want)
+			if got.Username != tc.wantUsername || got.Role != tc.wantRole ||
+				got.Open || got.Adult || got.SceneFilters != nil {
+				t.Fatalf("auth/me = %+v, want %q as %q and nothing adult",
+					got, tc.wantUsername, tc.wantRole)
+			}
+			if len(got.Libraries) != 2 {
+				t.Fatalf("auth/me libraries = %+v, want both seeded shelves", got.Libraries)
 			}
 		})
 	}

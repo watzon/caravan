@@ -140,10 +140,11 @@ func (s *server) handleCreateStashboxInstance(w http.ResponseWriter, r *http.Req
 // permanent id and writes the row, writing its own refusals and reporting
 // whether it got that far.
 //
-// It is a function rather than the handler's body because the enable flow
-// creates the first instance too (handleSetAdultEnabled): two doors, one
-// id-minting rule. Duplicating it is how a fresh install ends up with an
-// install-wide id that differs from the one an upgrade is carried into.
+// It is a function rather than the handler's body because the id-minting rule
+// is the load-bearing part and has to stay in one place: the bare `stashbox` is
+// reserved for an install's first instance, whatever creates it, and a second
+// copy of that rule is how a fresh install ends up with an id that differs from
+// the one an upgrade is carried into.
 func (s *server) mintStashboxInstance(ctx context.Context, w http.ResponseWriter,
 	body stashboxInstanceRequest,
 ) (*core.StashboxInstance, bool) {
@@ -299,13 +300,15 @@ func (s *server) handleDeleteStashboxInstance(w http.ResponseWriter, r *http.Req
 	// instance is the module's only way to reach a provider at all, so removing
 	// it would leave every adult surface answering 503 with no screen saying why.
 	//
-	// While the module is off this route is absent, so in practice the last
-	// instance outlives the module rather than being deletable during the gap.
-	// That is the honest shape of a module-wide switch; Part 3's per-library
-	// restructure is where it stops being a corner.
-	enabled, err := s.st.AdultEnabled(ctx)
+	// The question is whether any adult library is switched ON, not whether one
+	// exists: this route is absent to a caller who can see none, so in practice
+	// the last instance outlives the last active library rather than being
+	// deletable during the gap. A library switched off is why an install can
+	// hold instances nothing reaches — which is the state that lets an owner
+	// tidy them up.
+	enabled, err := s.st.AnyActiveLibraryOfKind(ctx, core.LibraryKindAdult)
 	if err != nil {
-		s.writeStoreError(w, "read adult setting", err)
+		s.writeStoreError(w, "read libraries", err)
 		return
 	}
 	if enabled {
@@ -316,8 +319,8 @@ func (s *server) handleDeleteStashboxInstance(w http.ResponseWriter, r *http.Req
 		}
 		if len(instances) <= 1 {
 			writeError(w, http.StatusConflict,
-				"this is the only stash-box instance and adult content is switched on; "+
-					"add another instance or switch the module off first")
+				"this is the only stash-box instance and an adult library is switched on; "+
+					"add another instance or switch the library off first")
 			return
 		}
 	}

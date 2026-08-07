@@ -322,6 +322,11 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("PATCH /libraries/{id}", s.handleUpdateLibrary)
 	api.HandleFunc("DELETE /libraries/{id}", s.handleDeleteLibrary)
 	api.HandleFunc("PUT /libraries/{id}/indexers/{indexerID}", s.handleSetLibraryIndexer)
+	// Who may see one library. Here rather than under /adult because it is not
+	// an adult question any more: any library can be restricted, and the shelf
+	// whose promise is absence is described by its own flags like every other.
+	api.HandleFunc("GET /libraries/{id}/access", s.handleGetLibraryAccess)
+	api.HandleFunc("PUT /libraries/{id}/access", s.handleSetLibraryAccess)
 
 	// The adult module (PLAN phase 9). Its routes are registered on a mux of
 	// their own and mounted behind requireAdult, so the gate is a property of
@@ -353,11 +358,6 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	// granted member does not.
 	adult.HandleFunc("GET /adult/performers", s.handleAdultPerformers)
 	adult.HandleFunc("GET /adult/tags", s.handleAdultTags)
-	// The member-access card. It lives under /adult rather than beside
-	// GET /users so that the accounts API carries no adult field on an install
-	// that has never enabled the module.
-	adult.HandleFunc("GET /adult/users", s.handleListAdultUsers)
-	adult.HandleFunc("PUT /adult/users/{id}/access", s.handleSetAdultAccess)
 	// The Stash handoff (PLAN phase 11), the adult twin of
 	// /handoff/jellyfin. It lives here rather than beside its twin because
 	// Stash is an adult-module feature: with the module off it must be absent,
@@ -381,13 +381,11 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	adult.HandleFunc("PUT /adult/stashbox-instances/{id}", s.handleUpdateStashboxInstance)
 	adult.HandleFunc("DELETE /adult/stashbox-instances/{id}", s.handleDeleteStashboxInstance)
 	adult.HandleFunc("POST /adult/stashbox-instances/{id}/test", s.handleTestStashboxInstance)
+	// The module has no master switch left to register. Turning it on is
+	// POST /libraries with kind=adult — the one door into this subtree, and the
+	// reason it sits outside it — and turning it off is PATCH {active:false} on
+	// every adult library.
 	api.Handle("/adult/", s.requireAdult(adult))
-
-	// The master switch. It is the one adult route that cannot live behind
-	// requireAdult, because turning the module ON is what it is for and the
-	// gate would refuse it forever. It is admin-only instead, by the ordinary
-	// rule: memberAllowed does not name it.
-	api.HandleFunc("POST /settings/adult", s.handleSetAdultEnabled)
 
 	api.HandleFunc("GET /indexers", s.handleListIndexers)
 	api.HandleFunc("POST /indexers", s.handleCreateIndexer)

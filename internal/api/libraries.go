@@ -103,13 +103,21 @@ type libraryPatchRequest struct {
 	// singular one is still accepted (and read as a chain of one) because it is
 	// what every client written before chains sends. Providers wins when both
 	// are present.
-	Provider         *string   `json:"provider"`
-	Providers        *[]string `json:"providers"`
-	IsDefault        *bool     `json:"is_default"`
-	DLNAVisible      *bool     `json:"dlna_visible"`
-	RouteTorrent     *string   `json:"route_torrent"`
-	RouteUsenet      *string   `json:"route_usenet"`
-	QualityProfileID *int64    `json:"quality_profile_id"`
+	Provider  *string   `json:"provider"`
+	Providers *[]string `json:"providers"`
+	IsDefault *bool     `json:"is_default"`
+	// Active is the master switch: false is dormant for everyone, admins
+	// included, and deletes nothing.
+	//
+	// `restricted` is deliberately NOT here. It is written only by PUT
+	// /libraries/{id}/access, together with the roster it applies to, because
+	// the two are one decision — one door per invariant, so a PATCH cannot
+	// leave a library restricted to nobody.
+	Active           *bool   `json:"active"`
+	DLNAVisible      *bool   `json:"dlna_visible"`
+	RouteTorrent     *string `json:"route_torrent"`
+	RouteUsenet      *string `json:"route_usenet"`
+	QualityProfileID *int64  `json:"quality_profile_id"`
 }
 
 // libraryCreateRequest is the body of POST /libraries.
@@ -145,10 +153,11 @@ type libraryIndexerRequest struct {
 // adult library: a name in a picker is a trace of a shelf whose promise is
 // absence.
 //
-// An admin who could CREATE an adult library still sees no instance here, which
-// is today's rule kept deliberately: widening the picker to "anyone who could
-// make one" is a decision for the phase that opens library creation, not a side
-// effect of generalizing the gate.
+// An admin who could CREATE an adult library still sees no instance here until
+// one exists, and that costs nothing: the instance routes are behind the same
+// gate, so an install with no adult library has no instance to offer either.
+// The picker fills itself in the order the bootstrap runs — library, then
+// endpoint, then the chain editor that names it.
 func (s *server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	adult, err := s.gate(r).seesAdult(ctx)
@@ -203,6 +212,17 @@ func (s *server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 // protocol with no accounts is a decision the owner makes, not one a create
 // form makes for them, so it starts down and the Reach card is where it goes
 // up.
+//
+// Creating an ADULT library is how the adult module is turned on, and this
+// route is the only door: the instance CRUD lives under /adult, which is absent
+// until a caller can see an adult library (requireAdult), so the library must
+// come first and the stash-box endpoint after it. The row is therefore born
+// RESTRICTED — to the admins alone until somebody is named — which is what the
+// module's own switch used to guarantee. Nothing here asks whether an endpoint
+// is configured: the screen warns, and a library whose chain resolves to no box
+// parks its scans rather than failing them (see library.adultChain). The old
+// enable proved a credential before the module existed; the general shape can
+// only promise that an adult library may exist before its chain resolves.
 func (s *server) handleCreateLibrary(w http.ResponseWriter, r *http.Request) {
 	var body libraryCreateRequest
 	if !decodeJSON(w, r, &body) {
@@ -213,17 +233,6 @@ func (s *server) handleCreateLibrary(w http.ResponseWriter, r *http.Request) {
 	if body.Kind != core.LibraryKindMovie && body.Kind != core.LibraryKindTV && body.Kind != core.LibraryKindAdult {
 		writeError(w, http.StatusBadRequest, "kind must be movie, tv or adult")
 		return
-	}
-	if body.Kind == core.LibraryKindAdult {
-		visible, err := s.gate(r).seesAdult(ctx)
-		if err != nil {
-			s.writeStoreError(w, "read library access", err)
-			return
-		}
-		if !visible {
-			writeError(w, http.StatusBadRequest, "kind must be movie, tv or adult")
-			return
-		}
 	}
 	name := strings.TrimSpace(body.Name)
 	if name == "" {
@@ -243,6 +252,7 @@ func (s *server) handleCreateLibrary(w http.ResponseWriter, r *http.Request) {
 	lib := &core.Library{
 		Kind: body.Kind, Name: name, RootPath: root,
 		Providers: chain, DLNAVisible: false,
+		Restricted: body.Kind == core.LibraryKindAdult,
 	}
 	if err := s.st.CreateLibrary(ctx, lib); err != nil {
 		s.writeStoreError(w, "create library", err)
@@ -282,10 +292,29 @@ func chainFrom(providers []string, provider, kind string) []string {
 // `stashbox:anything` that is well-formed, which is right for it — which kinds a
 // protocol serves is a compiled fact — and leaves "does this box exist here" to
 // be asked once, here.
+//
+// That third rule has exactly one exception, and it is what makes the module
+// bootstrappable: on an install with NO stash-box instance at all, the bare
+// legacy id is accepted. The instance routes live under /adult, which is absent
+// until an adult library exists, so the first library necessarily predates the
+// first box — and `stashbox` is the id the first instance ever created is
+// minted with (mintStashboxInstance), so the chain is a forward reference to
+// the endpoint about to be configured rather than a name for a box this install
+// has never held. A qualified `stashbox:something` gets no such benefit: that
+// names a particular box, and there is nothing for it to resolve into later.
 func (s *server) validProviderChain(ctx context.Context, w http.ResponseWriter, chain []string, kind string) bool {
 	if len(chain) == 0 {
 		writeError(w, http.StatusBadRequest, "at least one provider is required")
 		return false
+	}
+	bootstrap := false
+	if kind == core.LibraryKindAdult {
+		instances, err := s.st.ListStashboxInstances(ctx)
+		if err != nil {
+			s.writeStoreError(w, "list stash-box instances", err)
+			return false
+		}
+		bootstrap = len(instances) == 0
 	}
 	seen := make(map[string]bool, len(chain))
 	for _, id := range chain {
@@ -297,6 +326,9 @@ func (s *server) validProviderChain(ctx context.Context, w http.ResponseWriter, 
 		if !core.ProviderServes(id, kind) {
 			writeError(w, http.StatusBadRequest, "provider cannot serve this library kind")
 			return false
+		}
+		if bootstrap && id == core.ProviderStashbox {
+			continue
 		}
 		known, err := s.knownProviderInstance(ctx, id)
 		if err != nil {
@@ -346,9 +378,14 @@ func validateLibraryRoot(ctx context.Context, st *store.Store, raw string) (stri
 	return root, nil
 }
 
-// handleDeleteLibrary removes an empty, non-default, non-adult library. The
-// guards live in store.DeleteLibrary; this maps each refusal to the message
-// the screen shows.
+// handleDeleteLibrary removes an empty, non-default library. The guards live in
+// store.DeleteLibrary; this maps each refusal to the message the screen shows.
+//
+// An adult library is deleted under the same two guards as any other. Which
+// leaves one install unable to delete: exactly one adult library, its kind's
+// default, switched off. That is ErrLibraryIsDefault doing its job and not a
+// gap to close — every by-kind lookup needs an answer, and `active=0` is
+// already the "off" that deletion was never the right spelling of.
 func (s *server) handleDeleteLibrary(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -365,9 +402,6 @@ func (s *server) handleDeleteLibrary(w http.ResponseWriter, r *http.Request) {
 		return
 	case errors.Is(err, store.ErrLibraryIsDefault):
 		writeError(w, http.StatusConflict, "the library is its kind's default; make another library the default first")
-		return
-	case errors.Is(err, store.ErrLibraryIsAdult):
-		writeError(w, http.StatusConflict, "adult libraries are managed by the adult module switch")
 		return
 	case err != nil:
 		s.writeStoreError(w, "delete library", err)
@@ -392,10 +426,16 @@ func (s *server) handleListLibraries(w http.ResponseWriter, r *http.Request) {
 	gate := s.gate(r)
 	out := make([]libraryJSON, 0, len(libraries))
 	for _, l := range libraries {
-		// A library the caller cannot see is dropped rather than greyed: a row
+		// A library the caller may not have is dropped rather than greyed: a row
 		// carrying a name, a root path and a DLNA state is exactly the trace
 		// that "this shelf is not here for you" promises not to leave.
-		visible, err := gate.visible(ctx, l.ID)
+		//
+		// An INACTIVE one is kept, because this is the management surface and
+		// the row carries `active: false` for the screen to grey it with. It is
+		// the only list the toggle that undoes dormancy can be reached from, and
+		// this route is admin-only (routePolicies, and memberAllowed names none
+		// of it) — so the row never reaches somebody a restriction hid it from.
+		visible, err := gate.manages(ctx, l)
 		if err != nil {
 			s.writeStoreError(w, "read library access", err)
 			return
@@ -453,13 +493,35 @@ func (s *server) visibleLibrary(w http.ResponseWriter, r *http.Request, id int64
 // `active=0` has to stay reachable, or an owner who hid a library from
 // themselves has hidden the only way back.
 //
-// Today the two answer identically, because the only thing that can clear
-// `active` is the adult module switch and that already hid the row from these
-// routes. Widening this one to admit inactive rows is the phase that lands the
-// Active toggle; it is one predicate, in one place, precisely so that widening
-// cannot leak into a content route by accident.
+// So it admits an INACTIVE library, which is the whole difference: `active=0`
+// is dormant for everyone including the admin who set it, and every content
+// route answers 404 for it — but PATCH, DELETE, the indexer matrix and the
+// access card still reach it, because those are the switches, and a switch you
+// cannot get back to is a trapdoor.
+//
+// Restriction it does NOT bypass on its own; core.LibraryVisible already lets
+// an admin past that, and every caller of this is admin-only (routeAdmin, and
+// memberAllowed names none of them). A member reaching here is a routing bug,
+// and the gate's own answer is the right one for it.
 func (s *server) manageableLibrary(w http.ResponseWriter, r *http.Request, id int64) (*core.Library, bool) {
-	return s.visibleLibrary(w, r, id)
+	gate := s.gate(r)
+	lib, ok, err := gate.library(r.Context(), id)
+	if err != nil {
+		s.writeStoreError(w, "get library", err)
+		return nil, false
+	}
+	if ok {
+		visible, err := gate.manages(r.Context(), lib)
+		if err != nil {
+			s.writeStoreError(w, "read library access", err)
+			return nil, false
+		}
+		if visible {
+			return &lib, true
+		}
+	}
+	writeError(w, http.StatusNotFound, "not found")
+	return nil, false
 }
 
 // handleUpdateLibrary edits the settings a library may answer for itself. It is
@@ -566,6 +628,16 @@ func (s *server) handleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		lib.IsDefault = true
+	}
+	// Its own writer, after UpdateLibrary rather than inside it, because it is
+	// its own decision: everything above is a setting, and this is whether the
+	// library exists for anybody at all (store.SetLibraryActive).
+	if body.Active != nil && *body.Active != lib.Active {
+		if err := s.st.SetLibraryActive(ctx, lib.ID, *body.Active); err != nil {
+			s.writeStoreError(w, "set library active", err)
+			return
+		}
+		lib.Active = *body.Active
 	}
 	s.writeLibrary(w, r, *lib)
 }

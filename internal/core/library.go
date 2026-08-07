@@ -9,10 +9,10 @@ const (
 	LibraryKindMovie = "movie"
 	LibraryKindTV    = "tv"
 	// LibraryKindAdult is the adult module's library (PLAN phase 9). Unlike
-	// the other two it is not seeded by a migration: its row is created the
-	// first time the module is enabled (store.SetAdultEnabled), because a
-	// library row is a shelf in the UI and a container in the DLNA tree, and
-	// neither may exist on an install that never turned the module on.
+	// the other two it is not seeded by a migration: an install has one only
+	// once somebody creates it, because a library row is a shelf in the UI and
+	// a container in the DLNA tree, and neither may exist on an install that
+	// never asked for adult content. Creating one IS turning the module on.
 	LibraryKindAdult = "adult"
 )
 

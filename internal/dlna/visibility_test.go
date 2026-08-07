@@ -250,9 +250,7 @@ func TestModuleOffHidesEveryAdultLibrary(t *testing.T) {
 		t.Fatalf("root children = %v, want both adult containers while the module is on", ids)
 	}
 
-	if err := st.SetAdultEnabled(ctx, false); err != nil {
-		t.Fatalf("SetAdultEnabled(false): %v", err)
-	}
+	setAdultLibrariesActive(t, st, false)
 
 	rootDoc, err = svc.children(ctx, testURLs, rootID)
 	if err != nil {
@@ -270,9 +268,7 @@ func TestModuleOffHidesEveryAdultLibrary(t *testing.T) {
 	}
 
 	// And both come back on, because disabling remembers rather than unshares.
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled(true): %v", err)
-	}
+	enableAdultLibrary(t, st)
 	rootDoc, err = svc.children(ctx, testURLs, rootID)
 	if err != nil {
 		t.Fatalf("children(root): %v", err)

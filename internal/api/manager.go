@@ -131,8 +131,9 @@ type Manager interface {
 	// meaningful against the endpoint it was issued by; a blank endpoint means
 	// the TPDB preset, exactly as it does in the settings table.
 	//
-	// It is what POST /settings/adult runs before it commits anything, so the
-	// module cannot be switched on with a credential that does not work.
+	// It is what the instance routes run before they write a row, so an
+	// endpoint that has never answered cannot end up on a screen looking as
+	// though it were configured.
 	ValidateAdultCredential(ctx context.Context, endpoint, apiKey string) error
 
 	// AdultMetadataFor returns the provider for ONE configured stash-box

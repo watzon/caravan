@@ -41,8 +41,8 @@ func twoBoxHarness(t *testing.T) (*adultHarness, *stubAdultProvider, *core.Libra
 }
 
 // adultLibraryChained rewrites the default adult library's provider chain and
-// returns the row. ensureAdultLibrary seeds it with the legacy instance alone;
-// a second box is a configuration the owner makes.
+// returns the row. An adult library created with no chain of its own carries the
+// legacy `stashbox` id alone; a second box is a configuration the owner makes.
 func (a *adultHarness) adultLibraryChained(ids ...string) *core.Library {
 	a.t.Helper()
 	ctx := context.Background()
@@ -265,9 +265,7 @@ func TestRefreshMakesNoRequestOfEitherInstanceWhenDisabled(t *testing.T) {
 	h.seedSiteRow(core.ProviderStashbox, "site-a", "Legacy Site")
 	h.seedSiteRow(boxB, "site-b", "Beta Site")
 
-	if err := h.st.SetAdultEnabled(ctx, false); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	setAdultLibrariesActive(t, h.st, false)
 	h.adult.calls, beta.calls = 0, 0
 
 	res := &RefreshResult{}

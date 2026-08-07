@@ -148,9 +148,7 @@ func TestSearchRefusesAnAdultLibrary(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GetDefaultLibrary(adult): %v", err)
 		}
-		if err := st.SetAdultEnabled(context.Background(), false); err != nil {
-			t.Fatalf("SetAdultEnabled(false): %v", err)
-		}
+		setAdultLibrariesActive(t, st, false)
 
 		rec := do(t, h, http.MethodGet, "/api/v1/search?q=brazzers&library_id="+itoa(lib.ID), "")
 		wantStatus(t, rec, http.StatusNotFound)

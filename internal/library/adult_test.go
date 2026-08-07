@@ -112,6 +112,70 @@ func siteRef(stashID string) core.ItemRef {
 	return core.ItemRef{Provider: core.ProviderStashbox, Ref: stashID}
 }
 
+// enableAdultLibrary says the whole enable directly: the Adult library exists
+// and is switched on. An adult library IS the module — every gate below asks
+// AnyActiveLibraryOfKind, never a setting (see adultReady) — so a test that
+// wants scenes reachable has to own a row rather than a flag.
+//
+// The row it writes is the one an install carries, and each field is load
+// bearing. Restricted and NOT dlna_visible because the LAN tree has no accounts:
+// a shelf on it is readable by every device in the house, which is the one
+// mistake this module may not make. The legacy `stashbox` chain because that is
+// what a single-box install is named by, here and in every pre-instances client
+// (0026). IsDefault only where no adult library exists yet — the partial unique
+// index admits one default per kind — and Active is CreateLibrary's own doing,
+// so nothing here sets it.
+//
+// Idempotent, so a harness may call it on a store some earlier step already
+// switched off: an existing row is switched back on rather than duplicated,
+// which would leave two shelves fighting over one root path.
+func enableAdultLibrary(t *testing.T, st *store.Store) core.Library {
+	t.Helper()
+	ctx := context.Background()
+	lib, err := st.GetDefaultLibrary(ctx, core.LibraryKindAdult)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("GetDefaultLibrary(adult): %v", err)
+	}
+	if lib != nil {
+		if err := st.SetLibraryActive(ctx, lib.ID, true); err != nil {
+			t.Fatalf("SetLibraryActive(%d, true): %v", lib.ID, err)
+		}
+		lib.Active = true
+		return *lib
+	}
+	created := &core.Library{
+		Kind: core.LibraryKindAdult, Name: store.AdultLibraryName,
+		RootPath: store.AdultLibraryRoot, Providers: []string{core.ProviderStashbox},
+		DLNAVisible: false, Restricted: true, IsDefault: true,
+	}
+	if err := st.CreateLibrary(ctx, created); err != nil {
+		t.Fatalf("CreateLibrary(adult): %v", err)
+	}
+	return *created
+}
+
+// setAdultLibrariesActive is the other half of the same switch, spelled per
+// library because that is where it lives now.
+//
+// It has to reach EVERY adult library or it says nothing: the module gate is
+// "is any adult library active", so an off that left a sibling on would leave
+// the module reachable while the test believed it had shut it. The rows, the
+// files and the grants all survive the flip — switching off hides, it never
+// deletes — which is what the tests below then check.
+func setAdultLibrariesActive(t *testing.T, st *store.Store, active bool) {
+	t.Helper()
+	ctx := context.Background()
+	libs, err := st.ListLibrariesByKind(ctx, core.LibraryKindAdult)
+	if err != nil {
+		t.Fatalf("ListLibrariesByKind(adult): %v", err)
+	}
+	for _, lib := range libs {
+		if err := st.SetLibraryActive(ctx, lib.ID, active); err != nil {
+			t.Fatalf("SetLibraryActive(%d, %t): %v", lib.ID, active, err)
+		}
+	}
+}
+
 // adultHarness is the library harness plus an adult provider and the module
 // switched on.
 type adultHarness struct {
@@ -124,9 +188,7 @@ func newAdultHarness(t *testing.T, enabled bool) *adultHarness {
 	h := newHarness(t)
 	a := &adultHarness{harness: h, adult: &stubAdultProvider{scenes: map[string][]core.SceneMeta{}}}
 	if enabled {
-		if err := h.st.SetAdultEnabled(context.Background(), true); err != nil {
-			t.Fatalf("SetAdultEnabled: %v", err)
-		}
+		enableAdultLibrary(t, h.st)
 	}
 	h.mgr = a.newManager(h.st, h.provider)
 	return a
@@ -389,9 +451,7 @@ func TestRefreshMakesNoAdultRequestWhenDisabled(t *testing.T) {
 	h.seedBrazzers()
 	sr := h.addSite("site-1")
 
-	if err := h.st.SetAdultEnabled(context.Background(), false); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	setAdultLibrariesActive(t, h.st, false)
 	h.adult.calls = 0
 
 	res := &RefreshResult{}
@@ -597,9 +657,7 @@ func TestAdultLibrarySurvivesADatabaseWipe(t *testing.T) {
 	}
 
 	fresh := h.openStore(t.TempDir() + "/caravan.db")
-	if err := fresh.SetAdultEnabled(context.Background(), true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	enableAdultLibrary(t, fresh)
 	mgr := h.newManager(fresh, h.provider)
 
 	res, err := mgr.Scan(context.Background())
@@ -646,9 +704,7 @@ func TestScanIgnoresTheAdultTreeWhenDisabled(t *testing.T) {
 	h.scan()
 
 	const organized = "library/Adult/Brazzers/Season 2022/Brazzers - 2022-03-14 - Deep Impact.mkv"
-	if err := h.st.SetAdultEnabled(context.Background(), false); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	setAdultLibrariesActive(t, h.st, false)
 	h.writeVideo("library/Adult/Brazzers.23.02.01.Third.XXX.1080p.MP4-KTR.mkv", "another scene")
 	h.adult.calls = 0
 
@@ -1066,9 +1122,7 @@ func TestSyncSiteIsANoOpWhenThereIsNothingToWalk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddSite: %v", err)
 	}
-	if err := a.st.SetAdultEnabled(ctx, false); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	setAdultLibrariesActive(t, a.st, false)
 	before := a.adult.calls
 	if err := a.mgr.SyncSite(ctx, sr.ID); err != nil {
 		t.Errorf("SyncSite with the module off = %v, want a silent no-op", err)

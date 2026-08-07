@@ -47,7 +47,7 @@ func episodeSearchJobs(t *testing.T, ctx context.Context, st *store.Store) []cor
 func TestSyncSiteJobWalksTheCatalogueThenSearches(t *testing.T) {
 	ctx := context.Background()
 	st := openStore(t)
-	enableAdult(t, ctx, st)
+	enableAdultLibrary(t, st)
 
 	site := core.Series{
 		StashID: "site-1", Title: "Brazzers", SortTitle: "brazzers",
@@ -108,7 +108,7 @@ func TestSyncSiteJobWalksTheCatalogueThenSearches(t *testing.T) {
 func TestSyncSiteJobQueuesNoSearchWithoutTheFlag(t *testing.T) {
 	ctx := context.Background()
 	st := openStore(t)
-	enableAdult(t, ctx, st)
+	enableAdultLibrary(t, st)
 
 	site, _ := addSite(t, ctx, st, "Brazzers", time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC))
 	handler := SyncSiteHandler(func(context.Context, int64) error { return nil })
@@ -128,7 +128,7 @@ func TestSyncSiteJobQueuesNoSearchWithoutTheFlag(t *testing.T) {
 func TestSyncSiteSearchOnAnUnmonitoredSiteQueuesNothing(t *testing.T) {
 	ctx := context.Background()
 	st := openStore(t)
-	enableAdult(t, ctx, st)
+	enableAdultLibrary(t, st)
 
 	// What an unmonitored add leaves behind: the site AND the scenes the walk
 	// filed under it are unmonitored, because library.writeScenes gives a new
@@ -158,7 +158,7 @@ func TestSyncSiteSearchOnAnUnmonitoredSiteQueuesNothing(t *testing.T) {
 func TestSyncSiteJobFailsWhenTheWalkFails(t *testing.T) {
 	ctx := context.Background()
 	st := openStore(t)
-	enableAdult(t, ctx, st)
+	enableAdultLibrary(t, st)
 
 	site, _ := addSite(t, ctx, st, "Brazzers", time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC))
 	boom := errors.New("provider is down")

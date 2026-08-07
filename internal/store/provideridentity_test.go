@@ -101,14 +101,11 @@ func TestMigrate0024BackfillsProviderIdentity(t *testing.T) {
 		}
 	}
 
-	// The adult library is not seeded by a migration — it appears on enable —
-	// so its chain is the store's job, and the enable stays idempotent.
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled twice: %v", err)
-	}
+	// The adult library is not seeded by a migration — it is created like any
+	// other shelf — so nothing backfills its chain and the write door is the
+	// only thing that can put one on it. An adult library that came out of the
+	// create with no chain would ask no provider anything.
+	enableAdultLibrary(t, st)
 	adult, err := st.ListLibrariesByKind(ctx, core.LibraryKindAdult)
 	if err != nil {
 		t.Fatalf("ListLibrariesByKind(adult): %v", err)
@@ -234,9 +231,7 @@ func TestUpsertNormalizesLegacyIdentityAtTheWriteDoor(t *testing.T) {
 		t.Errorf("tv identity = %q/%q, want tmdb/1399", tv.Provider, tv.ProviderRef)
 	}
 
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	enableAdultLibrary(t, st)
 	site := &core.Series{StashID: "uuid-site", Title: "Some Site", SortTitle: "some site",
 		Kind: core.SeriesKindAdult}
 	if err := st.UpsertSeries(ctx, site); err != nil {

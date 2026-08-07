@@ -44,6 +44,11 @@ func TestRequireAdultGatesTheSubtree(t *testing.T) {
 	tests := []struct {
 		name    string
 		enabled bool
+		// granted names user 2 on the adult library. It is a store fact rather
+		// than a field on the identity: a grant lives in `library_access`, and a
+		// test that could set one on the request would be proving the gate reads
+		// something no real request carries.
+		granted bool
 		user    requestUser
 		want    int
 	}{
@@ -53,9 +58,10 @@ func TestRequireAdultGatesTheSubtree(t *testing.T) {
 			want: http.StatusNotFound,
 		},
 		{
-			name: "disabled hides it from a granted member",
-			user: requestUser{ID: 2, Role: core.RoleMember, AdultAccess: true},
-			want: http.StatusNotFound,
+			name:    "disabled hides it from a granted member",
+			granted: true,
+			user:    requestUser{ID: 2, Role: core.RoleMember},
+			want:    http.StatusNotFound,
 		},
 		{
 			name:    "enabled, an ungranted member still sees nothing",
@@ -72,13 +78,14 @@ func TestRequireAdultGatesTheSubtree(t *testing.T) {
 		{
 			name:    "enabled, a granted member is let through",
 			enabled: true,
-			user:    requestUser{ID: 2, Role: core.RoleMember, AdultAccess: true},
+			granted: true,
+			user:    requestUser{ID: 2, Role: core.RoleMember},
 			want:    http.StatusNoContent,
 		},
 		{
 			// The open server authenticates as an implicit admin, so it needs
-			// only the global switch — the same trusted-LAN default the rest of
-			// the API has.
+			// only an active adult library — the same trusted-LAN default the
+			// rest of the API has.
 			name:    "enabled, the open server is an admin",
 			enabled: true,
 			user:    requestUser{Role: core.RoleAdmin, Open: true},
@@ -89,12 +96,23 @@ func TestRequireAdultGatesTheSubtree(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h, st := adultProbe(t)
-			if tt.enabled {
-				if err := st.SetAdultEnabled(t.Context(), true); err != nil {
-					t.Fatalf("SetAdultEnabled: %v", err)
+			// A real row: a grant is a foreign key onto `users`, so an id
+			// invented in the table would be a grant on nobody.
+			member := createUser(t, st, testMember, testPassword, core.RoleMember)
+			lib := enableAdultLibrary(t, st)
+			if !tt.enabled {
+				setAdultLibrariesActive(t, st, false)
+			}
+			if tt.granted {
+				if err := st.SetLibraryAccess(t.Context(), lib.ID, true, []int64{member.ID}); err != nil {
+					t.Fatalf("SetLibraryAccess: %v", err)
 				}
 			}
-			rec := serveAs(h, tt.user)
+			user := tt.user
+			if user.Role == core.RoleMember {
+				user.ID = member.ID
+			}
+			rec := serveAs(h, user)
 			if rec.Code != tt.want {
 				t.Fatalf("status = %d, want %d (body %q)", rec.Code, tt.want, rec.Body.String())
 			}
@@ -170,11 +188,15 @@ func TestPutSettingsRefusesTheAdultSwitch(t *testing.T) {
 	}
 }
 
-// requireAuth is what puts the grant in front of the gate, and it must read it
-// from the row on every request. A copy taken at login would leave a housemate
-// whose access was revoked this morning still holding it until they logged out
-// — and revoking a grant is exactly the moment somebody needs it to be instant.
-func TestRequireAuthReadsTheAdultGrantPerRequest(t *testing.T) {
+// The gate reads a grant from `library_access` on every request, and it must:
+// a copy taken at login would leave a housemate whose access was revoked this
+// morning still holding it until they logged out — and revoking a grant is
+// exactly the moment somebody needs it to be instant.
+//
+// This is why the identity requireAuth resolves carries no grant of its own.
+// Anything cached onto the session would be a permission outliving its
+// revocation, and there would be no request at which to notice.
+func TestTheGateReadsTheGrantPerRequest(t *testing.T) {
 	ctx := t.Context()
 	st, err := store.Open(filepath.Join(t.TempDir(), "caravan.db"))
 	if err != nil {
@@ -187,8 +209,9 @@ func TestRequireAuthReadsTheAdultGrantPerRequest(t *testing.T) {
 		sessions: newSessionStore(), sessionTTL: defaultSessionTTL,
 	}
 	member := createUser(t, st, testMember, testPassword, core.RoleMember)
-	if err := st.SetUserAdultAccess(ctx, member.ID, true); err != nil {
-		t.Fatalf("SetUserAdultAccess: %v", err)
+	lib := enableAdultLibrary(t, st)
+	if err := st.SetLibraryAccess(ctx, lib.ID, true, []int64{member.ID}); err != nil {
+		t.Fatalf("SetLibraryAccess: %v", err)
 	}
 	token, err := s.sessions.issue(member.ID, s.sessionTTL)
 	if err != nil {
@@ -196,26 +219,35 @@ func TestRequireAuthReadsTheAdultGrantPerRequest(t *testing.T) {
 	}
 
 	// /requests is member-allowed, so the member is not turned away before the
-	// identity this test is about has been resolved.
-	var seen requestUser
+	// gate this test is about has been consulted.
+	var (
+		seen requestUser
+		sees bool
+		gErr error
+	)
 	h := s.requireAuth(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		seen = currentUser(r)
+		sees, gErr = s.gate(r).seesAdult(r.Context())
 	}))
-	call := func() requestUser {
+	call := func() bool {
 		r := httptest.NewRequest(http.MethodGet, "/requests", nil)
 		r.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
 		h.ServeHTTP(httptest.NewRecorder(), r)
-		return seen
+		if gErr != nil {
+			t.Fatalf("seesAdult: %v", gErr)
+		}
+		return sees
 	}
 
-	if got := call(); !got.AdultAccess || got.ID != member.ID {
-		t.Fatalf("granted member resolved as %+v, want id %d with the grant", got, member.ID)
+	if !call() || seen.ID != member.ID {
+		t.Fatalf("granted member resolved as %+v seeing %v, want id %d with the shelf",
+			seen, sees, member.ID)
 	}
 
-	if err := st.SetUserAdultAccess(ctx, member.ID, false); err != nil {
-		t.Fatalf("SetUserAdultAccess(false): %v", err)
+	if err := st.SetLibraryAccess(ctx, lib.ID, true, nil); err != nil {
+		t.Fatalf("SetLibraryAccess(revoke): %v", err)
 	}
-	if got := call(); got.AdultAccess {
-		t.Errorf("after revoking, the same session still resolved as %+v", got)
+	if call() {
+		t.Error("after revoking, the same session still saw the library")
 	}
 }

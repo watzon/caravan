@@ -29,6 +29,82 @@ func (noMetadata) SearchSeries(context.Context, string) ([]core.SeriesMeta, erro
 func (noMetadata) GetMovie(context.Context, string) (*core.MovieMeta, error)   { return nil, nil }
 func (noMetadata) GetSeries(context.Context, string) (*core.SeriesMeta, error) { return nil, nil }
 
+// enableAdultLibrary says directly what a server-wide adult switch used to say
+// indirectly: the Adult library exists and is switched on. An adult LIBRARY is
+// the module now — every gate in the tree asks whether a library of the kind is
+// active, never whether a setting says so — so a test that wants adult content
+// reachable has to create one, exactly as the owner does.
+//
+// The row is seeded with the values the product itself creates it with, because
+// none of them are decoration. dlna_visible is OFF: DLNA has no accounts, so a
+// container advertised on the LAN is readable by every device on it, and
+// sharing it is a second and separate decision. It is born RESTRICTED for the
+// same reason read the other way round: adult content was only ever reachable
+// by an account somebody granted, and a row born open would hand the whole
+// household a shelf on the act that made it. A fixture that let either default
+// drift would prove the guards hold for a library no screen can produce.
+//
+// It is idempotent, like the enable it replaces: an existing row is switched
+// back on rather than duplicated, so a test may switch adult off and on again
+// and find the library exactly as it left it. Only the first adult library is
+// the kind's default, because idx_libraries_default_per_kind admits one per
+// kind — a second claiming it would fail the insert rather than the assertion.
+func enableAdultLibrary(t *testing.T, st *store.Store) core.Library {
+	t.Helper()
+	ctx := context.Background()
+	existing, err := st.ListLibrariesByKind(ctx, core.LibraryKindAdult)
+	if err != nil {
+		t.Fatalf("ListLibrariesByKind(adult): %v", err)
+	}
+	for _, lib := range existing {
+		if lib.RootPath != store.AdultLibraryRoot {
+			continue
+		}
+		if err := st.SetLibraryActive(ctx, lib.ID, true); err != nil {
+			t.Fatalf("SetLibraryActive(%d, true): %v", lib.ID, err)
+		}
+		lib.Active = true
+		return lib
+	}
+
+	lib := core.Library{
+		Kind:        core.LibraryKindAdult,
+		Name:        store.AdultLibraryName,
+		RootPath:    store.AdultLibraryRoot,
+		Providers:   []string{core.ProviderStashbox},
+		DLNAVisible: false,
+		Restricted:  true,
+		IsDefault:   len(existing) == 0,
+	}
+	if err := st.CreateLibrary(ctx, &lib); err != nil {
+		t.Fatalf("CreateLibrary(%s): %v", store.AdultLibraryName, err)
+	}
+	return lib
+}
+
+// setAdultLibrariesActive is the other half of what a module switch did: one
+// flip bound every adult library at once, and that is now spelled per library.
+//
+// Switching a library off deletes nothing — not the row, not the series, not
+// the episodes, and certainly not the files. "Off" is a reachability promise,
+// not a retention policy, so a test that disables adult and then drives a full
+// job cycle still finds every row it seeded standing there to be skipped, which
+// is the only state in which "the sweep walked them and asked nobody" can be
+// told apart from "the sweep found nothing to walk".
+func setAdultLibrariesActive(t *testing.T, st *store.Store, active bool) {
+	t.Helper()
+	ctx := context.Background()
+	libs, err := st.ListLibrariesByKind(ctx, core.LibraryKindAdult)
+	if err != nil {
+		t.Fatalf("ListLibrariesByKind(adult): %v", err)
+	}
+	for _, lib := range libs {
+		if err := st.SetLibraryActive(ctx, lib.ID, active); err != nil {
+			t.Fatalf("SetLibraryActive(%d, %t): %v", lib.ID, active, err)
+		}
+	}
+}
+
 // seedSite puts an adult series and one scene in the store, the state an owner
 // who used the module and then switched it off leaves behind.
 func seedSite(t *testing.T, ctx context.Context, st *store.Store) {
@@ -93,9 +169,7 @@ func TestAdultProviderIsNilUntilTheModuleIsOnAndCredentialed(t *testing.T) {
 	}
 
 	// Module on, credential removed.
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	enableAdultLibrary(t, st)
 	setInstanceKey(t, ctx, st, core.ProviderStashbox, "")
 	if p := adapter.adultClientFor(ctx, core.ProviderStashbox); p != nil {
 		t.Errorf("adultClientFor = %v with no credential, want nil", p)
@@ -139,13 +213,9 @@ func TestFullJobCycleMakesNoStashboxRequestWhenAdultIsDisabled(t *testing.T) {
 	// Enable, seed the library the way a user of the module would leave it,
 	// then switch the module back off. Disabling deletes nothing, so the rows
 	// the sweeps walk are all still there.
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	enableAdultLibrary(t, st)
 	seedSite(t, ctx, st)
-	if err := st.SetAdultEnabled(ctx, false); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	setAdultLibrariesActive(t, st, false)
 	fake.Reset()
 
 	client := stashbox.New("secret", fake.URL(), fake.Client())
@@ -188,9 +258,7 @@ func TestWatcherManagerCarriesNoAdultProvider(t *testing.T) {
 	fake := stashboxtest.New(stashboxtest.Options{})
 	t.Cleanup(fake.Close)
 
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	enableAdultLibrary(t, st)
 	seedInstance(t, ctx, st, core.ProviderStashbox, "StashDB", fake.URL(), "secret")
 	seedSite(t, ctx, st)
 
@@ -219,17 +287,13 @@ func TestAdultMetadataSeamIsNilWhileTheModuleIsOff(t *testing.T) {
 	if p, id := adapter.DefaultAdultMetadata(ctx); p != nil || id != "" {
 		t.Errorf("DefaultAdultMetadata = %v, %q with the module off, want nil and \"\"", p, id)
 	}
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	enableAdultLibrary(t, st)
 	if p, id := adapter.DefaultAdultMetadata(ctx); p == nil || id != core.ProviderStashbox {
 		t.Errorf("DefaultAdultMetadata = %v, %q with the module on, want the only instance", p, id)
 	}
 	// Switching back off closes the door again without a restart, which is what
 	// reading the settings table per call buys.
-	if err := st.SetAdultEnabled(ctx, false); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	setAdultLibrariesActive(t, st, false)
 	if p, _ := adapter.DefaultAdultMetadata(ctx); p != nil {
 		t.Errorf("DefaultAdultMetadata = %v after the module was switched off, want nil", p)
 	}
@@ -293,9 +357,7 @@ func TestAdultProviderIsReusedAcrossCallsSoTheProbeRunsOnce(t *testing.T) {
 	adapter, st := testAdapter(t)
 	fake := tpdbFake(t)
 
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	enableAdultLibrary(t, st)
 	seedInstance(t, ctx, st, core.ProviderStashbox, "StashDB", fake.URL(), "secret")
 
 	// Two acquisitions, as two HTTP requests would make.
@@ -331,9 +393,7 @@ func TestAdultProviderIsPerInstanceAndRebuiltOnAKeyChange(t *testing.T) {
 	fake := tpdbFake(t)
 	other := tpdbFake(t)
 
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	enableAdultLibrary(t, st)
 	seedInstance(t, ctx, st, core.ProviderStashbox, "StashDB", fake.URL(), "secret")
 	seedInstance(t, ctx, st, core.ProviderStashbox+":fansdb", "FansDB", other.URL(), "secret")
 
@@ -382,13 +442,11 @@ func TestDefaultAdultMetadataFollowsTheDefaultLibrarysChain(t *testing.T) {
 	fake := tpdbFake(t)
 	other := tpdbFake(t)
 
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	enableAdultLibrary(t, st)
 	seedInstance(t, ctx, st, core.ProviderStashbox, "StashDB", fake.URL(), "secret")
 	seedInstance(t, ctx, st, core.ProviderStashbox+":fansdb", "FansDB", other.URL(), "secret")
 
-	// SetAdultEnabled seeds the Adult library chained to the legacy id.
+	// A newly created Adult library is chained to the legacy id.
 	if _, id := adapter.DefaultAdultMetadata(ctx); id != core.ProviderStashbox {
 		t.Fatalf("default = %q, want the chain head", id)
 	}
@@ -449,9 +507,7 @@ func TestAdultProviderIsSafeForConcurrentCallers(t *testing.T) {
 	adapter, st := testAdapter(t)
 	fake := tpdbFake(t)
 
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	enableAdultLibrary(t, st)
 	seedInstance(t, ctx, st, core.ProviderStashbox, "StashDB", fake.URL(), "secret")
 
 	const callers = 8
@@ -497,9 +553,7 @@ func TestValidatingACredentialDoesNotEvictTheWorkingClient(t *testing.T) {
 	})
 	t.Cleanup(fake.Close)
 
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	enableAdultLibrary(t, st)
 	seedInstance(t, ctx, st, core.ProviderStashbox, "StashDB", fake.URL(), "secret")
 
 	search := func(what string) {
@@ -536,11 +590,15 @@ func TestValidatingACredentialDoesNotEvictTheWorkingClient(t *testing.T) {
 	}
 }
 
-// The same seam, driven by the switch that survives the module setting's
-// retirement: the adult LIBRARY is switched off while `adult_enabled` is left
-// on. The two agree today (store.SetAdultEnabled dual-writes the column), so
-// this is the half that proves the guard reads the rows rather than the setting
-// — and it is the state a per-library toggle produces.
+// The same seam, driven by the switch a per-library toggle actually offers: a
+// fully seeded and credentialed adult LIBRARY that is switched off.
+//
+// It is a different state from the one above, where the seam is nil because no
+// adult library exists at all, and only this one can distinguish a guard that
+// reads `active` from a guard that merely counts adult rows. The two are worth
+// separating because the second is the shape a well-meant optimisation takes —
+// "an adult library exists, so the module is on" reads faster and is wrong for
+// every owner who ever switched a shelf off.
 func TestAdultMetadataSeamIsNilWhenEveryAdultLibraryIsInactive(t *testing.T) {
 	ctx := context.Background()
 	adapter, st := testAdapter(t)
@@ -548,9 +606,7 @@ func TestAdultMetadataSeamIsNilWhenEveryAdultLibraryIsInactive(t *testing.T) {
 	t.Cleanup(fake.Close)
 
 	seedInstance(t, ctx, st, core.ProviderStashbox, "StashDB", fake.URL(), "secret")
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	enableAdultLibrary(t, st)
 	if p, _ := adapter.DefaultAdultMetadata(ctx); p == nil {
 		t.Fatal("DefaultAdultMetadata is nil with the library on, so this test would prove nothing")
 	}
@@ -562,8 +618,11 @@ func TestAdultMetadataSeamIsNilWhenEveryAdultLibraryIsInactive(t *testing.T) {
 	if err := st.SetLibraryActive(ctx, lib.ID, false); err != nil {
 		t.Fatalf("SetLibraryActive(false): %v", err)
 	}
-	if on, err := st.AdultEnabled(ctx); err != nil || !on {
-		t.Fatalf("adult_enabled = %t, %v — the setting was meant to stay on", on, err)
+	// The precondition the test is named for, stated rather than assumed: the
+	// deactivation above names ONE library, and only if it left no active adult
+	// library behind does a nil seam below mean what it is read to mean.
+	if on, err := st.AnyActiveLibraryOfKind(ctx, core.LibraryKindAdult); err != nil || on {
+		t.Fatalf("an active adult library survives = %t, %v — the state under test was never reached", on, err)
 	}
 	if p, id := adapter.DefaultAdultMetadata(ctx); p != nil || id != "" {
 		t.Errorf("DefaultAdultMetadata = %v, %q with every adult library off, want nil and \"\"", p, id)

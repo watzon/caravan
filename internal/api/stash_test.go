@@ -164,9 +164,7 @@ func TestStashCardIsAdminOnly(t *testing.T) {
 	enableAdult(t, st)
 	createUser(t, st, testAdmin, testPassword, core.RoleAdmin)
 	member := createUser(t, st, testMember, testPassword, core.RoleMember)
-	if err := st.SetUserAdultAccess(context.Background(), member.ID, true); err != nil {
-		t.Fatalf("SetUserAdultAccess: %v", err)
-	}
+	grantAdultAccess(t, st, member.ID, true)
 	cookie := login(t, h, testMember, testPassword)
 
 	for _, route := range []struct{ method, path, body string }{
@@ -203,9 +201,7 @@ func TestStashSettingsAreAbsentWhileTheModuleIsOff(t *testing.T) {
 	}
 
 	// Switched off, they are gone — and so is the card's own endpoint.
-	if err := st.SetAdultEnabled(context.Background(), false); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	setAdultLibrariesActive(t, st, false)
 	rec = doAuth(t, h, http.MethodGet, "/api/v1/settings", "", withCookie(cookie))
 	wantStatus(t, rec, http.StatusOK)
 	var off map[string]string

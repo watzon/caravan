@@ -112,10 +112,6 @@ var (
 	// ErrLibraryIsDefault refuses to delete a kind's default library —
 	// demote it first, so every by-kind lookup keeps an answer.
 	ErrLibraryIsDefault = errors.New("store: library is its kind's default")
-	// ErrLibraryIsAdult refuses to delete an adult library: the module's
-	// switch already promises that disabling deletes nothing, and deletion
-	// through this door would be that promise broken (see SetAdultEnabled).
-	ErrLibraryIsAdult = errors.New("store: adult libraries are managed by the module switch")
 )
 
 // CreateLibrary inserts a new library and writes back the assigned id. The
@@ -157,18 +153,20 @@ func (s *Store) CreateLibrary(ctx context.Context, l *core.Library) error {
 	return nil
 }
 
-// DeleteLibrary removes an empty, non-default, non-adult library. The guards
-// live here rather than in the API so no second caller can forget one: a
-// library that still owns items is ErrLibraryNotEmpty (with items stranded
-// nowhere), the kind's default is ErrLibraryIsDefault, and adult libraries
-// are ErrLibraryIsAdult.
+// DeleteLibrary removes an empty, non-default library. The guards live here
+// rather than in the API so no second caller can forget one: a library that
+// still owns items is ErrLibraryNotEmpty (with items stranded nowhere), and the
+// kind's default is ErrLibraryIsDefault.
+//
+// An adult library is deleted under those two guards and no others. It used to
+// have a third, because the module switch owned the row and promised that
+// switching off destroyed nothing; `active` keeps that promise now, and it is
+// the deliberate "off". Once a library is an ordinary object, a kind-shaped
+// exception here would only mean the one shelf an owner cannot tidy away.
 func (s *Store) DeleteLibrary(ctx context.Context, id int64) error {
 	lib, err := s.GetLibrary(ctx, id)
 	if err != nil {
 		return err
-	}
-	if lib.Kind == core.LibraryKindAdult {
-		return ErrLibraryIsAdult
 	}
 	if lib.IsDefault {
 		return ErrLibraryIsDefault

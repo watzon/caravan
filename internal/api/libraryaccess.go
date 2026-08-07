@@ -98,29 +98,20 @@ func (g *libraryGate) load(ctx context.Context) error {
 		}
 	}
 
+	// `library_access` is the whole answer. users.adult_access was bridged onto
+	// adult libraries here while both existed; it is not consulted any more, and
+	// must not be again — nothing writes it since the access API replaced the
+	// module switch, so an account whose grant was revoked through PUT
+	// /libraries/{id}/access still carries a stale 1 in that column, and reading
+	// it would hand back the access that was just taken away.
 	g.grants = map[int64]bool{}
-	if g.user.Role != core.RoleAdmin {
+	if g.user.Role != core.RoleAdmin && g.user.ID != 0 {
 		// User id 0 — the API key and the open install — holds nothing, and
 		// both authenticate as an admin anyway; asking is a query that can only
 		// come back empty.
-		if g.user.ID != 0 {
-			g.grants, err = g.srv.st.ListLibraryAccessForUser(ctx, g.user.ID)
-			if err != nil {
-				return err
-			}
-		}
-		// The adult module's own grant, bridged onto its libraries while the
-		// switch still exists. store.SetUserAdultAccess dual-writes an access
-		// row, so for a real account the two already agree — but an identity
-		// resolved from a session carries the flag, and honouring it is what
-		// keeps this generalization from narrowing anything. It goes away with
-		// users.adult_access.
-		if g.user.AdultAccess {
-			for _, l := range libs {
-				if l.Kind == core.LibraryKindAdult {
-					g.grants[l.ID] = true
-				}
-			}
+		g.grants, err = g.srv.st.ListLibraryAccessForUser(ctx, g.user.ID)
+		if err != nil {
+			return err
 		}
 	}
 	g.loaded = true
@@ -169,6 +160,24 @@ func (g *libraryGate) allows(ctx context.Context, lib core.Library) (bool, error
 	return core.LibraryVisible(lib, g.user.Role, g.grants[lib.ID]), nil
 }
 
+// manages answers for an admin MANAGEMENT surface: the same rule as allows,
+// with `active` lifted.
+//
+// Lifting it is what keeps the Active toggle reachable. A library switched off
+// is dormant for every content route including an admin's, but the settings
+// card behind it — the list it appears in, its PATCH, its access roster — has
+// to keep answering, or switching a library off would be a one-way door with no
+// handle on the far side.
+//
+// Restriction it does NOT lift, and the difference is deliberate: every caller
+// of this is on an admin-only route, so core.LibraryVisible already waves an
+// admin past restriction, and writing a second bypass here would be a rule with
+// two homes.
+func (g *libraryGate) manages(ctx context.Context, lib core.Library) (bool, error) {
+	lib.Active = true
+	return g.allows(ctx, lib)
+}
+
 // visibleKind is visible for a row that may still be answering by kind: zero
 // resolves to the kind's default library rather than waving the row through.
 //
@@ -211,6 +220,22 @@ func (g *libraryGate) seesAdult(ctx context.Context) (bool, error) {
 	return false, nil
 }
 
+// visibleLibraries is every library this caller may see, in ListLibraries'
+// order. Inactive rows are absent, because core.LibraryVisible refuses them for
+// everybody — see meResponse.Libraries for why that is right even for an admin.
+func (g *libraryGate) visibleLibraries(ctx context.Context) ([]core.Library, error) {
+	if err := g.load(ctx); err != nil {
+		return nil, err
+	}
+	out := make([]core.Library, 0, len(g.libraries))
+	for _, l := range g.libraries {
+		if core.LibraryVisible(l, g.user.Role, g.grants[l.ID]) {
+			out = append(out, l)
+		}
+	}
+	return out, nil
+}
+
 // seesAll reports whether NOTHING is hidden from this caller.
 //
 // Two conditions, and the second is the one that is easy to forget: every
@@ -237,6 +262,168 @@ func (g *libraryGate) seesAll(ctx context.Context) (bool, error) {
 		}
 	}
 	return true, nil
+}
+
+// libraryAccessUserJSON is one account and its standing on one library, for the
+// Access card on the library's settings page.
+//
+// It is a DTO of its own rather than a field on userJSON so that GET /users —
+// reachable on every install — carries no access field at all. A per-account
+// flag on a general roster would say which libraries exist and who was kept out
+// of them, which is the trace a restricted shelf exists not to leave.
+type libraryAccessUserJSON struct {
+	ID       int64  `json:"id"`
+	Username string `json:"username"`
+	Role     string `json:"role"`
+	// Granted is whether the account holds a `library_access` row. It is
+	// meaningless beside AlwaysGranted, and false on most admins.
+	Granted bool `json:"granted"`
+	// AlwaysGranted says the account reaches the library through its ROLE
+	// rather than through a grant, which is true of every admin
+	// (core.LibraryVisible). The card shows "Always has access" in place of a
+	// checkbox, because a checkbox that changes nothing is a lie about who can
+	// see the shelf.
+	AlwaysGranted bool `json:"always_granted"`
+}
+
+// libraryAccessJSON is one library's whole access decision: the flag and the
+// roster it applies to, together, because neither means anything alone.
+type libraryAccessJSON struct {
+	Restricted bool                    `json:"restricted"`
+	Users      []libraryAccessUserJSON `json:"users"`
+}
+
+// libraryAccessRequest is the body of PUT /libraries/{id}/access.
+//
+// The whole decision, every time: the flag and the complete roster. There is no
+// per-user toggle route, deliberately — restricting a library and naming who
+// keeps it are one decision, and split across two requests there is a window in
+// which the library is restricted to nobody and a member watching the screen
+// sees a shelf vanish that was never meant to leave (store.SetLibraryAccess
+// writes the pair in one transaction for the same reason).
+type libraryAccessRequest struct {
+	// Restricted is a pointer so an absent field is a client bug rather than a
+	// silent unrestricting, the way monitorRequest treats Monitored.
+	Restricted *bool `json:"restricted"`
+	// UserIDs is the entire allow-list. Absent and empty are the same thing —
+	// "nobody but the admins" — which is a legitimate state, and the reason
+	// Restricted is a separate flag rather than an inference from this list.
+	UserIDs []int64 `json:"user_ids"`
+}
+
+// handleGetLibraryAccess answers the Access card: the library's restriction and
+// every account beside it.
+//
+// It resolves through manageableLibrary, so an INACTIVE library's access stays
+// editable. An owner who switched a library off and then wanted to fix who may
+// see it before switching it back on would otherwise have to make it visible to
+// the wrong people first.
+//
+// Admin-only by absence from memberAllowed — a member who could read this would
+// learn the household's account roster, which is the one thing a failed login
+// goes out of its way not to confirm.
+func (s *server) handleGetLibraryAccess(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	lib, ok := s.manageableLibrary(w, r, id)
+	if !ok {
+		return
+	}
+	s.writeLibraryAccess(w, r, *lib)
+}
+
+// handleSetLibraryAccess writes a library's restriction and its whole roster.
+//
+// Restricting also clears dlna_visible, in the store and in the same
+// transaction (store.SetLibraryAccess): DLNA has no accounts, so "restricted to
+// two people" and "advertised to every device on the LAN" cannot both be true.
+// Re-sharing afterwards is a second, deliberate act on the Reach card.
+//
+// Named accounts are checked to exist before anything is written. A grant to an
+// id that names nobody is not harmless — it is a row that will match whichever
+// account is created with that id next, which is a permission arriving by
+// accident.
+func (s *server) handleSetLibraryAccess(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var body libraryAccessRequest
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	if body.Restricted == nil {
+		writeError(w, http.StatusBadRequest, "restricted is required")
+		return
+	}
+	ctx := r.Context()
+
+	lib, ok := s.manageableLibrary(w, r, id)
+	if !ok {
+		return
+	}
+	users, err := s.st.ListUsers(ctx)
+	if err != nil {
+		s.writeStoreError(w, "list users", err)
+		return
+	}
+	known := make(map[int64]bool, len(users))
+	for _, u := range users {
+		known[u.ID] = true
+	}
+	for _, uid := range body.UserIDs {
+		if !known[uid] {
+			writeError(w, http.StatusBadRequest, "no such user")
+			return
+		}
+	}
+
+	if err := s.st.SetLibraryAccess(ctx, lib.ID, *body.Restricted, body.UserIDs); err != nil {
+		s.writeStoreError(w, "set library access", err)
+		return
+	}
+	// Re-read: restricting clears dlna_visible, so the row the caller holds is
+	// already stale in a way the next screen would render wrongly.
+	fresh, err := s.st.GetLibrary(ctx, lib.ID)
+	if err != nil {
+		s.writeStoreError(w, "get library", err)
+		return
+	}
+	s.writeLibraryAccess(w, r, *fresh)
+}
+
+// writeLibraryAccess renders the card from the library row and the account
+// list, so a read and a write answer with the same body and the screen never
+// has to guess what a write did to the rest of it.
+func (s *server) writeLibraryAccess(w http.ResponseWriter, r *http.Request, lib core.Library) {
+	ctx := r.Context()
+	users, err := s.st.ListUsers(ctx)
+	if err != nil {
+		s.writeStoreError(w, "list users", err)
+		return
+	}
+	granted, err := s.st.ListLibraryAccess(ctx, lib.ID)
+	if err != nil {
+		s.writeStoreError(w, "list library access", err)
+		return
+	}
+	held := make(map[int64]bool, len(granted))
+	for _, uid := range granted {
+		held[uid] = true
+	}
+	rows := make([]libraryAccessUserJSON, 0, len(users))
+	for _, u := range users {
+		rows = append(rows, libraryAccessUserJSON{
+			ID:            u.ID,
+			Username:      u.Username,
+			Role:          u.Role,
+			Granted:       held[u.ID],
+			AlwaysGranted: u.Role == core.RoleAdmin,
+		})
+	}
+	writeJSON(w, http.StatusOK, libraryAccessJSON{Restricted: lib.Restricted, Users: rows})
 }
 
 // requireAdult gates the whole /adult route subtree.

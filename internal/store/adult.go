@@ -22,6 +22,12 @@ const (
 
 // AdultEnabled reports whether the adult module is switched on server-wide.
 //
+// NOTHING WRITES THE SETTING ANY MORE: per-library `active` replaced it, and
+// the only writer went with POST /settings/adult. What it reports is therefore
+// whatever an install was carrying when it upgraded, frozen — useful to
+// migration 0027, which backfills from it, and to nobody else. It survives only
+// until 0028 deletes the key; ask AnyActiveLibraryOfKind instead.
+//
 // Absent means off, and so does anything that will not parse. That is the
 // mirror image of SettingDLNAEnabled's rule and the reason is the same one read
 // backwards: a default is a decision about what a typo means, and for a setting
@@ -36,131 +42,6 @@ func (s *Store) AdultEnabled(ctx context.Context) (bool, error) {
 	}
 	enabled, _ := strconv.ParseBool(strings.TrimSpace(raw))
 	return enabled, nil
-}
-
-// SetAdultEnabled flips the server-wide switch, creating the Adult library row
-// the first time it is turned on.
-//
-// The creation lives here rather than in the caller for the reason
-// UpdateLibrary bumps the DLNA update id itself: the setting and the row are
-// two halves of one fact, and two callers that each did half would eventually
-// disagree. It is idempotent — enabling a second time reuses the row that
-// already exists, along with whatever the owner has since done to it.
-//
-// Disabling deletes nothing. Not the library row, not the series, not the
-// episodes, and certainly not the files: "off" means the module is not
-// reachable, which is a visibility promise, not a retention policy. Turning it
-// back on has to find the library exactly as it was left, or the switch would
-// be a destructive operation wearing a toggle's clothes.
-//
-// The new row is created with dlna_visible OFF. That is the one place in
-// Caravan where a library is born hidden, and it is deliberate: DLNA has no
-// accounts, so a container advertised on the LAN is readable by every device on
-// it. Sharing it is a second, separate decision the owner makes on the DLNA
-// card (PLAN phase 9 task 6).
-//
-// It also writes `libraries.active` on every adult library — a dual-write until
-// the access API replaces the module switch. The switch and the column say the
-// same thing for one release so that the read side can be moved across a
-// library at a time; when the last reader of the setting is gone, this half
-// goes with it and PATCH /libraries/{id} {active} is the only door left.
-func (s *Store) SetAdultEnabled(ctx context.Context, enabled bool) error {
-	if err := s.SetSetting(ctx, SettingAdultEnabled, strconv.FormatBool(enabled)); err != nil {
-		return err
-	}
-	if !enabled {
-		return s.setAdultLibrariesActive(ctx, false)
-	}
-	if err := s.ensureAdultLibrary(ctx); err != nil {
-		return err
-	}
-	return s.setAdultLibrariesActive(ctx, true)
-}
-
-// setAdultLibrariesActive is the dual-write until the access API replaces the
-// module switch: one setting still decides the state of every adult library, so
-// flipping it flips them all. Per-library activity is the end state, and it
-// arrives when the switch is retired — nothing here tries to remember which
-// libraries were individually off, because until that door exists none can be.
-func (s *Store) setAdultLibrariesActive(ctx context.Context, active bool) error {
-	if _, err := s.db.ExecContext(ctx,
-		"UPDATE libraries SET active = ? WHERE kind = ?", active, core.LibraryKindAdult); err != nil {
-		return fmt.Errorf("store: set adult libraries active: %w", err)
-	}
-	return nil
-}
-
-// ensureAdultLibrary creates the Adult library row if it is not already there.
-//
-// The insert is guarded by root_path's UNIQUE constraint rather than by a
-// read-then-write, so two enables racing produce one row and one of them does
-// nothing, instead of two rows or a failed request. Before 0022 the guard was
-// UNIQUE(kind); with several libraries per kind allowed, the seed root is the
-// column that still identifies THIS row, and it is what a re-enable collides
-// with — the row is never deleted (see the disable contract above), so the
-// collision is the common case, not the edge.
-//
-// The row becomes the kind's default only when no adult default exists yet:
-// on first enable that is this row, and forever after the subquery keeps a
-// re-enable from ever contending with idx_libraries_default_per_kind.
-//
-// It is created RESTRICTED, for the reason it is created with dlna_visible off:
-// the module was only ever reachable by an account somebody granted, and a new
-// row born open would hand the whole household a shelf on the enable that made
-// it. It is created ACTIVE because the only caller is the enable itself — this
-// runs under SetAdultEnabled(true) and nowhere else, so the state it is called
-// under is on.
-func (s *Store) ensureAdultLibrary(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO libraries (kind, name, root_path, dlna_visible, provider, providers, is_default,
-			active, restricted)
-		SELECT ?, ?, ?, 0, ?, ?,
-			NOT EXISTS (SELECT 1 FROM libraries WHERE kind = ? AND is_default = 1),
-			1, 1
-		ON CONFLICT (root_path) DO NOTHING`,
-		core.LibraryKindAdult, AdultLibraryName, AdultLibraryRoot,
-		core.ProviderStashbox, `["`+core.ProviderStashbox+`"]`, core.LibraryKindAdult)
-	if err != nil {
-		return fmt.Errorf("store: create adult library: %w", err)
-	}
-	return nil
-}
-
-// SetUserAdultAccess grants or revokes one account's access to the adult
-// module. Setting it on an absent account is ErrNotFound.
-//
-// The grant is only half of the answer: core.AdultVisible also requires the
-// server-wide switch, so a grant made and then forgotten opens nothing once the
-// module is turned off.
-//
-// It also writes `library_access` rows on every adult library — a dual-write
-// until the access API replaces the module switch. The column and the join
-// table say the same thing for one release; PUT /libraries/{id}/access is the
-// door that survives, and it names one library rather than a whole kind.
-func (s *Store) SetUserAdultAccess(ctx context.Context, id int64, granted bool) error {
-	res, err := s.db.ExecContext(ctx,
-		"UPDATE users SET adult_access = ?, updated_at = ? WHERE id = ?",
-		granted, formatTime(now()), id)
-	if err != nil {
-		return fmt.Errorf("store: set user %d adult access: %w", id, err)
-	}
-	if err := affectedOne(res, "set user adult access", id); err != nil {
-		return err
-	}
-
-	if granted {
-		_, err = s.db.ExecContext(ctx, `
-			INSERT OR IGNORE INTO library_access (library_id, user_id)
-			SELECT id, ? FROM libraries WHERE kind = ?`, id, core.LibraryKindAdult)
-	} else {
-		_, err = s.db.ExecContext(ctx, `
-			DELETE FROM library_access WHERE user_id = ? AND library_id IN
-				(SELECT id FROM libraries WHERE kind = ?)`, id, core.LibraryKindAdult)
-	}
-	if err != nil {
-		return fmt.Errorf("store: mirror user %d adult access onto library access: %w", id, err)
-	}
-	return nil
 }
 
 // EpisodeIDsByStashID reports which of the given scenes the library already

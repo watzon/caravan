@@ -595,9 +595,9 @@ func (s *Service) friendlyName(ctx context.Context) (string, error) {
 // One loop, so every library is advertised by the same rule and by nothing
 // else. There is no branch here that mentions the adult module: if a library
 // row is active and says dlna_visible, it is on the shelf; if it does not, it
-// is absent — and an adult row is created with the flag off
-// (store.ensureAdultLibrary), so creating one changes nothing about what the
-// LAN can see until the owner makes that second decision.
+// is absent — and an adult row is created with the flag off, so creating one
+// changes nothing about what the LAN can see until the owner makes that second
+// decision.
 func (s *Service) rootChildren(ctx context.Context, u urls) (*didlLite, error) {
 	v, err := s.visibility(ctx)
 	if err != nil {
