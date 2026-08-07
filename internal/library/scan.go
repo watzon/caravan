@@ -324,7 +324,9 @@ func (m *Manager) scanFile(ctx context.Context, rel string, size int64, res *Sca
 	case p.Confidence < m.minConfidence:
 		park(reasonLowParse)
 		return
-	case isScene && m.adultFor(ctx, lib) == nil:
+	case isScene && len(m.adultChain(ctx, lib)) == 0:
+		// Not one configured instance on the library's chain: nothing can
+		// identify this site, which is the same dead end a nil provider was.
 		park(reasonNoProvider)
 		return
 	case !isScene && len(m.metadataChain(ctx, lib)) == 0:

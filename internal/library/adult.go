@@ -100,8 +100,14 @@ func (m *Manager) adultReady(ctx context.Context) error {
 //
 // monitored follows monitoredOrDefault: nil means monitored, and it decides a
 // new row only.
-func (m *Manager) AddSite(ctx context.Context, stashID string, monitored *bool, libraryID int64) (*core.Series, error) {
-	return m.addSite(ctx, stashID, monitored, libraryID, false)
+//
+// ref names the stash-box INSTANCE the id was read from as well as the id, for
+// AddMovie's reason: a UUID means nothing without the box that minted it, and
+// two boxes hold the same UUID under different sites. An empty provider is the
+// legacy instance (adultRef), which is what a client written before instances
+// sends and what a single-box install resolves to anyway.
+func (m *Manager) AddSite(ctx context.Context, ref core.ItemRef, monitored *bool, libraryID int64) (*core.Series, error) {
+	return m.addSite(ctx, ref, monitored, libraryID, false)
 }
 
 // AddSiteAndWait is AddSite with the catalogue walk done before it returns.
@@ -111,32 +117,39 @@ func (m *Manager) AddSite(ctx context.Context, stashID string, monitored *bool, 
 // scene request is that caller — the scene it granted has to be a wanted
 // episode by the time the approval answers, or the request is closed against
 // nothing.
-func (m *Manager) AddSiteAndWait(ctx context.Context, stashID string, monitored *bool, libraryID int64) (*core.Series, error) {
-	return m.addSite(ctx, stashID, monitored, libraryID, true)
+func (m *Manager) AddSiteAndWait(ctx context.Context, ref core.ItemRef, monitored *bool, libraryID int64) (*core.Series, error) {
+	return m.addSite(ctx, ref, monitored, libraryID, true)
 }
 
-func (m *Manager) addSite(ctx context.Context, stashID string, monitored *bool, libraryID int64, walk bool) (*core.Series, error) {
+func (m *Manager) addSite(ctx context.Context, ref core.ItemRef, monitored *bool, libraryID int64, walk bool) (*core.Series, error) {
 	if err := m.adultReady(ctx); err != nil {
 		return nil, err
 	}
-	if stashID == "" {
+	ref = adultRef(ref)
+	if ref.Ref == "" {
 		return nil, fmt.Errorf("library: empty stash id")
 	}
 
-	// The library first, so its provider choice answers the metadata fetch.
-	lib, err := m.siteLibrary(ctx, stashID, "", libraryID)
+	// The instance the REF names, not the library's chain head: the id is
+	// written in one box's vocabulary and the ref is the only thing that says
+	// which (see adultByID).
+	provider := m.adultByID(ctx, ref.Provider)
+	if provider == nil {
+		return nil, core.ErrNoAdultProvider
+	}
+	lib, err := m.siteLibrary(ctx, ref, "", libraryID)
 	if err != nil {
 		return nil, err
 	}
-	meta, err := m.adultFor(ctx, lib).GetSite(ctx, stashID)
+	meta, err := provider.GetSite(ctx, ref.Ref)
 	if err != nil {
-		return nil, fmt.Errorf("library: get site %s: %w", stashID, err)
+		return nil, fmt.Errorf("library: get site %s/%s: %w", ref.Provider, ref.Ref, err)
 	}
 	if meta == nil {
-		return nil, fmt.Errorf("library: site %s not found", stashID)
+		return nil, fmt.Errorf("library: site %s/%s not found", ref.Provider, ref.Ref)
 	}
 
-	sr, _, err := m.upsertSiteRow(ctx, meta, adultSeriesDir(lib, meta.Name), "", monitored, lib.ID)
+	sr, _, err := m.upsertSiteRow(ctx, ref.Provider, meta, adultSeriesDir(lib, meta.Name), "", monitored, lib.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -183,12 +196,20 @@ func (m *Manager) SyncSite(ctx context.Context, seriesID int64) error {
 // none. Status stays empty for the same reason: stash-box has no notion of a
 // site having ended, and inventing "Continuing" would put a claim in the UI
 // that no provider made.
-func (m *Manager) upsertSiteRow(ctx context.Context, meta *core.SiteMeta, dir, posterRel string, monitored *bool, libraryID int64) (*core.Series, bool, error) {
+//
+// providerID is the INSTANCE that answered, and it is the row's identity from
+// here on: every later refresh of this site asks that box and no other. The
+// bare `stashbox` is what an empty id means (adultRef) and what every row
+// written before instances carries.
+func (m *Manager) upsertSiteRow(ctx context.Context, providerID string, meta *core.SiteMeta, dir, posterRel string, monitored *bool, libraryID int64) (*core.Series, bool, error) {
+	if providerID == "" {
+		providerID = core.ProviderStashbox
+	}
 	sr := &core.Series{
-		// A site is pinned like every other item: stash-box answered, and the
+		// A site is pinned like every other item: one instance answered, and the
 		// stash id is its ref (store.normalizeSeriesProvider says the same from
 		// the other side, for rows written before 0024).
-		Provider:    core.ProviderStashbox,
+		Provider:    providerID,
 		ProviderRef: meta.StashID,
 		StashID:     meta.StashID,
 		Title:       meta.Name,
@@ -203,7 +224,10 @@ func (m *Manager) upsertSiteRow(ctx context.Context, meta *core.SiteMeta, dir, p
 
 	created := true
 	if meta.StashID != "" {
-		existing, err := m.store.GetSeriesByStashID(ctx, meta.StashID)
+		// (instance, ref) rather than the bare stash id: since 0026 two boxes
+		// may legitimately hold the same UUID, and matching on the id alone
+		// would make the second box's site an update of the first box's row.
+		existing, err := m.store.GetSeriesByProviderRef(ctx, providerID, meta.StashID)
 		switch {
 		case err == nil:
 			created = false
@@ -242,12 +266,18 @@ func (m *Manager) upsertSiteRow(ctx context.Context, meta *core.SiteMeta, dir, p
 // empty until the last one lands. walkSiteScenes owns that; everything about
 // how a scene becomes an episode row is writeScenes' and numberScenes' job,
 // unchanged.
+//
+// The catalogue comes from the site's own PINNED instance, never from the
+// library's chain head. The scene UUIDs already on these episode rows were
+// minted by that box; walking another one would file its scenes under this
+// site's numbering and leave the row claiming a catalogue it does not have.
 func (m *Manager) syncSiteScenes(ctx context.Context, sr *core.Series) error {
-	lib, err := m.seriesLibraryOf(ctx, sr)
-	if err != nil {
-		return err
+	provider := m.adultByID(ctx, sr.Provider)
+	if provider == nil {
+		return fmt.Errorf("library: %w: site %q is pinned to %s",
+			core.ErrNoAdultProvider, sr.Title, adultRef(core.ItemRef{Provider: sr.Provider}).Provider)
 	}
-	return m.walkSiteScenes(ctx, m.adultFor(ctx, lib), sr.StashID, func(batch []core.SceneMeta) error {
+	return m.walkSiteScenes(ctx, provider, sr.StashID, func(batch []core.SceneMeta) error {
 		return m.writeScenes(ctx, sr, batch)
 	})
 }
@@ -608,6 +638,12 @@ func episodeFromScene(scene core.SceneMeta, season, number int) core.Episode {
 // criterion this function exists to satisfy: a full job cycle on a server with
 // adult content disabled must make ZERO requests to the stash-box endpoint,
 // and a refresh sweep is the recurring job that would otherwise make them.
+//
+// Each site is refreshed against the instance it is PINNED to. A site whose
+// instance has been deleted is an error on the result and zero provider calls:
+// the alternative — falling back to whatever box the library's chain names
+// first — would ask that box for a UUID it never minted, and public stash-boxes
+// answer such a question with a different site rather than with "no".
 func (m *Manager) refreshSites(ctx context.Context, res *RefreshResult) error {
 	if err := m.adultReady(ctx); err != nil {
 		if errors.Is(err, ErrAdultDisabled) || errors.Is(err, core.ErrNoAdultProvider) {
@@ -627,11 +663,13 @@ func (m *Manager) refreshSites(ctx context.Context, res *RefreshResult) error {
 		if !sr.Monitored || sr.StashID == "" {
 			continue
 		}
-		lib, err := m.seriesLibraryOf(ctx, &sr)
-		if err != nil {
-			return err
+		pinned := adultRef(core.ItemRef{Provider: sr.Provider, Ref: sr.StashID})
+		provider := m.adultByID(ctx, pinned.Provider)
+		if provider == nil {
+			res.addErr("refresh site %q: no stash-box instance %q is configured", sr.Title, pinned.Provider)
+			continue
 		}
-		meta, err := m.adultFor(ctx, lib).GetSite(ctx, sr.StashID)
+		meta, err := provider.GetSite(ctx, sr.StashID)
 		if err != nil {
 			res.addErr("refresh site %q: %v", sr.Title, err)
 			continue
@@ -639,7 +677,7 @@ func (m *Manager) refreshSites(ctx context.Context, res *RefreshResult) error {
 		if meta == nil {
 			continue
 		}
-		row, _, err := m.upsertSiteRow(ctx, meta, sr.Path, "", nil, sr.LibraryID)
+		row, _, err := m.upsertSiteRow(ctx, pinned.Provider, meta, sr.Path, "", nil, sr.LibraryID)
 		if err != nil {
 			return err
 		}
@@ -907,28 +945,61 @@ func (m *Manager) matchAndImportScene(ctx context.Context, lib *core.Library, re
 // file that prompted the sync: a brand-new site is created in the adult
 // library whose root holds it. It reports nil (having already parked) when
 // the site cannot be resolved at all.
+//
+// IDENTIFICATION walks the library's chain, which is the half that differs from
+// a refresh. Nothing is pinned yet — the filename names a site and no box —
+// so every configured instance is a candidate, asked in the owner's own order,
+// and the FIRST one confident about the title wins. The winner's id is what the
+// new row is pinned to, and from then on it is the only box this site is ever
+// asked about (see syncSiteScenes).
+//
+// A rung that errors is recorded and the walk goes on, exactly as the metadata
+// chain's does: one box being down must not park a file the next box could
+// place. Only a chain where every rung errored is a provider failure.
 func (m *Manager) syncSiteFor(ctx context.Context, scanLib *core.Library, sr *core.Series, title, rel string, res *ScanResult, park func(string)) (*core.Series, error) {
 	if sr == nil {
-		sites, err := m.adultFor(ctx, scanLib).SearchSites(ctx, title)
-		if err != nil {
-			res.addErr("search sites for %q: %v", title, err)
-			park(reasonProviderErr)
+		chain := m.adultChain(ctx, scanLib)
+		if len(chain) == 0 {
+			park(reasonNoProvider)
 			return nil, nil
 		}
-		cands := make([]candidate, len(sites))
-		for i, site := range sites {
-			cands[i] = candidate{title: site.Name}
+		var (
+			hit    *core.SiteMeta
+			winner string
+			failed int
+		)
+		for _, rung := range chain {
+			sites, err := rung.P.SearchSites(ctx, title)
+			if err != nil {
+				res.addErr("search sites for %q on %q: %v", title, rung.ID, err)
+				failed++
+				continue
+			}
+			cands := make([]candidate, len(sites))
+			for i, site := range sites {
+				cands[i] = candidate{title: site.Name}
+			}
+			idx := bestMatch(cands, title, 0)
+			if idx < 0 {
+				continue
+			}
+			hit, winner = &sites[idx], rung.ID
+			break
 		}
-		idx := bestMatch(cands, title, 0)
-		if idx < 0 {
-			park(reasonNoMatch)
+		if hit == nil {
+			if failed == len(chain) {
+				park(reasonProviderErr)
+			} else {
+				park(reasonNoMatch)
+			}
 			return nil, nil
 		}
-		lib, err := m.siteLibrary(ctx, sites[idx].StashID, rel, 0)
+		ref := core.ItemRef{Provider: winner, Ref: hit.StashID}
+		lib, err := m.siteLibrary(ctx, ref, rel, 0)
 		if err != nil {
 			return nil, err
 		}
-		sr, _, err = m.upsertSiteRow(ctx, &sites[idx], adultSeriesDir(lib, sites[idx].Name), "", nil, lib.ID)
+		sr, _, err = m.upsertSiteRow(ctx, winner, hit, adultSeriesDir(lib, hit.Name), "", nil, lib.ID)
 		if err != nil {
 			return nil, err
 		}

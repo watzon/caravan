@@ -401,17 +401,16 @@ func (s *server) handleAddSite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	// Validated here, carried no further. HANDOFF (PLAN Part 2 phase 5): AddSite
-	// takes a bare stash id, so the instance cannot reach the library layer until
-	// that signature becomes ref-accepting — the row is pinned by whatever the
-	// manager resolves, which today is the default instance. Refusing an
-	// unconfigured id now means the ref-accepting version inherits a body that
-	// was already honest, rather than one that has been accepting ids nobody
-	// checked.
-	if _, ok := s.adultRefProvider(w, r, body.Provider); !ok {
+	// The instance the hit came from, validated here and CARRIED: it is what the
+	// row is pinned to, and every later refresh of this site asks that box and
+	// no other. An omitted provider resolves to the default instance rather than
+	// travelling empty, so the row records which box actually answered instead
+	// of leaving the library layer to guess again later.
+	providerID, ok := s.adultRefProvider(w, r, body.Provider)
+	if !ok {
 		return
 	}
-	sr, err := s.mgr.AddSite(ctx, stashID, body.Monitored, body.LibraryID)
+	sr, err := s.mgr.AddSite(ctx, core.ItemRef{Provider: providerID, Ref: stashID}, body.Monitored, body.LibraryID)
 	if err != nil {
 		s.writeManagerError(w, "", "add site", err)
 		return

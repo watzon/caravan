@@ -42,9 +42,10 @@ type stubManager struct {
 	// addSiteErr, when set, is what AddSite reports instead of writing a row.
 	addSiteErr error
 
-	// addSiteCalls records the stash ids AddSite was asked for, so a test can
-	// prove a scene approval added the SITE rather than something else.
-	addSiteCalls []string
+	// addSiteCalls records the refs AddSite was asked for, so a test can prove
+	// a scene approval added the SITE rather than something else — and, since
+	// instances, which BOX the row was pinned to.
+	addSiteCalls []core.ItemRef
 
 	// addSiteSceneStashID is the scene AddSiteAndWait files as an episode.
 	// Empty derives one from the site id; a test that approves a request for a
@@ -285,14 +286,16 @@ func (m *stubManager) searchCalls() []searchCall {
 // handler tests read back the same shape a real manager produces — and, like
 // the real one, it files NO scenes. The catalogue walk is a job now, and a stub
 // that quietly did it inline would hide the very split these tests defend.
-func (m *stubManager) AddSite(ctx context.Context, stashID string, monitored *bool, libraryID int64) (*core.Series, error) {
+func (m *stubManager) AddSite(ctx context.Context, ref core.ItemRef, monitored *bool, libraryID int64) (*core.Series, error) {
 	m.mu.Lock()
-	m.addSiteCalls = append(m.addSiteCalls, stashID)
+	m.addSiteCalls = append(m.addSiteCalls, ref)
 	m.mu.Unlock()
 	if m.addSiteErr != nil {
 		return nil, m.addSiteErr
 	}
+	stashID := ref.Ref
 	sr := &core.Series{
+		Provider: ref.Provider, ProviderRef: stashID,
 		StashID: stashID, Title: "Stub Site", SortTitle: "stub site",
 		Kind: core.SeriesKindAdult, Monitored: monitored == nil || *monitored,
 		Path: store.AdultLibraryRoot + "/Stub Site",
@@ -309,8 +312,9 @@ func (m *stubManager) AddSite(ctx context.Context, stashID string, monitored *bo
 // exists only on this path, so a caller that switched to the deferred AddSite
 // would leave the request approved with no episode row behind it, and the test
 // would see exactly that.
-func (m *stubManager) AddSiteAndWait(ctx context.Context, stashID string, monitored *bool, libraryID int64) (*core.Series, error) {
-	sr, err := m.AddSite(ctx, stashID, monitored, libraryID)
+func (m *stubManager) AddSiteAndWait(ctx context.Context, ref core.ItemRef, monitored *bool, libraryID int64) (*core.Series, error) {
+	stashID := ref.Ref
+	sr, err := m.AddSite(ctx, ref, monitored, libraryID)
 	if err != nil {
 		return nil, err
 	}
@@ -329,10 +333,22 @@ func (m *stubManager) AddSiteAndWait(ctx context.Context, stashID string, monito
 	return sr, nil
 }
 
+// siteCalls is the stash ids AddSite was asked for; siteRefs is the same calls
+// with the instance each named.
 func (m *stubManager) siteCalls() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return append([]string(nil), m.addSiteCalls...)
+	out := make([]string, 0, len(m.addSiteCalls))
+	for _, ref := range m.addSiteCalls {
+		out = append(out, ref.Ref)
+	}
+	return out
+}
+
+func (m *stubManager) siteRefs() []core.ItemRef {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]core.ItemRef(nil), m.addSiteCalls...)
 }
 
 func (m *stubManager) Metadata() core.MetadataProvider { return m.provider }

@@ -126,7 +126,10 @@ func TestAddTargetsTheChosenLibrary(t *testing.T) {
 // request.
 type fakeRegistry struct {
 	metadata map[string]core.MetadataProvider
-	asked    []string
+	// adult is the stash-box half, keyed by instance id. A nil map answers nil
+	// for every id, which is what a registry with no instances configured does.
+	adult map[string]core.AdultMetadataProvider
+	asked []string
 }
 
 func (f *fakeRegistry) Metadata(_ context.Context, id string) core.MetadataProvider {
@@ -134,7 +137,10 @@ func (f *fakeRegistry) Metadata(_ context.Context, id string) core.MetadataProvi
 	return f.metadata[id]
 }
 
-func (f *fakeRegistry) Adult(_ context.Context, _ string) core.AdultMetadataProvider { return nil }
+func (f *fakeRegistry) Adult(_ context.Context, id string) core.AdultMetadataProvider {
+	f.asked = append(f.asked, id)
+	return f.adult[id]
+}
 
 // An add is fetched through the provider its REF names, not through the
 // library's choice: the id is written in one provider's vocabulary, and the

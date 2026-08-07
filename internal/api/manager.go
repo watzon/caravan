@@ -70,7 +70,13 @@ type Manager interface {
 	// It does NOT walk the site's scene catalogue: that is hundreds of provider
 	// round trips for a large site, and it is a core.JobSyncSite the caller
 	// queues (see handleAddSite). monitored reads as AddMovie's does.
-	AddSite(ctx context.Context, stashID string, monitored *bool, libraryID int64) (*core.Series, error)
+	//
+	// ref names the stash-box INSTANCE the id was read from beside the id, for
+	// AddMovie's reason: a UUID is only an identity together with the box that
+	// minted it, and two boxes hold the same UUID under different sites. An
+	// empty provider means the legacy instance, which is what a client written
+	// before instances sends.
+	AddSite(ctx context.Context, ref core.ItemRef, monitored *bool, libraryID int64) (*core.Series, error)
 
 	// AddSiteAndWait is AddSite with the catalogue walked before it returns.
 	//
@@ -79,7 +85,7 @@ type Manager interface {
 	// scene, and a scene is an episode row that the walk is the only thing that
 	// creates. Queueing the walk instead would answer "approved" for a request
 	// that has, at that moment, made nothing wanted.
-	AddSiteAndWait(ctx context.Context, stashID string, monitored *bool, libraryID int64) (*core.Series, error)
+	AddSiteAndWait(ctx context.Context, ref core.ItemRef, monitored *bool, libraryID int64) (*core.Series, error)
 
 	// SearchLibrary identifies a title through one library's whole provider
 	// chain, merging what every provider on it offered. libraryID 0 means the

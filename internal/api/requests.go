@@ -454,7 +454,7 @@ func (s *server) approveScene(ctx context.Context, w http.ResponseWriter, r *htt
 	// empty on every historical row, and empty is not a box. The approval
 	// therefore reads whichever catalogue the default library identifies
 	// through, which is the box the scene was almost certainly browsed on.
-	provider, _ := s.mgr.DefaultAdultMetadata(ctx)
+	provider, providerID := s.mgr.DefaultAdultMetadata(ctx)
 	if provider == nil {
 		// Coded, and coded as the ADULT credential: an uncoded 503 is read by
 		// the SPA as a missing TMDB key (web/src/lib/credentials.ts), so
@@ -481,7 +481,11 @@ func (s *server) approveScene(ctx context.Context, w http.ResponseWriter, r *htt
 	// an approval that answered before the walk would close the request against
 	// an episode row that does not exist yet — so the granted scene would not
 	// be wanted, and the next sweep would search for nothing.
-	sr, err := s.mgr.AddSiteAndWait(ctx, scene.SiteStashID, nil, 0)
+	//
+	// The site is pinned to the instance that answered GetScene above, which is
+	// the only box whose catalogue this SiteStashID was read from.
+	sr, err := s.mgr.AddSiteAndWait(ctx,
+		core.ItemRef{Provider: providerID, Ref: scene.SiteStashID}, nil, 0)
 	if err != nil {
 		s.writeManagerError(w, "", "add site", err)
 		return nil, err

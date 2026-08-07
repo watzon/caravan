@@ -111,10 +111,16 @@ func (m *Manager) seriesLibrary(ctx context.Context, ref core.ItemRef, rel strin
 	return m.resolveLibrary(ctx, core.LibraryKindTV, rel, targetID)
 }
 
-// siteLibrary is movieLibrary's adult twin, keyed by stash id.
-func (m *Manager) siteLibrary(ctx context.Context, stashID, rel string, targetID int64) (*core.Library, error) {
-	if stashID != "" {
-		existing, err := m.store.GetSeriesByStashID(ctx, stashID)
+// siteLibrary is movieLibrary's adult twin, keyed by (instance, stash id).
+//
+// The instance is half the key rather than decoration. Since 0026 the same
+// UUID legitimately names a site on two boxes — the public stash-boxes are
+// forks of one another — so a lookup on the bare stash id would hand the second
+// box's site the first box's library, and the two rows would organize into one
+// another's folders.
+func (m *Manager) siteLibrary(ctx context.Context, ref core.ItemRef, rel string, targetID int64) (*core.Library, error) {
+	if ref.Valid() {
+		existing, err := m.store.GetSeriesByProviderRef(ctx, ref.Provider, ref.Ref)
 		if err == nil && existing.LibraryID != 0 {
 			return m.libraryByIDOrDefault(ctx, existing.LibraryID, core.LibraryKindAdult)
 		}
@@ -209,13 +215,72 @@ func (m *Manager) providerByID(ctx context.Context, id string) core.MetadataProv
 	return nil
 }
 
-// adultFor is metadataFor's adult twin. It does NOT replace adultReady: the
-// module switch is a global gate and stays one.
-func (m *Manager) adultFor(ctx context.Context, lib *core.Library) core.AdultMetadataProvider {
-	if m.providers != nil && lib != nil && lib.Provider != "" {
-		if p := m.providers.Adult(ctx, lib.Provider); p != nil {
+// adultRef fills in the instance a ref does not name.
+//
+// Empty is the LEGACY instance, `stashbox`: it is the id migration 0024 pinned
+// every adult row written before instances onto, the id 0026 carries the old
+// settings pair in under, and the id the first instance on a fresh install
+// takes. Empty is therefore never "no box" — it is the one box that was there
+// before there could be more than one.
+func adultRef(ref core.ItemRef) core.ItemRef {
+	if ref.Provider == "" {
+		ref.Provider = core.ProviderStashbox
+	}
+	return ref
+}
+
+// adultByID resolves ONE stash-box instance id through the registry, with NO
+// fallback. It is providerByID's rule on the adult half, and the absent
+// fallback matters MORE here.
+//
+// Asking box A for box B's UUID does not fail. The public stash-boxes are forks
+// of one another, so the same UUID frequently names a different site on the
+// other box — a refresh that fell back would fetch that other site and write
+// its title and its catalogue over the row. An instance the owner deleted is
+// nil, and the callers report that rather than asking somebody else.
+//
+// The one exception is the legacy id, and it is not a fallback across
+// instances: a registry that answers nil for `stashbox` is the pre-registry
+// wiring (and every test's seam), where the Manager-level provider IS the
+// stash-box client.
+func (m *Manager) adultByID(ctx context.Context, id string) core.AdultMetadataProvider {
+	if id == "" {
+		id = core.ProviderStashbox
+	}
+	if m.providers != nil {
+		if p := m.providers.Adult(ctx, id); p != nil {
 			return p
 		}
 	}
-	return m.adult
+	if id == core.ProviderStashbox {
+		return m.adult
+	}
+	return nil
+}
+
+// adultBinding is providerBinding's adult twin: one rung of a library's chain,
+// carrying the instance id beside the client. The id travels because it is what
+// a new site row is PINNED to — the chain identifies, and the winner's id is
+// the box every later refresh of that row asks.
+type adultBinding struct {
+	ID string
+	P  core.AdultMetadataProvider
+}
+
+// adultChain is metadataChain's adult twin: the library's ordered instance list
+// resolved to the clients that are actually configured, dropping ids that
+// answer nil. An empty result means nothing can identify a site for this
+// library, and callers degrade exactly as they do for a nil provider.
+func (m *Manager) adultChain(ctx context.Context, lib *core.Library) []adultBinding {
+	if lib == nil {
+		return nil
+	}
+	chain := lib.ProviderChain()
+	out := make([]adultBinding, 0, len(chain))
+	for _, id := range chain {
+		if p := m.adultByID(ctx, id); p != nil {
+			out = append(out, adultBinding{ID: id, P: p})
+		}
+	}
+	return out
 }

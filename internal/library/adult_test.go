@@ -105,6 +105,13 @@ func date(y int, m time.Month, d int) time.Time {
 	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 }
 
+// siteRef is a stash id on the LEGACY instance, which is what a single-box
+// install and every pre-instances client name. adultchain_test.go is where the
+// second box appears.
+func siteRef(stashID string) core.ItemRef {
+	return core.ItemRef{Provider: core.ProviderStashbox, Ref: stashID}
+}
+
 // adultHarness is the library harness plus an adult provider and the module
 // switched on.
 type adultHarness struct {
@@ -156,7 +163,7 @@ func (a *adultHarness) seedBrazzers() {
 // the same thing about the same walk.
 func (a *adultHarness) addSite(id string) *core.Series {
 	a.t.Helper()
-	sr, err := a.mgr.AddSiteAndWait(context.Background(), id, nil, 0)
+	sr, err := a.mgr.AddSiteAndWait(context.Background(), siteRef(id), nil, 0)
 	if err != nil {
 		a.t.Fatalf("AddSiteAndWait: %v", err)
 	}
@@ -357,7 +364,7 @@ func TestAddSiteRefusesWhenTheModuleIsDisabled(t *testing.T) {
 	h := newAdultHarness(t, false)
 	h.seedBrazzers()
 
-	if _, err := h.mgr.AddSite(context.Background(), "site-1", nil, 0); !errors.Is(err, ErrAdultDisabled) {
+	if _, err := h.mgr.AddSite(context.Background(), siteRef("site-1"), nil, 0); !errors.Is(err, ErrAdultDisabled) {
 		t.Errorf("AddSite error = %v, want ErrAdultDisabled", err)
 	}
 	if h.adult.calls != 0 {
@@ -368,7 +375,7 @@ func TestAddSiteRefusesWhenTheModuleIsDisabled(t *testing.T) {
 func TestAddSiteReportsAMissingProvider(t *testing.T) {
 	h := newAdultHarness(t, true)
 	h.mgr.adult = nil
-	if _, err := h.mgr.AddSite(context.Background(), "site-1", nil, 0); !errors.Is(err, core.ErrNoAdultProvider) {
+	if _, err := h.mgr.AddSite(context.Background(), siteRef("site-1"), nil, 0); !errors.Is(err, core.ErrNoAdultProvider) {
 		t.Errorf("AddSite error = %v, want ErrNoAdultProvider", err)
 	}
 }
@@ -954,7 +961,7 @@ func TestAddSiteDefersTheCatalogueWalk(t *testing.T) {
 	a.seedBrazzers()
 	ctx := context.Background()
 
-	sr, err := a.mgr.AddSite(ctx, "site-1", nil, 0)
+	sr, err := a.mgr.AddSite(ctx, siteRef("site-1"), nil, 0)
 	if err != nil {
 		t.Fatalf("AddSite: %v", err)
 	}
@@ -994,11 +1001,11 @@ func TestAddSiteTwiceIsOneSite(t *testing.T) {
 	a.seedBrazzers()
 	ctx := context.Background()
 
-	first, err := a.mgr.AddSite(ctx, "site-1", nil, 0)
+	first, err := a.mgr.AddSite(ctx, siteRef("site-1"), nil, 0)
 	if err != nil {
 		t.Fatalf("AddSite: %v", err)
 	}
-	second, err := a.mgr.AddSite(ctx, "site-1", nil, 0)
+	second, err := a.mgr.AddSite(ctx, siteRef("site-1"), nil, 0)
 	if err != nil {
 		t.Fatalf("AddSite again: %v", err)
 	}
@@ -1021,7 +1028,7 @@ func TestAddSiteAndWaitLandsTheCatalogueBeforeReturning(t *testing.T) {
 	a := newAdultHarness(t, true)
 	a.seedBrazzers()
 
-	sr, err := a.mgr.AddSiteAndWait(context.Background(), "site-1", nil, 0)
+	sr, err := a.mgr.AddSiteAndWait(context.Background(), siteRef("site-1"), nil, 0)
 	if err != nil {
 		t.Fatalf("AddSiteAndWait: %v", err)
 	}
@@ -1055,7 +1062,7 @@ func TestSyncSiteIsANoOpWhenThereIsNothingToWalk(t *testing.T) {
 		t.Errorf("SyncSite filed %d scenes under a television series", len(eps))
 	}
 
-	sr, err := a.mgr.AddSite(ctx, "site-1", nil, 0)
+	sr, err := a.mgr.AddSite(ctx, siteRef("site-1"), nil, 0)
 	if err != nil {
 		t.Fatalf("AddSite: %v", err)
 	}
@@ -1079,7 +1086,7 @@ func TestAddSiteUnmonitoredLeavesItsScenesUnmonitored(t *testing.T) {
 	a.seedBrazzers()
 	ctx := context.Background()
 
-	sr, err := a.mgr.AddSiteAndWait(ctx, "site-1", ptr(false), 0)
+	sr, err := a.mgr.AddSiteAndWait(ctx, siteRef("site-1"), ptr(false), 0)
 	if err != nil {
 		t.Fatalf("AddSiteAndWait: %v", err)
 	}
@@ -1188,7 +1195,7 @@ func TestCatalogueWalkPublishesEachYearBeforeItFinishes(t *testing.T) {
 	a.seedThreeYears()
 	ctx := context.Background()
 
-	sr, err := a.mgr.AddSite(ctx, "site-1", nil, 0)
+	sr, err := a.mgr.AddSite(ctx, siteRef("site-1"), nil, 0)
 	if err != nil {
 		t.Fatalf("AddSite: %v", err)
 	}
@@ -1309,7 +1316,7 @@ func TestFailedWalkKeepsTheYearsItAlreadyPublished(t *testing.T) {
 	a.seedThreeYears()
 	ctx := context.Background()
 
-	sr, err := a.mgr.AddSite(ctx, "site-1", nil, 0)
+	sr, err := a.mgr.AddSite(ctx, siteRef("site-1"), nil, 0)
 	if err != nil {
 		t.Fatalf("AddSite: %v", err)
 	}

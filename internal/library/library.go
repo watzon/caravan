@@ -69,7 +69,7 @@ type Manager struct {
 	// call site.
 	adult core.AdultMetadataProvider
 	// providers resolves a library's own provider choice; nil outside the
-	// full wiring. See metadataFor/adultFor for the fallback rule.
+	// full wiring. See metadataFor/adultByID for the fallback rule.
 	providers Providers
 	root      string
 

@@ -249,7 +249,7 @@ func TestAdapterAddSiteRefusesWhileTheModuleIsOff(t *testing.T) {
 
 	seedInstance(t, ctx, st, core.ProviderStashbox, "StashDB", fake.URL(), "secret")
 
-	if _, err := adapter.AddSite(ctx, "site-1", nil, 0); err == nil {
+	if _, err := adapter.AddSite(ctx, core.ItemRef{Provider: core.ProviderStashbox, Ref: "site-1"}, nil, 0); err == nil {
 		t.Fatal("AddSite succeeded with the module off")
 	}
 	if n := fake.Count(); n != 0 {

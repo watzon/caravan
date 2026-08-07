@@ -632,26 +632,26 @@ func (a *libraryAdapter) AddSeries(ctx context.Context, ref core.ItemRef, monito
 	return mgr.AddSeries(ctx, ref, monitored, libraryID)
 }
 
-// AddSite adds a site by stash-box id. It goes through current like every other
+// AddSite adds a site by (instance, stash-box id). It goes through current like every other
 // add, so the storage root and both providers are whatever the settings table
 // says right now — including "the module was switched off a moment ago", which
 // current resolves to a nil adult provider and library.AddSite refuses.
-func (a *libraryAdapter) AddSite(ctx context.Context, stashID string, monitored *bool, libraryID int64) (*core.Series, error) {
+func (a *libraryAdapter) AddSite(ctx context.Context, ref core.ItemRef, monitored *bool, libraryID int64) (*core.Series, error) {
 	mgr, err := a.current(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return mgr.AddSite(ctx, stashID, monitored, libraryID)
+	return mgr.AddSite(ctx, ref, monitored, libraryID)
 }
 
 // AddSiteAndWait is AddSite with the catalogue walk inline, for the scene
 // approval path. Same current() resolution, same refusal when the module is off.
-func (a *libraryAdapter) AddSiteAndWait(ctx context.Context, stashID string, monitored *bool, libraryID int64) (*core.Series, error) {
+func (a *libraryAdapter) AddSiteAndWait(ctx context.Context, ref core.ItemRef, monitored *bool, libraryID int64) (*core.Series, error) {
 	mgr, err := a.current(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return mgr.AddSiteAndWait(ctx, stashID, monitored, libraryID)
+	return mgr.AddSiteAndWait(ctx, ref, monitored, libraryID)
 }
 
 // SyncSite walks one site's catalogue, and is what the core.JobSyncSite handler
