@@ -339,20 +339,20 @@ func (a *libraryAdapter) Scan(ctx context.Context) error {
 	return nil
 }
 
-func (a *libraryAdapter) AddMovie(ctx context.Context, tmdbID int64, minAvailability string, monitored *bool, libraryID int64) (*core.Movie, error) {
+func (a *libraryAdapter) AddMovie(ctx context.Context, ref core.ItemRef, minAvailability string, monitored *bool, libraryID int64) (*core.Movie, error) {
 	mgr, err := a.current(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return mgr.AddMovie(ctx, tmdbID, minAvailability, monitored, libraryID)
+	return mgr.AddMovie(ctx, ref, minAvailability, monitored, libraryID)
 }
 
-func (a *libraryAdapter) AddSeries(ctx context.Context, tmdbID int64, monitored *bool, libraryID int64) (*core.Series, error) {
+func (a *libraryAdapter) AddSeries(ctx context.Context, ref core.ItemRef, monitored *bool, libraryID int64) (*core.Series, error) {
 	mgr, err := a.current(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return mgr.AddSeries(ctx, tmdbID, monitored, libraryID)
+	return mgr.AddSeries(ctx, ref, monitored, libraryID)
 }
 
 // AddSite adds a site by stash-box id. It goes through current like every other
@@ -453,13 +453,13 @@ func (a *libraryAdapter) RemoveSeries(ctx context.Context, id int64, deleteFiles
 
 // MatchUnmatched adapts the argument order and drops the import result, which
 // the HTTP layer does not return.
-func (a *libraryAdapter) MatchUnmatched(ctx context.Context, unmatchedID int64, mediaType string, tmdbID int64) error {
+func (a *libraryAdapter) MatchUnmatched(ctx context.Context, unmatchedID int64, mediaType string, ref core.ItemRef) error {
 	mgr, err := a.current(ctx)
 	if err != nil {
 		return err
 	}
 
-	result, err := mgr.ImportUnmatched(ctx, unmatchedID, tmdbID, mediaType)
+	result, err := mgr.ImportUnmatched(ctx, unmatchedID, ref, mediaType)
 	if err != nil {
 		return err
 	}

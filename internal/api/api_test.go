@@ -115,10 +115,11 @@ func (m *stubManager) Scan(ctx context.Context) error {
 	return m.scanErr
 }
 
-func (m *stubManager) AddMovie(ctx context.Context, tmdbID int64, minAvailability string, monitored *bool, libraryID int64) (*core.Movie, error) {
+func (m *stubManager) AddMovie(ctx context.Context, ref core.ItemRef, minAvailability string, monitored *bool, libraryID int64) (*core.Movie, error) {
 	if m.addErr != nil {
 		return nil, m.addErr
 	}
+	tmdbID := ref.TMDBID()
 	// The stub persists minAvailability and the monitored choice verbatim (the
 	// store defaults an empty availability), so handler tests can read the row
 	// back to prove the plumbing. It follows the real manager's rule for an
@@ -131,10 +132,11 @@ func (m *stubManager) AddMovie(ctx context.Context, tmdbID int64, minAvailabilit
 	return mv, nil
 }
 
-func (m *stubManager) AddSeries(ctx context.Context, tmdbID int64, monitored *bool, libraryID int64) (*core.Series, error) {
+func (m *stubManager) AddSeries(ctx context.Context, ref core.ItemRef, monitored *bool, libraryID int64) (*core.Series, error) {
 	if m.addErr != nil {
 		return nil, m.addErr
 	}
+	tmdbID := ref.TMDBID()
 	sr := &core.Series{TMDBID: tmdbID, Title: "Stub Series", SortTitle: "stub series", Year: 2016,
 		Monitored: monitored == nil || *monitored}
 	if err := m.st.UpsertSeries(ctx, sr); err != nil {
@@ -188,9 +190,9 @@ func (m *stubManager) removeCalls() []removeCall {
 	return append([]removeCall(nil), m.removes...)
 }
 
-func (m *stubManager) MatchUnmatched(ctx context.Context, id int64, mediaType string, tmdbID int64) error {
+func (m *stubManager) MatchUnmatched(ctx context.Context, id int64, mediaType string, ref core.ItemRef) error {
 	m.mu.Lock()
-	m.matches = append(m.matches, matchCall{id: id, mediaType: mediaType, tmdbID: tmdbID})
+	m.matches = append(m.matches, matchCall{id: id, mediaType: mediaType, tmdbID: ref.TMDBID()})
 	m.mu.Unlock()
 	return m.matchErr
 }

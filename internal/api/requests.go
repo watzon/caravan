@@ -317,14 +317,14 @@ func (s *server) handleApproveRequest(w http.ResponseWriter, r *http.Request) {
 		// Omission keeps the historical monitored default. An explicit false is
 		// useful when an admin approves a request but does not want automatic
 		// searches for future releases.
-		m, err := s.addMovieToLibrary(ctx, req.TMDBID, body.SearchNow, minAvailability, body.Monitored, body.QualityProfileID, 0)
+		m, err := s.addMovieToLibrary(ctx, core.TMDBRef(req.TMDBID), body.SearchNow, minAvailability, body.Monitored, body.QualityProfileID, 0)
 		if err != nil {
 			s.writeManagerError(w, "add movie", err)
 			return
 		}
 		out["movie"] = movieDTO(*m)
 	default:
-		sr, err := s.addSeriesToLibrary(ctx, req.TMDBID, body.SearchNow, body.Seasons, body.Monitored, body.QualityProfileID, 0)
+		sr, err := s.addSeriesToLibrary(ctx, core.TMDBRef(req.TMDBID), body.SearchNow, body.Seasons, body.Monitored, body.QualityProfileID, 0)
 		if err != nil {
 			s.writeManagerError(w, "add series", err)
 			return

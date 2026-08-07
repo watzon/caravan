@@ -91,14 +91,22 @@ func (s *stubProvider) SearchMovies(_ context.Context, _ string) ([]core.MovieMe
 	if s.searchErr != nil {
 		return nil, s.searchErr
 	}
-	return s.movies, nil
+	out := make([]core.MovieMeta, len(s.movies))
+	for i, m := range s.movies {
+		out[i] = stubMovieMeta(m)
+	}
+	return out, nil
 }
 
 func (s *stubProvider) SearchSeries(_ context.Context, _ string) ([]core.SeriesMeta, error) {
 	if s.searchErr != nil {
 		return nil, s.searchErr
 	}
-	return s.series, nil
+	out := make([]core.SeriesMeta, len(s.series))
+	for i, sr := range s.series {
+		out[i] = stubSeriesMeta(sr)
+	}
+	return out, nil
 }
 
 func (s *stubProvider) GetMovie(_ context.Context, ref string) (*core.MovieMeta, error) {
@@ -106,6 +114,7 @@ func (s *stubProvider) GetMovie(_ context.Context, ref string) (*core.MovieMeta,
 		return nil, s.getErr
 	}
 	if m, ok := s.movieByID[stubRefID(ref)]; ok {
+		m = stubMovieMeta(m)
 		return &m, nil
 	}
 	return nil, errors.New("stub: no such movie")
@@ -116,9 +125,31 @@ func (s *stubProvider) GetSeries(_ context.Context, ref string) (*core.SeriesMet
 		return nil, s.getErr
 	}
 	if sr, ok := s.seriesByID[stubRefID(ref)]; ok {
+		sr = stubSeriesMeta(sr)
 		return &sr, nil
 	}
 	return nil, errors.New("stub: no such series")
+}
+
+// stubMovieMeta and stubSeriesMeta stamp the provider identity every real
+// client puts on every answer it returns (see tmdb.movieMeta), so the fixtures
+// below can stay keyed by a bare TMDB id while the code under test reads refs.
+// A fixture that names its own provider — one standing in for a second
+// registry client — is left exactly as written.
+func stubMovieMeta(m core.MovieMeta) core.MovieMeta {
+	if m.Provider == "" && m.TMDBID != 0 {
+		ref := core.TMDBRef(m.TMDBID)
+		m.Provider, m.ProviderRef = ref.Provider, ref.Ref
+	}
+	return m
+}
+
+func stubSeriesMeta(s core.SeriesMeta) core.SeriesMeta {
+	if s.Provider == "" && s.TMDBID != 0 {
+		ref := core.TMDBRef(s.TMDBID)
+		s.Provider, s.ProviderRef = ref.Provider, ref.Ref
+	}
+	return s
 }
 
 // stubRefID parses a TMDB-shaped ref back into the int64 the stub's fixture

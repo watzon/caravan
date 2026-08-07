@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/watzon/caravan/internal/core"
@@ -45,12 +44,19 @@ func dispositionFor(rel string) sourceDisposition {
 //
 // On success the file is organized, its metadata rows are written, and the
 // unmatched entry is cleared.
-func (m *Manager) ImportUnmatched(ctx context.Context, unmatchedID, tmdbID int64, mediaType string) (*ImportResult, error) {
-	if m.provider == nil {
-		return nil, core.ErrNoMetadataProvider
+//
+// ref names the provider the user's choice came from and that provider's own
+// id for it, and it is the only thing that decides which client is asked.
+// There is deliberately no Manager-level provider gate in front of that: an
+// install whose libraries identify through some other provider entirely has no
+// TMDB client, and must still be able to match a parked file.
+func (m *Manager) ImportUnmatched(ctx context.Context, unmatchedID int64, ref core.ItemRef, mediaType string) (*ImportResult, error) {
+	if !ref.Valid() {
+		return nil, fmt.Errorf("library: invalid provider ref %q/%q", ref.Provider, ref.Ref)
 	}
-	if tmdbID <= 0 {
-		return nil, fmt.Errorf("library: invalid tmdb id %d", tmdbID)
+	provider := m.providerByID(ctx, ref.Provider)
+	if provider == nil {
+		return nil, core.ErrNoMetadataProvider
 	}
 
 	u, err := m.store.GetUnmatchedFile(ctx, unmatchedID)
@@ -69,18 +75,12 @@ func (m *Manager) ImportUnmatched(ctx context.Context, unmatchedID, tmdbID int64
 
 	switch mediaType {
 	case MediaTypeMovie:
-		// The same library the import below will resolve, so its provider
-		// choice answers the metadata fetch.
-		lib, err := m.movieLibrary(ctx, tmdbID, u.Path, u.LibraryID)
+		meta, err := provider.GetMovie(ctx, ref.Ref)
 		if err != nil {
-			return nil, err
-		}
-		meta, err := m.metadataFor(ctx, lib).GetMovie(ctx, strconv.FormatInt(tmdbID, 10))
-		if err != nil {
-			return nil, fmt.Errorf("library: get movie %d: %w", tmdbID, err)
+			return nil, fmt.Errorf("library: get movie %s/%s: %w", ref.Provider, ref.Ref, err)
 		}
 		if meta == nil {
-			return nil, fmt.Errorf("library: movie %d not found", tmdbID)
+			return nil, fmt.Errorf("library: movie %s/%s not found", ref.Provider, ref.Ref)
 		}
 		res.Path, res.MovieID, err = m.importMovie(ctx, meta, u.Path, info.Size(), u.Parsed, warn, dispositionFor(u.Path), u.LibraryID)
 		if err != nil {
@@ -91,16 +91,12 @@ func (m *Manager) ImportUnmatched(ctx context.Context, unmatchedID, tmdbID int64
 		if !u.Parsed.IsEpisode() {
 			return nil, fmt.Errorf("library: %q has no season/episode number to import as an episode", u.Path)
 		}
-		lib, err := m.seriesLibrary(ctx, tmdbID, u.Path, u.LibraryID)
+		meta, err := provider.GetSeries(ctx, ref.Ref)
 		if err != nil {
-			return nil, err
-		}
-		meta, err := m.metadataFor(ctx, lib).GetSeries(ctx, strconv.FormatInt(tmdbID, 10))
-		if err != nil {
-			return nil, fmt.Errorf("library: get series %d: %w", tmdbID, err)
+			return nil, fmt.Errorf("library: get series %s/%s: %w", ref.Provider, ref.Ref, err)
 		}
 		if meta == nil {
-			return nil, fmt.Errorf("library: series %d not found", tmdbID)
+			return nil, fmt.Errorf("library: series %s/%s not found", ref.Provider, ref.Ref)
 		}
 		res.Path, res.SeriesID, err = m.importEpisode(ctx, meta, u.Path, info.Size(), u.Parsed, warn, dispositionFor(u.Path), u.LibraryID)
 		if err != nil {

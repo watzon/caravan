@@ -25,7 +25,7 @@ func (m *Manager) importMovie(ctx context.Context, meta *core.MovieMeta, rel str
 	// The library is decided before the file is placed: the movie's own row
 	// when it has one, else the library whose root holds rel, else the movie
 	// default (libraries.go). Only then is a destination path built from it.
-	lib, err := m.movieLibrary(ctx, meta.TMDBID, rel, targetLibraryID)
+	lib, err := m.movieLibrary(ctx, meta.Ref(), rel, targetLibraryID)
 	if err != nil {
 		return "", 0, err
 	}
@@ -49,7 +49,8 @@ func (m *Manager) importMovie(ctx context.Context, meta *core.MovieMeta, rel str
 	if err != nil {
 		return "", 0, err
 	}
-	if created {
+	// Requests stay TMDB-keyed, so a non-TMDB add absorbs nothing.
+	if created && meta.TMDBID != 0 {
 		m.absorbRequests(ctx, core.MediaTypeMovie, meta.TMDBID, warn)
 	}
 
@@ -74,7 +75,7 @@ func (m *Manager) importEpisode(ctx context.Context, meta *core.SeriesMeta, rel 
 		return "", 0, fmt.Errorf("library: %s has no episode number", rel)
 	}
 
-	lib, err := m.seriesLibrary(ctx, meta.TMDBID, rel, targetLibraryID)
+	lib, err := m.seriesLibrary(ctx, meta.Ref(), rel, targetLibraryID)
 	if err != nil {
 		return "", 0, err
 	}
@@ -102,7 +103,8 @@ func (m *Manager) importEpisode(ctx context.Context, meta *core.SeriesMeta, rel 
 	if err := m.upsertSeriesTree(ctx, sr, meta); err != nil {
 		return "", 0, err
 	}
-	if created {
+	// TMDB-keyed, exactly as importMovie's is.
+	if created && meta.TMDBID != 0 {
 		m.absorbRequests(ctx, core.MediaTypeSeries, meta.TMDBID, warn)
 	}
 	episodeIDs, err := m.ensureEpisodes(ctx, sr.ID, p.Season, p.Episodes)
@@ -227,8 +229,69 @@ func monitoredOrDefault(monitored *bool) bool {
 	return *monitored
 }
 
+// existingMovieRow finds the row a provider answer is an update of, or nil
+// when there is none. It is the read side of store.UpsertMovie's rung order:
+// the pinned ref first, the TMDB id as the compatibility alias behind it.
+//
+// The TMDB rung is reachable only for a TMDB-shaped (or ref-less) answer. An
+// AniList answer that happened to carry a TMDB id must NOT collapse onto the
+// row TMDB identified: two providers' descriptions of a title are two rows
+// until somebody says otherwise, and silently merging them is the drift the
+// pinned ref exists to prevent.
+func (m *Manager) existingMovieRow(ctx context.Context, ref core.ItemRef, tmdbID int64) (*core.Movie, error) {
+	if ref.Valid() {
+		existing, err := m.store.GetMovieByProviderRef(ctx, ref.Provider, ref.Ref)
+		if err == nil {
+			return existing, nil
+		}
+		if !errors.Is(err, store.ErrNotFound) {
+			return nil, err
+		}
+	}
+	if tmdbID == 0 || (ref.Provider != "" && ref.Provider != core.ProviderTMDB) {
+		return nil, nil
+	}
+	existing, err := m.store.GetMovieByTMDBID(ctx, tmdbID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return existing, nil
+}
+
+// existingSeriesRow is existingMovieRow's series twin, with the same rung
+// order and the same refusal to cross providers.
+func (m *Manager) existingSeriesRow(ctx context.Context, ref core.ItemRef, tmdbID int64) (*core.Series, error) {
+	if ref.Valid() {
+		existing, err := m.store.GetSeriesByProviderRef(ctx, ref.Provider, ref.Ref)
+		if err == nil {
+			return existing, nil
+		}
+		if !errors.Is(err, store.ErrNotFound) {
+			return nil, err
+		}
+	}
+	if tmdbID == 0 || (ref.Provider != "" && ref.Provider != core.ProviderTMDB) {
+		return nil, nil
+	}
+	existing, err := m.store.GetSeriesByTMDBID(ctx, tmdbID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return existing, nil
+}
+
 // upsertMovieRow refreshes provider metadata onto the movies row, creating it
-// when the TMDB id is new, and reports whether the row was created.
+// when the provider ref is new, and reports whether the row was created.
+//
+// The row carries the identity of the provider that answered (Provider and
+// ProviderRef straight off the meta): pinning happens at the write door, so
+// every later refresh of this item asks the provider that actually knows it.
 //
 // A rescan must not overwrite user intent, so the monitored flag, the quality
 // profile assignment, the minimum availability, and the original add time
@@ -243,6 +306,8 @@ func monitoredOrDefault(monitored *bool) bool {
 // vanished — is healed to the resolved value.
 func (m *Manager) upsertMovieRow(ctx context.Context, meta *core.MovieMeta, dir, posterRel, minAvailability string, monitored *bool, libraryID int64) (*core.Movie, bool, error) {
 	mv := &core.Movie{
+		Provider:        meta.Provider,
+		ProviderRef:     meta.ProviderRef,
 		TMDBID:          meta.TMDBID,
 		IMDBID:          meta.IMDBID,
 		Title:           meta.Title,
@@ -260,27 +325,24 @@ func (m *Manager) upsertMovieRow(ctx context.Context, meta *core.MovieMeta, dir,
 		MinAvailability: minAvailability,
 	}
 
-	created := true
-	if meta.TMDBID != 0 {
-		existing, err := m.store.GetMovieByTMDBID(ctx, meta.TMDBID)
-		switch {
-		case err == nil:
-			created = false
-			mv.ID = existing.ID
-			mv.Monitored = existing.Monitored
-			mv.QualityProfileID = existing.QualityProfileID
-			mv.AddedAt = existing.AddedAt
-			if existing.LibraryID != 0 {
-				mv.LibraryID = existing.LibraryID
-			}
-			if posterRel == "" {
-				mv.PosterPath = existing.PosterPath
-			}
-			if minAvailability == "" {
-				mv.MinAvailability = existing.MinAvailability
-			}
-		case !errors.Is(err, store.ErrNotFound):
-			return nil, false, err
+	existing, err := m.existingMovieRow(ctx, meta.Ref(), meta.TMDBID)
+	if err != nil {
+		return nil, false, err
+	}
+	created := existing == nil
+	if existing != nil {
+		mv.ID = existing.ID
+		mv.Monitored = existing.Monitored
+		mv.QualityProfileID = existing.QualityProfileID
+		mv.AddedAt = existing.AddedAt
+		if existing.LibraryID != 0 {
+			mv.LibraryID = existing.LibraryID
+		}
+		if posterRel == "" {
+			mv.PosterPath = existing.PosterPath
+		}
+		if minAvailability == "" {
+			mv.MinAvailability = existing.MinAvailability
 		}
 	}
 
@@ -294,40 +356,39 @@ func (m *Manager) upsertMovieRow(ctx context.Context, meta *core.MovieMeta, dir,
 // preserve-user-intent rule (including libraryID's decide-new-heal-zero rule).
 func (m *Manager) upsertSeriesRow(ctx context.Context, meta *core.SeriesMeta, dir, posterRel string, monitored *bool, libraryID int64) (*core.Series, bool, error) {
 	sr := &core.Series{
-		TMDBID:     meta.TMDBID,
-		TVDBID:     meta.TVDBID,
-		IMDBID:     meta.IMDBID,
-		Title:      meta.Title,
-		SortTitle:  sortTitle(meta.Title),
-		Year:       meta.Year,
-		Overview:   meta.Overview,
-		Status:     meta.Status,
-		Path:       dir,
-		PosterPath: posterRel,
-		PosterURL:  meta.PosterURL,
-		Monitored:  monitoredOrDefault(monitored),
-		LibraryID:  libraryID,
-		FirstAired: meta.FirstAirDate,
+		Provider:    meta.Provider,
+		ProviderRef: meta.ProviderRef,
+		TMDBID:      meta.TMDBID,
+		TVDBID:      meta.TVDBID,
+		IMDBID:      meta.IMDBID,
+		Title:       meta.Title,
+		SortTitle:   sortTitle(meta.Title),
+		Year:        meta.Year,
+		Overview:    meta.Overview,
+		Status:      meta.Status,
+		Path:        dir,
+		PosterPath:  posterRel,
+		PosterURL:   meta.PosterURL,
+		Monitored:   monitoredOrDefault(monitored),
+		LibraryID:   libraryID,
+		FirstAired:  meta.FirstAirDate,
 	}
 
-	created := true
-	if meta.TMDBID != 0 {
-		existing, err := m.store.GetSeriesByTMDBID(ctx, meta.TMDBID)
-		switch {
-		case err == nil:
-			created = false
-			sr.ID = existing.ID
-			sr.Monitored = existing.Monitored
-			sr.QualityProfileID = existing.QualityProfileID
-			sr.AddedAt = existing.AddedAt
-			if existing.LibraryID != 0 {
-				sr.LibraryID = existing.LibraryID
-			}
-			if posterRel == "" {
-				sr.PosterPath = existing.PosterPath
-			}
-		case !errors.Is(err, store.ErrNotFound):
-			return nil, false, err
+	existing, err := m.existingSeriesRow(ctx, meta.Ref(), meta.TMDBID)
+	if err != nil {
+		return nil, false, err
+	}
+	created := existing == nil
+	if existing != nil {
+		sr.ID = existing.ID
+		sr.Monitored = existing.Monitored
+		sr.QualityProfileID = existing.QualityProfileID
+		sr.AddedAt = existing.AddedAt
+		if existing.LibraryID != 0 {
+			sr.LibraryID = existing.LibraryID
+		}
+		if posterRel == "" {
+			sr.PosterPath = existing.PosterPath
 		}
 	}
 

@@ -8,7 +8,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/watzon/caravan/internal/core"
@@ -405,10 +404,13 @@ func (m *Manager) matchAndImportEpisode(ctx context.Context, lib *core.Library, 
 		return "", nil
 	}
 
+	// Through the ref the search answer identified itself by, and through the
+	// provider that answered: a search result's id is written in that
+	// provider's vocabulary and means nothing to any other one.
 	meta := results[idx]
-	full, err := provider.GetSeries(ctx, strconv.FormatInt(meta.TMDBID, 10))
+	full, err := provider.GetSeries(ctx, meta.Ref().Ref)
 	if err != nil {
-		res.addErr("get series %d for %s: %v", meta.TMDBID, rel, err)
+		res.addErr("get series %s for %s: %v", meta.Ref().Ref, rel, err)
 		park(reasonProviderErr)
 		return "", nil
 	}

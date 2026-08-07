@@ -134,7 +134,7 @@ func (s *server) handleImportMatch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "not found")
 		return
 	}
-	if err := s.mgr.MatchUnmatched(r.Context(), id, body.Type, body.TMDBID); err != nil {
+	if err := s.mgr.MatchUnmatched(r.Context(), id, body.Type, core.TMDBRef(body.TMDBID)); err != nil {
 		s.writeManagerError(w, "match unmatched file", err)
 		return
 	}

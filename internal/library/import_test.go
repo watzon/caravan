@@ -39,7 +39,7 @@ func TestImportUnmatchedMovie(t *testing.T) {
 	u := parkOne(h, rel, core.ParsedRelease{Title: "bbb final cut", Confidence: 0.9})
 
 	ctx := context.Background()
-	res, err := h.mgr.ImportUnmatched(ctx, u.ID, 10378, MediaTypeMovie)
+	res, err := h.mgr.ImportUnmatched(ctx, u.ID, core.TMDBRef(10378), MediaTypeMovie)
 	if err != nil {
 		t.Fatalf("ImportUnmatched: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestImportUnmatchedEpisode(t *testing.T) {
 	u := parkOne(h, rel, core.ParsedRelease{Title: "pe2", Season: 1, Episodes: []int{3}, Confidence: 0.9})
 
 	ctx := context.Background()
-	res, err := h.mgr.ImportUnmatched(ctx, u.ID, 42, MediaTypeSeries)
+	res, err := h.mgr.ImportUnmatched(ctx, u.ID, core.TMDBRef(42), MediaTypeSeries)
 	if err != nil {
 		t.Fatalf("ImportUnmatched: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestImportUnmatchedCreatesUnknownEpisode(t *testing.T) {
 	u := parkOne(h, rel, core.ParsedRelease{Title: "pe2", Season: 1, Episodes: []int{9}, Confidence: 0.9})
 
 	ctx := context.Background()
-	res, err := h.mgr.ImportUnmatched(ctx, u.ID, 42, MediaTypeSeries)
+	res, err := h.mgr.ImportUnmatched(ctx, u.ID, core.TMDBRef(42), MediaTypeSeries)
 	if err != nil {
 		t.Fatalf("ImportUnmatched: %v", err)
 	}
@@ -172,12 +172,12 @@ func TestImportUnmatchedRejectsBadRequests(t *testing.T) {
 	}{
 		{"unknown media type", u.ID, 10378, "album", "unknown media type"},
 		{"unknown unmatched id", u.ID + 999, 10378, MediaTypeMovie, "not found"},
-		{"invalid tmdb id", u.ID, 0, MediaTypeMovie, "invalid tmdb id"},
+		{"invalid provider ref", u.ID, 0, MediaTypeMovie, "invalid provider ref"},
 		{"movie id used as series", u.ID, 10378, MediaTypeSeries, "no season/episode number"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := h.mgr.ImportUnmatched(ctx, tt.id, tt.tmdbID, tt.mediaType)
+			_, err := h.mgr.ImportUnmatched(ctx, tt.id, core.TMDBRef(tt.tmdbID), tt.mediaType)
 			if err == nil {
 				t.Fatalf("ImportUnmatched succeeded, want an error")
 			}
@@ -210,7 +210,7 @@ func TestImportUnmatchedRequiresTheFileOnDisk(t *testing.T) {
 	if err := os.Remove(filepath.Join(h.root, filepath.FromSlash(rel))); err != nil {
 		t.Fatalf("remove: %v", err)
 	}
-	if _, err := h.mgr.ImportUnmatched(context.Background(), u.ID, 10378, MediaTypeMovie); err == nil {
+	if _, err := h.mgr.ImportUnmatched(context.Background(), u.ID, core.TMDBRef(10378), MediaTypeMovie); err == nil {
 		t.Fatal("ImportUnmatched succeeded for a file that is gone")
 	}
 }
@@ -221,7 +221,7 @@ func TestImportUnmatchedNeedsAProvider(t *testing.T) {
 	u := parkOne(h, rel, core.ParsedRelease{Title: "bbb", Confidence: 0.2})
 
 	h.mgr = h.newManager(h.st, nil)
-	if _, err := h.mgr.ImportUnmatched(context.Background(), u.ID, 10378, MediaTypeMovie); err == nil {
+	if _, err := h.mgr.ImportUnmatched(context.Background(), u.ID, core.TMDBRef(10378), MediaTypeMovie); err == nil {
 		t.Fatal("ImportUnmatched succeeded without a metadata provider")
 	}
 }

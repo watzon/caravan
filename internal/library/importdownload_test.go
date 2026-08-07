@@ -76,7 +76,7 @@ func (h *harness) events() []core.Event {
 func addMovieItem(h *harness) *core.Movie {
 	h.t.Helper()
 	seedMovie(h)
-	mv, err := h.mgr.AddMovie(context.Background(), 10378, "", nil, 0)
+	mv, err := h.mgr.AddMovie(context.Background(), core.TMDBRef(10378), "", nil, 0)
 	if err != nil {
 		h.t.Fatalf("AddMovie: %v", err)
 	}
@@ -87,7 +87,7 @@ func addMovieItem(h *harness) *core.Movie {
 func addSeriesItem(h *harness) *core.Series {
 	h.t.Helper()
 	seedSeries(h)
-	sr, err := h.mgr.AddSeries(context.Background(), 42, nil, 0)
+	sr, err := h.mgr.AddSeries(context.Background(), core.TMDBRef(42), nil, 0)
 	if err != nil {
 		h.t.Fatalf("AddSeries: %v", err)
 	}
@@ -590,7 +590,7 @@ func TestImportDownloadSeasonPackLinksMultiEpisodeFileToEveryEpisode(t *testing.
 	meta := seedSeries(h)
 	meta.Seasons[0].Episodes = meta.Seasons[0].Episodes[:2]
 	h.provider.seriesByID[meta.TMDBID] = meta
-	sr, err := h.mgr.AddSeries(context.Background(), meta.TMDBID, nil, 0)
+	sr, err := h.mgr.AddSeries(context.Background(), core.TMDBRef(meta.TMDBID), nil, 0)
 	if err != nil {
 		t.Fatalf("AddSeries: %v", err)
 	}
@@ -890,7 +890,7 @@ func TestParkedImportIsResolvableByHand(t *testing.T) {
 		t.Fatalf("unmatched queue = %+v, want the unrecognized file parked", parked)
 	}
 
-	res, err := h.mgr.ImportUnmatched(ctx, parked[0].ID, 10378, MediaTypeMovie)
+	res, err := h.mgr.ImportUnmatched(ctx, parked[0].ID, core.TMDBRef(10378), MediaTypeMovie)
 	if err != nil {
 		t.Fatalf("ImportUnmatched: %v", err)
 	}

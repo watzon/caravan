@@ -185,15 +185,20 @@ func (m *Manager) SyncSite(ctx context.Context, seriesID int64) error {
 // that no provider made.
 func (m *Manager) upsertSiteRow(ctx context.Context, meta *core.SiteMeta, dir, posterRel string, monitored *bool, libraryID int64) (*core.Series, bool, error) {
 	sr := &core.Series{
-		StashID:    meta.StashID,
-		Title:      meta.Name,
-		SortTitle:  sortTitle(meta.Name),
-		Kind:       core.SeriesKindAdult,
-		Path:       dir,
-		PosterPath: posterRel,
-		PosterURL:  meta.ImageURL,
-		Monitored:  monitoredOrDefault(monitored),
-		LibraryID:  libraryID,
+		// A site is pinned like every other item: stash-box answered, and the
+		// stash id is its ref (store.normalizeSeriesProvider says the same from
+		// the other side, for rows written before 0024).
+		Provider:    core.ProviderStashbox,
+		ProviderRef: meta.StashID,
+		StashID:     meta.StashID,
+		Title:       meta.Name,
+		SortTitle:   sortTitle(meta.Name),
+		Kind:        core.SeriesKindAdult,
+		Path:        dir,
+		PosterPath:  posterRel,
+		PosterURL:   meta.ImageURL,
+		Monitored:   monitoredOrDefault(monitored),
+		LibraryID:   libraryID,
 	}
 
 	created := true

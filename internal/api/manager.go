@@ -20,21 +20,26 @@ type Manager interface {
 	// own result value is deliberately not part of this interface.
 	Scan(ctx context.Context) error
 
-	// AddMovie adds a movie to the library by provider id, fetching its
+	// AddMovie adds a movie to the library by provider ref, fetching its
 	// metadata, and returns the stored movie. minAvailability is the release
 	// stage its automatic search waits for; an empty string keeps an existing
 	// row's choice and defaults a new one.
+	//
+	// The ref carries the provider that identified the title as well as its id,
+	// because the id alone does not say which vocabulary it is written in. The
+	// HTTP bodies are still TMDB-shaped and the handlers build a TMDB ref from
+	// them; a ref-accepting body is a later phase.
 	//
 	// monitored is the add dialog's "Add and monitor" checkbox. Nil is the
 	// historical behaviour — monitored — and is what every caller that has no
 	// opinion passes, including request approval. It applies to a NEW row only;
 	// re-adding something already in the library keeps the owner's flag.
-	AddMovie(ctx context.Context, tmdbID int64, minAvailability string, monitored *bool, libraryID int64) (*core.Movie, error)
+	AddMovie(ctx context.Context, ref core.ItemRef, minAvailability string, monitored *bool, libraryID int64) (*core.Movie, error)
 
-	// AddSeries adds a series (with its seasons and episodes) by provider id.
+	// AddSeries adds a series (with its seasons and episodes) by provider ref.
 	// monitored is the series-level flag and reads exactly as AddMovie's; the
 	// season and episode rows keep their own monitored semantics.
-	AddSeries(ctx context.Context, tmdbID int64, monitored *bool, libraryID int64) (*core.Series, error)
+	AddSeries(ctx context.Context, ref core.ItemRef, monitored *bool, libraryID int64) (*core.Series, error)
 
 	// RemoveMovie stops tracking a movie. With deleteFiles set it deletes the
 	// movie's files from disk first; without it, only the rows go and a rescan
@@ -46,10 +51,10 @@ type Manager interface {
 	RemoveSeries(ctx context.Context, id int64, deleteFiles bool) error
 
 	// MatchUnmatched resolves a file parked in the scan-review queue against a
-	// provider id and imports it. mediaType is MediaTypeMovie or
+	// provider ref and imports it. mediaType is MediaTypeMovie or
 	// MediaTypeSeries; for a series, the season and episode numbers come from
 	// the parked file's parsed guess.
-	MatchUnmatched(ctx context.Context, unmatchedID int64, mediaType string, tmdbID int64) error
+	MatchUnmatched(ctx context.Context, unmatchedID int64, mediaType string, ref core.ItemRef) error
 
 	// AddSite adds an adult site by stash-box id, as a series of kind adult
 	// with its scenes as episodes. It is AddSeries' counterpart, and it is a

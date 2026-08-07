@@ -9,7 +9,6 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/watzon/caravan/internal/core"
@@ -514,11 +513,13 @@ func replacementEvent(target, oldQuality, newQuality string, grab core.GrabInfo,
 // a provider id — which is a decision, not a failure, so it comes back with a
 // nil error for the caller to park on. A provider that is merely unreachable
 // *is* an error, because retrying it will work.
+//
+// The two conditions read alike and are not alike. A row with no ref can never
+// be fetched, whatever the settings say, so it parks; a row whose provider is
+// not configured is a setup step nobody has done yet, so it is
+// core.ErrNoMetadataProvider — an error, and retryable once the credential is
+// entered.
 func (m *Manager) movieMeta(ctx context.Context, movieID int64) (*core.MovieMeta, string, error) {
-	if m.provider == nil {
-		return nil, "", core.ErrNoMetadataProvider
-	}
-
 	mv, err := m.store.GetMovie(ctx, movieID)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, fmt.Sprintf("movie %d is no longer in the library", movieID), nil
@@ -526,30 +527,26 @@ func (m *Manager) movieMeta(ctx context.Context, movieID int64) (*core.MovieMeta
 	if err != nil {
 		return nil, "", err
 	}
-	if mv.TMDBID <= 0 {
-		return nil, fmt.Sprintf("movie %q has no TMDB id to import against", mv.Title), nil
+	if mv.ProviderRef == "" {
+		return nil, fmt.Sprintf("%q has no provider id to import against", mv.Title), nil
+	}
+	provider := m.providerByID(ctx, mv.Provider)
+	if provider == nil {
+		return nil, "", core.ErrNoMetadataProvider
 	}
 
-	lib, err := m.libraryByIDOrDefault(ctx, mv.LibraryID, core.LibraryKindMovie)
+	meta, err := provider.GetMovie(ctx, mv.ProviderRef)
 	if err != nil {
-		return nil, "", err
-	}
-	meta, err := m.metadataFor(ctx, lib).GetMovie(ctx, strconv.FormatInt(mv.TMDBID, 10))
-	if err != nil {
-		return nil, "", fmt.Errorf("library: get movie %d: %w", mv.TMDBID, err)
+		return nil, "", fmt.Errorf("library: get movie %s/%s: %w", mv.Provider, mv.ProviderRef, err)
 	}
 	if meta == nil {
-		return nil, fmt.Sprintf("movie %d is not in the metadata provider", mv.TMDBID), nil
+		return nil, fmt.Sprintf("movie %s is not in the metadata provider", mv.ProviderRef), nil
 	}
 	return meta, "", nil
 }
 
 // seriesMeta is movieMeta's series twin, with the same park-reason contract.
 func (m *Manager) seriesMeta(ctx context.Context, seriesID int64) (*core.SeriesMeta, string, error) {
-	if m.provider == nil {
-		return nil, "", core.ErrNoMetadataProvider
-	}
-
 	sr, err := m.store.GetSeries(ctx, seriesID)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, fmt.Sprintf("series %d is no longer in the library", seriesID), nil
@@ -557,20 +554,20 @@ func (m *Manager) seriesMeta(ctx context.Context, seriesID int64) (*core.SeriesM
 	if err != nil {
 		return nil, "", err
 	}
-	if sr.TMDBID <= 0 {
-		return nil, fmt.Sprintf("series %q has no TMDB id to import against", sr.Title), nil
+	if sr.ProviderRef == "" {
+		return nil, fmt.Sprintf("%q has no provider id to import against", sr.Title), nil
+	}
+	provider := m.providerByID(ctx, sr.Provider)
+	if provider == nil {
+		return nil, "", core.ErrNoMetadataProvider
 	}
 
-	lib, err := m.seriesLibraryOf(ctx, sr)
+	meta, err := provider.GetSeries(ctx, sr.ProviderRef)
 	if err != nil {
-		return nil, "", err
-	}
-	meta, err := m.metadataFor(ctx, lib).GetSeries(ctx, strconv.FormatInt(sr.TMDBID, 10))
-	if err != nil {
-		return nil, "", fmt.Errorf("library: get series %d: %w", sr.TMDBID, err)
+		return nil, "", fmt.Errorf("library: get series %s/%s: %w", sr.Provider, sr.ProviderRef, err)
 	}
 	if meta == nil {
-		return nil, fmt.Sprintf("series %d is not in the metadata provider", sr.TMDBID), nil
+		return nil, fmt.Sprintf("series %s is not in the metadata provider", sr.ProviderRef), nil
 	}
 	return meta, "", nil
 }

@@ -3,7 +3,6 @@ package library
 import (
 	"context"
 	"fmt"
-	"strconv"
 
 	"github.com/watzon/caravan/internal/core"
 )
@@ -40,10 +39,14 @@ func (r *RefreshResult) addErr(format string, args ...any) {
 //
 // Unmonitored titles are skipped: nothing downstream acts on their metadata,
 // and the sweep's cost is provider round trips.
+//
+// Every title is re-fetched through the provider that identified it, by that
+// provider's own ref (see providerByID). There is no Manager-level gate in
+// front of the sweep: an install whose items are all pinned to some other
+// provider has no TMDB client and still has a library to refresh, and a title
+// whose provider is not configured is one recorded error rather than a dead
+// sweep.
 func (m *Manager) RefreshLibrary(ctx context.Context) (*RefreshResult, error) {
-	if m.provider == nil {
-		return nil, core.ErrNoMetadataProvider
-	}
 	res := &RefreshResult{}
 
 	movies, err := m.store.ListMovies(ctx)
@@ -54,14 +57,15 @@ func (m *Manager) RefreshLibrary(ctx context.Context) (*RefreshResult, error) {
 		if err := ctx.Err(); err != nil {
 			return res, err
 		}
-		if !mv.Monitored || mv.TMDBID == 0 {
+		if !mv.Monitored || mv.ProviderRef == "" {
 			continue
 		}
-		lib, err := m.libraryByIDOrDefault(ctx, mv.LibraryID, core.LibraryKindMovie)
-		if err != nil {
-			return nil, err
+		provider := m.providerByID(ctx, mv.Provider)
+		if provider == nil {
+			res.addErr("refresh movie %q: provider %q is not configured", mv.Title, mv.Provider)
+			continue
 		}
-		meta, err := m.metadataFor(ctx, lib).GetMovie(ctx, strconv.FormatInt(mv.TMDBID, 10))
+		meta, err := provider.GetMovie(ctx, mv.ProviderRef)
 		if err != nil {
 			res.addErr("refresh movie %q: %v", mv.Title, err)
 			continue
@@ -89,14 +93,15 @@ func (m *Manager) RefreshLibrary(ctx context.Context) (*RefreshResult, error) {
 		if err := ctx.Err(); err != nil {
 			return res, err
 		}
-		if !sr.Monitored || sr.TMDBID == 0 {
+		if !sr.Monitored || sr.ProviderRef == "" {
 			continue
 		}
-		lib, err := m.seriesLibraryOf(ctx, &sr)
-		if err != nil {
-			return nil, err
+		provider := m.providerByID(ctx, sr.Provider)
+		if provider == nil {
+			res.addErr("refresh series %q: provider %q is not configured", sr.Title, sr.Provider)
+			continue
 		}
-		meta, err := m.metadataFor(ctx, lib).GetSeries(ctx, strconv.FormatInt(sr.TMDBID, 10))
+		meta, err := provider.GetSeries(ctx, sr.ProviderRef)
 		if err != nil {
 			res.addErr("refresh series %q: %v", sr.Title, err)
 			continue

@@ -399,7 +399,7 @@ func (s *server) handleAddMovie(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	m, err := s.addMovieToLibrary(r.Context(), body.TMDBID, body.SearchNow, body.MinAvailability, body.Monitored, body.QualityProfileID, body.LibraryID)
+	m, err := s.addMovieToLibrary(r.Context(), core.TMDBRef(body.TMDBID), body.SearchNow, body.MinAvailability, body.Monitored, body.QualityProfileID, body.LibraryID)
 	if err != nil {
 		s.writeManagerError(w, "add movie", err)
 		return
@@ -440,8 +440,11 @@ func (s *server) validQualityProfileID(w http.ResponseWriter, r *http.Request, p
 // is what makes "a pending request is absorbed when its title arrives" true
 // however the title arrived, and it is the one place a permission check goes
 // when Caravan grows more than one kind of user.
-func (s *server) addMovieToLibrary(ctx context.Context, tmdbID int64, searchNow bool, minAvailability string, monitored *bool, qualityProfileID, libraryID int64) (*core.Movie, error) {
-	m, err := s.mgr.AddMovie(ctx, tmdbID, minAvailability, monitored, libraryID)
+//
+// ref is the provider identity to add. Requests are still TMDB-keyed, so the
+// absorb step below reads the ref's TMDB id back out of it.
+func (s *server) addMovieToLibrary(ctx context.Context, ref core.ItemRef, searchNow bool, minAvailability string, monitored *bool, qualityProfileID, libraryID int64) (*core.Movie, error) {
+	m, err := s.mgr.AddMovie(ctx, ref, minAvailability, monitored, libraryID)
 	if err != nil {
 		return nil, err
 	}
@@ -451,7 +454,7 @@ func (s *server) addMovieToLibrary(ctx context.Context, tmdbID int64, searchNow 
 		}
 		m.QualityProfileID = qualityProfileID
 	}
-	s.absorbRequests(ctx, MediaTypeMovie, tmdbID)
+	s.absorbRequests(ctx, MediaTypeMovie, ref.TMDBID())
 	if searchNow {
 		if _, err := s.enqueueMovieSearch(ctx, m.ID); err != nil {
 			// The movie is in the library; failing the request now would tell
@@ -469,8 +472,8 @@ func (s *server) addMovieToLibrary(ctx context.Context, tmdbID int64, searchNow 
 // else the provider knows about lands unmonitored. It is the same season
 // selection the add dialog shows, and it is what makes a partial add absorb
 // only the part of a pending request it actually granted.
-func (s *server) addSeriesToLibrary(ctx context.Context, tmdbID int64, searchMissing bool, seasons []int, monitored *bool, qualityProfileID, libraryID int64) (*core.Series, error) {
-	sr, err := s.mgr.AddSeries(ctx, tmdbID, monitored, libraryID)
+func (s *server) addSeriesToLibrary(ctx context.Context, ref core.ItemRef, searchMissing bool, seasons []int, monitored *bool, qualityProfileID, libraryID int64) (*core.Series, error) {
+	sr, err := s.mgr.AddSeries(ctx, ref, monitored, libraryID)
 	if err != nil {
 		return nil, err
 	}
@@ -484,7 +487,7 @@ func (s *server) addSeriesToLibrary(ctx context.Context, tmdbID int64, searchMis
 	if err != nil {
 		return nil, err
 	}
-	s.absorbSeriesRequests(ctx, tmdbID, ungranted)
+	s.absorbSeriesRequests(ctx, ref.TMDBID(), ungranted)
 	if searchMissing {
 		// Episode rows exist by the time AddSeries returns, so the wanted list
 		// already names them. See addMovieToLibrary for why a failure here does
@@ -835,7 +838,7 @@ func (s *server) handleAddSeries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sr, err := s.addSeriesToLibrary(r.Context(), body.TMDBID, body.SearchMissing, body.Seasons, body.Monitored, body.QualityProfileID, body.LibraryID)
+	sr, err := s.addSeriesToLibrary(r.Context(), core.TMDBRef(body.TMDBID), body.SearchMissing, body.Seasons, body.Monitored, body.QualityProfileID, body.LibraryID)
 	if err != nil {
 		s.writeManagerError(w, "add series", err)
 		return

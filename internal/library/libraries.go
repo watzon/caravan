@@ -84,32 +84,29 @@ func (m *Manager) resolveLibrary(ctx context.Context, kind, rel string, targetID
 	return m.store.GetDefaultLibrary(ctx, kind)
 }
 
-// movieLibrary resolves the library a movie import or add lands in. rel is the
-// file being imported ("" for a file-less add); targetID is the add's explicit
-// choice (0 for none).
-func (m *Manager) movieLibrary(ctx context.Context, tmdbID int64, rel string, targetID int64) (*core.Library, error) {
-	if tmdbID != 0 {
-		existing, err := m.store.GetMovieByTMDBID(ctx, tmdbID)
-		if err == nil && existing.LibraryID != 0 {
-			return m.libraryByIDOrDefault(ctx, existing.LibraryID, core.LibraryKindMovie)
-		}
-		if err != nil && !errors.Is(err, store.ErrNotFound) {
-			return nil, err
-		}
+// movieLibrary resolves the library a movie import or add lands in. ref is the
+// provider identity of the title (see existingMovieRow for how a row is found
+// from it); rel is the file being imported ("" for a file-less add); targetID
+// is the add's explicit choice (0 for none).
+func (m *Manager) movieLibrary(ctx context.Context, ref core.ItemRef, rel string, targetID int64) (*core.Library, error) {
+	existing, err := m.existingMovieRow(ctx, ref, ref.TMDBID())
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil && existing.LibraryID != 0 {
+		return m.libraryByIDOrDefault(ctx, existing.LibraryID, core.LibraryKindMovie)
 	}
 	return m.resolveLibrary(ctx, core.LibraryKindMovie, rel, targetID)
 }
 
 // seriesLibrary is movieLibrary's television twin.
-func (m *Manager) seriesLibrary(ctx context.Context, tmdbID int64, rel string, targetID int64) (*core.Library, error) {
-	if tmdbID != 0 {
-		existing, err := m.store.GetSeriesByTMDBID(ctx, tmdbID)
-		if err == nil && existing.LibraryID != 0 {
-			return m.libraryByIDOrDefault(ctx, existing.LibraryID, core.LibraryKindTV)
-		}
-		if err != nil && !errors.Is(err, store.ErrNotFound) {
-			return nil, err
-		}
+func (m *Manager) seriesLibrary(ctx context.Context, ref core.ItemRef, rel string, targetID int64) (*core.Library, error) {
+	existing, err := m.existingSeriesRow(ctx, ref, ref.TMDBID())
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil && existing.LibraryID != 0 {
+		return m.libraryByIDOrDefault(ctx, existing.LibraryID, core.LibraryKindTV)
 	}
 	return m.resolveLibrary(ctx, core.LibraryKindTV, rel, targetID)
 }
@@ -152,6 +149,33 @@ func (m *Manager) metadataFor(ctx context.Context, lib *core.Library) core.Metad
 		}
 	}
 	return m.provider
+}
+
+// providerByID resolves ONE provider id through the registry, with NO
+// fallback. It is what an item's pinned ref is fetched through, and the
+// absent fallback is the whole point: metadataFor may degrade to the
+// Manager-level provider because "which provider refreshes this library" has
+// a sane default, but "which provider owns id 21" does not. Asking TMDB for
+// an AniList ref does not fail — it returns a different show, and writes it
+// over the row.
+//
+// The one exception is the TMDB id itself, and it is not a fallback across
+// providers: a registry that answers nil for "tmdb" is the pre-registry wiring
+// (and every test's seam), where the Manager-level provider IS the TMDB
+// client.
+func (m *Manager) providerByID(ctx context.Context, id string) core.MetadataProvider {
+	if id == "" {
+		return nil
+	}
+	if m.providers != nil {
+		if p := m.providers.Metadata(ctx, id); p != nil {
+			return p
+		}
+	}
+	if id == core.ProviderTMDB {
+		return m.provider
+	}
+	return nil
 }
 
 // adultFor is metadataFor's adult twin. It does NOT replace adultReady: the
