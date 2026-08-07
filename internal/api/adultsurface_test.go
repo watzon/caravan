@@ -33,6 +33,12 @@ var adultRoutes = []struct{ method, path string }{
 	{http.MethodGet, "/api/v1/adult/stash"},
 	{http.MethodPost, "/api/v1/adult/stash"},
 	{http.MethodPost, "/api/v1/adult/stash/test"},
+	{http.MethodGet, "/api/v1/adult/stashbox-instances"},
+	{http.MethodPost, "/api/v1/adult/stashbox-instances"},
+	{http.MethodPost, "/api/v1/adult/stashbox-instances/test"},
+	{http.MethodPut, "/api/v1/adult/stashbox-instances/1"},
+	{http.MethodDelete, "/api/v1/adult/stashbox-instances/1"},
+	{http.MethodPost, "/api/v1/adult/stashbox-instances/1/test"},
 }
 
 // fakeAdultProvider is a canned core.AdultMetadataProvider that records every
@@ -859,6 +865,11 @@ func TestMemberAllowlistNamesExactlyTheAdultReadRoutes(t *testing.T) {
 		http.MethodDelete + " /adult/sites/7",
 		http.MethodGet + " /adult/users",
 		http.MethodPut + " /adult/users/7/access",
+		http.MethodGet + " /adult/stashbox-instances",
+		http.MethodPost + " /adult/stashbox-instances",
+		http.MethodPut + " /adult/stashbox-instances/7",
+		http.MethodDelete + " /adult/stashbox-instances/7",
+		http.MethodPost + " /adult/stashbox-instances/7/test",
 		http.MethodPost + " /settings/adult",
 	}
 	for _, entry := range allowed {

@@ -693,12 +693,6 @@ func TestPutSettingsRejectsBadRequests(t *testing.T) {
 		{"unknown key", `{"nonsense":"1"}`},
 		{"malformed json", `{`},
 		{"wrong value type", `{"storage_root":42}`},
-		// An adult metadata endpoint that could never be dialled is rejected
-		// where the user can see it, not swallowed and re-surfaced much later
-		// as a request error inside a refresh nobody is watching.
-		{"stashbox endpoint with no scheme", `{"stashbox_endpoint":"theporndb.net/graphql"}`},
-		{"stashbox endpoint with an undialable scheme", `{"stashbox_endpoint":"ftp://theporndb.net/graphql"}`},
-		{"stashbox endpoint with no host", `{"stashbox_endpoint":"https:///graphql"}`},
 	}
 	baseline, err := st.AllSettings(context.Background())
 	if err != nil {
@@ -760,57 +754,6 @@ func TestPutSettingsRejectsMode(t *testing.T) {
 	decodeBody(t, rec, &settings)
 	if _, ok := settings[SettingMode]; ok {
 		t.Fatalf("settings exposed status-only mode: %v", settings)
-	}
-}
-
-func TestPutSettingsAcceptsStashboxCredentials(t *testing.T) {
-	h, st, _ := newTestServer(t)
-
-	// A blank endpoint is legal and means "the TPDB preset": pasting a key is
-	// the whole configuration for the default provider.
-	rec := do(t, h, http.MethodPut, "/api/v1/settings",
-		`{"stashbox_endpoint":"","stashbox_api_key":"sk-adult"}`)
-	wantStatus(t, rec, http.StatusOK)
-	if strings.Contains(rec.Body.String(), "sk-adult") ||
-		strings.Contains(rec.Body.String(), `"`+store.SettingStashboxAPIKey+`"`) {
-		t.Fatalf("settings response exposed stashbox credential: %s", rec.Body.String())
-	}
-
-	var settings map[string]string
-	decodeBody(t, rec, &settings)
-	if _, ok := settings[store.SettingStashboxEndpoint]; !ok {
-		t.Fatalf("stashbox_endpoint missing from %v, want the blank value stored", settings)
-	}
-	stored, err := st.GetSetting(t.Context(), store.SettingStashboxAPIKey)
-	if err != nil {
-		t.Fatalf("GetSetting stashbox_api_key: %v", err)
-	}
-	if stored != "sk-adult" {
-		t.Fatalf("stored stashbox_api_key = %q, want %q", stored, "sk-adult")
-	}
-
-	// Naming another box — StashDB, FansDB, a self-hosted one — is a config
-	// change, not a code change (PLAN phase 9 task 1).
-	rec = do(t, h, http.MethodPut, "/api/v1/settings",
-		`{"stashbox_endpoint":"https://stashdb.org/graphql"}`)
-	wantStatus(t, rec, http.StatusOK)
-	decodeBody(t, rec, &settings)
-	if settings[store.SettingStashboxEndpoint] != "https://stashdb.org/graphql" {
-		t.Fatalf("stashbox_endpoint = %q, want the new endpoint", settings[store.SettingStashboxEndpoint])
-	}
-
-	// An explicit empty field remains the credential's clear operation.
-	rec = do(t, h, http.MethodPut, "/api/v1/settings", `{"stashbox_api_key":""}`)
-	wantStatus(t, rec, http.StatusOK)
-	if strings.Contains(rec.Body.String(), `"`+store.SettingStashboxAPIKey+`"`) {
-		t.Fatalf("settings clear response exposed stashbox credential field: %s", rec.Body.String())
-	}
-	stored, err = st.GetSetting(t.Context(), store.SettingStashboxAPIKey)
-	if err != nil {
-		t.Fatalf("GetSetting cleared stashbox_api_key: %v", err)
-	}
-	if stored != "" {
-		t.Fatalf("stored stashbox_api_key after clear = %q, want empty", stored)
 	}
 }
 

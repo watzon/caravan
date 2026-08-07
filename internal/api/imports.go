@@ -127,7 +127,7 @@ func (s *server) handleImportMatch(w http.ResponseWriter, r *http.Request) {
 	if body.Type == MediaTypeSeries {
 		kind = core.LibraryKindTV
 	}
-	ref, ok := itemRefFrom(w, body.Provider, body.ProviderRef, body.TMDBID, kind)
+	ref, ok := s.itemRefFrom(r.Context(), w, body.Provider, body.ProviderRef, body.TMDBID, kind)
 	if !ok {
 		return
 	}

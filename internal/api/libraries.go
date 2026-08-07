@@ -143,11 +143,19 @@ func (s *server) libraryVisible(r *http.Request, kind string) (bool, error) {
 	return s.adultVisible(r)
 }
 
-// handleListProviders lists the compiled-in metadata providers the create form
-// offers. Providers that serve only adult kinds are omitted for callers the
-// module is absent to, for libraryVisible's reason: a name in a picker is a
-// trace of a module whose promise is absence.
+// handleListProviders lists the providers the create form and the chain editor
+// may offer.
+//
+// It is a MERGE of two registries, not one list. The compiled-in descriptors
+// (core.Providers) are protocols, and the adult kind is stripped from every one
+// of them — the static "Stash-box" descriptor therefore never ships, because
+// "stash-box" is a wire dialect and a chain element has to name a catalogue with
+// an account and its own UUIDs behind it. Those are the configured instances,
+// one descriptor each, and they are added only for a caller the module is
+// visible to: a name in a picker is a trace of a module whose promise is absence
+// (see libraryVisible).
 func (s *server) handleListProviders(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	adult, err := s.adultVisible(r)
 	if err != nil {
 		s.writeStoreError(w, "read adult settings", err)
@@ -162,7 +170,7 @@ func (s *server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 	for _, p := range core.Providers() {
 		kinds := make([]string, 0, len(p.Kinds))
 		for _, k := range p.Kinds {
-			if k == core.LibraryKindAdult && !adult {
+			if k == core.LibraryKindAdult {
 				continue
 			}
 			kinds = append(kinds, k)
@@ -171,6 +179,20 @@ func (s *server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		out = append(out, providerJSON{ID: p.ID, Name: p.Name, Kinds: kinds})
+	}
+	if adult {
+		instances, err := s.st.ListStashboxInstances(ctx)
+		if err != nil {
+			s.writeStoreError(w, "list stash-box instances", err)
+			return
+		}
+		for _, in := range instances {
+			out = append(out, providerJSON{
+				ID:    in.ProviderID,
+				Name:  in.Name,
+				Kinds: []string{core.LibraryKindAdult},
+			})
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"providers": out})
 }
@@ -214,7 +236,7 @@ func (s *server) handleCreateLibrary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	chain := chainFrom(body.Providers, body.Provider, body.Kind)
-	if !validProviderChain(w, chain, body.Kind) {
+	if !s.validProviderChain(ctx, w, chain, body.Kind) {
 		return
 	}
 	root, err := validateLibraryRoot(ctx, s.st, body.RootPath)
@@ -254,11 +276,18 @@ func chainFrom(providers []string, provider, kind string) []string {
 // refusal itself.
 //
 // Every element must serve the kind, which is what keeps an adult library's
-// chain to ["stashbox"] without a rule that says so: no other compiled-in
+// chain to stash-box ids without a rule that says so: no other compiled-in
 // provider serves the adult kind (core.ProviderServes). Duplicates are refused
 // because a chain is an ORDER, and an id appearing twice has no second meaning
 // — the walk would ask the same provider the same question again.
-func validProviderChain(w http.ResponseWriter, chain []string, kind string) bool {
+//
+// It is a method taking a context because the third rule is a database
+// question: an id whose base is stash-box has to name an instance that is
+// actually configured. ProviderServes answers on the base and so accepts
+// `stashbox:anything` that is well-formed, which is right for it — which kinds a
+// protocol serves is a compiled fact — and leaves "does this box exist here" to
+// be asked once, here.
+func (s *server) validProviderChain(ctx context.Context, w http.ResponseWriter, chain []string, kind string) bool {
 	if len(chain) == 0 {
 		writeError(w, http.StatusBadRequest, "at least one provider is required")
 		return false
@@ -272,6 +301,15 @@ func validProviderChain(w http.ResponseWriter, chain []string, kind string) bool
 		seen[id] = true
 		if !core.ProviderServes(id, kind) {
 			writeError(w, http.StatusBadRequest, "provider cannot serve this library kind")
+			return false
+		}
+		known, err := s.knownProviderInstance(ctx, id)
+		if err != nil {
+			s.writeStoreError(w, "get stash-box instance", err)
+			return false
+		}
+		if !known {
+			writeError(w, http.StatusBadRequest, "no stash-box instance named "+id+" is configured")
 			return false
 		}
 	}
@@ -427,7 +465,7 @@ func (s *server) handleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
 		} else {
 			chain = []string{*body.Provider}
 		}
-		if !validProviderChain(w, chain, lib.Kind) {
+		if !s.validProviderChain(ctx, w, chain, lib.Kind) {
 			return
 		}
 	}

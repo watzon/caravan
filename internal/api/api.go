@@ -369,6 +369,18 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	adult.HandleFunc("GET /adult/stash", s.handleGetStash)
 	adult.HandleFunc("POST /adult/stash", s.handleSetStash)
 	adult.HandleFunc("POST /adult/stash/test", s.handleTestStash)
+	// The configured stash-box endpoints (PLAN Part 2 phase 3). They are the
+	// adult module's metadata sources, so they belong on this subtree even
+	// though the screen that edits them is Settings → Metadata: a list of
+	// catalogues a household subscribes to is exactly what "absent when off"
+	// has to cover. /test with no id in the path probes an unsaved
+	// configuration, as the indexer category and download-client endpoints do.
+	adult.HandleFunc("GET /adult/stashbox-instances", s.handleListStashboxInstances)
+	adult.HandleFunc("POST /adult/stashbox-instances", s.handleCreateStashboxInstance)
+	adult.HandleFunc("POST /adult/stashbox-instances/test", s.handleTestStashboxInstanceConfig)
+	adult.HandleFunc("PUT /adult/stashbox-instances/{id}", s.handleUpdateStashboxInstance)
+	adult.HandleFunc("DELETE /adult/stashbox-instances/{id}", s.handleDeleteStashboxInstance)
+	adult.HandleFunc("POST /adult/stashbox-instances/{id}/test", s.handleTestStashboxInstance)
 	api.Handle("/adult/", s.requireAdult(adult))
 
 	// The master switch. It is the one adult route that cannot live behind

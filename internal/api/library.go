@@ -272,7 +272,13 @@ type addRequest struct {
 // telling it the answer outright. A ref pasted from a provider that is not on
 // the chain is still a true ref, and refusing it would quietly turn the chain
 // into a second allow-list nobody asked for.
-func itemRefFrom(w http.ResponseWriter, provider, providerRef string, tmdbID int64, kind string) (core.ItemRef, bool) {
+//
+// EXISTENCE is a different question from membership, and it is asked: a ref
+// naming a stash-box instance this install does not hold is a ref nothing can
+// ever be refreshed against, so it is refused here rather than pinned to a row
+// and discovered on the next refresh (see knownProviderInstance). That is why
+// this takes a context and hangs off the server.
+func (s *server) itemRefFrom(ctx context.Context, w http.ResponseWriter, provider, providerRef string, tmdbID int64, kind string) (core.ItemRef, bool) {
 	provider = strings.TrimSpace(provider)
 	providerRef = strings.TrimSpace(providerRef)
 
@@ -280,6 +286,15 @@ func itemRefFrom(w http.ResponseWriter, provider, providerRef string, tmdbID int
 	case provider != "" && providerRef != "":
 		if !core.ProviderServes(provider, kind) {
 			writeError(w, http.StatusBadRequest, "provider does not serve this kind of item")
+			return core.ItemRef{}, false
+		}
+		known, err := s.knownProviderInstance(ctx, provider)
+		if err != nil {
+			s.writeStoreError(w, "get stash-box instance", err)
+			return core.ItemRef{}, false
+		}
+		if !known {
+			writeError(w, http.StatusBadRequest, "no stash-box instance named "+provider+" is configured")
 			return core.ItemRef{}, false
 		}
 		return core.ItemRef{Provider: provider, Ref: providerRef}, true
@@ -429,7 +444,7 @@ func (s *server) handleAddMovie(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	ref, ok := itemRefFrom(w, body.Provider, body.ProviderRef, body.TMDBID, core.LibraryKindMovie)
+	ref, ok := s.itemRefFrom(r.Context(), w, body.Provider, body.ProviderRef, body.TMDBID, core.LibraryKindMovie)
 	if !ok {
 		return
 	}
@@ -880,7 +895,7 @@ func (s *server) handleAddSeries(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	ref, ok := itemRefFrom(w, body.Provider, body.ProviderRef, body.TMDBID, core.LibraryKindTV)
+	ref, ok := s.itemRefFrom(r.Context(), w, body.Provider, body.ProviderRef, body.TMDBID, core.LibraryKindTV)
 	if !ok {
 		return
 	}

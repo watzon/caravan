@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -53,8 +52,6 @@ var writableSettings = map[string]bool{
 	store.SettingTMDBAPIKey:             true,
 	store.SettingTheTVDBAPIKey:          true,
 	store.SettingTheTVDBPIN:             true,
-	store.SettingStashboxEndpoint:       true,
-	store.SettingStashboxAPIKey:         true,
 	store.SettingRSSSyncIntervalMinutes: true,
 	store.SettingBacklogIntervalMinutes: true,
 	store.SettingRefreshIntervalMinutes: true,
@@ -97,8 +94,6 @@ var trimmedSettings = map[string]bool{
 	store.SettingTMDBAPIKey:              true,
 	store.SettingTheTVDBAPIKey:           true,
 	store.SettingTheTVDBPIN:              true,
-	store.SettingStashboxEndpoint:        true,
-	store.SettingStashboxAPIKey:          true,
 	store.SettingConvertVideoPreset:      true,
 	store.SettingConvertVideoCRF:         true,
 	store.SettingConvertAudioBitrateKbps: true,
@@ -120,7 +115,6 @@ type engineSettingsApplier interface {
 // accidentally becoming readable because AllSettings grew a new key.
 var publicSettingKeys = map[string]bool{
 	store.SettingStorageRoot:                  true,
-	store.SettingStashboxEndpoint:             true,
 	store.SettingRSSSyncIntervalMinutes:       true,
 	store.SettingBacklogIntervalMinutes:       true,
 	store.SettingRefreshIntervalMinutes:       true,
@@ -254,10 +248,6 @@ func (s *server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := validateStashboxSettings(body); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
 	if err := s.validateRouteSettings(r.Context(), body); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -270,10 +260,6 @@ func (s *server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if !s.guardAdultCredentialEdit(w, r, body) {
-		return
-	}
-
 	// Sorted so a partial failure is at least deterministic.
 	keys := make([]string, 0, len(body))
 	for key := range body {
@@ -468,11 +454,15 @@ func (s *server) resolveAdultCredential(w http.ResponseWriter, r *http.Request, 
 		s.writeStoreError(w, "read stash-box endpoint", err)
 		return "", "", false
 	}
-	// The same shape check PUT /settings applies, run here because this route
-	// bypasses that allowlist entirely.
-	if err := validateStashboxSettings(map[string]string{store.SettingStashboxEndpoint: endpoint}); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return "", "", false
+	// Blank still means "the TPDB preset" on this route, which is the last
+	// reader of that sentinel: an instance row may not hold it (see
+	// core.StashboxInstance.Endpoint), and phase 7 replaces this whole
+	// resolution with an instance-carrying body.
+	if endpoint != "" {
+		if err := stashboxEndpointShape(endpoint); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return "", "", false
+		}
 	}
 
 	key, err = s.credentialField(ctx, body.StashboxAPIKey, store.SettingStashboxAPIKey)
@@ -486,76 +476,6 @@ func (s *server) resolveAdultCredential(w http.ResponseWriter, r *http.Request, 
 		return "", "", false
 	}
 	return endpoint, key, true
-}
-
-// guardAdultCredentialEdit keeps a settings PUT from replacing or blanking the
-// stash-box credential of a module that is already on.
-//
-// POST /settings/adult gates the switch on a working credential (SPEC §10.2),
-// but that gate is one-time unless this one exists: both stash-box keys are in
-// writableSettings, so clearing the key on Settings → Adult → Metadata source
-// would leave adult_enabled true with nothing to authenticate with, and every
-// adult surface answering 503. The invariant is "the module is on only while a
-// credential that was proved is behind it", and an edit is as much a way to
-// break it as a bad enable.
-//
-// It runs only when the body touches one of the two fields AND the module is
-// on. With the module off there is nothing running against the credential, and
-// the enable gate will prove whatever is stored before anything turns on — so
-// storing a key to enable with later stays a legal, upstream-free write.
-//
-// It reports false when it has written the response itself.
-func (s *server) guardAdultCredentialEdit(w http.ResponseWriter, r *http.Request, body map[string]string) bool {
-	suppliedEndpoint, hasEndpoint := body[store.SettingStashboxEndpoint]
-	suppliedKey, hasKey := body[store.SettingStashboxAPIKey]
-	if !hasEndpoint && !hasKey {
-		return true
-	}
-
-	ctx := r.Context()
-	enabled, err := s.st.AdultEnabled(ctx)
-	if err != nil {
-		s.writeStoreError(w, "read adult setting", err)
-		return false
-	}
-	if !enabled {
-		return true
-	}
-
-	// A field the body omits keeps its stored value, so the pair validated here
-	// is exactly the pair the write would leave behind.
-	endpoint, key := suppliedEndpoint, suppliedKey
-	if !hasEndpoint {
-		if endpoint, err = s.settingValue(ctx, store.SettingStashboxEndpoint); err != nil {
-			s.writeStoreError(w, "read stash-box endpoint", err)
-			return false
-		}
-	}
-	if !hasKey {
-		if key, err = s.settingValue(ctx, store.SettingStashboxAPIKey); err != nil {
-			s.writeStoreError(w, "read stash-box api key", err)
-			return false
-		}
-	}
-	endpoint, key = strings.TrimSpace(endpoint), strings.TrimSpace(key)
-
-	if key == "" {
-		writeCodedError(w, http.StatusBadRequest, CodeAdultCredentialAbsent,
-			"a stash-box API key is required while adult content is on")
-		return false
-	}
-
-	testCtx, cancel := context.WithTimeout(ctx, credentialCheckTimeout)
-	defer cancel()
-	if err := s.mgr.ValidateAdultCredential(testCtx, endpoint, key); err != nil {
-		// The endpoint's own message, for the reason handleSetAdultEnabled
-		// gives: "it did not work" without a reason cannot be acted on. Not
-		// logged, and it never carries the key.
-		writeCodedError(w, http.StatusBadGateway, CodeAdultCredentialInvalid,
-			"stash-box test failed: "+err.Error())
-		return false
-	}
-	return true
 }
 
 // credentialField resolves one supplied-or-stored credential field.
@@ -587,30 +507,6 @@ func validateDLNASettings(settings map[string]string) error {
 		if len([]rune(name)) > 64 {
 			return fmt.Errorf("invalid %s", store.SettingDLNAFriendlyName)
 		}
-	}
-	return nil
-}
-
-// validateStashboxSettings refuses an adult metadata endpoint that could never
-// be called.
-//
-// The client falls back to its TPDB preset for a blank endpoint, so blank is
-// legal and means "the default". Anything else has to be an absolute http(s)
-// URL: a relative path or a scheme nothing dials would otherwise be stored
-// happily and only fail much later, inside a refresh, as a request error nobody
-// is watching (SPEC §13 — surprises belong where the user can see them).
-func validateStashboxSettings(settings map[string]string) error {
-	raw, ok := settings[store.SettingStashboxEndpoint]
-	if !ok {
-		return nil
-	}
-	endpoint := strings.TrimSpace(raw)
-	if endpoint == "" {
-		return nil
-	}
-	u, err := url.Parse(endpoint)
-	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
-		return fmt.Errorf("invalid %s: expected an absolute http(s) URL", store.SettingStashboxEndpoint)
 	}
 	return nil
 }

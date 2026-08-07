@@ -56,6 +56,11 @@ const (
 	// Neither key does anything on its own. The adult module is gated by its
 	// own enable flag and a per-user grant, and nothing reads these until both
 	// are satisfied — a stored endpoint is not a reason to talk to it.
+	//
+	// RETIRED: migration 0026 carried the pair into `stashbox_instances` and
+	// deleted both rows, and neither is writable through PUT /settings any more.
+	// The constants outlive the rows because internal/stash still names them;
+	// they go when that reader does (PLAN Part 2 phase 6).
 	SettingStashboxEndpoint = "stashbox_endpoint"
 	SettingStashboxAPIKey   = "stashbox_api_key"
 	// SettingAdultEnabled is the server-wide switch for the adult module (PLAN

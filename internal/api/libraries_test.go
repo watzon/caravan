@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -623,23 +624,35 @@ func TestPatchLibraryValidatesTheProviderChain(t *testing.T) {
 	}
 }
 
-// An adult library's chain can only ever be ["stashbox"], and not because a
-// rule says so: no other compiled-in provider serves the adult kind, and the
-// per-element check is what makes that a consequence rather than a promise.
-func TestProviderChainForAdultIsStashboxAlone(t *testing.T) {
+// An adult library's chain can only ever name stash-box instances, and not
+// because a rule says so: no other compiled-in provider serves the adult kind,
+// and the per-element check is what makes that a consequence rather than a
+// promise. The instance half is a database question — a well-formed id for a box
+// this install does not hold is refused too, because a chain that names one
+// walks to a provider nothing can build.
+func TestProviderChainForAdultNamesConfiguredInstancesAlone(t *testing.T) {
+	st := newTestStore(t)
+	seedStashboxInstance(t, st, core.ProviderStashbox, "StashDB", "https://stashdb.org/graphql")
+	seedStashboxInstance(t, st, core.ProviderStashbox+":fansdb", "FansDB", "https://fansdb.cc/graphql")
+	s := &server{st: st, log: slog.Default()}
+
 	cases := []struct {
 		chain []string
 		want  bool
 	}{
 		{[]string{core.ProviderStashbox}, true},
+		{[]string{core.ProviderStashbox, core.ProviderStashbox + ":fansdb"}, true},
+		{[]string{core.ProviderStashbox, core.ProviderStashbox}, false},
+		{[]string{core.ProviderStashbox + ":pmvstash"}, false},
 		{[]string{core.ProviderStashbox, core.ProviderTMDB}, false},
 		{[]string{core.ProviderTMDB}, false},
 		{nil, false},
 	}
 	for _, c := range cases {
 		w := httptest.NewRecorder()
-		if got := validProviderChain(w, c.chain, core.LibraryKindAdult); got != c.want {
-			t.Errorf("validProviderChain(%v, adult) = %v, want %v", c.chain, got, c.want)
+		if got := s.validProviderChain(context.Background(), w, c.chain, core.LibraryKindAdult); got != c.want {
+			t.Errorf("validProviderChain(%v, adult) = %v, want %v (body %q)",
+				c.chain, got, c.want, w.Body.String())
 		}
 	}
 }
