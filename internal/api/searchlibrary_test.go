@@ -196,6 +196,49 @@ func TestARejectedTMDBKeyLeavesAnAniListLibrarySearchable(t *testing.T) {
 	wantCode(t, rec, CodeMetadataCredentialInvalid)
 }
 
+// The same refusal, now with two credentials in play rather than one and a
+// keyless one.
+//
+// A rejected TheTVDB key must stop a TheTVDB-chained library and nothing else.
+// This is the pair TMDB alone could never prove: the per-chain check has to
+// find the verdict for the id ON THIS CHAIN, so a TVmaze library goes on
+// searching and — see TestARejectedTheTVDBKeyLeavesTMDBHealthy — the TMDB card
+// stays green.
+func TestARejectedTheTVDBKeyRefusesOnlyItsOwnChain(t *testing.T) {
+	h, st, mgr := newTestServer(t)
+	setSetting(t, st, store.SettingTMDBAPIKey, "good")
+	setSetting(t, st, store.SettingTheTVDBAPIKey, "revoked")
+	mgr.validateKeys = map[string]error{core.ProviderTheTVDB + "/revoked": errKeyRejected}
+
+	// Prove the key wrong the way the Test button does, so the verdict is cached.
+	rec := do(t, h, http.MethodPost, "/api/v1/settings/metadata/test", `{"provider":"thetvdb"}`)
+	wantStatus(t, rec, http.StatusBadGateway)
+
+	tvdbLib := createLibrary(t, h,
+		`{"kind":"tv","name":"Anime","root_path":"library/Anime","providers":["thetvdb"]}`)
+	mazeLib := createLibrary(t, h,
+		`{"kind":"tv","name":"Shows","root_path":"library/Shows","providers":["tvmaze"]}`)
+
+	rec = do(t, h, http.MethodGet, "/api/v1/search?q=frieren&library_id="+itoa(tvdbLib.ID), "")
+	wantStatus(t, rec, http.StatusServiceUnavailable)
+	wantCode(t, rec, CodeMetadataCredentialInvalid)
+	if calls := mgr.searchCalls(); len(calls) != 0 {
+		t.Fatalf("a refused chain still ran: %+v", calls)
+	}
+
+	mgr.searchHits = &library.SearchHits{
+		Series:    []core.SeriesMeta{{Provider: core.ProviderTVmaze, ProviderRef: "169", Title: "Breaking Bad"}},
+		Providers: []string{core.ProviderTVmaze},
+	}
+	rec = do(t, h, http.MethodGet, "/api/v1/search?q=breaking+bad&library_id="+itoa(mazeLib.ID), "")
+	wantStatus(t, rec, http.StatusOK)
+	var body searchResponse
+	decodeBody(t, rec, &body)
+	if len(body.Series) != 1 || body.Series[0].Provider != core.ProviderTVmaze {
+		t.Fatalf("series = %+v, want the tvmaze hit", body.Series)
+	}
+}
+
 // One provider failing while another answered is a 200 that says so. A chain
 // that came back silently short is indistinguishable from a chain that had
 // nothing to say.

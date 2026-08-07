@@ -326,6 +326,26 @@ func TestProviderCredentialSettingsMatchStoreKeys(t *testing.T) {
 	if got := core.ProviderCredentialSetting(core.ProviderTMDB); got != store.SettingTMDBAPIKey {
 		t.Fatalf("tmdb credential setting = %q, want %q", got, store.SettingTMDBAPIKey)
 	}
+	if got := core.ProviderCredentialSetting(core.ProviderTheTVDB); got != store.SettingTheTVDBAPIKey {
+		t.Fatalf("thetvdb credential setting = %q, want %q", got, store.SettingTheTVDBAPIKey)
+	}
+
+	// TheTVDB's PIN is the other half of one credential and is invisible to the
+	// loop below, because CredentialSetting names one row. It has to be held to
+	// the same three rules by hand: a PIN that could not be written would make a
+	// user-supported subscription unusable, an untrimmed one would be sent with
+	// the whitespace a paste brought along, and a readable one would put half a
+	// credential in a browser response (SPEC §12).
+	if !writableSettings[store.SettingTheTVDBPIN] {
+		t.Errorf("%q is not writable through PUT /settings", store.SettingTheTVDBPIN)
+	}
+	if !trimmedSettings[store.SettingTheTVDBPIN] {
+		t.Errorf("%q is not trimmed on the way in", store.SettingTheTVDBPIN)
+	}
+	if publicSettingKeys[store.SettingTheTVDBPIN] {
+		t.Errorf("%q is readable through GET /settings — it is half a credential (SPEC §12)",
+			store.SettingTheTVDBPIN)
+	}
 
 	// Every key the registry names must be one PUT /settings will accept and
 	// store trimmed, or the card that offers a field would write somewhere the
@@ -531,11 +551,170 @@ func TestMetadataTestNamesItsProvider(t *testing.T) {
 		if got := status.MetadataCredentials[core.ProviderTMDB].State; got != CredentialInvalid {
 			t.Fatalf("metadata_credentials[tmdb].state = %q, want %q", got, CredentialInvalid)
 		}
-		if len(status.MetadataCredentials) != 1 {
+		// One entry per CREDENTIALED provider and no more: the keyless ones are
+		// absent because "Ready" is a fact the client reads off the provider
+		// list, not a verdict this server reached.
+		if len(status.MetadataCredentials) != credentialedProviderCount() {
 			t.Fatalf("credential map = %+v, want only the credentialed providers in it",
 				status.MetadataCredentials)
 		}
+		// The other credential is untouched: nobody entered a TheTVDB key, and a
+		// TMDB rejection is not a reason to say anything about it.
+		if got := status.MetadataCredentials[core.ProviderTheTVDB].State; got != CredentialAbsent {
+			t.Fatalf("metadata_credentials[thetvdb].state = %q, want %q", got, CredentialAbsent)
+		}
 	})
+}
+
+// credentialedProviderCount is how many entries GET /system/status' credential
+// map must carry. It is derived rather than written out so registering a
+// provider does not turn a count assertion into a false failure.
+func credentialedProviderCount() int {
+	n := 0
+	for _, p := range core.Providers() {
+		if p.CredentialSetting != "" {
+			n++
+		}
+	}
+	return n
+}
+
+// ---------------------------------------------------------------------------
+// TheTVDB: the first consumer of the per-provider credential model.
+//
+// TMDB was the only credential when the model was generalized, so nothing could
+// prove that generalizing it meant anything. These are that proof.
+
+// THE acceptance assertion of the per-provider model: a rejected TheTVDB key
+// marks TheTVDB and nothing else. While "the metadata credential" was one
+// field, this rejection would have put the TMDB card — and every Discover
+// surface behind it — into the "your key is wrong" state, and the fix offered
+// would have been to re-enter a key that works.
+func TestARejectedTheTVDBKeyLeavesTMDBHealthy(t *testing.T) {
+	h, st, mgr := newTestServer(t)
+	setSetting(t, st, store.SettingTMDBAPIKey, "good")
+	setSetting(t, st, store.SettingTheTVDBAPIKey, "revoked")
+	mgr.validateKeys = map[string]error{core.ProviderTheTVDB + "/revoked": errKeyRejected}
+
+	rec := do(t, h, http.MethodPost, "/api/v1/settings/metadata/test", `{"provider":"thetvdb"}`)
+	wantStatus(t, rec, http.StatusBadGateway)
+	wantCode(t, rec, CodeMetadataCredentialInvalid)
+
+	status := credentialState(t, h)
+	assertCredentialMapAgrees(t, status)
+	if got := status.MetadataCredentials[core.ProviderTheTVDB].State; got != CredentialInvalid {
+		t.Fatalf("metadata_credentials[thetvdb].state = %q, want %q", got, CredentialInvalid)
+	}
+	if got := status.MetadataCredentials[core.ProviderTMDB].State; got != CredentialOK {
+		t.Fatalf("metadata_credentials[tmdb].state = %q, want it untouched at %q", got, CredentialOK)
+	}
+	// The flat field is the TMDB entry, so the same thing said the old way.
+	if status.MetadataCredential != CredentialOK {
+		t.Fatalf("metadata_credential = %q, want the TMDB key still %q",
+			status.MetadataCredential, CredentialOK)
+	}
+	// The Test button asked about the provider whose card it sits on, with the
+	// key stored for THAT provider.
+	want := validateCall{provider: core.ProviderTheTVDB, key: "revoked"}
+	if got := mgr.validations(); len(got) != 1 || got[0] != want {
+		t.Fatalf("validated %v, want exactly [%v]", got, want)
+	}
+}
+
+// A PIN edit is a credential edit. TheTVDB's login consumes the key and the PIN
+// together, so saving a PIN changes the exchange even though the settings row
+// ProviderDescriptor.CredentialSetting names did not move — and the verdict on
+// file is then about a login this server no longer makes.
+func TestATheTVDBPINEditRechecksTheCredential(t *testing.T) {
+	h, st, mgr := newTestServer(t)
+	setSetting(t, st, store.SettingTheTVDBAPIKey, "supporter-key")
+
+	// Prove the pair, so a verdict is cached against the key string.
+	wantStatus(t, do(t, h, http.MethodPost, "/api/v1/settings/metadata/test",
+		`{"provider":"thetvdb"}`), http.StatusOK)
+	if got := credentialState(t, h).MetadataCredentials[core.ProviderTheTVDB].State; got != CredentialOK {
+		t.Fatalf("metadata_credentials[thetvdb].state = %q, want %q", got, CredentialOK)
+	}
+
+	// The pair stops working, and the only thing that changed is the PIN.
+	mgr.validateKeys = map[string]error{core.ProviderTheTVDB + "/supporter-key": errKeyRejected}
+	wantStatus(t, do(t, h, http.MethodPut, "/api/v1/settings",
+		`{"thetvdb_pin":"9999"}`), http.StatusOK)
+	if got := credentialState(t, h).MetadataCredentials[core.ProviderTheTVDB].State; got != CredentialInvalid {
+		t.Fatalf("metadata_credentials[thetvdb].state = %q after a PIN edit, want %q — "+
+			"the cached verdict was about a login this server no longer makes", got, CredentialInvalid)
+	}
+
+	// And the way back out. A mistyped PIN that is corrected has to clear the
+	// rejection, or the card would stay red until somebody retyped the key.
+	mgr.validateKeys = nil
+	wantStatus(t, do(t, h, http.MethodPut, "/api/v1/settings",
+		`{"thetvdb_pin":"1234"}`), http.StatusOK)
+	if got := credentialState(t, h).MetadataCredentials[core.ProviderTheTVDB].State; got != CredentialOK {
+		t.Fatalf("metadata_credentials[thetvdb].state = %q after the PIN was fixed, want %q", got, CredentialOK)
+	}
+}
+
+// TheTVDB needed no edit to publicSettings to get its "a key is stored" flag:
+// the loop that landed with the credential map derives one per credentialed
+// descriptor. Neither half of the credential is readable.
+func TestTheTVDBKeySetFlagComesFromTheRegistry(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	const setFlag = store.SettingTheTVDBAPIKey + credentialSetSuffix
+
+	rec := do(t, h, http.MethodGet, "/api/v1/settings", "")
+	wantStatus(t, rec, http.StatusOK)
+	var settings map[string]string
+	decodeBody(t, rec, &settings)
+	if settings[setFlag] != "false" {
+		t.Fatalf("fresh settings = %v, want %s=false", settings, setFlag)
+	}
+
+	setSetting(t, st, store.SettingTheTVDBAPIKey, "licensed-key")
+	setSetting(t, st, store.SettingTheTVDBPIN, "1234")
+
+	rec = do(t, h, http.MethodGet, "/api/v1/settings", "")
+	wantStatus(t, rec, http.StatusOK)
+	decodeBody(t, rec, &settings)
+	if settings[setFlag] != "true" {
+		t.Fatalf("settings = %v, want %s=true", settings, setFlag)
+	}
+	if _, ok := settings[store.SettingTheTVDBAPIKey]; ok {
+		t.Errorf("settings exposed %s: %v", store.SettingTheTVDBAPIKey, settings)
+	}
+	// The PIN is half a credential and gets no flag and no value: there is one
+	// card and one question, "is a credential on file".
+	if _, ok := settings[store.SettingTheTVDBPIN]; ok {
+		t.Errorf("settings exposed %s: %v", store.SettingTheTVDBPIN, settings)
+	}
+	if _, ok := settings[store.SettingTheTVDBPIN+credentialSetSuffix]; ok {
+		t.Errorf("settings carry a set-flag for the PIN: %v", settings)
+	}
+}
+
+// Both halves are stored with their surrounding whitespace removed. A pasted
+// PIN that kept its trailing space would be sent to /login verbatim while
+// everything that judges the credential trimmed it — a card reading healthy
+// while nothing works.
+func TestTheTVDBCredentialIsTrimmedOnTheWayIn(t *testing.T) {
+	h, st, _ := newTestServer(t)
+
+	wantStatus(t, do(t, h, http.MethodPut, "/api/v1/settings",
+		`{"thetvdb_api_key":"  licensed-key  ","thetvdb_pin":" 1234 "}`), http.StatusOK)
+
+	ctx := context.Background()
+	for key, want := range map[string]string{
+		store.SettingTheTVDBAPIKey: "licensed-key",
+		store.SettingTheTVDBPIN:    "1234",
+	} {
+		got, err := st.GetSetting(ctx, key)
+		if err != nil {
+			t.Fatalf("GetSetting(%s): %v", key, err)
+		}
+		if got != want {
+			t.Errorf("stored %s = %q, want %q", key, got, want)
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------

@@ -51,6 +51,8 @@ const (
 // only way in (SPEC §10); see internal/api/storage.go.
 var writableSettings = map[string]bool{
 	store.SettingTMDBAPIKey:             true,
+	store.SettingTheTVDBAPIKey:          true,
+	store.SettingTheTVDBPIN:             true,
 	store.SettingStashboxEndpoint:       true,
 	store.SettingStashboxAPIKey:         true,
 	store.SettingRSSSyncIntervalMinutes: true,
@@ -93,6 +95,8 @@ var writableSettings = map[string]bool{
 // string and the sent string the same value.
 var trimmedSettings = map[string]bool{
 	store.SettingTMDBAPIKey:              true,
+	store.SettingTheTVDBAPIKey:           true,
+	store.SettingTheTVDBPIN:              true,
 	store.SettingStashboxEndpoint:        true,
 	store.SettingStashboxAPIKey:          true,
 	store.SettingConvertVideoPreset:      true,
@@ -284,6 +288,28 @@ func (s *server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		if err := s.st.SetSetting(r.Context(), key, value); err != nil {
 			s.writeStoreError(w, "write settings", err)
 			return
+		}
+	}
+
+	// TheTVDB's credential is a PAIR: the login consumes the key and, when the
+	// subscription is user-supported, the PIN beside it. The loop below can only
+	// see the key, because ProviderDescriptor.CredentialSetting names one
+	// settings row — so a PIN edit changes what a login sends while leaving that
+	// loop nothing to notice, and the cached verdict, which is filed under the
+	// key string, survives an edit it is no longer true of.
+	//
+	// Dropping it first is what makes the recheck a recheck. When the key came in
+	// this body too, the loop below then proves the new pair; when it did not,
+	// the stored key is what the new PIN will travel with, so it is proved here.
+	// A settings read that fails leaves the state optimistic rather than failing
+	// a save that has already landed, exactly as revalidateMetadataKey does with
+	// an unreachable provider.
+	if _, ok := body[store.SettingTheTVDBPIN]; ok {
+		s.credentials.forget(core.ProviderTheTVDB)
+		if _, keyEdited := body[store.SettingTheTVDBAPIKey]; !keyEdited {
+			if key, err := s.settingValue(r.Context(), store.SettingTheTVDBAPIKey); err == nil {
+				s.revalidateMetadataKey(r.Context(), core.ProviderTheTVDB, key)
+			}
 		}
 	}
 

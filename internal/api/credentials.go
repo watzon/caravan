@@ -139,6 +139,23 @@ func (c *metadataCredentials) record(providerID, key string, err error) {
 	c.byProvider[providerID] = v
 }
 
+// forget drops whatever is cached for providerID, so the next check actually
+// asks instead of believing what is on file.
+//
+// It exists for the one credential that is not a single string. TheTVDB's login
+// consumes a key AND, for a user-supported subscription, a PIN, while this cache
+// is keyed on the key alone — so editing the PIN changes the exchange without
+// changing the cache key, and the verdict left behind is about a login this
+// server no longer makes. That is stale in both directions: a repaired PIN would
+// stay "invalid" until somebody retyped the key, and a broken one would go on
+// reading "ok".
+func (c *metadataCredentials) forget(providerID string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	delete(c.byProvider, providerID)
+}
+
 // verdict reports whether providerID's key is known to have been rejected, and
 // why. A verdict recorded for one provider never answers for another: that is
 // the whole point of keying the cache by id.

@@ -250,6 +250,60 @@ func TestRefreshRecordsAnUnconfiguredProviderAndContinues(t *testing.T) {
 	}
 }
 
+// Two providers that both publish the SAME TVDB id for a show stay two rows.
+//
+// existingSeriesRow climbs one rung past the provider ref — GetSeriesByTMDBID —
+// and that rung is fenced to refs that are TMDB's own. Nothing keys on TVDBID,
+// deliberately: it is a cross-link the NFO writer and some indexers read, not an
+// identity. This was untestable while TMDB was the only provider that carried
+// one; with TVmaze and TheTVDB both filling the field it is load-bearing, and
+// collapsing the two would leave one row whose provider and ref name one
+// provider while its metadata came from the other — so every later refresh
+// would overwrite it with the wrong show's episode list.
+func TestSeriesFromTwoProvidersSharingATVDBIDStayTwoRows(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+
+	const shared = 81189
+	maze := &stubProvider{seriesByID: map[int64]core.SeriesMeta{
+		169: {Provider: core.ProviderTVmaze, ProviderRef: "169", TVDBID: shared,
+			Title: "Breaking Bad", Year: 2008},
+	}}
+	tvdb := &stubProvider{seriesByID: map[int64]core.SeriesMeta{
+		shared: {Provider: core.ProviderTheTVDB, ProviderRef: "81189", TVDBID: shared,
+			Title: "Breaking Bad", Year: 2008},
+	}}
+	h.mgr.providers = &fakeRegistry{metadata: map[string]core.MetadataProvider{
+		core.ProviderTVmaze: maze, core.ProviderTheTVDB: tvdb,
+	}}
+
+	first, err := h.mgr.AddSeries(ctx, core.ItemRef{Provider: core.ProviderTVmaze, Ref: "169"}, nil, 0)
+	if err != nil {
+		t.Fatalf("AddSeries(tvmaze): %v", err)
+	}
+	second, err := h.mgr.AddSeries(ctx, core.ItemRef{Provider: core.ProviderTheTVDB, Ref: "81189"}, nil, 0)
+	if err != nil {
+		t.Fatalf("AddSeries(thetvdb): %v", err)
+	}
+
+	if first.ID == second.ID {
+		t.Fatalf("both adds landed on row %d; a shared TVDB id collapsed two providers' rows", first.ID)
+	}
+	for _, want := range []core.ItemRef{
+		{Provider: core.ProviderTVmaze, Ref: "169"},
+		{Provider: core.ProviderTheTVDB, Ref: "81189"},
+	} {
+		sr, err := h.st.GetSeriesByProviderRef(ctx, want.Provider, want.Ref)
+		if err != nil {
+			t.Fatalf("GetSeriesByProviderRef(%v): %v", want, err)
+		}
+		if sr.TVDBID != shared {
+			t.Errorf("%v row tvdb_id = %d, want the shared %d — the cross-link still gets written",
+				want, sr.TVDBID, shared)
+		}
+	}
+}
+
 // chainHarness builds a two-provider chain over a fresh Anime library: ids
 // "first" and "second", in that order, resolved through a fake registry.
 func chainHarness(t *testing.T, first, second *stubProvider) (*harness, *core.Library) {

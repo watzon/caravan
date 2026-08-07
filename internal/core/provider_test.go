@@ -46,6 +46,14 @@ func TestProviderServesRejectsMismatches(t *testing.T) {
 		// be creatable against it.
 		{ProviderTVmaze, LibraryKindMovie, false},
 		{ProviderTVmaze, LibraryKindAdult, false},
+		{ProviderTheTVDB, LibraryKindTV, true},
+		// TheTVDB DOES catalogue films, and the movie kind is refused anyway:
+		// MovieMeta.DigitalRelease gates minimum availability and TheTVDB's movie
+		// record has no typed release list to fill it from, so a movie library
+		// chained here would start grabbing films that are still in cinemas. See
+		// the descriptor comment.
+		{ProviderTheTVDB, LibraryKindMovie, false},
+		{ProviderTheTVDB, LibraryKindAdult, false},
 		{"", LibraryKindMovie, false},
 	}
 	for _, c := range cases {

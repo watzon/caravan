@@ -11,6 +11,7 @@ const (
 	ProviderStashbox = "stashbox"
 	ProviderAniList  = "anilist"
 	ProviderTVmaze   = "tvmaze"
+	ProviderTheTVDB  = "thetvdb"
 )
 
 // ProviderDescriptor describes one compiled-in metadata provider.
@@ -64,6 +65,19 @@ var providers = []ProviderDescriptor{
 	// movie library be created against a provider that refuses every movie
 	// lookup.
 	{ID: ProviderTVmaze, Name: "TVmaze", Kinds: []string{LibraryKindTV}},
+	// TheTVDB is television-only HERE, and the movie half is a deliberate
+	// omission rather than a gap in the catalogue: TheTVDB does hold films.
+	//
+	// MovieMeta.DigitalRelease is what gates minimum availability
+	// (internal/wanted/list.go:199), and TheTVDB's movie record carries no typed
+	// release list to fill it from. A movie mapped through here would arrive with
+	// a zero digital release, which reads as "released long ago" and starts
+	// grabbing a film that is still in cinemas — a wrong automation decision, not
+	// a missing field on a detail page. Claiming the movie kind therefore waits
+	// on a release-date mapping design, and until then internal/thetvdb answers
+	// GetMovie with ErrProviderKindUnsupported so the two cannot disagree.
+	{ID: ProviderTheTVDB, Name: "TheTVDB", Kinds: []string{LibraryKindTV},
+		CredentialSetting: "thetvdb_api_key"},
 }
 
 // Providers returns the compiled-in provider descriptors. The result is a

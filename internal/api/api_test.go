@@ -822,6 +822,21 @@ func TestPutSettingsRequiresBody(t *testing.T) {
 	wantErrorBody(t, rec)
 }
 
+// absentCredentials is the credential map of a fresh install: one entry per
+// credentialed provider, every one of them absent, and nothing for the keyless
+// ones — "Ready" is a fact the client reads off the provider list, not a verdict
+// this server reached.
+func absentCredentials() map[string]credentialStateJSON {
+	out := map[string]credentialStateJSON{}
+	for _, p := range core.Providers() {
+		if p.CredentialSetting == "" {
+			continue
+		}
+		out[p.ID] = credentialStateJSON{State: CredentialAbsent}
+	}
+	return out
+}
+
 func TestSystemStatus(t *testing.T) {
 	h, st, _ := newTestServer(t)
 	ctx := context.Background()
@@ -859,13 +874,17 @@ func TestSystemStatus(t *testing.T) {
 		DiskFreeBytes:  0,
 		DiskTotalBytes: 0,
 		EngineHealth:   "unconfigured",
-		// A fresh database has no TMDB key, which is the first-run state the
-		// wizard's metadata step exists to fix. The flat field and the map say
-		// so together, because the handler fills both from the same read.
-		MetadataCredential: CredentialAbsent,
-		MetadataCredentials: map[string]credentialStateJSON{
-			core.ProviderTMDB: {State: CredentialAbsent},
-		},
+		// A fresh database has no key for any credentialed provider, which is the
+		// first-run state the wizard's metadata step exists to fix. The flat
+		// field and the map say so together, because the handler fills both from
+		// the same read.
+		//
+		// The map is built from the registry rather than written out, so
+		// registering a provider does not turn this into a false failure. What
+		// the assertion is for is that every credentialed provider is present and
+		// absent, and no keyless one is present at all.
+		MetadataCredential:  CredentialAbsent,
+		MetadataCredentials: absentCredentials(),
 		NeedsSetup: true,
 		// No provider means nothing polls external clients, and the banner
 		// input is an empty list rather than null.

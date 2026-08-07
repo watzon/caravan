@@ -34,6 +34,18 @@ const (
 	SettingEpisodeFileFormat  = "episode_file_format"
 	// SettingTMDBAPIKey is the metadata provider credential.
 	SettingTMDBAPIKey = "tmdb_api_key"
+	// SettingTheTVDBAPIKey and SettingTheTVDBPIN are TheTVDB v4's credential.
+	// It is a pair rather than a key because TheTVDB sells two kinds of
+	// subscription: a licensed key logs in alone, and a user-supported key logs
+	// in with the subscriber's PIN beside it (see internal/thetvdb).
+	//
+	// The PIN is stored as a credential, not as a preference: it is half of what
+	// /login consumes, so it is write-only on the wire exactly as the key is.
+	// An empty PIN is the licensed case and means the field is omitted from the
+	// login body entirely — a stored empty string and a stored " " are the same
+	// thing, which is why both keys are trimmed on the way in.
+	SettingTheTVDBAPIKey = "thetvdb_api_key"
+	SettingTheTVDBPIN    = "thetvdb_pin"
 	// SettingStashboxEndpoint and SettingStashboxAPIKey configure the adult
 	// library's metadata provider (PLAN phase 9 task 1). "stash-box" is a
 	// protocol rather than a service, so the endpoint is a value: TPDB is the

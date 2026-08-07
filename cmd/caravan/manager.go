@@ -16,6 +16,7 @@ import (
 	"github.com/watzon/caravan/internal/library"
 	"github.com/watzon/caravan/internal/stashbox"
 	"github.com/watzon/caravan/internal/store"
+	"github.com/watzon/caravan/internal/thetvdb"
 	"github.com/watzon/caravan/internal/tmdb"
 	"github.com/watzon/caravan/internal/tvmaze"
 )
@@ -79,6 +80,12 @@ type libraryAdapter struct {
 	// tvmaze is THE TVmaze client for this process, for the same reason anilist
 	// is the only AniList one; see tvmazeClient.
 	tvmaze *tvmaze.Client
+	// thetvdbMu guards thetvdb, which is read and replaced from concurrent HTTP
+	// handlers.
+	thetvdbMu sync.Mutex
+	// thetvdb is the last TheTVDB client built, kept alongside the two settings
+	// it was built from; see thetvdbClient.
+	thetvdb *cachedTheTVDB
 }
 
 // cachedTMDB is one TMDB client and the setting that defines it.
@@ -95,6 +102,15 @@ type cachedStashbox struct {
 	key      string
 	endpoint string
 	client   *stashbox.Client
+}
+
+// cachedTheTVDB is one TheTVDB client and the two settings that define it. Both
+// are the cache key rather than the key alone, because both are what New takes:
+// a PIN edit produces a different login and therefore a different client.
+type cachedTheTVDB struct {
+	key    string
+	pin    string
+	client *thetvdb.Client
 }
 
 func newLibraryAdapter(st *store.Store, fallbackRoot string, log *slog.Logger, notify library.Notifier, notifyAdult library.AdultNotifier) *libraryAdapter {
@@ -139,6 +155,8 @@ func (p providerRegistry) Metadata(ctx context.Context, providerID string) core.
 		return p.a.anilistClient()
 	case core.ProviderTVmaze:
 		return p.a.tvmazeClient()
+	case core.ProviderTheTVDB:
+		return p.a.thetvdbProvider(ctx)
 	}
 	return nil
 }
@@ -272,6 +290,61 @@ func (a *libraryAdapter) tvmazeClient() *tvmaze.Client {
 	return a.tvmaze
 }
 
+// thetvdbProvider returns the TheTVDB provider, or nil when no API key has been
+// entered.
+//
+// Both settings are read on every call so a runtime edit takes effect at once,
+// exactly as metadata() does for TMDB. The PIN is not part of the "is it
+// configured" question: a licensed subscription has none, and refusing to build
+// a client without one would make the licensed case unusable.
+//
+// The nil is a genuine untyped nil rather than a nil *thetvdb.Client, because
+// callers test the interface value against nil and a typed nil would pass that
+// test and then be called (SPEC §13: no key degrades to parse-only, it does not
+// crash).
+func (a *libraryAdapter) thetvdbProvider(ctx context.Context) core.MetadataProvider {
+	key, err := a.setting(ctx, store.SettingTheTVDBAPIKey)
+	if err != nil {
+		a.log.Error("read thetvdb api key", "error", err)
+		return nil
+	}
+	if key == "" {
+		return nil
+	}
+	pin, err := a.setting(ctx, store.SettingTheTVDBPIN)
+	if err != nil {
+		a.log.Error("read thetvdb pin", "error", err)
+		return nil
+	}
+	return a.thetvdbClient(key, pin)
+}
+
+// thetvdbClient returns the client for these settings, reusing the last one
+// while both are unchanged.
+//
+// The cache is load-bearing rather than an optimisation. A TheTVDB client holds
+// the bearer token it logged in for — the API takes no credential on an ordinary
+// request — so a client built per call would log in before every search
+// keystroke and every series in a refresh sweep, spending the subscription's
+// login budget to learn something the last client already knew.
+//
+// A change to either setting still builds a new client, which is the point of
+// keying on both: the PIN is half of what /login consumes, so a token obtained
+// with the old pair says nothing about the new one. Nothing is invalidated on a
+// timer — the token is refreshed by the 401 that proves it stopped working, see
+// internal/thetvdb.
+func (a *libraryAdapter) thetvdbClient(key, pin string) *thetvdb.Client {
+	a.thetvdbMu.Lock()
+	defer a.thetvdbMu.Unlock()
+
+	if c := a.thetvdb; c != nil && c.key == key && c.pin == pin {
+		return c.client
+	}
+	client := thetvdb.New(key, pin, a.hc)
+	a.thetvdb = &cachedTheTVDB{key: key, pin: pin, client: client}
+	return client
+}
+
 // watcherManager builds the one library.Manager the import watcher holds for
 // the life of the process.
 //
@@ -389,6 +462,19 @@ func (a *libraryAdapter) ValidateMetadataKey(ctx context.Context, providerID, ap
 	switch providerID {
 	case core.ProviderTMDB:
 		return tmdb.New(apiKey, a.hc).Test(ctx)
+	case core.ProviderTheTVDB:
+		// The candidate key is paired with the STORED pin. The Test button's
+		// question is "is this key good", and a PIN is not a secret anybody
+		// rotates per test: it belongs to the subscription, it is already saved
+		// beside the key, and asking the caller to re-send it would mean a
+		// licensed user's blank field could not be told apart from "leave the
+		// stored one alone". A read that fails is reported rather than silently
+		// treated as the licensed case, which would prove the wrong pair.
+		pin, err := a.setting(ctx, store.SettingTheTVDBPIN)
+		if err != nil {
+			return fmt.Errorf("caravan: read thetvdb pin: %w", err)
+		}
+		return thetvdb.New(apiKey, pin, a.hc).Test(ctx)
 	}
 	return fmt.Errorf("caravan: provider %q has no API key to validate", providerID)
 }
