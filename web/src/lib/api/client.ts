@@ -11,7 +11,6 @@ import type {
   EventPage,
   AddSiteRequest,
   AdultDiscoverPage,
-  AdultUser,
   ApproveRequestBody,
   ApproveRequestResult,
   AuthState,
@@ -46,6 +45,8 @@ import type {
   Job,
   Library,
   JobPage,
+  LibraryAccess,
+  LibraryAccessInput,
   LibraryCreate,
   LibraryIndexerOverride,
   LibraryPatch,
@@ -253,6 +254,10 @@ export const endpoints = {
   library: (id: number) => `${API_BASE}/libraries/${id}`,
   libraryIndexer: (id: number, indexerID: number) =>
     `${API_BASE}/libraries/${id}/indexers/${indexerID}`,
+  // Who reaches one library. Admin-only like the rest of this block, and for a
+  // sharper reason: a member who could read it would learn the household's
+  // whole account roster.
+  libraryAccess: (id: number) => `${API_BASE}/libraries/${id}/access`,
 
   // Discover — browse the provider rather than search it. Every id in this
   // block is a TMDB id; library ids only appear in the decorated payloads.
@@ -285,8 +290,6 @@ export const endpoints = {
   adultDiscover: () => `${API_BASE}/adult/discover`,
   adultPerformers: () => `${API_BASE}/adult/performers`,
   adultTags: () => `${API_BASE}/adult/tags`,
-  adultUsers: () => `${API_BASE}/adult/users`,
-  adultUserAccess: (id: number) => `${API_BASE}/adult/users/${id}/access`,
   // Phase 11 — the Stash handoff. Inside the gated subtree with the rest of
   // /adult rather than beside /handoff/jellyfin, so an adult-module setting is
   // absent for an ungranted caller rather than merely switched off.
@@ -300,10 +303,6 @@ export const endpoints = {
   stashboxInstance: (id: number) => `${API_BASE}/adult/stashbox-instances/${id}`,
   stashboxInstanceTest: (id: number) => `${API_BASE}/adult/stashbox-instances/${id}/test`,
   stashboxConfigTest: () => `${API_BASE}/adult/stashbox-instances/test`,
-  // The master switch, and the one adult route outside the gated subtree: it
-  // has to be reachable while the module is off, because turning it on is what
-  // it is for.
-  settingsAdult: () => `${API_BASE}/settings/adult`,
 } as const;
 
 /**
@@ -1158,6 +1157,22 @@ export const api = {
   setLibraryIndexer: (id: number, indexerID: number, body: LibraryIndexerOverride) =>
     request<Library>(endpoints.libraryIndexer(id, indexerID), { method: 'PUT', body }),
 
+  /** The Access card: this library's restriction and every account beside it. */
+  getLibraryAccess: (id: number, signal?: AbortSignal) =>
+    request<LibraryAccess>(endpoints.libraryAccess(id), { signal }),
+
+  /**
+   * Write the whole decision — the flag and the complete allow-list — in one
+   * request. There is no per-user verb, deliberately: split in two there is a
+   * window in which the library is restricted to nobody.
+   *
+   * Restricting also clears the library's `dlna_visible` server-side, because
+   * DLNA has no accounts. The answer carries only the access pair, so a caller
+   * holding the library row has to reflect that clearing itself.
+   */
+  setLibraryAccess: (id: number, body: LibraryAccessInput) =>
+    request<LibraryAccess>(endpoints.libraryAccess(id), { method: 'PUT', body }),
+
   /* ------------------------------------------------------------------------
    * Discover & requests.
    *
@@ -1300,34 +1315,11 @@ export const api = {
    * Phase 9 — the adult module.
    *
    * 503 means no stash-box credential is configured (send the user to
-   * Settings → Adult content); 502 means the provider is unhappy. Both arrive
+   * Settings → Metadata); 502 means the provider is unhappy. Both arrive
    * as an ApiError, same as the TMDB-backed screens, so callers branch on
    * `status`. A 404 means the module is not visible to this caller — which is
    * indistinguishable from the route not existing, deliberately.
    * --------------------------------------------------------------------- */
-
-  /**
-   * Turn the module on or off. The first enable creates the Adult library row
-   * (hidden from DLNA); a disable deletes nothing, so turning it back on finds
-   * the sites, the scenes and the files exactly as they were.
-   *
-   * An enable may CARRY the first stash-box instance (PLAN Part 2 phase 7):
-   * the server proves the endpoint and key BEFORE it writes anything and
-   * commits `adult_enabled` last, so a credential that does not work leaves the
-   * instance table and the switch byte-identical. An enable with no instance is
-   * a re-enable — the instances survived the switch-off — and makes zero
-   * upstream calls.
-   *
-   * A failure arrives as an ApiError coded `adult_credential_absent` (the
-   * instance table is empty and the body carried none) or
-   * `adult_credential_invalid` (the endpoint refused the key) — see
-   * credentials.ts.
-   */
-  setAdultEnabled: (enabled: boolean, instance?: StashboxInstanceInput) =>
-    request<{ enabled: boolean }>(endpoints.settingsAdult(), {
-      method: 'POST',
-      body: { enabled, ...(instance === undefined ? {} : { instance }) },
-    }),
 
   /**
    * The configured stash-box endpoints (PLAN Part 2 phase 3).
@@ -1415,18 +1407,6 @@ export const api = {
 
   adultTags: (query: string, signal?: AbortSignal) =>
     listOf<SceneFilterRef>(withQuery(endpoints.adultTags(), { q: query }), 'tags', signal),
-
-  /** The member-access card: every account and whether it reaches the module. */
-  listAdultUsers: (signal?: AbortSignal) =>
-    listOf<AdultUser>(endpoints.adultUsers(), 'users', signal),
-
-  /**
-   * Grant or revoke one account's access. It takes effect on that account's
-   * very next request — the grant is not a credential, so there is no session
-   * to invalidate and nobody gets signed out.
-   */
-  setAdultAccess: (id: number, granted: boolean) =>
-    request<AdultUser>(endpoints.adultUserAccess(id), { method: 'PUT', body: { granted } }),
 
   /* ------------------------------------------------------------------------
    * Phase 11 — the Stash handoff (SPEC §5.2's adult twin). Like Jellyfin's,

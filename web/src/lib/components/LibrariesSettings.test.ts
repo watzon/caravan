@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import LibrariesSettings from './LibrariesSettings.svelte';
-import type { Library, LibraryIndexer } from '../api/types';
+import type { Library, LibraryAccess, LibraryIndexer } from '../api/types';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -35,6 +35,8 @@ function library(over: Partial<Library> = {}): Library {
     providers: ['tmdb'],
     is_default: true,
     item_count: 0,
+    active: true,
+    restricted: false,
     dlna_visible: true,
     route_torrent: '',
     route_usenet: '',
@@ -60,7 +62,13 @@ let holdWrites: boolean;
 let releaseWrite: (() => void) | null;
 let scanPosts: number;
 let scanStatusReads: number;
+/** How often the screen re-read the identity. */
+let meReads: number;
 let scanCounts: { media_files: number; unmatched: number };
+/** What GET /libraries/providers answers; a test may empty the adult half. */
+let providerList: { id: string; name: string; kinds: string[] }[];
+/** What GET (and then PUT) /libraries/{id}/access answers. */
+let accessBody: LibraryAccess;
 
 const SETTINGS = { route_torrent: '3', route_usenet: '' };
 const CLIENTS = [
@@ -84,7 +92,21 @@ beforeEach(() => {
   releaseWrite = null;
   scanPosts = 0;
   scanStatusReads = 0;
+  meReads = 0;
   scanCounts = { media_files: 12, unmatched: 2 };
+  providerList = [
+    { id: 'tmdb', name: 'TMDB', kinds: ['movie', 'tv'] },
+    // Television only: it is what makes the chain editor's eligibility filter a
+    // real rule rather than a formality.
+    { id: 'anilist', name: 'AniList', kinds: ['tv'] },
+    // The adult descriptors are one per CONFIGURED stash-box instance (PLAN
+    // Part 2 phase 3 merges them into this list), so an id here may be
+    // instance-qualified and the chain editor names it from the same list as
+    // everything else.
+    { id: 'stashbox', name: 'ThePornDB', kinds: ['adult'] },
+    { id: 'stashbox:stashdb', name: 'StashDB', kinds: ['adult'] },
+  ];
+  accessBody = { restricted: false, users: [] };
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -93,6 +115,25 @@ beforeEach(() => {
       if (url.endsWith('/library/rescan') && method === 'POST') {
         scanPosts += 1;
         return jsonResponse({ status: 'scanning' }, 202);
+      }
+      // The access pair answers with itself, never with the library row, so a
+      // caller wanting the DLNA clearing that restricting causes has to apply
+      // it locally — which is exactly what the screen is asserted to do.
+      if (url.endsWith('/access')) {
+        if (method === 'GET') return jsonResponse(accessBody);
+        const body = JSON.parse(String(init!.body)) as { restricted: boolean; user_ids: number[] };
+        writes.push({ method, url, body });
+        if (writeStatus !== 200) return jsonResponse({ error: 'nope' }, writeStatus);
+        accessBody = {
+          restricted: body.restricted,
+          users: accessBody.users.map((u) => ({ ...u, granted: body.user_ids.includes(u.id) })),
+        };
+        if (body.restricted) {
+          libraries = libraries.map((l) =>
+            url.includes(`/libraries/${l.id}/`) ? { ...l, restricted: true, dlna_visible: false } : l,
+          );
+        }
+        return jsonResponse(accessBody);
       }
       if (method !== 'GET') {
         const body = init?.body === undefined ? null : JSON.parse(String(init.body));
@@ -107,26 +148,16 @@ beforeEach(() => {
         if (reply) libraries = libraries.map((l) => (l.id === reply.id ? reply : l));
         return jsonResponse(reply ?? libraries.find((l) => url.includes(`/libraries/${l.id}`)));
       }
-      if (url.endsWith('/libraries/providers'))
-        return jsonResponse({
-          providers: [
-            { id: 'tmdb', name: 'TMDB', kinds: ['movie', 'tv'] },
-            // Television only: it is what makes the chain editor's eligibility
-            // filter a real rule rather than a formality.
-            { id: 'anilist', name: 'AniList', kinds: ['tv'] },
-            // The adult descriptors are one per CONFIGURED stash-box instance
-            // (PLAN Part 2 phase 3 merges them into this list), so an id here
-            // may be instance-qualified and the chain editor names it from the
-            // same list as everything else.
-            { id: 'stashbox', name: 'ThePornDB', kinds: ['adult'] },
-            { id: 'stashbox:stashdb', name: 'StashDB', kinds: ['adult'] },
-          ],
-        });
+      if (url.endsWith('/libraries/providers')) return jsonResponse({ providers: providerList });
       if (url.endsWith('/libraries')) return jsonResponse({ libraries });
       if (url.endsWith('/settings')) return jsonResponse(SETTINGS);
       if (url.endsWith('/quality-profiles')) return jsonResponse({ profiles: PROFILES });
       if (url.endsWith('/download-clients/types')) return jsonResponse({ types: TYPES });
       if (url.endsWith('/download-clients')) return jsonResponse({ download_clients: CLIENTS });
+      if (url.endsWith('/auth/me')) {
+        meReads += 1;
+        return jsonResponse({ username: 'root', role: 'admin', open: false, adult: false, libraries: [] });
+      }
       if (url.endsWith('/system/status')) {
         scanStatusReads += 1;
         return jsonResponse({
@@ -187,6 +218,20 @@ function finishWrite() {
   releaseWrite = null;
   holdWrites = false;
   release();
+}
+
+/**
+ * The switch whose accessible name is `name` — the visible label, or the
+ * aria-label when the control hides it. Positional lookup is not usable here:
+ * every library card carries several switches now (active, restricted, one per
+ * indexer, DLNA) and their order is a layout decision, not a contract.
+ */
+function toggle(name: string): HTMLButtonElement {
+  const found = [...host.querySelectorAll<HTMLButtonElement>('[role="switch"]')].find(
+    (candidate) => (candidate.getAttribute('aria-label') ?? candidate.textContent ?? '').trim() === name,
+  );
+  expect(found, `switch named ${name}`).toBeDefined();
+  return found!;
 }
 
 function button(label: string): HTMLButtonElement {
@@ -467,13 +512,13 @@ describe('LibrariesSettings — indexer rows', () => {
 
     expect(host.textContent).toContain('Not searched for this library');
     expect(host.textContent).not.toContain('Disabled in Settings');
-    expect(host.querySelector('[role="switch"]')?.getAttribute('aria-checked')).toBe('false');
+    expect(toggle('Search Prowlarr for Movies').getAttribute('aria-checked')).toBe('false');
     // The dot reports the indexer's own health, which is still green — the
     // library is what switched it off, not the indexer.
     expect(host.querySelector('li span.bg-success')).not.toBeNull();
     expect(host.textContent).toContain('Indexer enabled');
     expect(host.querySelector('span[title="Prowlarr"]')?.textContent).toBe('Prowlarr');
-    const searchToggle = host.querySelector<HTMLButtonElement>('[role="switch"]');
+    const searchToggle = toggle('Search Prowlarr for Movies');
     expect(searchToggle?.getAttribute('aria-label')).toBe('Search Prowlarr for Movies');
     expect(searchToggle?.getAttribute('title')).toBe('Search Prowlarr for Movies');
     expect(searchToggle?.parentElement?.classList.contains('w-full')).toBe(true);
@@ -494,7 +539,7 @@ describe('LibrariesSettings — indexer rows', () => {
     expect(host.querySelector('li span.bg-ink-muted')).not.toBeNull();
     expect(host.textContent).toContain('Indexer disabled');
     // Still on for this library: the row must not offer to "re-enable" it.
-    expect(host.querySelector('[role="switch"]')?.getAttribute('aria-checked')).toBe('true');
+    expect(toggle('Search Prowlarr for Movies').getAttribute('aria-checked')).toBe('true');
   });
 
   it('renders the resolved categories as chips and marks an overridden set', async () => {
@@ -524,7 +569,7 @@ describe('LibrariesSettings — indexer rows', () => {
     ];
     await mountLoaded();
 
-    (host.querySelector('[role="switch"]') as HTMLButtonElement).click();
+    toggle('Search Prowlarr for Movies').click();
     await settle();
 
     expect(writes).toEqual([
@@ -540,7 +585,7 @@ describe('LibrariesSettings — indexer rows', () => {
   it('sends a null category list when a row has no override to carry', async () => {
     await mountLoaded();
 
-    (host.querySelector('[role="switch"]') as HTMLButtonElement).click();
+    toggle('Search Prowlarr for Movies').click();
     await settle();
 
     expect(write(0).body).toEqual({ enabled: false, categories: null });
@@ -618,7 +663,7 @@ describe('LibrariesSettings — switcher and reach', () => {
 
     // A write from here must land on the library the screen is showing, not on
     // whichever one happened to load first.
-    (host.querySelector('[role="switch"]') as HTMLButtonElement).click();
+    toggle('Search Prowlarr for Series').click();
     await settle();
 
     expect(write(0).url).toBe('/api/v1/libraries/2/indexers/1');
@@ -805,5 +850,235 @@ describe('LibrariesSettings — multiple libraries', () => {
     ) as HTMLButtonElement;
     expect(del.disabled).toBe(true);
     expect(host.textContent).toContain('still has 3 items');
+  });
+});
+
+/**
+ * The Active switch and the Access card (PLAN Part 3 phase 5).
+ *
+ * These two used to be the adult module's master switch and its member roster,
+ * on a settings page of their own. A library is the object both always
+ * described, so they are library controls now — offered for every kind, with
+ * no adult branch anywhere in the screen.
+ */
+describe('LibrariesSettings — active and access', () => {
+  it('PATCHes the master switch and never disables the control that undoes it', async () => {
+    writeReplies = [library({ active: false })];
+    await mountLoaded();
+
+    toggle('Library active').click();
+    await settle();
+
+    expect(writes).toEqual([
+      { method: 'PATCH', url: '/api/v1/libraries/1', body: { active: false } },
+    ]);
+    expect(autosaveStatus('1:active')).toBe('Saved');
+    // The nav item, the Explore scopes and the request form read what a session
+    // may see from /auth/me, and switching a library off changes that for the
+    // admin who did it too.
+    expect(meReads).toBe(1);
+    // Reachable is the whole reason an admin still receives inactive rows.
+    expect(toggle('Library active').disabled).toBe(false);
+    expect(toggle('Library active').getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('renders an inactive library greyed, badged, and still editable', async () => {
+    libraries = [library({ active: false }), SERIES];
+    await mountLoaded();
+
+    expect(host.textContent).toContain('Inactive');
+    const veil = host.querySelector('[data-library-behaviour]');
+    expect(veil, 'the behaviour cards').not.toBeNull();
+    expect(veil!.classList.contains('opacity-60')).toBe(true);
+    // Greyed, not hidden: what the library will come back with is still here.
+    expect(host.querySelector('#library-name')).not.toBeNull();
+    expect(toggle('Library active').getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('drops the veil for an active library', async () => {
+    await mountLoaded();
+
+    expect(host.textContent).not.toContain('Inactive');
+    expect(
+      host.querySelector('[data-library-behaviour]')?.classList.contains('opacity-60'),
+    ).toBe(false);
+  });
+
+  it('restricts a library, and reflects the DLNA share the server cleared', async () => {
+    libraries = [library({ dlna_visible: true }), SERIES];
+    await mountLoaded();
+
+    expect(toggle('Share over DLNA').getAttribute('aria-checked')).toBe('true');
+
+    toggle('Limit to named accounts').click();
+    await settle();
+
+    expect(writes).toEqual([
+      {
+        method: 'PUT',
+        url: '/api/v1/libraries/1/access',
+        // The whole decision in one request: split in two there is a window in
+        // which the library is restricted to nobody.
+        body: { restricted: true, user_ids: [] },
+      },
+    ]);
+    expect(autosaveStatus('1:access')).toBe('Saved');
+    // DLNA has no accounts, so the server clears the share in the same
+    // transaction — and the access answer does not carry the library row, so
+    // the screen has to apply that itself or it keeps showing a live share.
+    expect(toggle('Share over DLNA').getAttribute('aria-checked')).toBe('false');
+    expect(host.textContent).not.toContain('is on the network');
+  });
+
+  it('reads the roster, names the accounts a role already admits, and writes the whole list', async () => {
+    libraries = [library({ restricted: true }), SERIES];
+    accessBody = {
+      restricted: true,
+      users: [
+        { id: 1, username: 'root', role: 'admin', granted: false, always_granted: true },
+        { id: 2, username: 'kid', role: 'member', granted: false, always_granted: false },
+      ],
+    };
+    await mountLoaded();
+
+    // An admin gets a statement, not a checkbox: a control that changes
+    // nothing is a lie about who can see the shelf.
+    const adminRow = host.querySelector('[data-access-row="1"]');
+    expect(adminRow?.textContent).toContain('Always has access');
+    expect(adminRow?.querySelector('[role="switch"]')).toBeNull();
+
+    toggle('Movies for kid').click();
+    await settle();
+
+    expect(writes).toEqual([
+      {
+        method: 'PUT',
+        url: '/api/v1/libraries/1/access',
+        body: { restricted: true, user_ids: [2] },
+      },
+    ]);
+    expect(toggle('Movies for kid').getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('offers an open install nothing to grant rather than an empty list', async () => {
+    libraries = [library({ restricted: true }), SERIES];
+    await mountLoaded();
+
+    expect(host.textContent).toContain('No accounts yet');
+    expect(host.textContent).toContain('anyone who can reach it is an admin');
+  });
+
+  it('keeps the roster off the screen while a library is open to everyone', async () => {
+    libraries = [library({ restricted: true }), SERIES];
+    accessBody = {
+      restricted: true,
+      users: [{ id: 2, username: 'kid', role: 'member', granted: true, always_granted: false }],
+    };
+    await mountLoaded();
+
+    // Unrestricted, the list is not on screen at all — the toggle is the whole
+    // card until somebody turns it on.
+    button('Series').click();
+    await settle();
+    expect(host.textContent).not.toContain('kid');
+  });
+});
+
+describe('LibrariesSettings — the DLNA warning', () => {
+  /** The banner's own words, so a passing test cannot be satisfied by prose. */
+  const WARNING = 'every device on this network can browse it';
+
+  it('warns when a restricted library is also shared on the LAN', async () => {
+    libraries = [library({ restricted: true, dlna_visible: true }), SERIES];
+    await mountLoaded();
+
+    expect(host.textContent).toContain(WARNING);
+    expect(host.querySelector('[role="alert"]')).not.toBeNull();
+  });
+
+  it('stays quiet for a restricted library that is not shared', async () => {
+    libraries = [library({ restricted: true, dlna_visible: false }), SERIES];
+    await mountLoaded();
+
+    expect(host.textContent).not.toContain(WARNING);
+  });
+
+  it('stays quiet for an open library that is shared', async () => {
+    libraries = [library({ restricted: false, dlna_visible: true }), SERIES];
+    await mountLoaded();
+
+    expect(host.textContent).not.toContain(WARNING);
+  });
+
+  it('names the CLI flag on an adult library and nowhere else', async () => {
+    libraries = [
+      MOVIES,
+      library({ id: 3, kind: 'adult', name: 'Adult', root_path: 'library/Adult', provider: 'stashbox', providers: ['stashbox'], restricted: true }),
+    ];
+    await mountLoaded();
+
+    expect(host.textContent).not.toContain('--include-adult');
+
+    button('Adult').click();
+    await settle();
+    expect(host.textContent).toContain('--include-adult');
+  });
+});
+
+/**
+ * Creating an adult library IS how adult content is turned on now, and the
+ * stash-box instance CRUD only appears once one exists. So the form has to
+ * offer the kind on an install with no box configured, and warn rather than
+ * block.
+ */
+describe('LibrariesSettings — the adult create flow', () => {
+  async function openAdd() {
+    await mountLoaded();
+    button('Add library').click();
+    flushSync();
+    pick(select('new-library-kind'), 'adult');
+  }
+
+  it('warns, and points at Metadata, when no stash-box endpoint is configured', async () => {
+    providerList = [{ id: 'tmdb', name: 'TMDB', kinds: ['movie', 'tv'] }];
+    await openAdd();
+
+    expect([...select('new-library-kind').options].map((o) => o.value)).toContain('adult');
+    expect(host.textContent).toContain('No stash-box endpoint yet');
+    expect(
+      [...host.querySelectorAll('a[href="/settings/metadata"]')].length,
+      'a link to Metadata',
+    ).toBeGreaterThan(0);
+  });
+
+  it('says nothing about endpoints once one is configured', async () => {
+    await openAdd();
+
+    expect(host.textContent).not.toContain('No stash-box endpoint yet');
+  });
+
+  it('creates the library without a chain the boxless install could not name', async () => {
+    providerList = [{ id: 'tmdb', name: 'TMDB', kinds: ['movie', 'tv'] }];
+    await openAdd();
+
+    const name = host.querySelector('#new-library-name') as HTMLInputElement;
+    name.value = 'Adult';
+    name.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+
+    writeReplies = [
+      library({ id: 9, kind: 'adult', name: 'Adult', root_path: 'library/Adult', is_default: true, restricted: true, dlna_visible: false, provider: 'stashbox', providers: ['stashbox'] }),
+    ];
+    const submit = [...host.querySelectorAll('button')].find(
+      (b) => b.textContent?.includes('Add library') && b.closest('[role="dialog"], dialog, .fixed'),
+    );
+    submit!.click();
+    await settle();
+
+    const post = writes.find((w) => w.method === 'POST' && w.url.endsWith('/libraries'));
+    expect(post, 'POST /libraries').toBeDefined();
+    // An empty chain, so the server picks the bare legacy stash-box id — the
+    // one exception that makes the module bootstrappable.
+    expect(post!.body).toMatchObject({ kind: 'adult', name: 'Adult', providers: [] });
   });
 });

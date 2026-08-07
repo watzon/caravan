@@ -9,6 +9,7 @@ import { system } from '../state/system.svelte';
 import { providers } from '../state/providers.svelte';
 import { session } from '../state/session.svelte';
 import { navigate, router } from '../router.svelte';
+import { SETTINGS_CATALOG, settingsMatches } from '../settings/catalog';
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
@@ -98,6 +99,7 @@ function stubFetch() {
     if (url.endsWith('/download-clients/types')) return jsonResponse({ types: [] });
     if (url.endsWith('/download-clients')) return jsonResponse({ download_clients: [] });
     if (url.endsWith('/libraries/providers')) return jsonResponse({ providers: [] });
+    if (url.endsWith('/quality-profiles')) return jsonResponse({ profiles: [] });
     if (url.endsWith('/dlna')) {
       return jsonResponse({ enabled: true, friendly_name: 'Caravan', advertising: true, uuid: 'u' });
     }
@@ -304,6 +306,37 @@ describe('Settings overview and route resolution', () => {
 
     expect(host.querySelector('#dlna-friendly-name')).not.toBeNull();
     expect(host.querySelector('#jellyfin-url')).not.toBeNull();
+  });
+
+  /**
+   * The Adult content page dissolved into the library cards (PLAN Part 3
+   * phase 5): its master switch is a library's Active toggle and its member
+   * roster is a library's Access card. A bookmark has to land where both now
+   * are, not on the generic Metadata fallback that an unknown slug gets.
+   */
+  it('lands the retired adult slug on Libraries', async () => {
+    stubFetch();
+    app = mount(Settings, { target: host, props: { section: 'adult' } });
+    await settle();
+
+    expect(host.querySelector('h1#libraries')?.textContent).toContain('Libraries');
+    expect(host.querySelector('h1#metadata')).toBeNull();
+  });
+
+  it('offers no Adult content destination anywhere in the catalog', async () => {
+    stubFetch();
+    app = mount(Settings, { target: host });
+    await settle();
+
+    expect(host.textContent).not.toContain('Adult content');
+    expect(host.querySelector('a[href^="/settings/adult"]')).toBeNull();
+
+    // The words somebody would have searched for on the retired page have to
+    // reach the screen that answers them now.
+    for (const term of ['adult', 'privacy', 'access', 'restricted', 'active']) {
+      const hits = SETTINGS_CATALOG.filter((entry) => settingsMatches(entry, term));
+      expect(hits.map((entry) => entry.label), term).toContain('Libraries');
+    }
   });
 });
 

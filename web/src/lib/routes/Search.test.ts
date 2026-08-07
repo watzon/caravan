@@ -68,6 +68,8 @@ const MOVIE_LIBRARY: Library = {
   providers: ['tmdb'],
   is_default: true,
   item_count: 0,
+  active: true,
+  restricted: false,
   dlna_visible: true,
   route_torrent: '',
   route_usenet: '',

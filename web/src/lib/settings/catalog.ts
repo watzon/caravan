@@ -35,7 +35,20 @@ export const SETTINGS_CATALOG = [
     route: '/settings/libraries',
     anchor: 'libraries',
     aliases: ['library', 'media folders'],
-    keywords: ['movies', 'series', 'root folder'],
+    // Who reaches a library is a library setting now, so the words somebody
+    // would have searched for on the retired Adult content page have to land
+    // here — including 'adult', which names a KIND of library rather than a
+    // module.
+    keywords: [
+      'movies',
+      'series',
+      'root folder',
+      'access',
+      'privacy',
+      'restricted',
+      'active',
+      'adult',
+    ],
   },
   {
     category: 'Library and media',
@@ -63,18 +76,6 @@ export const SETTINGS_CATALOG = [
     anchor: 'storage',
     aliases: ['storage root', 'data directory', 'database'],
     keywords: ['disk', 'files', 'migration', 'naming', 'recycle', 'retention', 'backup', 'restore'],
-  },
-  {
-    category: 'Library and media',
-    label: 'Adult content',
-    description: 'Enable the adult library and choose who reaches it.',
-    route: '/settings/adult',
-    anchor: 'adult-content',
-    aliases: ['adult library'],
-    // The stash-box endpoints moved to Metadata, so the keyword goes with them:
-    // a search for one that landed here would name a screen that no longer
-    // configures it.
-    keywords: ['access', 'privacy'],
   },
   {
     category: 'Search and downloads',
@@ -168,6 +169,10 @@ const LEGACY_SETTINGS_SECTIONS: Readonly<Record<string, string>> = {
   jellyfin: 'playback',
   'tv-profile': 'playback',
   general: 'metadata',
+  // The adult module's own page dissolved into the library cards: its master
+  // switch is a library's Active toggle and its member list is a library's
+  // Access card, so a bookmark lands on the screen that now holds both.
+  adult: 'libraries',
 };
 
 /** The catalog entry a direct or retired `/settings/:section` route represents. */

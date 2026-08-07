@@ -448,11 +448,16 @@ export interface SessionUser {
   role: UserRole;
   open: boolean;
   /**
-   * Whether the adult module is visible to THIS caller: the server-wide switch
-   * is on and this account reaches it (an admin always does, a member needs the
-   * grant). It is the only field outside /adult that reports anything about the
-   * module, and it is false — never absent — for everybody else, so "off" and
-   * "not granted" are the same answer here as they are on the 404 from /adult.
+   * Whether adult content is visible to THIS caller: at least one adult-kind
+   * library is ACTIVE and this account reaches it (an admin always does, a
+   * member needs a grant on it, an unrestricted library needs none). The name
+   * and the type are unchanged from the module-switch era on purpose — every
+   * surface that reads it asks the same question it always did — but there is
+   * no server-wide switch behind it any more, only libraries.
+   *
+   * It is false, never absent, for everybody else, so "there is no adult
+   * library" and "I was not granted one" are the same answer here as they are
+   * on the 404 from /adult.
    *
    * The SPA reads the nav item, the settings pill and the scene surfaces from
    * this and nothing else. GET /settings cannot stand in for it: that route is
@@ -460,12 +465,30 @@ export interface SessionUser {
    */
   adult: boolean;
   /**
+   * Every library this session may see — active and permitted, nothing else.
+   *
+   * Root paths, provider chains and DLNA state are deliberately absent: this
+   * travels to every member, and GET /libraries (which carries all of that)
+   * is admin-only and must stay that way.
+   *
+   * Optional because a server older than the field sends none, and because
+   * nothing on this screen may treat "the list is missing" as "no libraries".
+   */
+  libraries?: SessionLibrary[];
+  /**
    * Which controls the Explore rail's Adult scope may draw. Absent for a caller
    * the module is invisible to, for a server with no stash-box credential, and
    * for a server too old to send it — see `sceneFiltersOf`, which is the only
    * thing that should read it.
    */
   scene_filters?: SceneFilterSupport;
+}
+
+/** internal/api.meLibraryJSON — one shelf as a session may know it. */
+export interface SessionLibrary {
+  id: number;
+  kind: LibraryKind;
+  name: string;
 }
 
 /**
@@ -654,16 +677,6 @@ export const SETTING_CONVERT_AUDIO_BITRATE_KBPS = 'convert_audio_bitrate_kbps';
  */
 export const SETTING_DLNA_ENABLED = 'dlna_enabled';
 export const SETTING_DLNA_FRIENDLY_NAME = 'dlna_friendly_name';
-
-/**
- * The adult module's master switch, as GET /settings reports it.
- *
- * Readable here but NOT writable: PUT /settings rejects it, because the first
- * enable also creates the Adult library row. `api.setAdultEnabled` is the only
- * way to change it. Absent means off, exactly as the server reads it, so the
- * Settings screen can seed its toggle without a second request.
- */
-export const SETTING_ADULT_ENABLED = 'adult_enabled';
 
 /**
  * GET /dlna — what the media server is actually doing.
@@ -1788,13 +1801,11 @@ export interface ApproveRequestResult {
 /**
  * internal/core.LibraryKind* — the whole item→library mapping.
  *
- * The `adult` row does not exist until the module is enabled for the first
- * time, and it survives a later disable (nothing is deleted) — so the row
- * outliving the module is exactly why GET /libraries filters rather than
- * trusting the table. The server drops it for any caller the module is not
- * visible to (internal/api.libraryVisible), which means its presence in a
- * payload IS permission to render it, and the switcher needs no adult rule of
- * its own. Enforced by TestLibrariesHideTheAdultRowWhenTheModuleIsOff.
+ * An `adult` row exists only once somebody creates one — creating it IS how
+ * adult content is turned on, and switching it off later deletes nothing. The
+ * server drops every row the caller may not see (internal/api.libraryGate),
+ * which means a row's presence in a payload IS permission to render it, and
+ * no screen needs an adult rule of its own.
  */
 export type LibraryKind = 'movie' | 'tv' | 'adult';
 
@@ -1850,6 +1861,19 @@ export interface Library {
   is_default: boolean;
   /** How many movies and series this library owns — what the delete guard counts. */
   item_count: number;
+  /**
+   * The library's master switch. False is dormant for EVERYONE, admins
+   * included: no rows, no posters, no scans, no DLNA container. It deletes
+   * nothing, and GET /libraries keeps sending inactive rows to an admin
+   * precisely so the toggle that undoes it stays reachable.
+   */
+  active: boolean;
+  /**
+   * Whether the library is narrowed to the accounts named in its access list.
+   * Admins bypass it. Written through PUT /libraries/{id}/access — never
+   * through PATCH, so the flag and the roster it applies to move together.
+   */
+  restricted: boolean;
   dlna_visible: boolean;
   route_torrent: string;
   route_usenet: string;
@@ -1873,6 +1897,12 @@ export interface LibraryPatch {
   /** The whole ordered chain: non-empty, no duplicates, all serving the kind. */
   providers?: string[];
   is_default?: boolean;
+  /**
+   * The master switch. `restricted` is deliberately NOT here: one door per
+   * invariant, and restriction cannot be written without the roster that gives
+   * it meaning (PUT /libraries/{id}/access).
+   */
+  active?: boolean;
   dlna_visible?: boolean;
   route_torrent?: string;
   route_usenet?: string;
@@ -1909,6 +1939,44 @@ export interface MetadataProviderInfo {
 export interface LibraryIndexerOverride {
   enabled: boolean;
   categories: number[] | null;
+}
+
+/**
+ * internal/api.libraryAccessUserJSON — one account beside one library.
+ *
+ * A shape of its own rather than a field on `User` because GET /users carries
+ * no access field at all: a per-account flag on a roster reachable from every
+ * install would say which libraries exist and who was kept out of them, which
+ * is the trace a restricted shelf exists not to leave.
+ */
+export interface LibraryMember {
+  id: number;
+  username: string;
+  role: UserRole;
+  /** The account's own grant. Meaningless beside `always_granted`. */
+  granted: boolean;
+  /** The account reaches the library through its ROLE — every admin. */
+  always_granted: boolean;
+}
+
+/**
+ * internal/api.libraryAccessJSON — one library's whole access decision.
+ *
+ * The flag and the roster travel together because neither means anything
+ * alone: "restricted" without a list is "admins only", and a list without the
+ * flag grants nobody anything. PUT takes the same pair back, whole, so there
+ * is never a moment where a library is restricted to nobody by accident.
+ */
+export interface LibraryAccess {
+  restricted: boolean;
+  users: LibraryMember[];
+}
+
+/** Body for PUT /libraries/{id}/access: the entire decision, every time. */
+export interface LibraryAccessInput {
+  restricted: boolean;
+  /** The complete allow-list. Empty is legitimate — "the admins and nobody else". */
+  user_ids: number[];
 }
 
 /* ---------------------------------------------------------------------------
@@ -2069,24 +2137,6 @@ export interface ScenePerformersPage {
 /** GET /adult/tags?q= */
 export interface SceneTagsPage {
   tags: SceneFilterRef[];
-}
-
-/**
- * internal/api.adultUserJSON — one row of the member-access card.
- *
- * It is a shape of its own rather than a field on `User` because GET /users
- * carries no adult field at all: an `adult_access: false` on every row of an
- * install that never enabled the module is exactly the trace this phase
- * promises not to leave.
- */
-export interface AdultUser {
-  id: number;
-  username: string;
-  role: UserRole;
-  /** The account's own grant. False and meaningless on an admin row. */
-  granted: boolean;
-  /** The account reaches the module through its role — every admin. */
-  always_granted: boolean;
 }
 
 /**

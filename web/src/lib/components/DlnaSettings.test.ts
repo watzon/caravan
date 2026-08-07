@@ -13,6 +13,8 @@ const ADULT_LIBRARY: Library = {
   providers: ['stashbox'],
   is_default: true,
   item_count: 0,
+  active: true,
+  restricted: true,
   dlna_visible: false,
   route_torrent: '',
   route_usenet: '',

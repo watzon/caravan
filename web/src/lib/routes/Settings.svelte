@@ -10,7 +10,6 @@
     SETTING_TMDB_API_KEY_SET,
     type Settings,
   } from '../api/types';
-  import AdultSettings from '../components/AdultSettings.svelte';
   import Badge from '../components/Badge.svelte';
   import Button from '../components/Button.svelte';
   import Icon from '../components/Icon.svelte';
@@ -278,8 +277,6 @@
       <DownloadsSettings {settings} {saving} {showAdvanced} onsave={save} />
     {:else if activeEntry?.route === '/settings/playback' && settings}
       <PlaybackSettings {settings} {saving} onsave={save} />
-    {:else if activeEntry?.route === '/settings/adult' && settings}
-      <AdultSettings {settings} />
     {:else if activeEntry?.route === '/settings/interface'}
       <InterfaceSettings />
     {:else if activeEntry?.route === '/settings/security' && settings}
