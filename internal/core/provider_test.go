@@ -1,6 +1,9 @@
 package core
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // Every descriptor must be internally consistent and every kind must have a
 // default that actually serves it — the create form and migration 0022 both
@@ -34,6 +37,16 @@ func TestProviderServesRejectsMismatches(t *testing.T) {
 		{ProviderTMDB, LibraryKindAdult, false},
 		{ProviderStashbox, LibraryKindAdult, true},
 		{ProviderStashbox, LibraryKindMovie, false},
+		// An instance is answered on its base: every configured stash-box
+		// endpoint speaks stash-box, and none of them speaks TMDB's vocabulary.
+		{ProviderStashbox + ":stashdb", LibraryKindAdult, true},
+		{ProviderStashbox + ":stashdb", LibraryKindMovie, false},
+		{ProviderStashbox + ":stashdb", LibraryKindTV, false},
+		// A malformed instance id serves nothing rather than falling back to its
+		// base — a chain that only consults ProviderServes must not admit an id
+		// no registry lookup can ever resolve to a client.
+		{ProviderStashbox + ":Bad", LibraryKindAdult, false},
+		{ProviderTMDB + ":anything", LibraryKindMovie, false},
 		{ProviderAniList, LibraryKindTV, true},
 		// AniList is television-only: internal/anilist refuses movie lookups
 		// with ErrProviderKindUnsupported, so a movie library must not be
@@ -76,6 +89,91 @@ func TestDefaultTVProviderStaysTMDB(t *testing.T) {
 func TestDefaultProviderForUnknownKind(t *testing.T) {
 	if got := DefaultProviderForKind("music"); got != "" {
 		t.Errorf("DefaultProviderForKind(unknown) = %q, want empty", got)
+	}
+}
+
+// Base parsing is total: it answers for ids validation will go on to refuse, so
+// that no caller has to ask the two questions in a particular order.
+func TestProviderBase(t *testing.T) {
+	cases := map[string]string{
+		"":                 "",
+		ProviderTMDB:       ProviderTMDB,
+		"stashbox:stashdb": ProviderStashbox,
+		// An empty slug is not a valid id, and the base of it is still the base.
+		"stashbox:": ProviderStashbox,
+		// Everything after the FIRST colon is the slug, so a second colon makes
+		// the slug invalid rather than making a third level of id.
+		"a:b:c": "a",
+	}
+	for id, want := range cases {
+		if got := ProviderBase(id); got != want {
+			t.Errorf("ProviderBase(%q) = %q, want %q", id, got, want)
+		}
+	}
+}
+
+func TestValidProviderInstanceID(t *testing.T) {
+	cases := []struct {
+		id   string
+		want bool
+		why  string
+	}{
+		{ProviderStashbox, true, "the legacy instance keeps the bare id forever"},
+		{ProviderTMDB, true, "a bare compiled id"},
+		{"stashbox:stashdb", true, "base plus slug"},
+		{"stashbox:s", true, "a one-character slug"},
+		{"stashbox:pmv-stash", true, "dashes inside the slug"},
+		{"stashbox:0", true, "a slug may start with a digit"},
+		{"", false, "the empty id names no provider"},
+		{"bogus", false, "an id no descriptor claims"},
+		{"bogus:x", false, "an unknown base cannot be instanced"},
+		{"stashbox:", false, "an empty slug"},
+		{"stashbox:StashDB", false, "uppercase — ids two rows can disagree about"},
+		{"stashbox:-lead", false, "a leading dash"},
+		{"stashbox:a:b", false, "a slug cannot contain the separator"},
+		{"stashbox:" + strings.Repeat("a", 32), true, "32 characters is the cap"},
+		{"stashbox:" + strings.Repeat("a", 33), false, "33 characters is over it"},
+		// Deliberate: TMDB's base is real and nothing mints TMDB instances, so
+		// this can only be a mistake or a hand-edited chain. Admitting it would
+		// put an id in a chain that no registry lookup can resolve to a client.
+		{"tmdb:x", false, "only stash-box is instanced"},
+		{"anilist:x", false, "only stash-box is instanced"},
+	}
+	for _, c := range cases {
+		if got := ValidProviderInstanceID(c.id); got != c.want {
+			t.Errorf("ValidProviderInstanceID(%q) = %v, want %v (%s)", c.id, got, c.want, c.why)
+		}
+	}
+}
+
+// Every slug the deriver produces must be one the validator accepts, or the
+// create form mints ids the chain editor then refuses.
+func TestProviderSlug(t *testing.T) {
+	cases := map[string]string{
+		"StashDB":                 "stashdb",
+		"PMV Stash":               "pmv-stash",
+		"  ThePornDB  ":           "theporndb",
+		"My  Box":                 "my-box",
+		"box.example":             "box-example",
+		"--leading":               "leading",
+		"trailing--":              "trailing",
+		"":                        "",
+		"日本":                      "",
+		strings.Repeat("a", 40):   strings.Repeat("a", 32),
+		strings.Repeat("ab ", 12): "ab-ab-ab-ab-ab-ab-ab-ab-ab-ab-ab",
+	}
+	for name, want := range cases {
+		got := ProviderSlug(name)
+		if got != want {
+			t.Errorf("ProviderSlug(%q) = %q, want %q", name, got, want)
+			continue
+		}
+		if got == "" {
+			continue
+		}
+		if !ValidProviderInstanceID(ProviderStashbox + ":" + got) {
+			t.Errorf("ProviderSlug(%q) = %q, which the validator refuses", name, got)
+		}
 	}
 }
 
