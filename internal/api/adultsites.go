@@ -222,7 +222,7 @@ func (s *server) handleGetSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	years, count, withFile, err := s.siteYears(ctx, sr.ID)
+	years, count, withFile, err := s.siteYears(ctx, sr)
 	if err != nil {
 		s.writeStoreError(w, "read scenes", err)
 		return
@@ -231,7 +231,7 @@ func (s *server) handleGetSite(w http.ResponseWriter, r *http.Request) {
 	dto.SceneCount, dto.SceneFileCount = count, withFile
 	writeJSON(w, http.StatusOK, siteDetailJSON{
 		siteJSON:    dto,
-		ProviderURL: s.siteProviderURL(ctx, sr.StashID),
+		ProviderURL: s.siteProviderURL(ctx, sr),
 		Cataloguing: s.siteCataloguing(ctx, sr.ID),
 		Years:       years,
 	})
@@ -269,22 +269,49 @@ func (s *server) siteCataloguing(ctx context.Context, seriesID int64) bool {
 	return false
 }
 
-// siteProviderURL is the site's page on the configured endpoint's website.
+// siteProviderURL is the site's page on ITS OWN instance's website.
 //
-// A settings read that fails is not worth failing the page for: the link is the
-// least important thing on it, and a site with no link renders exactly as one
-// whose provider has no page.
-func (s *server) siteProviderURL(ctx context.Context, stashID string) string {
-	endpoint, err := s.st.GetSetting(ctx, store.SettingStashboxEndpoint)
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
+// The row's provider decides it, not a server-wide setting: two instances have
+// two websites, and a link built from the wrong one lands on a page about a
+// different site — or on a 404 — while looking exactly like a working link.
+//
+// A lookup that fails is not worth failing the page for: the link is the least
+// important thing on it, and a site with no link renders exactly as one whose
+// provider has no page. A gone instance is the same nothing.
+func (s *server) siteProviderURL(ctx context.Context, sr *core.Series) string {
+	endpoint := s.siteEndpoint(ctx, sr)
+	if endpoint == "" {
+		// NOT stashbox.SiteWebURL's own blank-means-the-preset rule: that
+		// sentinel died with the settings pair (0026). A gone instance links
+		// nowhere rather than at whichever box the preset happens to name.
 		return ""
 	}
-	return stashbox.SiteWebURL(endpoint, stashID)
+	return stashbox.SiteWebURL(endpoint, sr.StashID)
+}
+
+// siteEndpoint is the endpoint a site's own stash-box instance answers on, or
+// "" when the instance is gone or unreadable. An empty provider is the legacy
+// instance, which is what every adult row written before 0026 carries.
+func (s *server) siteEndpoint(ctx context.Context, sr *core.Series) string {
+	providerID := sr.Provider
+	if providerID == "" {
+		providerID = core.ProviderStashbox
+	}
+	in, err := s.st.GetStashboxInstanceByProviderID(ctx, providerID)
+	if err != nil {
+		if !errors.Is(err, store.ErrNotFound) {
+			s.log.Error("read stash-box instance for a site link",
+				"provider", providerID, "error", err)
+		}
+		return ""
+	}
+	return in.Endpoint
 }
 
 // siteYears assembles a site's release years and their scenes, and reports the
 // totals so the page header does not need a second pass.
-func (s *server) siteYears(ctx context.Context, seriesID int64) ([]siteYearJSON, int, int, error) {
+func (s *server) siteYears(ctx context.Context, sr *core.Series) ([]siteYearJSON, int, int, error) {
+	seriesID := sr.ID
 	seasons, err := s.st.ListSeasons(ctx, seriesID)
 	if err != nil {
 		return nil, 0, 0, err
@@ -303,12 +330,11 @@ func (s *server) siteYears(ctx context.Context, seriesID int64) ([]siteYearJSON,
 	}
 
 	profile := s.activeTVProfile(ctx)
-	// Read once for the whole page, tolerantly for the reason siteProviderURL
-	// is: scenes with no provider link render fine.
-	endpoint, err := s.st.GetSetting(ctx, store.SettingStashboxEndpoint)
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		endpoint = ""
-	}
+	// The SITE's instance, read once for the whole page: every scene on it was
+	// minted by the same box the site was, so one lookup answers the lot.
+	// Tolerant for the reason siteProviderURL is — scenes with no provider link
+	// render fine.
+	endpoint := s.siteEndpoint(ctx, sr)
 	byYear := map[int][]sceneJSON{}
 	total, withFile := 0, 0
 	for _, e := range episodes {
@@ -318,7 +344,9 @@ func (s *server) siteYears(ctx context.Context, seriesID int64) ([]siteYearJSON,
 			withFile++
 		}
 		scene := sceneDTO(e, firstFileDTO(files, profile))
-		scene.ProviderURL = stashbox.SceneWebURL(endpoint, e.StashID)
+		if endpoint != "" {
+			scene.ProviderURL = stashbox.SceneWebURL(endpoint, e.StashID)
+		}
 		byYear[e.SeasonNumber] = append(byYear[e.SeasonNumber], scene)
 	}
 

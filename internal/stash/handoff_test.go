@@ -136,12 +136,20 @@ func jobsOfKind(t *testing.T, st *store.Store, kind string) []core.Job {
 }
 
 // seedScene inserts one adult site with one scene and one imported file, which
-// is the state an import leaves behind and the identity push reads.
+// is the state an import leaves behind and the identity push reads. The site is
+// pinned to the legacy instance, which is what a single-box install and every
+// row written before 0026 carry; seedSceneOn pins it elsewhere.
 func seedScene(t *testing.T, st *store.Store) core.Episode {
+	t.Helper()
+	return seedSceneOn(t, st, core.ProviderStashbox)
+}
+
+func seedSceneOn(t *testing.T, st *store.Store, providerID string) core.Episode {
 	t.Helper()
 	ctx := context.Background()
 
 	series := &core.Series{
+		Provider: providerID, ProviderRef: "site-1",
 		StashID: "site-1", Title: "Brazzers", Kind: core.SeriesKindAdult, Monitored: true,
 	}
 	if err := st.UpsertSeries(ctx, series); err != nil {
@@ -176,6 +184,17 @@ func seedScene(t *testing.T, st *store.Store) core.Episode {
 		t.Fatalf("LinkEpisodeFile: %v", err)
 	}
 	return *episode
+}
+
+// seedInstance configures one stash-box endpoint. The endpoint is what a push
+// carries beside every UUID, so a fixture with no instance is a fixture whose
+// ids have no issuer — see TestIdentityPushOmitsIdsWhenTheInstanceIsGone.
+func seedInstance(t *testing.T, st *store.Store, providerID, name, endpoint string) {
+	t.Helper()
+	in := &core.StashboxInstance{ProviderID: providerID, Name: name, Endpoint: endpoint}
+	if err := st.UpsertStashboxInstance(context.Background(), in); err != nil {
+		t.Fatalf("UpsertStashboxInstance(%s): %v", providerID, err)
+	}
 }
 
 func TestConfigOnAFreshDatabaseIsDisabled(t *testing.T) {
@@ -468,9 +487,7 @@ func TestIdentityPushPayload(t *testing.T) {
 	t.Cleanup(srv.Close)
 	svc, st := newTestService(t, srv.Client())
 	configure(t, st, srv.URL(), "secret", true, true)
-	if err := st.SetSetting(context.Background(), store.SettingStashboxEndpoint, "https://tpdb.test/graphql"); err != nil {
-		t.Fatalf("set stash-box endpoint: %v", err)
-	}
+	seedInstance(t, st, core.ProviderStashbox, "ThePornDB", "https://tpdb.test/graphql")
 	episode := seedScene(t, st)
 
 	if err := svc.HandleIdentify(context.Background(), st, identifyPayloadFor(t, episode.ID)); err != nil {
@@ -511,10 +528,17 @@ func TestIdentityPushPayload(t *testing.T) {
 	}
 }
 
-// An unconfigured stash-box endpoint means the client's own preset, so the
-// endpoint pushed has to be the one that was actually queried — a UUID without
-// the box that issued it is not an identity.
-func TestIdentityPushCarriesTheDefaultStashboxEndpoint(t *testing.T) {
+// A site whose stash-box instance has been deleted is pushed WITHOUT stash ids
+// — not with a guess at which box issued them.
+//
+// The file still arrives, titled and dated and with its performers, because
+// those are facts Caravan owns whatever happened to the endpoint. What is
+// withheld is the attribution: a StashIDInput naming the wrong box writes into
+// the user's own Stash a claim that box never made, Stash's identify step then
+// trusts it, and undoing it means finding every scene the guess touched. An
+// absent id leaves the scene merely unidentified, which the next push repairs
+// the moment the instance is added back.
+func TestIdentityPushOmitsIdsWhenTheInstanceIsGone(t *testing.T) {
 	srv := stashtest.New(stashtest.Options{
 		Operations: map[string][]stashtest.Response{
 			"FindSceneByPath":     {stashtest.Data(`{"findScenes":{"count":1,"scenes":[{"id":"42"}]}}`)},
@@ -531,11 +555,50 @@ func TestIdentityPushCarriesTheDefaultStashboxEndpoint(t *testing.T) {
 	if err := svc.HandleIdentify(context.Background(), st, identifyPayloadFor(t, episode.ID)); err != nil {
 		t.Fatalf("HandleIdentify: %v", err)
 	}
+	updates := srv.Operations("SceneUpdate")
+	if len(updates) != 1 {
+		t.Fatalf("SceneUpdate requests = %d, want the file pushed anyway", len(updates))
+	}
+	input, _ := updates[0].Variables["input"].(map[string]any)
+	if _, ok := input["stash_ids"]; ok {
+		t.Errorf("SceneUpdateInput carried stash_ids %v with no instance to attribute them to",
+			input["stash_ids"])
+	}
+	if input["title"] != "Deep Impact" {
+		t.Errorf("title = %v, want the push to have happened regardless", input["title"])
+	}
+}
+
+// A scene under a site pinned to the SECOND instance carries that instance's
+// endpoint, not the first one's. The endpoint is half the identity, and the
+// public boxes mint identical UUIDs — so the wrong one attributes the scene to
+// a record on a box that never held it.
+func TestIdentityPushCarriesThePinnedInstancesEndpoint(t *testing.T) {
+	srv := stashtest.New(stashtest.Options{
+		Operations: map[string][]stashtest.Response{
+			"FindSceneByPath":     {stashtest.Data(`{"findScenes":{"count":1,"scenes":[{"id":"42"}]}}`)},
+			"FindStudioByName":    {stashtest.Data(`{"findStudios":{"studios":[{"id":"9"}]}}`)},
+			"FindPerformerByName": {stashtest.Data(`{"findPerformers":{"performers":[{"id":"3"}]}}`)},
+			"SceneUpdate":         {stashtest.Data(`{"sceneUpdate":{"id":"42"}}`)},
+		},
+	})
+	t.Cleanup(srv.Close)
+	svc, st := newTestService(t, srv.Client())
+	configure(t, st, srv.URL(), "secret", true, true)
+	seedInstance(t, st, core.ProviderStashbox, "ThePornDB", "https://tpdb.test/graphql")
+	seedInstance(t, st, core.ProviderStashbox+":stashdb", "StashDB", "https://stashdb.test/graphql")
+	episode := seedSceneOn(t, st, core.ProviderStashbox+":stashdb")
+
+	if err := svc.HandleIdentify(context.Background(), st, identifyPayloadFor(t, episode.ID)); err != nil {
+		t.Fatalf("HandleIdentify: %v", err)
+	}
 	input, _ := srv.Operations("SceneUpdate")[0].Variables["input"].(map[string]any)
-	ids, _ := input["stash_ids"].([]any)
-	first, _ := ids[0].(map[string]any)
-	if first["endpoint"] != "https://theporndb.net/graphql" {
-		t.Errorf("stash id endpoint = %v, want the client's own preset", first["endpoint"])
+	want := []any{map[string]any{
+		"endpoint": "https://stashdb.test/graphql",
+		"stash_id": "scene-a",
+	}}
+	if !reflect.DeepEqual(input["stash_ids"], want) {
+		t.Errorf("stash_ids = %v, want the pinned instance's endpoint", input["stash_ids"])
 	}
 }
 
@@ -721,6 +784,10 @@ func TestIdentityPushSurvivesStudioAndPerformerFailures(t *testing.T) {
 	t.Cleanup(srv.Close)
 	svc, st := newTestService(t, srv.Client())
 	configure(t, st, srv.URL(), "secret", true, true)
+	// The ids need an issuer to be pushed at all now (see
+	// TestIdentityPushOmitsIdsWhenTheInstanceIsGone), so the fixture configures
+	// one. What is under test here is still the best-effort rule.
+	seedInstance(t, st, core.ProviderStashbox, "ThePornDB", "https://tpdb.test/graphql")
 	episode := seedScene(t, st)
 
 	if err := svc.HandleIdentify(context.Background(), st, identifyPayloadFor(t, episode.ID)); err != nil {

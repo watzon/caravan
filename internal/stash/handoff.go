@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/watzon/caravan/internal/core"
-	"github.com/watzon/caravan/internal/stashbox"
 	"github.com/watzon/caravan/internal/store"
 )
 
@@ -622,7 +621,7 @@ func (s *Service) scenePush(ctx context.Context, episodeID int64) (scenePush, bo
 		return scenePush{}, false, nil
 	}
 
-	endpoint, err := s.stashboxEndpoint(ctx)
+	endpoint, err := s.endpointForSeries(ctx, series)
 	if err != nil {
 		return scenePush{}, false, err
 	}
@@ -631,11 +630,22 @@ func (s *Service) scenePush(ctx context.Context, episodeID int64) (scenePush, bo
 		path:  filepath.Join(root, filepath.FromSlash(files[0].Path)),
 		title: episode.Title,
 	}
-	if episode.StashID != "" {
-		push.stashIDs = []StashID{{Endpoint: endpoint, StashID: episode.StashID}}
-	}
-	if series.StashID != "" {
-		push.studioIDs = []StashID{{Endpoint: endpoint, StashID: series.StashID}}
+	// No endpoint means the instance these ids were minted by is gone, and the
+	// file is pushed with NO stash ids at all — not with a guess.
+	//
+	// A StashIDInput carrying the wrong endpoint is worse than none: it writes
+	// into the user's own Stash a claim that box X issued a UUID it never
+	// issued, Stash's identify step then trusts it, and undoing it means
+	// finding every scene the guess touched. An absent id leaves the scene
+	// merely unidentified, which the next push repairs the moment the instance
+	// is added back.
+	if endpoint != "" {
+		if episode.StashID != "" {
+			push.stashIDs = []StashID{{Endpoint: endpoint, StashID: episode.StashID}}
+		}
+		if series.StashID != "" {
+			push.studioIDs = []StashID{{Endpoint: endpoint, StashID: series.StashID}}
+		}
 	}
 	if !episode.AirDate.IsZero() {
 		push.date = episode.AirDate.Format("2006-01-02")
@@ -843,20 +853,30 @@ func (s *Service) storageRoot(ctx context.Context) (string, error) {
 	return s.setting(ctx, store.SettingStorageRoot)
 }
 
-// stashboxEndpoint is which stash-box the ids being pushed came from. It is
-// part of the identity: a UUID means nothing without the box that issued it,
-// which is exactly what StashIDInput.endpoint is for. A blank setting means the
-// client's own preset, so the endpoint pushed is the one that was actually
-// queried.
-func (s *Service) stashboxEndpoint(ctx context.Context) (string, error) {
-	endpoint, err := s.setting(ctx, store.SettingStashboxEndpoint)
+// endpointForSeries is which stash-box the ids on this site's rows came from.
+//
+// It is part of the identity, which is exactly what StashIDInput.endpoint is
+// for: a UUID means nothing without the box that issued it, and since 0026 the
+// public boxes are forks of one another minting identical UUIDs for different
+// records. The instance is read from the ITEM rather than from a setting for
+// that reason — a server-wide endpoint could only ever be right for one box.
+//
+// An empty provider is the legacy instance (`stashbox`), which is what every
+// adult row written before instances carries. An instance the owner deleted
+// answers "" — see scenePush for what that suppresses.
+func (s *Service) endpointForSeries(ctx context.Context, sr *core.Series) (string, error) {
+	providerID := sr.Provider
+	if providerID == "" {
+		providerID = core.ProviderStashbox
+	}
+	in, err := s.st.GetStashboxInstanceByProviderID(ctx, providerID)
+	if errors.Is(err, store.ErrNotFound) {
+		return "", nil
+	}
 	if err != nil {
 		return "", err
 	}
-	if endpoint == "" {
-		return stashbox.DefaultEndpoint, nil
-	}
-	return endpoint, nil
+	return strings.TrimSpace(in.Endpoint), nil
 }
 
 func (s *Service) setting(ctx context.Context, key string) (string, error) {

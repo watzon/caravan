@@ -153,15 +153,22 @@ func enableAdult(t *testing.T, st *store.Store) {
 }
 
 // seedSite puts one site with one scene in the library, the way library.AddSite
-// does.
+// does. It is pinned to the legacy instance, which is what a single-box install
+// and every row written before 0026 carry; seedSiteOn pins it elsewhere.
 func seedSite(t *testing.T, st *store.Store) *core.Series {
+	t.Helper()
+	return seedSiteOn(t, st, core.ProviderStashbox, "site-1", "scene-1", "Brazzers")
+}
+
+func seedSiteOn(t *testing.T, st *store.Store, providerID, siteID, sceneID, title string) *core.Series {
 	t.Helper()
 	ctx := context.Background()
 
 	sr := &core.Series{
-		StashID: "site-1", Title: "Brazzers", SortTitle: "brazzers",
+		Provider: providerID, ProviderRef: siteID,
+		StashID: siteID, Title: title, SortTitle: strings.ToLower(title),
 		Kind: core.SeriesKindAdult, Monitored: true,
-		Path: store.AdultLibraryRoot + "/Brazzers",
+		Path: store.AdultLibraryRoot + "/" + title,
 	}
 	if err := st.UpsertSeries(ctx, sr); err != nil {
 		t.Fatalf("UpsertSeries: %v", err)
@@ -172,10 +179,10 @@ func seedSite(t *testing.T, st *store.Store) *core.Series {
 		t.Fatalf("UpsertSeason: %v", err)
 	}
 	if err := st.UpsertEpisode(ctx, &core.Episode{
-		SeriesID: sr.ID, SeasonNumber: 2022, EpisodeNumber: 1, StashID: "scene-1",
+		SeriesID: sr.ID, SeasonNumber: 2022, EpisodeNumber: 1, StashID: sceneID,
 		Title: "Deep Impact", AirDate: time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC),
 		Monitored: true,
-		Scene:     &core.SceneInfo{Studio: "Brazzers", Performers: []string{"Janie"}, URL: "https://example.test/s/1"},
+		Scene:     &core.SceneInfo{Studio: title, Performers: []string{"Janie"}, URL: "https://example.test/s/1"},
 	}); err != nil {
 		t.Fatalf("UpsertEpisode: %v", err)
 	}
@@ -1073,41 +1080,43 @@ func TestSiteSearchWithNoQueryAsksTheProviderForItsDefaultList(t *testing.T) {
 }
 
 // The provider id on a site's page is a link out, and where it points depends on
-// which endpoint is configured — which is why the server derives it: the setting
-// is admin-only, and this page is one a granted member reads.
-func TestSiteDetailCarriesTheProviderLink(t *testing.T) {
-	tests := []struct {
+// which endpoint the SITE's own instance answers on — which is why the server
+// derives it: the instance list is admin-only, and this page is one a granted
+// member reads.
+//
+// Two instances in one install means two websites, so the link is a per-ROW
+// fact and not a server-wide one. A link built from the wrong endpoint lands on
+// a page about a different site, or on a 404, while looking exactly like a
+// working link.
+func TestSiteDetailLinksToTheSitesOwnInstance(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	enableAdult(t, st)
+	seedStashboxInstance(t, st, core.ProviderStashbox, "ThePornDB", "https://theporndb.net/graphql")
+	seedStashboxInstance(t, st, core.ProviderStashbox+":stashdb", "StashDB", "https://stashdb.org/graphql")
+
+	tpdb := seedSiteOn(t, st, core.ProviderStashbox, "site-1", "scene-1", "Brazzers")
+	stashdb := seedSiteOn(t, st, core.ProviderStashbox+":stashdb", "site-2", "scene-2", "Vixen")
+
+	for _, tt := range []struct {
 		name      string
-		endpoint  string
+		site      *core.Series
 		want      string
 		wantScene string
 	}{
 		{
-			// TPDB files a site under /sites; it is the default endpoint.
-			name:      "the default endpoint",
+			// TPDB files a site under /sites.
+			name: "the legacy instance", site: tpdb,
 			want:      "https://theporndb.net/sites/site-1",
 			wantScene: "https://theporndb.net/scenes/scene-1",
 		},
 		{
-			name:      "a stash-box keeps the /studios convention",
-			endpoint:  "https://stashdb.org/graphql",
-			want:      "https://stashdb.org/studios/site-1",
-			wantScene: "https://stashdb.org/scenes/scene-1",
+			name: "a stash-box keeps the /studios convention", site: stashdb,
+			want:      "https://stashdb.org/studios/site-2",
+			wantScene: "https://stashdb.org/scenes/scene-2",
 		},
-	}
-
-	for _, tt := range tests {
+	} {
 		t.Run(tt.name, func(t *testing.T) {
-			h, st, _ := newTestServer(t)
-			enableAdult(t, st)
-			if tt.endpoint != "" {
-				if err := st.SetSetting(context.Background(), store.SettingStashboxEndpoint, tt.endpoint); err != nil {
-					t.Fatalf("set endpoint: %v", err)
-				}
-			}
-			site := seedSite(t, st)
-
-			rec := do(t, h, http.MethodGet, "/api/v1/adult/sites/"+itoa(site.ID), "")
+			rec := do(t, h, http.MethodGet, "/api/v1/adult/sites/"+itoa(tt.site.ID), "")
 			wantStatus(t, rec, http.StatusOK)
 			var body siteDetailJSON
 			decodeBody(t, rec, &body)
@@ -1123,6 +1132,26 @@ func TestSiteDetailCarriesTheProviderLink(t *testing.T) {
 				t.Errorf("scene provider_url = %q, want %q", got, tt.wantScene)
 			}
 		})
+	}
+}
+
+// A site whose instance is gone renders with no link rather than with a guessed
+// one: a link into a box that never held this UUID is worse than no link, and a
+// site with none renders exactly as one whose provider has no page.
+func TestSiteDetailHasNoLinkWhenTheInstanceIsGone(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	enableAdult(t, st)
+	site := seedSiteOn(t, st, core.ProviderStashbox+":gone", "site-1", "scene-1", "Brazzers")
+
+	rec := do(t, h, http.MethodGet, "/api/v1/adult/sites/"+itoa(site.ID), "")
+	wantStatus(t, rec, http.StatusOK)
+	var body siteDetailJSON
+	decodeBody(t, rec, &body)
+	if body.ProviderURL != "" {
+		t.Errorf("provider_url = %q, want none", body.ProviderURL)
+	}
+	if got := body.Years[0].Scenes[0].ProviderURL; got != "" {
+		t.Errorf("scene provider_url = %q, want none", got)
 	}
 }
 
