@@ -96,3 +96,33 @@ func TestParsedReleaseIsEpisode(t *testing.T) {
 		})
 	}
 }
+
+// The two numbering claims must never both be true: IsEpisode's call sites act
+// on Season and Episodes immediately, and an absolute number has not been
+// placed in a season yet.
+func TestParsedReleaseIsAbsoluteEpisode(t *testing.T) {
+	tests := []struct {
+		name   string
+		parsed ParsedRelease
+		want   bool
+	}{
+		{name: "movie", parsed: ParsedRelease{Title: "Big Buck Bunny", Year: 2008}, want: false},
+		{name: "absolute only", parsed: ParsedRelease{Title: "Show", Absolute: 105}, want: true},
+		{name: "placed episode", parsed: ParsedRelease{Season: 5, Episodes: []int{3}}, want: false},
+		{name: "season pack", parsed: ParsedRelease{Season: 5}, want: false},
+		// Parse never builds this; the guard says which claim wins if some
+		// future caller hand-builds one.
+		{name: "both", parsed: ParsedRelease{Season: 5, Episodes: []int{3}, Absolute: 105}, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.parsed.IsAbsoluteEpisode(); got != tt.want {
+				t.Errorf("IsAbsoluteEpisode() = %v, want %v", got, tt.want)
+			}
+			if tt.want && tt.parsed.IsEpisode() {
+				t.Error("IsEpisode() = true for an absolute-only name, want false")
+			}
+		})
+	}
+}

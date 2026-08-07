@@ -17,6 +17,20 @@ type ParsedRelease struct {
 	// multi-episode file (S01E01E02) yields more than one entry; a movie
 	// yields none.
 	Episodes []int
+	// Absolute is the absolute (series-wide) episode number an anime-style
+	// release name carries — "Show - 105" — and is zero on every other name.
+	// It is never set alongside Episodes: a name that says S05E03 has already
+	// said which episode it is, and a second, differently-derived answer to the
+	// same question is only ever a chance to disagree.
+	//
+	// It is a number rather than a (season, episode) pair because the mapping
+	// from an absolute number to a season is a fact about the SERIES, not about
+	// the filename — exactly as SceneDate's mapping is a fact about the site.
+	// The name claims "the 105th episode"; which season that lands in depends
+	// on how long the earlier seasons ran, which the name does not say and
+	// cannot. The library layer resolves it once it knows which series the file
+	// belongs to.
+	Absolute int `json:",omitempty"`
 	// Quality is one of the Quality* constants.
 	Quality string
 	// Source is one of the Source* constants.
@@ -55,8 +69,19 @@ type ParsedRelease struct {
 	Confidence float64
 }
 
-// IsEpisode reports whether the parsed name describes a TV episode release.
+// IsEpisode reports whether the name named a season and an episode. It is
+// deliberately not widened to cover absolute numbering: every call site reads
+// it as "Season and Episodes are usable right now", and a name carrying only an
+// absolute number has not yet said which season it belongs to.
 func (p ParsedRelease) IsEpisode() bool { return len(p.Episodes) > 0 }
+
+// IsAbsoluteEpisode reports whether the name named a series-wide episode number
+// and nothing more — the anime shape. It is the complement of IsEpisode, never
+// its overlap: such a file names an episode identity that still has to be
+// placed against the series before anything can be filed.
+func (p ParsedRelease) IsAbsoluteEpisode() bool {
+	return len(p.Episodes) == 0 && p.Absolute > 0
+}
 
 // IsScene reports whether the parsed name describes a dated scene release —
 // the adult module's release shape. A ParsedRelease is never both: Parse never

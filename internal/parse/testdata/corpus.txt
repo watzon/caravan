@@ -28,6 +28,11 @@ Alien.1979.Directors.Cut.1080p.BluRay.DTS.x264-DON | title=Alien; year=1979; qua
 Avatar.2009.EXTENDED.COLLECTORS.CUT.2160p.WEB-DL.DDP5.1.Atmos.HDR.HEVC-FLUX | title=Avatar; year=2009; quality=2160p; source=webdl; codec=hevc; audio=Atmos; edition=Extended; group=FLUX; minconf=0.95
 Dune.Part.Two.2024.1080p.WEBRip.x264.AAC5.1-[YTS.MX] | title=Dune Part Two; year=2024; quality=1080p; source=webrip; codec=x264; audio=AAC; group=YTS.MX; minconf=0.95
 Spider-Man.Into.the.Spider-Verse.2018.1080p.BluRay.x264-SPARKS | title=Spider-Man Into the Spider-Verse; year=2018; quality=1080p; source=bluray; codec=x264; group=SPARKS; minconf=0.9
+# A movie title ending in a number is the absolute-number recognizer's worst
+# false positive: cutting "Oceans 11" down to "Oceans" breaks the search query
+# these titles exist to build.
+Oceans.11.2001.1080p.BluRay.x264-GROUP | title=Oceans 11; year=2001; quality=1080p; source=bluray; codec=x264; group=GROUP; minconf=0.9
+Apollo.13.1995.1080p.BluRay.x264-GROUP | title=Apollo 13; year=1995; quality=1080p; source=bluray; codec=x264; group=GROUP; minconf=0.9
 1917.2019.1080p.BluRay.x264-VETO | title=1917; year=2019; quality=1080p; source=bluray; codec=x264; group=VETO; minconf=0.9
 2012.2009.720p.BluRay.x264-METiS | title=2012; year=2009; quality=720p; source=bluray; codec=x264; group=METiS; minconf=0.9
 Mad.Max.Fury.Road.2015.PROPER.1080p.BluRay.x264-SPARKS | title=Mad Max Fury Road; year=2015; quality=1080p; source=bluray; codec=x264; group=SPARKS; proper=true; minconf=0.9
@@ -100,13 +105,25 @@ The.Sopranos.Season.6.Part.2.1080p.BluRay.x264-SHORTBREHD | title=The Sopranos; 
 # Multi-season packs are out of scope (SPEC §16): degrade to the first season.
 The.Office.S01-S09.COMPLETE.1080p.BluRay.x265-GROUP | title=The Office; season=1; quality=1080p; source=bluray; codec=x265; group=GROUP; minconf=0.8; maxconf=0.9
 
-# ------------------------------------------- unsupported shapes (degrade) ----
-# Anime absolute numbering is explicitly out of scope (SPEC §16). These must
-# come back low-confidence and intact, never as a wrong episode number.
-[SubsPlease] Frieren - 12 (1080p) [F0E9D2A1].mkv | title=Frieren - 12; quality=1080p; group=SubsPlease; container=mkv; minconf=0.4; maxconf=0.5
-[Erai-raws] Kimetsu no Yaiba - 05 [1080p][Multiple Subtitle].mkv | title=Kimetsu no Yaiba - 05; quality=1080p; group=Erai-raws; container=mkv; minconf=0.4; maxconf=0.5
-[HorribleSubs] Show Name - 01 [720p].mkv | title=Show Name - 01; quality=720p; group=HorribleSubs; container=mkv; minconf=0.4; maxconf=0.5
+# ------------------------------------------------- absolute numbering -------
+# The anime shape: the name claims one series-wide episode number and no
+# season. The number comes out in `absolute` and out of the title, because the
+# title is what the metadata search query is built from.
+[SubsPlease] Frieren - 12 (1080p) [F0E9D2A1].mkv | title=Frieren; absolute=12; quality=1080p; group=SubsPlease; container=mkv; minconf=0.75; maxconf=0.8
+[Erai-raws] Kimetsu no Yaiba - 05 [1080p][Multiple Subtitle].mkv | title=Kimetsu no Yaiba; absolute=5; quality=1080p; group=Erai-raws; container=mkv; minconf=0.75; maxconf=0.8
+[HorribleSubs] Show Name - 01 [720p].mkv | title=Show Name; absolute=1; quality=720p; group=HorribleSubs; container=mkv; minconf=0.75; maxconf=0.8
+# A name that already named a season named its episode within that season. The
+# absolute recognizer never runs on it, so 07 stays out of `absolute`.
 [Group] Another Anime S02 - 07 [1080p][HEVC][10bit].mkv | title=Another Anime; season=2; quality=1080p; codec=hevc; bitdepth=10; group=Group; container=mkv; minconf=0.7; maxconf=0.8
+
+# ------------------------------------------- unsupported shapes (degrade) ----
+# Absolute ranges stay out of scope (SPEC §16): taking the first number would
+# import a two-episode file as one episode, so the name degrades whole — title
+# included — and parks in the review queue.
+[SubsPlease] Show - 105-106 (1080p).mkv | title=Show - 105-106; quality=1080p; group=SubsPlease; container=mkv; minconf=0.4; maxconf=0.5
+# A number in front of the dash is a season, not a count of the whole series:
+# "Show 2 - 05" is episode 5 of season 2 and the parser refuses to guess it.
+[Group] Show 2 - 05 [1080p].mkv | title=Show 2 - 05; quality=1080p; group=Group; container=mkv; minconf=0.4; maxconf=0.5
 # Daily-dated episodes are out of scope too: the date reads as a year.
 The.Daily.Show.2024.01.15.Guest.Name.1080p.WEB.h264-GROUP | title=The Daily Show; year=2024; quality=1080p; source=webdl; codec=h264; group=GROUP; minconf=0.9
 
@@ -117,7 +134,7 @@ Some.Movie.2021.2160p.WEB-DL.HEVC.10bit.DDP5.1-GRP | title=Some Movie; year=2021
 Another.Movie.2019.1080p.BluRay.x264.8bit.AAC-GRP | title=Another Movie; year=2019; quality=1080p; source=bluray; codec=x264; audio=AAC; bitdepth=8; group=GRP; minconf=1
 # Hi10P is the anime spelling of the same claim, and it has to be cut out of
 # the title like every other technical tag.
-[Anime-Group] Cool Show - 03 [Hi10P][720p][x264].mkv | title=Cool Show - 03; quality=720p; codec=x264; bitdepth=10; group=Anime-Group; container=mkv; minconf=0.5; maxconf=0.6
+[Anime-Group] Cool Show - 03 [Hi10P][720p][x264].mkv | title=Cool Show; absolute=3; quality=720p; codec=x264; bitdepth=10; group=Anime-Group; container=mkv; minconf=0.8; maxconf=0.85
 
 # ------------------------------------------------------------- garbage in ----
 asdkjhaskdjhasd | title=asdkjhaskdjhasd; maxconf=0.15
