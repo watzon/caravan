@@ -48,9 +48,11 @@ func TestMigrateSeedsLibrariesIntoExistingDatabase(t *testing.T) {
 	}
 	want := []core.Library{
 		{ID: 1, Kind: core.LibraryKindMovie, Name: "Movies", RootPath: "library/Movies",
-			DLNAVisible: true, Provider: core.ProviderTMDB, IsDefault: true},
+			DLNAVisible: true, Provider: core.ProviderTMDB,
+			Providers: []string{core.ProviderTMDB}, IsDefault: true},
 		{ID: 2, Kind: core.LibraryKindTV, Name: "Series", RootPath: "library/TV",
-			DLNAVisible: true, Provider: core.ProviderTMDB, IsDefault: true},
+			DLNAVisible: true, Provider: core.ProviderTMDB,
+			Providers: []string{core.ProviderTMDB}, IsDefault: true},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("ListLibraries = %+v, want %+v", got, want)

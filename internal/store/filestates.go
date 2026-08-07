@@ -11,7 +11,8 @@ import (
 // and episodeColumns constants are ambiguous next to media_files.id and
 // series.id.
 const (
-	movieStateColumns = `m.id, m.tmdb_id, m.imdb_id, m.title, m.sort_title, m.year, m.overview,
+	movieStateColumns = `m.id, m.provider, m.provider_ref, m.tmdb_id, m.imdb_id, m.title,
+		m.sort_title, m.year, m.overview,
 		m.path, m.poster_path, m.poster_url, m.monitored, m.quality_profile_id, m.release_date,
 		m.digital_release, m.physical_release, m.min_availability, m.added_at, m.updated_at,
 		m.library_id`
@@ -183,7 +184,8 @@ func scanMovieWith(sc scanner, extra ...any) (*core.Movie, error) {
 		addedAt         string
 		updatedAt       string
 	)
-	dest := []any{&m.ID, &m.TMDBID, &m.IMDBID, &m.Title, &m.SortTitle, &m.Year, &m.Overview,
+	dest := []any{&m.ID, &m.Provider, &m.ProviderRef, &m.TMDBID, &m.IMDBID, &m.Title,
+		&m.SortTitle, &m.Year, &m.Overview,
 		&m.Path, &m.PosterPath, &m.PosterURL, &m.Monitored, &m.QualityProfileID, &releaseDate,
 		&digitalRelease, &physicalRelease, &m.MinAvailability, &addedAt, &updatedAt,
 		&m.LibraryID}

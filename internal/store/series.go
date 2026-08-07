@@ -9,7 +9,8 @@ import (
 	"github.com/watzon/caravan/internal/core"
 )
 
-const seriesColumns = `id, kind, tmdb_id, stash_id, tvdb_id, imdb_id, title, sort_title, year, overview,
+const seriesColumns = `id, kind, provider, provider_ref, tmdb_id, stash_id, tvdb_id, imdb_id,
+	title, sort_title, year, overview,
 	status, path, poster_path, poster_url, monitored, quality_profile_id, first_aired, added_at, updated_at,
 	library_id`
 
@@ -46,6 +47,8 @@ func (s *Store) UpsertSeries(ctx context.Context, sr *core.Series) error {
 		}
 	}
 
+	normalizeSeriesProvider(sr)
+
 	if sr.ID == 0 {
 		existing, err := s.matchExistingSeries(ctx, sr)
 		if err != nil {
@@ -69,13 +72,15 @@ func (s *Store) UpsertSeries(ctx context.Context, sr *core.Series) error {
 		// library_id 0 keeps the stored value — a refresh must never move a
 		// series between libraries; a move names its target explicitly.
 		res, err := s.db.ExecContext(ctx, `
-			UPDATE series SET kind = ?, tmdb_id = ?, stash_id = ?, tvdb_id = ?, imdb_id = ?,
+			UPDATE series SET kind = ?, provider = ?, provider_ref = ?, tmdb_id = ?,
+				stash_id = ?, tvdb_id = ?, imdb_id = ?,
 				title = ?, sort_title = ?,
 				year = ?, overview = ?, status = ?, path = ?, poster_path = ?, poster_url = ?,
 				monitored = ?, quality_profile_id = ?, first_aired = ?, added_at = ?, updated_at = ?,
 				library_id = COALESCE(NULLIF(?, 0), library_id)
 			WHERE id = ?`,
-			sr.Kind, sr.TMDBID, sr.StashID, sr.TVDBID, sr.IMDBID, sr.Title, sr.SortTitle,
+			sr.Kind, sr.Provider, sr.ProviderRef, sr.TMDBID, sr.StashID, sr.TVDBID, sr.IMDBID,
+			sr.Title, sr.SortTitle,
 			sr.Year, sr.Overview,
 			sr.Status, sr.Path, sr.PosterPath, sr.PosterURL, sr.Monitored, sr.QualityProfileID,
 			formatTime(sr.FirstAired), formatTime(sr.AddedAt), formatTime(sr.UpdatedAt),
@@ -94,12 +99,14 @@ func (s *Store) UpsertSeries(ctx context.Context, sr *core.Series) error {
 	}
 
 	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO series (kind, tmdb_id, stash_id, tvdb_id, imdb_id, title, sort_title,
+		INSERT INTO series (kind, provider, provider_ref, tmdb_id, stash_id, tvdb_id, imdb_id,
+			title, sort_title,
 			year, overview,
 			status, path, poster_path, poster_url, monitored, quality_profile_id, first_aired,
 			added_at, updated_at, library_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		sr.Kind, sr.TMDBID, sr.StashID, sr.TVDBID, sr.IMDBID, sr.Title, sr.SortTitle,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		sr.Kind, sr.Provider, sr.ProviderRef, sr.TMDBID, sr.StashID, sr.TVDBID, sr.IMDBID,
+		sr.Title, sr.SortTitle,
 		sr.Year, sr.Overview,
 		sr.Status, sr.Path, sr.PosterPath, sr.PosterURL, sr.Monitored, sr.QualityProfileID,
 		formatTime(sr.FirstAired), formatTime(sr.AddedAt), formatTime(sr.UpdatedAt),
@@ -160,16 +167,64 @@ func (s *Store) GetSeriesByStashID(ctx context.Context, stashID string) (*core.S
 	return sr, nil
 }
 
+// normalizeSeriesProvider derives the provider identity from whichever legacy
+// id the series' kind is matched on, when the caller supplied none — the same
+// move this function's neighbour makes for Kind, and for the same reason.
+//
+// It is what makes "every matched row carries a ref" a property of the table
+// rather than a habit of its callers: a caller written before 0024 still lands
+// a row the ref lookups can find.
+func normalizeSeriesProvider(sr *core.Series) {
+	if sr.Provider != "" {
+		return
+	}
+	switch {
+	case sr.Kind == core.SeriesKindAdult && sr.StashID != "":
+		sr.Provider, sr.ProviderRef = core.ProviderStashbox, sr.StashID
+	case sr.Kind != core.SeriesKindAdult && sr.TMDBID != 0:
+		ref := core.TMDBRef(sr.TMDBID)
+		sr.Provider, sr.ProviderRef = ref.Provider, ref.Ref
+	}
+}
+
+// GetSeriesByProviderRef returns the series one provider identified by ref, or
+// ErrNotFound. A blank ref matches nothing, for GetSeriesByStashID's reason:
+// "" is precisely the value the partial unique index excludes.
+func (s *Store) GetSeriesByProviderRef(ctx context.Context, provider, ref string) (*core.Series, error) {
+	if provider == "" || ref == "" {
+		return nil, fmt.Errorf("store: series %s/%s: %w", provider, ref, ErrNotFound)
+	}
+	row := s.db.QueryRowContext(ctx, "SELECT "+seriesColumns+
+		" FROM series WHERE provider = ? AND provider_ref = ?", provider, ref)
+	sr, err := scanSeries(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("store: series %s/%s: %w", provider, ref, ErrNotFound)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("store: get series %s/%s: %w", provider, ref, err)
+	}
+	return sr, nil
+}
+
 // matchExistingSeries finds the row sr is an update of, by whichever provider
 // id its kind is matched on, or nil when there is none. An unmatched series
 // (no provider id at all) always inserts: two shows the scanner has not
 // identified are two shows, not one.
+//
+// RUNG ORDER MATTERS. The ref rung is first and applies to every kind; the
+// stash and tmdb rungs behind it are compatibility aliases for the two
+// providers that predate refs. Put the tmdb rung first and a re-fetched TMDB
+// series matches on tmdb_id while its ref goes unconsulted — which is fine
+// until a provider that writes no tmdb_id comes along, at which point every
+// refresh inserts a duplicate instead of updating the row it wrote last time.
 func (s *Store) matchExistingSeries(ctx context.Context, sr *core.Series) (*core.Series, error) {
 	var (
 		existing *core.Series
 		err      error
 	)
 	switch {
+	case sr.ProviderRef != "":
+		existing, err = s.GetSeriesByProviderRef(ctx, sr.Provider, sr.ProviderRef)
 	case sr.Kind == core.SeriesKindAdult && sr.StashID != "":
 		existing, err = s.GetSeriesByStashID(ctx, sr.StashID)
 	case sr.Kind != core.SeriesKindAdult && sr.TMDBID != 0:
@@ -250,7 +305,8 @@ func scanSeries(sc scanner) (*core.Series, error) {
 		addedAt    string
 		updatedAt  string
 	)
-	err := sc.Scan(&sr.ID, &sr.Kind, &sr.TMDBID, &sr.StashID, &sr.TVDBID, &sr.IMDBID,
+	err := sc.Scan(&sr.ID, &sr.Kind, &sr.Provider, &sr.ProviderRef, &sr.TMDBID, &sr.StashID,
+		&sr.TVDBID, &sr.IMDBID,
 		&sr.Title, &sr.SortTitle, &sr.Year,
 		&sr.Overview, &sr.Status, &sr.Path, &sr.PosterPath, &sr.PosterURL, &sr.Monitored,
 		&sr.QualityProfileID, &firstAired, &addedAt, &updatedAt, &sr.LibraryID)

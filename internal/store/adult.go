@@ -83,12 +83,12 @@ func (s *Store) SetAdultEnabled(ctx context.Context, enabled bool) error {
 // re-enable from ever contending with idx_libraries_default_per_kind.
 func (s *Store) ensureAdultLibrary(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO libraries (kind, name, root_path, dlna_visible, provider, is_default)
-		SELECT ?, ?, ?, 0, ?,
+		INSERT INTO libraries (kind, name, root_path, dlna_visible, provider, providers, is_default)
+		SELECT ?, ?, ?, 0, ?, ?,
 			NOT EXISTS (SELECT 1 FROM libraries WHERE kind = ? AND is_default = 1)
 		ON CONFLICT (root_path) DO NOTHING`,
 		core.LibraryKindAdult, AdultLibraryName, AdultLibraryRoot,
-		core.ProviderStashbox, core.LibraryKindAdult)
+		core.ProviderStashbox, `["`+core.ProviderStashbox+`"]`, core.LibraryKindAdult)
 	if err != nil {
 		return fmt.Errorf("store: create adult library: %w", err)
 	}

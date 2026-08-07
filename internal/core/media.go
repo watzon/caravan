@@ -12,13 +12,18 @@ import "time"
 
 // Movie is a library movie: a wanted item, an owned item, or both.
 type Movie struct {
-	ID        int64
-	TMDBID    int64
-	IMDBID    string
-	Title     string
-	SortTitle string
-	Year      int
-	Overview  string
+	ID int64
+	// Provider and ProviderRef are the provider that identified this row and
+	// that provider's own id — the item is PINNED to it; a refresh asks this
+	// provider and no other. Empty on a row no provider has identified.
+	Provider    string
+	ProviderRef string
+	TMDBID      int64
+	IMDBID      string
+	Title       string
+	SortTitle   string
+	Year        int
+	Overview    string
 	// Path is the movie's folder, relative to the storage root
 	// ("Movies/Big Buck Bunny (2008)"). Empty until the movie is organized.
 	Path string
@@ -95,8 +100,13 @@ func ValidSeriesKind(s string) bool {
 
 // Series is a library TV series, or — when Kind is SeriesKindAdult — a site.
 type Series struct {
-	ID     int64
-	TMDBID int64
+	ID int64
+	// Provider and ProviderRef are the provider that identified this row and
+	// that provider's own id — the item is PINNED to it; a refresh asks this
+	// provider and no other. Empty on a row no provider has identified.
+	Provider    string
+	ProviderRef string
+	TMDBID      int64
 	// StashID is the stash-box id of the site behind an adult series, a UUID
 	// string. Empty on every television series and on an adult series that has
 	// not been matched to a site yet. It is unique among the rows that set it,

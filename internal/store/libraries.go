@@ -11,7 +11,7 @@ import (
 )
 
 const libraryColumns = `id, kind, name, root_path, dlna_visible,
-	route_torrent, route_usenet, quality_profile_id, provider, is_default`
+	route_torrent, route_usenet, quality_profile_id, provider, providers, is_default`
 
 // ListLibraries returns every library ordered by id, which is the order 0012
 // seeded them in: Movies first, then Series.
@@ -122,13 +122,17 @@ var (
 // this function only owns what the schema owns: root uniqueness, and the DLNA
 // tree version, which must advance when a visible container appears.
 func (s *Store) CreateLibrary(ctx context.Context, l *core.Library) error {
+	chain, err := normalizeChain(l)
+	if err != nil {
+		return fmt.Errorf("store: create library %q: %w", l.Name, err)
+	}
 	res, err := s.db.ExecContext(ctx, `
 		INSERT INTO libraries (kind, name, root_path, dlna_visible,
-			route_torrent, route_usenet, quality_profile_id, provider, is_default)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			route_torrent, route_usenet, quality_profile_id, provider, providers, is_default)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		l.Kind, l.Name, l.RootPath, l.DLNAVisible,
 		nullString(l.RouteTorrent), nullString(l.RouteUsenet), nullInt64(l.QualityProfileID),
-		l.Provider, l.IsDefault)
+		l.Provider, chain, l.IsDefault)
 	if err != nil {
 		return fmt.Errorf("store: create library %q: %w", l.Name, err)
 	}
@@ -232,13 +236,18 @@ func (s *Store) UpdateLibrary(ctx context.Context, l *core.Library) error {
 	if err != nil {
 		return err
 	}
+	chain, err := normalizeChain(l)
+	if err != nil {
+		return fmt.Errorf("store: update library %d: %w", l.ID, err)
+	}
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE libraries SET name = ?, root_path = ?, dlna_visible = ?,
-			route_torrent = ?, route_usenet = ?, quality_profile_id = ?, provider = ?
+			route_torrent = ?, route_usenet = ?, quality_profile_id = ?, provider = ?,
+			providers = ?
 		WHERE id = ?`,
 		l.Name, l.RootPath, l.DLNAVisible,
 		nullString(l.RouteTorrent), nullString(l.RouteUsenet), nullInt64(l.QualityProfileID),
-		l.Provider, l.ID)
+		l.Provider, chain, l.ID)
 	if err != nil {
 		return fmt.Errorf("store: update library %d: %w", l.ID, err)
 	}
@@ -538,19 +547,57 @@ func nullInt64(v int64) any {
 	return v
 }
 
+// normalizeChain settles l's two provider columns against each other and
+// returns the encoded `providers` value to store.
+//
+// Both columns are written from this one result, by every writer, so they
+// cannot disagree: `provider` is defined as the chain's head, and a row whose
+// head contradicts its list would make two readers of the same library reach
+// two different providers. It also fills a chain in from a caller that only
+// set the head, which is every caller written before 0024.
+func normalizeChain(l *core.Library) (string, error) {
+	chain := l.Providers
+	if len(chain) == 0 && l.Provider != "" {
+		chain = []string{l.Provider}
+	}
+	l.Providers = chain
+	if len(chain) == 0 {
+		// A library nobody assigned a provider. Empty rather than "[]" so it
+		// reads back the same as a row the migration left alone.
+		l.Provider = ""
+		return "", nil
+	}
+	l.Provider = chain[0]
+	b, err := json.Marshal(chain)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
 func scanLibrary(sc scanner) (*core.Library, error) {
 	var (
 		l         core.Library
 		torrent   sql.NullString
 		usenet    sql.NullString
 		profileID sql.NullInt64
+		providers sql.NullString
 	)
 	if err := sc.Scan(&l.ID, &l.Kind, &l.Name, &l.RootPath, &l.DLNAVisible,
-		&torrent, &usenet, &profileID, &l.Provider, &l.IsDefault); err != nil {
+		&torrent, &usenet, &profileID, &l.Provider, &providers, &l.IsDefault); err != nil {
 		return nil, err
 	}
 	l.RouteTorrent = torrent.String
 	l.RouteUsenet = usenet.String
 	l.QualityProfileID = profileID.Int64
+	// A chain that will not decode is treated as absent rather than as an
+	// error: `provider` is the head and still answers, so a library with a
+	// mangled list keeps working exactly as it did before 0024 instead of
+	// making the whole Libraries screen unreadable.
+	if providers.Valid && providers.String != "" {
+		if err := json.Unmarshal([]byte(providers.String), &l.Providers); err != nil {
+			l.Providers = nil
+		}
+	}
 	return &l, nil
 }

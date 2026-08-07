@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/watzon/caravan/internal/core"
@@ -64,17 +65,20 @@ func TestMigrate0022PreservesExistingInstall(t *testing.T) {
 	}
 	wantLibs := []core.Library{
 		{ID: 1, Kind: core.LibraryKindMovie, Name: "Movies", RootPath: "library/Movies",
-			DLNAVisible: true, Provider: core.ProviderTMDB, IsDefault: true},
+			DLNAVisible: true, Provider: core.ProviderTMDB,
+			Providers: []string{core.ProviderTMDB}, IsDefault: true},
 		{ID: 2, Kind: core.LibraryKindTV, Name: "Series", RootPath: "library/TV",
-			DLNAVisible: true, RouteTorrent: "embedded", Provider: core.ProviderTMDB, IsDefault: true},
+			DLNAVisible: true, RouteTorrent: "embedded", Provider: core.ProviderTMDB,
+			Providers: []string{core.ProviderTMDB}, IsDefault: true},
 		{ID: 3, Kind: core.LibraryKindAdult, Name: "Adult", RootPath: "library/Adult",
-			DLNAVisible: false, Provider: core.ProviderStashbox, IsDefault: true},
+			DLNAVisible: false, Provider: core.ProviderStashbox,
+			Providers: []string{core.ProviderStashbox}, IsDefault: true},
 	}
 	if len(libs) != len(wantLibs) {
 		t.Fatalf("ListLibraries = %+v, want %+v", libs, wantLibs)
 	}
 	for i := range wantLibs {
-		if libs[i] != wantLibs[i] {
+		if !reflect.DeepEqual(libs[i], wantLibs[i]) {
 			t.Errorf("library[%d] = %+v, want %+v", i, libs[i], wantLibs[i])
 		}
 	}

@@ -64,14 +64,37 @@ type Library struct {
 	// name none of their own. Zero means no library default, which falls
 	// through to the store's default profile.
 	QualityProfileID int64
-	// Provider is the id of the metadata provider that refreshes this
-	// library's items — one of the Provider* constants, validated against
-	// Kind by ProviderServes at the edge.
+	// Provider is the chain's head, kept in sync by the store — one of the
+	// Provider* constants, validated against Kind by ProviderServes at the
+	// edge. It survives beside Providers so every reader written against 0022
+	// keeps answering exactly as it did.
 	Provider string
+	// Providers is the ordered list of providers this library identifies new
+	// items through: the first one that answers wins, and the rest are the
+	// fallback. Empty on a row written before migration 0024, which is what
+	// ProviderChain exists to smooth over.
+	Providers []string
 	// IsDefault marks the one library per kind that answers legacy by-kind
 	// lookups and receives items added without an explicit target. Exactly
 	// one default exists per kind (partial unique index, migration 0022).
 	IsDefault bool
+}
+
+// ProviderChain is the ordered provider list to walk when identifying an item
+// in this library.
+//
+// It is the one place that reconciles the two columns, so no caller has to
+// know that Provider is the head of Providers: a row from 0024 onward answers
+// from the list, a row that only ever had a head answers with a chain of one,
+// and a library nobody assigned a provider answers with nothing to walk.
+func (l Library) ProviderChain() []string {
+	if len(l.Providers) > 0 {
+		return l.Providers
+	}
+	if l.Provider != "" {
+		return []string{l.Provider}
+	}
+	return nil
 }
 
 // LibraryIndexer is one (library, indexer) search override.
