@@ -67,15 +67,16 @@ func Compute(ctx context.Context, st *store.Store) (*Lists, error) {
 	if err != nil {
 		return nil, err
 	}
-	// With the module off, an adult episode is not wanted: it must not reach
-	// the backlog sweep, the RSS matcher or the wanted screen. This is where
-	// that is enforced rather than at each of those three, because the wanted
-	// list is what all three read — and an adult item that never enters it
-	// cannot leak out of any of them.
-	adultEnabled, err := st.AdultEnabled(ctx)
+	// An item under an inactive library is not wanted: it must not reach the
+	// backlog sweep, the RSS matcher or the wanted screen. This is where that is
+	// enforced rather than at each of those three, because the wanted list is
+	// what all three read — and an item that never enters it cannot leak out of
+	// any of them.
+	libraries, err := st.ListLibraries(ctx)
 	if err != nil {
 		return nil, err
 	}
+	owners := core.NewLibrarySet(libraries)
 
 	// Profiles are resolved once and cached: a library shares a handful of
 	// profiles across thousands of items. The LIBRARY is part of the key
@@ -105,6 +106,9 @@ func Compute(ctx context.Context, st *store.Store) (*Lists, error) {
 
 	out := &Lists{Movies: []Movie{}, Episodes: []Episode{}}
 	for _, ms := range movieStates {
+		if !owners.Active(ms.Movie.LibraryID, core.LibraryKindMovie) {
+			continue
+		}
 		// A movie that has not reached its minimum availability is never
 		// wanted, the way an unaired episode never is: there is nothing real
 		// to find yet. A file on disk overrides the calendar — whatever
@@ -122,7 +126,7 @@ func Compute(ctx context.Context, st *store.Store) (*Lists, error) {
 		out.Movies = append(out.Movies, Movie{Movie: ms.Movie, Reason: reason, FileQuality: ms.FileQuality})
 	}
 	for _, es := range episodeStates {
-		if es.SeriesKind == core.SeriesKindAdult && !adultEnabled {
+		if !owners.Active(es.SeriesLibraryID, core.LibraryKindForSeries(es.SeriesKind)) {
 			continue
 		}
 		// An episode with no known air date is treated as aired: providers do

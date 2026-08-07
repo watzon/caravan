@@ -535,3 +535,52 @@ func TestValidatingACredentialDoesNotEvictTheWorkingClient(t *testing.T) {
 		t.Errorf("queryStudios attempts = %d, want 2: the validation must not evict the cached client", n)
 	}
 }
+
+// The same seam, driven by the switch that survives the module setting's
+// retirement: the adult LIBRARY is switched off while `adult_enabled` is left
+// on. The two agree today (store.SetAdultEnabled dual-writes the column), so
+// this is the half that proves the guard reads the rows rather than the setting
+// — and it is the state a per-library toggle produces.
+func TestAdultMetadataSeamIsNilWhenEveryAdultLibraryIsInactive(t *testing.T) {
+	ctx := context.Background()
+	adapter, st := testAdapter(t)
+	fake := stashboxtest.New(stashboxtest.Options{})
+	t.Cleanup(fake.Close)
+
+	seedInstance(t, ctx, st, core.ProviderStashbox, "StashDB", fake.URL(), "secret")
+	if err := st.SetAdultEnabled(ctx, true); err != nil {
+		t.Fatalf("SetAdultEnabled: %v", err)
+	}
+	if p, _ := adapter.DefaultAdultMetadata(ctx); p == nil {
+		t.Fatal("DefaultAdultMetadata is nil with the library on, so this test would prove nothing")
+	}
+
+	lib, err := st.GetLibraryByKind(ctx, core.LibraryKindAdult)
+	if err != nil {
+		t.Fatalf("GetLibraryByKind: %v", err)
+	}
+	if err := st.SetLibraryActive(ctx, lib.ID, false); err != nil {
+		t.Fatalf("SetLibraryActive(false): %v", err)
+	}
+	if on, err := st.AdultEnabled(ctx); err != nil || !on {
+		t.Fatalf("adult_enabled = %t, %v — the setting was meant to stay on", on, err)
+	}
+	if p, id := adapter.DefaultAdultMetadata(ctx); p != nil || id != "" {
+		t.Errorf("DefaultAdultMetadata = %v, %q with every adult library off, want nil and \"\"", p, id)
+	}
+	if p := adapter.AdultMetadataFor(ctx, core.ProviderStashbox); p != nil {
+		t.Errorf("AdultMetadataFor = %v with every adult library off, want nil", p)
+	}
+	if n := fake.Count(); n != 0 {
+		t.Errorf("resolving the seam made %d stash-box requests, want 0", n)
+	}
+
+	// And switching the library back on reopens the door without a restart,
+	// which is what reading the rows per call buys.
+	if err := st.SetLibraryActive(ctx, lib.ID, true); err != nil {
+		t.Fatalf("SetLibraryActive(true): %v", err)
+	}
+	if p, id := adapter.DefaultAdultMetadata(ctx); p == nil || id != core.ProviderStashbox {
+		t.Errorf("DefaultAdultMetadata = %v, %q after reactivation, want the only instance", p, id)
+	}
+}

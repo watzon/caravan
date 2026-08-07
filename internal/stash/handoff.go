@@ -189,15 +189,15 @@ func (s *Service) Config(ctx context.Context) (Config, error) {
 // active resolves the configuration a handoff would run with right now, and
 // reports whether it may run at all.
 //
-// The adult module's own switch is checked first and independently of the
-// handoff's. Stash is an adult-module feature: with the module off there is no
-// adult library to hand over, and a Caravan that still talked to a Stash server
-// would be making a request the user believes they turned off (PLAN phase 9's
-// zero-traffic rule, applied to the other end of the pipe). Both switches are
-// read at run time rather than carried in a job payload, so a handoff switched
-// off between the import and the job is simply not made.
+// Whether any adult library is switched on is checked first and independently
+// of the handoff's own switch. Stash is an adult-library feature: with every
+// adult shelf dormant there is nothing to hand over, and a Caravan that still
+// talked to a Stash server would be making a request the user believes they
+// turned off (the zero-traffic rule, applied to the other end of the pipe).
+// Both switches are read at run time rather than carried in a job payload, so a
+// handoff switched off between the import and the job is simply not made.
 func (s *Service) active(ctx context.Context) (Config, bool, error) {
-	on, err := s.st.AdultEnabled(ctx)
+	on, err := s.st.AnyActiveLibraryOfKind(ctx, core.LibraryKindAdult)
 	if err != nil {
 		return Config{}, false, err
 	}

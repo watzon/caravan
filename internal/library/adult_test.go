@@ -1349,3 +1349,83 @@ func TestFailedWalkKeepsTheYearsItAlreadyPublished(t *testing.T) {
 		}
 	}
 }
+
+// The gate is the TARGET library's own switch, not the kind's. A second adult
+// library still being on is not permission to add into a dormant one — that is
+// exactly what the module-wide switch could not express, and getting it wrong
+// would reach the endpoint on behalf of a shelf the owner turned off.
+func TestAddSiteRefusesAnInactiveLibraryWhileASiblingIsOn(t *testing.T) {
+	ctx := context.Background()
+	a := newAdultHarness(t, true)
+	a.seedBrazzers()
+
+	second := &core.Library{Kind: core.LibraryKindAdult, Name: "Studios",
+		RootPath: "library/Studios", Provider: core.ProviderStashbox}
+	if err := a.st.CreateLibrary(ctx, second); err != nil {
+		t.Fatalf("CreateLibrary: %v", err)
+	}
+	if err := a.st.SetLibraryActive(ctx, second.ID, false); err != nil {
+		t.Fatalf("SetLibraryActive: %v", err)
+	}
+	a.adult.calls = 0
+
+	if _, err := a.mgr.AddSite(ctx, siteRef("site-1"), nil, second.ID); !errors.Is(err, ErrAdultDisabled) {
+		t.Errorf("AddSite into an inactive library = %v, want ErrAdultDisabled", err)
+	}
+	if a.adult.calls != 0 {
+		t.Errorf("the refused add made %d provider calls, want 0", a.adult.calls)
+	}
+
+	// The still-active default library is provably unaffected.
+	if _, err := a.mgr.AddSite(ctx, siteRef("site-1"), nil, 0); err != nil {
+		t.Fatalf("AddSite into the active library: %v", err)
+	}
+}
+
+// The refresh sweep names no library, so its gate can only ask whether ANY
+// adult shelf is on. A site under a dormant one is skipped individually, or the
+// sweep would walk its catalogue because a sibling happened to be on.
+func TestRefreshSitesSkipsSitesUnderAnInactiveLibrary(t *testing.T) {
+	ctx := context.Background()
+	a := newAdultHarness(t, true)
+	a.seedBrazzers()
+	sr := a.addSite("site-1")
+
+	lib, err := a.st.GetLibrary(ctx, sr.LibraryID)
+	if err != nil {
+		t.Fatalf("GetLibrary: %v", err)
+	}
+	// A second, active adult library, so the sweep's own gate stays open.
+	second := &core.Library{Kind: core.LibraryKindAdult, Name: "Studios",
+		RootPath: "library/Studios", Provider: core.ProviderStashbox}
+	if err := a.st.CreateLibrary(ctx, second); err != nil {
+		t.Fatalf("CreateLibrary: %v", err)
+	}
+	if err := a.st.SetLibraryActive(ctx, lib.ID, false); err != nil {
+		t.Fatalf("SetLibraryActive: %v", err)
+	}
+	a.adult.calls = 0
+
+	res := &RefreshResult{}
+	if err := a.mgr.refreshSites(ctx, res); err != nil {
+		t.Fatalf("refreshSites: %v", err)
+	}
+	if a.adult.calls != 0 {
+		t.Errorf("the sweep made %d provider calls for a dormant library's site, want 0", a.adult.calls)
+	}
+	if res.Sites != 0 || len(res.Errors) != 0 {
+		t.Errorf("result = %+v, want an untouched no-op", res)
+	}
+	// The queued catalogue walk agrees, so the other door onto the same rows is
+	// shut too.
+	if err := a.mgr.SyncSite(ctx, sr.ID); err != nil {
+		t.Errorf("SyncSite under an inactive library = %v, want a silent no-op", err)
+	}
+	if a.adult.calls != 0 {
+		t.Errorf("SyncSite reached the provider %d times for a dormant library, want 0", a.adult.calls)
+	}
+	// And the rows are all still there: switching off hides, it never deletes.
+	if eps := a.episodes(sr.ID); len(eps) != 3 {
+		t.Errorf("episodes after the switch = %d, want 3", len(eps))
+	}
+}

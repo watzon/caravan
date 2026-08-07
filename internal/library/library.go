@@ -64,9 +64,9 @@ type Manager struct {
 	// credential is configured. It is a second provider rather than a second
 	// implementation of the first because the two describe different worlds —
 	// see core.AdultMetadataProvider for why. Nothing here reaches it without
-	// going through adultReady, which is what makes "zero stash-box traffic
-	// when the module is off" a property of one function rather than of every
-	// call site.
+	// going through adultReady or adultReadyIn, which is what makes "zero
+	// stash-box traffic when no adult library is active" a property of two small
+	// functions rather than of every call site.
 	adult core.AdultMetadataProvider
 	// providers resolves a library's own provider choice; nil outside the
 	// full wiring. See metadataFor/adultByID for the fallback rule.

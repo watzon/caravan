@@ -128,22 +128,21 @@ func (m *Manager) Scan(ctx context.Context) (*ScanResult, error) {
 		return nil, fmt.Errorf("library: %s is not a directory", libAbs)
 	}
 
-	// A disabled adult module is not walked at all, which is stronger than
-	// walking it and refusing to match: a scene filename parked in the review
-	// queue is a UI trace of a module the owner turned off, and this phase
-	// promises there are none (PLAN phase 9 task 5). It is also the cheapest
-	// possible guarantee that a scan makes no stash-box request.
-	adultEnabled, err := m.store.AdultEnabled(ctx)
-	if err != nil {
-		return nil, err
-	}
-	// Every adult-kind library root is skipped, not just the seed one: a
-	// second adult library missed here would park scene filenames in the
-	// review queue with the module off, the exact trace this promises against.
-	adultAbs := map[string]bool{}
+	// An inactive library is not walked at all, which is stronger than walking
+	// it and refusing to match: a filename parked in the review queue is a UI
+	// trace of a shelf the owner switched off, and `active = 0` promises there
+	// are none. For an adult library it is also the cheapest possible guarantee
+	// that a scan makes no stash-box request.
+	//
+	// Every inactive library's root is skipped, of every kind. Before the switch
+	// generalized this was the adult module's rule alone, and it had to name
+	// every adult library rather than the seed one for the same reason it now
+	// names every kind: a root missed here parks filenames from a shelf that is
+	// meant to be absent.
+	inactiveRoots := map[string]bool{}
 	for _, lib := range libs {
-		if lib.Kind == core.LibraryKindAdult {
-			adultAbs[m.abs(lib.RootPath)] = true
+		if !lib.Active {
+			inactiveRoots[m.abs(lib.RootPath)] = true
 		}
 	}
 
@@ -187,7 +186,7 @@ func (m *Manager) Scan(ctx context.Context) (*ScanResult, error) {
 				if p != libAbs && strings.HasPrefix(name, ".") {
 					return fs.SkipDir
 				}
-				if !adultEnabled && adultAbs[p] {
+				if inactiveRoots[p] {
 					return fs.SkipDir
 				}
 				return nil
@@ -218,7 +217,7 @@ func (m *Manager) Scan(ctx context.Context) (*ScanResult, error) {
 		return nil, fmt.Errorf("library: scan %s: %w", libAbs, walkErr)
 	}
 
-	if err := m.reconcileRemovals(ctx, res, before, beforeUnmatched, seenFiles, seenUnmatched, adultEnabled); err != nil {
+	if err := m.reconcileRemovals(ctx, res, before, beforeUnmatched, seenFiles, seenUnmatched); err != nil {
 		return nil, err
 	}
 	if err := m.healStaleArtwork(ctx, res); err != nil {
@@ -530,17 +529,19 @@ func (m *Manager) matchAndImportEpisode(ctx context.Context, lib *core.Library, 
 // with no file is a legitimate wanted item (SPEC §9), and a rescan must never
 // delete user intent.
 // A tree the walk deliberately skipped is not a tree whose files are gone, so
-// the adult rows survive a scan made with the module switched off. Disabling
-// deletes nothing (store.SetAdultEnabled says so about the library row); a
-// reconciliation that quietly dropped every adult media_files row would make
-// that promise false at the first rescan.
-func (m *Manager) reconcileRemovals(ctx context.Context, res *ScanResult, before []core.MediaFile, beforeUnmatched []core.UnmatchedFile, seenFiles, seenUnmatched map[string]bool, adultEnabled bool) error {
+// the rows under an INACTIVE library survive a scan made while it is off.
+// Deactivating deletes nothing (store.SetLibraryActive says so about the row);
+// a reconciliation that quietly dropped every media_files row under a dormant
+// library would make that promise false at the first rescan, and switching the
+// library back on would find an empty shelf.
+//
+// The skip set is read off m.scanLibs rather than passed in: the same snapshot
+// the walk took its inactive roots from is the one that answers here, so the
+// two halves of one scan cannot disagree about which libraries were off.
+func (m *Manager) reconcileRemovals(ctx context.Context, res *ScanResult, before []core.MediaFile, beforeUnmatched []core.UnmatchedFile, seenFiles, seenUnmatched map[string]bool) error {
 	skipped := func(rel string) bool {
-		if adultEnabled {
-			return false
-		}
 		lib := libraryForPath(m.scanLibs, rel)
-		return lib != nil && lib.Kind == core.LibraryKindAdult
+		return lib != nil && !lib.Active
 	}
 
 	for _, f := range before {

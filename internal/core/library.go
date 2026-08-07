@@ -126,6 +126,61 @@ func LibraryVisible(lib Library, role string, granted bool) bool {
 	return !lib.Restricted || granted
 }
 
+// LibrarySet indexes a whole library list for the one question background work
+// asks of it: given a row's library_id and the kind it belongs to, is the
+// library that owns it switched on?
+//
+// It exists so that a sweep with no caller and a request with one resolve
+// ownership the same way. The rules are api.libraryGate's, restated for callers
+// that have no identity to gate on — divergence between them would mean an item
+// the wanted list searches for and the screens refuse to show, or the reverse:
+//
+//   - a zero library_id resolves to the kind's DEFAULT library, exactly as a
+//     by-kind lookup would (pre-0022 rows, and every import that named no
+//     target, carry a zero);
+//   - a kind with no library at all is NOT active: a row belonging to a shelf
+//     that does not exist belongs nowhere, and nowhere is off. That is what
+//     keeps an adult series row on an install that never enabled the module
+//     from being wanted;
+//   - an id no row answers to stays active: ownership that cannot be
+//     established is not evidence of ownership.
+type LibrarySet struct {
+	byID     map[int64]Library
+	defaults map[string]int64
+}
+
+// NewLibrarySet indexes the list once, for callers that will ask about many
+// rows.
+func NewLibrarySet(libs []Library) LibrarySet {
+	s := LibrarySet{byID: make(map[int64]Library, len(libs)), defaults: map[string]int64{}}
+	for _, l := range libs {
+		s.byID[l.ID] = l
+		// store.GetLibraryByKind's ordering, reproduced: is_default first, then
+		// id. Resolving a by-kind lookup differently here would answer about a
+		// different library than the one the rest of the server files rows under.
+		if cur, ok := s.defaults[l.Kind]; !ok || (l.IsDefault && !s.byID[cur].IsDefault) {
+			s.defaults[l.Kind] = l.ID
+		}
+	}
+	return s
+}
+
+// Active reports whether the library owning a row is switched on.
+func (s LibrarySet) Active(libraryID int64, kind string) bool {
+	if libraryID == 0 {
+		id, ok := s.defaults[kind]
+		if !ok {
+			return false
+		}
+		libraryID = id
+	}
+	lib, ok := s.byID[libraryID]
+	if !ok {
+		return true
+	}
+	return lib.Active
+}
+
 // ProviderChain is the ordered provider list to walk when identifying an item
 // in this library.
 //

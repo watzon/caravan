@@ -190,13 +190,19 @@ func (metadataOnlyRegistry) Adult(context.Context, string) core.AdultMetadataPro
 // adultClientFor returns the client for one configured stash-box instance, or
 // nil.
 //
-// It is nil unless the module is switched on AND the instance exists AND it has
-// a credential, and the order matters: the switch is read FIRST, so a server
-// with adult content disabled makes no instance lookup and builds no client at
-// all. library.adultReady checks the same switch, which makes this the second of
-// two independent reasons the endpoint cannot be reached when the module is off
-// — the acceptance criterion is zero requests, and one guard is one bug away
-// from zero guards.
+// It is nil unless at least one adult library is switched on AND the instance
+// exists AND it has a credential, and the order matters: the switch is read
+// FIRST, so a server with every adult shelf dormant makes no instance lookup and
+// builds no client at all. library.adultReady asks the same question, which
+// makes this the second of two independent reasons the endpoint cannot be
+// reached when adult content is off — the acceptance criterion is zero requests,
+// and one guard is one bug away from zero guards.
+//
+// The question is asked of the library rows rather than of a server-wide
+// setting. This door has to stay shut for the same install states it always
+// did, and "no active adult library" is what "the module is off" has become —
+// asking the rows is what lets the setting be retired without revisiting this
+// file's semantics.
 //
 // An id no row answers to is nil rather than a fall back to another box. The
 // refs on a pinned item were minted by ONE catalogue, and asking a different one
@@ -210,12 +216,12 @@ func (metadataOnlyRegistry) Adult(context.Context, string) core.AdultMetadataPro
 // to take effect at once — but the client built from it is reused; see
 // stashboxClient.
 func (a *libraryAdapter) adultClientFor(ctx context.Context, providerID string) core.AdultMetadataProvider {
-	enabled, err := a.st.AdultEnabled(ctx)
+	on, err := a.st.AnyActiveLibraryOfKind(ctx, core.LibraryKindAdult)
 	if err != nil {
-		a.log.Error("read adult setting", "error", err)
+		a.log.Error("read adult library state", "error", err)
 		return nil
 	}
-	if !enabled {
+	if !on {
 		return nil
 	}
 	in, err := a.st.GetStashboxInstanceByProviderID(ctx, providerID)
@@ -247,15 +253,15 @@ func (a *libraryAdapter) adultClientFor(ctx context.Context, providerID string) 
 // fallback, which on an upgraded install is the endpoint that was configured
 // before instances existed.
 //
-// The module switch is read before either lookup, so a disabled module still
-// costs zero queries and zero traffic.
+// The library switch is read before either lookup, so an install with no active
+// adult library still costs zero instance queries and zero traffic.
 func (a *libraryAdapter) defaultAdultMetadata(ctx context.Context) (core.AdultMetadataProvider, string) {
-	enabled, err := a.st.AdultEnabled(ctx)
+	on, err := a.st.AnyActiveLibraryOfKind(ctx, core.LibraryKindAdult)
 	if err != nil {
-		a.log.Error("read adult setting", "error", err)
+		a.log.Error("read adult library state", "error", err)
 		return nil, ""
 	}
-	if !enabled {
+	if !on {
 		return nil, ""
 	}
 	providerID := a.defaultAdultProviderID(ctx)

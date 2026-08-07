@@ -288,20 +288,24 @@ func (v visibility) visible() []core.Library {
 
 // visibility resolves every library's advertised state.
 //
-// The adult rule applies per adult library and carries a second condition: the
-// module's own master switch. Disabling the module deletes nothing
-// (store.SetAdultEnabled), so a dlna_visible survives an off — and a flag left
-// on would keep the shelf on every television on the LAN while the API, the
-// SPA, the calendar and the wanted list had all gone quiet. "Off" has to mean
-// off on the one surface with no accounts, so the AND lives here rather than as
-// a write to the row: the owner's sharing decision is remembered and simply
-// does not apply while the module is off.
+// The rule is `active && dlna_visible`, per library and for every kind. The two
+// flags answer different questions and both have to be yes: dlna_visible is the
+// owner's sharing decision, active is whether the library exists for anybody at
+// all. Switching a library off deletes nothing (store.SetLibraryActive), so a
+// dlna_visible survives it — and a flag left on would keep the shelf on every
+// television on the LAN while the API, the SPA, the calendar and the wanted list
+// had all gone quiet. "Off" has to mean off on the one surface with no accounts,
+// so the AND lives here rather than as a write to the row: the sharing decision
+// is remembered and simply does not apply while the library is dormant, which is
+// what lets switching it back on restore the shelf exactly as it was left.
+//
+// `restricted` deliberately has NO say here. DLNA has no accounts, so "these two
+// people" is inexpressible on it; store.SetLibraryAccess resolves that by
+// clearing dlna_visible in the same write that restricts. Re-applying the
+// restriction as a condition would make re-sharing impossible instead of
+// deliberate.
 func (s *Service) visibility(ctx context.Context) (visibility, error) {
 	libraries, err := s.st.ListLibraries(ctx)
-	if err != nil {
-		return visibility{}, err
-	}
-	adultEnabled, err := s.st.AdultEnabled(ctx)
 	if err != nil {
 		return visibility{}, err
 	}
@@ -311,11 +315,7 @@ func (s *Service) visibility(ctx context.Context) (visibility, error) {
 		defaults:  make(map[string]int64, len(legacyContainerID)),
 	}
 	for _, l := range libraries {
-		visible := l.DLNAVisible
-		if l.Kind == core.LibraryKindAdult && !adultEnabled {
-			visible = false
-		}
-		v.byID[l.ID] = visible
+		v.byID[l.ID] = l.Active && l.DLNAVisible
 		if l.IsDefault {
 			v.defaults[l.Kind] = l.ID
 		}
@@ -594,10 +594,10 @@ func (s *Service) friendlyName(ctx context.Context) (string, error) {
 //
 // One loop, so every library is advertised by the same rule and by nothing
 // else. There is no branch here that mentions the adult module: if a library
-// row says dlna_visible, it is on the shelf; if it does not, it is absent —
-// and the adult row is created with the flag off (store.SetAdultEnabled), so
-// enabling the module changes nothing about what the LAN can see until the
-// owner makes that second decision.
+// row is active and says dlna_visible, it is on the shelf; if it does not, it
+// is absent — and an adult row is created with the flag off
+// (store.ensureAdultLibrary), so creating one changes nothing about what the
+// LAN can see until the owner makes that second decision.
 func (s *Service) rootChildren(ctx context.Context, u urls) (*didlLite, error) {
 	v, err := s.visibility(ctx)
 	if err != nil {

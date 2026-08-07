@@ -31,14 +31,16 @@ import (
 // the tests is what keeps the two from drifting apart.
 const AdultDir = "Adult"
 
-// ErrAdultDisabled reports that the adult module is switched off server-wide.
+// ErrAdultDisabled reports that the adult library this operation would act on
+// is switched off — for a sweep that names none, that no adult library is on at
+// all.
 //
 // It is a distinct error rather than a silent no-op wherever a caller ASKED for
 // something adult — AddSite, a scene import — because a request that names a
 // site is not something to quietly ignore. The automatic sweeps do treat it as
 // a no-op, which is the "zero stash-box traffic when disabled" promise: nothing
 // scheduled may reach the endpoint, and nothing scheduled may log an error
-// about a module the owner turned off either.
+// about a shelf the owner turned off either.
 var ErrAdultDisabled = errors.New("library: the adult module is disabled")
 
 // scenePageSize is how many scenes one provider round trip asks for. A site's
@@ -63,18 +65,38 @@ func adultSeriesDir(lib *core.Library, title string) string {
 	return path.Join(lib.RootPath, sanitize(title))
 }
 
-// adultReady answers whether this Manager may talk to the adult provider right
-// now, and is the single gate every adult path in this package goes through.
+// adultReady answers whether this Manager may talk to the adult provider AT
+// ALL right now. It is the gate for the paths that name no library — the
+// sweeps, and the jobs that have not yet read the row they are about to act on.
 //
-// Both halves matter and they fail differently. The module being off is a
-// decision the owner made, and it is what guarantees the endpoint is never
-// reached; no provider configured is a setup step nobody has done yet.
+// Both halves matter and they fail differently. Not one adult library being
+// switched on is a decision the owner made, and it is what guarantees the
+// endpoint is never reached; no provider configured is a setup step nobody has
+// done yet.
+//
+// A path that HOLDS the library it is about to act on asks adultReadyIn
+// instead: with the switch living on the rows, "some adult library is on" is
+// the weaker question, and answering it for a caller that named a dormant one
+// would reach the endpoint on that library's behalf.
 func (m *Manager) adultReady(ctx context.Context) error {
-	enabled, err := m.store.AdultEnabled(ctx)
+	on, err := m.store.AnyActiveLibraryOfKind(ctx, core.LibraryKindAdult)
 	if err != nil {
 		return err
 	}
-	if !enabled {
+	if !on {
+		return ErrAdultDisabled
+	}
+	if m.adult == nil {
+		return core.ErrNoAdultProvider
+	}
+	return nil
+}
+
+// adultReadyIn is adultReady for a caller that already holds its target
+// library: the same two failures, with the master switch read off the row
+// rather than off the kind.
+func (m *Manager) adultReadyIn(lib *core.Library) error {
+	if lib == nil || !lib.Active {
 		return ErrAdultDisabled
 	}
 	if m.adult == nil {
@@ -122,12 +144,28 @@ func (m *Manager) AddSiteAndWait(ctx context.Context, ref core.ItemRef, monitore
 }
 
 func (m *Manager) addSite(ctx context.Context, ref core.ItemRef, monitored *bool, libraryID int64, walk bool) (*core.Series, error) {
-	if err := m.adultReady(ctx); err != nil {
-		return nil, err
-	}
 	ref = adultRef(ref)
 	if ref.Ref == "" {
 		return nil, fmt.Errorf("library: empty stash id")
+	}
+
+	// The TARGET library is resolved before the gate rather than after it,
+	// because the gate is that library's own master switch: an add into a
+	// dormant shelf must be refused even while a sibling adult library is on.
+	// Nothing between here and the gate reaches a provider — siteLibrary is
+	// store reads — so the zero-traffic order is unchanged.
+	lib, err := m.siteLibrary(ctx, ref, "", libraryID)
+	if errors.Is(err, store.ErrNotFound) {
+		// No adult library on the install at all is OFF, not open: a shelf that
+		// does not exist reaches no endpoint and shows nobody anything. That is
+		// the same reading core.LibrarySet gives a row whose kind has no library.
+		return nil, ErrAdultDisabled
+	}
+	if err != nil {
+		return nil, err
+	}
+	if err := m.adultReadyIn(lib); err != nil {
+		return nil, err
 	}
 
 	// The instance the REF names, not the library's chain head: the id is
@@ -136,10 +174,6 @@ func (m *Manager) addSite(ctx context.Context, ref core.ItemRef, monitored *bool
 	provider := m.adultByID(ctx, ref.Provider)
 	if provider == nil {
 		return nil, core.ErrNoAdultProvider
-	}
-	lib, err := m.siteLibrary(ctx, ref, "", libraryID)
-	if err != nil {
-		return nil, err
 	}
 	meta, err := provider.GetSite(ctx, ref.Ref)
 	if err != nil {
@@ -166,9 +200,14 @@ func (m *Manager) addSite(ctx context.Context, ref core.ItemRef, monitored *bool
 //
 // A site that has been removed since the job was queued is not an error: there
 // is nothing left to walk, and failing would retry a job that can never
-// succeed. Neither is the module having been switched off in the meantime —
+// succeed. Neither is its library having been switched off in the meantime —
 // that is refreshSites' rule, and it is what keeps a job queued before the
 // switch from being the one path that reaches stash-box after it.
+//
+// The switch is asked twice, and the second question is the narrow one: the
+// install-wide gate refuses before any row is read, and the site's OWN library
+// refuses once the row says which shelf it belongs to. A sibling adult library
+// still being on is not permission to walk a dormant one's catalogue.
 func (m *Manager) SyncSite(ctx context.Context, seriesID int64) error {
 	if err := m.adultReady(ctx); err != nil {
 		if errors.Is(err, ErrAdultDisabled) || errors.Is(err, core.ErrNoAdultProvider) {
@@ -184,6 +223,16 @@ func (m *Manager) SyncSite(ctx context.Context, seriesID int64) error {
 		return err
 	}
 	if sr.Kind != core.SeriesKindAdult || sr.StashID == "" {
+		return nil
+	}
+	lib, err := m.seriesLibraryOf(ctx, sr)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !lib.Active {
 		return nil
 	}
 	return m.syncSiteScenes(ctx, sr)
@@ -633,11 +682,17 @@ func episodeFromScene(scene core.SceneMeta, season, number int) core.Episode {
 
 // refreshSites is the adult half of RefreshLibrary.
 //
-// It is a no-op — not an error, and not one provider call — when the module is
-// off or no stash-box credential is configured. That is the acceptance
-// criterion this function exists to satisfy: a full job cycle on a server with
-// adult content disabled must make ZERO requests to the stash-box endpoint,
-// and a refresh sweep is the recurring job that would otherwise make them.
+// It is a no-op — not an error, and not one provider call — when no adult
+// library is switched on or no stash-box credential is configured. That is the
+// acceptance criterion this function exists to satisfy: a full job cycle on a
+// server with adult content disabled must make ZERO requests to the stash-box
+// endpoint, and a refresh sweep is the recurring job that would otherwise make
+// them.
+//
+// A site under a library that is off is skipped individually, which is the
+// narrow form of the same rule: the sweep names no library, so the gate above
+// can only ask whether ANY adult shelf is on, and refreshing a dormant one's
+// catalogue because a sibling is on would reach the endpoint on its behalf.
 //
 // Each site is refreshed against the instance it is PINNED to. A site whose
 // instance has been deleted is an error on the result and zero provider calls:
@@ -656,11 +711,19 @@ func (m *Manager) refreshSites(ctx context.Context, res *RefreshResult) error {
 	if err != nil {
 		return err
 	}
+	libs, err := m.store.ListLibraries(ctx)
+	if err != nil {
+		return err
+	}
+	owners := core.NewLibrarySet(libs)
 	for _, sr := range sites {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		if !sr.Monitored || sr.StashID == "" {
+			continue
+		}
+		if !owners.Active(sr.LibraryID, core.LibraryKindAdult) {
 			continue
 		}
 		pinned := adultRef(core.ItemRef{Provider: sr.Provider, Ref: sr.StashID})

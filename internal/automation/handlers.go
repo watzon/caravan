@@ -128,30 +128,25 @@ func (f rssFeed) libsFor(release core.Release) map[int64]bool {
 // library that enabled it, and the per-library decision moves to matching
 // (PLAN phase 8 task 5).
 //
-// A library the module it belongs to has switched off contributes nothing. That
-// matters for exactly one library: store.SetAdultEnabled deliberately does not
-// delete the Adult row when the module is disabled, so without this the adult
+// A library that is switched off contributes nothing. Deactivating deliberately
+// does not delete the row (store.SetLibraryActive), so without this a dormant
 // library's categories stay in the union forever and every RSS poll keeps
-// asking each indexer for `cat=…,6000`, once per sync interval, on an install
-// whose owner turned the module off. Nothing would be grabbed — wanted.Compute
-// drops adult items when disabled — but the request itself is a durable trace
-// of a module this phase promises is absent, visible in the indexer's own
-// request log, and it is a wider fetch than the enabled libraries asked for.
-// Scan skips the adult tree and refreshSites no-ops for the same reason.
+// asking each indexer for them, once per sync interval, on an install whose
+// owner turned that shelf off. Nothing would be grabbed — wanted.Compute drops
+// an inactive library's items — but the request itself is a durable trace of a
+// shelf that is meant to be absent, visible in the indexer's own request log,
+// and it is a wider fetch than the active libraries asked for. Scan skips
+// inactive roots and refreshSites no-ops for the same reason.
 func rssFeeds(ctx context.Context, st *store.Store) ([]rssFeed, error) {
 	libraries, err := st.ListLibraries(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: list libraries: %w", err)
 	}
-	adultEnabled, err := st.AdultEnabled(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("store: read adult setting: %w", err)
-	}
 
 	feeds := []*rssFeed{}
 	byIndexer := map[int64]*rssFeed{}
 	for _, library := range libraries {
-		if library.Kind == core.LibraryKindAdult && !adultEnabled {
+		if !library.Active {
 			continue
 		}
 		settings, err := st.ResolveLibrarySettings(ctx, library.ID)
@@ -322,6 +317,16 @@ func (r *Runner) handleSearchMovie(ctx context.Context, st *store.Store, payload
 	if err != nil {
 		return fmt.Errorf("store: get movie: %w", err)
 	}
+	// handleSearchEpisode's rule, for the other item kind: a job outlives the
+	// switch, so the library is re-read rather than trusted from when the job
+	// was queued.
+	libraries, err := st.ListLibraries(ctx)
+	if err != nil {
+		return fmt.Errorf("store: list libraries: %w", err)
+	}
+	if !core.NewLibrarySet(libraries).Active(movie.LibraryID, core.LibraryKindMovie) {
+		return nil
+	}
 	profile, err := st.ResolveItemQualityProfileByLibrary(ctx, movie.LibraryID, core.LibraryKindMovie, movie.QualityProfileID)
 	if err != nil {
 		return fmt.Errorf("store: resolve movie profile: %w", err)
@@ -370,21 +375,19 @@ func (r *Runner) handleSearchEpisode(ctx context.Context, st *store.Store, paylo
 	if err != nil {
 		return fmt.Errorf("store: get series: %w", err)
 	}
-	// A job queued before the module was switched off is the one path that can
-	// reach a scene search on a server with adult content disabled, so the
-	// switch is re-read here rather than trusted from when the job was made.
-	// Dropping the job is the right answer: the item is not wanted any more
-	// (wanted.Compute agrees), so there is nothing to retry.
-	if series.Kind == core.SeriesKindAdult {
-		enabled, err := st.AdultEnabled(ctx)
-		if err != nil {
-			return fmt.Errorf("store: read adult setting: %w", err)
-		}
-		if !enabled {
-			return nil
-		}
-	}
 	kind := core.LibraryKindForSeries(series.Kind)
+	// A job queued before the series' library was switched off is the one path
+	// that can reach an indexer on a dormant library's behalf, so the switch is
+	// re-read here rather than trusted from when the job was made. Dropping the
+	// job is the right answer: the item is not wanted any more (wanted.Compute
+	// agrees), so there is nothing to retry.
+	libraries, err := st.ListLibraries(ctx)
+	if err != nil {
+		return fmt.Errorf("store: list libraries: %w", err)
+	}
+	if !core.NewLibrarySet(libraries).Active(series.LibraryID, kind) {
+		return nil
+	}
 	profile, err := st.ResolveItemQualityProfileByLibrary(ctx, series.LibraryID, kind, series.QualityProfileID)
 	if err != nil {
 		return fmt.Errorf("store: resolve episode profile: %w", err)

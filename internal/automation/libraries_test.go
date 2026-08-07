@@ -560,3 +560,108 @@ func TestSameKindLibrariesSearchTheirOwnIndexers(t *testing.T) {
 		t.Fatalf("anime search hit %s, want only beta", formatRequests(got))
 	}
 }
+
+// setLibraryActive flips one library's master switch by kind, which is what
+// PATCH /libraries/{id} {active} does from the Libraries screen.
+func setLibraryActive(t *testing.T, ctx context.Context, st *store.Store, kind string, active bool) {
+	t.Helper()
+	library, err := st.GetLibraryByKind(ctx, kind)
+	if err != nil {
+		t.Fatalf("get %s library: %v", kind, err)
+	}
+	if err := st.SetLibraryActive(ctx, library.ID, active); err != nil {
+		t.Fatalf("set %s library active: %v", kind, err)
+	}
+}
+
+// The adult module's RSS rule, generalized: an inactive library's categories
+// leave the per-indexer union. Switching a library off deliberately deletes
+// nothing, so without this its categories stay in the query string of every RSS
+// poll forever — a durable trace, in the indexer's own request log, of a shelf
+// the owner turned off, and a wider fetch than the active libraries asked for.
+//
+// A television library is the fixture: this is the capability the switch gained
+// by moving onto the rows.
+func TestRSSSyncDropsAnInactiveLibrarysCategories(t *testing.T) {
+	ctx := context.Background()
+	st := openStore(t)
+
+	fake := startFakeTorznab(t)
+	cfg := addTorznabIndexer(t, ctx, st, fake, "shared", 2000, 5000)
+	// Both libraries are given an override, so the union under test is exactly
+	// what they asked for and nothing is inherited.
+	overrideLibraryIndexer(t, ctx, st, core.LibraryKindMovie, cfg.ID, true, []int{2000})
+	overrideLibraryIndexer(t, ctx, st, core.LibraryKindTV, cfg.ID, true, []int{5000})
+	runner := NewRunner(st, fake.factory(), func(context.Context, int64, string) core.Engine { return &fakeEngine{} })
+
+	if err := runner.handleRSSSync(ctx, st, json.RawMessage("{}")); err != nil {
+		t.Fatalf("handle rss sync: %v", err)
+	}
+	if got := fake.recorded(); len(got) != 1 || got[0].cats != "2000,5000" {
+		t.Fatalf("rss fetch with both libraries on = %s, want the union", formatRequests(got))
+	}
+
+	setLibraryActive(t, ctx, st, core.LibraryKindTV, false)
+	fake.reset()
+	if err := runner.handleRSSSync(ctx, st, json.RawMessage("{}")); err != nil {
+		t.Fatalf("handle rss sync: %v", err)
+	}
+	got := fake.recorded()
+	if len(got) != 1 {
+		t.Fatalf("rss cycle made %s, want one fetch", formatRequests(got))
+	}
+	if got[0].cats != "2000" {
+		t.Fatalf("rss fetch with the tv library off = %s, want only the active library's categories",
+			formatRequests(got))
+	}
+
+	// And it comes back: the switch is a switch, not a one-way door.
+	setLibraryActive(t, ctx, st, core.LibraryKindTV, true)
+	fake.reset()
+	if err := runner.handleRSSSync(ctx, st, json.RawMessage("{}")); err != nil {
+		t.Fatalf("handle rss sync: %v", err)
+	}
+	if got := fake.recorded(); len(got) != 1 || got[0].cats != "2000,5000" {
+		t.Fatalf("rss fetch after reactivation = %s, want the union back", formatRequests(got))
+	}
+}
+
+// A job outlives the switch that was on when it was queued, so a search job is
+// the one path that can reach an indexer on a dormant library's behalf. It is
+// dropped rather than run, and dropped rather than retried: the item is not
+// wanted any more, so there is nothing to come back for.
+func TestSearchJobsAreDroppedForAnInactiveLibrary(t *testing.T) {
+	ctx := context.Background()
+	st := openStore(t)
+
+	fake := startFakeTorznab(t)
+	cfg := addTorznabIndexer(t, ctx, st, fake, "shared", 2000, 5000)
+	overrideLibraryIndexer(t, ctx, st, core.LibraryKindMovie, cfg.ID, true, []int{2000})
+	overrideLibraryIndexer(t, ctx, st, core.LibraryKindTV, cfg.ID, true, []int{5000})
+
+	episode := addEpisode(t, ctx, st, "Example Series")
+	movie := core.Movie{TMDBID: 603, Title: "The Matrix", SortTitle: "matrix", Year: 1999, Monitored: true}
+	if err := st.UpsertMovie(ctx, &movie); err != nil {
+		t.Fatalf("upsert movie: %v", err)
+	}
+	runner := NewRunner(st, fake.factory(), func(context.Context, int64, string) core.Engine { return &fakeEngine{} })
+
+	setLibraryActive(t, ctx, st, core.LibraryKindTV, false)
+	searchEpisodeJob(t, ctx, runner, st, episode.ID)
+	if got := fake.recorded(); len(got) != 0 {
+		t.Fatalf("an inactive library still searched for an episode: %s", formatRequests(got))
+	}
+
+	// The movie library is provably untouched by the tv library's switch, and
+	// then answers the same way once its own goes off.
+	searchMovieJob(t, ctx, runner, st, movie.ID)
+	if got := fake.recorded(); len(got) == 0 {
+		t.Fatal("the still-active movie library stopped searching")
+	}
+	setLibraryActive(t, ctx, st, core.LibraryKindMovie, false)
+	fake.reset()
+	searchMovieJob(t, ctx, runner, st, movie.ID)
+	if got := fake.recorded(); len(got) != 0 {
+		t.Fatalf("an inactive library still searched for a movie: %s", formatRequests(got))
+	}
+}

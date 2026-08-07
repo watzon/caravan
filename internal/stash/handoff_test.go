@@ -1055,3 +1055,45 @@ func TestRedactURLKeepsUserinfoOutOfLogs(t *testing.T) {
 		}
 	}
 }
+
+// The same gate, driven by the switch that survives the module setting's
+// retirement: the adult LIBRARY is switched off while the setting is left on.
+// The two agree today (store.SetAdultEnabled dual-writes the column), so this is
+// the half that proves the handoff reads the rows rather than the setting.
+func TestInactiveAdultLibraryQueuesNothingAndTalksToNobody(t *testing.T) {
+	srv := stashtest.New(stashtest.Options{})
+	t.Cleanup(srv.Close)
+	svc, st := newTestService(t, srv.Client())
+	configure(t, st, srv.URL(), "secret", true, true)
+	episode := seedScene(t, st)
+
+	ctx := context.Background()
+	lib, err := st.GetLibraryByKind(ctx, core.LibraryKindAdult)
+	if err != nil {
+		t.Fatalf("GetLibraryByKind: %v", err)
+	}
+	if err := st.SetLibraryActive(ctx, lib.ID, false); err != nil {
+		t.Fatalf("SetLibraryActive: %v", err)
+	}
+	if on, err := st.AdultEnabled(ctx); err != nil || !on {
+		t.Fatalf("adult_enabled = %t, %v — the setting was meant to stay on", on, err)
+	}
+
+	if err := svc.AdultLibraryChanged(ctx, []int64{episode.ID}); err != nil {
+		t.Fatalf("AdultLibraryChanged: %v", err)
+	}
+	if got := len(jobsOfKind(t, st, ScanJobKind)) + len(jobsOfKind(t, st, IdentifyJobKind)); got != 0 {
+		t.Fatalf("jobs = %d, want 0 while every adult library is off", got)
+	}
+	// And a job queued while the library was on, run after it was not, still
+	// makes no request.
+	if err := svc.HandleScan(ctx, st, nil); err != nil {
+		t.Fatalf("HandleScan: %v", err)
+	}
+	if err := svc.HandleIdentify(ctx, st, identifyPayloadFor(t, episode.ID)); err != nil {
+		t.Fatalf("HandleIdentify: %v", err)
+	}
+	if n := srv.Count(); n != 0 {
+		t.Fatalf("requests to Stash = %d, want 0 while every adult library is off", n)
+	}
+}

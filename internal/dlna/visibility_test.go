@@ -493,3 +493,185 @@ func TestBrowseReportsCurrentSystemUpdateID(t *testing.T) {
 		t.Errorf("GetSystemUpdateID is not %q:\n%s", want, rec.Body.String())
 	}
 }
+
+// setLibraryActive flips one library's master switch, which is what
+// PATCH /libraries/{id} {active} does from the Libraries screen.
+func setLibraryActive(t *testing.T, st *store.Store, id int64, active bool) {
+	t.Helper()
+	if err := st.SetLibraryActive(context.Background(), id, active); err != nil {
+		t.Fatalf("SetLibraryActive(%d, %t): %v", id, active, err)
+	}
+}
+
+// The DLNA rule is `active && dlna_visible` for EVERY kind, so a library the
+// owner switched off leaves the LAN exactly as a hidden one does: absent from
+// the root, unreachable by any cached id, and refusing its media URLs.
+//
+// A television library is the fixture. The module switch this generalizes could
+// only ever hide adult shelves; the whole point of moving it onto the rows is
+// that the same door now closes over a Kids library or a second anime one, and
+// the surface with no accounts on it is where getting that wrong is worst.
+func TestInactiveLibraryLeavesTheDLNATreeEntirely(t *testing.T) {
+	svc, st, root := newTestService(t)
+	seedLibrary(t, st)
+	anime, series, file := seedSecondTVLibrary(t, st, root)
+	ctx := context.Background()
+
+	containerID := libraryPrefix + strconv.FormatInt(anime.ID, 10)
+	subtree := []string{containerID, tvIDSpace.seriesObjectID(series.ID), tvIDSpace.seasonObjectID(series.ID, 1)}
+	// Asserted while it is still on, so the refusals below are the switch's
+	// doing and not ids that never resolved.
+	for _, objectID := range subtree {
+		if _, err := svc.metadata(ctx, testURLs, objectID); err != nil {
+			t.Fatalf("metadata(%q) while active: %v", objectID, err)
+		}
+	}
+	if rec := requestDirectMedia(t, svc, file.ID); rec.Code != http.StatusOK {
+		t.Fatalf("media while active: status = %d", rec.Code)
+	}
+	before, err := svc.systemUpdateID(ctx)
+	if err != nil {
+		t.Fatalf("systemUpdateID: %v", err)
+	}
+
+	setLibraryActive(t, st, anime.ID, false)
+
+	rootDoc, err := svc.children(ctx, testURLs, rootID)
+	if err != nil {
+		t.Fatalf("children(root): %v", err)
+	}
+	if slices.Contains(containerIDs(rootDoc), containerID) {
+		t.Errorf("the root still advertises an inactive library: %v", containerIDs(rootDoc))
+	}
+	for _, objectID := range subtree {
+		if _, err := svc.children(ctx, testURLs, objectID); !errors.Is(err, errNoObject) {
+			t.Errorf("children(%q) = %v, want errNoObject", objectID, err)
+		}
+		if _, err := svc.metadata(ctx, testURLs, objectID); !errors.Is(err, errNoObject) {
+			t.Errorf("metadata(%q) = %v, want errNoObject", objectID, err)
+		}
+		if _, err := svc.search(ctx, testURLs, objectID, "*"); !errors.Is(err, errNoObject) {
+			t.Errorf("search(%q) = %v, want errNoObject", objectID, err)
+		}
+	}
+	// A cached media URL stops playing too, or the tree would be closed and the
+	// bytes still served.
+	if rec := requestDirectMedia(t, svc, file.ID); rec.Code != http.StatusNotFound {
+		t.Errorf("media from an inactive library: status = %d, want 404", rec.Code)
+	}
+	// A search from the root does not bring it back either.
+	found, err := svc.search(ctx, testURLs, rootID, `dc:title contains "Frieren"`)
+	if err != nil {
+		t.Fatalf("search(root): %v", err)
+	}
+	if len(found.Containers) != 0 || len(found.Items) != 0 {
+		t.Errorf("a root search reached an inactive library: %+v", found)
+	}
+	// A television caching the tree has to be told the shelf is gone.
+	after, err := svc.systemUpdateID(ctx)
+	if err != nil {
+		t.Fatalf("systemUpdateID: %v", err)
+	}
+	if after == before {
+		t.Errorf("systemUpdateID stayed %q while a shared library was switched off", after)
+	}
+
+	// The default television library is provably untouched: the switch is per
+	// library, not per kind.
+	tv, err := svc.children(ctx, testURLs, tvID)
+	if err != nil {
+		t.Fatalf("children(tv): %v", err)
+	}
+	if len(tv.Containers) != 1 || tv.Containers[0].Title != "Planet Earth II (2016)" {
+		t.Fatalf("tv children = %v, want the default library's show", containerTitles(tv))
+	}
+}
+
+// Switching a library off must REMEMBER the owner's sharing decision rather
+// than revoke it: `active` suppresses the container without clearing
+// dlna_visible, so switching it back on restores the shelf exactly as it was
+// left. Clearing the flag would make every reactivation a silent unshare, and
+// re-sharing on a LAN is a deliberate act (see store.SetLibraryAccess for the
+// one case that DOES clear it).
+func TestDLNAVisibilitySurvivesAnActiveRoundTrip(t *testing.T) {
+	svc, st, _ := newTestService(t)
+	seedLibrary(t, st)
+	ctx := context.Background()
+
+	lib, err := st.GetLibraryByKind(ctx, core.LibraryKindTV)
+	if err != nil {
+		t.Fatalf("GetLibraryByKind: %v", err)
+	}
+	if !lib.DLNAVisible {
+		t.Fatal("the seeded tv library is not shared, so this test would prove nothing")
+	}
+
+	setLibraryActive(t, st, lib.ID, false)
+	off, err := st.GetLibrary(ctx, lib.ID)
+	if err != nil {
+		t.Fatalf("GetLibrary: %v", err)
+	}
+	if !off.DLNAVisible {
+		t.Error("switching a library off forgot the owner's sharing decision")
+	}
+	rootDoc, err := svc.children(ctx, testURLs, rootID)
+	if err != nil {
+		t.Fatalf("children(root): %v", err)
+	}
+	if slices.Contains(containerIDs(rootDoc), tvID) {
+		t.Errorf("the root advertises a remembered-but-inactive library: %v", containerIDs(rootDoc))
+	}
+
+	setLibraryActive(t, st, lib.ID, true)
+	rootDoc, err = svc.children(ctx, testURLs, rootID)
+	if err != nil {
+		t.Fatalf("children(root): %v", err)
+	}
+	if !slices.Contains(containerIDs(rootDoc), tvID) {
+		t.Errorf("reactivating did not put the shared shelf back: %v", containerIDs(rootDoc))
+	}
+}
+
+// A restricted library is not hidden from DLNA by a condition applied here:
+// store.SetLibraryAccess clears dlna_visible in the same write that restricts,
+// because "these two people" is inexpressible on an accountless LAN. Reading
+// `restricted` in visibility() as well would make re-sharing impossible instead
+// of deliberate, so this pins that it does not.
+func TestRestrictedLibraryCanBeReSharedOnTheLAN(t *testing.T) {
+	svc, st, _ := newTestService(t)
+	seedLibrary(t, st)
+	ctx := context.Background()
+
+	lib, err := st.GetLibraryByKind(ctx, core.LibraryKindTV)
+	if err != nil {
+		t.Fatalf("GetLibraryByKind: %v", err)
+	}
+	if err := st.SetLibraryAccess(ctx, lib.ID, true, nil); err != nil {
+		t.Fatalf("SetLibraryAccess: %v", err)
+	}
+	rootDoc, err := svc.children(ctx, testURLs, rootID)
+	if err != nil {
+		t.Fatalf("children(root): %v", err)
+	}
+	if slices.Contains(containerIDs(rootDoc), tvID) {
+		t.Fatalf("restricting left the library on the LAN: %v", containerIDs(rootDoc))
+	}
+
+	// The second, deliberate act on the Reach card puts it back while the
+	// library stays restricted for accounts.
+	setLibraryVisible(t, st, lib.ID, true)
+	rootDoc, err = svc.children(ctx, testURLs, rootID)
+	if err != nil {
+		t.Fatalf("children(root): %v", err)
+	}
+	if !slices.Contains(containerIDs(rootDoc), tvID) {
+		t.Errorf("a re-shared restricted library is still off the LAN: %v", containerIDs(rootDoc))
+	}
+	back, err := st.GetLibrary(ctx, lib.ID)
+	if err != nil {
+		t.Fatalf("GetLibrary: %v", err)
+	}
+	if !back.Restricted {
+		t.Error("re-sharing on the LAN unrestricted the library for accounts")
+	}
+}
