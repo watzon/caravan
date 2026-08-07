@@ -612,6 +612,117 @@ describe('Settings metadata pane', () => {
     expect(card!.querySelector('input')).toBeNull();
   });
 
+  // TheTVDB is the second key-based provider, so the card it renders through is
+  // shared with TMDB. These say the shared card is addressed per provider —
+  // its own field ids, its own settings keys, its own `provider` on the test —
+  // which is the whole of what "shared" is allowed to mean.
+  it('offers TheTVDB a key field and the subscriber PIN beside it', async () => {
+    stubMetadata(() => jsonResponse({ status: 'ok' }));
+    app = mount(Settings, { target: host, props: { section: 'metadata' } });
+    await settle();
+
+    const card = [...host.querySelectorAll('section')].find(
+      (s) => s.querySelector('h3')?.textContent === 'TheTVDB',
+    );
+    expect(card).toBeDefined();
+    expect(card!.querySelector('#thetvdb-key')).not.toBeNull();
+    expect(card!.querySelector('#thetvdb-pin')).not.toBeNull();
+    expect(card!.textContent).toContain('Subscriber PIN');
+    // The support question the PIN raises, answered where it is asked.
+    expect(card!.textContent).toContain('Only for user-supported keys. Leave blank for a licensed key.');
+  });
+
+  it('tests the TheTVDB field against TheTVDB, not TMDB', async () => {
+    const calls = stubMetadata(() => jsonResponse({ status: 'ok' }));
+    app = mount(Settings, { target: host, props: { section: 'metadata' } });
+    await settle();
+
+    const field = host.querySelector('#thetvdb-key') as HTMLInputElement;
+    field.value = 'tvdb-key';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+
+    cardButton('#thetvdb-key', 'Test').click();
+    await settle();
+
+    expect(calls.find((c) => c.url.includes('/settings/metadata/test'))).toMatchObject({
+      method: 'POST',
+      body: { api_key: 'tvdb-key', provider: 'thetvdb' },
+    });
+    expect(host.textContent).toContain('TheTVDB accepted this key');
+  });
+
+  it('saves the TheTVDB key and the PIN to their own settings keys', async () => {
+    const calls = stubMetadata(() => jsonResponse({ status: 'ok' }));
+    app = mount(Settings, { target: host, props: { section: 'metadata' } });
+    await settle();
+
+    const key = host.querySelector('#thetvdb-key') as HTMLInputElement;
+    key.value = 'tvdb-key';
+    key.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    cardButton('#thetvdb-key', 'Save').click();
+    await settle();
+    expect(calls.filter((c) => c.method === 'PUT').at(-1)?.body).toEqual({
+      thetvdb_api_key: 'tvdb-key',
+    });
+
+    // A licensed key needs no PIN, so the PIN is savable on its own — a blank
+    // key beside it must not be read as "clear the key".
+    key.value = '';
+    key.dispatchEvent(new Event('input', { bubbles: true }));
+    const pin = host.querySelector('#thetvdb-pin') as HTMLInputElement;
+    pin.value = '  1234  ';
+    pin.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    cardButton('#thetvdb-key', 'Save').click();
+    await settle();
+    expect(calls.filter((c) => c.method === 'PUT').at(-1)?.body).toEqual({ thetvdb_pin: '1234' });
+  });
+
+  // The point of the per-provider map (phase 5): one rejected key marks its own
+  // provider and says nothing about the other.
+  it('reads each card’s badge from that provider’s entry in the status map', async () => {
+    stubMetadata(() => jsonResponse({ status: 'ok' }));
+    system.status = {
+      ...SYSTEM_STATUS,
+      metadata_credentials: {
+        tmdb: { state: 'ok', reason: '', checked_at: '' },
+        thetvdb: { state: 'invalid', reason: 'TheTVDB says no', checked_at: '' },
+      },
+    } as never;
+    app = mount(Settings, { target: host, props: { section: 'metadata' } });
+    await settle();
+
+    const cardFor = (title: string) =>
+      [...host.querySelectorAll('section')].find((s) => s.querySelector('h3')?.textContent === title)!;
+
+    expect(cardFor('TheTVDB').textContent).toContain('Key rejected');
+    expect(cardFor('TheTVDB').textContent).toContain('TheTVDB rejected this key');
+    // The provider's own complaint, not a generic one.
+    expect(cardFor('TheTVDB').textContent).toContain('TheTVDB says no');
+    expect(cardFor('TMDB').textContent).toContain('Connected');
+    expect(cardFor('TMDB').textContent).not.toContain('TMDB rejected this key');
+  });
+
+  // The keyless cards must not gain a field from the card the keyed ones share.
+  it('leaves the keyless providers with nothing to enter', async () => {
+    stubMetadata(() => jsonResponse({ status: 'ok' }), [
+      ...ALL_PROVIDERS,
+      { id: 'tvmaze', name: 'TVmaze', kinds: ['tv'] },
+    ]);
+    app = mount(Settings, { target: host, props: { section: 'metadata' } });
+    await settle();
+
+    for (const title of ['AniList', 'TVmaze']) {
+      const card = [...host.querySelectorAll('section')].find(
+        (s) => s.querySelector('h3')?.textContent === title,
+      );
+      expect(card, `${title} card`).toBeDefined();
+      expect(card!.querySelector('input'), `${title} key input`).toBeNull();
+    }
+  });
+
   // The server omits the adult provider when the module is absent; the page
   // must not reintroduce it (promise-of-absence).
   it('omits the Stash-box card when the server does not list the provider', async () => {

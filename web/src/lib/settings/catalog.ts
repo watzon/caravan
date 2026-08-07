@@ -44,7 +44,7 @@ export const SETTINGS_CATALOG = [
     route: '/settings/metadata',
     anchor: 'metadata',
     aliases: ['TMDB', 'AniList', 'API key', 'providers'],
-    keywords: ['metadata key', 'artwork', 'titles', 'discover', 'anime'],
+    keywords: ['metadata key', 'artwork', 'titles', 'discover', 'anime', 'thetvdb', 'tvdb'],
   },
   {
     category: 'Library and media',
