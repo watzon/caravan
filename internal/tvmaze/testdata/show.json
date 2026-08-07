@@ -1,0 +1,23 @@
+{
+  "id": 169,
+  "url": "https://www.tvmaze.com/shows/169/breaking-bad",
+  "name": "Breaking Bad",
+  "type": "Scripted",
+  "language": "English",
+  "genres": ["Drama", "Crime", "Thriller"],
+  "status": "Ended",
+  "runtime": 60,
+  "averageRuntime": 60,
+  "premiered": "2008-01-20",
+  "ended": "2013-09-29",
+  "schedule": { "time": "22:00", "days": ["Sunday"] },
+  "rating": { "average": 9.2 },
+  "weight": 99,
+  "externals": { "tvrage": 18164, "thetvdb": 81189, "imdb": "tt0903747" },
+  "image": {
+    "medium": "https://static.tvmaze.com/uploads/images/medium_portrait/0/2400.jpg",
+    "original": "https://static.tvmaze.com/uploads/images/original_untouched/0/2400.jpg"
+  },
+  "summary": "<p><b>Breaking Bad</b> follows Walter White, a chemistry teacher.</p><p>Diagnosed with cancer, he turns to a life of crime.</p>",
+  "updated": 1704794458
+}

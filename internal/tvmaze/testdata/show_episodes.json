@@ -1,0 +1,90 @@
+[
+  {
+    "id": 100000,
+    "name": "Good Cop / Bad Cop",
+    "season": 1,
+    "number": null,
+    "type": "insignificant_special",
+    "airdate": "2009-02-17",
+    "airtime": "",
+    "runtime": 3,
+    "summary": "<p>A promotional short. TVmaze gives it no episode number.</p>"
+  },
+  {
+    "id": 12,
+    "name": "Pilot",
+    "season": 1,
+    "number": 1,
+    "type": "regular",
+    "airdate": "2008-01-20",
+    "airtime": "22:00",
+    "runtime": 58,
+    "summary": "<p>Diagnosed with terminal lung cancer, Walter White turns to cooking.</p>"
+  },
+  {
+    "id": 13,
+    "name": "Cat's in the Bag...",
+    "season": 1,
+    "number": 2,
+    "type": "regular",
+    "airdate": "2008-01-27",
+    "airtime": "22:00",
+    "runtime": 48,
+    "summary": "<p>Walt and Jesse deal with the aftermath.</p>"
+  },
+  {
+    "id": 14,
+    "name": "...And the Bag's in the River",
+    "season": 1,
+    "number": 3,
+    "type": "regular",
+    "airdate": "2008-02-10",
+    "airtime": "22:00",
+    "runtime": 48,
+    "summary": null
+  },
+  {
+    "id": 22,
+    "name": "Grilled",
+    "season": 2,
+    "number": 2,
+    "type": "regular",
+    "airdate": "2009-03-15",
+    "airtime": "22:00",
+    "runtime": 47,
+    "summary": null
+  },
+  {
+    "id": 21,
+    "name": "Seven Thirty-Seven",
+    "season": 2,
+    "number": 1,
+    "type": "regular",
+    "airdate": "2009-03-08",
+    "airtime": "22:00",
+    "runtime": 47,
+    "summary": null
+  },
+  {
+    "id": 31,
+    "name": "No Más",
+    "season": 3,
+    "number": 1,
+    "type": "regular",
+    "airdate": "2010-03-21",
+    "airtime": "22:00",
+    "runtime": 47,
+    "summary": null
+  },
+  {
+    "id": 32,
+    "name": "Caballo sin Nombre",
+    "season": 3,
+    "number": 2,
+    "type": "regular",
+    "airdate": "",
+    "airtime": "",
+    "runtime": null,
+    "summary": null
+  }
+]
