@@ -151,6 +151,37 @@ func (m *Manager) metadataFor(ctx context.Context, lib *core.Library) core.Metad
 	return m.provider
 }
 
+// providerBinding is one rung of a library's provider chain: the id, and the
+// client that answered for it. The id travels with the client because
+// everything a chain walk records afterwards — a search failure, which
+// provider a scan matched through — names the provider rather than the object.
+type providerBinding struct {
+	ID string
+	P  core.MetadataProvider
+}
+
+// metadataChain resolves a library's ordered provider list to the clients that
+// are actually configured, dropping ids that answer nil. Empty result =
+// nothing can identify anything for this library; callers degrade as for a nil
+// provider.
+//
+// Order is the library's own (core.Library.ProviderChain), and it is the whole
+// configuration: which provider is asked first about an anime is a decision the
+// owner makes per library, not one this package can infer.
+func (m *Manager) metadataChain(ctx context.Context, lib *core.Library) []providerBinding {
+	if lib == nil {
+		return nil
+	}
+	chain := lib.ProviderChain()
+	out := make([]providerBinding, 0, len(chain))
+	for _, id := range chain {
+		if p := m.providerByID(ctx, id); p != nil {
+			out = append(out, providerBinding{ID: id, P: p})
+		}
+	}
+	return out
+}
+
 // providerByID resolves ONE provider id through the registry, with NO
 // fallback. It is what an item's pinned ref is fetched through, and the
 // absent fallback is the whole point: metadataFor may degrade to the

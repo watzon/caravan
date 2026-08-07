@@ -130,6 +130,14 @@ func (p providerRegistry) Adult(ctx context.Context, providerID string) core.Adu
 	return nil
 }
 
+// metadataOnlyRegistry is providerRegistry with the adult half removed. The
+// watcher is the one Manager that outlives a settings change, and the reason
+// it carries no adult provider (see watcherManager) is unchanged by its
+// needing the metadata half.
+type metadataOnlyRegistry struct{ providerRegistry }
+
+func (metadataOnlyRegistry) Adult(context.Context, string) core.AdultMetadataProvider { return nil }
+
 // adultMetadata returns the stash-box provider, or nil.
 //
 // It is nil unless the module is switched on AND a credential has been entered,
@@ -217,10 +225,18 @@ func (a *libraryAdapter) stashboxClient(key, endpoint string) *stashbox.Client {
 // and the watcher is the path a downloaded scene actually arrives by, so
 // leaving it out would make PLAN phase 11's acceptance silently unmet in
 // exactly the way a watcher without the playback handoff would.
+//
+// It DOES carry the metadata registry, through metadataOnlyRegistry. Without
+// one, every library the watcher imports for resolves to the Manager-level
+// provider alone, so an item pinned to any other provider could not be fetched
+// at all and its download would park — a Manager that answers differently from
+// every other Manager in the process, which is precisely what this function
+// exists to prevent.
 func (a *libraryAdapter) watcherManager(root string) *library.Manager {
 	return library.NewManager(a.st, lateMetadata{adapter: a}, root,
 		library.WithNotifier(a.notify),
-		library.WithAdultNotifier(a.notifyAdult))
+		library.WithAdultNotifier(a.notifyAdult),
+		library.WithProviders(metadataOnlyRegistry{providerRegistry{a}}))
 }
 
 // StorageRoot is the storage root in force right now: the settings table's

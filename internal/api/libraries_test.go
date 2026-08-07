@@ -526,3 +526,94 @@ func TestListProvidersOmitsAdultWithoutTheModule(t *testing.T) {
 		}
 	}
 }
+
+// A library carries an ordered provider CHAIN, and the wire keeps both
+// spellings: `providers` is the list, `provider` is its read-only head, so a
+// client written before chains keeps reading exactly what it always did.
+func TestCreateLibraryAcceptsAProviderChain(t *testing.T) {
+	h, _, _ := newTestServer(t)
+
+	rec := do(t, h, http.MethodPost, "/api/v1/libraries",
+		`{"kind":"tv","name":"Anime","root_path":"library/Anime","providers":["tmdb"]}`)
+	wantStatus(t, rec, http.StatusCreated)
+	var created libraryJSON
+	decodeBody(t, rec, &created)
+	if created.Provider != core.ProviderTMDB ||
+		!reflect.DeepEqual(created.Providers, []string{core.ProviderTMDB}) {
+		t.Errorf("created = %+v, want the chain and its head", created)
+	}
+
+	// The singular spelling is still a chain of one.
+	rec = do(t, h, http.MethodPost, "/api/v1/libraries",
+		`{"kind":"movie","name":"Docs","root_path":"library/Docs","provider":"tmdb"}`)
+	wantStatus(t, rec, http.StatusCreated)
+	decodeBody(t, rec, &created)
+	if !reflect.DeepEqual(created.Providers, []string{core.ProviderTMDB}) {
+		t.Errorf("created = %+v, want the singular provider read as a chain", created)
+	}
+
+	for name, body := range map[string]string{
+		"repeated provider": `{"kind":"tv","name":"X","root_path":"library/X","providers":["tmdb","tmdb"]}`,
+		"wrong kind":        `{"kind":"movie","name":"X","root_path":"library/X","providers":["stashbox"]}`,
+		"unknown provider":  `{"kind":"tv","name":"X","root_path":"library/X","providers":["nope"]}`,
+	} {
+		rec := do(t, h, http.MethodPost, "/api/v1/libraries", body)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400", name, rec.Code)
+		}
+	}
+}
+
+// PATCH takes the same chain under the same rules. An explicit empty list is a
+// request to make the library identify nothing, which is refused rather than
+// quietly read as "leave it alone".
+func TestPatchLibraryValidatesTheProviderChain(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	def, err := st.GetDefaultLibrary(context.Background(), core.LibraryKindTV)
+	if err != nil {
+		t.Fatalf("GetDefaultLibrary: %v", err)
+	}
+	path := "/api/v1/libraries/" + itoa(def.ID)
+
+	rec := do(t, h, http.MethodPatch, path, `{"providers":["tmdb"]}`)
+	wantStatus(t, rec, http.StatusOK)
+	var patched libraryJSON
+	decodeBody(t, rec, &patched)
+	if patched.Provider != core.ProviderTMDB ||
+		!reflect.DeepEqual(patched.Providers, []string{core.ProviderTMDB}) {
+		t.Errorf("patched = %+v, want the chain and its head", patched)
+	}
+
+	for name, body := range map[string]string{
+		"empty chain":       `{"providers":[]}`,
+		"repeated provider": `{"providers":["tmdb","tmdb"]}`,
+		"wrong kind":        `{"providers":["stashbox"]}`,
+		"singular wrong":    `{"provider":"stashbox"}`,
+	} {
+		rec := do(t, h, http.MethodPatch, path, body)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400", name, rec.Code)
+		}
+	}
+}
+
+// An adult library's chain can only ever be ["stashbox"], and not because a
+// rule says so: no other compiled-in provider serves the adult kind, and the
+// per-element check is what makes that a consequence rather than a promise.
+func TestProviderChainForAdultIsStashboxAlone(t *testing.T) {
+	cases := []struct {
+		chain []string
+		want  bool
+	}{
+		{[]string{core.ProviderStashbox}, true},
+		{[]string{core.ProviderStashbox, core.ProviderTMDB}, false},
+		{[]string{core.ProviderTMDB}, false},
+		{nil, false},
+	}
+	for _, c := range cases {
+		w := httptest.NewRecorder()
+		if got := validProviderChain(w, c.chain, core.LibraryKindAdult); got != c.want {
+			t.Errorf("validProviderChain(%v, adult) = %v, want %v", c.chain, got, c.want)
+		}
+	}
+}

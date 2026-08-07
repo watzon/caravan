@@ -2,6 +2,9 @@ package library
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -244,5 +247,164 @@ func TestRefreshRecordsAnUnconfiguredProviderAndContinues(t *testing.T) {
 	}
 	if !strings.Contains(res.Errors[0], `provider "gone" is not configured`) {
 		t.Errorf("error = %q, want it to name the missing provider", res.Errors[0])
+	}
+}
+
+// chainHarness builds a two-provider chain over a fresh Anime library: ids
+// "first" and "second", in that order, resolved through a fake registry.
+func chainHarness(t *testing.T, first, second *stubProvider) (*harness, *core.Library) {
+	t.Helper()
+	h := newHarness(t)
+	h.mgr.providers = &fakeRegistry{metadata: map[string]core.MetadataProvider{
+		"first": first, "second": second,
+	}}
+	anime := &core.Library{Kind: core.LibraryKindTV, Name: "Anime",
+		RootPath: "library/Anime", Providers: []string{"first", "second"}}
+	if err := h.st.CreateLibrary(context.Background(), anime); err != nil {
+		t.Fatalf("CreateLibrary: %v", err)
+	}
+	return h, anime
+}
+
+// chainSeries is one provider's whole answer about the fixture show: the
+// search hit and the detail GetSeries returns for it.
+func chainSeries(provider, ref, title string) *stubProvider {
+	hit := core.SeriesMeta{Provider: provider, ProviderRef: ref, Title: title, Year: 2023}
+	full := hit
+	full.Seasons = []core.SeasonMeta{{
+		Number:   1,
+		Title:    "Season 1",
+		Episodes: []core.EpisodeMeta{{Season: 1, Number: 1, Title: "The Journey's End"}},
+	}}
+	return &stubProvider{
+		series:     []core.SeriesMeta{hit},
+		seriesByID: map[int64]core.SeriesMeta{stubRefID(ref): full},
+	}
+}
+
+// A scan walks the library's chain in order and imports the FIRST provider
+// that is confident about the file. A provider that errors is recorded and the
+// walk goes on; only a chain where every provider errored parks the file as a
+// provider failure, and a chain that answered without recognizing the title
+// parks it as no match.
+func TestScanWalksTheProviderChain(t *testing.T) {
+	rel := "library/Anime/Frieren.S01E01.1080p.WEB-DL.x265.mkv"
+	organized := "library/Anime/Frieren (2023)/Season 01/Frieren (2023) - S01E01 - The Journey's End.mkv"
+
+	t.Run("past a provider that errored", func(t *testing.T) {
+		broken := &stubProvider{searchErr: errors.New("upstream is down")}
+		h, _ := chainHarness(t, broken, chainSeries("second", "7", "Frieren"))
+		h.parser[filepath.Base(rel)] = episodeParse("Frieren", 1, 1)
+		h.writeVideo(rel, "episode bytes")
+
+		res := h.scan()
+		if res.Added != 1 || res.Unmatched != 0 {
+			t.Fatalf("result = %+v, want the second provider's match imported", res)
+		}
+		if len(res.Errors) != 1 || !strings.Contains(res.Errors[0], `"first"`) {
+			t.Errorf("errors = %v, want the failed provider named", res.Errors)
+		}
+		if got := h.read(organized); got != "episode bytes" {
+			t.Fatalf("organized file %q missing (content %q)", organized, got)
+		}
+	})
+
+	t.Run("past a provider that did not recognize it", func(t *testing.T) {
+		stranger := chainSeries("first", "1", "A Completely Different Show")
+		h, _ := chainHarness(t, stranger, chainSeries("second", "7", "Frieren"))
+		h.parser[filepath.Base(rel)] = episodeParse("Frieren", 1, 1)
+		h.writeVideo(rel, "episode bytes")
+
+		res := h.scan()
+		if res.Added != 1 || res.Unmatched != 0 || len(res.Errors) != 0 {
+			t.Fatalf("result = %+v, want the second provider's match imported", res)
+		}
+		sr, err := h.st.GetSeriesByProviderRef(context.Background(), "second", "7")
+		if err != nil {
+			t.Fatalf("GetSeriesByProviderRef: %v", err)
+		}
+		if sr.Title != "Frieren" {
+			t.Errorf("series = %+v, want the provider that matched", sr)
+		}
+	})
+
+	t.Run("every provider errored", func(t *testing.T) {
+		down := func() *stubProvider { return &stubProvider{searchErr: errors.New("upstream is down")} }
+		h, _ := chainHarness(t, down(), down())
+		h.parser[filepath.Base(rel)] = episodeParse("Frieren", 1, 1)
+		h.writeVideo(rel, "episode bytes")
+
+		res := h.scan()
+		if res.Unmatched != 1 || res.Added != 0 {
+			t.Fatalf("result = %+v, want the file parked", res)
+		}
+		parked := h.unmatched()
+		if len(parked) != 1 || parked[0].Reason != reasonProviderErr {
+			t.Errorf("unmatched queue = %+v, want %q", parked, reasonProviderErr)
+		}
+	})
+}
+
+// A search asks every provider on the chain and MERGES what they say, in chain
+// order. Neither provider's answer may hide the other's: TMDB answers
+// something for nearly every anime query, and the anime provider answers
+// nothing about the live-action show that shares the name.
+func TestSearchLibraryMergesTheChainInOrder(t *testing.T) {
+	h, lib := chainHarness(t,
+		chainSeries("first", "1", "Frieren"),
+		chainSeries("second", "7", "Frieren: Beyond Journey's End"))
+
+	hits, err := h.mgr.SearchLibrary(context.Background(), lib.ID, core.MediaTypeSeries, "frieren")
+	if err != nil {
+		t.Fatalf("SearchLibrary: %v", err)
+	}
+	if len(hits.Series) != 2 ||
+		hits.Series[0].Provider != "first" || hits.Series[1].Provider != "second" {
+		t.Fatalf("hits = %+v, want both providers' answers in chain order", hits.Series)
+	}
+	if len(hits.Providers) != 2 || hits.Providers[0] != "first" || hits.Providers[1] != "second" {
+		t.Errorf("providers = %v, want the chain that ran", hits.Providers)
+	}
+	if len(hits.Failures) != 0 {
+		t.Errorf("failures = %+v, want none", hits.Failures)
+	}
+}
+
+// One provider being down is a Failure the caller can render, not an error:
+// the rest of the chain still answered, and hiding those hits would make a
+// half-configured install look like an empty one.
+func TestSearchLibrarySurfacesOneProviderFailure(t *testing.T) {
+	h, lib := chainHarness(t,
+		&stubProvider{searchErr: errors.New("upstream is down")},
+		chainSeries("second", "7", "Frieren"))
+
+	hits, err := h.mgr.SearchLibrary(context.Background(), lib.ID, core.MediaTypeSeries, "frieren")
+	if err != nil {
+		t.Fatalf("SearchLibrary: %v", err)
+	}
+	if len(hits.Series) != 1 || hits.Series[0].Provider != "second" {
+		t.Fatalf("hits = %+v, want the healthy provider's answer", hits.Series)
+	}
+	if len(hits.Failures) != 1 || hits.Failures[0].Provider != "first" ||
+		!strings.Contains(hits.Failures[0].Message, "upstream is down") {
+		t.Errorf("failures = %+v, want the down provider named with its reason", hits.Failures)
+	}
+}
+
+// A chain where EVERY provider failed is an error, and it is the FIRST
+// failure's error: a TMDB-headed chain with a rejected key has to surface as
+// the credential fault the add dialog explains, not as whatever the provider
+// behind it said.
+func TestSearchLibraryAllFailedReturnsTheFirstError(t *testing.T) {
+	h, lib := chainHarness(t,
+		&stubProvider{searchErr: fmt.Errorf("tmdb: %w", core.ErrMetadataUnauthorized)},
+		&stubProvider{searchErr: errors.New("upstream is down")})
+
+	hits, err := h.mgr.SearchLibrary(context.Background(), lib.ID, core.MediaTypeSeries, "frieren")
+	if hits != nil {
+		t.Fatalf("hits = %+v, want none when the whole chain failed", hits)
+	}
+	if !errors.Is(err, core.ErrMetadataUnauthorized) {
+		t.Errorf("error = %v, want the first failure's credential fault", err)
 	}
 }

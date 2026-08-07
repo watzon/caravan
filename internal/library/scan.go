@@ -319,7 +319,9 @@ func (m *Manager) scanFile(ctx context.Context, rel string, size int64, res *Sca
 	case isScene && m.adultFor(ctx, lib) == nil:
 		park(reasonNoProvider)
 		return
-	case !isScene && m.metadataFor(ctx, lib) == nil:
+	case !isScene && len(m.metadataChain(ctx, lib)) == 0:
+		// Not one configured provider on the library's chain: nothing can
+		// identify this file, which is the same dead end a nil provider was.
 		park(reasonNoProvider)
 		return
 	}
@@ -356,66 +358,126 @@ func (m *Manager) scanFile(ctx context.Context, rel string, size int64, res *Sca
 	}
 }
 
-// matchAndImportMovie searches the file's library's provider for rel's parsed
-// title and imports the winner. A provider failure or a weak match parks the
-// file rather than failing the scan.
+// chainOutcome counts what a chain walk met, so the park reason can tell
+// "nobody could be asked" from "everybody answered and none of them knew it".
+// The two are different problems and only one of them is the user's to fix.
+type chainOutcome struct {
+	// answered is how many providers returned a result set, matching or not;
+	// failed is how many returned an error. Providers that do not serve the
+	// kind are counted in neither: nothing went wrong and nothing was asked.
+	answered int
+	failed   int
+}
+
+// park chooses this walk's park reason: a provider error only when EVERY
+// provider that could be asked errored, and no match when at least one of them
+// answered without recognizing the title.
+func (o chainOutcome) reason() string {
+	if o.answered == 0 && o.failed > 0 {
+		return reasonProviderErr
+	}
+	return reasonNoMatch
+}
+
+// matchAndImportMovie walks the file's library's provider chain for rel's
+// parsed title and imports the first confident match. A provider failure or a
+// weak match parks the file rather than failing the scan.
+//
+// FIRST confident match, not the best of a merged set. A match score is
+// computed against one provider's own titles and release years, so scores from
+// two providers are not comparable — picking the higher one would be arithmetic
+// on two different scales. The chain's ORDER is the answer to "which provider
+// do you believe about this library", and this honors it.
 func (m *Manager) matchAndImportMovie(ctx context.Context, lib *core.Library, rel string, size int64, p core.ParsedRelease, res *ScanResult, park func(string)) (string, error) {
-	results, err := m.metadataFor(ctx, lib).SearchMovies(ctx, p.Title)
-	if err != nil {
-		res.addErr("search movies for %s: %v", rel, err)
-		park(reasonProviderErr)
+	var (
+		meta    *core.MovieMeta
+		outcome chainOutcome
+	)
+	for _, b := range m.metadataChain(ctx, lib) {
+		results, err := b.P.SearchMovies(ctx, p.Title)
+		switch {
+		case errors.Is(err, core.ErrProviderKindUnsupported):
+			// Not a failure: this rung of the chain simply has nothing to say
+			// about this kind of item.
+			continue
+		case err != nil:
+			res.addErr("search movies for %s through %q: %v", rel, b.ID, err)
+			outcome.failed++
+			continue
+		}
+		outcome.answered++
+
+		cands := make([]candidate, len(results))
+		for i, r := range results {
+			cands[i] = candidate{title: r.Title, originalTitle: r.OriginalTitle, year: r.Year}
+		}
+		if idx := bestMatch(cands, p.Title, p.Year); idx >= 0 {
+			meta = &results[idx]
+			break
+		}
+	}
+	if meta == nil {
+		park(outcome.reason())
 		return "", nil
 	}
 
-	cands := make([]candidate, len(results))
-	for i, r := range results {
-		cands[i] = candidate{title: r.Title, originalTitle: r.OriginalTitle, year: r.Year}
-	}
-	idx := bestMatch(cands, p.Title, p.Year)
-	if idx < 0 {
-		park(reasonNoMatch)
-		return "", nil
-	}
-
-	meta := results[idx]
-	finalRel, _, err := m.importMovie(ctx, &meta, rel, size, p, res.addErr, consumeSource, lib.ID)
+	finalRel, _, err := m.importMovie(ctx, meta, rel, size, p, res.addErr, consumeSource, lib.ID)
 	return finalRel, err
 }
 
-// matchAndImportEpisode is matchAndImportMovie's series twin. It resolves the
-// full series details after the search, because episode titles and the season
-// tree only come back from GetSeries.
+// matchAndImportEpisode is matchAndImportMovie's series twin, walking the same
+// chain under the same first-confident-match rule. It resolves the full series
+// details after the search, because episode titles and the season tree only
+// come back from GetSeries — through the SAME provider that matched, by the ref
+// its own answer carried: a search result's id is written in that provider's
+// vocabulary and means nothing to any other one.
 func (m *Manager) matchAndImportEpisode(ctx context.Context, lib *core.Library, rel string, size int64, p core.ParsedRelease, res *ScanResult, park func(string)) (string, error) {
-	provider := m.metadataFor(ctx, lib)
-	results, err := provider.SearchSeries(ctx, p.Title)
-	if err != nil {
-		res.addErr("search series for %s: %v", rel, err)
-		park(reasonProviderErr)
-		return "", nil
-	}
+	var (
+		full    *core.SeriesMeta
+		outcome chainOutcome
+	)
+	for _, b := range m.metadataChain(ctx, lib) {
+		results, err := b.P.SearchSeries(ctx, p.Title)
+		switch {
+		case errors.Is(err, core.ErrProviderKindUnsupported):
+			continue
+		case err != nil:
+			res.addErr("search series for %s through %q: %v", rel, b.ID, err)
+			outcome.failed++
+			continue
+		}
 
-	cands := make([]candidate, len(results))
-	for i, r := range results {
-		cands[i] = candidate{title: r.Title, originalTitle: r.OriginalTitle, year: r.Year}
-	}
-	idx := bestMatch(cands, p.Title, p.Year)
-	if idx < 0 {
-		park(reasonNoMatch)
-		return "", nil
-	}
+		cands := make([]candidate, len(results))
+		for i, r := range results {
+			cands[i] = candidate{title: r.Title, originalTitle: r.OriginalTitle, year: r.Year}
+		}
+		idx := bestMatch(cands, p.Title, p.Year)
+		if idx < 0 {
+			outcome.answered++
+			continue
+		}
 
-	// Through the ref the search answer identified itself by, and through the
-	// provider that answered: a search result's id is written in that
-	// provider's vocabulary and means nothing to any other one.
-	meta := results[idx]
-	full, err := provider.GetSeries(ctx, meta.Ref().Ref)
-	if err != nil {
-		res.addErr("get series %s for %s: %v", meta.Ref().Ref, rel, err)
-		park(reasonProviderErr)
-		return "", nil
+		ref := results[idx].Ref()
+		detail, err := b.P.GetSeries(ctx, ref.Ref)
+		if err != nil {
+			// The provider's turn failed, matched or not: it is the same
+			// unreachable provider the search would have failed on.
+			res.addErr("get series %q from %q for %s: %v", ref.Ref, b.ID, rel, err)
+			outcome.failed++
+			continue
+		}
+		outcome.answered++
+		if detail == nil {
+			// It matched and then could not describe what it matched. That is
+			// an answer, not a failure, and the next rung may still know the
+			// show.
+			continue
+		}
+		full = detail
+		break
 	}
 	if full == nil {
-		park(reasonNoMatch)
+		park(outcome.reason())
 		return "", nil
 	}
 

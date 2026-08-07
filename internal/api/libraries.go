@@ -28,9 +28,13 @@ type libraryJSON struct {
 	// RootPath is read-only here: it is where the organizer already put the
 	// files, and moving the library is POST /system/storage-root/migrate's job.
 	RootPath string `json:"root_path"`
-	// Provider is the metadata provider that refreshes this library's items,
-	// one of the ids GET /libraries/providers lists.
+	// Provider is the chain's head, read-only: it is what a client written
+	// before chains reads, and the store keeps it in step with Providers.
 	Provider string `json:"provider"`
+	// Providers is the ordered chain this library identifies new items
+	// through, each one of the ids GET /libraries/providers lists. The first
+	// that recognizes a title wins a scan; a search asks all of them.
+	Providers []string `json:"providers"`
 	// IsDefault marks the one library per kind that answers by-kind lookups
 	// and receives items added without an explicit target.
 	IsDefault bool `json:"is_default"`
@@ -88,13 +92,18 @@ type libraryIndexerJSON struct {
 // be distinguishable from "not mentioned in this request". Kind and root path
 // are absent because neither is editable.
 type libraryPatchRequest struct {
-	Name             *string `json:"name"`
-	Provider         *string `json:"provider"`
-	IsDefault        *bool   `json:"is_default"`
-	DLNAVisible      *bool   `json:"dlna_visible"`
-	RouteTorrent     *string `json:"route_torrent"`
-	RouteUsenet      *string `json:"route_usenet"`
-	QualityProfileID *int64  `json:"quality_profile_id"`
+	Name *string `json:"name"`
+	// Provider and Providers are two spellings of the same setting: the
+	// singular one is still accepted (and read as a chain of one) because it is
+	// what every client written before chains sends. Providers wins when both
+	// are present.
+	Provider         *string   `json:"provider"`
+	Providers        *[]string `json:"providers"`
+	IsDefault        *bool     `json:"is_default"`
+	DLNAVisible      *bool     `json:"dlna_visible"`
+	RouteTorrent     *string   `json:"route_torrent"`
+	RouteUsenet      *string   `json:"route_usenet"`
+	QualityProfileID *int64    `json:"quality_profile_id"`
 }
 
 // libraryCreateRequest is the body of POST /libraries.
@@ -102,7 +111,10 @@ type libraryCreateRequest struct {
 	Kind     string `json:"kind"`
 	Name     string `json:"name"`
 	RootPath string `json:"root_path"`
-	Provider string `json:"provider"`
+	// Provider and Providers read as libraryPatchRequest's do: the singular is
+	// a chain of one, and an empty pair defaults to the kind's own provider.
+	Provider  string   `json:"provider"`
+	Providers []string `json:"providers"`
 }
 
 // libraryIndexerRequest is the body of PUT /libraries/{id}/indexers/{indexerID}.
@@ -201,12 +213,8 @@ func (s *server) handleCreateLibrary(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	provider := body.Provider
-	if provider == "" {
-		provider = core.DefaultProviderForKind(body.Kind)
-	}
-	if !core.ProviderServes(provider, body.Kind) {
-		writeError(w, http.StatusBadRequest, "provider cannot serve this library kind")
+	chain := chainFrom(body.Providers, body.Provider, body.Kind)
+	if !validProviderChain(w, chain, body.Kind) {
 		return
 	}
 	root, err := validateLibraryRoot(ctx, s.st, body.RootPath)
@@ -217,13 +225,57 @@ func (s *server) handleCreateLibrary(w http.ResponseWriter, r *http.Request) {
 
 	lib := &core.Library{
 		Kind: body.Kind, Name: name, RootPath: root,
-		Provider: provider, DLNAVisible: false,
+		Providers: chain, DLNAVisible: false,
 	}
 	if err := s.st.CreateLibrary(ctx, lib); err != nil {
 		s.writeStoreError(w, "create library", err)
 		return
 	}
 	s.writeLibraryStatus(w, r, *lib, http.StatusCreated)
+}
+
+// chainFrom renders a request's two provider spellings as one chain: the list
+// when it was sent, the singular id as a chain of one behind it, and the
+// kind's own provider when neither was.
+func chainFrom(providers []string, provider, kind string) []string {
+	if len(providers) > 0 {
+		return providers
+	}
+	if provider == "" {
+		provider = core.DefaultProviderForKind(kind)
+	}
+	if provider == "" {
+		return nil
+	}
+	return []string{provider}
+}
+
+// validProviderChain rejects a chain that cannot be walked, writing the
+// refusal itself.
+//
+// Every element must serve the kind, which is what keeps an adult library's
+// chain to ["stashbox"] without a rule that says so: no other compiled-in
+// provider serves the adult kind (core.ProviderServes). Duplicates are refused
+// because a chain is an ORDER, and an id appearing twice has no second meaning
+// — the walk would ask the same provider the same question again.
+func validProviderChain(w http.ResponseWriter, chain []string, kind string) bool {
+	if len(chain) == 0 {
+		writeError(w, http.StatusBadRequest, "at least one provider is required")
+		return false
+	}
+	seen := make(map[string]bool, len(chain))
+	for _, id := range chain {
+		if seen[id] {
+			writeError(w, http.StatusBadRequest, "providers cannot repeat")
+			return false
+		}
+		seen[id] = true
+		if !core.ProviderServes(id, kind) {
+			writeError(w, http.StatusBadRequest, "provider cannot serve this library kind")
+			return false
+		}
+	}
+	return true
 }
 
 // validateLibraryRoot normalizes and checks a new library's root path: a
@@ -368,9 +420,16 @@ func (s *server) handleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name cannot be empty")
 		return
 	}
-	if body.Provider != nil && !core.ProviderServes(*body.Provider, lib.Kind) {
-		writeError(w, http.StatusBadRequest, "provider cannot serve this library kind")
-		return
+	var chain []string
+	if body.Providers != nil || body.Provider != nil {
+		if body.Providers != nil {
+			chain = *body.Providers
+		} else {
+			chain = []string{*body.Provider}
+		}
+		if !validProviderChain(w, chain, lib.Kind) {
+			return
+		}
 	}
 	// Demotion has no meaning of its own: a kind must always have a default,
 	// so the flag moves by promoting the successor, never by clearing.
@@ -403,8 +462,12 @@ func (s *server) handleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
 	if body.Name != nil {
 		lib.Name = strings.TrimSpace(*body.Name)
 	}
-	if body.Provider != nil {
-		lib.Provider = *body.Provider
+	if chain != nil {
+		// The head follows the list rather than being set beside it; the store
+		// settles the two columns (store.normalizeChain) and this must not
+		// hand it a pair that already disagree.
+		lib.Providers = chain
+		lib.Provider = chain[0]
 	}
 	if body.DLNAVisible != nil {
 		lib.DLNAVisible = *body.DLNAVisible
@@ -567,6 +630,7 @@ func (s *server) libraryDTO(ctx context.Context, l core.Library, indexers []core
 		Name:             l.Name,
 		RootPath:         l.RootPath,
 		Provider:         l.Provider,
+		Providers:        l.ProviderChain(),
 		IsDefault:        l.IsDefault,
 		ItemCount:        count,
 		DLNAVisible:      l.DLNAVisible,
