@@ -422,6 +422,19 @@
           </p>
         </SettingsCard>
 
+        <SettingsCard
+          title="TVmaze"
+          description="Series: titles, real season and episode data, and artwork from TVmaze.">
+          {#snippet action()}
+            <Badge tone="success">Ready</Badge>
+          {/snippet}
+          <p class="text-sm text-ink-secondary">
+            TVmaze needs no key or account. To use it, add it to a series library’s provider list
+            in
+            <a href="/settings/libraries#libraries" class="text-accent-text hover:underline">Libraries</a>.
+          </p>
+        </SettingsCard>
+
         {#if hasStashbox}
           <SettingsCard title="Stash-box" description="Adult metadata.">
             <p class="text-sm text-ink-secondary">

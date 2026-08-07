@@ -591,6 +591,27 @@ describe('Settings metadata pane', () => {
     expect(host.querySelector('a[href="/settings/adult#adult-content"]')).not.toBeNull();
   });
 
+  // TVmaze is keyless, so "Ready" is the whole of its configuration. The
+  // negative half is the load-bearing one: a card with a key field on it would
+  // ask for a credential that does not exist, and the next provider to gain one
+  // must not gain it here by accident.
+  it('offers TVmaze as ready with nothing to enter', async () => {
+    stubMetadata(() => jsonResponse({ status: 'ok' }), [
+      ...ALL_PROVIDERS,
+      { id: 'tvmaze', name: 'TVmaze', kinds: ['tv'] },
+    ]);
+    app = mount(Settings, { target: host, props: { section: 'metadata' } });
+    await settle();
+
+    const card = [...host.querySelectorAll('section')].find(
+      (s) => s.querySelector('h3')?.textContent === 'TVmaze',
+    );
+    expect(card).toBeDefined();
+    expect(card!.textContent).toContain('Ready');
+    expect(card!.textContent).toContain('TVmaze needs no key or account');
+    expect(card!.querySelector('input')).toBeNull();
+  });
+
   // The server omits the adult provider when the module is absent; the page
   // must not reintroduce it (promise-of-absence).
   it('omits the Stash-box card when the server does not list the provider', async () => {
