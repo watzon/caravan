@@ -74,9 +74,11 @@ type stubManager struct {
 
 	removeErr error
 
-	// validateKeys is the verdict ValidateMetadataKey gives each API key. A key
-	// with no entry is accepted, so a test only has to name the keys it wants
-	// rejected.
+	// validateKeys is the verdict ValidateMetadataKey gives each API key,
+	// looked up first as "provider/key" and then as the bare key. A key with no
+	// entry either way is accepted, so a test only has to name the keys it wants
+	// rejected — and only has to qualify them when it cares which provider was
+	// asked.
 	validateKeys map[string]error
 
 	// adultCredentialErr is what ValidateAdultCredential reports, nil by
@@ -93,7 +95,7 @@ type stubManager struct {
 	searches             []searchCall
 	matches              []matchCall
 	removes              []removeCall
-	validateCalls        []string
+	validateCalls        []validateCall
 	adultCredentialCalls []adultCredential
 }
 
@@ -340,11 +342,28 @@ func (m *stubManager) AdultMetadata() core.AdultMetadataProvider { return m.adul
 // verdict the provider would give it, and a key with no entry is accepted. The
 // default therefore matches the pre-phase-10 world, where nothing validated
 // anything, so every existing test keeps meaning what it meant.
-func (m *stubManager) ValidateMetadataKey(ctx context.Context, apiKey string) error {
+//
+// The verdicts are keyed by (provider, key) so a test can reject a key for one
+// provider and accept the same string for another — the thing a per-provider
+// credential model has to get right. A bare key with no provider prefix answers
+// for every provider, which is what the tests written before there was a second
+// credentialed one mean.
+func (m *stubManager) ValidateMetadataKey(ctx context.Context, providerID, apiKey string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.validateCalls = append(m.validateCalls, apiKey)
+	m.validateCalls = append(m.validateCalls, validateCall{provider: providerID, key: apiKey})
+	if err, ok := m.validateKeys[providerID+"/"+apiKey]; ok {
+		return err
+	}
 	return m.validateKeys[apiKey]
+}
+
+// validateCall is one ValidateMetadataKey the handlers made, recording the
+// provider as well as the key so a test can prove the right card's Test button
+// asked about the right provider.
+type validateCall struct {
+	provider string
+	key      string
 }
 
 // ValidateAdultCredential answers from adultCredentialErr, recording what it
@@ -364,10 +383,20 @@ type adultCredential struct {
 	key      string
 }
 
+// validatedKeys is the keys that were proved, in order. Tests that do not care
+// which provider was asked read this; validations carries the pair.
 func (m *stubManager) validatedKeys() []string {
+	out := []string{}
+	for _, c := range m.validations() {
+		out = append(out, c.key)
+	}
+	return out
+}
+
+func (m *stubManager) validations() []validateCall {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return append([]string(nil), m.validateCalls...)
+	return append([]validateCall(nil), m.validateCalls...)
 }
 
 func (m *stubManager) adultCredentials() []adultCredential {
@@ -831,9 +860,13 @@ func TestSystemStatus(t *testing.T) {
 		DiskTotalBytes: 0,
 		EngineHealth:   "unconfigured",
 		// A fresh database has no TMDB key, which is the first-run state the
-		// wizard's metadata step exists to fix.
+		// wizard's metadata step exists to fix. The flat field and the map say
+		// so together, because the handler fills both from the same read.
 		MetadataCredential: CredentialAbsent,
-		NeedsSetup:         true,
+		MetadataCredentials: map[string]credentialStateJSON{
+			core.ProviderTMDB: {State: CredentialAbsent},
+		},
+		NeedsSetup: true,
 		// No provider means nothing polls external clients, and the banner
 		// input is an empty list rather than null.
 		UnhealthyDownloadClients: []unhealthyClientJSON{},

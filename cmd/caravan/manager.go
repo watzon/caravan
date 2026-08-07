@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -371,16 +372,25 @@ func (a *libraryAdapter) metadata(ctx context.Context) core.MetadataProvider {
 	return client
 }
 
-// ValidateMetadataKey proves a TMDB API key with one live call (PLAN phase 10
-// tasks 2 and 4).
+// ValidateMetadataKey proves one provider's API key with one live call (PLAN
+// phase 10 tasks 2 and 4).
 //
 // It builds a client for the key it was handed rather than reading the settings
 // table, because the callers that matter are testing a key that is not stored
 // yet. The client is not cached: a validation happens when a person presses a
 // button, which is rare enough that one allocation is cheaper than another
 // cache to invalidate.
-func (a *libraryAdapter) ValidateMetadataKey(ctx context.Context, apiKey string) error {
-	return tmdb.New(apiKey, a.hc).Test(ctx)
+//
+// The switch is exhaustive over the credentialed providers, and an id it does
+// not know is an error rather than a fall-through to TMDB: proving the wrong
+// provider's key and reporting the answer as this one's is the failure the
+// per-provider credential model exists to prevent.
+func (a *libraryAdapter) ValidateMetadataKey(ctx context.Context, providerID, apiKey string) error {
+	switch providerID {
+	case core.ProviderTMDB:
+		return tmdb.New(apiKey, a.hc).Test(ctx)
+	}
+	return fmt.Errorf("caravan: provider %q has no API key to validate", providerID)
 }
 
 // ValidateAdultCredential proves a stash-box endpoint and key.

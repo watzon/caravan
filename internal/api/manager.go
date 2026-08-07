@@ -102,16 +102,23 @@ type Manager interface {
 	// 503 rather than pretending there are no results.
 	Metadata() core.MetadataProvider
 
-	// ValidateMetadataKey proves apiKey against the metadata provider with one
-	// live call, reporting nil when the provider accepted it and an error
+	// ValidateMetadataKey proves apiKey against one metadata provider with a
+	// single live call, reporting nil when the provider accepted it and an error
 	// wrapping core.ErrMetadataUnauthorized when it rejected it.
+	//
+	// providerID is explicit because "the metadata provider" stopped being
+	// singular: a library chains several, more than one of them can want a key,
+	// and a key is only meaningful against the provider it was issued by. An id
+	// that names no credentialed provider is an error rather than a default,
+	// since defaulting would prove some other provider's key and report the
+	// answer as this one's.
 	//
 	// It takes the key rather than reading the settings table because the two
 	// callers that matter test a key that is not stored yet: the first-run
 	// wizard, which proves the credential before writing it, and the settings
 	// Test button, which proves what is in the field rather than what was last
 	// saved.
-	ValidateMetadataKey(ctx context.Context, apiKey string) error
+	ValidateMetadataKey(ctx context.Context, providerID, apiKey string) error
 
 	// ValidateAdultCredential is ValidateMetadataKey's stash-box twin. The
 	// endpoint travels with the key because a stash-box credential is only

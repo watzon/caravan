@@ -391,7 +391,7 @@ func (s *server) handleAddSite(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	sr, err := s.mgr.AddSite(ctx, stashID, body.Monitored, body.LibraryID)
 	if err != nil {
-		s.writeManagerError(w, "add site", err)
+		s.writeManagerError(w, "", "add site", err)
 		return
 	}
 	if err := s.enqueueSiteSync(ctx, sr.ID, body.SearchNow); err != nil {

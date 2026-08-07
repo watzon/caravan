@@ -102,10 +102,11 @@ type server struct {
 	// request while the status endpoint and the queue read it from others.
 	dirty atomic.Bool
 
-	// credentials is the cached verdict on the TMDB API key (SPEC §10.1, PLAN
-	// phase 10 task 2). It is why GET /system/status can report credential
-	// health on every poll without a single upstream call; see credentials.go.
-	credentials metadataCredential
+	// credentials is the cached verdict on each credentialed provider's API key
+	// (SPEC §10.1, PLAN phase 10 task 2). It is why GET /system/status can
+	// report credential health on every poll without a single upstream call;
+	// see credentials.go.
+	credentials metadataCredentials
 
 	// shutdown is the orderly-stop trigger POST /system/shutdown pulls, wired
 	// by the serving process to the same cancel a signal uses. Nil means this

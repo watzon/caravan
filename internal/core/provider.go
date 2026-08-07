@@ -23,6 +23,17 @@ type ProviderDescriptor struct {
 	// that speaks movies and television is not thereby qualified to serve an
 	// adult library: the vocabularies (TMDB ids vs stash ids) do not overlap.
 	Kinds []string
+	// CredentialSetting is the settings-table key holding this provider's API
+	// key. Empty means keyless, and keyless is the default: a provider that
+	// needs nothing entered is Ready the moment it is compiled in, and the
+	// server has no verdict to reach about it.
+	//
+	// It is a bare literal rather than a store.Setting* reference because core
+	// cannot import store — store validates library rows against this package,
+	// and the dependency the other way round would be a cycle. The two spellings
+	// are held together by TestProviderCredentialSettingsMatchStoreKeys in
+	// internal/api, which is the one place that may import both.
+	CredentialSetting string
 }
 
 // providers is a literal, not a mutable registry: what is compiled in is the
@@ -30,7 +41,15 @@ type ProviderDescriptor struct {
 // is how the two drift apart. Adding a provider is one entry here plus a
 // client implementation wired up in cmd/caravan.
 var providers = []ProviderDescriptor{
-	{ID: ProviderTMDB, Name: "TMDB", Kinds: []string{LibraryKindMovie, LibraryKindTV}},
+	{ID: ProviderTMDB, Name: "TMDB", Kinds: []string{LibraryKindMovie, LibraryKindTV},
+		CredentialSetting: "tmdb_api_key"},
+	// Stash-box is credentialed and yet carries no CredentialSetting: the adult
+	// half keeps its own door. Its endpoint and key are proved together by
+	// ValidateAdultCredential, guarded on the way in by the enable gate and by
+	// guardAdultCredentialEdit, and a credential that is only meaningful beside
+	// the endpoint that issued it is not the same object as a bare metadata API
+	// key. Listing it here would put it in the metadata credential map and in
+	// the two loops that read that map, where neither of those guards runs.
 	{ID: ProviderStashbox, Name: "Stash-box", Kinds: []string{LibraryKindAdult}},
 	// AniList serves television only. Anime films exist, but AniList's own
 	// vocabulary files them as a MEDIA entry of format MOVIE under the same
@@ -70,6 +89,21 @@ func ProviderServes(id, kind string) bool {
 		}
 	}
 	return false
+}
+
+// ProviderCredentialSetting returns the settings key holding the provider's API
+// key, or "" when the provider needs none.
+//
+// An unknown id gets the same "" for the same reason ProviderServes gives an
+// unknown id nothing: there is no credential of this kind to read either way,
+// and a caller that reads the answer as "keyless" is right on both counts.
+func ProviderCredentialSetting(id string) string {
+	for _, p := range providers {
+		if p.ID == id {
+			return p.CredentialSetting
+		}
+	}
+	return ""
 }
 
 // DefaultProviderForKind returns the provider a library of the given kind gets

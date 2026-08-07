@@ -14,31 +14,39 @@ import (
 
 // Credential health (PLAN phase 10 tasks 2-4).
 //
-// Every metadata-needing surface in Caravan sits behind one credential — the
-// TMDB API key — and before this phase a missing or wrong one surfaced as a
-// 503 with a prose message or, once the key was wrong rather than absent, as a
-// raw 502 from whatever call happened to fail first. Neither told the SPA what
-// to render.
+// A metadata-needing surface in Caravan sits behind a credential, and before
+// this phase a missing or wrong one surfaced as a 503 with a prose message or,
+// once the key was wrong rather than absent, as a raw 502 from whatever call
+// happened to fail first. Neither told the SPA what to render.
 //
 // Two things fix that, and they are deliberately separate:
 //
 //   - A cached verdict. GET /system/status reports "absent", "invalid" or "ok"
-//     and never calls TMDB to find out, because the status endpoint is polled
-//     on a timer and a poll that costs an upstream round trip is a poll that
-//     gets rate limited. The verdict is only ever refreshed by something the
-//     user did: the test button, a key edit, or a metadata call that came back
-//     rejected.
+//     and never calls the provider to find out, because the status endpoint is
+//     polled on a timer and a poll that costs an upstream round trip is a poll
+//     that gets rate limited. The verdict is only ever refreshed by something
+//     the user did: the test button, a key edit, or a metadata call that came
+//     back rejected.
 //   - A stable error code. Every guarded surface answers with one of the
 //     credential codes below, so the SPA branches on the code and shows the
 //     directed empty state instead of an error toast.
+//
+// The verdict is per-provider, keyed by provider id, because "the metadata
+// provider" stopped being singular when libraries gained chains: a rejected
+// TMDB key says nothing about a TheTVDB key, and a model that cannot tell them
+// apart either marks a working credential bad or lets a broken one read as ok.
+// Which providers have a credential at all is core's answer
+// (ProviderDescriptor.CredentialSetting), so a provider added later joins the
+// status map, the revalidation loop and the "<setting>_set" projection without
+// an edit here.
 
 // Metadata credential states reported by GET /system/status.
 const (
-	// CredentialAbsent means no TMDB API key has been entered.
+	// CredentialAbsent means no API key has been entered for the provider.
 	CredentialAbsent = "absent"
 	// CredentialInvalid means the key on file was rejected, either by the test
 	// button, by the check that runs when it is saved, or by a metadata call
-	// that answered 401.
+	// that answered 401 and could say which provider answered it.
 	CredentialInvalid = "invalid"
 	// CredentialOK means a key is on file and nothing has rejected it.
 	//
@@ -52,7 +60,7 @@ const (
 // Error codes carried by errorResponse.Code. They are the contract the SPA
 // branches on; the messages beside them are for humans and may be reworded.
 const (
-	// CodeMetadataCredentialAbsent means the surface needs the TMDB key and
+	// CodeMetadataCredentialAbsent means the surface needs a metadata key and
 	// none has been entered — the fix is Settings → Metadata.
 	CodeMetadataCredentialAbsent = "metadata_credential_absent"
 	// CodeMetadataCredentialInvalid means a key is on file and the provider
@@ -71,21 +79,15 @@ const (
 // slow provider for longer than a person will wait.
 const credentialCheckTimeout = 12 * time.Second
 
-// metadataCredential is the cached verdict on one TMDB API key.
+// credentialVerdict is the cached verdict on one provider's API key.
 //
 // The cache key is the key value itself rather than a generation counter,
 // following the stash-box client cache in cmd/caravan: the verdict is a fact
 // about that exact string, so a key edited to something else invalidates it by
 // simply not matching, and a key edited back to a value that was already
 // proven wrong is known to be wrong without asking again.
-//
-// Only a rejection is ever cached. A validation that failed because the network
-// was down says nothing about the credential, so it leaves no verdict and the
-// state stays optimistic — an unreachable TMDB is not a wrong API key, and
-// telling the user to go fix their key would be a lie.
-type metadataCredential struct {
-	mu sync.Mutex
-	// key is the API key rejected is about. Empty means nothing is cached.
+type credentialVerdict struct {
+	// key is the API key rejected is about.
 	key string
 	// rejected is true when key was refused by the provider.
 	rejected bool
@@ -97,47 +99,162 @@ type metadataCredential struct {
 	checkedAt time.Time
 }
 
-// record stores the verdict of a live check of key. A nil err clears any
-// rejection; core.ErrMetadataUnauthorized records one; anything else is an
-// upstream problem and leaves the cache alone.
-func (c *metadataCredential) record(key string, err error) {
+// metadataCredentials holds one verdict per credentialed provider.
+//
+// Only a rejection is ever cached. A validation that failed because the network
+// was down says nothing about the credential, so it leaves no verdict and the
+// state stays optimistic — an unreachable provider is not a wrong API key, and
+// telling the user to go fix their key would be a lie.
+//
+// A keyless provider never appears here, not even as an "ok": that a provider
+// needs no credential is a fact about what is compiled in, which the client
+// reads off the provider list, not a verdict this server reached about
+// anything.
+type metadataCredentials struct {
+	mu sync.Mutex
+	// byProvider maps a provider id to its verdict. A provider with no entry
+	// has nothing cached.
+	byProvider map[string]credentialVerdict
+}
+
+// record stores the verdict of a live check of providerID's key. A nil err
+// clears any rejection; core.ErrMetadataUnauthorized records one; anything else
+// is an upstream problem and leaves the cache alone.
+func (c *metadataCredentials) record(providerID, key string, err error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	var v credentialVerdict
 	switch {
 	case err == nil:
-		c.key, c.rejected, c.reason, c.checkedAt = key, false, "", time.Now()
+		v = credentialVerdict{key: key, checkedAt: time.Now()}
 	case errors.Is(err, core.ErrMetadataUnauthorized):
-		c.key, c.rejected, c.reason, c.checkedAt = key, true, err.Error(), time.Now()
+		v = credentialVerdict{key: key, rejected: true, reason: err.Error(), checkedAt: time.Now()}
+	default:
+		return
 	}
+	if c.byProvider == nil {
+		c.byProvider = make(map[string]credentialVerdict)
+	}
+	c.byProvider[providerID] = v
 }
 
-// verdict reports whether key is known to have been rejected, and why.
-func (c *metadataCredential) verdict(key string) (rejected bool, reason string, checkedAt time.Time) {
+// verdict reports whether providerID's key is known to have been rejected, and
+// why. A verdict recorded for one provider never answers for another: that is
+// the whole point of keying the cache by id.
+func (c *metadataCredentials) verdict(providerID, key string) (rejected bool, reason string, checkedAt time.Time) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.key != key {
+	v, ok := c.byProvider[providerID]
+	if !ok || v.key != key {
 		return false, "", time.Time{}
 	}
-	return c.rejected, c.reason, c.checkedAt
+	return v.rejected, v.reason, v.checkedAt
 }
 
-// metadataCredentialState is the cached health of the TMDB key: one settings
-// read, never an upstream call.
-func (s *server) metadataCredentialState(ctx context.Context) (state, reason string, checkedAt time.Time, err error) {
-	key, err := s.settingValue(ctx, store.SettingTMDBAPIKey)
+// credentialStateJSON is one provider's credential health as GET /system/status
+// reports it.
+type credentialStateJSON struct {
+	State string `json:"state"`
+	// Reason is the provider's own words for a rejection, empty for every other
+	// state and never containing the key (SPEC §12).
+	Reason string `json:"reason,omitempty"`
+	// CheckedAt is when the cached verdict was reached, empty when the key has
+	// never been checked.
+	CheckedAt string `json:"checked_at,omitempty"`
+}
+
+// metadataCredentialState is the cached health of one provider's API key: one
+// settings read, never an upstream call.
+//
+// A keyless provider is never asked, and answers with the zero value if it is:
+// "Ready" is a client-side fact about a provider that needs nothing entered,
+// not a verdict this server reached. See credentialStates, which is what builds
+// the map and which skips them.
+func (s *server) metadataCredentialState(ctx context.Context, providerID string) (credentialStateJSON, error) {
+	setting := core.ProviderCredentialSetting(providerID)
+	if setting == "" {
+		return credentialStateJSON{}, nil
+	}
+	key, err := s.settingValue(ctx, setting)
 	if err != nil {
-		return "", "", time.Time{}, err
+		return credentialStateJSON{}, err
 	}
 	if key == "" {
-		return CredentialAbsent, "", time.Time{}, nil
+		return credentialStateJSON{State: CredentialAbsent}, nil
 	}
-	rejected, reason, checkedAt := s.credentials.verdict(key)
+	rejected, reason, checkedAt := s.credentials.verdict(providerID, key)
 	if rejected {
-		return CredentialInvalid, reason, checkedAt, nil
+		return credentialStateJSON{State: CredentialInvalid, Reason: reason, CheckedAt: jsonTime(checkedAt)}, nil
 	}
-	return CredentialOK, "", checkedAt, nil
+	return credentialStateJSON{State: CredentialOK, CheckedAt: jsonTime(checkedAt)}, nil
+}
+
+// credentialStates is every credentialed provider's health, keyed by provider
+// id. It is what GET /system/status reports, and the flat TMDB fields beside it
+// are read out of this same map so the two cannot disagree.
+//
+// Keyless providers are absent rather than "ok" — see metadataCredentialState —
+// which also keeps the payload bounded by the number of keys a person can
+// enter rather than by the size of the registry.
+func (s *server) credentialStates(ctx context.Context) (map[string]credentialStateJSON, error) {
+	out := make(map[string]credentialStateJSON)
+	for _, p := range core.Providers() {
+		if p.CredentialSetting == "" {
+			continue
+		}
+		state, err := s.metadataCredentialState(ctx, p.ID)
+		if err != nil {
+			return nil, err
+		}
+		out[p.ID] = state
+	}
+	return out, nil
+}
+
+// providerName is the registry's label for an id, empty for an id the registry
+// does not carry. It is what puts the provider's own name in the messages
+// below, so a rejected TheTVDB key does not send someone to the TMDB card.
+func providerName(id string) string {
+	for _, p := range core.Providers() {
+		if p.ID == id {
+			return p.Name
+		}
+	}
+	return ""
+}
+
+// credentialRejectedMessage says whose key was refused.
+//
+// An unknown or keyless id leaves it deliberately vague, because that is what
+// the caller knew: naming a provider there would be the same guess
+// noteMetadataFailure refuses to make.
+func credentialRejectedMessage(providerID string) string {
+	if name := providerName(providerID); name != "" {
+		return "the " + name + " API key was rejected"
+	}
+	return "a metadata API key was rejected"
+}
+
+// soleCredentialedProvider names the one provider among ids that holds a
+// credential, or "" when none or more than one does.
+//
+// It is how a chain-level failure is attributed: a chain of one credentialed
+// provider leaves nothing to work out, while a chain of two knows a key was
+// refused and not which, and "" is the honest answer to that.
+func soleCredentialedProvider(ids []string) string {
+	found := ""
+	for _, id := range ids {
+		if core.ProviderCredentialSetting(id) == "" {
+			continue
+		}
+		if found != "" && found != id {
+			return ""
+		}
+		found = id
+	}
+	return found
 }
 
 // settingValue reads one setting, treating "never set" as the empty string.
@@ -177,8 +294,8 @@ func (s *server) metadataProvider(w http.ResponseWriter, r *http.Request) (core.
 	return provider, true
 }
 
-// tmdbKeyRejected reports whether the stored TMDB key is one TMDB has already
-// refused, writing the typed 503 itself.
+// credentialRejected reports whether any of the named providers holds a key
+// that has already been refused, writing the typed 503 itself.
 //
 // It is separate from metadataProvider because the verdict and the provider are
 // separate questions once a library can be chained to something other than
@@ -186,18 +303,39 @@ func (s *server) metadataProvider(w http.ResponseWriter, r *http.Request) (core.
 // asking "is TMDB configured", and answers the second for itself by walking the
 // chain (see handleSearch). A store read that fails counts as refused — the
 // response has been written either way, and the caller must stop.
-func (s *server) tmdbKeyRejected(w http.ResponseWriter, r *http.Request) bool {
-	key, err := s.settingValue(r.Context(), store.SettingTMDBAPIKey)
-	if err != nil {
-		s.writeStoreError(w, "read metadata credential", err)
-		return true
-	}
-	if rejected, _, _ := s.credentials.verdict(key); rejected {
-		writeCodedError(w, http.StatusServiceUnavailable, CodeMetadataCredentialInvalid,
-			"the TMDB API key was rejected")
-		return true
+//
+// Keyless ids on the list are skipped rather than refused: a chain is a list of
+// providers, not a list of credentials, and the ones that need nothing entered
+// can never be the reason a search is refused.
+func (s *server) credentialRejected(w http.ResponseWriter, r *http.Request, providerIDs []string) bool {
+	ctx := r.Context()
+	for _, id := range providerIDs {
+		setting := core.ProviderCredentialSetting(id)
+		if setting == "" {
+			continue
+		}
+		key, err := s.settingValue(ctx, setting)
+		if err != nil {
+			s.writeStoreError(w, "read metadata credential", err)
+			return true
+		}
+		if rejected, _, _ := s.credentials.verdict(id, key); rejected {
+			writeCodedError(w, http.StatusServiceUnavailable, CodeMetadataCredentialInvalid,
+				credentialRejectedMessage(id))
+			return true
+		}
 	}
 	return false
+}
+
+// tmdbKeyRejected is credentialRejected for the surfaces that are TMDB's alone.
+//
+// Discover is the one that matters: its curated shelves are TMDB list ids, so
+// there is no chain to consult and nothing else to ask. It stays a named
+// function rather than an inline slice so those surfaces say which provider
+// they are about.
+func (s *server) tmdbKeyRejected(w http.ResponseWriter, r *http.Request) bool {
+	return s.credentialRejected(w, r, []string{core.ProviderTMDB})
 }
 
 // noteMetadataFailure records a rejected credential seen by a live metadata
@@ -208,29 +346,46 @@ func (s *server) tmdbKeyRejected(w http.ResponseWriter, r *http.Request) bool {
 // first time anything tries to use it, without waiting for someone to press
 // Test.
 //
+// providerID is whose credential the caller can prove the failure was about. An
+// empty id — or one that holds no credential — records NOTHING while still
+// reporting true, and that refusal is the point: a call that walked a chain
+// knows a key was refused but not which one, and marking a key bad on a guess
+// sends someone to re-enter a credential that works while the broken one goes
+// on reading "ok". The typed error code the caller writes stays right either
+// way; only the attribution is withheld.
+//
 // The key is re-read here rather than threaded through every call site because
 // the error path is rare and a settings read is cheap; the request's own
 // context is not used because a caller that gave up is exactly when this is
 // most worth recording.
-func (s *server) noteMetadataFailure(err error) bool {
+func (s *server) noteMetadataFailure(providerID string, err error) bool {
 	if !errors.Is(err, core.ErrMetadataUnauthorized) {
 		return false
+	}
+	setting := core.ProviderCredentialSetting(providerID)
+	if setting == "" {
+		return true
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	key, readErr := s.settingValue(ctx, store.SettingTMDBAPIKey)
+	key, readErr := s.settingValue(ctx, setting)
 	if readErr != nil || key == "" {
 		return true
 	}
-	s.credentials.record(key, err)
+	s.credentials.record(providerID, key, err)
 	return true
 }
 
 // writeMetadataError reports a failed metadata call, turning a rejected
 // credential into the typed answer the guarded surfaces use and leaving every
 // other failure as the bad gateway it was.
-func (s *server) writeMetadataError(w http.ResponseWriter, msg string, err error) {
+//
+// providerIDs are the providers the call could have reached — a chain, for the
+// per-library search. The rejection is attributed only when exactly one of them
+// is credentialed, which is the difference between knowing whose key was
+// refused and guessing; see soleCredentialedProvider and noteMetadataFailure.
+func (s *server) writeMetadataError(w http.ResponseWriter, providerIDs []string, msg string, err error) {
 	// A chain with nothing configured on it is the absent-credential answer,
 	// not a bad gateway. Before per-library search this could not be reached
 	// here — the caller had already resolved a provider — but a chain resolves
@@ -241,9 +396,10 @@ func (s *server) writeMetadataError(w http.ResponseWriter, msg string, err error
 			"no metadata provider configured")
 		return
 	}
-	if s.noteMetadataFailure(err) {
+	culprit := soleCredentialedProvider(providerIDs)
+	if s.noteMetadataFailure(culprit, err) {
 		writeCodedError(w, http.StatusServiceUnavailable, CodeMetadataCredentialInvalid,
-			"the TMDB API key was rejected")
+			credentialRejectedMessage(culprit))
 		return
 	}
 	s.log.Error(msg, "error", err)
@@ -252,6 +408,11 @@ func (s *server) writeMetadataError(w http.ResponseWriter, msg string, err error
 
 // metadataTestRequest is the body of POST /settings/metadata/test.
 type metadataTestRequest struct {
+	// Provider names whose key is being proved. Empty means TMDB, which keeps a
+	// bodyless POST and every body written before there was a second
+	// credentialed provider meaning exactly what it meant.
+	Provider string `json:"provider"`
+
 	// APIKey is the key to prove. Empty means "the one already saved", which
 	// is what the settings screen's Test button sends and what the indexer test
 	// does by construction (it reads the stored row).
@@ -262,12 +423,17 @@ type metadataTestRequest struct {
 	APIKey string `json:"api_key"`
 }
 
-// handleMetadataTest proves a TMDB API key against TMDB (PLAN phase 10 task 4),
-// mirroring POST /indexers/{id}/test.
+// handleMetadataTest proves one provider's API key against that provider (PLAN
+// phase 10 task 4), mirroring POST /indexers/{id}/test.
 //
-// The verdict is cached against the key that was tested, so testing a key in
-// the first-run wizard and then saving it costs one upstream call, not two: the
-// save finds a verdict for that exact string and believes it.
+// The verdict is cached against the provider and the key that was tested, so
+// testing a key in the first-run wizard and then saving it costs one upstream
+// call, not two: the save finds a verdict for that exact pair and believes it.
+//
+// A provider id nothing implements, and one that needs no key at all, are both
+// refused as bad requests rather than answered "ok": there is no credential
+// behind either, and a Test button that passes for a card with no field on it
+// would be reporting the health of nothing.
 //
 // The response never echoes the key, and neither does the log line — the
 // provider's message can quote a request, and SPEC §12 keeps credentials out of
@@ -279,26 +445,36 @@ func (s *server) handleMetadataTest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	providerID := strings.TrimSpace(body.Provider)
+	if providerID == "" {
+		providerID = core.ProviderTMDB
+	}
+	setting := core.ProviderCredentialSetting(providerID)
+	if setting == "" {
+		writeError(w, http.StatusBadRequest, "provider "+providerID+" has no API key to test")
+		return
+	}
+
 	key := strings.TrimSpace(body.APIKey)
 	if key == "" {
-		stored, err := s.settingValue(r.Context(), store.SettingTMDBAPIKey)
+		stored, err := s.settingValue(r.Context(), setting)
 		if err != nil {
-			s.writeStoreError(w, "read tmdb api key", err)
+			s.writeStoreError(w, "read metadata api key", err)
 			return
 		}
 		key = stored
 	}
 	if key == "" {
 		writeCodedError(w, http.StatusBadRequest, CodeMetadataCredentialAbsent,
-			"no TMDB API key to test")
+			"no "+providerName(providerID)+" API key to test")
 		return
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), credentialCheckTimeout)
 	defer cancel()
 
-	if err := s.mgr.ValidateMetadataKey(ctx, key); err != nil {
-		s.credentials.record(key, err)
+	if err := s.mgr.ValidateMetadataKey(ctx, providerID, key); err != nil {
+		s.credentials.record(providerID, key, err)
 		if errors.Is(err, core.ErrMetadataUnauthorized) {
 			writeCodedError(w, http.StatusBadGateway, CodeMetadataCredentialInvalid,
 				"metadata test failed: "+err.Error())
@@ -307,7 +483,7 @@ func (s *server) handleMetadataTest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "metadata test failed: "+err.Error())
 		return
 	}
-	s.credentials.record(key, nil)
+	s.credentials.record(providerID, key, nil)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
@@ -321,15 +497,15 @@ func (s *server) handleMetadataTest(w http.ResponseWriter, r *http.Request) {
 //
 // A key that already carries a verdict — the wizard tested it a moment ago — is
 // believed, so this costs nothing on the path the UI actually takes.
-func (s *server) revalidateMetadataKey(ctx context.Context, key string) {
+func (s *server) revalidateMetadataKey(ctx context.Context, providerID, key string) {
 	if key == "" {
 		return
 	}
-	if _, _, checkedAt := s.credentials.verdict(key); !checkedAt.IsZero() {
+	if _, _, checkedAt := s.credentials.verdict(providerID, key); !checkedAt.IsZero() {
 		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, credentialCheckTimeout)
 	defer cancel()
 
-	s.credentials.record(key, s.mgr.ValidateMetadataKey(ctx, key))
+	s.credentials.record(providerID, key, s.mgr.ValidateMetadataKey(ctx, providerID, key))
 }

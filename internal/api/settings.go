@@ -22,7 +22,17 @@ import (
 // report it. The serving process writes it at startup from the bootstrap
 // config; an unset value reports ModeServer.
 const SettingMode = "mode"
-const settingTMDBAPIKeySet = "tmdb_api_key_set"
+
+// credentialSetSuffix turns a credential's settings key into the public "a key
+// is stored" flag beside it. The key itself is write-only (SPEC §12), and the
+// settings screen still has to render a card that says whether one is on file.
+const credentialSetSuffix = "_set"
+
+// settingTMDBAPIKeySet is that flag as it has always been spelled on the wire.
+// publicSettings derives it from the registry now; this names the exact string
+// every existing consumer reads, and derives it the same way so the two cannot
+// drift apart.
+const settingTMDBAPIKeySet = store.SettingTMDBAPIKey + credentialSetSuffix
 
 // Deployment modes reported by GET /system/status.
 const (
@@ -167,7 +177,17 @@ func (s *server) publicSettings(r *http.Request) (map[string]string, error) {
 			settings[key] = value
 		}
 	}
-	settings[settingTMDBAPIKeySet] = strconv.FormatBool(stored[store.SettingTMDBAPIKey] != "")
+	// One flag per credentialed provider, from the registry rather than from a
+	// list written out here: a provider added later gets its "a key is stored"
+	// flag without an edit to this file, which is the same reason the status map
+	// and the revalidation below are loops.
+	for _, p := range core.Providers() {
+		if p.CredentialSetting == "" {
+			continue
+		}
+		settings[p.CredentialSetting+credentialSetSuffix] =
+			strconv.FormatBool(stored[p.CredentialSetting] != "")
+	}
 
 	visible, err := s.adultVisible(r)
 	if err != nil {
@@ -269,10 +289,16 @@ func (s *server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 
 	// A key edit is the first of the two credential-state transitions (PLAN
 	// phase 10 task 2). It runs after the write, costs at most one upstream
-	// call, and is skipped entirely for a key the Test button already proved —
-	// see revalidateMetadataKey.
-	if key, ok := body[store.SettingTMDBAPIKey]; ok {
-		s.revalidateMetadataKey(r.Context(), strings.TrimSpace(key))
+	// call per edited credential, and is skipped entirely for a key the Test
+	// button already proved — see revalidateMetadataKey. Only the keys this body
+	// actually carried are checked, so saving an unrelated setting stays free.
+	for _, p := range core.Providers() {
+		if p.CredentialSetting == "" {
+			continue
+		}
+		if key, ok := body[p.CredentialSetting]; ok {
+			s.revalidateMetadataKey(r.Context(), p.ID, strings.TrimSpace(key))
+		}
 	}
 
 	settings, err := s.publicSettings(r)
@@ -704,6 +730,18 @@ type statusResponse struct {
 	// when the key has never been checked. It is what lets the settings screen
 	// say "tested 2 minutes ago" rather than implying a check just ran.
 	MetadataCredentialCheckedAt string `json:"metadata_credential_checked_at,omitempty"`
+	// MetadataCredentials is every credentialed provider's health, keyed by
+	// provider id, since "the metadata provider" stopped being singular.
+	//
+	// The three flat fields above are this map's TMDB entry, filled from it in
+	// handleSystemStatus so the two can never disagree. They stay because every
+	// existing consumer reads them, and because TMDB is still the provider the
+	// first-run wizard and the Discover surfaces are about.
+	//
+	// Keyless providers are absent rather than "ok": what a provider needs is a
+	// fact the client reads off the provider list, not a verdict this server
+	// reached.
+	MetadataCredentials map[string]credentialStateJSON `json:"metadata_credentials"`
 	// UnhealthyDownloadClients names the external clients the queue poller
 	// cannot reach (PLAN phase 6 task 4). Empty is the normal case; a
 	// non-empty list is what raises the "client X unreachable" banner. The
@@ -869,11 +907,15 @@ func (s *server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	credential, credentialReason, credentialCheckedAt, err := s.metadataCredentialState(ctx)
+	// One read of the whole map, and the flat TMDB fields are lifted out of it
+	// rather than derived a second time: two paths to the same answer are two
+	// answers waiting to disagree.
+	credentials, err := s.credentialStates(ctx)
 	if err != nil {
 		s.writeStoreError(w, "read metadata credential", err)
 		return
 	}
+	tmdbCredential := credentials[core.ProviderTMDB]
 
 	var diskFree, diskTotal int64
 	if root != "" {
@@ -904,9 +946,10 @@ func (s *server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 		DiskFreeBytes:               diskFree,
 		DiskTotalBytes:              diskTotal,
 		EngineHealth:                s.engineHealth(),
-		MetadataCredential:          credential,
-		MetadataCredentialReason:    credentialReason,
-		MetadataCredentialCheckedAt: jsonTime(credentialCheckedAt),
+		MetadataCredential:          tmdbCredential.State,
+		MetadataCredentialReason:    tmdbCredential.Reason,
+		MetadataCredentialCheckedAt: tmdbCredential.CheckedAt,
+		MetadataCredentials:         credentials,
 		UnhealthyDownloadClients:    s.unhealthyDownloadClients(),
 		StashUnreachable:            s.stashHealth(adultVisible),
 		FFmpegAvailable:             s.ffmpegAvailable(),

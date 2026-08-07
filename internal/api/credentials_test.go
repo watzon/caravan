@@ -308,6 +308,237 @@ func (p *countingProvider) SearchSeries(ctx context.Context, q string) ([]core.S
 }
 
 // ---------------------------------------------------------------------------
+// Per-provider credential state.
+//
+// "The metadata provider" stopped being singular when libraries gained chains,
+// so the verdict did too. What these pin is that generalizing it narrowed
+// nothing: the flat TMDB fields still say what they always said, and they say
+// it because they are read out of the same map.
+
+// TestProviderCredentialSettingsMatchStoreKeys is the fitness test
+// ProviderDescriptor.CredentialSetting's comment names.
+//
+// core cannot import store, so the settings key is written out as a literal
+// there and as a constant in store, and nothing but this makes the two agree. A
+// silent disagreement is a credential card reading a settings row nobody writes:
+// the key is stored, the state says "absent", and there is no error anywhere.
+func TestProviderCredentialSettingsMatchStoreKeys(t *testing.T) {
+	if got := core.ProviderCredentialSetting(core.ProviderTMDB); got != store.SettingTMDBAPIKey {
+		t.Fatalf("tmdb credential setting = %q, want %q", got, store.SettingTMDBAPIKey)
+	}
+
+	// Every key the registry names must be one PUT /settings will accept and
+	// store trimmed, or the card that offers a field would write somewhere the
+	// credential machinery never looks.
+	for _, p := range core.Providers() {
+		if p.CredentialSetting == "" {
+			continue
+		}
+		if !writableSettings[p.CredentialSetting] {
+			t.Errorf("%s: %q is not writable through PUT /settings", p.ID, p.CredentialSetting)
+		}
+		if !trimmedSettings[p.CredentialSetting] {
+			t.Errorf("%s: %q is not trimmed on the way in", p.ID, p.CredentialSetting)
+		}
+		if publicSettingKeys[p.CredentialSetting] {
+			t.Errorf("%s: %q is readable through GET /settings — credentials are write-only (SPEC §12)",
+				p.ID, p.CredentialSetting)
+		}
+	}
+}
+
+// The status map carries one entry per credentialed provider and agrees with
+// the flat TMDB fields, which are lifted out of it.
+func TestSystemStatusReportsPerProviderCredentials(t *testing.T) {
+	h, st, mgr := newTestServer(t)
+	mgr.validateKeys = map[string]error{"revoked": errKeyRejected}
+
+	// Fresh install: TMDB is in the map and absent, and nothing else is in it.
+	status := credentialState(t, h)
+	assertCredentialMapAgrees(t, status)
+	if got := status.MetadataCredentials[core.ProviderTMDB].State; got != CredentialAbsent {
+		t.Fatalf("metadata_credentials[tmdb].state = %q, want %q", got, CredentialAbsent)
+	}
+	// A keyless provider has no server verdict at all: "Ready" is a fact the
+	// client reads off the provider list, and an entry here saying "ok" for a
+	// key that does not exist would be this server claiming to have checked
+	// something.
+	for _, p := range core.Providers() {
+		if p.CredentialSetting != "" {
+			continue
+		}
+		if _, ok := status.MetadataCredentials[p.ID]; ok {
+			t.Errorf("keyless provider %q has a credential state: %+v", p.ID, status.MetadataCredentials[p.ID])
+		}
+	}
+
+	// A stored key nobody has proven wrong, then one that was.
+	setSetting(t, st, store.SettingTMDBAPIKey, "k")
+	assertCredentialMapAgrees(t, credentialState(t, h))
+	if got := credentialState(t, h).MetadataCredentials[core.ProviderTMDB].State; got != CredentialOK {
+		t.Fatalf("metadata_credentials[tmdb].state = %q, want %q", got, CredentialOK)
+	}
+
+	wantStatus(t, do(t, h, http.MethodPut, "/api/v1/settings", `{"tmdb_api_key":"revoked"}`), http.StatusOK)
+	status = credentialState(t, h)
+	assertCredentialMapAgrees(t, status)
+	entry := status.MetadataCredentials[core.ProviderTMDB]
+	if entry.State != CredentialInvalid || entry.Reason == "" || entry.CheckedAt == "" {
+		t.Fatalf("metadata_credentials[tmdb] = %+v, want an invalid verdict with a reason and a time", entry)
+	}
+	if strings.Contains(entry.Reason, "revoked") {
+		t.Errorf("the API key leaked into the credential map: %q", entry.Reason)
+	}
+}
+
+// assertCredentialMapAgrees is the invariant handleSystemStatus is written to
+// keep: the three flat fields are the map's TMDB entry, so a client reading
+// either one is reading the same verdict.
+func assertCredentialMapAgrees(t *testing.T, status statusResponse) {
+	t.Helper()
+	entry, ok := status.MetadataCredentials[core.ProviderTMDB]
+	if !ok {
+		t.Fatalf("metadata_credentials has no tmdb entry: %+v", status.MetadataCredentials)
+	}
+	if entry.State != status.MetadataCredential ||
+		entry.Reason != status.MetadataCredentialReason ||
+		entry.CheckedAt != status.MetadataCredentialCheckedAt {
+		t.Fatalf("metadata_credentials[tmdb] = %+v, want it to agree with the flat fields %q/%q/%q",
+			entry, status.MetadataCredential, status.MetadataCredentialReason,
+			status.MetadataCredentialCheckedAt)
+	}
+}
+
+// A verdict belongs to the provider it was reached about. Sharing one across
+// providers is the failure the whole per-provider model exists to prevent: a
+// revoked TMDB key would mark a working TheTVDB key bad, and the settings
+// screen would send someone to re-enter a credential that works.
+func TestACredentialVerdictNeverAnswersForAnotherProvider(t *testing.T) {
+	var c metadataCredentials
+
+	// The same key string under two providers. It is the realistic shape of the
+	// mistake: nothing stops a person pasting the same value into both cards,
+	// and a cache keyed on the value alone would then be one verdict.
+	c.record(core.ProviderTMDB, "shared", errKeyRejected)
+
+	if rejected, reason, checkedAt := c.verdict(core.ProviderTMDB, "shared"); !rejected ||
+		reason == "" || checkedAt.IsZero() {
+		t.Fatalf("tmdb verdict = %v/%q/%v, want the rejection it was told about", rejected, reason, checkedAt)
+	}
+	if rejected, _, _ := c.verdict("thetvdb", "shared"); rejected {
+		t.Fatal("a rejection recorded for tmdb answered for another provider")
+	}
+
+	// A pass for one provider leaves the other's rejection standing.
+	c.record("thetvdb", "shared", nil)
+	if rejected, _, _ := c.verdict(core.ProviderTMDB, "shared"); !rejected {
+		t.Fatal("another provider's passing check cleared the tmdb rejection")
+	}
+
+	// And the verdict is still about that exact string: an edited key is simply
+	// not the key that was refused.
+	if rejected, _, _ := c.verdict(core.ProviderTMDB, "edited"); rejected {
+		t.Fatal("an edited key inherited the old key's rejection")
+	}
+}
+
+// soleCredentialedProvider is what decides whether a chain-level failure may be
+// attributed at all. Getting it wrong in the permissive direction marks the
+// wrong key bad; getting it wrong in the strict direction loses the transition
+// that flips a revoked key without waiting for the Test button.
+func TestSoleCredentialedProvider(t *testing.T) {
+	tests := []struct {
+		name string
+		ids  []string
+		want string
+	}{
+		{"nothing ran", nil, ""},
+		{"a keyless chain", []string{core.ProviderAniList, core.ProviderTVmaze}, ""},
+		{"one credential", []string{core.ProviderTMDB}, core.ProviderTMDB},
+		{"one credential beside keyless ones", []string{core.ProviderTMDB, core.ProviderAniList}, core.ProviderTMDB},
+		{"the same one twice", []string{core.ProviderTMDB, core.ProviderTMDB}, core.ProviderTMDB},
+		// An id nothing implements holds no credential, so it cannot be the one
+		// that was refused and cannot make the answer ambiguous either. The row
+		// for two REGISTERED credentials arrives with TheTVDB, which is the
+		// first provider able to make this return "".
+		{"an unknown id beside a credential", []string{core.ProviderTMDB, "nope"}, core.ProviderTMDB},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := soleCredentialedProvider(tt.ids); got != tt.want {
+				t.Fatalf("soleCredentialedProvider(%v) = %q, want %q", tt.ids, got, tt.want)
+			}
+		})
+	}
+}
+
+// The Test button names the provider it is testing. A default of TMDB keeps
+// every body written before there was a second credentialed provider — and the
+// bodyless POST the settings screen sends — meaning exactly what it meant.
+func TestMetadataTestNamesItsProvider(t *testing.T) {
+	t.Run("an explicit tmdb is the same request as none", func(t *testing.T) {
+		h, st, mgr := newTestServer(t)
+		setSetting(t, st, store.SettingTMDBAPIKey, "stored")
+
+		wantStatus(t, do(t, h, http.MethodPost, "/api/v1/settings/metadata/test",
+			`{"provider":"tmdb"}`), http.StatusOK)
+
+		want := validateCall{provider: core.ProviderTMDB, key: "stored"}
+		if got := mgr.validations(); len(got) != 1 || got[0] != want {
+			t.Fatalf("validated %v, want exactly [%v]", got, want)
+		}
+	})
+
+	// A keyless provider's card has no field on it, so a Test that passed would
+	// be reporting the health of nothing.
+	t.Run("a keyless provider is refused", func(t *testing.T) {
+		h, _, mgr := newTestServer(t)
+
+		rec := do(t, h, http.MethodPost, "/api/v1/settings/metadata/test",
+			`{"provider":"anilist","api_key":"whatever"}`)
+		wantStatus(t, rec, http.StatusBadRequest)
+		wantErrorBody(t, rec)
+		if got := mgr.validations(); len(got) != 0 {
+			t.Fatalf("a keyless provider was validated: %v", got)
+		}
+	})
+
+	t.Run("an unknown provider is refused", func(t *testing.T) {
+		h, _, mgr := newTestServer(t)
+
+		rec := do(t, h, http.MethodPost, "/api/v1/settings/metadata/test",
+			`{"provider":"bogus","api_key":"whatever"}`)
+		wantStatus(t, rec, http.StatusBadRequest)
+		wantErrorBody(t, rec)
+		if got := mgr.validations(); len(got) != 0 {
+			t.Fatalf("an unknown provider was validated: %v", got)
+		}
+	})
+
+	// A rejection from the Test button lands under the provider that was tested
+	// and nowhere else.
+	t.Run("a rejection lands under the provider tested", func(t *testing.T) {
+		h, st, mgr := newTestServer(t)
+		setSetting(t, st, store.SettingTMDBAPIKey, "revoked")
+		mgr.validateKeys = map[string]error{core.ProviderTMDB + "/revoked": errKeyRejected}
+
+		rec := do(t, h, http.MethodPost, "/api/v1/settings/metadata/test", `{"provider":"tmdb"}`)
+		wantStatus(t, rec, http.StatusBadGateway)
+		wantCode(t, rec, CodeMetadataCredentialInvalid)
+
+		status := credentialState(t, h)
+		assertCredentialMapAgrees(t, status)
+		if got := status.MetadataCredentials[core.ProviderTMDB].State; got != CredentialInvalid {
+			t.Fatalf("metadata_credentials[tmdb].state = %q, want %q", got, CredentialInvalid)
+		}
+		if len(status.MetadataCredentials) != 1 {
+			t.Fatalf("credential map = %+v, want only the credentialed providers in it",
+				status.MetadataCredentials)
+		}
+	})
+}
+
+// ---------------------------------------------------------------------------
 // Adult enable gating (PLAN phase 10 task 5).
 //
 // Turning the module on is one decision, and the server refuses it as a unit: a

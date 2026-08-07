@@ -146,7 +146,7 @@ func (s *server) handleImportMatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.mgr.MatchUnmatched(r.Context(), id, body.Type, ref); err != nil {
-		s.writeManagerError(w, "match unmatched file", err)
+		s.writeManagerError(w, ref.Provider, "match unmatched file", err)
 		return
 	}
 	// Matching a parked file puts the title in the library, which is what a

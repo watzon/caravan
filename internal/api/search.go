@@ -145,13 +145,15 @@ func (s *server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	// The credential pre-check, before any provider is asked.
 	//
-	// The cached verdict is about ONE credential — the TMDB API key — so it can
-	// only speak for a chain that contains TMDB. A library chained to AniList
-	// alone needs no key at all, and refusing its search because a key it never
-	// uses was rejected an hour ago would make the provider that works
-	// unreachable through the provider that does not. A MIXED chain is still
-	// refused whole: this runs before anything does, so there is no partial
-	// answer to keep.
+	// A cached verdict is about ONE provider's key, so it can only speak for a
+	// chain that contains that provider. A library chained to AniList alone
+	// needs no key at all, and refusing its search because a key it never uses
+	// was rejected an hour ago would make the provider that works unreachable
+	// through the provider that does not. The question is asked of every
+	// credentialed provider on the chain rather than of TMDB, so a rejected
+	// TheTVDB key refuses the libraries chained to TheTVDB and no others. A
+	// MIXED chain is still refused whole: this runs before anything does, so
+	// there is no partial answer to keep.
 	var willRun []string
 	if runMovies {
 		willRun = appendUniqueProviders(willRun, s.searchChain(ctx, lib, core.LibraryKindMovie))
@@ -159,7 +161,7 @@ func (s *server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	if runSeries {
 		willRun = appendUniqueProviders(willRun, s.searchChain(ctx, lib, core.LibraryKindTV))
 	}
-	if slices.Contains(willRun, core.ProviderTMDB) && s.tmdbKeyRejected(w, r) {
+	if s.credentialRejected(w, r, willRun) {
 		return
 	}
 
@@ -172,7 +174,7 @@ func (s *server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	if runMovies {
 		hits, err := s.mgr.SearchLibrary(ctx, libraryID, MediaTypeMovie, query)
 		if err != nil {
-			s.writeMetadataError(w, "metadata movie search failed", err)
+			s.writeMetadataError(w, willRun, "metadata movie search failed", err)
 			return
 		}
 		for _, m := range hits.Movies {
@@ -184,7 +186,7 @@ func (s *server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	if runSeries {
 		hits, err := s.mgr.SearchLibrary(ctx, libraryID, MediaTypeSeries, query)
 		if err != nil {
-			s.writeMetadataError(w, "metadata series search failed", err)
+			s.writeMetadataError(w, willRun, "metadata series search failed", err)
 			return
 		}
 		for _, sr := range hits.Series {

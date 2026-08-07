@@ -319,14 +319,14 @@ func (s *server) handleApproveRequest(w http.ResponseWriter, r *http.Request) {
 		// searches for future releases.
 		m, err := s.addMovieToLibrary(ctx, core.TMDBRef(req.TMDBID), body.SearchNow, minAvailability, body.Monitored, body.QualityProfileID, 0)
 		if err != nil {
-			s.writeManagerError(w, "add movie", err)
+			s.writeManagerError(w, core.ProviderTMDB, "add movie", err)
 			return
 		}
 		out["movie"] = movieDTO(*m)
 	default:
 		sr, err := s.addSeriesToLibrary(ctx, core.TMDBRef(req.TMDBID), body.SearchNow, body.Seasons, body.Monitored, body.QualityProfileID, 0)
 		if err != nil {
-			s.writeManagerError(w, "add series", err)
+			s.writeManagerError(w, core.ProviderTMDB, "add series", err)
 			return
 		}
 		out["series"] = seriesDTO(*sr)
@@ -459,7 +459,7 @@ func (s *server) approveScene(ctx context.Context, w http.ResponseWriter, r *htt
 	// be wanted, and the next sweep would search for nothing.
 	sr, err := s.mgr.AddSiteAndWait(ctx, scene.SiteStashID, nil, 0)
 	if err != nil {
-		s.writeManagerError(w, "add site", err)
+		s.writeManagerError(w, "", "add site", err)
 		return nil, err
 	}
 	// The add absorbs a matching pending request the way every other add path

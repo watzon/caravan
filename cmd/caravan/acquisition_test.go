@@ -218,7 +218,7 @@ func TestTMDBCredentialValidationDoesNotEvictWorkingClient(t *testing.T) {
 
 	working := adapter.metadata(ctx)
 	tmdbMovieGenres(t, working)
-	if err := adapter.ValidateMetadataKey(ctx, "candidate-key"); err != nil {
+	if err := adapter.ValidateMetadataKey(ctx, core.ProviderTMDB, "candidate-key"); err != nil {
 		t.Fatalf("ValidateMetadataKey: %v", err)
 	}
 	afterValidation := adapter.metadata(ctx)

@@ -449,7 +449,7 @@ func (s *server) handleAddMovie(w http.ResponseWriter, r *http.Request) {
 
 	m, err := s.addMovieToLibrary(r.Context(), ref, body.SearchNow, body.MinAvailability, body.Monitored, body.QualityProfileID, body.LibraryID)
 	if err != nil {
-		s.writeManagerError(w, "add movie", err)
+		s.writeManagerError(w, ref.Provider, "add movie", err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, movieDTO(*m))
@@ -798,7 +798,7 @@ func (s *server) handleDeleteMovie(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.mgr.RemoveMovie(r.Context(), id, deleteFilesRequested(r)); err != nil {
-		s.writeManagerError(w, "delete movie", err)
+		s.writeManagerError(w, "", "delete movie", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -900,7 +900,7 @@ func (s *server) handleAddSeries(w http.ResponseWriter, r *http.Request) {
 
 	sr, err := s.addSeriesToLibrary(r.Context(), ref, body.SearchMissing, body.Seasons, body.Monitored, body.QualityProfileID, body.LibraryID)
 	if err != nil {
-		s.writeManagerError(w, "add series", err)
+		s.writeManagerError(w, ref.Provider, "add series", err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, seriesDTO(*sr))
@@ -1089,7 +1089,7 @@ func (s *server) handleDeleteSeries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.mgr.RemoveSeries(r.Context(), id, deleteFilesRequested(r)); err != nil {
-		s.writeManagerError(w, "delete series", err)
+		s.writeManagerError(w, "", "delete series", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -1315,11 +1315,17 @@ func (s *server) startScan() bool {
 }
 
 // writeManagerError maps a library-manager failure to a status. A missing
-// upstream record (unknown TMDB id, missing queue entry) is a 404, an
-// unconfigured metadata provider is a 503 the UI can turn into "add a TMDB API
+// upstream record (unknown provider id, missing queue entry) is a 404, an
+// unconfigured metadata provider is a 503 the UI can turn into "add an API
 // key"; everything else is reported as a 502, because the manager's remaining
 // failure modes are the metadata provider and the filesystem, not this process.
-func (s *server) writeManagerError(w http.ResponseWriter, msg string, err error) {
+//
+// providerID is whose credential a rejection here would be about. An add and a
+// match are pinned to the ref's own provider (see library.AddMovie), so the
+// caller knows it exactly; a caller with no provider in the picture — a delete,
+// an adult site — passes "" and marks nothing, which noteMetadataFailure
+// explains.
+func (s *server) writeManagerError(w http.ResponseWriter, providerID, msg string, err error) {
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "not found")
 		return
@@ -1333,9 +1339,9 @@ func (s *server) writeManagerError(w http.ResponseWriter, msg string, err error)
 	// a raw 502 for the one failure it can actually tell the user how to fix
 	// (PLAN phase 10 task 3), and the cached credential state never learned
 	// that the key had gone bad.
-	if s.noteMetadataFailure(err) {
+	if s.noteMetadataFailure(providerID, err) {
 		writeCodedError(w, http.StatusServiceUnavailable, CodeMetadataCredentialInvalid,
-			"the TMDB API key was rejected")
+			credentialRejectedMessage(providerID))
 		return
 	}
 	// The adult twin. It is reachable only from behind requireAdult, so it can
