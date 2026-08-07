@@ -66,13 +66,16 @@ func TestMigrate0022PreservesExistingInstall(t *testing.T) {
 	wantLibs := []core.Library{
 		{ID: 1, Kind: core.LibraryKindMovie, Name: "Movies", RootPath: "library/Movies",
 			DLNAVisible: true, Provider: core.ProviderTMDB,
-			Providers: []string{core.ProviderTMDB}, IsDefault: true},
+			Providers: []string{core.ProviderTMDB}, IsDefault: true, Active: true},
 		{ID: 2, Kind: core.LibraryKindTV, Name: "Series", RootPath: "library/TV",
 			DLNAVisible: true, RouteTorrent: "embedded", Provider: core.ProviderTMDB,
-			Providers: []string{core.ProviderTMDB}, IsDefault: true},
+			Providers: []string{core.ProviderTMDB}, IsDefault: true, Active: true},
+		// 0027 reads the module switch this install had on, and carries the
+		// grant rule the module always had onto the row.
 		{ID: 3, Kind: core.LibraryKindAdult, Name: "Adult", RootPath: "library/Adult",
 			DLNAVisible: false, Provider: core.ProviderStashbox,
-			Providers: []string{core.ProviderStashbox}, IsDefault: true},
+			Providers: []string{core.ProviderStashbox}, IsDefault: true,
+			Active: true, Restricted: true},
 	}
 	if len(libs) != len(wantLibs) {
 		t.Fatalf("ListLibraries = %+v, want %+v", libs, wantLibs)

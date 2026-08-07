@@ -102,10 +102,11 @@ func TestMigrate0013PreservesThePhase8Install(t *testing.T) {
 	wantLibraries := []core.Library{
 		{ID: 1, Kind: core.LibraryKindMovie, Name: "Movies", RootPath: "library/Movies",
 			DLNAVisible: true, Provider: core.ProviderTMDB,
-			Providers: []string{core.ProviderTMDB}, IsDefault: true},
+			Providers: []string{core.ProviderTMDB}, IsDefault: true, Active: true},
 		{ID: 2, Kind: core.LibraryKindTV, Name: "Series", RootPath: "library/TV",
 			DLNAVisible: false, RouteTorrent: "embedded", QualityProfileID: 1,
-			Provider: core.ProviderTMDB, Providers: []string{core.ProviderTMDB}, IsDefault: true},
+			Provider: core.ProviderTMDB, Providers: []string{core.ProviderTMDB},
+			IsDefault: true, Active: true},
 	}
 	if !reflect.DeepEqual(libraries, wantLibraries) {
 		t.Errorf("ListLibraries = %+v, want %+v", libraries, wantLibraries)
@@ -308,6 +309,9 @@ func TestSetAdultEnabledCreatesTheLibraryOnce(t *testing.T) {
 		ID: 3, Kind: core.LibraryKindAdult, Name: AdultLibraryName,
 		RootPath: AdultLibraryRoot, DLNAVisible: false,
 		Provider: core.ProviderStashbox, Providers: []string{core.ProviderStashbox}, IsDefault: true,
+		// Born active under the enable that created it, and born restricted:
+		// the module was only ever reachable by a granted account.
+		Active: true, Restricted: true,
 	}
 	if !reflect.DeepEqual(lib, want) {
 		t.Errorf("adult library = %+v, want %+v", lib, want)

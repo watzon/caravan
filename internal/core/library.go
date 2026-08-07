@@ -78,6 +78,52 @@ type Library struct {
 	// lookups and receives items added without an explicit target. Exactly
 	// one default exists per kind (partial unique index, migration 0022).
 	IsDefault bool
+	// Active is the library's master switch. False makes it dormant for
+	// EVERYONE — an admin included — and deletes nothing: the rows, the files
+	// and the grants all wait for it to come back on. It is how a library is
+	// hidden without being destroyed, and it is the general form of the switch
+	// the adult module used to own alone.
+	Active bool
+	// Restricted narrows the library to the accounts named in `library_access`
+	// (plus admins, see LibraryVisible). False is every account.
+	//
+	// It is a flag rather than an inference from an empty roster because
+	// "restricted to nobody yet" is not "open to everybody": a library that
+	// unlocked itself the moment its last grantee was removed would do the
+	// opposite of what removing them asked for.
+	Restricted bool
+}
+
+// LibraryVisible is the whole per-library access rule, in one pure function so
+// there is exactly one truth table to read and exactly one to test. It is
+// AdultVisible generalized: the module switch became lib.Active and the
+// per-account grant became a per-library one.
+//
+// Two rules, applied in this order and no other:
+//
+//   - lib.Active binds everyone. An inactive library is dormant, not merely
+//     locked, and an admin is no exception — deactivating a library is how an
+//     owner hides one from THEMSELVES, and a switch the person holding it
+//     cannot feel is not a switch. It is also what guarantees no provider
+//     traffic, no scans and no DLNA container for a library that is off.
+//   - lib.Restricted binds members only. Admins bypass it, and that is
+//     load-bearing rather than a convenience: the API-key credential and the
+//     open install (no accounts at all) both authenticate as an admin with
+//     user id 0, and user 0 can never hold a library_access row. Binding
+//     admins to restriction would lock both of them out of every restricted
+//     library instantly, with no door left to grant themselves through. Anyone
+//     tempted by a future "restrict admins too" is looking at that failure.
+//
+// granted is whether this account holds a grant on this library. It is only
+// ever consulted for a member, and an unrecognised role is not an admin.
+func LibraryVisible(lib Library, role string, granted bool) bool {
+	if !lib.Active {
+		return false
+	}
+	if role == RoleAdmin {
+		return true
+	}
+	return !lib.Restricted || granted
 }
 
 // ProviderChain is the ordered provider list to walk when identifying an item

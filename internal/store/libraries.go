@@ -11,7 +11,8 @@ import (
 )
 
 const libraryColumns = `id, kind, name, root_path, dlna_visible,
-	route_torrent, route_usenet, quality_profile_id, provider, providers, is_default`
+	route_torrent, route_usenet, quality_profile_id, provider, providers, is_default,
+	active, restricted`
 
 // ListLibraries returns every library ordered by id, which is the order 0012
 // seeded them in: Movies first, then Series.
@@ -121,18 +122,27 @@ var (
 // caller (the API layer) validates the kind, the provider and the root path —
 // this function only owns what the schema owns: root uniqueness, and the DLNA
 // tree version, which must advance when a visible container appears.
+//
+// A library is born ACTIVE, whatever the caller left in the field. Dormancy is
+// a later and deliberate act on a library that exists — there is no form that
+// creates one already switched off, and a Go zero value silently meaning "off"
+// would make every caller written before the column existed create libraries
+// nobody can see. Restriction is the opposite: it IS a create-time decision
+// (an adult library is born restricted), so it is passed through.
 func (s *Store) CreateLibrary(ctx context.Context, l *core.Library) error {
 	chain, err := normalizeChain(l)
 	if err != nil {
 		return fmt.Errorf("store: create library %q: %w", l.Name, err)
 	}
+	l.Active = true
 	res, err := s.db.ExecContext(ctx, `
 		INSERT INTO libraries (kind, name, root_path, dlna_visible,
-			route_torrent, route_usenet, quality_profile_id, provider, providers, is_default)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			route_torrent, route_usenet, quality_profile_id, provider, providers, is_default,
+			active, restricted)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		l.Kind, l.Name, l.RootPath, l.DLNAVisible,
 		nullString(l.RouteTorrent), nullString(l.RouteUsenet), nullInt64(l.QualityProfileID),
-		l.Provider, chain, l.IsDefault)
+		l.Provider, chain, l.IsDefault, l.Active, l.Restricted)
 	if err != nil {
 		return fmt.Errorf("store: create library %q: %w", l.Name, err)
 	}
@@ -231,6 +241,13 @@ func (s *Store) SetDefaultLibrary(ctx context.Context, id int64) error {
 // while the counter stood still is one the TV keeps showing. Doing it here
 // rather than in the caller is what makes the two impossible to get out of
 // step.
+//
+// `active` advances it too, but only for a library dlna_visible was already on
+// for. The DLNA rule is `active AND dlna_visible`, so deactivating a shared
+// library removes its container and reactivating puts it back — both are tree
+// changes a cached client must be told about. For a library nobody shares, the
+// tree did not contain the container either way and the counter has nothing to
+// report.
 func (s *Store) UpdateLibrary(ctx context.Context, l *core.Library) error {
 	prev, err := s.GetLibrary(ctx, l.ID)
 	if err != nil {
@@ -243,18 +260,18 @@ func (s *Store) UpdateLibrary(ctx context.Context, l *core.Library) error {
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE libraries SET name = ?, root_path = ?, dlna_visible = ?,
 			route_torrent = ?, route_usenet = ?, quality_profile_id = ?, provider = ?,
-			providers = ?
+			providers = ?, active = ?, restricted = ?
 		WHERE id = ?`,
 		l.Name, l.RootPath, l.DLNAVisible,
 		nullString(l.RouteTorrent), nullString(l.RouteUsenet), nullInt64(l.QualityProfileID),
-		l.Provider, chain, l.ID)
+		l.Provider, chain, l.Active, l.Restricted, l.ID)
 	if err != nil {
 		return fmt.Errorf("store: update library %d: %w", l.ID, err)
 	}
 	if err := affectedOne(res, "library", l.ID); err != nil {
 		return err
 	}
-	if prev.DLNAVisible != l.DLNAVisible {
+	if prev.DLNAVisible != l.DLNAVisible || (prev.Active != l.Active && l.DLNAVisible) {
 		return s.bumpDLNAUpdateID(ctx)
 	}
 	return nil
@@ -584,7 +601,8 @@ func scanLibrary(sc scanner) (*core.Library, error) {
 		providers sql.NullString
 	)
 	if err := sc.Scan(&l.ID, &l.Kind, &l.Name, &l.RootPath, &l.DLNAVisible,
-		&torrent, &usenet, &profileID, &l.Provider, &providers, &l.IsDefault); err != nil {
+		&torrent, &usenet, &profileID, &l.Provider, &providers, &l.IsDefault,
+		&l.Active, &l.Restricted); err != nil {
 		return nil, err
 	}
 	l.RouteTorrent = torrent.String
