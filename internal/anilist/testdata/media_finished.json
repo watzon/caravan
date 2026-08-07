@@ -1,0 +1,77 @@
+{
+  "data": {
+    "Media": {
+      "id": 98202,
+      "title": {
+        "romaji": "Yuru Camp△",
+        "english": "Laid-Back Camp",
+        "native": "ゆるキャン△"
+      },
+      "synonyms": ["Yurucamp", "Heartwarming Camp"],
+      "startDate": { "year": 2018, "month": 1, "day": 4 },
+      "endDate": { "year": 2018, "month": 3, "day": 22 },
+      "description": "Rin camps alone at the foot of <i>Mount Fuji</i>.<br><br>(Source: Crunchyroll)",
+      "averageScore": 82,
+      "status": "FINISHED",
+      "episodes": 12,
+      "format": "TV",
+      "coverImage": {
+        "extraLarge": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx98202-cfSDlnyLOAcT.jpg",
+        "large": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx98202-cfSDlnyLOAcT.jpg"
+      },
+      "stats": {
+        "scoreDistribution": [
+          { "amount": 12 },
+          { "amount": 130 },
+          { "amount": 2400 }
+        ]
+      },
+      "nextAiringEpisode": null,
+      "streamingEpisodes": [
+        {
+          "title": "Episode 1 - Mount Fuji and Curry Noodles",
+          "url": "https://www.crunchyroll.com/laid-back-camp/episode-1",
+          "site": "Crunchyroll"
+        },
+        {
+          "title": "Episode 1 - Mount Fuji and Curry Noodles (dub)",
+          "url": "https://www.funimation.com/shows/laid-back-camp/episode-1",
+          "site": "Funimation"
+        },
+        {
+          "title": "Episode 2 - Welcome to the Outdoor Activities Circle!",
+          "url": "https://www.crunchyroll.com/laid-back-camp/episode-2",
+          "site": "Crunchyroll"
+        },
+        {
+          "title": "Episode 3",
+          "url": "https://www.crunchyroll.com/laid-back-camp/episode-3",
+          "site": "Crunchyroll"
+        },
+        {
+          "title": "Room Camp - Special",
+          "url": "https://www.crunchyroll.com/room-camp/episode-1",
+          "site": "Crunchyroll"
+        },
+        {
+          "title": "Episode 12 - Mount Fuji and the Solo Camper Girls",
+          "url": "https://www.crunchyroll.com/laid-back-camp/episode-12",
+          "site": "Crunchyroll"
+        }
+      ],
+      "airingSchedule": {
+        "pageInfo": { "hasNextPage": true },
+        "nodes": [
+          { "episode": 1, "airingAt": 1515024000 },
+          { "episode": 2, "airingAt": 1515628800 },
+          { "episode": 3, "airingAt": 1516233600 },
+          { "episode": 4, "airingAt": 1516838400 },
+          { "episode": 5, "airingAt": 1517443200 },
+          { "episode": 6, "airingAt": 1518048000 },
+          { "episode": 7, "airingAt": 1518652800 },
+          { "episode": 8, "airingAt": 1519257600 }
+        ]
+      }
+    }
+  }
+}

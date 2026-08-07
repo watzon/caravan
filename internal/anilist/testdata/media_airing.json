@@ -1,0 +1,57 @@
+{
+  "data": {
+    "Media": {
+      "id": 116742,
+      "title": {
+        "romaji": "Tsuki ga Michibiku Isekai Douchuu",
+        "english": null,
+        "native": "月が導く異世界道中"
+      },
+      "synonyms": ["Tsukimichi: Moonlit Fantasy"],
+      "startDate": { "year": 2021, "month": 7, "day": 7 },
+      "endDate": { "year": null, "month": null, "day": null },
+      "description": "Makoto is summoned to another world &mdash; and promptly dumped in the wastelands.<br><br>(Source: Crunchyroll)",
+      "averageScore": 75,
+      "status": "RELEASING",
+      "episodes": null,
+      "format": "TV",
+      "coverImage": {
+        "extraLarge": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx116742-jTfNRt0nHOhu.jpg",
+        "large": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx116742-jTfNRt0nHOhu.jpg"
+      },
+      "stats": {
+        "scoreDistribution": [
+          { "amount": 40 },
+          { "amount": 260 },
+          { "amount": 700 }
+        ]
+      },
+      "nextAiringEpisode": { "episode": 8, "airingAt": 1629849600 },
+      "streamingEpisodes": [
+        {
+          "title": "Episode 1 - The Goddess's Rejection",
+          "url": "https://www.crunchyroll.com/tsukimichi/episode-1",
+          "site": "Crunchyroll"
+        },
+        {
+          "title": "Episode 2 - The Demon Lord's Daughter",
+          "url": "https://www.crunchyroll.com/tsukimichi/episode-2",
+          "site": "Crunchyroll"
+        }
+      ],
+      "airingSchedule": {
+        "pageInfo": { "hasNextPage": false },
+        "nodes": [
+          { "episode": 1, "airingAt": 1625616000 },
+          { "episode": 2, "airingAt": 1626220800 },
+          { "episode": 3, "airingAt": 1626825600 },
+          { "episode": 4, "airingAt": 1627430400 },
+          { "episode": 5, "airingAt": 1628035200 },
+          { "episode": 6, "airingAt": 1628640000 },
+          { "episode": 7, "airingAt": 1629244800 },
+          { "episode": 8, "airingAt": 1629849600 }
+        ]
+      }
+    }
+  }
+}
