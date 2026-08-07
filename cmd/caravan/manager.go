@@ -16,6 +16,7 @@ import (
 	"github.com/watzon/caravan/internal/stashbox"
 	"github.com/watzon/caravan/internal/store"
 	"github.com/watzon/caravan/internal/tmdb"
+	"github.com/watzon/caravan/internal/tvmaze"
 )
 
 // metadataTimeout bounds a single provider HTTP call.
@@ -71,6 +72,12 @@ type libraryAdapter struct {
 	// anilist is THE AniList client for this process — there is no cache key
 	// beside it because there is no setting to key on; see anilistClient.
 	anilist *anilist.Client
+	// tvmazeMu guards tvmaze, which is read and replaced from concurrent HTTP
+	// handlers.
+	tvmazeMu sync.Mutex
+	// tvmaze is THE TVmaze client for this process, for the same reason anilist
+	// is the only AniList one; see tvmazeClient.
+	tvmaze *tvmaze.Client
 }
 
 // cachedTMDB is one TMDB client and the setting that defines it.
@@ -129,6 +136,8 @@ func (p providerRegistry) Metadata(ctx context.Context, providerID string) core.
 		return p.a.metadata(ctx)
 	case core.ProviderAniList:
 		return p.a.anilistClient()
+	case core.ProviderTVmaze:
+		return p.a.tvmazeClient()
 	}
 	return nil
 }
@@ -147,7 +156,7 @@ func (p providerRegistry) Adult(ctx context.Context, providerID string) core.Adu
 //
 // It EMBEDS providerRegistry rather than restating the metadata switch, so a
 // provider added there reaches the watcher without a second edit — which is
-// how AniList got there.
+// how AniList and TVmaze both got there.
 type metadataOnlyRegistry struct{ providerRegistry }
 
 func (metadataOnlyRegistry) Adult(context.Context, string) core.AdultMetadataProvider { return nil }
@@ -239,6 +248,27 @@ func (a *libraryAdapter) anilistClient() *anilist.Client {
 		a.anilist = anilist.New(a.hc)
 	}
 	return a.anilist
+}
+
+// tvmazeClient returns THE TVmaze client, building it once.
+//
+// It takes no cache key for the same reason anilistClient does not: TVmaze's
+// read API is public, so no setting can change what a client for it would be,
+// and the host is a constant rather than a preset (see tvmaze.DefaultBaseURL).
+//
+// Reuse is the contract here too, not an optimisation. The client carries the
+// throttle for a budget TVmaze enforces per CALLER — and one GetSeries costs
+// two requests — so a client built per call would hand every caller a fresh,
+// empty budget and the process would walk straight into the limit the throttle
+// exists to respect.
+func (a *libraryAdapter) tvmazeClient() *tvmaze.Client {
+	a.tvmazeMu.Lock()
+	defer a.tvmazeMu.Unlock()
+
+	if a.tvmaze == nil {
+		a.tvmaze = tvmaze.New(a.hc)
+	}
+	return a.tvmaze
 }
 
 // watcherManager builds the one library.Manager the import watcher holds for

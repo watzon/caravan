@@ -40,6 +40,12 @@ func TestProviderServesRejectsMismatches(t *testing.T) {
 		// creatable against it.
 		{ProviderAniList, LibraryKindMovie, false},
 		{ProviderAniList, LibraryKindAdult, false},
+		{ProviderTVmaze, LibraryKindTV, true},
+		// TVmaze catalogues television only: internal/tvmaze refuses movie
+		// lookups with ErrProviderKindUnsupported, so a movie library must not
+		// be creatable against it.
+		{ProviderTVmaze, LibraryKindMovie, false},
+		{ProviderTVmaze, LibraryKindAdult, false},
 		{"", LibraryKindMovie, false},
 	}
 	for _, c := range cases {

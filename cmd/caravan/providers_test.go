@@ -32,6 +32,30 @@ func TestAniListClientIsReused(t *testing.T) {
 	}
 }
 
+// TVmaze needs no credential either, so its entry has to resolve on a store
+// where nothing has been configured at all — a library chained to it works on a
+// fresh install, and a test that seeded a setting first would not prove it.
+func TestProviderRegistryResolvesTVmazeWithoutSettings(t *testing.T) {
+	adapter, _ := testAdapter(t)
+	reg := providerRegistry{adapter}
+
+	if got := reg.Metadata(context.Background(), core.ProviderTVmaze); got == nil {
+		t.Fatal("Metadata(tvmaze) = nil, want a client")
+	}
+}
+
+// The client is built once and reused, because the throttle it carries is the
+// process-wide budget TVmaze enforces. A second call that built a second client
+// would hand the caller a fresh, empty budget.
+func TestTVmazeClientIsReused(t *testing.T) {
+	adapter, _ := testAdapter(t)
+
+	first := adapter.tvmazeClient()
+	if second := adapter.tvmazeClient(); second != first {
+		t.Error("tvmazeClient built a second client; the throttle would be reset")
+	}
+}
+
 // An id nobody compiled in must be a GENUINE untyped nil: callers test the
 // interface value, and a typed nil pointer would pass that test and then be
 // called.

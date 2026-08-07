@@ -10,6 +10,7 @@ const (
 	ProviderTMDB     = "tmdb"
 	ProviderStashbox = "stashbox"
 	ProviderAniList  = "anilist"
+	ProviderTVmaze   = "tvmaze"
 )
 
 // ProviderDescriptor describes one compiled-in metadata provider.
@@ -38,6 +39,12 @@ var providers = []ProviderDescriptor{
 	// movie kind here would let a movie library be created against a provider
 	// that refuses every movie lookup.
 	{ID: ProviderAniList, Name: "AniList", Kinds: []string{LibraryKindTV}},
+	// TVmaze catalogues television and nothing else — there is no film half of
+	// its catalogue to claim — and internal/tvmaze answers GetMovie with
+	// ErrProviderKindUnsupported. Claiming the movie kind here would let a
+	// movie library be created against a provider that refuses every movie
+	// lookup.
+	{ID: ProviderTVmaze, Name: "TVmaze", Kinds: []string{LibraryKindTV}},
 }
 
 // Providers returns the compiled-in provider descriptors. The result is a
