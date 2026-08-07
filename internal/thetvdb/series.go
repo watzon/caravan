@@ -294,9 +294,10 @@ func seasons(records []episodeRecord) []core.SeasonMeta {
 			Title:    e.Name,
 			Overview: htmltext.Strip(e.Overview),
 			AirDate:  air,
-			// e.AbsoluteNumber is deliberately not mapped: core.EpisodeMeta
-			// gains the field in the absolute-numbering phase, which is what
-			// consumes it.
+			// TheTVDB's own running count, passed through as it arrives: 0 for
+			// an episode it keeps no absolute order for, which is what "not
+			// known" is spelled as everywhere downstream.
+			Absolute: e.AbsoluteNumber,
 		})
 		if !air.IsZero() {
 			if first, ok := airDates[e.SeasonNumber]; !ok || air.Before(first) {

@@ -178,4 +178,9 @@ type EpisodeMeta struct {
 	Overview string
 	// AirDate is zero when the episode is unaired or the provider had no date.
 	AirDate time.Time
+	// Absolute is the provider's series-wide episode number, 0 when the
+	// provider serves none. It is the provider's own count, never a derived
+	// one: a number counted here by walking the seasons would be an answer
+	// Caravan invented about a series it does not publish.
+	Absolute int
 }

@@ -18,8 +18,12 @@ func day(y, m, d int) time.Time {
 }
 
 // ep is one episode of the single synthesized season.
+// Absolute is n and not 0: on AniList the episode number IS the absolute
+// number, because each cour is its own Media record and nothing this record
+// describes precedes its own episode 1. Every expectation below carries it, so
+// a mapping that stopped emitting it could not pass quietly.
 func ep(n int, title string, air time.Time) core.EpisodeMeta {
-	return core.EpisodeMeta{Season: 1, Number: n, Title: title, AirDate: air}
+	return core.EpisodeMeta{Season: 1, Number: n, Absolute: n, Title: title, AirDate: air}
 }
 
 func TestSearchSeries(t *testing.T) {

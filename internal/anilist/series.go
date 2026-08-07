@@ -314,7 +314,13 @@ func season(m mediaResult, airDates map[int]time.Time) core.SeasonMeta {
 		sm.Episodes = append(sm.Episodes, core.EpisodeMeta{
 			Season: 1,
 			Number: n,
-			Title:  titles[n],
+			// The episode number IS the absolute number here. AniList models
+			// each cour as its own single-season Media record, so nothing this
+			// record describes ever precedes episode 1 of it — that is a
+			// statement about AniList's data model, not an assumption about
+			// anime.
+			Absolute: n,
+			Title:    titles[n],
 			// Zero for an episode past maxAiringPages or one AniList has no
 			// schedule node for, which is what an unaired episode carries too.
 			AirDate: airDates[n],
@@ -453,4 +459,3 @@ func firstNonEmpty(vals ...string) string {
 	}
 	return ""
 }
-

@@ -188,6 +188,11 @@ type Episode struct {
 	// it is the release date, and its year is the season the scene lands in.
 	AirDate   time.Time
 	Monitored bool
+	// AbsoluteNumber is the provider's series-wide episode number — the count
+	// an anime-style release name uses ("Show - 105") — and 0 when no provider
+	// ever served one for this episode. Zero is "not known", not "the zeroth
+	// episode", so nothing may derive it (migration 0025).
+	AbsoluteNumber int
 	// Scene is the scene-side metadata of an adult episode, nil on every
 	// television episode. It rides in one JSON column because nothing queries
 	// on it — it is rendered on a scene row and nowhere else.

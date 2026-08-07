@@ -135,6 +135,8 @@ func TestGetSeriesBuildsSeasonsIncludingSpecials(t *testing.T) {
 			// worth reading.
 			AirDate: day(2009, 2, 17),
 			Episodes: []core.EpisodeMeta{
+				// A special TheTVDB keeps out of the running order: absolute 0,
+				// which is what "no absolute number" is spelled as.
 				{Season: 0, Number: 1, Title: "Good Cop / Bad Cop",
 					Overview: "A promotional short. TheTVDB numbers it inside the specials season.",
 					AirDate:  day(2009, 2, 17)},
@@ -145,10 +147,10 @@ func TestGetSeriesBuildsSeasonsIncludingSpecials(t *testing.T) {
 			Title:   "Season 1",
 			AirDate: day(2008, 1, 20),
 			Episodes: []core.EpisodeMeta{
-				{Season: 1, Number: 1, Title: "Pilot",
+				{Season: 1, Number: 1, Absolute: 1, Title: "Pilot",
 					Overview: "Diagnosed with terminal lung cancer, Walter White turns to cooking.",
 					AirDate:  day(2008, 1, 20)},
-				{Season: 1, Number: 2, Title: "Cat's in the Bag...", AirDate: day(2008, 1, 27)},
+				{Season: 1, Number: 2, Absolute: 2, Title: "Cat's in the Bag...", AirDate: day(2008, 1, 27)},
 			},
 		},
 		{
@@ -157,11 +159,14 @@ func TestGetSeriesBuildsSeasonsIncludingSpecials(t *testing.T) {
 			AirDate: day(2009, 3, 8),
 			Episodes: []core.EpisodeMeta{
 				// Page 1 serves these out of order, and the overview is real
-				// markup: both are normalised here rather than downstream.
-				{Season: 2, Number: 1, Title: "Seven Thirty-Seven",
+				// markup: both are normalised here rather than downstream. The
+				// absolute numbers ride along per episode — 9 and 10 across a
+				// season boundary, which is the whole point of the order and the
+				// one thing counting seasons here could never reproduce.
+				{Season: 2, Number: 1, Absolute: 9, Title: "Seven Thirty-Seven",
 					Overview: "Walt and Jesse deal with the aftermath.",
 					AirDate:  day(2009, 3, 8)},
-				{Season: 2, Number: 2, Title: "Grilled", AirDate: day(2009, 3, 15)},
+				{Season: 2, Number: 2, Absolute: 10, Title: "Grilled", AirDate: day(2009, 3, 15)},
 			},
 		},
 	}

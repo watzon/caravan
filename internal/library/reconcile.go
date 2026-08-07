@@ -457,14 +457,15 @@ func (m *Manager) upsertSeriesTree(ctx context.Context, sr *core.Series, meta *c
 				monitored = sr.Monitored && em.Season != 0
 			}
 			episode := &core.Episode{
-				SeriesID:      seriesID,
-				SeasonNumber:  em.Season,
-				EpisodeNumber: em.Number,
-				TMDBID:        em.TMDBID,
-				Title:         em.Title,
-				Overview:      em.Overview,
-				AirDate:       em.AirDate,
-				Monitored:     monitored,
+				SeriesID:       seriesID,
+				SeasonNumber:   em.Season,
+				EpisodeNumber:  em.Number,
+				TMDBID:         em.TMDBID,
+				Title:          em.Title,
+				Overview:       em.Overview,
+				AirDate:        em.AirDate,
+				Monitored:      monitored,
+				AbsoluteNumber: em.Absolute,
 			}
 			if err := m.store.UpsertEpisode(ctx, episode); err != nil {
 				return err
