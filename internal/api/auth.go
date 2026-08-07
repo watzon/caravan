@@ -735,13 +735,23 @@ type sceneFiltersJSON struct {
 	AnyOf         bool `json:"any_of"`
 }
 
-// sceneFilters reports what the configured adult provider can serve, or nil
-// when there is nothing to report: an ungranted caller, or no credential.
-func (s *server) sceneFilters(adult bool) *sceneFiltersJSON {
+// sceneFilters reports what the adult provider can serve, or nil when there is
+// nothing to report: an ungranted caller, or no credential.
+//
+// KNOWN FOLLOW-UP (PLAN Part 2, deliberate seam for Part 3): it reports the
+// DEFAULT instance's capabilities, because /auth/me is read before any scene
+// request and has no library to key on. On a server whose boxes differ — TPDB
+// serves a release year and a runtime, a StashDB or FansDB install refuses both
+// — the rail is drawn from the default box's dialect and a filter it offers can
+// still be refused by another one. The refusal is already handled (see
+// handleAdultDiscover's SceneFilterUnsupportedError branch); what is missing is
+// the rail narrowing itself per instance, which needs the per-library scope
+// Part 3 introduces.
+func (s *server) sceneFilters(ctx context.Context, adult bool) *sceneFiltersJSON {
 	if !adult {
 		return nil
 	}
-	provider := s.mgr.AdultMetadata()
+	provider, _ := s.mgr.DefaultAdultMetadata(ctx)
 	if provider == nil {
 		return nil
 	}
@@ -770,7 +780,7 @@ func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreError(w, "read adult settings", err)
 		return
 	}
-	filters := s.sceneFilters(adult)
+	filters := s.sceneFilters(r.Context(), adult)
 	user := currentUser(r)
 	if user.ID == 0 {
 		writeJSON(w, http.StatusOK, meResponse{

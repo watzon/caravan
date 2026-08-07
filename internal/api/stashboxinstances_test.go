@@ -429,3 +429,143 @@ func TestPutSettingsNoLongerAcceptsStashboxCredentials(t *testing.T) {
 		t.Fatalf("settings still project the retired endpoint: %v", settings)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Instance resolution on the adult surfaces (PLAN Part 2 phase 4).
+// ---------------------------------------------------------------------------
+
+// adultAdminWithProvider is adultAdmin with a canned stash-box behind it and the
+// two instances the resolution tests choose between.
+func adultAdminWithProvider(t *testing.T) (http.Handler, *store.Store, *stubManager, *http.Cookie) {
+	t.Helper()
+	h, st, mgr, cookie := adultAdmin(t)
+	mgr.adult = &fakeAdultProvider{
+		sites:  []core.SiteMeta{{StashID: "site-1", Name: "Brazzers"}},
+		scenes: fakeScenes(),
+	}
+	seedStashboxInstance(t, st, core.ProviderStashbox, "StashDB", "https://stashdb.org/graphql")
+	seedStashboxInstance(t, st, core.ProviderStashbox+":fansdb", "FansDB", "https://fansdb.cc/graphql")
+	return h, st, mgr, cookie
+}
+
+// A hit says which box answered, because two boxes can hold the same site under
+// the same UUID — a hit without the instance names nothing an add could pin to.
+func TestAdultHitsCarryTheAnsweringInstance(t *testing.T) {
+	h, st, _, cookie := adultAdminWithProvider(t)
+
+	assertProvider := func(target, want string) {
+		t.Helper()
+		rec := doAuth(t, h, http.MethodGet, target, "", withCookie(cookie))
+		wantStatus(t, rec, http.StatusOK)
+		var body struct {
+			Sites  []siteMetaJSON  `json:"sites"`
+			Scenes []sceneMetaJSON `json:"scenes"`
+		}
+		decodeBody(t, rec, &body)
+		for _, site := range body.Sites {
+			if site.Provider != want {
+				t.Errorf("%s: site provider = %q, want %q", target, site.Provider, want)
+			}
+		}
+		for _, scene := range body.Scenes {
+			if scene.Provider != want {
+				t.Errorf("%s: scene provider = %q, want %q", target, scene.Provider, want)
+			}
+		}
+		if len(body.Sites)+len(body.Scenes) == 0 {
+			t.Fatalf("%s answered nothing to attribute", target)
+		}
+	}
+
+	// The default: the adult library's chain head, which the enable seeded as
+	// the legacy id.
+	assertProvider("/api/v1/adult/search?q=brazzers", core.ProviderStashbox)
+	assertProvider("/api/v1/adult/discover", core.ProviderStashbox)
+
+	// Moving the library's chain moves the default with it.
+	ctx := context.Background()
+	lib, err := st.GetLibraryByKind(ctx, core.LibraryKindAdult)
+	if err != nil {
+		t.Fatalf("GetLibraryByKind: %v", err)
+	}
+	lib.Provider = core.ProviderStashbox + ":fansdb"
+	lib.Providers = []string{core.ProviderStashbox + ":fansdb"}
+	if err := st.UpdateLibrary(ctx, lib); err != nil {
+		t.Fatalf("UpdateLibrary: %v", err)
+	}
+	assertProvider("/api/v1/adult/search?q=brazzers", core.ProviderStashbox+":fansdb")
+
+	// And an explicit ?provider= overrules the default.
+	assertProvider("/api/v1/adult/search?q=brazzers&provider="+core.ProviderStashbox, core.ProviderStashbox)
+	assertProvider("/api/v1/adult/discover?provider="+core.ProviderStashbox, core.ProviderStashbox)
+}
+
+// An id nothing answers to is the CALLER's mistake and reads as one. Passing it
+// through would come back as the same nil an unconfigured module gives, and a
+// typo would be reported as a configuration problem.
+func TestAdultSurfacesRefuseAnUnknownProvider(t *testing.T) {
+	h, _, mgr, cookie := adultAdminWithProvider(t)
+
+	for _, target := range []string{
+		"/api/v1/adult/search?q=x&provider=" + core.ProviderStashbox + ":nope",
+		"/api/v1/adult/discover?provider=" + core.ProviderTMDB,
+		"/api/v1/adult/performers?q=mia&provider=" + core.ProviderStashbox + ":nope",
+		"/api/v1/adult/tags?q=anal&provider=not%20an%20id",
+	} {
+		rec := doAuth(t, h, http.MethodGet, target, "", withCookie(cookie))
+		wantStatus(t, rec, http.StatusBadRequest)
+		wantErrorBody(t, rec)
+	}
+	if calls := mgr.adult.(*fakeAdultProvider).callLog(); len(calls) != 0 {
+		t.Errorf("a refused provider id still reached the endpoint: %v", calls)
+	}
+}
+
+// The bodies accept the same id the hits carry, validated the same way. AddSite
+// cannot yet carry it to the library layer (see handleAddSite) and a request row
+// has no column for it, so both drop it — but neither accepts one nobody checked.
+func TestAdultBodiesValidateTheInstanceTheyName(t *testing.T) {
+	h, _, _, cookie := adultAdminWithProvider(t)
+
+	wantStatus(t, doAuth(t, h, http.MethodPost, "/api/v1/adult/sites",
+		`{"stash_id":"site-1","provider":"`+core.ProviderStashbox+`:fansdb"}`, withCookie(cookie)),
+		http.StatusCreated)
+
+	for _, probe := range []struct{ path, body string }{
+		{"/api/v1/adult/sites", `{"stash_id":"site-2","provider":"` + core.ProviderStashbox + `:nope"}`},
+		{"/api/v1/requests", `{"media_type":"scene","stash_id":"scene-9","title":"X","provider":"` + core.ProviderStashbox + `:nope"}`},
+		{"/api/v1/requests", `{"media_type":"movie","tmdb_id":603,"title":"X","provider":"` + core.ProviderStashbox + `"}`},
+	} {
+		rec := doAuth(t, h, http.MethodPost, probe.path, probe.body, withCookie(cookie))
+		wantStatus(t, rec, http.StatusBadRequest)
+		wantErrorBody(t, rec)
+	}
+}
+
+// /auth/me reports the DEFAULT instance's filter dialect. It is read before the
+// first scene request and has no library to key on, which is the known follow-up
+// sceneFilters documents.
+func TestSceneFiltersReportTheDefaultInstance(t *testing.T) {
+	h, _, mgr, cookie := adultAdminWithProvider(t)
+
+	rec := doAuth(t, h, http.MethodGet, "/api/v1/auth/me", "", withCookie(cookie))
+	wantStatus(t, rec, http.StatusOK)
+	var me meResponse
+	decodeBody(t, rec, &me)
+	if !me.Adult || me.SceneFilters == nil {
+		t.Fatalf("me = %+v, want the adult module and its filter rail", me)
+	}
+
+	// With no provider behind the module there is nothing to report, and the
+	// screen's own 503 is the better answer.
+	mgr.adult = nil
+	rec = doAuth(t, h, http.MethodGet, "/api/v1/auth/me", "", withCookie(cookie))
+	wantStatus(t, rec, http.StatusOK)
+	// A fresh value: scene_filters is omitempty, so decoding into the old one
+	// would keep the pointer the first response set.
+	me = meResponse{}
+	decodeBody(t, rec, &me)
+	if me.SceneFilters != nil {
+		t.Fatalf("scene_filters = %+v with no provider, want absent", me.SceneFilters)
+	}
+}

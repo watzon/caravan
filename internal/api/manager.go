@@ -129,16 +129,30 @@ type Manager interface {
 	// module cannot be switched on with a credential that does not work.
 	ValidateAdultCredential(ctx context.Context, endpoint, apiKey string) error
 
-	// AdultMetadata returns the configured adult metadata provider, or nil.
+	// AdultMetadataFor returns the provider for ONE configured stash-box
+	// instance, or nil.
 	//
-	// Nil is the answer both when no stash-box credential has been entered and
-	// when the module is switched off, and the second half is load-bearing: it
-	// is the wiring's own guard, independent of requireAdult and of
-	// library.adultReady, so the "zero stash-box traffic when disabled"
-	// acceptance survives any one of the three being got wrong. The nil must be
-	// a genuine untyped nil rather than a typed nil pointer, because callers
-	// test the interface value (see Metadata).
-	AdultMetadata() core.AdultMetadataProvider
+	// Nil is the answer when the module is switched off, when no instance
+	// answers to that id, and when the one that does has no credential. The
+	// first is load-bearing: it is the wiring's own guard, independent of
+	// requireAdult and of library.adultReady, so the "zero stash-box traffic
+	// when disabled" acceptance survives any one of the three being got wrong.
+	// The nil must be a genuine untyped nil rather than a typed nil pointer,
+	// because callers test the interface value (see Metadata).
+	//
+	// There is deliberately no fallback for an id nothing answers to. The refs
+	// on a pinned item were minted by one catalogue, and asking a different one
+	// about them does not fail — it answers about something else.
+	AdultMetadataFor(ctx context.Context, providerID string) core.AdultMetadataProvider
+
+	// DefaultAdultMetadata is the provider a surface that names no instance
+	// answers from, together with the id it resolved to — so the answer can say
+	// which box it came from, which is the whole point of the `provider` field
+	// on the site and scene DTOs.
+	//
+	// The choice is the default adult library's chain head, or the oldest
+	// instance when it names none. Both halves are nil/"" when the module is off.
+	DefaultAdultMetadata(ctx context.Context) (core.AdultMetadataProvider, string)
 }
 
 // Media types accepted by POST /import/queue/{id}/match and POST /requests,

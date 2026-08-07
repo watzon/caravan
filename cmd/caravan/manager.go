@@ -56,12 +56,14 @@ type libraryAdapter struct {
 	// disjoint sets of imports — see library.AdultNotifier.
 	notifyAdult library.AdultNotifier
 
-	// adultMu guards adult, which is read and replaced from concurrent HTTP
+	// adultMu guards adult, which is read and written from concurrent HTTP
 	// handlers.
 	adultMu sync.Mutex
-	// adult is the last stash-box client built, kept alongside the settings it
-	// was built from; see stashboxClient.
-	adult *cachedStashbox
+	// adult is one cached stash-box client per configured instance, keyed by
+	// provider id. A map rather than a single slot because the endpoints are
+	// separate catalogues with separate accounts, and a chain can walk two of
+	// them in one lookup — one slot would evict on every hop. See stashboxClient.
+	adult map[string]*cachedStashbox
 	// tmdbMu guards tmdb, which is read and replaced from concurrent HTTP
 	// handlers.
 	tmdbMu sync.Mutex
@@ -94,10 +96,10 @@ type cachedTMDB struct {
 	client *tmdb.Client
 }
 
-// cachedStashbox is one stash-box client and the two settings that define it.
-// The settings are the cache key rather than a generation counter because they
-// are the whole of what New takes: if neither changed, the client that would be
-// built is the client already held.
+// cachedStashbox is one stash-box client and the two instance fields that
+// define it. They are the cache key rather than a generation counter because
+// they are the whole of what New takes: if neither changed, the client that
+// would be built is the client already held.
 type cachedStashbox struct {
 	key      string
 	endpoint string
@@ -133,7 +135,7 @@ func (a *libraryAdapter) current(ctx context.Context) (*library.Manager, error) 
 	return library.NewManager(a.st, a.metadata(ctx), root,
 		library.WithNotifier(a.notify),
 		library.WithAdultNotifier(a.notifyAdult),
-		library.WithAdultProvider(a.adultMetadata(ctx)),
+		library.WithAdultProvider(a.defaultAdultProvider(ctx)),
 		library.WithProviders(providerRegistry{a}),
 	), nil
 }
@@ -161,11 +163,16 @@ func (p providerRegistry) Metadata(ctx context.Context, providerID string) core.
 	return nil
 }
 
+// Adult resolves any id whose BASE is stash-box, which is what makes a chain
+// instance-aware without a case per endpoint: the compiled protocol is the
+// switch, the slug names which catalogue speaks it, and an id naming an
+// instance this install does not hold answers nil exactly as an unknown
+// provider does.
 func (p providerRegistry) Adult(ctx context.Context, providerID string) core.AdultMetadataProvider {
-	if providerID == core.ProviderStashbox {
-		return p.a.adultMetadata(ctx)
+	if core.ProviderBase(providerID) != core.ProviderStashbox {
+		return nil
 	}
-	return nil
+	return p.a.adultClientFor(ctx, providerID)
 }
 
 // metadataOnlyRegistry is providerRegistry with the adult half removed. The
@@ -180,22 +187,29 @@ type metadataOnlyRegistry struct{ providerRegistry }
 
 func (metadataOnlyRegistry) Adult(context.Context, string) core.AdultMetadataProvider { return nil }
 
-// adultMetadata returns the stash-box provider, or nil.
+// adultClientFor returns the client for one configured stash-box instance, or
+// nil.
 //
-// It is nil unless the module is switched on AND a credential has been entered,
-// and the order matters: the switch is read first, so a server with adult
-// content disabled builds no client at all. library.adultReady checks the same
-// switch, which makes this the second of two independent reasons the endpoint
-// cannot be reached when the module is off — the acceptance criterion is zero
-// requests, and one guard is one bug away from zero guards.
+// It is nil unless the module is switched on AND the instance exists AND it has
+// a credential, and the order matters: the switch is read FIRST, so a server
+// with adult content disabled makes no instance lookup and builds no client at
+// all. library.adultReady checks the same switch, which makes this the second of
+// two independent reasons the endpoint cannot be reached when the module is off
+// — the acceptance criterion is zero requests, and one guard is one bug away
+// from zero guards.
+//
+// An id no row answers to is nil rather than a fall back to another box. The
+// refs on a pinned item were minted by ONE catalogue, and asking a different one
+// about them does not fail — it answers about something else.
 //
 // The nil is a genuine untyped nil for the same reason Metadata's is: callers
 // test the interface value against nil, and a typed nil *stashbox.Client would
 // pass that test and then make a request.
 //
-// The settings are still read on every call — turning the module off has to take
-// effect at once — but the client built from them is reused; see stashboxClient.
-func (a *libraryAdapter) adultMetadata(ctx context.Context) core.AdultMetadataProvider {
+// The row is read on every call — turning the module off, or rotating a key, has
+// to take effect at once — but the client built from it is reused; see
+// stashboxClient.
+func (a *libraryAdapter) adultClientFor(ctx context.Context, providerID string) core.AdultMetadataProvider {
 	enabled, err := a.st.AdultEnabled(ctx)
 	if err != nil {
 		a.log.Error("read adult setting", "error", err)
@@ -204,44 +218,116 @@ func (a *libraryAdapter) adultMetadata(ctx context.Context) core.AdultMetadataPr
 	if !enabled {
 		return nil
 	}
-	key, err := a.setting(ctx, store.SettingStashboxAPIKey)
+	in, err := a.st.GetStashboxInstanceByProviderID(ctx, providerID)
 	if err != nil {
-		a.log.Error("read stash-box api key", "error", err)
+		// A gone instance is a configuration fact, not a failure: the caller's
+		// answer is the same nil an unconfigured module gives, and the surfaces
+		// above report that as "no provider configured".
+		if !errors.Is(err, store.ErrNotFound) {
+			a.log.Error("read stash-box instance", "provider", providerID, "error", err)
+		}
 		return nil
 	}
-	if key == "" {
+	// A box that serves anonymous reads needs no key, but nothing on this door
+	// configures one that way: every instance is created through a form that
+	// tests a credential, so an empty key here means "not finished configuring"
+	// and is the same nil the settings pair used to give.
+	if in.APIKey == "" {
 		return nil
 	}
-	endpoint, err := a.setting(ctx, store.SettingStashboxEndpoint)
-	if err != nil {
-		a.log.Error("read stash-box endpoint", "error", err)
-		return nil
-	}
-	return a.stashboxClient(key, endpoint)
+	return a.stashboxClient(in.ProviderID, in.APIKey, in.Endpoint)
 }
 
-// stashboxClient returns the client for these settings, reusing the last one
-// while they are unchanged.
+// defaultAdultMetadata resolves the instance a surface that names none should
+// answer from, and reports which one it chose.
+//
+// The default adult library's chain head is the answer when there is one: it is
+// the box that library identifies new sites through, so it is the box whose
+// catalogue a bare search should be reading. The lowest-id instance is the
+// fallback, which on an upgraded install is the endpoint that was configured
+// before instances existed.
+//
+// The module switch is read before either lookup, so a disabled module still
+// costs zero queries and zero traffic.
+func (a *libraryAdapter) defaultAdultMetadata(ctx context.Context) (core.AdultMetadataProvider, string) {
+	enabled, err := a.st.AdultEnabled(ctx)
+	if err != nil {
+		a.log.Error("read adult setting", "error", err)
+		return nil, ""
+	}
+	if !enabled {
+		return nil, ""
+	}
+	providerID := a.defaultAdultProviderID(ctx)
+	if providerID == "" {
+		return nil, ""
+	}
+	provider := a.adultClientFor(ctx, providerID)
+	if provider == nil {
+		return nil, ""
+	}
+	return provider, providerID
+}
+
+// defaultAdultProviderID is defaultAdultMetadata's choice of instance, without
+// building anything.
+func (a *libraryAdapter) defaultAdultProviderID(ctx context.Context) string {
+	lib, err := a.st.GetLibraryByKind(ctx, core.LibraryKindAdult)
+	switch {
+	case err == nil:
+		for _, id := range lib.ProviderChain() {
+			if core.ProviderBase(id) == core.ProviderStashbox {
+				return id
+			}
+		}
+	case !errors.Is(err, store.ErrNotFound):
+		a.log.Error("read default adult library", "error", err)
+		return ""
+	}
+	instances, err := a.st.ListStashboxInstances(ctx)
+	if err != nil {
+		a.log.Error("list stash-box instances", "error", err)
+		return ""
+	}
+	if len(instances) == 0 {
+		return ""
+	}
+	return instances[0].ProviderID
+}
+
+// defaultAdultProvider is defaultAdultMetadata without the id, for the callers
+// that only need something to hand library.WithAdultProvider.
+func (a *libraryAdapter) defaultAdultProvider(ctx context.Context) core.AdultMetadataProvider {
+	provider, _ := a.defaultAdultMetadata(ctx)
+	return provider
+}
+
+// stashboxClient returns the client for this instance, reusing the last one
+// built for it while its endpoint and key are unchanged.
 //
 // Unlike the TMDB client, a stash-box client learns something: the first search
 // against an endpoint discovers whether it implements queryStudios, and TPDB —
 // the default endpoint — does not. That memo lives on the client, so building a
 // fresh one per call threw the answer away and sent one doomed request per
-// search; a typeahead box did it per keystroke.
+// search; a typeahead box did it per keystroke. The memo is also why the cache
+// is per instance: what one box implements says nothing about another.
 //
-// A change to either setting still builds a new client, which is the point of
-// keying on them: pointing at a different endpoint must re-probe rather than
-// inherit what was true of the last one. Nothing is invalidated on a timer — a
-// restart is the re-check, the same rule the memo itself follows.
-func (a *libraryAdapter) stashboxClient(key, endpoint string) *stashbox.Client {
+// A change to either field still builds a new client, which is the point of
+// keying on them: a rotated key must not keep authenticating with the old one.
+// Nothing is invalidated on a timer — a restart is the re-check, the same rule
+// the memo itself follows.
+func (a *libraryAdapter) stashboxClient(providerID, key, endpoint string) *stashbox.Client {
 	a.adultMu.Lock()
 	defer a.adultMu.Unlock()
 
-	if c := a.adult; c != nil && c.key == key && c.endpoint == endpoint {
+	if c := a.adult[providerID]; c != nil && c.key == key && c.endpoint == endpoint {
 		return c.client
 	}
 	client := stashbox.New(key, endpoint, a.hc)
-	a.adult = &cachedStashbox{key: key, endpoint: endpoint, client: client}
+	if a.adult == nil {
+		a.adult = map[string]*cachedStashbox{}
+	}
+	a.adult[providerID] = &cachedStashbox{key: key, endpoint: endpoint, client: client}
 	return client
 }
 
@@ -600,12 +686,25 @@ func (a *libraryAdapter) MoveSeries(ctx context.Context, seriesID, libraryID int
 	return mgr.MoveSeries(ctx, seriesID, libraryID)
 }
 
-// AdultMetadata is the provider the HTTP layer searches sites and scenes
-// through. It reads the settings table on every call, exactly as Metadata does,
-// so enabling the module or pasting a key takes effect without a restart — and,
-// more importantly, so does turning it off.
-func (a *libraryAdapter) AdultMetadata() core.AdultMetadataProvider {
-	return a.adultMetadata(context.Background())
+// AdultMetadataFor is the provider the HTTP layer searches one named instance's
+// catalogue through. It reads the instance row on every call, exactly as
+// Metadata reads the settings table, so adding a box or rotating a key takes
+// effect without a restart — and, more importantly, so does turning the module
+// off.
+//
+// An id whose base is not stash-box is nil without a lookup: nothing else serves
+// the adult kind, so such an id can only be a caller mistake.
+func (a *libraryAdapter) AdultMetadataFor(ctx context.Context, providerID string) core.AdultMetadataProvider {
+	if core.ProviderBase(providerID) != core.ProviderStashbox {
+		return nil
+	}
+	return a.adultClientFor(ctx, providerID)
+}
+
+// DefaultAdultMetadata is the provider a surface that names no instance answers
+// from, with the id it chose so the answer can say which box it came from.
+func (a *libraryAdapter) DefaultAdultMetadata(ctx context.Context) (core.AdultMetadataProvider, string) {
+	return a.defaultAdultMetadata(ctx)
 }
 
 func (a *libraryAdapter) RefreshLibrary(ctx context.Context) (*library.RefreshResult, error) {

@@ -47,7 +47,13 @@ type requestCreateRequest struct {
 	MediaType string `json:"media_type"`
 	TMDBID    int64  `json:"tmdb_id"`
 	// StashID names a scene, and is the only id a scene request carries.
-	StashID    string `json:"stash_id"`
+	StashID string `json:"stash_id"`
+	// Provider names the stash-box instance the scene was browsed on. It is
+	// accepted and validated, and then deliberately dropped: requests carry no
+	// provider column, so there is nowhere truthful to put it and approval reads
+	// the default instance (see approveScene). It is here so a client can start
+	// sending what it knows before the column exists.
+	Provider   string `json:"provider"`
 	Title      string `json:"title"`
 	Year       int    `json:"year"`
 	PosterPath string `json:"poster_path"`
@@ -107,7 +113,19 @@ func (s *server) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "tmdb_id is not valid for a scene")
 			return
 		}
+		// Validated and then dropped; see requestCreateRequest.Provider. It is
+		// checked rather than ignored so a client cannot start sending an id
+		// nobody ever verifies and have it silently become load-bearing when
+		// the column arrives.
+		if strings.TrimSpace(body.Provider) != "" &&
+			!s.validAdultInstance(r.Context(), w, strings.TrimSpace(body.Provider)) {
+			return
+		}
 	} else {
+		if body.Provider != "" {
+			writeError(w, http.StatusBadRequest, "provider is only valid for a scene")
+			return
+		}
 		if body.StashID != "" {
 			writeError(w, http.StatusBadRequest, "stash_id is only valid for a scene")
 			return
@@ -430,7 +448,13 @@ func (s *server) loadRequest(w http.ResponseWriter, r *http.Request, id int64) (
 //
 // It writes its own failures and returns the error only so the caller can stop.
 func (s *server) approveScene(ctx context.Context, w http.ResponseWriter, r *http.Request, req *core.Request) (*core.Series, error) {
-	provider := s.mgr.AdultMetadata()
+	// The DEFAULT instance: a request row carries no provider column, so there
+	// is no instance on it to honour. Scene requests made before instances
+	// existed are the reason it cannot simply grow one — the field would be
+	// empty on every historical row, and empty is not a box. The approval
+	// therefore reads whichever catalogue the default library identifies
+	// through, which is the box the scene was almost certainly browsed on.
+	provider, _ := s.mgr.DefaultAdultMetadata(ctx)
 	if provider == nil {
 		// Coded, and coded as the ADULT credential: an uncoded 503 is read by
 		// the SPA as a missing TMDB key (web/src/lib/credentials.ts), so

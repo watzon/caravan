@@ -91,6 +91,7 @@ type stubManager struct {
 	searchHits *library.SearchHits
 
 	mu                   sync.Mutex
+	adultProviderCalls   []string
 	adds                 []addCall
 	searches             []searchCall
 	matches              []matchCall
@@ -336,7 +337,61 @@ func (m *stubManager) siteCalls() []string {
 
 func (m *stubManager) Metadata() core.MetadataProvider { return m.provider }
 
-func (m *stubManager) AdultMetadata() core.AdultMetadataProvider { return m.adult }
+// AdultMetadataFor answers with the one canned provider for any id a stash-box
+// instance row exists for, so a test that seeds two instances gets the same fake
+// from both — what the handlers are asked to prove is which id they RESOLVED,
+// and adultProviderCalls is where that is recorded.
+func (m *stubManager) AdultMetadataFor(ctx context.Context, providerID string) core.AdultMetadataProvider {
+	m.mu.Lock()
+	m.adultProviderCalls = append(m.adultProviderCalls, providerID)
+	m.mu.Unlock()
+	if m.adult == nil {
+		return nil
+	}
+	if _, err := m.st.GetStashboxInstanceByProviderID(ctx, providerID); err != nil {
+		return nil
+	}
+	return m.adult
+}
+
+// DefaultAdultMetadata resolves the way the real adapter does — the default
+// adult library's chain head, else the oldest instance — so a test can move the
+// default by editing the library rather than by reaching into the stub.
+func (m *stubManager) DefaultAdultMetadata(ctx context.Context) (core.AdultMetadataProvider, string) {
+	if m.adult == nil {
+		return nil, ""
+	}
+	providerID := ""
+	if lib, err := m.st.GetLibraryByKind(ctx, core.LibraryKindAdult); err == nil {
+		for _, id := range lib.ProviderChain() {
+			if core.ProviderBase(id) == core.ProviderStashbox {
+				providerID = id
+				break
+			}
+		}
+	}
+	if providerID == "" {
+		instances, err := m.st.ListStashboxInstances(ctx)
+		if err != nil || len(instances) == 0 {
+			// No instance row at all still resolves to the legacy id: most
+			// tests predate instances and seed none, and their subject is the
+			// surface rather than the endpoint behind it.
+			return m.adult, core.ProviderStashbox
+		}
+		providerID = instances[0].ProviderID
+	}
+	m.mu.Lock()
+	m.adultProviderCalls = append(m.adultProviderCalls, providerID)
+	m.mu.Unlock()
+	return m.adult, providerID
+}
+
+// adultProviders is the instance ids the handlers resolved, in order.
+func (m *stubManager) adultProviders() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.adultProviderCalls...)
+}
 
 // ValidateMetadataKey answers from validateKeys: an entry maps a key to the
 // verdict the provider would give it, and a key with no entry is accepted. The
@@ -828,7 +883,7 @@ func TestSystemStatus(t *testing.T) {
 		// absent, and no keyless one is present at all.
 		MetadataCredential:  CredentialAbsent,
 		MetadataCredentials: absentCredentials(),
-		NeedsSetup: true,
+		NeedsSetup:          true,
 		// No provider means nothing polls external clients, and the banner
 		// input is an empty list rather than null.
 		UnhealthyDownloadClients: []unhealthyClientJSON{},
