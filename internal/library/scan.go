@@ -48,6 +48,12 @@ const (
 	reasonNoEpisodeNum = "under TV/ but no season/episode in filename"
 	reasonNoMatch      = "no metadata match"
 	reasonProviderErr  = "metadata provider error"
+	// reasonNoAbsoluteMatch parks a file named by absolute episode number that
+	// the matched series' own episode tree cannot place. It is a different
+	// problem from reasonNoMatch and only one of them is about the show being
+	// wrong: here the right show was found and its numbering does not contain
+	// the number the name claims.
+	reasonNoAbsoluteMatch = "absolute episode number is not in the provider's episode list"
 	// Adult park reasons (PLAN phase 9 task 4). They name the scene vocabulary
 	// rather than reusing the episode one, because "no season/episode in
 	// filename" would be advice nobody can act on for a file that is supposed
@@ -305,7 +311,9 @@ func (m *Manager) scanFile(ctx context.Context, rel string, size int64, res *Sca
 	case isScene && !p.IsScene():
 		park(reasonNoSceneDate)
 		return
-	case !isScene && !isEpisode && lib.Kind == core.LibraryKindTV:
+	case !isScene && !isEpisode && !p.IsAbsoluteEpisode() && lib.Kind == core.LibraryKindTV:
+		// An absolute number is a season/episode claim the series has not
+		// answered yet, so it is not "no number in the filename".
 		park(reasonNoEpisodeNum)
 		return
 	}
@@ -333,7 +341,12 @@ func (m *Manager) scanFile(ctx context.Context, rel string, size int64, res *Sca
 	switch {
 	case isScene:
 		finalRel, err = m.matchAndImportScene(ctx, lib, rel, size, p, res, park)
-	case isEpisode:
+	// The library kind decides, exactly as it does above: only a TV library
+	// routes an absolute-looking name into the episode path. A movie whose
+	// title ends in a number is the shape the parser's own negative table
+	// guards against, and under a movie root it must stay a movie however the
+	// number reads.
+	case isEpisode || (lib.Kind == core.LibraryKindTV && p.IsAbsoluteEpisode()):
 		finalRel, err = m.matchAndImportEpisode(ctx, lib, rel, size, p, res, park)
 	default:
 		finalRel, err = m.matchAndImportMovie(ctx, lib, rel, size, p, res, park)
@@ -367,14 +380,25 @@ type chainOutcome struct {
 	// kind are counted in neither: nothing went wrong and nothing was asked.
 	answered int
 	failed   int
+	// unresolved is how many providers recognized the show but could not place
+	// the file's absolute episode number in their own episode list. Such a
+	// provider answered a different question than the others got wrong.
+	unresolved int
 }
 
 // park chooses this walk's park reason: a provider error only when EVERY
-// provider that could be asked errored, and no match when at least one of them
-// answered without recognizing the title.
+// provider that could be asked errored, no absolute match when a provider knew
+// the show but not the number, and no match when at least one of them answered
+// without recognizing the title.
 func (o chainOutcome) reason() string {
 	if o.answered == 0 && o.failed > 0 {
 		return reasonProviderErr
+	}
+	// "Right show, unknown numbering" outranks "wrong show": it is the more
+	// specific thing anybody learned about the file, and it is the one the user
+	// can act on — by chaining a provider that publishes an absolute order.
+	if o.unresolved > 0 {
+		return reasonNoAbsoluteMatch
 	}
 	return reasonNoMatch
 }
@@ -473,6 +497,16 @@ func (m *Manager) matchAndImportEpisode(ctx context.Context, lib *core.Library, 
 			// show.
 			continue
 		}
+		// An absolute-numbered name is only placeable against a tree that
+		// publishes the order. A rung that cannot place it has recognized the
+		// show and answered nothing about the file, so the walk goes on: the
+		// next provider may be the one that keeps an absolute order at all.
+		resolved, ok := resolveAbsolute(detail, p)
+		if !ok {
+			outcome.unresolved++
+			continue
+		}
+		p = resolved
 		full = detail
 		break
 	}

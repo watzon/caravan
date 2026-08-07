@@ -264,6 +264,18 @@ func (m *Manager) importDownloadedEpisodes(ctx context.Context, files []download
 		p := m.parse(filepath.Base(file.rel))
 
 		reason := unresolvable
+		// An absolute-numbered file has not said which season it is in, and
+		// every check below reads (season, episode) — so the series' own tree
+		// places it first. Only an absolute-shaped parse is asked: a file the
+		// parser could name nothing about is the grab-title fallback's business
+		// further down, not an unplaceable number.
+		if reason == "" && p.IsAbsoluteEpisode() {
+			if resolved, ok := resolveAbsolute(meta, p); ok {
+				p = resolved
+			} else {
+				reason = reasonNoAbsoluteMatch
+			}
+		}
 		if reason == "" {
 			reason = episodeMismatch(meta, p, grab, wanted)
 			// The release title can vouch for one file only — the
@@ -649,12 +661,17 @@ func episodeMismatch(meta *core.SeriesMeta, p core.ParsedRelease, grab core.Grab
 }
 
 // noClaim reports whether a parse is noise rather than a positive claim about
-// what a file is: no episode numbers and below the confidence that would let a
-// scan import it. Only such a file may borrow its grab's release title — a
-// file that positively claims to be something else parks, never relabels
-// (the movieMismatch principle, applied to the fallback itself).
+// what a file is: no episode numbers, no absolute one, and below the confidence
+// that would let a scan import it. Only such a file may borrow its grab's
+// release title — a file that positively claims to be something else parks,
+// never relabels (the movieMismatch principle, applied to the fallback itself).
+//
+// An absolute number is such a claim. "Show - 105" says which episode the file
+// is as plainly as S05E03 does; that the series had to place it does not make
+// it noise, and letting the grab's release title overwrite it would file the
+// episode the grab wanted rather than the one on disk.
 func (m *Manager) noClaim(p core.ParsedRelease) bool {
-	return !p.IsEpisode() && p.Confidence < m.minConfidence
+	return !p.IsEpisode() && !p.IsAbsoluteEpisode() && p.Confidence < m.minConfidence
 }
 
 // grabTitleParse parses the release title the grab recorded — the name the

@@ -462,3 +462,52 @@ func TestSearchLibraryAllFailedReturnsTheFirstError(t *testing.T) {
 		t.Errorf("error = %v, want the first failure's credential fault", err)
 	}
 }
+
+// chainSeriesAbsolute is chainSeries for a provider that publishes an absolute
+// order: two seasons, and the series-wide count running across the boundary so
+// episode 5 of the show is S02E03.
+func chainSeriesAbsolute(provider, ref, title string) *stubProvider {
+	hit := core.SeriesMeta{Provider: provider, ProviderRef: ref, Title: title, Year: 2023}
+	full := hit
+	full.Seasons = []core.SeasonMeta{
+		{Number: 1, Title: "Season 1", Episodes: []core.EpisodeMeta{
+			{Season: 1, Number: 1, Absolute: 1, Title: "One"},
+			{Season: 1, Number: 2, Absolute: 2, Title: "Two"},
+		}},
+		{Number: 2, Title: "Season 2", Episodes: []core.EpisodeMeta{
+			{Season: 2, Number: 1, Absolute: 3, Title: "Three"},
+			{Season: 2, Number: 2, Absolute: 4, Title: "Four"},
+			{Season: 2, Number: 3, Absolute: 5, Title: "Five"},
+		}},
+	}
+	return &stubProvider{
+		series:     []core.SeriesMeta{hit},
+		seriesByID: map[int64]core.SeriesMeta{stubRefID(ref): full},
+	}
+}
+
+// A rung that knows the show but not its absolute order has answered nothing
+// about an absolute-numbered file, so the walk goes on to a rung that keeps
+// one. Stopping at the first title match would park a file the chain could
+// place — which is the whole reason a chain is ordered rather than merged.
+func TestScanWalksTheChainForAnAbsoluteNumber(t *testing.T) {
+	rel := "library/Anime/[Group] Frieren - 5.mkv"
+	organized := "library/Anime/Frieren (2023)/Season 02/Frieren (2023) - S02E03 - Five.mkv"
+
+	// "first" matches the title and publishes no absolute numbers at all.
+	h, _ := chainHarness(t, chainSeries("first", "1", "Frieren"),
+		chainSeriesAbsolute("second", "7", "Frieren"))
+	h.parser[filepath.Base(rel)] = absoluteParse("Frieren", 5)
+	h.writeVideo(rel, "episode bytes")
+
+	res := h.scan()
+	if res.Added != 1 || res.Unmatched != 0 || len(res.Errors) != 0 {
+		t.Fatalf("result = %+v (errors %v), want the second provider's order used", res, res.Errors)
+	}
+	if got := h.read(organized); got != "episode bytes" {
+		t.Fatalf("organized file %q missing (content %q)", organized, got)
+	}
+	if _, err := h.st.GetSeriesByProviderRef(context.Background(), "second", "7"); err != nil {
+		t.Errorf("GetSeriesByProviderRef(second): %v — the rung that could place it should own the row", err)
+	}
+}

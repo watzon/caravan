@@ -40,7 +40,11 @@ func dispositionFor(rel string) sourceDisposition {
 // mediaType is MediaTypeMovie or MediaTypeSeries. The parked file's parsed
 // season and episode numbers are reused as-is — the user is correcting *what*
 // the file is, not which episode of it — so a series import needs a filename
-// the parser found an episode number in.
+// the parser found an episode number in. A filename carrying only an absolute
+// number counts: the number is the file's own claim, and the series the user
+// just named is what places it (resolveAbsolute). That is the door out of a
+// reasonNoAbsoluteMatch park, and without it a file parked for numbering could
+// only ever be re-parked.
 //
 // On success the file is organized, its metadata rows are written, and the
 // unmatched entry is cleared.
@@ -88,7 +92,7 @@ func (m *Manager) ImportUnmatched(ctx context.Context, unmatchedID int64, ref co
 		}
 
 	case MediaTypeSeries:
-		if !u.Parsed.IsEpisode() {
+		if !u.Parsed.IsEpisode() && !u.Parsed.IsAbsoluteEpisode() {
 			return nil, fmt.Errorf("library: %q has no season/episode number to import as an episode", u.Path)
 		}
 		meta, err := provider.GetSeries(ctx, ref.Ref)
@@ -98,7 +102,15 @@ func (m *Manager) ImportUnmatched(ctx context.Context, unmatchedID int64, ref co
 		if meta == nil {
 			return nil, fmt.Errorf("library: series %s/%s not found", ref.Provider, ref.Ref)
 		}
-		res.Path, res.SeriesID, err = m.importEpisode(ctx, meta, u.Path, info.Size(), u.Parsed, warn, dispositionFor(u.Path), u.LibraryID)
+		// The chosen series' own tree places an absolute number, or nothing
+		// does. This is a refusal rather than a park because the user is
+		// standing in front of it: the answer they need is that THIS series
+		// cannot place THAT number, so they can choose another one.
+		p, ok := resolveAbsolute(meta, u.Parsed)
+		if !ok {
+			return nil, fmt.Errorf("library: %q: %s", u.Path, reasonNoAbsoluteMatch)
+		}
+		res.Path, res.SeriesID, err = m.importEpisode(ctx, meta, u.Path, info.Size(), p, warn, dispositionFor(u.Path), u.LibraryID)
 		if err != nil {
 			return nil, err
 		}
