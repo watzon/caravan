@@ -80,6 +80,8 @@ import type {
   Site,
   SiteDetail,
   SiteMeta,
+  StashboxInstance,
+  StashboxInstanceInput,
   StashConfig,
   StashTestResult,
   StorageMigration,
@@ -290,6 +292,14 @@ export const endpoints = {
   // absent for an ungranted caller rather than merely switched off.
   adultStash: () => `${API_BASE}/adult/stash`,
   adultStashTest: () => `${API_BASE}/adult/stash/test`,
+  // The stash-box instances. Inside the gated subtree for the reason the
+  // handoff is: a list of the catalogues a household subscribes to is exactly
+  // the trace the module promises not to leave, so it 404s while the module is
+  // off rather than answering an empty list.
+  stashboxInstances: () => `${API_BASE}/adult/stashbox-instances`,
+  stashboxInstance: (id: number) => `${API_BASE}/adult/stashbox-instances/${id}`,
+  stashboxInstanceTest: (id: number) => `${API_BASE}/adult/stashbox-instances/${id}/test`,
+  stashboxConfigTest: () => `${API_BASE}/adult/stashbox-instances/test`,
   // The master switch, and the one adult route outside the gated subtree: it
   // has to be reachable while the module is off, because turning it on is what
   // it is for.
@@ -1301,29 +1311,64 @@ export const api = {
    * (hidden from DLNA); a disable deletes nothing, so turning it back on finds
    * the sites, the scenes and the files exactly as they were.
    *
-   * An enable carries the credential it is made with (PLAN phase 10 task 5):
-   * the server proves the stash-box endpoint and key BEFORE it writes anything
-   * and commits `adult_enabled` last, so a credential that does not work leaves
-   * the endpoint, the key and the switch byte-identical. Omitting either field
-   * means "use what is stored", which is what re-enabling a module that was
-   * configured once and switched off should send.
+   * An enable may CARRY the first stash-box instance (PLAN Part 2 phase 7):
+   * the server proves the endpoint and key BEFORE it writes anything and
+   * commits `adult_enabled` last, so a credential that does not work leaves the
+   * instance table and the switch byte-identical. An enable with no instance is
+   * a re-enable — the instances survived the switch-off — and makes zero
+   * upstream calls.
    *
-   * A failure arrives as an ApiError coded `adult_credential_absent` (nothing
-   * to authenticate with) or `adult_credential_invalid` (the endpoint refused
-   * it) — see credentials.ts.
+   * A failure arrives as an ApiError coded `adult_credential_absent` (the
+   * instance table is empty and the body carried none) or
+   * `adult_credential_invalid` (the endpoint refused the key) — see
+   * credentials.ts.
    */
-  setAdultEnabled: (
-    enabled: boolean,
-    credential?: { endpoint?: string; apiKey?: string },
-  ) =>
+  setAdultEnabled: (enabled: boolean, instance?: StashboxInstanceInput) =>
     request<{ enabled: boolean }>(endpoints.settingsAdult(), {
       method: 'POST',
-      body: {
-        enabled,
-        ...(credential?.endpoint === undefined ? {} : { stashbox_endpoint: credential.endpoint }),
-        ...(credential?.apiKey === undefined ? {} : { stashbox_api_key: credential.apiKey }),
-      },
+      body: { enabled, ...(instance === undefined ? {} : { instance }) },
     }),
+
+  /**
+   * The configured stash-box endpoints (PLAN Part 2 phase 3).
+   *
+   * Every one of these 404s while the module is off, so the settings card that
+   * calls them is mounted only for a session that already sees the module.
+   */
+  listStashboxInstances: (signal?: AbortSignal) =>
+    listOf<StashboxInstance>(endpoints.stashboxInstances(), 'instances', signal),
+
+  createStashboxInstance: (body: StashboxInstanceInput) =>
+    request<StashboxInstance>(endpoints.stashboxInstances(), { method: 'POST', body }),
+
+  /**
+   * Edit the two fields an instance owns after creation: its label and its
+   * credential. An endpoint change is refused by the server — every item pinned
+   * to the instance carries a UUID only that box minted — so the edit form does
+   * not offer one.
+   */
+  updateStashboxInstance: (id: number, body: StashboxInstanceInput) =>
+    request<StashboxInstance>(endpoints.stashboxInstance(id), { method: 'PUT', body }),
+
+  /**
+   * Remove an instance nothing depends on. A 409 names what still uses it, or
+   * says it is the last one while the module is on; callers show that message
+   * as it arrived.
+   */
+  deleteStashboxInstance: (id: number) =>
+    request<void>(endpoints.stashboxInstance(id), { method: 'DELETE' }),
+
+  /** Ask a stored instance's box whether it answers with the key on file. */
+  testStashboxInstance: (id: number) =>
+    request<void>(endpoints.stashboxInstanceTest(id), { method: 'POST' }),
+
+  /**
+   * The same question for an endpoint and key that are not stored yet, which is
+   * what the add form needs while the user is still typing — before the
+   * instance exists to have an id.
+   */
+  testStashboxConfig: (body: StashboxInstanceInput) =>
+    request<void>(endpoints.stashboxConfigTest(), { method: 'POST', body }),
 
   /** Every site in the library, with the scene counts the grid badges. */
   listSites: (signal?: AbortSignal) => listOf<Site>(endpoints.adultSites(), 'sites', signal),

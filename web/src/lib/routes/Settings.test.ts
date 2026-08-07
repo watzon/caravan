@@ -7,6 +7,7 @@ import PosterCard from '../components/PosterCard.svelte';
 import { reactiveProps } from '../reactiveprops.svelte';
 import { system } from '../state/system.svelte';
 import { providers } from '../state/providers.svelte';
+import { session } from '../state/session.svelte';
 import { navigate, router } from '../router.svelte';
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -49,6 +50,9 @@ afterEach(() => {
   // Same for the provider list, which load() otherwise fetches only once.
   providers.all = [];
   providers.loaded = false;
+  // And for the identity: a session one test seeded decides whether the next
+  // one renders an adult-module card at all.
+  session.user = null;
   unmount(app);
   host.remove();
   localStorage.clear();
@@ -446,6 +450,18 @@ describe('Settings metadata pane', () => {
     { id: 'stashbox', name: 'Stash-box', kinds: ['adult'] },
   ];
 
+  const STASHBOX_INSTANCES = [
+    {
+      id: 1,
+      provider_id: 'stashbox',
+      name: 'ThePornDB',
+      endpoint: 'https://theporndb.net/graphql',
+      has_api_key: true,
+      library_count: 1,
+      item_count: 4,
+    },
+  ];
+
   function stubMetadata(
     testReply: () => Response,
     providerList: unknown[] = ALL_PROVIDERS,
@@ -459,6 +475,13 @@ describe('Settings metadata pane', () => {
         body: typeof init?.body === 'string' ? JSON.parse(init.body) : null,
       });
       if (url.includes('/settings/metadata/test')) return testReply();
+      if (url.endsWith('/adult/stashbox-instances')) {
+        // What the server answers a session that does not see the module: the
+        // route is not merely empty, it is not there.
+        return session.user?.adult
+          ? jsonResponse({ instances: STASHBOX_INSTANCES })
+          : jsonResponse({ error: 'not found' }, 404);
+      }
       if (url.endsWith('/libraries/providers')) return jsonResponse({ providers: providerList });
       if (url.endsWith('/settings')) return jsonResponse({ tmdb_api_key_set: 'true' });
       if (url.endsWith('/system/status')) return jsonResponse(SYSTEM_STATUS);
@@ -586,9 +609,6 @@ describe('Settings metadata pane', () => {
 
     expect(host.textContent).toContain('AniList needs no key or account');
     expect(host.querySelector('a[href="/settings/libraries#libraries"]')).not.toBeNull();
-    // Stash-box configures itself with the adult module; this page only points.
-    expect(host.querySelector('#stashbox-endpoint')).toBeNull();
-    expect(host.querySelector('a[href="/settings/adult#adult-content"]')).not.toBeNull();
   });
 
   // TVmaze is keyless, so "Ready" is the whole of its configuration. The
@@ -723,17 +743,34 @@ describe('Settings metadata pane', () => {
     }
   });
 
-  // The server omits the adult provider when the module is absent; the page
-  // must not reintroduce it (promise-of-absence).
-  it('omits the Stash-box card when the server does not list the provider', async () => {
-    stubMetadata(
-      () => jsonResponse({ status: 'ok' }),
-      ALL_PROVIDERS.filter((p) => p.id !== 'stashbox'),
+  // The pointer card is gone (PLAN Part 2 phase 8): stash-box endpoints are
+  // managed HERE now, one row per configured box.
+  it('manages the stash-box instances for a session that sees the module', async () => {
+    session.user = { username: 'root', role: 'admin', open: false, adult: true };
+    stubMetadata(() => jsonResponse({ status: 'ok' }));
+    app = mount(Settings, { target: host, props: { section: 'metadata' } });
+    await settle();
+
+    const card = [...host.querySelectorAll('section')].find(
+      (s) => s.querySelector('h3')?.textContent === 'Stash-box',
     );
+    expect(card).toBeDefined();
+    expect(card!.textContent).toContain('ThePornDB');
+    expect(card!.textContent).toContain('https://theporndb.net/graphql');
+    expect(card!.textContent).toContain('Used by 1 library · 4 items');
+    // The old pointer at Adult content is gone with the card it stood in for.
+    expect(host.querySelector('a[href="/settings/adult#adult-content"]')).toBeNull();
+  });
+
+  // Promise-of-absence: an admin the module is not visible to gets no card at
+  // all — not an empty one, and no request that would 404.
+  it('omits the Stash-box card entirely for a session without the module', async () => {
+    const calls = stubMetadata(() => jsonResponse({ status: 'ok' }));
     app = mount(Settings, { target: host, props: { section: 'metadata' } });
     await settle();
 
     expect(host.textContent).toContain('AniList');
     expect(host.textContent).not.toContain('Stash-box');
+    expect(calls.some((c) => c.url.includes('stashbox-instances'))).toBe(false);
   });
 });

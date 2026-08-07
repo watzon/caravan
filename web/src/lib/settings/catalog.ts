@@ -44,7 +44,7 @@ export const SETTINGS_CATALOG = [
     route: '/settings/metadata',
     anchor: 'metadata',
     aliases: ['TMDB', 'AniList', 'API key', 'providers'],
-    keywords: ['metadata key', 'artwork', 'titles', 'discover', 'anime', 'thetvdb', 'tvdb'],
+    keywords: ['metadata key', 'artwork', 'titles', 'discover', 'anime', 'thetvdb', 'tvdb', 'stash-box', 'stashdb', 'fansdb'],
   },
   {
     category: 'Library and media',
@@ -67,11 +67,14 @@ export const SETTINGS_CATALOG = [
   {
     category: 'Library and media',
     label: 'Adult content',
-    description: 'Enable the adult library, metadata source, and member access.',
+    description: 'Enable the adult library and choose who reaches it.',
     route: '/settings/adult',
     anchor: 'adult-content',
     aliases: ['adult library'],
-    keywords: ['stash-box', 'access', 'privacy'],
+    // The stash-box endpoints moved to Metadata, so the keyword goes with them:
+    // a search for one that landed here would name a screen that no longer
+    // configures it.
+    keywords: ['access', 'privacy'],
   },
   {
     category: 'Search and downloads',

@@ -656,22 +656,6 @@ export const SETTING_DLNA_ENABLED = 'dlna_enabled';
 export const SETTING_DLNA_FRIENDLY_NAME = 'dlna_friendly_name';
 
 /**
- * The stash-box metadata source for the adult module (internal/store).
- *
- * These two ride on PUT /settings like every other key. The master switch does
- * NOT — flipping `adult_enabled` creates the Adult library row on its first
- * enable, which a key/value PUT cannot carry out, so it has an endpoint of its
- * own (POST /settings/adult) and the server refuses it here.
- *
- * A blank endpoint is legal and means the TPDB preset below.
- */
-export const SETTING_STASHBOX_ENDPOINT = 'stashbox_endpoint';
-export const SETTING_STASHBOX_API_KEY = 'stashbox_api_key';
-
-/** internal/stashbox.DefaultEndpoint — what a blank endpoint resolves to. */
-export const STASHBOX_TPDB_ENDPOINT = 'https://theporndb.net/graphql';
-
-/**
  * The adult module's master switch, as GET /settings reports it.
  *
  * Readable here but NOT writable: PUT /settings rejects it, because the first
@@ -2104,3 +2088,55 @@ export interface AdultUser {
   /** The account reaches the module through its role — every admin. */
   always_granted: boolean;
 }
+
+/**
+ * internal/api.stashboxInstanceJSON — one configured stash-box endpoint.
+ *
+ * The API key is write-only (SPEC §12), so nothing here can render it;
+ * `has_api_key` is the only thing the screen may say about it.
+ */
+export interface StashboxInstance {
+  id: number;
+  /**
+   * The value stored in every pinned row and every provider chain. Read-only:
+   * renaming an instance must never re-point the rows pinned to it. The first
+   * instance on an install is the bare `stashbox`; the rest are
+   * `stashbox:<slug>`.
+   */
+  provider_id: string;
+  name: string;
+  endpoint: string;
+  has_api_key: boolean;
+  /** What the delete guard would report, carried on every row. */
+  library_count: number;
+  item_count: number;
+}
+
+/**
+ * The body of the create, update and test-config routes.
+ *
+ * `api_key` absent means "keep the stored one" on an update and "no key" on a
+ * create; an explicit empty string clears it. `endpoint` is immutable after
+ * creation — the server refuses a change — so an edit either repeats it or
+ * omits it.
+ */
+export interface StashboxInstanceInput {
+  name: string;
+  endpoint: string;
+  api_key?: string;
+}
+
+/**
+ * The public stash-boxes worth offering by name, plus the escape hatch.
+ *
+ * A preset only fills the add form's name and endpoint — both stay editable
+ * before the instance is created — so this list is a convenience, never a
+ * constraint. It replaces the single STASHBOX_TPDB_ENDPOINT default: with
+ * several instances per install there is no one endpoint to be the default.
+ */
+export const STASHBOX_PRESETS: { id: string; label: string; endpoint: string }[] = [
+  { id: 'stashdb', label: 'StashDB', endpoint: 'https://stashdb.org/graphql' },
+  { id: 'fansdb', label: 'FansDB', endpoint: 'https://fansdb.cc/graphql' },
+  { id: 'pmvstash', label: 'PMV-Stash', endpoint: 'https://pmvstash.org/graphql' },
+  { id: 'theporndb', label: 'ThePornDB', endpoint: 'https://theporndb.net/graphql' },
+];

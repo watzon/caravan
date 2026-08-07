@@ -1,11 +1,15 @@
 /**
- * The adult enable setup (PLAN phase 10 task 5).
+ * The adult enable setup (PLAN Part 2 phase 8, was phase 10 task 5).
  *
- * The acceptance criterion is a negative one, so that is what these test: with
- * a missing or refused stash-box credential the module CANNOT end up on, and
- * cancelling changes nothing. The server enforces it too — validation runs
- * before any write and `adult_enabled` is committed last — so the modal's job
- * is to never claim otherwise.
+ * Two acceptance criteria, both negative. With no stash-box endpoint the module
+ * CANNOT end up on, and cancelling changes nothing. The server enforces both —
+ * validation runs before any write and `adult_enabled` is committed last — so
+ * the modal's job is to never claim otherwise.
+ *
+ * The third thing these pin is the two-step: every instance route 404s while
+ * the module is off, so the modal cannot look up whether an endpoint exists. It
+ * posts a bare enable and lets the SERVER say, revealing the form only on
+ * `adult_credential_absent`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
@@ -18,19 +22,28 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+const ABSENT = () =>
+  jsonResponse(
+    {
+      error: 'a stash-box endpoint is required to enable adult content',
+      code: 'adult_credential_absent',
+    },
+    400,
+  );
+
 let host: HTMLElement;
 let app: Record<string, unknown> | undefined;
 let calls: { url: string; method: string; body: Record<string, unknown> | null }[];
-let enabled: { endpoint: string; apiKey: string }[];
+let enabled: number;
 let closed: number;
-/** What POST /settings/adult answers; the default is a working credential. */
-let enableReply: () => Response;
+/** What POST /settings/adult answers, per call, oldest first. */
+let replies: (() => Response)[];
 
 beforeEach(() => {
   calls = [];
-  enabled = [];
+  enabled = 0;
   closed = 0;
-  enableReply = () => jsonResponse({ enabled: true });
+  replies = [];
   host = document.createElement('div');
   document.body.appendChild(host);
 
@@ -42,7 +55,7 @@ beforeEach(() => {
         method: init?.method ?? 'GET',
         body: typeof init?.body === 'string' ? JSON.parse(init.body) : null,
       });
-      return enableReply();
+      return (replies.shift() ?? (() => jsonResponse({ enabled: true })))();
     }),
   );
 });
@@ -59,13 +72,12 @@ async function settle() {
   flushSync();
 }
 
-function mountModal(props: { initialEndpoint?: string; initialApiKey?: string } = {}) {
+function mountModal() {
   app = mount(AdultEnableModal, {
     target: host,
     props: {
-      ...props,
       onclose: () => (closed += 1),
-      onenabled: (committed: { endpoint: string; apiKey: string }) => enabled.push(committed),
+      onenabled: () => (enabled += 1),
     },
   });
   flushSync();
@@ -85,132 +97,140 @@ function typeInto(selector: string, value: string): void {
   flushSync();
 }
 
-/** Fill in a key and walk to the confirm step. */
-function toConfirm(key = 'sb-key') {
-  typeInto('#adult-enable-api-key', key);
-  button('Continue').click();
+function pick(selector: string, value: string): void {
+  const select = host.querySelector(selector) as HTMLSelectElement | null;
+  expect(select, selector).not.toBeNull();
+  select!.value = value;
+  select!.dispatchEvent(new Event('change', { bubbles: true }));
   flushSync();
 }
 
 describe('AdultEnableModal', () => {
-  it('opens on the credential step with the ThePornDB preset selected', () => {
+  // The exposure defaults come BEFORE the commit — the whole reason the modal
+  // opens on them rather than on a form.
+  it('opens on the exposure defaults and asks for nothing', () => {
     mountModal();
-
-    const select = host.querySelector('#adult-enable-endpoint') as HTMLSelectElement;
-    expect(select.value).toBe('tpdb');
-    // The custom URL field only exists once Custom is chosen.
-    expect(host.querySelector('#adult-enable-endpoint-url')).toBeNull();
-    expect(host.textContent).not.toContain('DLNA stays off');
-
-    const helpID = select.getAttribute('aria-describedby');
-    expect(helpID).toBe('adult-enable-endpoint-help');
-    expect(host.querySelector(`#${helpID}`)?.textContent).toContain("provider's GraphQL endpoint");
-  });
-
-  // Nothing to authenticate with is refused before a request is made: the
-  // server would refuse it too (adult_credential_absent), but a round trip to
-  // learn the field is empty is a round trip nobody needs.
-  it('will not advance without an API key, and asks for nothing', () => {
-    mountModal();
-
-    button('Continue').click();
-    flushSync();
-
-    expect(host.textContent).toContain('Enter the stash-box API key');
-    expect(calls).toEqual([]);
-  });
-
-  // The confirm step is where the exposure defaults are restated, and it comes
-  // BEFORE the commit — the whole reason it is a step rather than a footnote.
-  it('restates the three exposure defaults before anything is enabled', () => {
-    mountModal();
-    toConfirm();
 
     expect(host.textContent).toContain('DLNA stays off');
     expect(host.textContent).toContain('Prepared drives leave it out');
     expect(host.textContent).toContain('Members see nothing until granted');
+    // No form: the modal does not yet know whether one is needed.
+    expect(host.querySelector('#adult-enable-api-key')).toBeNull();
     expect(calls).toEqual([]);
   });
 
-  it('enables with the credential it showed, blank endpoint for the preset', async () => {
+  // The re-enable path. The instances survived the switch-off, so the enable
+  // carries nothing and the server makes zero upstream calls.
+  it('enables bare when the server already has an endpoint', async () => {
     mountModal();
-    toConfirm(' sb-key ');
 
     button('Enable adult content').click();
     await settle();
 
     expect(calls).toEqual([
-      expect.objectContaining({
-        method: 'POST',
-        body: { enabled: true, stashbox_endpoint: '', stashbox_api_key: 'sb-key' },
-      }),
+      expect.objectContaining({ method: 'POST', body: { enabled: true } }),
     ]);
-    expect(enabled).toEqual([{ endpoint: '', apiKey: 'sb-key' }]);
+    expect(enabled).toBe(1);
+    expect(host.querySelector('#adult-enable-api-key')).toBeNull();
   });
 
-  it('sends a custom endpoint verbatim', async () => {
-    mountModal({ initialEndpoint: 'https://stash.example/graphql', initialApiKey: 'k' });
+  // The first-enable path, and the reason the form is a fallback: the modal
+  // cannot introspect the instance table through a 404 wall, so the server is
+  // what reveals the form.
+  it('reveals the first-instance form when the server says none is configured', async () => {
+    replies = [ABSENT];
+    mountModal();
 
-    expect((host.querySelector('#adult-enable-endpoint') as HTMLSelectElement).value).toBe(
-      'custom',
-    );
-    button('Continue').click();
-    flushSync();
     button('Enable adult content').click();
     await settle();
 
-    expect(calls[0]?.body).toEqual({
+    expect(enabled).toBe(0);
+    expect(host.textContent).toContain('a stash-box endpoint is required');
+    expect(host.querySelector('#adult-enable-preset')).not.toBeNull();
+    expect(host.querySelector('#adult-enable-api-key')).not.toBeNull();
+  });
+
+  it('enables with the preset instance it showed', async () => {
+    replies = [ABSENT];
+    mountModal();
+    button('Enable adult content').click();
+    await settle();
+
+    typeInto('#adult-enable-api-key', ' sb-key ');
+    button('Enable adult content').click();
+    await settle();
+
+    expect(calls[1]?.body).toEqual({
       enabled: true,
-      stashbox_endpoint: 'https://stash.example/graphql',
-      stashbox_api_key: 'k',
+      instance: { name: 'StashDB', endpoint: 'https://stashdb.org/graphql', api_key: 'sb-key' },
+    });
+    expect(enabled).toBe(1);
+  });
+
+  it('sends a custom endpoint verbatim', async () => {
+    replies = [ABSENT];
+    mountModal();
+    button('Enable adult content').click();
+    await settle();
+
+    pick('#adult-enable-preset', '');
+    typeInto('#adult-enable-name', 'House box');
+    typeInto('#adult-enable-endpoint-url', 'https://stash.example/graphql');
+    typeInto('#adult-enable-api-key', 'k');
+    button('Enable adult content').click();
+    await settle();
+
+    expect(calls[1]?.body).toEqual({
+      enabled: true,
+      instance: { name: 'House box', endpoint: 'https://stash.example/graphql', api_key: 'k' },
     });
   });
 
   // The acceptance criterion: a refused credential cannot leave the module on.
-  // The server never wrote anything, and the modal says so where the mistake
-  // is — on the field, back on the credential step.
-  it('stays off and returns to the credential step when the provider refuses', async () => {
-    enableReply = () =>
-      jsonResponse(
-        { error: 'stash-box test failed: unauthorized', code: 'adult_credential_invalid' },
-        502,
-      );
+  // The server never wrote anything, and the modal says so on the form the
+  // mistake is on.
+  it('stays off and keeps the form when the box refuses the key', async () => {
+    replies = [
+      ABSENT,
+      () =>
+        jsonResponse(
+          { error: 'stash-box test failed: unauthorized', code: 'adult_credential_invalid' },
+          502,
+        ),
+    ];
     mountModal();
-    toConfirm('bad-key');
-
     button('Enable adult content').click();
     await settle();
 
-    expect(enabled).toEqual([]);
+    typeInto('#adult-enable-api-key', 'bad-key');
+    button('Enable adult content').click();
+    await settle();
+
+    expect(enabled).toBe(0);
     expect(host.textContent).toContain('stash-box test failed: unauthorized');
-    // Back on step 1, with the key that was wrong still editable.
+    // Still on the form, with the key that was wrong still editable.
     expect(host.querySelector('#adult-enable-api-key')).not.toBeNull();
-    expect(host.textContent).not.toContain('DLNA stays off');
   });
 
-  it('reports a missing credential the server refused without turning anything on', async () => {
-    enableReply = () =>
-      jsonResponse(
-        {
-          error: 'a stash-box API key is required to enable adult content',
-          code: 'adult_credential_absent',
-        },
-        400,
-      );
+  // A missing name is refused before a request is made: the server would refuse
+  // it too, but a round trip to learn a field is empty is one nobody needs.
+  it('will not post an instance with no name', async () => {
+    replies = [ABSENT];
     mountModal();
-    toConfirm('whitespace-only-server-side');
-
     button('Enable adult content').click();
     await settle();
 
-    expect(enabled).toEqual([]);
-    expect(host.textContent).toContain('a stash-box API key is required');
+    typeInto('#adult-enable-name', '   ');
+    button('Enable adult content').click();
+    await settle();
+
+    expect(calls).toHaveLength(1);
+    expect(host.textContent).toContain('Give this stash-box a name.');
   });
 
-  it('announces a non-credential enable failure without leaving the confirmation step', async () => {
-    enableReply = () => jsonResponse({ error: 'settings service unavailable' }, 500);
+  it('announces a non-credential enable failure without revealing a form', async () => {
+    replies = [() => jsonResponse({ error: 'settings service unavailable' }, 500)];
     mountModal();
-    toConfirm();
 
     button('Enable adult content').click();
     await settle();
@@ -218,7 +238,8 @@ describe('AdultEnableModal', () => {
     const alert = host.querySelector('[role="alert"]');
     expect(alert?.textContent).toContain('settings service unavailable');
     expect(host.textContent).toContain('DLNA stays off');
-    expect(enabled).toEqual([]);
+    expect(host.querySelector('#adult-enable-api-key')).toBeNull();
+    expect(enabled).toBe(0);
   });
 
   // Cancel leaves everything off — which is easy to guarantee, because nothing
@@ -230,26 +251,15 @@ describe('AdultEnableModal', () => {
     expect(closed).toBe(1);
     expect(calls).toEqual([]);
 
-    toConfirm();
+    replies = [ABSENT];
+    button('Enable adult content').click();
+    await settle();
     button('Cancel').click();
     flushSync();
 
     expect(closed).toBe(2);
-    expect(enabled).toEqual([]);
-    expect(calls).toEqual([]);
-  });
-
-  // Editing the credential must not be a trip back through the whole dialog,
-  // but it must go through the confirm step again — the enable only ever
-  // commits what the user last looked at.
-  it('goes back to the credential step without enabling', () => {
-    mountModal();
-    toConfirm();
-
-    button('Back').click();
-    flushSync();
-
-    expect(host.querySelector('#adult-enable-api-key')).not.toBeNull();
-    expect(calls).toEqual([]);
+    expect(enabled).toBe(0);
+    // The one call is the bare enable the server refused; it wrote nothing.
+    expect(calls).toHaveLength(1);
   });
 });

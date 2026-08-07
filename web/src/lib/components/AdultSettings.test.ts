@@ -2,10 +2,15 @@
  * Settings → Adult content (PLAN phase 9 task 7a).
  *
  * This pane IS the module's control plane: without it there is no in-product
- * way to turn the module on, to hand a housemate a grant, or to enter a
- * stash-box credential. So the tests are about the four cards existing and
- * writing the right thing, and about the module's own promise — nothing below
- * the master switch is on screen, or fetched, while the switch is off.
+ * way to turn the module on or to hand a housemate a grant. So the tests are
+ * about the three remaining cards existing and writing the right thing, and
+ * about the module's own promise — nothing below the master switch is on
+ * screen, or fetched, while the switch is off.
+ *
+ * The metadata source is no longer one of them (PLAN Part 2 phase 8): stash-box
+ * endpoints are configured per instance on Settings → Metadata, so the
+ * assertions about that card moved to StashboxSettings.test.ts and the negative
+ * half stayed here.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
@@ -47,13 +52,11 @@ let host: HTMLElement;
 let app: Record<string, unknown> | undefined;
 let users: AdultUser[];
 let libraries: Library[];
-let saved: Settings[];
 let calls: { url: string; method: string; body: unknown }[];
 
 beforeEach(() => {
   users = ROSTER.map((u) => ({ ...u }));
   libraries = [ADULT_LIBRARY];
-  saved = [];
   calls = [];
   clearToasts();
   session.user = { username: 'root', role: 'admin', open: false, adult: true };
@@ -71,7 +74,6 @@ beforeEach(() => {
       if (url.endsWith('/settings/adult')) return jsonResponse({ enabled: body.enabled });
       if (url.endsWith('/adult/users')) return jsonResponse({ users });
       if (url.endsWith('/libraries')) return jsonResponse({ libraries });
-      if (url.includes('/adult/search')) return jsonResponse({ sites: [] });
       const access = /\/adult\/users\/(\d+)\/access$/.exec(url);
       if (access) {
         const id = Number(access[1]);
@@ -98,16 +100,7 @@ async function settle() {
 }
 
 async function mountPane(settings: Settings) {
-  app = mount(AdultSettings, {
-    target: host,
-    props: {
-      settings,
-      onsave: async (patch: Settings) => {
-        saved.push(patch);
-        return true;
-      },
-    },
-  });
+  app = mount(AdultSettings, { target: host, props: { settings } });
   await settle();
 }
 
@@ -119,20 +112,6 @@ function switches(): HTMLButtonElement[] {
 function toggle(index: number): HTMLButtonElement {
   const found = switches()[index];
   expect(found, `switch #${index}`).toBeDefined();
-  return found as HTMLButtonElement;
-}
-
-/** Type into a bound input the way a person does: value, then the event. */
-function typeInto(selector: string, value: string): void {
-  const field = host.querySelector(selector) as HTMLInputElement | null;
-  expect(field, selector).not.toBeNull();
-  field!.value = value;
-  field!.dispatchEvent(new Event('input', { bubbles: true }));
-}
-
-function button(label: string): HTMLButtonElement {
-  const found = [...host.querySelectorAll('button')].find((b) => b.textContent?.trim() === label);
-  expect(found, `button labelled ${label}`).toBeDefined();
   return found as HTMLButtonElement;
 }
 
@@ -166,8 +145,7 @@ describe('AdultSettings', () => {
     expect(calls).toEqual([]);
   });
 
-  // PLAN phase 10 task 5: the switch no longer writes. Enabling needs a
-  // stash-box credential that works and a statement of what it exposes, so the
+  // The switch no longer writes. Enabling states what it exposes first, so the
   // switch opens the setup modal and nothing is written until it finishes.
   it('opens the setup modal instead of enabling, and writes nothing yet', async () => {
     await mountPane({});
@@ -175,8 +153,7 @@ describe('AdultSettings', () => {
     toggle(0).click();
     await settle();
 
-    expect(host.textContent).toContain('Enable adult content');
-    expect(host.querySelector('#adult-enable-api-key')).not.toBeNull();
+    expect(host.textContent).toContain('DLNA stays off');
     expect(calls).toEqual([]);
   });
 
@@ -185,23 +162,31 @@ describe('AdultSettings', () => {
 
     toggle(0).click();
     await settle();
-    typeInto('#adult-enable-api-key', 'sb-key');
-    modalButton('Continue').click();
-    await settle();
     modalButton('Enable adult content').click();
     await settle();
 
-    // One atomic call: the credential the enable was made with travels with it,
-    // so a provider that refuses leaves everything exactly as it was.
+    // One atomic call. This install already has an instance — the stub answers
+    // as the server does for a re-enable — so nothing about a stash-box travels
+    // with it.
     expect(calls[0]).toMatchObject({
       method: 'POST',
-      body: { enabled: true, stashbox_endpoint: '', stashbox_api_key: 'sb-key' },
+      body: { enabled: true },
       url: expect.stringContaining('/settings/adult'),
     });
     // The sidebar, Discover and the request form all read session.adult, which
     // only /auth/me can answer.
     expect(calls.some((c) => c.url.endsWith('/auth/me'))).toBe(true);
-    expect(host.textContent).toContain('Metadata source');
+    expect(host.textContent).toContain('Member access');
+  });
+
+  // The card moved to Settings → Metadata, where an install with several
+  // stash-boxes has a row per box instead of one endpoint field.
+  it('no longer configures the metadata source', async () => {
+    await mountPane({ adult_enabled: 'true' });
+
+    expect(host.textContent).not.toContain('Metadata source');
+    expect(host.querySelector('#stashbox-endpoint')).toBeNull();
+    expect(host.querySelector('#stashbox-api-key')).toBeNull();
   });
 
   // Disabling exposes nothing and deletes nothing, so it never prompts.
@@ -214,46 +199,7 @@ describe('AdultSettings', () => {
     expect(calls.some((c) => c.body && (c.body as { enabled: boolean }).enabled === false)).toBe(
       true,
     );
-    expect(host.querySelector('#adult-enable-api-key')).toBeNull();
-  });
-
-  it('saves the endpoint preset as blank and the key trimmed', async () => {
-    await mountPane({ adult_enabled: 'true', stashbox_api_key: '  secret  ' });
-
-    button('Save').click();
-    await settle();
-
-    // Blank rather than the literal preset URL: it is what the server already
-    // resolves an empty endpoint to, so the default stays the server's to move.
-    expect(saved).toEqual([{ stashbox_endpoint: '', stashbox_api_key: 'secret' }]);
-  });
-
-  it('keeps a custom endpoint as typed', async () => {
-    await mountPane({
-      adult_enabled: 'true',
-      stashbox_endpoint: 'https://stash.example/graphql',
-      stashbox_api_key: 'k',
-    });
-
-    const select = host.querySelector('#stashbox-endpoint') as HTMLSelectElement;
-    expect(select.value).toBe('custom');
-    const custom = host.querySelector('#stashbox-endpoint-url') as HTMLInputElement;
-    expect(custom.value).toBe('https://stash.example/graphql');
-
-    button('Save').click();
-    await settle();
-    expect(saved).toEqual([
-      { stashbox_endpoint: 'https://stash.example/graphql', stashbox_api_key: 'k' },
-    ]);
-  });
-
-  it('tests the source against the provider', async () => {
-    await mountPane({ adult_enabled: 'true' });
-
-    button('Test').click();
-    await settle();
-
-    expect(calls.some((c) => c.url.includes('/adult/search'))).toBe(true);
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
   });
 
   it('grants a member and leaves admins without a toggle', async () => {

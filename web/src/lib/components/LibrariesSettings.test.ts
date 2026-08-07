@@ -114,7 +114,12 @@ beforeEach(() => {
             // Television only: it is what makes the chain editor's eligibility
             // filter a real rule rather than a formality.
             { id: 'anilist', name: 'AniList', kinds: ['tv'] },
-            { id: 'stashbox', name: 'Stash-box', kinds: ['adult'] },
+            // The adult descriptors are one per CONFIGURED stash-box instance
+            // (PLAN Part 2 phase 3 merges them into this list), so an id here
+            // may be instance-qualified and the chain editor names it from the
+            // same list as everything else.
+            { id: 'stashbox', name: 'ThePornDB', kinds: ['adult'] },
+            { id: 'stashbox:stashdb', name: 'StashDB', kinds: ['adult'] },
           ],
         });
       if (url.endsWith('/libraries')) return jsonResponse({ libraries });
@@ -672,6 +677,34 @@ describe('LibrariesSettings — switcher and reach', () => {
     await settle();
 
     expect(rootPath()).toBe('library/Adult');
+  });
+
+  // An instance-qualified id is a provider like any other here: the chain
+  // editor names it from the merged descriptor list, so a second stash-box
+  // reads as its own box rather than as a raw id.
+  it('names an instance-qualified stash-box in the chain', async () => {
+    libraries = [
+      MOVIES,
+      SERIES,
+      library({
+        id: 3,
+        kind: 'adult',
+        name: 'Adult',
+        root_path: 'library/Adult',
+        provider: 'stashbox:stashdb',
+        providers: ['stashbox:stashdb', 'stashbox'],
+      }),
+    ];
+    await mountLoaded();
+
+    button('Adult').click();
+    await settle();
+
+    const chain = host.querySelector('ol[aria-label="Provider chain for Adult"]');
+    expect(chain).not.toBeNull();
+    expect(chain!.textContent).toContain('StashDB');
+    expect(chain!.textContent).toContain('ThePornDB');
+    expect(chain!.textContent).not.toContain('stashbox:stashdb');
   });
 
   it('surfaces a failed load with a retry rather than an empty screen', async () => {

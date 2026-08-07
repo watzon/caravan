@@ -7,9 +7,8 @@
    *    library (hidden from DLNA); turning it off deletes nothing, so it is a
    *    visibility decision and the copy says so rather than warning about data
    *    loss that does not happen.
-   * 2. Where the metadata comes from — a stash-box endpoint and its key.
-   * 3. Who reaches it. Admins always do; every other account is one grant.
-   * 4. Where it reaches BEYOND this screen: DLNA and prepared drives are the
+   * 2. Who reaches it. Admins always do; every other account is one grant.
+   * 3. Where it reaches BEYOND this screen: DLNA and prepared drives are the
    *    two surfaces that leave the browser, and the one place they are stated
    *    together is here. Neither is edited from this card — the DLNA share
    *    lives on the Playback card next to the toggle that turns DLNA on at all,
@@ -17,46 +16,32 @@
    *    and links rather than duplicating a control.
    *
    * Everything below the master switch is unmounted while the module is off:
-   * there is no roster to grant against, no provider to test, and nowhere for
-   * it to reach.
+   * there is no roster to grant against and nowhere for it to reach.
+   *
+   * The metadata source is NOT here any more (PLAN Part 2 phase 8). It is one
+   * card per configured stash-box endpoint on Settings → Metadata, beside every
+   * other provider, because an install can subscribe to several boxes and a
+   * single endpoint field could only ever describe one.
    */
   import { onMount } from 'svelte';
   import { api, errorText } from '../api/client';
-  import {
-    SETTING_ADULT_ENABLED,
-    SETTING_STASHBOX_API_KEY,
-    SETTING_STASHBOX_ENDPOINT,
-    STASHBOX_TPDB_ENDPOINT,
-    type AdultUser,
-    type Library,
-    type Settings,
-  } from '../api/types';
+  import { SETTING_ADULT_ENABLED, type AdultUser, type Library, type Settings } from '../api/types';
   import { session } from '../state/session.svelte';
   import { pushToast } from '../state/toast.svelte';
   import AdultEnableModal from './AdultEnableModal.svelte';
   import Badge from './Badge.svelte';
   import Banner from './Banner.svelte';
-  import Button from './Button.svelte';
   import EmptyState from './EmptyState.svelte';
-  import Field from './Field.svelte';
-  import Icon from './Icon.svelte';
   import LoadError from './LoadError.svelte';
   import SettingsCard from './SettingsCard.svelte';
   import Skeleton from './Skeleton.svelte';
-  import TextInput from './TextInput.svelte';
   import Toggle from './Toggle.svelte';
-
-  const SELECT_CLASS =
-    'h-9 w-full rounded-sm border border-border-strong bg-raised px-3 text-md text-ink ' +
-    'focus:border-accent focus:outline-none disabled:opacity-50';
 
   interface Props {
     settings: Settings;
-    saving?: boolean;
-    onsave: (patch: Settings, note: string) => Promise<boolean>;
   }
 
-  let { settings, saving = false, onsave }: Props = $props();
+  let { settings }: Props = $props();
 
   /**
    * The master switch, mirrored locally: it is written through
@@ -68,12 +53,6 @@
   /** True while the enable setup modal is open (PLAN phase 10 task 5). */
   let enabling = $state(false);
 
-  /** '' is stored as "use the preset", which is what the server resolves it to. */
-  let preset = $state(true);
-  let endpoint = $state(STASHBOX_TPDB_ENDPOINT);
-  let apiKey = $state('');
-  let testing = $state(false);
-
   let users = $state<AdultUser[] | null>(null);
   let adultLibrary = $state<Library | null>(null);
   let loading = $state(false);
@@ -81,14 +60,10 @@
   /** The account whose grant is mid-flight, so only its own row goes quiet. */
   let granting = $state<number | null>(null);
 
-  // The form is seeded from the settings it was handed exactly once. Re-seeding
-  // whenever the prop changed would overwrite a half-typed key the moment any
-  // other card on the screen saved.
+  // Seeded from the settings this screen was handed exactly once: the switch is
+  // written through POST /settings/adult, so re-reading the prop later would
+  // fight whatever the flip just committed.
   onMount(() => {
-    const stored = (settings[SETTING_STASHBOX_ENDPOINT] ?? '').trim();
-    preset = stored === '' || stored === STASHBOX_TPDB_ENDPOINT;
-    endpoint = stored === '' ? STASHBOX_TPDB_ENDPOINT : stored;
-    apiKey = settings[SETTING_STASHBOX_API_KEY] ?? '';
     enabled = settings[SETTING_ADULT_ENABLED] === 'true';
     void load();
   });
@@ -152,53 +127,15 @@
   }
 
   /**
-   * The modal already wrote the credential it proved, as part of the same
-   * atomic enable — so this only catches up the screen with what is now true.
+   * The modal already wrote the instance it proved, as part of the same atomic
+   * enable — so this only catches up the screen with what is now true.
    */
-  async function onEnabled(committed: { endpoint: string; apiKey: string }) {
+  async function onEnabled() {
     enabling = false;
     enabled = true;
-    // Re-seed the source card from what the enable committed, so the fields
-    // below show the credential that is actually in force rather than the
-    // blanks this screen mounted with.
-    preset = committed.endpoint === '';
-    endpoint = committed.endpoint === '' ? STASHBOX_TPDB_ENDPOINT : committed.endpoint;
-    apiKey = committed.apiKey;
     await session.refresh();
     pushToast('Adult content is on.', 'success');
     await load();
-  }
-
-  async function saveSource() {
-    await onsave(
-      {
-        // The preset is stored as the empty string rather than the literal URL:
-        // it is what the server already resolves a blank endpoint to, so a
-        // future change of default follows the server instead of being frozen
-        // into everyone's settings table.
-        [SETTING_STASHBOX_ENDPOINT]: preset ? '' : endpoint.trim(),
-        [SETTING_STASHBOX_API_KEY]: apiKey.trim(),
-      },
-      'Metadata source saved.',
-    );
-  }
-
-  /**
-   * The connection test is a real site search: it is the same call the Add site
-   * picker makes, so it exercises the endpoint, the credential and the parsing
-   * together. Zero results still count as a pass — an answer is the thing being
-   * tested.
-   */
-  async function test() {
-    testing = true;
-    try {
-      await api.searchSites('test');
-      pushToast('The metadata source answered.', 'success');
-    } catch (err) {
-      pushToast(errorText(err), 'danger');
-    } finally {
-      testing = false;
-    }
   }
 
   async function grant(user: AdultUser, granted: boolean) {
@@ -217,7 +154,6 @@
     }
   }
 
-  let canSaveSource = $derived(!saving && (preset || endpoint.trim() !== ''));
   let sharedOnDlna = $derived(adultLibrary?.dlna_visible === true);
 </script>
 
@@ -246,54 +182,6 @@
     {#if error}
       <LoadError message={error} onretry={load} />
     {/if}
-
-    <SettingsCard
-      title="Metadata source"
-      description="A stash-box provider supplies sites, scenes, performers and artwork — TMDB does none of this.">
-      <Field
-        label="Endpoint"
-        for="stashbox-endpoint"
-        help="The provider's GraphQL endpoint. The preset follows Caravan's default; pick Custom to point at your own stash-box.">
-        <select
-          id="stashbox-endpoint"
-          value={preset ? 'tpdb' : 'custom'}
-          onchange={(event) => (preset = event.currentTarget.value === 'tpdb')}
-          class={SELECT_CLASS}>
-          <option value="tpdb">ThePornDB — {STASHBOX_TPDB_ENDPOINT}</option>
-          <option value="custom">Custom stash-box…</option>
-        </select>
-      </Field>
-
-      {#if !preset}
-        <Field
-          label="Custom endpoint"
-          for="stashbox-endpoint-url"
-          help="An absolute http(s) URL. Anything else is refused rather than silently ignored.">
-          <TextInput
-            id="stashbox-endpoint-url"
-            bind:value={endpoint}
-            mono
-            placeholder={STASHBOX_TPDB_ENDPOINT} />
-        </Field>
-      {/if}
-
-      <Field
-        label="API key"
-        for="stashbox-api-key"
-        help="Stored in the database, never in caravan.yaml or logs.">
-        <TextInput id="stashbox-api-key" bind:value={apiKey} type="password" mono placeholder="•••••" />
-      </Field>
-
-      <div class="flex flex-wrap items-center gap-2">
-        <Button variant="primary" disabled={!canSaveSource} onclick={saveSource}>
-          <Icon name="check" size={14} />
-          {saving ? 'Saving…' : 'Save'}
-        </Button>
-        <Button variant="ghost" disabled={testing} onclick={test}>
-          {testing ? 'Testing…' : 'Test'}
-        </Button>
-      </div>
-    </SettingsCard>
 
     <SettingsCard
       title="Member access"
@@ -389,10 +277,6 @@
 {#if enabling}
   <!-- Cancel closes it and nothing was written: the enable is one server-side
        call that validates before it writes, so an abandoned setup leaves the
-       endpoint, the key and the switch exactly where they were. -->
-  <AdultEnableModal
-    initialEndpoint={preset ? '' : endpoint}
-    initialApiKey={apiKey}
-    onclose={() => (enabling = false)}
-    onenabled={onEnabled} />
+       instance table and the switch exactly where they were. -->
+  <AdultEnableModal onclose={() => (enabling = false)} onenabled={onEnabled} />
 {/if}

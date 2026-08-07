@@ -26,6 +26,7 @@
   import QualityProfiles from '../components/QualityProfiles.svelte';
   import SecuritySettings from '../components/SecuritySettings.svelte';
   import SettingsCard from '../components/SettingsCard.svelte';
+  import StashboxSettings from '../components/StashboxSettings.svelte';
   import RuntimeDiagnostics from '../components/RuntimeDiagnostics.svelte';
   import StorageSettings from '../components/StorageSettings.svelte';
   import TasksSettings from '../components/TasksSettings.svelte';
@@ -41,7 +42,7 @@
   } from '../settings/catalog';
   import { pushToast } from '../state/toast.svelte';
   import { page } from '../state/page.svelte';
-  import { providers } from '../state/providers.svelte';
+  import { session } from '../state/session.svelte';
   import { system } from '../state/system.svelte';
 
   interface Props {
@@ -82,13 +83,6 @@
   let metadataConfigured = $derived(
     hasTMDBKey || (status !== null && metadataState === 'ok'),
   );
-  /**
-   * Stash-box is configured with the rest of the adult module; this page only
-   * points there, and only when the server lists the provider at all — the
-   * endpoint omits it when the module is absent, so the card obeys the same
-   * promise-of-absence as every other adult surface.
-   */
-  let hasStashbox = $derived(providers.all.some((p) => p.id === 'stashbox'));
   let storageConfigured = $derived(Boolean(settings?.storage_root || status?.storage_root));
   let results = $derived(SETTINGS_CATALOG.filter((entry) => settingsMatches(entry, query)));
   let setup = $derived([
@@ -166,10 +160,6 @@
   $effect(() => {
     page.actions = settingsSearch;
     return () => (page.actions = null);
-  });
-
-  $effect(() => {
-    if (activeEntry?.route === '/settings/metadata') void providers.load();
   });
 
   async function save(patch: Settings, note: string): Promise<boolean> {
@@ -289,7 +279,7 @@
     {:else if activeEntry?.route === '/settings/playback' && settings}
       <PlaybackSettings {settings} {saving} onsave={save} />
     {:else if activeEntry?.route === '/settings/adult' && settings}
-      <AdultSettings {settings} {saving} onsave={save} />
+      <AdultSettings {settings} />
     {:else if activeEntry?.route === '/settings/interface'}
       <InterfaceSettings />
     {:else if activeEntry?.route === '/settings/security' && settings}
@@ -394,13 +384,14 @@
           </p>
         </SettingsCard>
 
-        {#if hasStashbox}
-          <SettingsCard title="Stash-box" description="Adult metadata.">
-            <p class="text-sm text-ink-secondary">
-              The Stash-box endpoint is configured with the rest of the adult module in
-              <a href="/settings/adult#adult-content" class="text-accent-text hover:underline">Adult content</a>.
-            </p>
-          </SettingsCard>
+        <!--
+          Gated on the session rather than on the provider list: every route the
+          card calls 404s while the module is off, so a card that mounted and
+          then failed to load would itself be the trace the module promises not
+          to leave.
+        -->
+        {#if session.adult}
+          <StashboxSettings />
         {/if}
       </section>
     {/if}
