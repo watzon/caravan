@@ -5,7 +5,25 @@
 
 import { api, errorText } from '../api/client';
 import type { SystemStatus } from '../api/types';
-import { metadataStateOf, type MetadataCredentialState } from '../credentials';
+import {
+  PROVIDER_TMDB,
+  providerStateOf,
+  type MetadataCredentialState,
+} from '../credentials';
+
+/** One provider's credential health, as the surfaces that warn about it read it. */
+export interface ProviderCredentialState {
+  state: MetadataCredentialState;
+  /** The provider's own words for a rejection. '' unless invalid. */
+  reason: string;
+  /** RFC3339 timestamp of the verdict. '' when nothing has checked yet. */
+  checkedAt: string;
+}
+
+/** A credential that needs attention, with the id to name it by. */
+export interface UnhealthyCredential extends ProviderCredentialState {
+  id: string;
+}
 
 class SystemState {
   status = $state<SystemStatus | null>(null);
@@ -26,12 +44,48 @@ class SystemState {
    * their answer from the failed call itself, not from here.
    */
   get metadataCredential(): MetadataCredentialState {
-    return metadataStateOf(this.status?.metadata_credential);
+    return this.credential(PROVIDER_TMDB).state;
   }
 
   /** Why the key was rejected, in the provider's words. '' unless invalid. */
   get metadataCredentialReason(): string {
-    return this.status?.metadata_credential_reason ?? '';
+    return this.credential(PROVIDER_TMDB).reason;
+  }
+
+  /**
+   * One provider's credential health as of the last status fetch.
+   *
+   * The per-provider map is read when the server sent one, and TMDB falls back
+   * to the flat fields when it did not — the server fills those from the map's
+   * TMDB entry, so the two answers are the same answer.
+   */
+  credential(providerId: string): ProviderCredentialState {
+    const state = providerStateOf(this.status, providerId);
+    const entry = this.status?.metadata_credentials?.[providerId];
+    if (entry) return { state, reason: entry.reason ?? '', checkedAt: entry.checked_at ?? '' };
+    if (this.status?.metadata_credentials || providerId !== PROVIDER_TMDB) {
+      return { state, reason: '', checkedAt: '' };
+    }
+    return {
+      state,
+      reason: this.status?.metadata_credential_reason ?? '',
+      checkedAt: this.status?.metadata_credential_checked_at ?? '',
+    };
+  }
+
+  /**
+   * Every credential that needs attention, for the sidebar's warning rows.
+   *
+   * Sorted by id so the rows do not reorder between polls. A server that sent
+   * no map is asked about TMDB alone, which is every credential such a server
+   * has an opinion about.
+   */
+  get unhealthyCredentials(): UnhealthyCredential[] {
+    const byProvider = this.status?.metadata_credentials;
+    const ids = byProvider ? Object.keys(byProvider).sort() : [PROVIDER_TMDB];
+    return ids
+      .map((id) => ({ id, ...this.credential(id) }))
+      .filter((c) => c.state !== 'ok');
   }
 
   async refresh(): Promise<void> {

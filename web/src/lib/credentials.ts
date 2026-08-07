@@ -3,8 +3,9 @@
  *
  * Two things arrive from the server and they are deliberately different:
  *
- *  - `GET /system/status` reports a cached verdict on the TMDB key — absent,
- *    invalid or ok — so the sidebar can say so without anything calling TMDB.
+ *  - `GET /system/status` reports a cached verdict per credentialed provider —
+ *    absent, invalid or ok — so the sidebar can say so without anything calling
+ *    the provider.
  *  - Every guarded surface answers 503 with a stable `code` on the error
  *    envelope, so a screen that cannot render knows *why* and can point at the
  *    fix instead of showing the provider's complaint as a toast.
@@ -15,6 +16,14 @@
  */
 
 import { ApiError, errorCode } from './api/client';
+import type { SystemStatus } from './api/types';
+
+/**
+ * TMDB's provider id (core.ProviderTMDB). It is named here because it is the
+ * one id this module treats specially: the flat `metadata_credential` fields a
+ * pre-map server answers with are TMDB's and nothing else's.
+ */
+export const PROVIDER_TMDB = 'tmdb';
 
 /** Error-envelope codes (internal/api/credentials.go). */
 export const CODE_METADATA_ABSENT = 'metadata_credential_absent';
@@ -101,10 +110,18 @@ export function metadataToast(err: unknown, canFix = true): string | null {
   return fault ? metadataCopy(fault, canFix).message : null;
 }
 
-/** The sidebar's short label for a credential that needs attention. */
-export function metadataStateLabel(state: MetadataCredentialState): string | null {
-  if (state === 'absent') return 'No TMDB key';
-  if (state === 'invalid') return 'TMDB key rejected';
+/**
+ * The sidebar's short label for a credential that needs attention.
+ *
+ * `provider` is the display name to say it about, defaulting to TMDB because
+ * that is the only credential the label existed for before the status map did.
+ */
+export function metadataStateLabel(
+  state: MetadataCredentialState,
+  provider = 'TMDB',
+): string | null {
+  if (state === 'absent') return `No ${provider} key`;
+  if (state === 'invalid') return `${provider} key rejected`;
   return null;
 }
 
@@ -113,4 +130,26 @@ export function metadataStateOf(
   reported: string | undefined | null,
 ): MetadataCredentialState {
   return reported === 'absent' || reported === 'invalid' ? reported : 'ok';
+}
+
+/**
+ * One provider's state on a status payload.
+ *
+ * The per-provider map is the answer whenever the server sent one, including
+ * when it holds no entry for `providerId` — a credentialed provider the server
+ * knows about is always in it, so an id missing from a map that exists is one
+ * this server has no credential for, which is not a problem to warn about.
+ *
+ * A status with no map at all is an older server, or a fixture written before
+ * the map existed. Those still carry TMDB's verdict in the flat fields, so
+ * TMDB is answered from there and every other id reads as the optimistic "ok"
+ * — the same rule `metadataStateOf` documents for a field that is not there.
+ */
+export function providerStateOf(
+  status: SystemStatus | null | undefined,
+  providerId: string,
+): MetadataCredentialState {
+  const byProvider = status?.metadata_credentials;
+  if (byProvider) return metadataStateOf(byProvider[providerId]?.state);
+  return providerId === PROVIDER_TMDB ? metadataStateOf(status?.metadata_credential) : 'ok';
 }

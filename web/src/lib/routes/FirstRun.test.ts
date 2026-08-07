@@ -201,9 +201,13 @@ describe('FirstRun', () => {
     await settle();
 
     // Trimmed, and sent in the body: the key is proved before it is stored, so
-    // a wrong one never reaches the database.
+    // a wrong one never reaches the database. The provider is named because
+    // there are several now, and the wizard's field is TMDB's.
     expect(called('/settings/metadata/test')).toEqual([
-      expect.objectContaining({ method: 'POST', body: { api_key: 'abc123' } }),
+      expect.objectContaining({
+        method: 'POST',
+        body: { api_key: 'abc123', provider: 'tmdb' },
+      }),
     ]);
     expect(host.textContent).toContain('Key works');
     expect(called('/settings')).toHaveLength(1); // the test route only

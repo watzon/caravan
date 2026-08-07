@@ -323,6 +323,23 @@ export interface RuntimeDiagnostics {
   memory_alloc_bytes: number;
 }
 
+/**
+ * One provider's cached credential verdict, as `GET /system/status` reports it
+ * under `metadata_credentials` (internal/api/credentials.go credentialStateJSON).
+ *
+ * A provider that needs no key is absent from that map rather than present as
+ * "ok": what a provider requires is a fact read off the provider list, not a
+ * verdict the server reached about anything.
+ */
+export interface ProviderCredential {
+  /** "absent" | "invalid" | "ok". Read through `credentials.providerStateOf`. */
+  state: string;
+  /** The provider's own words for a rejection. Absent unless invalid. */
+  reason?: string;
+  /** RFC3339 timestamp of the verdict. Absent when nothing has checked yet. */
+  checked_at?: string;
+}
+
 export interface SystemStatus {
   version: string;
   /** "server" | "portable" (SPEC §2). */
@@ -393,6 +410,17 @@ export interface SystemStatus {
   metadata_credential_reason?: string;
   /** RFC3339 timestamp of the verdict. Absent when nothing has checked yet. */
   metadata_credential_checked_at?: string;
+  /**
+   * Every credentialed provider's verdict, keyed by provider id, since "the
+   * metadata provider" stopped being singular once libraries gained chains.
+   *
+   * The three flat fields above are this map's TMDB entry — the server fills
+   * them from it, so the two cannot disagree. Optional so an older server, or a
+   * fixture written before the map existed, still answers for TMDB through the
+   * flat fields; read it through `credentials.providerStateOf`, which knows
+   * that fallback.
+   */
+  metadata_credentials?: Record<string, ProviderCredential>;
   /** Admin-only process and path diagnostics supplied by the serving command. */
   runtime?: RuntimeDiagnostics;
 }

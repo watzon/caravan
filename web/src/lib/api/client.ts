@@ -521,20 +521,25 @@ export const api = {
     request<Settings>(endpoints.settings(), { method: 'PUT', body: patch }),
 
   /**
-   * Prove a TMDB API key against TMDB (PLAN phase 10 task 4).
+   * Prove one provider's API key against that provider (PLAN phase 10 task 4).
    *
    * Passing the key tests that exact string without storing it, which is what
    * the first-run wizard and the settings field both do — so a wrong key is
    * caught before it is saved. Passing nothing tests the stored one.
    *
+   * `provider` defaults to TMDB, which is what the server assumes for a body
+   * that names none — so a caller that has only ever had one key to prove keeps
+   * asking the question it always asked. An id with no key field of its own is
+   * a 400 rather than a test that quietly proves TMDB's key instead.
+   *
    * The server caches the verdict against the key's value, so testing and then
    * saving the same key costs one upstream call, not two: prefer test-then-save
    * over saving blind.
    */
-  testMetadataKey: (apiKey = '') =>
+  testMetadataKey: (apiKey = '', provider = 'tmdb') =>
     request<{ status: string }>(endpoints.metadataTest(), {
       method: 'POST',
-      body: { api_key: apiKey },
+      body: { api_key: apiKey, provider },
     }),
 
   /**

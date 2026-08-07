@@ -25,8 +25,9 @@
   import { BADGE_POLL_MS, downloads } from '../state/downloads.svelte';
   import { REQUESTS_BADGE_POLL_MS, requests } from '../state/requests.svelte';
   import { system } from '../state/system.svelte';
+  import { providers } from '../state/providers.svelte';
   import { formatBytes } from '../format';
-  import { metadataStateLabel } from '../credentials';
+  import { metadataStateLabel, PROVIDER_TMDB } from '../credentials';
   import Badge from '../components/Badge.svelte';
   import Button from '../components/Button.svelte';
   import Icon, { type IconName } from '../components/Icon.svelte';
@@ -246,14 +247,36 @@
   });
 
   /**
-   * The TMDB credential, when it needs attention (PLAN phase 10 task 2).
+   * The provider display name to warn about a credential under.
    *
-   * It is quiet while the key works — a healthy credential is not news — and
-   * loud in exactly the two states where every metadata surface is degraded.
-   * The state is read from the status payload's cached verdict, so this row
-   * costs no upstream call however often the card refreshes.
+   * `providers` is an admin-only list loaded lazily by the surfaces that need
+   * names, so the shell usually has none and `name()` hands back the raw id —
+   * a worse label but never a wrong one. TMDB is the exception: its row
+   * predates the list entirely and must read the same either way.
    */
-  let credentialLabel = $derived(metadataStateLabel(system.metadataCredential));
+  function credentialName(id: string): string {
+    const named = providers.name(id);
+    if (named !== id) return named;
+    return id === PROVIDER_TMDB ? 'TMDB' : id;
+  }
+
+  /**
+   * The credentials that need attention (PLAN phase 10 task 2), one row each.
+   *
+   * The card is quiet while a key works — a healthy credential is not news —
+   * and loud in exactly the two states where the surfaces behind that provider
+   * are degraded. Every state is read from the status payload's cached
+   * verdicts, so these rows cost no upstream call however often it refreshes.
+   */
+  let credentialRows = $derived(
+    system.unhealthyCredentials
+      .map((c) => ({
+        id: c.id,
+        reason: c.reason,
+        label: metadataStateLabel(c.state, credentialName(c.id)),
+      }))
+      .filter((row): row is typeof row & { label: string } => row.label !== null),
+  );
   let signOutLabel = $derived(auth.busy ? 'Signing out…' : `Sign out ${session.username}`);
 
   let settingsMode = $derived(settingsSection !== undefined);
@@ -434,16 +457,16 @@
 
       <!-- A link rather than a statement: every screen this breaks is fixed in
            one place, so the card that reports it goes there. -->
-      {#if credentialLabel}
+      {#each credentialRows as row (row.id)}
         <a
           href="/settings/metadata"
           class="flex items-center gap-2 rounded-sm text-sm text-warning transition-colors duration-150 ease-out hover:underline"
-          title={system.metadataCredentialReason || undefined}
+          title={row.reason || undefined}
           onclick={closeForNavigation}>
           <span class="size-2 shrink-0 rounded-full {TONE_DOT.warning}"></span>
-          <span>{credentialLabel}</span>
+          <span>{row.label}</span>
         </a>
-      {/if}
+      {/each}
 
       <div class="flex flex-col gap-2">
         <span

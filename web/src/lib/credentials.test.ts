@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { ApiError } from './api/client';
+import type { SystemStatus } from './api/types';
 import {
   adultFault,
   metadataCopy,
@@ -14,6 +15,7 @@ import {
   metadataStateLabel,
   metadataStateOf,
   metadataToast,
+  providerStateOf,
 } from './credentials';
 
 /** An error shaped exactly as the API layer builds one from a JSON envelope. */
@@ -110,6 +112,62 @@ describe('metadataStateLabel', () => {
   it('names each state that needs attention', () => {
     expect(metadataStateLabel('absent')).toBe('No TMDB key');
     expect(metadataStateLabel('invalid')).toBe('TMDB key rejected');
+  });
+
+  // One row per provider means the label has to say which one, and TMDB's
+  // wording is only the default rather than the sentence.
+  it('says it about the provider it was handed', () => {
+    expect(metadataStateLabel('absent', 'TheTVDB')).toBe('No TheTVDB key');
+    expect(metadataStateLabel('invalid', 'TheTVDB')).toBe('TheTVDB key rejected');
+    expect(metadataStateLabel('ok', 'TheTVDB')).toBeNull();
+  });
+});
+
+describe('providerStateOf', () => {
+  /** A status carrying only the credential fields under test. */
+  function status(fields: Partial<SystemStatus>): SystemStatus {
+    return fields as SystemStatus;
+  }
+
+  it('reads the provider its entry in the map', () => {
+    const s = status({
+      metadata_credentials: {
+        tmdb: { state: 'invalid', reason: 'tmdb: http 401' },
+        thetvdb: { state: 'absent' },
+      },
+    });
+
+    expect(providerStateOf(s, 'tmdb')).toBe('invalid');
+    expect(providerStateOf(s, 'thetvdb')).toBe('absent');
+  });
+
+  // A credentialed provider this server knows about is always in the map, so an
+  // id that is not in one is a provider it has no credential for — a keyless
+  // one, or one that is not compiled in. Neither is a problem to warn about.
+  it('treats an id the map does not carry as ok', () => {
+    const s = status({ metadata_credentials: { tmdb: { state: 'invalid' } } });
+
+    expect(providerStateOf(s, 'tvmaze')).toBe('ok');
+    expect(providerStateOf(s, 'nonsense')).toBe('ok');
+  });
+
+  // An older server, or a fixture written before the map: the flat fields are
+  // TMDB's verdict and nothing else's.
+  it('falls back to the flat fields for TMDB when there is no map', () => {
+    expect(providerStateOf(status({ metadata_credential: 'absent' }), 'tmdb')).toBe('absent');
+    expect(providerStateOf(status({ metadata_credential: 'invalid' }), 'tmdb')).toBe('invalid');
+    expect(providerStateOf(status({ metadata_credential: 'ok' }), 'tmdb')).toBe('ok');
+  });
+
+  it('never reads the flat fields as another provider’s verdict', () => {
+    expect(providerStateOf(status({ metadata_credential: 'invalid' }), 'thetvdb')).toBe('ok');
+  });
+
+  // The badge this feeds is a warning, so a status nobody has fetched must not
+  // raise one.
+  it('reads a status that is not there as ok', () => {
+    expect(providerStateOf(null, 'tmdb')).toBe('ok');
+    expect(providerStateOf(undefined, 'thetvdb')).toBe('ok');
   });
 });
 
