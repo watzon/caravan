@@ -40,11 +40,11 @@ export const SETTINGS_CATALOG = [
   {
     category: 'Library and media',
     label: 'Metadata',
-    description: 'Connect TMDB for titles, artwork, search, and episode data.',
+    description: 'Configure each metadata provider: TMDB, AniList, and more.',
     route: '/settings/metadata',
     anchor: 'metadata',
-    aliases: ['TMDB', 'API key'],
-    keywords: ['metadata key', 'artwork', 'titles', 'discover'],
+    aliases: ['TMDB', 'AniList', 'API key', 'providers'],
+    keywords: ['metadata key', 'artwork', 'titles', 'discover', 'anime'],
   },
   {
     category: 'Library and media',

@@ -36,6 +36,7 @@
   } from '../settings/catalog';
   import { pushToast } from '../state/toast.svelte';
   import { page } from '../state/page.svelte';
+  import { providers } from '../state/providers.svelte';
   import { system } from '../state/system.svelte';
 
   interface Props {
@@ -77,6 +78,20 @@
   let metadataConfigured = $derived(
     hasTMDBKey || (status !== null && metadataState === 'ok'),
   );
+  /**
+   * Stash-box is configured with the rest of the adult module; this page only
+   * points there, and only when the server lists the provider at all — the
+   * endpoint omits it when the module is absent, so the card obeys the same
+   * promise-of-absence as every other adult surface.
+   */
+  let hasStashbox = $derived(providers.all.some((p) => p.id === 'stashbox'));
+  let tmdbBadge = $derived(
+    metadataState === 'invalid'
+      ? { tone: 'danger' as const, label: 'Key rejected' }
+      : metadataState === 'absent'
+        ? { tone: 'warning' as const, label: 'No key' }
+        : { tone: 'success' as const, label: 'Connected' },
+  );
   let storageConfigured = $derived(Boolean(settings?.storage_root || status?.storage_root));
   let results = $derived(SETTINGS_CATALOG.filter((entry) => settingsMatches(entry, query)));
   let setup = $derived([
@@ -88,7 +103,7 @@
     },
     {
       label: 'Connect metadata',
-      description: 'Add a TMDB API key for search, titles, and artwork.',
+      description: 'Add a TMDB API key for Discover, requests, and TMDB libraries.',
       href: '/settings/metadata#metadata',
       complete: metadataConfigured,
     },
@@ -156,6 +171,10 @@
   $effect(() => {
     page.actions = settingsSearch;
     return () => (page.actions = null);
+  });
+
+  $effect(() => {
+    if (activeEntry?.route === '/settings/metadata') void providers.load();
   });
 
   async function save(patch: Settings, note: string): Promise<boolean> {
@@ -326,56 +345,91 @@
       </section>
     {:else if activeEntry?.route === '/settings/metadata'}
       <section class="flex flex-col gap-6">
-        {#if metadataState !== 'ok'}
-          <Banner
-            tone="warning"
-            icon="warning"
-            title={metadataState === 'invalid' ? 'TMDB rejected this key' : 'No TMDB API key yet'}
-            message={metadataState === 'invalid'
-              ? system.metadataCredentialReason ||
-                'The key on file was refused. Correct it below and press Test.'
-              : 'Search, Discover and adding a title all read TMDB. Enter a key below and press Test.'} />
-        {/if}
+        <p class="text-sm text-ink-secondary">
+          Each provider keeps its own configuration here. Which providers a library uses — and in
+          which order — is set per library in
+          <a href="/settings/libraries#libraries" class="text-accent-text hover:underline">Libraries</a>.
+        </p>
 
-        <Field
-          label="TMDB API key"
-          for="tmdb-key"
-          help="Stored in the database, never in caravan.yaml or logs."
-          error={tmdbTest && !tmdbTest.ok ? tmdbTest.message : null}>
-          <TextInput
-            id="tmdb-key"
-            bind:value={tmdbKey}
-            type="password"
-            mono
-            placeholder="•••••"
-            oninput={() => (tmdbTest = null)} />
-        </Field>
-        {#if hasTMDBKey}
-          <p class="-mt-4 text-sm text-ink-secondary">A key is stored. Leave blank to keep it.</p>
-        {/if}
+        <SettingsCard
+          title="TMDB"
+          description="Movies and series: titles, artwork, episode data, Discover, and requests.">
+          {#snippet action()}
+            <Badge tone={tmdbBadge.tone}>{tmdbBadge.label}</Badge>
+          {/snippet}
+          {#if metadataState !== 'ok'}
+            <Banner
+              tone="warning"
+              icon="warning"
+              title={metadataState === 'invalid' ? 'TMDB rejected this key' : 'No TMDB API key yet'}
+              message={metadataState === 'invalid'
+                ? system.metadataCredentialReason ||
+                  'The key on file was refused. Correct it below and press Test.'
+                : 'Discover, requests, and every library that uses TMDB read this key. Enter it below and press Test.'} />
+          {/if}
 
-        {#if tmdbTest?.ok}
-          <p class="-mt-4 text-sm text-success">✓ {tmdbTest.message}</p>
-        {/if}
+          <Field
+            label="TMDB API key"
+            for="tmdb-key"
+            help="Stored in the database, never in caravan.yaml or logs."
+            error={tmdbTest && !tmdbTest.ok ? tmdbTest.message : null}>
+            <TextInput
+              id="tmdb-key"
+              bind:value={tmdbKey}
+              type="password"
+              mono
+              placeholder="•••••"
+              oninput={() => (tmdbTest = null)} />
+          </Field>
+          {#if hasTMDBKey}
+            <p class="-mt-2 text-sm text-ink-secondary">A key is stored. Leave blank to keep it.</p>
+          {/if}
 
-        <div class="flex flex-wrap items-center gap-2">
-          <Button
-            variant="primary"
-            disabled={saving || tmdbKey.trim() === ''}
-            onclick={() => save({ [SETTING_TMDB_API_KEY]: tmdbKey.trim() }, 'TMDB API key saved.')}>
-            <Icon name="check" size={14} />
-            {saving ? 'Saving…' : 'Save'}
-          </Button>
-          <Button
-            variant="secondary"
-            disabled={!hasTMDBKey || saving}
-            onclick={() => save({ [SETTING_TMDB_API_KEY]: '' }, 'TMDB API key cleared.')}>
-            Clear
-          </Button>
-          <Button variant="secondary" disabled={testingTMDB} onclick={testMetadata}>
-            {testingTMDB ? 'Testing…' : 'Test'}
-          </Button>
-        </div>
+          {#if tmdbTest?.ok}
+            <p class="-mt-2 text-sm text-success">✓ {tmdbTest.message}</p>
+          {/if}
+
+          <div class="flex flex-wrap items-center gap-2">
+            <Button
+              variant="primary"
+              disabled={saving || tmdbKey.trim() === ''}
+              onclick={() => save({ [SETTING_TMDB_API_KEY]: tmdbKey.trim() }, 'TMDB API key saved.')}>
+              <Icon name="check" size={14} />
+              {saving ? 'Saving…' : 'Save'}
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={!hasTMDBKey || saving}
+              onclick={() => save({ [SETTING_TMDB_API_KEY]: '' }, 'TMDB API key cleared.')}>
+              Clear
+            </Button>
+            <Button variant="secondary" disabled={testingTMDB} onclick={testMetadata}>
+              {testingTMDB ? 'Testing…' : 'Test'}
+            </Button>
+          </div>
+        </SettingsCard>
+
+        <SettingsCard
+          title="AniList"
+          description="Anime series: titles, episode counts, and artwork from AniList.">
+          {#snippet action()}
+            <Badge tone="success">Ready</Badge>
+          {/snippet}
+          <p class="text-sm text-ink-secondary">
+            AniList needs no key or account. To use it, add it to a series library’s provider list
+            in
+            <a href="/settings/libraries#libraries" class="text-accent-text hover:underline">Libraries</a>.
+          </p>
+        </SettingsCard>
+
+        {#if hasStashbox}
+          <SettingsCard title="Stash-box" description="Adult metadata.">
+            <p class="text-sm text-ink-secondary">
+              The Stash-box endpoint is configured with the rest of the adult module in
+              <a href="/settings/adult#adult-content" class="text-accent-text hover:underline">Adult content</a>.
+            </p>
+          </SettingsCard>
+        {/if}
       </section>
     {/if}
   </div>

@@ -6,6 +6,7 @@ import FilterOptions from '../components/FilterOptions.svelte';
 import PosterCard from '../components/PosterCard.svelte';
 import { reactiveProps } from '../reactiveprops.svelte';
 import { system } from '../state/system.svelte';
+import { providers } from '../state/providers.svelte';
 import { navigate, router } from '../router.svelte';
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -45,6 +46,9 @@ beforeEach(() => {
 afterEach(() => {
   // A module singleton: a status one test seeded must not decide the next.
   system.status = null;
+  // Same for the provider list, which load() otherwise fetches only once.
+  providers.all = [];
+  providers.loaded = false;
   unmount(app);
   host.remove();
   localStorage.clear();
@@ -89,6 +93,7 @@ function stubFetch() {
     if (url.endsWith('/usenet-servers')) return jsonResponse({ usenet_servers: [] });
     if (url.endsWith('/download-clients/types')) return jsonResponse({ types: [] });
     if (url.endsWith('/download-clients')) return jsonResponse({ download_clients: [] });
+    if (url.endsWith('/libraries/providers')) return jsonResponse({ providers: [] });
     if (url.endsWith('/dlna')) {
       return jsonResponse({ enabled: true, friendly_name: 'Caravan', advertising: true, uuid: 'u' });
     }
@@ -435,7 +440,16 @@ describe('Settings engine tab', () => {
  * has to be saved to find out it was one.
  */
 describe('Settings metadata pane', () => {
-  function stubMetadata(testReply: () => Response): { url: string; method: string; body: unknown }[] {
+  const ALL_PROVIDERS = [
+    { id: 'tmdb', name: 'TMDB', kinds: ['movie', 'tv'] },
+    { id: 'anilist', name: 'AniList', kinds: ['tv'] },
+    { id: 'stashbox', name: 'Stash-box', kinds: ['adult'] },
+  ];
+
+  function stubMetadata(
+    testReply: () => Response,
+    providerList: unknown[] = ALL_PROVIDERS,
+  ): { url: string; method: string; body: unknown }[] {
     const calls: { url: string; method: string; body: unknown }[] = [];
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -445,6 +459,7 @@ describe('Settings metadata pane', () => {
         body: typeof init?.body === 'string' ? JSON.parse(init.body) : null,
       });
       if (url.includes('/settings/metadata/test')) return testReply();
+      if (url.endsWith('/libraries/providers')) return jsonResponse({ providers: providerList });
       if (url.endsWith('/settings')) return jsonResponse({ tmdb_api_key_set: 'true' });
       if (url.endsWith('/system/status')) return jsonResponse(SYSTEM_STATUS);
       if (url.endsWith('/indexers')) return jsonResponse({ indexers: [] });
@@ -560,5 +575,33 @@ describe('Settings metadata pane', () => {
 
     expect(host.textContent).not.toContain('No TMDB API key yet');
     expect(host.textContent).not.toContain('TMDB rejected this key');
+  });
+
+  // Jellyfin's split: this page is each provider's own configuration; which
+  // library uses which provider lives in Libraries. The page must say both.
+  it('shows a card per provider and points chain ordering at Libraries', async () => {
+    stubMetadata(() => jsonResponse({ status: 'ok' }));
+    app = mount(Settings, { target: host, props: { section: 'metadata' } });
+    await settle();
+
+    expect(host.textContent).toContain('AniList needs no key or account');
+    expect(host.querySelector('a[href="/settings/libraries#libraries"]')).not.toBeNull();
+    // Stash-box configures itself with the adult module; this page only points.
+    expect(host.querySelector('#stashbox-endpoint')).toBeNull();
+    expect(host.querySelector('a[href="/settings/adult#adult-content"]')).not.toBeNull();
+  });
+
+  // The server omits the adult provider when the module is absent; the page
+  // must not reintroduce it (promise-of-absence).
+  it('omits the Stash-box card when the server does not list the provider', async () => {
+    stubMetadata(
+      () => jsonResponse({ status: 'ok' }),
+      ALL_PROVIDERS.filter((p) => p.id !== 'stashbox'),
+    );
+    app = mount(Settings, { target: host, props: { section: 'metadata' } });
+    await settle();
+
+    expect(host.textContent).toContain('AniList');
+    expect(host.textContent).not.toContain('Stash-box');
   });
 });
