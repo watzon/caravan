@@ -86,6 +86,8 @@ export interface Movie {
   poster_url: string;
   monitored: boolean;
   quality_profile_id: number;
+  /** The library that owns the movie; 0 on rows from before libraries were plural. */
+  library_id: number;
   release_date: string;
   /** The release stage the movie's automatic search waits for. */
   min_availability: MinAvailability;
@@ -146,6 +148,8 @@ export interface Series {
   poster_url: string;
   monitored: boolean;
   quality_profile_id: number;
+  /** The library that owns the series; 0 on rows from before libraries were plural. */
+  library_id: number;
   first_aired: string;
   added_at: string;
   updated_at: string;
@@ -164,12 +168,32 @@ export interface UnmatchedFile {
   size: number;
   parsed: ParsedRelease;
   reason: string;
+  /**
+   * The library the manual match is scoped to. An untied universal-search grab
+   * already chose one, and the review screen names it; 0 — every scan-parked
+   * file — means unscoped.
+   */
+  library_id: number;
   seen_at: string;
 }
 
-/** internal/core.MovieMeta — a TMDB search hit, not yet a library item. */
+/** internal/core.MovieMeta — a provider search hit, not yet a library item. */
 export interface MovieMeta {
+  /**
+   * The TMDB id, and zero for a hit from any other provider — which is honest
+   * rather than missing: an AniList title has no TMDB id. It stays because it
+   * is the compatibility spelling every add still accepts; `provider` and
+   * `provider_ref` are what actually identify a row in a chain.
+   */
   tmdb_id: number;
+  /** The provider that answered: 'tmdb', 'anilist'. */
+  provider: string;
+  /**
+   * This title's id in that provider's own numbering. With `provider` it is
+   * the only thing that tells two chain hits apart — two providers' ids are
+   * different numbers for different things.
+   */
+  provider_ref: string;
   imdb_id: string;
   title: string;
   original_title: string;
@@ -183,9 +207,14 @@ export interface MovieMeta {
   poster_url: string;
 }
 
-/** internal/core.SeriesMeta — a TMDB search hit, not yet a library item. */
+/** internal/core.SeriesMeta — a provider search hit, not yet a library item. */
 export interface SeriesMeta {
+  /** Reads exactly as MovieMeta.tmdb_id does. */
   tmdb_id: number;
+  /** The provider that answered. */
+  provider: string;
+  /** This title's id in that provider's own numbering. */
+  provider_ref: string;
   tvdb_id: number;
   imdb_id: string;
   title: string;
@@ -204,6 +233,32 @@ export interface SeriesMeta {
 export interface SearchResults {
   movies: MovieMeta[];
   series: SeriesMeta[];
+  /**
+   * The provider chain that actually ran, in order and deduplicated.
+   *
+   * The LENGTH matters as much as the contents: a per-row provider badge is
+   * noise on the overwhelmingly common single-provider install, and is the
+   * only way to tell two hits apart once the chain is longer than one.
+   */
+  providers: string[];
+  /**
+   * The library whose chain answered, echoed so the add lands where the user
+   * searched. Zero means the request named none and the kind's default
+   * answered.
+   */
+  library_id: number;
+  /**
+   * The providers that ran and failed while others succeeded. They arrive on a
+   * 200: one provider being down must not hide what the others returned. A
+   * chain where every provider failed is a 502/503 instead.
+   */
+  errors?: SearchProviderError[];
+}
+
+/** One provider's refusal inside an otherwise successful search. */
+export interface SearchProviderError {
+  provider: string;
+  message: string;
 }
 
 /** How much is in the library right now, from GET /system/status. */
@@ -266,6 +321,23 @@ export interface RuntimeDiagnostics {
   listen_address: string;
   goroutines: number;
   memory_alloc_bytes: number;
+}
+
+/**
+ * One provider's cached credential verdict, as `GET /system/status` reports it
+ * under `metadata_credentials` (internal/api/credentials.go credentialStateJSON).
+ *
+ * A provider that needs no key is absent from that map rather than present as
+ * "ok": what a provider requires is a fact read off the provider list, not a
+ * verdict the server reached about anything.
+ */
+export interface ProviderCredential {
+  /** "absent" | "invalid" | "ok". Read through `credentials.providerStateOf`. */
+  state: string;
+  /** The provider's own words for a rejection. Absent unless invalid. */
+  reason?: string;
+  /** RFC3339 timestamp of the verdict. Absent when nothing has checked yet. */
+  checked_at?: string;
 }
 
 export interface SystemStatus {
@@ -338,6 +410,17 @@ export interface SystemStatus {
   metadata_credential_reason?: string;
   /** RFC3339 timestamp of the verdict. Absent when nothing has checked yet. */
   metadata_credential_checked_at?: string;
+  /**
+   * Every credentialed provider's verdict, keyed by provider id, since "the
+   * metadata provider" stopped being singular once libraries gained chains.
+   *
+   * The three flat fields above are this map's TMDB entry — the server fills
+   * them from it, so the two cannot disagree. Optional so an older server, or a
+   * fixture written before the map existed, still answers for TMDB through the
+   * flat fields; read it through `credentials.providerStateOf`, which knows
+   * that fallback.
+   */
+  metadata_credentials?: Record<string, ProviderCredential>;
   /** Admin-only process and path diagnostics supplied by the serving command. */
   runtime?: RuntimeDiagnostics;
 }
@@ -365,11 +448,16 @@ export interface SessionUser {
   role: UserRole;
   open: boolean;
   /**
-   * Whether the adult module is visible to THIS caller: the server-wide switch
-   * is on and this account reaches it (an admin always does, a member needs the
-   * grant). It is the only field outside /adult that reports anything about the
-   * module, and it is false — never absent — for everybody else, so "off" and
-   * "not granted" are the same answer here as they are on the 404 from /adult.
+   * Whether adult content is visible to THIS caller: at least one adult-kind
+   * library is ACTIVE and this account reaches it (an admin always does, a
+   * member needs a grant on it, an unrestricted library needs none). The name
+   * and the type are unchanged from the module-switch era on purpose — every
+   * surface that reads it asks the same question it always did — but there is
+   * no server-wide switch behind it any more, only libraries.
+   *
+   * It is false, never absent, for everybody else, so "there is no adult
+   * library" and "I was not granted one" are the same answer here as they are
+   * on the 404 from /adult.
    *
    * The SPA reads the nav item, the settings pill and the scene surfaces from
    * this and nothing else. GET /settings cannot stand in for it: that route is
@@ -377,12 +465,30 @@ export interface SessionUser {
    */
   adult: boolean;
   /**
+   * Every library this session may see — active and permitted, nothing else.
+   *
+   * Root paths, provider chains and DLNA state are deliberately absent: this
+   * travels to every member, and GET /libraries (which carries all of that)
+   * is admin-only and must stay that way.
+   *
+   * Optional because a server older than the field sends none, and because
+   * nothing on this screen may treat "the list is missing" as "no libraries".
+   */
+  libraries?: SessionLibrary[];
+  /**
    * Which controls the Explore rail's Adult scope may draw. Absent for a caller
    * the module is invisible to, for a server with no stash-box credential, and
    * for a server too old to send it — see `sceneFiltersOf`, which is the only
    * thing that should read it.
    */
   scene_filters?: SceneFilterSupport;
+}
+
+/** internal/api.meLibraryJSON — one shelf as a session may know it. */
+export interface SessionLibrary {
+  id: number;
+  kind: LibraryKind;
+  name: string;
 }
 
 /**
@@ -502,6 +608,15 @@ export const SETTING_STORAGE_ROOT = 'storage_root';
 export const SETTING_TMDB_API_KEY = 'tmdb_api_key';
 export const SETTING_TMDB_API_KEY_SET = 'tmdb_api_key_set';
 /**
+ * TheTVDB v4's credential is a pair: the login consumes the key, and a
+ * user-supported key needs the subscriber's PIN beside it. Both are write-only,
+ * so only the key has a public `_set` flag — the PIN has no card of its own to
+ * report on.
+ */
+export const SETTING_THETVDB_API_KEY = 'thetvdb_api_key';
+export const SETTING_THETVDB_PIN = 'thetvdb_pin';
+export const SETTING_THETVDB_API_KEY_SET = 'thetvdb_api_key_set';
+/**
  * Caravan's own API key, for external tools and the iCal feed. Read-only here:
  * it is generated by POST /settings/apikey, never typed in.
  *
@@ -562,32 +677,6 @@ export const SETTING_CONVERT_AUDIO_BITRATE_KBPS = 'convert_audio_bitrate_kbps';
  */
 export const SETTING_DLNA_ENABLED = 'dlna_enabled';
 export const SETTING_DLNA_FRIENDLY_NAME = 'dlna_friendly_name';
-
-/**
- * The stash-box metadata source for the adult module (internal/store).
- *
- * These two ride on PUT /settings like every other key. The master switch does
- * NOT — flipping `adult_enabled` creates the Adult library row on its first
- * enable, which a key/value PUT cannot carry out, so it has an endpoint of its
- * own (POST /settings/adult) and the server refuses it here.
- *
- * A blank endpoint is legal and means the TPDB preset below.
- */
-export const SETTING_STASHBOX_ENDPOINT = 'stashbox_endpoint';
-export const SETTING_STASHBOX_API_KEY = 'stashbox_api_key';
-
-/** internal/stashbox.DefaultEndpoint — what a blank endpoint resolves to. */
-export const STASHBOX_TPDB_ENDPOINT = 'https://theporndb.net/graphql';
-
-/**
- * The adult module's master switch, as GET /settings reports it.
- *
- * Readable here but NOT writable: PUT /settings rejects it, because the first
- * enable also creates the Adult library row. `api.setAdultEnabled` is the only
- * way to change it. Absent means off, exactly as the server reads it, so the
- * Settings screen can seed its toggle without a second request.
- */
-export const SETTING_ADULT_ENABLED = 'adult_enabled';
 
 /**
  * GET /dlna — what the media server is actually doing.
@@ -666,7 +755,20 @@ export interface ScanSummary {
 
 /** Body for POST /library/movies and POST /library/series. */
 export interface AddItemRequest {
+  /**
+   * The compatibility spelling of "which title". Send it for a TMDB hit; send
+   * `provider`/`provider_ref` for a hit from anywhere else. Sending both is
+   * harmless — the pair wins.
+   */
   tmdb_id: number;
+  /**
+   * The general spelling: the provider that identified the title and its id in
+   * that provider's numbering, straight off a search hit. They travel as a
+   * pair — half of one is rejected, because a ref read in the wrong vocabulary
+   * is a different title rather than a failed lookup.
+   */
+  provider?: string;
+  provider_ref?: string;
   /**
    * Whether Caravan should keep searching for missing releases after the add.
    * Omitting it preserves the endpoint's historical monitored default.
@@ -690,6 +792,11 @@ export interface AddItemRequest {
    * it defaults a new movie to 'released' and leaves a re-add's choice alone.
    */
   min_availability?: MinAvailability;
+  /**
+   * The library a NEW item lands in. Omitting it (or 0) targets the kind's
+   * default library; a re-added title stays where it already lives.
+   */
+  library_id?: number;
 }
 
 /**
@@ -706,6 +813,8 @@ export interface AddSiteRequest {
    * scenes to search for.
    */
   search_now?: boolean;
+  /** Reads exactly as AddItemRequest.library_id does, over adult libraries. */
+  library_id?: number;
 }
 
 /**
@@ -720,7 +829,11 @@ export interface SearchQueued {
 /** Body for POST /import/queue/{id}/match. */
 export interface MatchRequest {
   type: 'movie' | 'series';
+  /** Reads exactly as AddItemRequest.tmdb_id does. */
   tmdb_id: number;
+  /** Reads exactly as AddItemRequest's pair does; both or neither. */
+  provider?: string;
+  provider_ref?: string;
 }
 
 /* ---------------------------------------------------------------------------
@@ -939,6 +1052,55 @@ export interface Release {
   compatibility: TVCompatibility;
   /** Active quality profile's score and accept/reject rationale when evaluated. */
   profile_decision?: ProfileDecision;
+}
+
+/** One indexer that failed during a fan-out; partial results still come back. */
+export interface IndexerError {
+  indexer_id: number;
+  indexer: string;
+  error: string;
+}
+
+/**
+ * The release-search envelope every picker endpoint answers with: the exact
+ * queries the server sent, the rows, and the indexers that failed. The
+ * universal search adds `truncated` and echoes the scoring library.
+ */
+export interface ReleasesResponse {
+  query: string;
+  queries: string[];
+  truncated?: boolean;
+  library_id?: number;
+  releases: Release[];
+  errors: IndexerError[];
+}
+
+/** Query for GET /search/releases — the Prowlarr-style universal search. */
+export interface SearchReleasesParams {
+  q: string;
+  /** Indexer category ids; empty searches genuinely unfiltered. */
+  cats?: number[];
+  /** Restrict to these indexers; empty asks every enabled one. */
+  indexer_ids?: number[];
+  /** Score rows against this library's profile instead of the default. */
+  library_id?: number;
+  limit?: number;
+}
+
+/**
+ * Body for POST /search/grab. Without `tie` the grab is untied: the finished
+ * download parks in scan review scoped to `library_id`.
+ */
+export interface SearchGrabRequest {
+  release_id: number;
+  library_id: number;
+  tie?: {
+    media_type: 'movie' | 'series';
+    media_id: number;
+    /** Season/episode narrowing for a series tie; absent grabs the whole series. */
+    season?: number;
+    episode?: number;
+  };
 }
 
 /**
@@ -1639,13 +1801,11 @@ export interface ApproveRequestResult {
 /**
  * internal/core.LibraryKind* — the whole item→library mapping.
  *
- * The `adult` row does not exist until the module is enabled for the first
- * time, and it survives a later disable (nothing is deleted) — so the row
- * outliving the module is exactly why GET /libraries filters rather than
- * trusting the table. The server drops it for any caller the module is not
- * visible to (internal/api.libraryVisible), which means its presence in a
- * payload IS permission to render it, and the switcher needs no adult rule of
- * its own. Enforced by TestLibrariesHideTheAdultRowWhenTheModuleIsOff.
+ * An `adult` row exists only once somebody creates one — creating it IS how
+ * adult content is turned on, and switching it off later deletes nothing. The
+ * server drops every row the caller may not see (internal/api.libraryGate),
+ * which means a row's presence in a payload IS permission to render it, and
+ * no screen needs an adult rule of its own.
  */
 export type LibraryKind = 'movie' | 'tv' | 'adult';
 
@@ -1685,6 +1845,35 @@ export interface Library {
   name: string;
   /** Storage-root-relative and read-only: moving it is the Storage screen's job. */
   root_path: string;
+  /**
+   * The chain's head, READ-ONLY: it is what a client written before chains
+   * reads, and the server keeps it in step with `providers`. Write through
+   * `providers` instead.
+   */
+  provider: string;
+  /**
+   * The ordered chain this library identifies new items through, each one of
+   * the ids GET /libraries/providers lists. The first that recognizes a title
+   * wins a scan; a search asks all of them.
+   */
+  providers: string[];
+  /** The one library per kind that answers by-kind lookups and untargeted adds. */
+  is_default: boolean;
+  /** How many movies and series this library owns — what the delete guard counts. */
+  item_count: number;
+  /**
+   * The library's master switch. False is dormant for EVERYONE, admins
+   * included: no rows, no posters, no scans, no DLNA container. It deletes
+   * nothing, and GET /libraries keeps sending inactive rows to an admin
+   * precisely so the toggle that undoes it stays reachable.
+   */
+  active: boolean;
+  /**
+   * Whether the library is narrowed to the accounts named in its access list.
+   * Admins bypass it. Written through PUT /libraries/{id}/access — never
+   * through PATCH, so the flag and the roster it applies to move together.
+   */
+  restricted: boolean;
   dlna_visible: boolean;
   route_torrent: string;
   route_usenet: string;
@@ -1695,13 +1884,49 @@ export interface Library {
 /**
  * Body for PATCH /libraries/{id}. Every field is optional because the screen
  * saves one control at a time, and `''`/`0` clear an override rather than
- * meaning "unset".
+ * meaning "unset". `is_default` may only be set true — a kind must always
+ * have a default, so the flag moves by promoting the successor.
  */
 export interface LibraryPatch {
+  name?: string;
+  /**
+   * The pre-chain spelling, still accepted and read as a chain of one. New
+   * writes send `providers`, which wins when both are present.
+   */
+  provider?: string;
+  /** The whole ordered chain: non-empty, no duplicates, all serving the kind. */
+  providers?: string[];
+  is_default?: boolean;
+  /**
+   * The master switch. `restricted` is deliberately NOT here: one door per
+   * invariant, and restriction cannot be written without the roster that gives
+   * it meaning (PUT /libraries/{id}/access).
+   */
+  active?: boolean;
   dlna_visible?: boolean;
   route_torrent?: string;
   route_usenet?: string;
   quality_profile_id?: number;
+}
+
+/** Body for POST /libraries. */
+export interface LibraryCreate {
+  kind: LibraryKind;
+  name: string;
+  /** Storage-root-relative, must sit under library/. */
+  root_path: string;
+  /** The pre-chain spelling, read as a chain of one. Empty picks the kind's default. */
+  provider?: string;
+  /** The ordered chain, validated as LibraryPatch.providers is. */
+  providers?: string[];
+}
+
+/** One compiled-in metadata provider (GET /libraries/providers). */
+export interface MetadataProviderInfo {
+  id: string;
+  name: string;
+  /** The library kinds this provider can serve. */
+  kinds: LibraryKind[];
 }
 
 /**
@@ -1714,6 +1939,44 @@ export interface LibraryPatch {
 export interface LibraryIndexerOverride {
   enabled: boolean;
   categories: number[] | null;
+}
+
+/**
+ * internal/api.libraryAccessUserJSON — one account beside one library.
+ *
+ * A shape of its own rather than a field on `User` because GET /users carries
+ * no access field at all: a per-account flag on a roster reachable from every
+ * install would say which libraries exist and who was kept out of them, which
+ * is the trace a restricted shelf exists not to leave.
+ */
+export interface LibraryMember {
+  id: number;
+  username: string;
+  role: UserRole;
+  /** The account's own grant. Meaningless beside `always_granted`. */
+  granted: boolean;
+  /** The account reaches the library through its ROLE — every admin. */
+  always_granted: boolean;
+}
+
+/**
+ * internal/api.libraryAccessJSON — one library's whole access decision.
+ *
+ * The flag and the roster travel together because neither means anything
+ * alone: "restricted" without a list is "admins only", and a list without the
+ * flag grants nobody anything. PUT takes the same pair back, whole, so there
+ * is never a moment where a library is restricted to nobody by accident.
+ */
+export interface LibraryAccess {
+  restricted: boolean;
+  users: LibraryMember[];
+}
+
+/** Body for PUT /libraries/{id}/access: the entire decision, every time. */
+export interface LibraryAccessInput {
+  restricted: boolean;
+  /** The complete allow-list. Empty is legitimate — "the admins and nobody else". */
+  user_ids: number[];
 }
 
 /* ---------------------------------------------------------------------------
@@ -1745,6 +2008,8 @@ export interface Site {
   poster_url: string;
   monitored: boolean;
   quality_profile_id: number;
+  /** The adult library that owns the site. */
+  library_id: number;
   added_at: string;
   updated_at: string;
   /** The grid's "18 / 240" badge — episode counts under this screen's nouns. */
@@ -1875,19 +2140,53 @@ export interface SceneTagsPage {
 }
 
 /**
- * internal/api.adultUserJSON — one row of the member-access card.
+ * internal/api.stashboxInstanceJSON — one configured stash-box endpoint.
  *
- * It is a shape of its own rather than a field on `User` because GET /users
- * carries no adult field at all: an `adult_access: false` on every row of an
- * install that never enabled the module is exactly the trace this phase
- * promises not to leave.
+ * The API key is write-only (SPEC §12), so nothing here can render it;
+ * `has_api_key` is the only thing the screen may say about it.
  */
-export interface AdultUser {
+export interface StashboxInstance {
   id: number;
-  username: string;
-  role: UserRole;
-  /** The account's own grant. False and meaningless on an admin row. */
-  granted: boolean;
-  /** The account reaches the module through its role — every admin. */
-  always_granted: boolean;
+  /**
+   * The value stored in every pinned row and every provider chain. Read-only:
+   * renaming an instance must never re-point the rows pinned to it. The first
+   * instance on an install is the bare `stashbox`; the rest are
+   * `stashbox:<slug>`.
+   */
+  provider_id: string;
+  name: string;
+  endpoint: string;
+  has_api_key: boolean;
+  /** What the delete guard would report, carried on every row. */
+  library_count: number;
+  item_count: number;
 }
+
+/**
+ * The body of the create, update and test-config routes.
+ *
+ * `api_key` absent means "keep the stored one" on an update and "no key" on a
+ * create; an explicit empty string clears it. `endpoint` is immutable after
+ * creation — the server refuses a change — so an edit either repeats it or
+ * omits it.
+ */
+export interface StashboxInstanceInput {
+  name: string;
+  endpoint: string;
+  api_key?: string;
+}
+
+/**
+ * The public stash-boxes worth offering by name, plus the escape hatch.
+ *
+ * A preset only fills the add form's name and endpoint — both stay editable
+ * before the instance is created — so this list is a convenience, never a
+ * constraint. It replaces the single STASHBOX_TPDB_ENDPOINT default: with
+ * several instances per install there is no one endpoint to be the default.
+ */
+export const STASHBOX_PRESETS: { id: string; label: string; endpoint: string }[] = [
+  { id: 'stashdb', label: 'StashDB', endpoint: 'https://stashdb.org/graphql' },
+  { id: 'fansdb', label: 'FansDB', endpoint: 'https://fansdb.cc/graphql' },
+  { id: 'pmvstash', label: 'PMV-Stash', endpoint: 'https://pmvstash.org/graphql' },
+  { id: 'theporndb', label: 'ThePornDB', endpoint: 'https://theporndb.net/graphql' },
+];

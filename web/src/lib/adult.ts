@@ -34,11 +34,16 @@ import { formatAge, UNKNOWN } from './format';
 export const CATALOGUING_POLL_MS = 3000;
 
 /**
- * Whether the adult module exists for this browser.
+ * Whether adult content exists for this browser.
  *
- * The server has already combined the two conditions — the server-wide switch
- * AND this account's grant (admins are implicitly granted) — into one boolean
- * on GET /auth/me, and this reads that and nothing else. It deliberately does
+ * The server has already combined the conditions — at least one adult-kind
+ * library is ACTIVE and this account reaches it (an admin always does, a
+ * member needs a grant on a restricted one) — into one boolean on GET
+ * /auth/me, and this reads that and nothing else. What the boolean is derived
+ * from changed when the module switch dissolved into per-library state; what
+ * it MEANS to a screen did not, which is why every caller is untouched.
+ *
+ * It deliberately does
  * NOT fall back to a role check: an unknown identity reads as an admin for the
  * rest of the SPA (see session.isAdmin), and carrying that guess over here
  * would draw the nav item during boot on a server where the module is off.

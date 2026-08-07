@@ -10,12 +10,16 @@ import (
 // §13): what the scanner found, the parser's best guess, and why it could not
 // be matched.
 type unmatchedJSON struct {
-	ID     int64      `json:"id"`
-	Path   string     `json:"path"`
-	Size   int64      `json:"size"`
-	Reason string     `json:"reason"`
-	SeenAt string     `json:"seen_at"`
-	Parsed parsedJSON `json:"parsed"`
+	ID     int64  `json:"id"`
+	Path   string `json:"path"`
+	Size   int64  `json:"size"`
+	Reason string `json:"reason"`
+	SeenAt string `json:"seen_at"`
+	// LibraryID scopes the manual match: an untied universal-search grab
+	// already chose a library, and the review screen pre-selects it. 0 —
+	// every scan-parked file — means unscoped.
+	LibraryID int64      `json:"library_id"`
+	Parsed    parsedJSON `json:"parsed"`
 }
 
 type parsedJSON struct {
@@ -63,6 +67,10 @@ func parsedDTO(p core.ParsedRelease) parsedJSON {
 type matchRequest struct {
 	Type   string `json:"type"`
 	TMDBID int64  `json:"tmdb_id"`
+	// Provider and ProviderRef are the general spelling of the same answer,
+	// resolved by the rules addRequest's pair follows; see itemRefFrom.
+	Provider    string `json:"provider"`
+	ProviderRef string `json:"provider_ref"`
 }
 
 func (s *server) handleImportQueue(w http.ResponseWriter, r *http.Request) {
@@ -74,13 +82,21 @@ func (s *server) handleImportQueue(w http.ResponseWriter, r *http.Request) {
 
 	out := make([]unmatchedJSON, 0, len(files))
 	for _, f := range files {
+		// A file parked into a library — an untied grab's payload — is as
+		// invisible as that library is to this caller.
+		if visible, ok := s.unmatchedVisible(w, r, &f); !ok {
+			return
+		} else if !visible {
+			continue
+		}
 		out = append(out, unmatchedJSON{
-			ID:     f.ID,
-			Path:   f.Path,
-			Size:   f.Size,
-			Reason: f.Reason,
-			SeenAt: jsonTime(f.SeenAt),
-			Parsed: parsedDTO(f.Parsed),
+			ID:        f.ID,
+			Path:      f.Path,
+			Size:      f.Size,
+			Reason:    f.Reason,
+			SeenAt:    jsonTime(f.SeenAt),
+			LibraryID: f.LibraryID,
+			Parsed:    parsedDTO(f.Parsed),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": out})
@@ -102,24 +118,39 @@ func (s *server) handleImportMatch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "type must be movie or series")
 		return
 	}
-	if body.TMDBID <= 0 {
-		writeError(w, http.StatusBadRequest, "tmdb_id is required")
+	// The endpoint's kind is the media type the caller just named, so a match
+	// that says "series" may only be pinned to a provider that serves
+	// television.
+	kind := core.LibraryKindMovie
+	if body.Type == MediaTypeSeries {
+		kind = core.LibraryKindTV
+	}
+	ref, ok := s.itemRefFrom(r.Context(), w, body.Provider, body.ProviderRef, body.TMDBID, kind)
+	if !ok {
 		return
 	}
 
 	// Resolve the queue entry here so an unknown id is a 404 regardless of how
 	// the manager reports it.
-	if _, err := s.st.GetUnmatchedFile(r.Context(), id); err != nil {
+	u, err := s.st.GetUnmatchedFile(r.Context(), id)
+	if err != nil {
 		s.writeStoreError(w, "get unmatched file", err)
 		return
 	}
-	if err := s.mgr.MatchUnmatched(r.Context(), id, body.Type, body.TMDBID); err != nil {
-		s.writeManagerError(w, "match unmatched file", err)
+	if visible, ok := s.unmatchedVisible(w, r, u); !ok {
+		return
+	} else if !visible {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if err := s.mgr.MatchUnmatched(r.Context(), id, body.Type, ref); err != nil {
+		s.writeManagerError(w, ref.Provider, "match unmatched file", err)
 		return
 	}
 	// Matching a parked file puts the title in the library, which is what a
-	// pending request was asking for. See absorbRequests.
-	s.absorbRequests(r.Context(), body.Type, body.TMDBID)
+	// pending request was asking for. See absorbRequests — including why a
+	// non-TMDB ref absorbs nothing.
+	s.absorbRequests(r.Context(), body.Type, ref.TMDBID())
 	writeJSON(w, http.StatusOK, map[string]string{"status": "matched"})
 }
 
@@ -137,9 +168,29 @@ func (s *server) handleImportDelete(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreError(w, "get unmatched file", err)
 		return
 	}
+	if visible, ok := s.unmatchedVisible(w, r, f); !ok {
+		return
+	} else if !visible {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
 	if err := s.st.DeleteUnmatchedFileByPath(r.Context(), f.Path); err != nil {
 		s.writeStoreError(w, "delete unmatched file", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// unmatchedVisible reports whether a parked file may be shown to this caller:
+// a file scoped to a library is as visible as that library is. A file with no
+// library — every scan-parked one — is unscoped and belongs to nobody in
+// particular, so it stays visible. The second return is false when the check
+// itself failed and the response has been written.
+func (s *server) unmatchedVisible(w http.ResponseWriter, r *http.Request, u *core.UnmatchedFile) (bool, bool) {
+	visible, err := s.gate(r).visible(r.Context(), u.LibraryID)
+	if err != nil {
+		s.writeStoreError(w, "read library access", err)
+		return false, false
+	}
+	return visible, true
 }

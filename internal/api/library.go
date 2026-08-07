@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/watzon/caravan/internal/core"
 	"github.com/watzon/caravan/internal/parse"
@@ -31,6 +32,7 @@ type movieJSON struct {
 	PosterURL        string `json:"poster_url"`
 	Monitored        bool   `json:"monitored"`
 	QualityProfileID int64  `json:"quality_profile_id"`
+	LibraryID        int64  `json:"library_id"`
 	ReleaseDate      string `json:"release_date"`
 	// MinAvailability is the release stage the movie's automatic search waits
 	// for: announced, in_cinemas or released.
@@ -58,6 +60,7 @@ type seriesJSON struct {
 	PosterURL        string `json:"poster_url"`
 	Monitored        bool   `json:"monitored"`
 	QualityProfileID int64  `json:"quality_profile_id"`
+	LibraryID        int64  `json:"library_id"`
 	FirstAired       string `json:"first_aired"`
 	AddedAt          string `json:"added_at"`
 	UpdatedAt        string `json:"updated_at"`
@@ -133,6 +136,7 @@ func movieDTO(m core.Movie) movieJSON {
 		PosterURL:        m.PosterURL,
 		Monitored:        m.Monitored,
 		QualityProfileID: m.QualityProfileID,
+		LibraryID:        m.LibraryID,
 		ReleaseDate:      jsonTime(m.ReleaseDate),
 		MinAvailability:  m.MinAvailability,
 		AddedAt:          jsonTime(m.AddedAt),
@@ -156,6 +160,7 @@ func seriesDTO(sr core.Series) seriesJSON {
 		PosterURL:        sr.PosterURL,
 		Monitored:        sr.Monitored,
 		QualityProfileID: sr.QualityProfileID,
+		LibraryID:        sr.LibraryID,
 		FirstAired:       jsonTime(sr.FirstAired),
 		AddedAt:          jsonTime(sr.AddedAt),
 		UpdatedAt:        jsonTime(sr.UpdatedAt),
@@ -204,6 +209,11 @@ func firstFileDTO(files []core.MediaFile, profile core.TVProfile) *mediaFileJSON
 // behaviour — add and wait for the next backlog sweep.
 type addRequest struct {
 	TMDBID int64 `json:"tmdb_id"`
+	// Provider and ProviderRef are the general spelling of "which title": the
+	// provider that identified it and its id in that provider's own numbering,
+	// straight off a search hit. They travel as a pair; see itemRefFrom.
+	Provider    string `json:"provider"`
+	ProviderRef string `json:"provider_ref"`
 	// QualityProfileID is the optional item override. Zero, including an
 	// omitted field, leaves the new item to inherit its library or system
 	// default.
@@ -234,6 +244,167 @@ type addRequest struct {
 	// is series-only. Omitting it defaults a new movie to released and leaves
 	// a re-added movie's choice alone.
 	MinAvailability string `json:"min_availability"`
+	// LibraryID is the library a NEW item lands in. Zero — and every request
+	// from before libraries were plural — targets the kind's default. A
+	// re-added title stays in the library it already lives in whatever this
+	// says: a move is an explicit operation, never a side effect of an add.
+	LibraryID int64 `json:"library_id"`
+}
+
+// itemRefFrom resolves the two spellings of "which title" a body may carry
+// into one core.ItemRef, writing the refusal itself. kind is the LibraryKind
+// the ENDPOINT is about: LibraryKindMovie for the movie routes, LibraryKindTV
+// for the series ones.
+//
+// tmdb_id is the compatibility spelling, and it is what every client written
+// before providers were plural still sends; provider + provider_ref is the
+// general one, and it is what a search hit from any chain hands back.
+//
+// The pair travels together or not at all. Half a pair has named a provider
+// with nothing to look up, or a ref written in a vocabulary nobody named, and
+// there is no safe guess: a ref read in the wrong vocabulary is a different
+// title, not a failed lookup, so the item would be pinned to something real
+// and wrong.
+//
+// The provider is validated against the endpoint's kind and NOT against the
+// target library's chain. The chain governs IDENTIFICATION — which providers
+// are asked when Caravan has to work out what a file is — and this is the user
+// telling it the answer outright. A ref pasted from a provider that is not on
+// the chain is still a true ref, and refusing it would quietly turn the chain
+// into a second allow-list nobody asked for.
+//
+// EXISTENCE is a different question from membership, and it is asked: a ref
+// naming a stash-box instance this install does not hold is a ref nothing can
+// ever be refreshed against, so it is refused here rather than pinned to a row
+// and discovered on the next refresh (see knownProviderInstance). That is why
+// this takes a context and hangs off the server.
+func (s *server) itemRefFrom(ctx context.Context, w http.ResponseWriter, provider, providerRef string, tmdbID int64, kind string) (core.ItemRef, bool) {
+	provider = strings.TrimSpace(provider)
+	providerRef = strings.TrimSpace(providerRef)
+
+	switch {
+	case provider != "" && providerRef != "":
+		if !core.ProviderServes(provider, kind) {
+			writeError(w, http.StatusBadRequest, "provider does not serve this kind of item")
+			return core.ItemRef{}, false
+		}
+		known, err := s.knownProviderInstance(ctx, provider)
+		if err != nil {
+			s.writeStoreError(w, "get stash-box instance", err)
+			return core.ItemRef{}, false
+		}
+		if !known {
+			writeError(w, http.StatusBadRequest, "no stash-box instance named "+provider+" is configured")
+			return core.ItemRef{}, false
+		}
+		return core.ItemRef{Provider: provider, Ref: providerRef}, true
+	case provider != "" || providerRef != "":
+		writeError(w, http.StatusBadRequest, "provider and provider_ref must be sent together")
+		return core.ItemRef{}, false
+	case tmdbID > 0:
+		return core.TMDBRef(tmdbID), true
+	}
+	writeError(w, http.StatusBadRequest, "tmdb_id or provider/provider_ref is required")
+	return core.ItemRef{}, false
+}
+
+// moveRequest is the body of the two move endpoints: the target library.
+type moveRequest struct {
+	LibraryID int64 `json:"library_id"`
+}
+
+// handleMoveMovie queues a movie's move into another library. 202 rather
+// than 200: the transfer is a durable job, because a move is file I/O the
+// request must not own. The validation happens now, while the user is
+// watching — the job re-checks, but a target of the wrong kind should be a
+// 400 today, not a failed job tomorrow.
+func (s *server) handleMoveMovie(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var body moveRequest
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	if _, err := s.st.GetMovie(r.Context(), id); err != nil {
+		s.writeStoreError(w, "get movie", err)
+		return
+	}
+	if !s.validMoveTarget(w, r, body.LibraryID, core.LibraryKindMovie) {
+		return
+	}
+	s.enqueueMove(w, r, core.MediaTypeMovie, id, body.LibraryID)
+}
+
+// handleMoveSeries is handleMoveMovie's series twin, covering adult sites
+// too: the series must be visible to the caller, and the target must speak
+// the series' kind.
+func (s *server) handleMoveSeries(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var body moveRequest
+	if !decodeJSON(w, r, &body) {
+		return
+	}
+	sr, ok := s.getVisibleSeries(w, r, id)
+	if !ok {
+		return
+	}
+	if !s.validMoveTarget(w, r, body.LibraryID, core.LibraryKindForSeries(sr.Kind)) {
+		return
+	}
+	s.enqueueMove(w, r, core.MediaTypeSeries, id, body.LibraryID)
+}
+
+func (s *server) validMoveTarget(w http.ResponseWriter, r *http.Request, libraryID int64, kind string) bool {
+	if libraryID <= 0 {
+		writeError(w, http.StatusBadRequest, "library_id is required")
+		return false
+	}
+	lib, ok := s.visibleLibrary(w, r, libraryID)
+	if !ok {
+		return false
+	}
+	if lib.Kind != kind {
+		writeError(w, http.StatusBadRequest, "library holds a different kind of item")
+		return false
+	}
+	return true
+}
+
+func (s *server) enqueueMove(w http.ResponseWriter, r *http.Request, itemType string, itemID, libraryID int64) {
+	if _, err := s.enqueueSearchJob(r.Context(), core.JobMoveItem, core.JobMoveItemPayload{
+		ItemType: itemType, ItemID: itemID, LibraryID: libraryID,
+	}); err != nil {
+		s.writeStoreError(w, "queue move", err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]any{"status": "moving"})
+}
+
+// validAddLibraryID validates an add's library target, writing the refusal
+// itself. Zero names the default and is always fine; a real id must exist, be
+// visible to this caller, and hold items of the endpoint's kind.
+func (s *server) validAddLibraryID(w http.ResponseWriter, r *http.Request, libraryID int64, kind string) bool {
+	if libraryID < 0 {
+		writeError(w, http.StatusBadRequest, "invalid library_id")
+		return false
+	}
+	if libraryID == 0 {
+		return true
+	}
+	lib, ok := s.visibleLibrary(w, r, libraryID)
+	if !ok {
+		return false
+	}
+	if lib.Kind != kind {
+		writeError(w, http.StatusBadRequest, "library holds a different kind of item")
+		return false
+	}
+	return true
 }
 
 func (s *server) handleListMovies(w http.ResponseWriter, r *http.Request) {
@@ -258,9 +429,22 @@ func (s *server) handleListMovies(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// The Movies screen's first visibility filter. It changes nothing while
+	// every movie library is on and open to everybody — which is the point:
+	// the shelf a movie sits on is now allowed to be somebody else's, and this
+	// list is where that has to be true before it can be true anywhere.
+	gate := s.gate(r)
 	profile := s.activeTVProfile(ctx)
 	out := make([]movieJSON, 0, len(movies))
 	for _, m := range movies {
+		visible, err := gate.visibleKind(ctx, m.LibraryID, core.LibraryKindMovie)
+		if err != nil {
+			s.writeStoreError(w, "read library access", err)
+			return
+		}
+		if !visible {
+			continue
+		}
 		dto := movieDTO(m)
 		dto.File = firstFileDTO(byMovie[m.ID], profile)
 		out = append(out, dto)
@@ -273,8 +457,8 @@ func (s *server) handleAddMovie(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	if body.TMDBID <= 0 {
-		writeError(w, http.StatusBadRequest, "tmdb_id is required")
+	ref, ok := s.itemRefFrom(r.Context(), w, body.Provider, body.ProviderRef, body.TMDBID, core.LibraryKindMovie)
+	if !ok {
 		return
 	}
 	if len(body.Seasons) > 0 {
@@ -287,10 +471,13 @@ func (s *server) handleAddMovie(w http.ResponseWriter, r *http.Request) {
 	if !s.validQualityProfileID(w, r, body.QualityProfileID) {
 		return
 	}
+	if !s.validAddLibraryID(w, r, body.LibraryID, core.LibraryKindMovie) {
+		return
+	}
 
-	m, err := s.addMovieToLibrary(r.Context(), body.TMDBID, body.SearchNow, body.MinAvailability, body.Monitored, body.QualityProfileID)
+	m, err := s.addMovieToLibrary(r.Context(), ref, body.SearchNow, body.MinAvailability, body.Monitored, body.QualityProfileID, body.LibraryID)
 	if err != nil {
-		s.writeManagerError(w, "add movie", err)
+		s.writeManagerError(w, ref.Provider, "add movie", err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, movieDTO(*m))
@@ -329,8 +516,11 @@ func (s *server) validQualityProfileID(w http.ResponseWriter, r *http.Request, p
 // is what makes "a pending request is absorbed when its title arrives" true
 // however the title arrived, and it is the one place a permission check goes
 // when Caravan grows more than one kind of user.
-func (s *server) addMovieToLibrary(ctx context.Context, tmdbID int64, searchNow bool, minAvailability string, monitored *bool, qualityProfileID int64) (*core.Movie, error) {
-	m, err := s.mgr.AddMovie(ctx, tmdbID, minAvailability, monitored)
+//
+// ref is the provider identity to add. Requests are still TMDB-keyed, so the
+// absorb step below reads the ref's TMDB id back out of it.
+func (s *server) addMovieToLibrary(ctx context.Context, ref core.ItemRef, searchNow bool, minAvailability string, monitored *bool, qualityProfileID, libraryID int64) (*core.Movie, error) {
+	m, err := s.mgr.AddMovie(ctx, ref, minAvailability, monitored, libraryID)
 	if err != nil {
 		return nil, err
 	}
@@ -340,7 +530,7 @@ func (s *server) addMovieToLibrary(ctx context.Context, tmdbID int64, searchNow 
 		}
 		m.QualityProfileID = qualityProfileID
 	}
-	s.absorbRequests(ctx, MediaTypeMovie, tmdbID)
+	s.absorbRequests(ctx, MediaTypeMovie, ref.TMDBID())
 	if searchNow {
 		if _, err := s.enqueueMovieSearch(ctx, m.ID); err != nil {
 			// The movie is in the library; failing the request now would tell
@@ -358,8 +548,8 @@ func (s *server) addMovieToLibrary(ctx context.Context, tmdbID int64, searchNow 
 // else the provider knows about lands unmonitored. It is the same season
 // selection the add dialog shows, and it is what makes a partial add absorb
 // only the part of a pending request it actually granted.
-func (s *server) addSeriesToLibrary(ctx context.Context, tmdbID int64, searchMissing bool, seasons []int, monitored *bool, qualityProfileID int64) (*core.Series, error) {
-	sr, err := s.mgr.AddSeries(ctx, tmdbID, monitored)
+func (s *server) addSeriesToLibrary(ctx context.Context, ref core.ItemRef, searchMissing bool, seasons []int, monitored *bool, qualityProfileID, libraryID int64) (*core.Series, error) {
+	sr, err := s.mgr.AddSeries(ctx, ref, monitored, libraryID)
 	if err != nil {
 		return nil, err
 	}
@@ -373,7 +563,7 @@ func (s *server) addSeriesToLibrary(ctx context.Context, tmdbID int64, searchMis
 	if err != nil {
 		return nil, err
 	}
-	s.absorbSeriesRequests(ctx, tmdbID, ungranted)
+	s.absorbSeriesRequests(ctx, ref.TMDBID(), ungranted)
 	if searchMissing {
 		// Episode rows exist by the time AddSeries returns, so the wanted list
 		// already names them. See addMovieToLibrary for why a failure here does
@@ -391,7 +581,15 @@ func (s *server) addSeriesToLibrary(ctx context.Context, tmdbID int64, searchMis
 // It never fails the caller: the add already happened, and a request row left
 // saying "pending" is a cosmetic wrong, not a reason to tell the client the
 // add did not work.
+//
+// A title added by a non-TMDB ref has no TMDB id, and requests are still
+// TMDB-keyed, so there is nothing it could have granted. Asking the store about
+// id 0 would be a query for rows that cannot exist and, worse, one that any
+// malformed request row carrying a zero would answer.
 func (s *server) absorbRequests(ctx context.Context, mediaType string, tmdbID int64) {
+	if tmdbID == 0 {
+		return
+	}
 	n, err := s.st.ApproveRequestsFor(ctx, mediaType, tmdbID)
 	if err != nil {
 		s.log.Error("absorb requests", "media_type", mediaType, "tmdb_id", tmdbID, "error", err)
@@ -411,6 +609,10 @@ func (s *server) absorbRequests(ctx context.Context, mediaType string, tmdbID in
 // pending: closing it would throw away the ask with no record that only part of
 // it was granted.
 func (s *server) absorbSeriesRequests(ctx context.Context, tmdbID int64, ungranted []int) {
+	// See absorbRequests: no TMDB id, nothing a request could have asked for.
+	if tmdbID == 0 {
+		return
+	}
 	if len(ungranted) == 0 {
 		s.absorbRequests(ctx, MediaTypeSeries, tmdbID)
 		return
@@ -624,7 +826,7 @@ func (s *server) handleDeleteMovie(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.mgr.RemoveMovie(r.Context(), id, deleteFilesRequested(r)); err != nil {
-		s.writeManagerError(w, "delete movie", err)
+		s.writeManagerError(w, "", "delete movie", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -691,8 +893,22 @@ func (s *server) handleListSeries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The television filter above says which VOCABULARY belongs on this shelf;
+	// the gate says which shelves this caller has. Both, in that order: a site
+	// is not a television series however visible its library is, and a
+	// restricted television library is not this caller's however television it
+	// is.
+	gate := s.gate(r)
 	out := make([]seriesJSON, 0, len(series))
 	for _, sr := range series {
+		visible, err := gate.visibleKind(ctx, sr.LibraryID, core.LibraryKindForSeries(sr.Kind))
+		if err != nil {
+			s.writeStoreError(w, "read library access", err)
+			return
+		}
+		if !visible {
+			continue
+		}
 		dto := seriesDTO(sr)
 		dto.EpisodeCount = counts[sr.ID].Total
 		dto.EpisodeFileCount = counts[sr.ID].WithFile
@@ -706,8 +922,8 @@ func (s *server) handleAddSeries(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	if body.TMDBID <= 0 {
-		writeError(w, http.StatusBadRequest, "tmdb_id is required")
+	ref, ok := s.itemRefFrom(r.Context(), w, body.Provider, body.ProviderRef, body.TMDBID, core.LibraryKindTV)
+	if !ok {
 		return
 	}
 	if !validSeasonNumbers(w, body.Seasons) {
@@ -720,17 +936,20 @@ func (s *server) handleAddSeries(w http.ResponseWriter, r *http.Request) {
 	if !s.validQualityProfileID(w, r, body.QualityProfileID) {
 		return
 	}
+	if !s.validAddLibraryID(w, r, body.LibraryID, core.LibraryKindTV) {
+		return
+	}
 
-	sr, err := s.addSeriesToLibrary(r.Context(), body.TMDBID, body.SearchMissing, body.Seasons, body.Monitored, body.QualityProfileID)
+	sr, err := s.addSeriesToLibrary(r.Context(), ref, body.SearchMissing, body.Seasons, body.Monitored, body.QualityProfileID, body.LibraryID)
 	if err != nil {
-		s.writeManagerError(w, "add series", err)
+		s.writeManagerError(w, ref.Provider, "add series", err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, seriesDTO(*sr))
 }
 
-// getVisibleSeries is GetSeries plus the adult gate, writing the refusal
-// itself.
+// getVisibleSeries is GetSeries plus its library's access rule, writing the
+// refusal itself.
 //
 // A site is stored as a series row (PLAN phase 9 task 3), so every by-id series
 // route can be handed a site's id. handleListSeries was narrowed to television
@@ -739,22 +958,24 @@ func (s *server) handleAddSeries(w http.ResponseWriter, r *http.Request) {
 // GET /library/series/{siteID} with the site's title, its root under
 // library/Adult and its whole season/episode tree — scene titles and release
 // dates — which the SPA then renders as an ordinary television detail page.
+// The same now holds for a television library somebody restricted.
 //
-// The refusal is 404 rather than 403, the answer getVisibleLibrary and
+// The refusal is 404 rather than 403, the answer visibleLibrary and
 // requireAdult both give: "this exists and you may not have it" is the worse
-// leak on a module whose promise is absence.
+// leak on a shelf whose promise is absence.
 func (s *server) getVisibleSeries(w http.ResponseWriter, r *http.Request, id int64) (*core.Series, bool) {
 	sr, err := s.st.GetSeries(r.Context(), id)
 	if err != nil {
 		s.writeStoreError(w, "get series", err)
 		return nil, false
 	}
-	if sr.Kind != core.SeriesKindAdult {
-		return sr, true
-	}
-	visible, err := s.adultVisible(r)
+	// The row's own library answers, and its KIND is what a row still carrying
+	// library_id 0 resolves through — a site added before libraries had ids
+	// belongs to the adult shelf just as surely as one that names it.
+	visible, err := s.gate(r).visibleKind(r.Context(), sr.LibraryID,
+		core.LibraryKindForSeries(sr.Kind))
 	if err != nil {
-		s.writeStoreError(w, "read adult settings", err)
+		s.writeStoreError(w, "read library access", err)
 		return nil, false
 	}
 	if !visible {
@@ -912,7 +1133,7 @@ func (s *server) handleDeleteSeries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.mgr.RemoveSeries(r.Context(), id, deleteFilesRequested(r)); err != nil {
-		s.writeManagerError(w, "delete series", err)
+		s.writeManagerError(w, "", "delete series", err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -1138,11 +1359,17 @@ func (s *server) startScan() bool {
 }
 
 // writeManagerError maps a library-manager failure to a status. A missing
-// upstream record (unknown TMDB id, missing queue entry) is a 404, an
-// unconfigured metadata provider is a 503 the UI can turn into "add a TMDB API
+// upstream record (unknown provider id, missing queue entry) is a 404, an
+// unconfigured metadata provider is a 503 the UI can turn into "add an API
 // key"; everything else is reported as a 502, because the manager's remaining
 // failure modes are the metadata provider and the filesystem, not this process.
-func (s *server) writeManagerError(w http.ResponseWriter, msg string, err error) {
+//
+// providerID is whose credential a rejection here would be about. An add and a
+// match are pinned to the ref's own provider (see library.AddMovie), so the
+// caller knows it exactly; a caller with no provider in the picture — a delete,
+// an adult site — passes "" and marks nothing, which noteMetadataFailure
+// explains.
+func (s *server) writeManagerError(w http.ResponseWriter, providerID, msg string, err error) {
 	if errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusNotFound, "not found")
 		return
@@ -1156,9 +1383,9 @@ func (s *server) writeManagerError(w http.ResponseWriter, msg string, err error)
 	// a raw 502 for the one failure it can actually tell the user how to fix
 	// (PLAN phase 10 task 3), and the cached credential state never learned
 	// that the key had gone bad.
-	if s.noteMetadataFailure(err) {
+	if s.noteMetadataFailure(providerID, err) {
 		writeCodedError(w, http.StatusServiceUnavailable, CodeMetadataCredentialInvalid,
-			"the TMDB API key was rejected")
+			credentialRejectedMessage(providerID))
 		return
 	}
 	// The adult twin. It is reachable only from behind requireAdult, so it can

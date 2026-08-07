@@ -31,14 +31,16 @@ import (
 // the tests is what keeps the two from drifting apart.
 const AdultDir = "Adult"
 
-// ErrAdultDisabled reports that the adult module is switched off server-wide.
+// ErrAdultDisabled reports that the adult library this operation would act on
+// is switched off — for a sweep that names none, that no adult library is on at
+// all.
 //
 // It is a distinct error rather than a silent no-op wherever a caller ASKED for
 // something adult — AddSite, a scene import — because a request that names a
 // site is not something to quietly ignore. The automatic sweeps do treat it as
 // a no-op, which is the "zero stash-box traffic when disabled" promise: nothing
 // scheduled may reach the endpoint, and nothing scheduled may log an error
-// about a module the owner turned off either.
+// about a shelf the owner turned off either.
 var ErrAdultDisabled = errors.New("library: the adult module is disabled")
 
 // scenePageSize is how many scenes one provider round trip asks for. A site's
@@ -51,29 +53,50 @@ const scenePageSize = 100
 // a refresh that never terminates is worse than one that stops early.
 const maxScenePages = 200
 
-// adultSeriesDir returns a site's folder, storage-root-relative.
+// adultSeriesDir returns a site's folder under its adult library's root.
 //
 // There is no year in the name, unlike a television series: a site is not a
 // production with a first-air year, it is a publisher that has been releasing
 // since it opened. "library/Adult/Site Name" is the whole layout, and it is
-// under the adult root rather than under TV so that excluding adult content
-// from a prepared drive or a DLNA tree is one path prefix (PLAN phase 9 task 6).
-func adultSeriesDir(title string) string {
-	return path.Join(LibraryDir, AdultDir, sanitize(title))
+// under an adult root rather than under TV so that excluding adult content
+// from a prepared drive or a DLNA tree is a path-prefix check per adult
+// library (PLAN phase 9 task 6).
+func adultSeriesDir(lib *core.Library, title string) string {
+	return path.Join(lib.RootPath, sanitize(title))
 }
 
-// adultReady answers whether this Manager may talk to the adult provider right
-// now, and is the single gate every adult path in this package goes through.
+// adultReady answers whether this Manager may talk to the adult provider AT
+// ALL right now. It is the gate for the paths that name no library — the
+// sweeps, and the jobs that have not yet read the row they are about to act on.
 //
-// Both halves matter and they fail differently. The module being off is a
-// decision the owner made, and it is what guarantees the endpoint is never
-// reached; no provider configured is a setup step nobody has done yet.
+// Both halves matter and they fail differently. Not one adult library being
+// switched on is a decision the owner made, and it is what guarantees the
+// endpoint is never reached; no provider configured is a setup step nobody has
+// done yet.
+//
+// A path that HOLDS the library it is about to act on asks adultReadyIn
+// instead: with the switch living on the rows, "some adult library is on" is
+// the weaker question, and answering it for a caller that named a dormant one
+// would reach the endpoint on that library's behalf.
 func (m *Manager) adultReady(ctx context.Context) error {
-	enabled, err := m.store.AdultEnabled(ctx)
+	on, err := m.store.AnyActiveLibraryOfKind(ctx, core.LibraryKindAdult)
 	if err != nil {
 		return err
 	}
-	if !enabled {
+	if !on {
+		return ErrAdultDisabled
+	}
+	if m.adult == nil {
+		return core.ErrNoAdultProvider
+	}
+	return nil
+}
+
+// adultReadyIn is adultReady for a caller that already holds its target
+// library: the same two failures, with the master switch read off the row
+// rather than off the kind.
+func (m *Manager) adultReadyIn(lib *core.Library) error {
+	if lib == nil || !lib.Active {
 		return ErrAdultDisabled
 	}
 	if m.adult == nil {
@@ -99,8 +122,14 @@ func (m *Manager) adultReady(ctx context.Context) error {
 //
 // monitored follows monitoredOrDefault: nil means monitored, and it decides a
 // new row only.
-func (m *Manager) AddSite(ctx context.Context, stashID string, monitored *bool) (*core.Series, error) {
-	return m.addSite(ctx, stashID, monitored, false)
+//
+// ref names the stash-box INSTANCE the id was read from as well as the id, for
+// AddMovie's reason: a UUID means nothing without the box that minted it, and
+// two boxes hold the same UUID under different sites. An empty provider is the
+// legacy instance (adultRef), which is what a client written before instances
+// sends and what a single-box install resolves to anyway.
+func (m *Manager) AddSite(ctx context.Context, ref core.ItemRef, monitored *bool, libraryID int64) (*core.Series, error) {
+	return m.addSite(ctx, ref, monitored, libraryID, false)
 }
 
 // AddSiteAndWait is AddSite with the catalogue walk done before it returns.
@@ -110,27 +139,51 @@ func (m *Manager) AddSite(ctx context.Context, stashID string, monitored *bool) 
 // scene request is that caller — the scene it granted has to be a wanted
 // episode by the time the approval answers, or the request is closed against
 // nothing.
-func (m *Manager) AddSiteAndWait(ctx context.Context, stashID string, monitored *bool) (*core.Series, error) {
-	return m.addSite(ctx, stashID, monitored, true)
+func (m *Manager) AddSiteAndWait(ctx context.Context, ref core.ItemRef, monitored *bool, libraryID int64) (*core.Series, error) {
+	return m.addSite(ctx, ref, monitored, libraryID, true)
 }
 
-func (m *Manager) addSite(ctx context.Context, stashID string, monitored *bool, walk bool) (*core.Series, error) {
-	if err := m.adultReady(ctx); err != nil {
-		return nil, err
-	}
-	if stashID == "" {
+func (m *Manager) addSite(ctx context.Context, ref core.ItemRef, monitored *bool, libraryID int64, walk bool) (*core.Series, error) {
+	ref = adultRef(ref)
+	if ref.Ref == "" {
 		return nil, fmt.Errorf("library: empty stash id")
 	}
 
-	meta, err := m.adult.GetSite(ctx, stashID)
-	if err != nil {
-		return nil, fmt.Errorf("library: get site %s: %w", stashID, err)
+	// The TARGET library is resolved before the gate rather than after it,
+	// because the gate is that library's own master switch: an add into a
+	// dormant shelf must be refused even while a sibling adult library is on.
+	// Nothing between here and the gate reaches a provider — siteLibrary is
+	// store reads — so the zero-traffic order is unchanged.
+	lib, err := m.siteLibrary(ctx, ref, "", libraryID)
+	if errors.Is(err, store.ErrNotFound) {
+		// No adult library on the install at all is OFF, not open: a shelf that
+		// does not exist reaches no endpoint and shows nobody anything. That is
+		// the same reading core.LibrarySet gives a row whose kind has no library.
+		return nil, ErrAdultDisabled
 	}
-	if meta == nil {
-		return nil, fmt.Errorf("library: site %s not found", stashID)
+	if err != nil {
+		return nil, err
+	}
+	if err := m.adultReadyIn(lib); err != nil {
+		return nil, err
 	}
 
-	sr, _, err := m.upsertSiteRow(ctx, meta, adultSeriesDir(meta.Name), "", monitored)
+	// The instance the REF names, not the library's chain head: the id is
+	// written in one box's vocabulary and the ref is the only thing that says
+	// which (see adultByID).
+	provider := m.adultByID(ctx, ref.Provider)
+	if provider == nil {
+		return nil, core.ErrNoAdultProvider
+	}
+	meta, err := provider.GetSite(ctx, ref.Ref)
+	if err != nil {
+		return nil, fmt.Errorf("library: get site %s/%s: %w", ref.Provider, ref.Ref, err)
+	}
+	if meta == nil {
+		return nil, fmt.Errorf("library: site %s/%s not found", ref.Provider, ref.Ref)
+	}
+
+	sr, _, err := m.upsertSiteRow(ctx, ref.Provider, meta, adultSeriesDir(lib, meta.Name), "", monitored, lib.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -147,9 +200,14 @@ func (m *Manager) addSite(ctx context.Context, stashID string, monitored *bool, 
 //
 // A site that has been removed since the job was queued is not an error: there
 // is nothing left to walk, and failing would retry a job that can never
-// succeed. Neither is the module having been switched off in the meantime —
+// succeed. Neither is its library having been switched off in the meantime —
 // that is refreshSites' rule, and it is what keeps a job queued before the
 // switch from being the one path that reaches stash-box after it.
+//
+// The switch is asked twice, and the second question is the narrow one: the
+// install-wide gate refuses before any row is read, and the site's OWN library
+// refuses once the row says which shelf it belongs to. A sibling adult library
+// still being on is not permission to walk a dormant one's catalogue.
 func (m *Manager) SyncSite(ctx context.Context, seriesID int64) error {
 	if err := m.adultReady(ctx); err != nil {
 		if errors.Is(err, ErrAdultDisabled) || errors.Is(err, core.ErrNoAdultProvider) {
@@ -167,6 +225,16 @@ func (m *Manager) SyncSite(ctx context.Context, seriesID int64) error {
 	if sr.Kind != core.SeriesKindAdult || sr.StashID == "" {
 		return nil
 	}
+	lib, err := m.seriesLibraryOf(ctx, sr)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !lib.Active {
+		return nil
+	}
 	return m.syncSiteScenes(ctx, sr)
 }
 
@@ -177,21 +245,38 @@ func (m *Manager) SyncSite(ctx context.Context, seriesID int64) error {
 // none. Status stays empty for the same reason: stash-box has no notion of a
 // site having ended, and inventing "Continuing" would put a claim in the UI
 // that no provider made.
-func (m *Manager) upsertSiteRow(ctx context.Context, meta *core.SiteMeta, dir, posterRel string, monitored *bool) (*core.Series, bool, error) {
+//
+// providerID is the INSTANCE that answered, and it is the row's identity from
+// here on: every later refresh of this site asks that box and no other. The
+// bare `stashbox` is what an empty id means (adultRef) and what every row
+// written before instances carries.
+func (m *Manager) upsertSiteRow(ctx context.Context, providerID string, meta *core.SiteMeta, dir, posterRel string, monitored *bool, libraryID int64) (*core.Series, bool, error) {
+	if providerID == "" {
+		providerID = core.ProviderStashbox
+	}
 	sr := &core.Series{
-		StashID:    meta.StashID,
-		Title:      meta.Name,
-		SortTitle:  sortTitle(meta.Name),
-		Kind:       core.SeriesKindAdult,
-		Path:       dir,
-		PosterPath: posterRel,
-		PosterURL:  meta.ImageURL,
-		Monitored:  monitoredOrDefault(monitored),
+		// A site is pinned like every other item: one instance answered, and the
+		// stash id is its ref (store.normalizeSeriesProvider says the same from
+		// the other side, for rows written before 0024).
+		Provider:    providerID,
+		ProviderRef: meta.StashID,
+		StashID:     meta.StashID,
+		Title:       meta.Name,
+		SortTitle:   sortTitle(meta.Name),
+		Kind:        core.SeriesKindAdult,
+		Path:        dir,
+		PosterPath:  posterRel,
+		PosterURL:   meta.ImageURL,
+		Monitored:   monitoredOrDefault(monitored),
+		LibraryID:   libraryID,
 	}
 
 	created := true
 	if meta.StashID != "" {
-		existing, err := m.store.GetSeriesByStashID(ctx, meta.StashID)
+		// (instance, ref) rather than the bare stash id: since 0026 two boxes
+		// may legitimately hold the same UUID, and matching on the id alone
+		// would make the second box's site an update of the first box's row.
+		existing, err := m.store.GetSeriesByProviderRef(ctx, providerID, meta.StashID)
 		switch {
 		case err == nil:
 			created = false
@@ -199,6 +284,9 @@ func (m *Manager) upsertSiteRow(ctx context.Context, meta *core.SiteMeta, dir, p
 			sr.Monitored = existing.Monitored
 			sr.QualityProfileID = existing.QualityProfileID
 			sr.AddedAt = existing.AddedAt
+			if existing.LibraryID != 0 {
+				sr.LibraryID = existing.LibraryID
+			}
 			// The folder on disk is ground truth, exactly as it is for a movie
 			// refresh: a site renamed upstream must not point the row at a
 			// directory that does not exist.
@@ -227,8 +315,18 @@ func (m *Manager) upsertSiteRow(ctx context.Context, meta *core.SiteMeta, dir, p
 // empty until the last one lands. walkSiteScenes owns that; everything about
 // how a scene becomes an episode row is writeScenes' and numberScenes' job,
 // unchanged.
+//
+// The catalogue comes from the site's own PINNED instance, never from the
+// library's chain head. The scene UUIDs already on these episode rows were
+// minted by that box; walking another one would file its scenes under this
+// site's numbering and leave the row claiming a catalogue it does not have.
 func (m *Manager) syncSiteScenes(ctx context.Context, sr *core.Series) error {
-	return m.walkSiteScenes(ctx, sr.StashID, func(batch []core.SceneMeta) error {
+	provider := m.adultByID(ctx, sr.Provider)
+	if provider == nil {
+		return fmt.Errorf("library: %w: site %q is pinned to %s",
+			core.ErrNoAdultProvider, sr.Title, adultRef(core.ItemRef{Provider: sr.Provider}).Provider)
+	}
+	return m.walkSiteScenes(ctx, provider, sr.StashID, func(batch []core.SceneMeta) error {
 		return m.writeScenes(ctx, sr, batch)
 	})
 }
@@ -267,7 +365,7 @@ type sceneBatch func([]core.SceneMeta) error
 // either way. A site whose whole catalogue sits in one year publishes once, at
 // the end — nothing can be numbered before its year is complete, and a
 // single-year site is a short walk anyway.
-func (m *Manager) walkSiteScenes(ctx context.Context, siteStashID string, flush sceneBatch) error {
+func (m *Manager) walkSiteScenes(ctx context.Context, provider core.AdultMetadataProvider, siteStashID string, flush sceneBatch) error {
 	seen := map[string]bool{}
 	// Scenes waiting for their year to be proven complete, keyed by that year,
 	// and lowest is the oldest year the walk has reached. Everything above it
@@ -318,7 +416,7 @@ func (m *Manager) walkSiteScenes(ctx context.Context, siteStashID string, flush 
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		result, err := m.adult.SearchScenes(ctx, core.SceneQuery{
+		result, err := provider.SearchScenes(ctx, core.SceneQuery{
 			SiteStashID: siteStashID,
 			Page:        page,
 			PerPage:     scenePageSize,
@@ -584,11 +682,23 @@ func episodeFromScene(scene core.SceneMeta, season, number int) core.Episode {
 
 // refreshSites is the adult half of RefreshLibrary.
 //
-// It is a no-op — not an error, and not one provider call — when the module is
-// off or no stash-box credential is configured. That is the acceptance
-// criterion this function exists to satisfy: a full job cycle on a server with
-// adult content disabled must make ZERO requests to the stash-box endpoint,
-// and a refresh sweep is the recurring job that would otherwise make them.
+// It is a no-op — not an error, and not one provider call — when no adult
+// library is switched on or no stash-box credential is configured. That is the
+// acceptance criterion this function exists to satisfy: a full job cycle on a
+// server with adult content disabled must make ZERO requests to the stash-box
+// endpoint, and a refresh sweep is the recurring job that would otherwise make
+// them.
+//
+// A site under a library that is off is skipped individually, which is the
+// narrow form of the same rule: the sweep names no library, so the gate above
+// can only ask whether ANY adult shelf is on, and refreshing a dormant one's
+// catalogue because a sibling is on would reach the endpoint on its behalf.
+//
+// Each site is refreshed against the instance it is PINNED to. A site whose
+// instance has been deleted is an error on the result and zero provider calls:
+// the alternative — falling back to whatever box the library's chain names
+// first — would ask that box for a UUID it never minted, and public stash-boxes
+// answer such a question with a different site rather than with "no".
 func (m *Manager) refreshSites(ctx context.Context, res *RefreshResult) error {
 	if err := m.adultReady(ctx); err != nil {
 		if errors.Is(err, ErrAdultDisabled) || errors.Is(err, core.ErrNoAdultProvider) {
@@ -601,6 +711,11 @@ func (m *Manager) refreshSites(ctx context.Context, res *RefreshResult) error {
 	if err != nil {
 		return err
 	}
+	libs, err := m.store.ListLibraries(ctx)
+	if err != nil {
+		return err
+	}
+	owners := core.NewLibrarySet(libs)
 	for _, sr := range sites {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -608,7 +723,16 @@ func (m *Manager) refreshSites(ctx context.Context, res *RefreshResult) error {
 		if !sr.Monitored || sr.StashID == "" {
 			continue
 		}
-		meta, err := m.adult.GetSite(ctx, sr.StashID)
+		if !owners.Active(sr.LibraryID, core.LibraryKindAdult) {
+			continue
+		}
+		pinned := adultRef(core.ItemRef{Provider: sr.Provider, Ref: sr.StashID})
+		provider := m.adultByID(ctx, pinned.Provider)
+		if provider == nil {
+			res.addErr("refresh site %q: no stash-box instance %q is configured", sr.Title, pinned.Provider)
+			continue
+		}
+		meta, err := provider.GetSite(ctx, sr.StashID)
 		if err != nil {
 			res.addErr("refresh site %q: %v", sr.Title, err)
 			continue
@@ -616,7 +740,7 @@ func (m *Manager) refreshSites(ctx context.Context, res *RefreshResult) error {
 		if meta == nil {
 			continue
 		}
-		row, _, err := m.upsertSiteRow(ctx, meta, sr.Path, "", nil)
+		row, _, err := m.upsertSiteRow(ctx, pinned.Provider, meta, sr.Path, "", nil, sr.LibraryID)
 		if err != nil {
 			return err
 		}
@@ -645,7 +769,11 @@ func (m *Manager) importScene(ctx context.Context, sr *core.Series, rel string, 
 
 	dir := sr.Path
 	if dir == "" {
-		dir = adultSeriesDir(sr.Title)
+		lib, err := m.seriesLibraryOf(ctx, sr)
+		if err != nil {
+			return "", 0, err
+		}
+		dir = adultSeriesDir(lib, sr.Title)
 	}
 	dst := path.Join(dir, m.seasonFolderName(p.Season),
 		sceneFileName(sr.Title, airDate, episodeTitle, path.Ext(rel)))
@@ -843,7 +971,7 @@ func grabCoversEpisode(grab core.GrabInfo, id int64) bool {
 // the site is new or when the date belongs to a scene the library has not seen
 // yet — once per site per scan, because a walk that found nothing would find
 // nothing again for the next file.
-func (m *Manager) matchAndImportScene(ctx context.Context, rel string, size int64, p core.ParsedRelease, res *ScanResult, park func(string)) (string, error) {
+func (m *Manager) matchAndImportScene(ctx context.Context, lib *core.Library, rel string, size int64, p core.ParsedRelease, res *ScanResult, park func(string)) (string, error) {
 	sr, err := m.adultSeriesByTitle(ctx, p.Title)
 	if err != nil {
 		return "", err
@@ -858,7 +986,7 @@ func (m *Manager) matchAndImportScene(ctx context.Context, rel string, size int6
 	}
 
 	if reason != "" && (sr == nil || !m.syncedSites[sr.ID]) {
-		sr, err = m.syncSiteFor(ctx, sr, p.Title, res, park)
+		sr, err = m.syncSiteFor(ctx, lib, sr, p.Title, rel, res, park)
 		if err != nil || sr == nil {
 			return "", err
 		}
@@ -876,26 +1004,65 @@ func (m *Manager) matchAndImportScene(ctx context.Context, rel string, size int6
 }
 
 // syncSiteFor brings one site's catalogue up to date, finding it in the
-// provider first when the library does not have it yet. It reports nil (having
-// already parked) when the site cannot be resolved at all.
-func (m *Manager) syncSiteFor(ctx context.Context, sr *core.Series, title string, res *ScanResult, park func(string)) (*core.Series, error) {
+// provider first when the library does not have it yet. rel is the scanned
+// file that prompted the sync: a brand-new site is created in the adult
+// library whose root holds it. It reports nil (having already parked) when
+// the site cannot be resolved at all.
+//
+// IDENTIFICATION walks the library's chain, which is the half that differs from
+// a refresh. Nothing is pinned yet — the filename names a site and no box —
+// so every configured instance is a candidate, asked in the owner's own order,
+// and the FIRST one confident about the title wins. The winner's id is what the
+// new row is pinned to, and from then on it is the only box this site is ever
+// asked about (see syncSiteScenes).
+//
+// A rung that errors is recorded and the walk goes on, exactly as the metadata
+// chain's does: one box being down must not park a file the next box could
+// place. Only a chain where every rung errored is a provider failure.
+func (m *Manager) syncSiteFor(ctx context.Context, scanLib *core.Library, sr *core.Series, title, rel string, res *ScanResult, park func(string)) (*core.Series, error) {
 	if sr == nil {
-		sites, err := m.adult.SearchSites(ctx, title)
+		chain := m.adultChain(ctx, scanLib)
+		if len(chain) == 0 {
+			park(reasonNoProvider)
+			return nil, nil
+		}
+		var (
+			hit    *core.SiteMeta
+			winner string
+			failed int
+		)
+		for _, rung := range chain {
+			sites, err := rung.P.SearchSites(ctx, title)
+			if err != nil {
+				res.addErr("search sites for %q on %q: %v", title, rung.ID, err)
+				failed++
+				continue
+			}
+			cands := make([]candidate, len(sites))
+			for i, site := range sites {
+				cands[i] = candidate{title: site.Name}
+			}
+			idx := bestMatch(cands, title, 0)
+			if idx < 0 {
+				continue
+			}
+			hit, winner = &sites[idx], rung.ID
+			break
+		}
+		if hit == nil {
+			if failed == len(chain) {
+				park(reasonProviderErr)
+			} else {
+				park(reasonNoMatch)
+			}
+			return nil, nil
+		}
+		ref := core.ItemRef{Provider: winner, Ref: hit.StashID}
+		lib, err := m.siteLibrary(ctx, ref, rel, 0)
 		if err != nil {
-			res.addErr("search sites for %q: %v", title, err)
-			park(reasonProviderErr)
-			return nil, nil
+			return nil, err
 		}
-		cands := make([]candidate, len(sites))
-		for i, site := range sites {
-			cands[i] = candidate{title: site.Name}
-		}
-		idx := bestMatch(cands, title, 0)
-		if idx < 0 {
-			park(reasonNoMatch)
-			return nil, nil
-		}
-		sr, _, err = m.upsertSiteRow(ctx, &sites[idx], adultSeriesDir(sites[idx].Name), "", nil)
+		sr, _, err = m.upsertSiteRow(ctx, winner, hit, adultSeriesDir(lib, hit.Name), "", nil, lib.ID)
 		if err != nil {
 			return nil, err
 		}

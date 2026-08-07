@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"strconv"
 	"time"
 )
 
@@ -25,9 +26,58 @@ var ErrNoMetadataProvider = errors.New("core: no metadata provider configured")
 // rejected credential marks the cached state invalid; a timeout does not.
 var ErrMetadataUnauthorized = errors.New("core: metadata credential rejected")
 
+// ErrProviderKindUnsupported reports that a provider was asked for a media
+// kind it does not serve — TMDB for an adult site, stash-box for a film.
+//
+// A chain walker SKIPS such a provider rather than failing on it: this is the
+// registry's Kinds list restated at the call site, not a failure. Nothing went
+// wrong, this rung of the chain simply has nothing to say.
+var ErrProviderKindUnsupported = errors.New("core: provider does not serve this media kind")
+
+// ItemRef is the identity of a provider-side title: which provider answered,
+// and that provider's own id for it.
+type ItemRef struct {
+	Provider string
+	Ref      string
+}
+
+// TMDBRef is the ItemRef for a TMDB numeric id. A zero or negative id is not
+// an identity at all — it is the absence of one — so it yields the zero
+// ItemRef rather than a ref pointing at "0".
+func TMDBRef(id int64) ItemRef {
+	if id <= 0 {
+		return ItemRef{}
+	}
+	return ItemRef{Provider: ProviderTMDB, Ref: strconv.FormatInt(id, 10)}
+}
+
+// Valid reports whether the ref names both a provider and an id. Either half
+// alone identifies nothing.
+func (r ItemRef) Valid() bool {
+	return r.Provider != "" && r.Ref != ""
+}
+
+// TMDBID returns the ref's numeric TMDB id, or 0 when it belongs to another
+// provider or does not parse. It exists for the callers that still key on the
+// int64 — NFO uniqueids, discover decoration, the requests table.
+func (r ItemRef) TMDBID() int64 {
+	if r.Provider != ProviderTMDB {
+		return 0
+	}
+	id, err := strconv.ParseInt(r.Ref, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return id
+}
+
 // MetadataProvider is the metadata source Caravan matches library items
-// against (TMDB in v1, SPEC §4). It is the seam that keeps the library and
-// scanner packages testable without network access.
+// against (TMDB and stash-box, SPEC §4). It is the seam that keeps the library
+// and scanner packages testable without network access.
+//
+// The Get* methods take a provider-native ref, not a shared id space: the
+// whole point of the seam is that a provider's vocabulary stops here. TMDB's
+// refs are its numeric ids written as strings; stash-box's are UUIDs.
 type MetadataProvider interface {
 	// SearchMovies returns movie candidates for a free-text query, best match
 	// first.
@@ -35,16 +85,21 @@ type MetadataProvider interface {
 	// SearchSeries returns series candidates for a free-text query, best match
 	// first.
 	SearchSeries(ctx context.Context, q string) ([]SeriesMeta, error)
-	// GetMovie returns full details for one movie by provider id.
-	GetMovie(ctx context.Context, tmdbID int64) (*MovieMeta, error)
-	// GetSeries returns full details for one series by provider id, including
-	// its seasons and episodes.
-	GetSeries(ctx context.Context, tmdbID int64) (*SeriesMeta, error)
+	// GetMovie returns full details for one movie by this provider's own ref.
+	GetMovie(ctx context.Context, ref string) (*MovieMeta, error)
+	// GetSeries returns full details for one series by this provider's own
+	// ref, including its seasons and episodes.
+	GetSeries(ctx context.Context, ref string) (*SeriesMeta, error)
 }
 
 // MovieMeta is provider-side movie metadata, before it becomes a library
 // Movie.
 type MovieMeta struct {
+	// Provider and ProviderRef are the identity of the record: which provider
+	// answered, and its own id for it. TMDBID stays alongside them because the
+	// NFO uniqueids, discover decoration and the requests table all key on it.
+	Provider      string
+	ProviderRef   string
 	TMDBID        int64
 	IMDBID        string
 	Title         string
@@ -65,10 +120,19 @@ type MovieMeta struct {
 	PosterURL string
 }
 
+// Ref is the movie's provider-side identity.
+func (m MovieMeta) Ref() ItemRef {
+	return ItemRef{Provider: m.Provider, Ref: m.ProviderRef}
+}
+
 // SeriesMeta is provider-side series metadata, before it becomes a library
 // Series. Seasons is populated by GetSeries and typically empty on search
 // results.
 type SeriesMeta struct {
+	// Provider and ProviderRef are the identity of the record; see
+	// MovieMeta for why the legacy id fields below survive alongside them.
+	Provider      string
+	ProviderRef   string
 	TMDBID        int64
 	TVDBID        int64
 	IMDBID        string
@@ -85,6 +149,11 @@ type SeriesMeta struct {
 	// PosterURL is an absolute provider URL (see MovieMeta.PosterURL).
 	PosterURL string
 	Seasons   []SeasonMeta
+}
+
+// Ref is the series' provider-side identity.
+func (s SeriesMeta) Ref() ItemRef {
+	return ItemRef{Provider: s.Provider, Ref: s.ProviderRef}
 }
 
 // SeasonMeta is provider-side season metadata. Number 0 is the specials
@@ -109,4 +178,9 @@ type EpisodeMeta struct {
 	Overview string
 	// AirDate is zero when the episode is unaired or the provider had no date.
 	AirDate time.Time
+	// Absolute is the provider's series-wide episode number, 0 when the
+	// provider serves none. It is the provider's own count, never a derived
+	// one: a number counted here by walking the seasons would be an answer
+	// Caravan invented about a series it does not publish.
+	Absolute int
 }

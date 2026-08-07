@@ -147,9 +147,7 @@ func TestImagesRefuseAdultArtworkWithoutAReasonToServeIt(t *testing.T) {
 		t.Errorf("anonymous adult poster with the module never enabled = %d, want 404", got)
 	}
 
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	enableAdultLibrary(t, st)
 
 	// Televisions and the login screen still get ordinary library artwork with
 	// no credential: the hole this endpoint deliberately has must stay open.
@@ -172,15 +170,11 @@ func TestImagesRefuseAdultArtworkWithoutAReasonToServeIt(t *testing.T) {
 	}
 
 	// A grant opens it, which is what the SPA's Adult screens need.
-	if err := st.SetUserAdultAccess(ctx, member.ID, true); err != nil {
-		t.Fatalf("SetUserAdultAccess: %v", err)
-	}
+	grantAdultAccess(t, st, member.ID, true)
 	if got := get(sitePath, memberCookie); got != http.StatusOK {
 		t.Errorf("granted member adult poster = %d, want 200", got)
 	}
-	if err := st.SetUserAdultAccess(ctx, member.ID, false); err != nil {
-		t.Fatalf("SetUserAdultAccess(false): %v", err)
-	}
+	grantAdultAccess(t, st, member.ID, false)
 
 	// Case is not a way around it: APFS and NTFS would serve the same bytes
 	// for a path the check spelled differently.
@@ -204,9 +198,7 @@ func TestImagesRefuseAdultArtworkWithoutAReasonToServeIt(t *testing.T) {
 
 	// And switching the module off closes it for everyone, the admin and the
 	// LAN included — the dlna_visible the owner left behind does not apply.
-	if err := st.SetAdultEnabled(ctx, false); err != nil {
-		t.Fatalf("SetAdultEnabled(false): %v", err)
-	}
+	setAdultLibrariesActive(t, st, false)
 	for _, tc := range []struct {
 		name     string
 		decorate func(*http.Request)
@@ -231,9 +223,7 @@ func TestImagesRefuseAdultArtworkReachedThroughDotSegments(t *testing.T) {
 		t.Fatalf("SetSetting: %v", err)
 	}
 	writeFile(t, root, store.AdultLibraryRoot+"/Brazzers/poster.jpg", "siteposter")
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	enableAdultLibrary(t, st)
 
 	// Percent-encoded, because http.ServeMux cleans and redirects a literal
 	// "/../" before any handler sees it.

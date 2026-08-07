@@ -26,8 +26,84 @@ func (noMetadata) SearchMovies(context.Context, string) ([]core.MovieMeta, error
 func (noMetadata) SearchSeries(context.Context, string) ([]core.SeriesMeta, error) {
 	return nil, nil
 }
-func (noMetadata) GetMovie(context.Context, int64) (*core.MovieMeta, error)   { return nil, nil }
-func (noMetadata) GetSeries(context.Context, int64) (*core.SeriesMeta, error) { return nil, nil }
+func (noMetadata) GetMovie(context.Context, string) (*core.MovieMeta, error)   { return nil, nil }
+func (noMetadata) GetSeries(context.Context, string) (*core.SeriesMeta, error) { return nil, nil }
+
+// enableAdultLibrary says directly what a server-wide adult switch used to say
+// indirectly: the Adult library exists and is switched on. An adult LIBRARY is
+// the module now — every gate in the tree asks whether a library of the kind is
+// active, never whether a setting says so — so a test that wants adult content
+// reachable has to create one, exactly as the owner does.
+//
+// The row is seeded with the values the product itself creates it with, because
+// none of them are decoration. dlna_visible is OFF: DLNA has no accounts, so a
+// container advertised on the LAN is readable by every device on it, and
+// sharing it is a second and separate decision. It is born RESTRICTED for the
+// same reason read the other way round: adult content was only ever reachable
+// by an account somebody granted, and a row born open would hand the whole
+// household a shelf on the act that made it. A fixture that let either default
+// drift would prove the guards hold for a library no screen can produce.
+//
+// It is idempotent, like the enable it replaces: an existing row is switched
+// back on rather than duplicated, so a test may switch adult off and on again
+// and find the library exactly as it left it. Only the first adult library is
+// the kind's default, because idx_libraries_default_per_kind admits one per
+// kind — a second claiming it would fail the insert rather than the assertion.
+func enableAdultLibrary(t *testing.T, st *store.Store) core.Library {
+	t.Helper()
+	ctx := context.Background()
+	existing, err := st.ListLibrariesByKind(ctx, core.LibraryKindAdult)
+	if err != nil {
+		t.Fatalf("ListLibrariesByKind(adult): %v", err)
+	}
+	for _, lib := range existing {
+		if lib.RootPath != store.AdultLibraryRoot {
+			continue
+		}
+		if err := st.SetLibraryActive(ctx, lib.ID, true); err != nil {
+			t.Fatalf("SetLibraryActive(%d, true): %v", lib.ID, err)
+		}
+		lib.Active = true
+		return lib
+	}
+
+	lib := core.Library{
+		Kind:        core.LibraryKindAdult,
+		Name:        store.AdultLibraryName,
+		RootPath:    store.AdultLibraryRoot,
+		Providers:   []string{core.ProviderStashbox},
+		DLNAVisible: false,
+		Restricted:  true,
+		IsDefault:   len(existing) == 0,
+	}
+	if err := st.CreateLibrary(ctx, &lib); err != nil {
+		t.Fatalf("CreateLibrary(%s): %v", store.AdultLibraryName, err)
+	}
+	return lib
+}
+
+// setAdultLibrariesActive is the other half of what a module switch did: one
+// flip bound every adult library at once, and that is now spelled per library.
+//
+// Switching a library off deletes nothing — not the row, not the series, not
+// the episodes, and certainly not the files. "Off" is a reachability promise,
+// not a retention policy, so a test that disables adult and then drives a full
+// job cycle still finds every row it seeded standing there to be skipped, which
+// is the only state in which "the sweep walked them and asked nobody" can be
+// told apart from "the sweep found nothing to walk".
+func setAdultLibrariesActive(t *testing.T, st *store.Store, active bool) {
+	t.Helper()
+	ctx := context.Background()
+	libs, err := st.ListLibrariesByKind(ctx, core.LibraryKindAdult)
+	if err != nil {
+		t.Fatalf("ListLibrariesByKind(adult): %v", err)
+	}
+	for _, lib := range libs {
+		if err := st.SetLibraryActive(ctx, lib.ID, active); err != nil {
+			t.Fatalf("SetLibraryActive(%d, %t): %v", lib.ID, active, err)
+		}
+	}
+}
 
 // seedSite puts an adult series and one scene in the store, the state an owner
 // who used the module and then switched it off leaves behind.
@@ -50,6 +126,32 @@ func seedSite(t *testing.T, ctx context.Context, st *store.Store) {
 	}
 }
 
+// seedInstance writes one configured stash-box endpoint, the way the instance
+// create handler does. providerID is what a chain and every pinned row store.
+func seedInstance(t *testing.T, ctx context.Context, st *store.Store, providerID, name, endpoint, key string) {
+	t.Helper()
+	in := &core.StashboxInstance{
+		ProviderID: providerID, Name: name, Endpoint: endpoint, APIKey: key,
+	}
+	if err := st.UpsertStashboxInstance(ctx, in); err != nil {
+		t.Fatalf("UpsertStashboxInstance(%q): %v", providerID, err)
+	}
+}
+
+// setInstanceKey rotates one instance's credential, the way the update handler
+// does after proving it.
+func setInstanceKey(t *testing.T, ctx context.Context, st *store.Store, providerID, key string) {
+	t.Helper()
+	in, err := st.GetStashboxInstanceByProviderID(ctx, providerID)
+	if err != nil {
+		t.Fatalf("GetStashboxInstanceByProviderID(%q): %v", providerID, err)
+	}
+	in.APIKey = key
+	if err := st.UpsertStashboxInstance(ctx, in); err != nil {
+		t.Fatalf("UpsertStashboxInstance(%q): %v", providerID, err)
+	}
+}
+
 // The composition root's own guard: with the module off, no client for the
 // endpoint is built at all. This is the outer of the two independent reasons
 // the endpoint cannot be reached — library.adultReady is the inner one.
@@ -59,35 +161,31 @@ func TestAdultProviderIsNilUntilTheModuleIsOnAndCredentialed(t *testing.T) {
 	fake := stashboxtest.New(stashboxtest.Options{})
 	t.Cleanup(fake.Close)
 
-	if err := st.SetSetting(ctx, store.SettingStashboxEndpoint, fake.URL()); err != nil {
-		t.Fatalf("set endpoint: %v", err)
-	}
-	if err := st.SetSetting(ctx, store.SettingStashboxAPIKey, "secret"); err != nil {
-		t.Fatalf("set api key: %v", err)
-	}
+	seedInstance(t, ctx, st, core.ProviderStashbox, "StashDB", fake.URL(), "secret")
 
-	// Credential present, module off.
-	if p := adapter.adultMetadata(ctx); p != nil {
-		t.Errorf("adultMetadata = %v with the module off, want nil", p)
+	// Instance present, module off.
+	if p := adapter.adultClientFor(ctx, core.ProviderStashbox); p != nil {
+		t.Errorf("adultClientFor = %v with the module off, want nil", p)
 	}
 
 	// Module on, credential removed.
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
-	if err := st.SetSetting(ctx, store.SettingStashboxAPIKey, ""); err != nil {
-		t.Fatalf("clear api key: %v", err)
-	}
-	if p := adapter.adultMetadata(ctx); p != nil {
-		t.Errorf("adultMetadata = %v with no credential, want nil", p)
+	enableAdultLibrary(t, st)
+	setInstanceKey(t, ctx, st, core.ProviderStashbox, "")
+	if p := adapter.adultClientFor(ctx, core.ProviderStashbox); p != nil {
+		t.Errorf("adultClientFor = %v with no credential, want nil", p)
 	}
 
 	// Both.
-	if err := st.SetSetting(ctx, store.SettingStashboxAPIKey, "secret"); err != nil {
-		t.Fatalf("set api key: %v", err)
+	setInstanceKey(t, ctx, st, core.ProviderStashbox, "secret")
+	if p := adapter.adultClientFor(ctx, core.ProviderStashbox); p == nil {
+		t.Error("adultClientFor = nil with the module on and a credential set, want a provider")
 	}
-	if p := adapter.adultMetadata(ctx); p == nil {
-		t.Error("adultMetadata = nil with the module on and a credential set, want a provider")
+
+	// An id no instance answers to is nil too, and a genuine untyped one: a
+	// typed nil *stashbox.Client would pass the caller's == nil test and then
+	// make a request.
+	if p := adapter.adultClientFor(ctx, core.ProviderStashbox+":fansdb"); p != nil {
+		t.Errorf("adultClientFor(unconfigured) = %v, want a genuine nil", p)
 	}
 
 	// Nothing above made a request: building a client is not using one.
@@ -115,13 +213,9 @@ func TestFullJobCycleMakesNoStashboxRequestWhenAdultIsDisabled(t *testing.T) {
 	// Enable, seed the library the way a user of the module would leave it,
 	// then switch the module back off. Disabling deletes nothing, so the rows
 	// the sweeps walk are all still there.
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	enableAdultLibrary(t, st)
 	seedSite(t, ctx, st)
-	if err := st.SetAdultEnabled(ctx, false); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	setAdultLibrariesActive(t, st, false)
 	fake.Reset()
 
 	client := stashbox.New("secret", fake.URL(), fake.Client())
@@ -164,15 +258,8 @@ func TestWatcherManagerCarriesNoAdultProvider(t *testing.T) {
 	fake := stashboxtest.New(stashboxtest.Options{})
 	t.Cleanup(fake.Close)
 
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
-	if err := st.SetSetting(ctx, store.SettingStashboxEndpoint, fake.URL()); err != nil {
-		t.Fatalf("set endpoint: %v", err)
-	}
-	if err := st.SetSetting(ctx, store.SettingStashboxAPIKey, "secret"); err != nil {
-		t.Fatalf("set api key: %v", err)
-	}
+	enableAdultLibrary(t, st)
+	seedInstance(t, ctx, st, core.ProviderStashbox, "StashDB", fake.URL(), "secret")
 	seedSite(t, ctx, st)
 
 	mgr := adapter.watcherManager(t.TempDir())
@@ -195,29 +282,20 @@ func TestAdultMetadataSeamIsNilWhileTheModuleIsOff(t *testing.T) {
 	fake := stashboxtest.New(stashboxtest.Options{})
 	t.Cleanup(fake.Close)
 
-	if err := st.SetSetting(ctx, store.SettingStashboxEndpoint, fake.URL()); err != nil {
-		t.Fatalf("set endpoint: %v", err)
-	}
-	if err := st.SetSetting(ctx, store.SettingStashboxAPIKey, "secret"); err != nil {
-		t.Fatalf("set api key: %v", err)
-	}
+	seedInstance(t, ctx, st, core.ProviderStashbox, "StashDB", fake.URL(), "secret")
 
-	if p := adapter.AdultMetadata(); p != nil {
-		t.Errorf("AdultMetadata = %v with the module off, want nil", p)
+	if p, id := adapter.DefaultAdultMetadata(ctx); p != nil || id != "" {
+		t.Errorf("DefaultAdultMetadata = %v, %q with the module off, want nil and \"\"", p, id)
 	}
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
-	if p := adapter.AdultMetadata(); p == nil {
-		t.Error("AdultMetadata = nil with the module on and a credential set")
+	enableAdultLibrary(t, st)
+	if p, id := adapter.DefaultAdultMetadata(ctx); p == nil || id != core.ProviderStashbox {
+		t.Errorf("DefaultAdultMetadata = %v, %q with the module on, want the only instance", p, id)
 	}
 	// Switching back off closes the door again without a restart, which is what
 	// reading the settings table per call buys.
-	if err := st.SetAdultEnabled(ctx, false); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
-	if p := adapter.AdultMetadata(); p != nil {
-		t.Errorf("AdultMetadata = %v after the module was switched off, want nil", p)
+	setAdultLibrariesActive(t, st, false)
+	if p, _ := adapter.DefaultAdultMetadata(ctx); p != nil {
+		t.Errorf("DefaultAdultMetadata = %v after the module was switched off, want nil", p)
 	}
 	if n := fake.Count(); n != 0 {
 		t.Errorf("resolving the seam made %d stash-box requests, want 0", n)
@@ -233,14 +311,9 @@ func TestAdapterAddSiteRefusesWhileTheModuleIsOff(t *testing.T) {
 	fake := stashboxtest.New(stashboxtest.Options{})
 	t.Cleanup(fake.Close)
 
-	if err := st.SetSetting(ctx, store.SettingStashboxEndpoint, fake.URL()); err != nil {
-		t.Fatalf("set endpoint: %v", err)
-	}
-	if err := st.SetSetting(ctx, store.SettingStashboxAPIKey, "secret"); err != nil {
-		t.Fatalf("set api key: %v", err)
-	}
+	seedInstance(t, ctx, st, core.ProviderStashbox, "StashDB", fake.URL(), "secret")
 
-	if _, err := adapter.AddSite(ctx, "site-1", nil); err == nil {
+	if _, err := adapter.AddSite(ctx, core.ItemRef{Provider: core.ProviderStashbox, Ref: "site-1"}, nil, 0); err == nil {
 		t.Fatal("AddSite succeeded with the module off")
 	}
 	if n := fake.Count(); n != 0 {
@@ -284,21 +357,14 @@ func TestAdultProviderIsReusedAcrossCallsSoTheProbeRunsOnce(t *testing.T) {
 	adapter, st := testAdapter(t)
 	fake := tpdbFake(t)
 
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
-	if err := st.SetSetting(ctx, store.SettingStashboxEndpoint, fake.URL()); err != nil {
-		t.Fatalf("set endpoint: %v", err)
-	}
-	if err := st.SetSetting(ctx, store.SettingStashboxAPIKey, "secret"); err != nil {
-		t.Fatalf("set api key: %v", err)
-	}
+	enableAdultLibrary(t, st)
+	seedInstance(t, ctx, st, core.ProviderStashbox, "StashDB", fake.URL(), "secret")
 
 	// Two acquisitions, as two HTTP requests would make.
 	for i := 0; i < 2; i++ {
-		provider := adapter.adultMetadata(ctx)
+		provider := adapter.adultClientFor(ctx, core.ProviderStashbox)
 		if provider == nil {
-			t.Fatalf("adultMetadata = nil on call %d", i+1)
+			t.Fatalf("adultClientFor = nil on call %d", i+1)
 		}
 		if _, err := provider.SearchSites(ctx, "brazzers"); err != nil {
 			t.Fatalf("SearchSites on call %d: %v", i+1, err)
@@ -315,61 +381,124 @@ func TestAdultProviderIsReusedAcrossCallsSoTheProbeRunsOnce(t *testing.T) {
 	}
 }
 
-// The cache is keyed on the settings, not held forever: pasting a new key or
-// pointing at a different endpoint has to build a fresh client, because what was
-// true of the old endpoint is not evidence about the new one.
-func TestAdultProviderIsRebuiltWhenTheSettingsChange(t *testing.T) {
+// The cache is per instance and keyed on that instance's own endpoint and key.
+// A rotated credential has to build a fresh client, because what was true of the
+// old one is not evidence about the new one — and a SECOND instance has to get a
+// client of its own, probed on its own terms, without disturbing the first. One
+// slot for "the" stash-box client would have evicted on every hop of a two-box
+// chain.
+func TestAdultProviderIsPerInstanceAndRebuiltOnAKeyChange(t *testing.T) {
 	ctx := context.Background()
 	adapter, st := testAdapter(t)
 	fake := tpdbFake(t)
 	other := tpdbFake(t)
 
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
-	if err := st.SetSetting(ctx, store.SettingStashboxEndpoint, fake.URL()); err != nil {
-		t.Fatalf("set endpoint: %v", err)
-	}
-	if err := st.SetSetting(ctx, store.SettingStashboxAPIKey, "secret"); err != nil {
-		t.Fatalf("set api key: %v", err)
-	}
+	enableAdultLibrary(t, st)
+	seedInstance(t, ctx, st, core.ProviderStashbox, "StashDB", fake.URL(), "secret")
+	seedInstance(t, ctx, st, core.ProviderStashbox+":fansdb", "FansDB", other.URL(), "secret")
 
-	search := func(what string) {
+	search := func(providerID, what string) {
 		t.Helper()
-		provider := adapter.adultMetadata(ctx)
+		provider := adapter.adultClientFor(ctx, providerID)
 		if provider == nil {
-			t.Fatalf("adultMetadata = nil %s", what)
+			t.Fatalf("adultClientFor(%s) = nil %s", providerID, what)
 		}
 		if _, err := provider.SearchSites(ctx, "brazzers"); err != nil {
 			t.Fatalf("SearchSites %s: %v", what, err)
 		}
 	}
 
-	search("on the first endpoint")
+	search(core.ProviderStashbox, "on the first instance")
 
-	// A new credential: same endpoint, different client.
-	if err := st.SetSetting(ctx, store.SettingStashboxAPIKey, "rotated"); err != nil {
-		t.Fatalf("rotate api key: %v", err)
-	}
-	search("after the key was rotated")
+	// A new credential on the same instance: same endpoint, different client.
+	setInstanceKey(t, ctx, st, core.ProviderStashbox, "rotated")
+	search(core.ProviderStashbox, "after the key was rotated")
 	if n := queryStudiosAttempts(fake); n != 2 {
 		t.Errorf("queryStudios attempts = %d after a key change, want 2: a new credential must get a fresh client", n)
 	}
 
-	// A new endpoint: a different box entirely, which may well have the query.
-	if err := st.SetSetting(ctx, store.SettingStashboxEndpoint, other.URL()); err != nil {
-		t.Fatalf("repoint endpoint: %v", err)
-	}
-	search("after the endpoint moved")
+	// The second instance is a different box entirely, which may well have the
+	// query, and it must be probed without touching the first.
+	search(core.ProviderStashbox+":fansdb", "on the second instance")
 	if n := queryStudiosAttempts(other); n != 1 {
-		t.Errorf("queryStudios attempts on the new endpoint = %d, want 1: it must be probed on its own terms", n)
+		t.Errorf("queryStudios attempts on the second instance = %d, want 1: it must be probed on its own terms", n)
 	}
 	if n := queryStudiosAttempts(fake); n != 2 {
-		t.Errorf("the old endpoint saw %d probes, want 2: it must not be touched after the move", n)
+		t.Errorf("the first instance saw %d probes, want 2: a second box must not evict it", n)
+	}
+
+	// And going back is free: the first client is still cached, so no third probe.
+	search(core.ProviderStashbox, "back on the first instance")
+	if n := queryStudiosAttempts(fake); n != 2 {
+		t.Errorf("queryStudios attempts = %d after returning to the first instance, want 2", n)
 	}
 }
 
-// adultMetadata is called from concurrent HTTP handlers, so the cache it now
+// The default a surface that names no instance answers from: the default adult
+// library's chain head when it names one, the oldest instance otherwise.
+func TestDefaultAdultMetadataFollowsTheDefaultLibrarysChain(t *testing.T) {
+	ctx := context.Background()
+	adapter, st := testAdapter(t)
+	fake := tpdbFake(t)
+	other := tpdbFake(t)
+
+	enableAdultLibrary(t, st)
+	seedInstance(t, ctx, st, core.ProviderStashbox, "StashDB", fake.URL(), "secret")
+	seedInstance(t, ctx, st, core.ProviderStashbox+":fansdb", "FansDB", other.URL(), "secret")
+
+	// A newly created Adult library is chained to the legacy id.
+	if _, id := adapter.DefaultAdultMetadata(ctx); id != core.ProviderStashbox {
+		t.Fatalf("default = %q, want the chain head", id)
+	}
+
+	lib, err := st.GetLibraryByKind(ctx, core.LibraryKindAdult)
+	if err != nil {
+		t.Fatalf("GetLibraryByKind: %v", err)
+	}
+	lib.Provider = core.ProviderStashbox + ":fansdb"
+	lib.Providers = []string{core.ProviderStashbox + ":fansdb", core.ProviderStashbox}
+	if err := st.UpdateLibrary(ctx, lib); err != nil {
+		t.Fatalf("UpdateLibrary: %v", err)
+	}
+	if _, id := adapter.DefaultAdultMetadata(ctx); id != core.ProviderStashbox+":fansdb" {
+		t.Fatalf("default = %q, want the new chain head", id)
+	}
+
+	// Resolving the default is a decision, not a request.
+	if n := fake.Count() + other.Count(); n != 0 {
+		t.Errorf("resolving the default made %d stash-box requests, want 0", n)
+	}
+}
+
+// The switch is read BEFORE the instance table, so a disabled module costs no
+// query at all — the ordering that makes "zero traffic when off" hold even if
+// somebody later makes the lookup expensive.
+func TestDisabledModuleReadsNoInstanceRow(t *testing.T) {
+	ctx := context.Background()
+	adapter, st := testAdapter(t)
+	fake := tpdbFake(t)
+	seedInstance(t, ctx, st, core.ProviderStashbox, "StashDB", fake.URL(), "secret")
+
+	if p := adapter.adultClientFor(ctx, core.ProviderStashbox); p != nil {
+		t.Errorf("adultClientFor = %v with the module off, want nil", p)
+	}
+	if p, id := adapter.DefaultAdultMetadata(ctx); p != nil || id != "" {
+		t.Errorf("DefaultAdultMetadata = %v, %q with the module off, want nil", p, id)
+	}
+	// The exported per-instance seam agrees, and an id of another protocol is
+	// nil without any lookup at all.
+	if p := adapter.AdultMetadataFor(ctx, core.ProviderStashbox); p != nil {
+		t.Errorf("AdultMetadataFor = %v with the module off, want nil", p)
+	}
+	if p := adapter.AdultMetadataFor(ctx, core.ProviderTMDB); p != nil {
+		t.Errorf("AdultMetadataFor(tmdb) = %v, want nil", p)
+	}
+	if n := fake.Count(); n != 0 {
+		t.Errorf("a disabled module made %d stash-box requests, want 0", n)
+	}
+}
+
+// adultClientFor is called from concurrent HTTP handlers, so the cache it now
 // reads and replaces has to be safe under -race — and has to hand every caller
 // the same client, since one client per goroutine would lose the memo exactly
 // the way one client per call did.
@@ -378,15 +507,8 @@ func TestAdultProviderIsSafeForConcurrentCallers(t *testing.T) {
 	adapter, st := testAdapter(t)
 	fake := tpdbFake(t)
 
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
-	if err := st.SetSetting(ctx, store.SettingStashboxEndpoint, fake.URL()); err != nil {
-		t.Fatalf("set endpoint: %v", err)
-	}
-	if err := st.SetSetting(ctx, store.SettingStashboxAPIKey, "secret"); err != nil {
-		t.Fatalf("set api key: %v", err)
-	}
+	enableAdultLibrary(t, st)
+	seedInstance(t, ctx, st, core.ProviderStashbox, "StashDB", fake.URL(), "secret")
 
 	const callers = 8
 	got := make([]core.AdultMetadataProvider, callers)
@@ -395,14 +517,14 @@ func TestAdultProviderIsSafeForConcurrentCallers(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			got[i] = adapter.adultMetadata(ctx)
+			got[i] = adapter.adultClientFor(ctx, core.ProviderStashbox)
 		}(i)
 	}
 	wg.Wait()
 
 	for i, provider := range got {
 		if provider == nil {
-			t.Fatalf("adultMetadata = nil on caller %d", i)
+			t.Fatalf("adultClientFor = nil on caller %d", i)
 		}
 		if provider != got[0] {
 			t.Errorf("caller %d got a different client; every caller must share one so the capability memo is shared too", i)
@@ -431,21 +553,14 @@ func TestValidatingACredentialDoesNotEvictTheWorkingClient(t *testing.T) {
 	})
 	t.Cleanup(fake.Close)
 
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
-	if err := st.SetSetting(ctx, store.SettingStashboxEndpoint, fake.URL()); err != nil {
-		t.Fatalf("set endpoint: %v", err)
-	}
-	if err := st.SetSetting(ctx, store.SettingStashboxAPIKey, "secret"); err != nil {
-		t.Fatalf("set api key: %v", err)
-	}
+	enableAdultLibrary(t, st)
+	seedInstance(t, ctx, st, core.ProviderStashbox, "StashDB", fake.URL(), "secret")
 
 	search := func(what string) {
 		t.Helper()
-		provider := adapter.adultMetadata(ctx)
+		provider := adapter.adultClientFor(ctx, core.ProviderStashbox)
 		if provider == nil {
-			t.Fatalf("adultMetadata = nil %s", what)
+			t.Fatalf("adultClientFor = nil %s", what)
 		}
 		if _, err := provider.SearchSites(ctx, "brazzers"); err != nil {
 			t.Fatalf("SearchSites %s: %v", what, err)
@@ -472,5 +587,59 @@ func TestValidatingACredentialDoesNotEvictTheWorkingClient(t *testing.T) {
 	// never stored.
 	if n := queryStudiosAttempts(fake); n != 2 {
 		t.Errorf("queryStudios attempts = %d, want 2: the validation must not evict the cached client", n)
+	}
+}
+
+// The same seam, driven by the switch a per-library toggle actually offers: a
+// fully seeded and credentialed adult LIBRARY that is switched off.
+//
+// It is a different state from the one above, where the seam is nil because no
+// adult library exists at all, and only this one can distinguish a guard that
+// reads `active` from a guard that merely counts adult rows. The two are worth
+// separating because the second is the shape a well-meant optimisation takes —
+// "an adult library exists, so the module is on" reads faster and is wrong for
+// every owner who ever switched a shelf off.
+func TestAdultMetadataSeamIsNilWhenEveryAdultLibraryIsInactive(t *testing.T) {
+	ctx := context.Background()
+	adapter, st := testAdapter(t)
+	fake := stashboxtest.New(stashboxtest.Options{})
+	t.Cleanup(fake.Close)
+
+	seedInstance(t, ctx, st, core.ProviderStashbox, "StashDB", fake.URL(), "secret")
+	enableAdultLibrary(t, st)
+	if p, _ := adapter.DefaultAdultMetadata(ctx); p == nil {
+		t.Fatal("DefaultAdultMetadata is nil with the library on, so this test would prove nothing")
+	}
+
+	lib, err := st.GetLibraryByKind(ctx, core.LibraryKindAdult)
+	if err != nil {
+		t.Fatalf("GetLibraryByKind: %v", err)
+	}
+	if err := st.SetLibraryActive(ctx, lib.ID, false); err != nil {
+		t.Fatalf("SetLibraryActive(false): %v", err)
+	}
+	// The precondition the test is named for, stated rather than assumed: the
+	// deactivation above names ONE library, and only if it left no active adult
+	// library behind does a nil seam below mean what it is read to mean.
+	if on, err := st.AnyActiveLibraryOfKind(ctx, core.LibraryKindAdult); err != nil || on {
+		t.Fatalf("an active adult library survives = %t, %v — the state under test was never reached", on, err)
+	}
+	if p, id := adapter.DefaultAdultMetadata(ctx); p != nil || id != "" {
+		t.Errorf("DefaultAdultMetadata = %v, %q with every adult library off, want nil and \"\"", p, id)
+	}
+	if p := adapter.AdultMetadataFor(ctx, core.ProviderStashbox); p != nil {
+		t.Errorf("AdultMetadataFor = %v with every adult library off, want nil", p)
+	}
+	if n := fake.Count(); n != 0 {
+		t.Errorf("resolving the seam made %d stash-box requests, want 0", n)
+	}
+
+	// And switching the library back on reopens the door without a restart,
+	// which is what reading the rows per call buys.
+	if err := st.SetLibraryActive(ctx, lib.ID, true); err != nil {
+		t.Fatalf("SetLibraryActive(true): %v", err)
+	}
+	if p, id := adapter.DefaultAdultMetadata(ctx); p == nil || id != core.ProviderStashbox {
+		t.Errorf("DefaultAdultMetadata = %v, %q after reactivation, want the only instance", p, id)
 	}
 }

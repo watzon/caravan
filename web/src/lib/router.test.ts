@@ -94,6 +94,20 @@ describe('matchRoutes', () => {
     expect(matchRoutes(ROUTES, '/queue')?.pattern).toBe('/queue');
   });
 
+  /**
+   * The universal search is one screen whose whole state is a query string, so
+   * the match must survive the query it always carries — and it must stay out
+   * of the member allowlist, because the screen exists to grab.
+   */
+  it('resolves the universal search and keeps it an admin screen', () => {
+    expect(matchRoutes(ROUTES, '/search')?.pattern).toBe('/search');
+    expect(matchRoutes(ROUTES, '/search?q=dune&cats=2000')).toEqual({
+      pattern: '/search',
+      params: {},
+    });
+    expect(memberAllowedRoute('/search')).toBe(false);
+  });
+
   // The index is Discover now: it is a route in its own right, not a redirect
   // to the library.
   it('resolves the index and the discover screens', () => {

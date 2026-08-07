@@ -381,7 +381,9 @@ describe('an endpoint that cannot answer', () => {
     await open('/discover/adult');
 
     expect(host.textContent).toContain('No metadata source configured');
-    expect(host.querySelector('a[href="/settings/adult"]')).not.toBeNull();
+    // The endpoints are configured on Metadata now (PLAN Part 2 phase 8), and
+    // the adult settings page it used to point at no longer exists.
+    expect(host.querySelector('a[href="/settings/metadata"]')).not.toBeNull();
   });
 
   it('offers a retry for an unhappy provider', async () => {

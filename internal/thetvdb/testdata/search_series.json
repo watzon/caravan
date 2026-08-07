@@ -1,0 +1,32 @@
+{
+  "status": "success",
+  "data": [
+    {
+      "objectID": "series-81189",
+      "id": "series-81189",
+      "tvdb_id": "81189",
+      "name": "Breaking Bad",
+      "type": "series",
+      "year": "2008",
+      "overview": "A high school chemistry teacher turns to cooking after a terminal diagnosis.",
+      "image_url": "https://artworks.thetvdb.com/banners/posters/81189-1.jpg",
+      "first_air_time": "2008-01-20",
+      "remote_ids": [
+        { "id": "tt0903747", "type": 2, "sourceName": "IMDB" },
+        { "id": "1396", "type": 12, "sourceName": "TheMovieDB.com" }
+      ]
+    },
+    {
+      "objectID": "series-273181",
+      "id": "series-273181",
+      "tvdb_id": "273181",
+      "name": "Better Call Saul",
+      "type": "series",
+      "year": "",
+      "overview": "",
+      "image_url": "",
+      "first_air_time": "",
+      "remote_ids": []
+    }
+  ]
+}

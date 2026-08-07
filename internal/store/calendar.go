@@ -19,7 +19,11 @@ type CalendarEpisode struct {
 	// is on, scenes — so the row has to be able to say which it is: an
 	// ungranted viewer must see nothing adult here (PLAN phase 9 task 5).
 	SeriesKind string
-	HasFile    bool
+	// SeriesLibraryID is which library owns the series, so the calendar can
+	// drop the rows of a library this viewer cannot see. Zero is a row that
+	// still answers by kind, which SeriesKind then resolves.
+	SeriesLibraryID int64
+	HasFile         bool
 }
 
 // CalendarMovie is the movie counterpart of CalendarEpisode. Calendar rows
@@ -35,7 +39,7 @@ type CalendarMovie struct {
 // actionable nor historical enough to merit a calendar entry.
 func (s *Store) CalendarEpisodes(ctx context.Context, start, end time.Time) ([]CalendarEpisode, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT `+episodeStateColumns+`, s.title, s.kind,
+		SELECT `+episodeStateColumns+`, s.title, s.kind, s.library_id,
 			EXISTS(SELECT 1 FROM episode_files ef WHERE ef.episode_id = e.id)
 		FROM episodes e
 		JOIN series s ON s.id = e.series_id
@@ -52,7 +56,8 @@ func (s *Store) CalendarEpisodes(ctx context.Context, start, end time.Time) ([]C
 	out := []CalendarEpisode{}
 	for rows.Next() {
 		var entry CalendarEpisode
-		episode, err := scanEpisodeWith(rows, &entry.SeriesTitle, &entry.SeriesKind, &entry.HasFile)
+		episode, err := scanEpisodeWith(rows,
+			&entry.SeriesTitle, &entry.SeriesKind, &entry.SeriesLibraryID, &entry.HasFile)
 		if err != nil {
 			return nil, fmt.Errorf("store: scan calendar episode: %w", err)
 		}

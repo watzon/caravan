@@ -127,10 +127,6 @@ func (s *Service) searchScope(ctx context.Context, u urls, containerID string) (
 	} else if hidden {
 		return nil, errNoObject
 	}
-	visible, err := s.visibleLibraries(ctx)
-	if err != nil {
-		return nil, err
-	}
 
 	out := newDIDL()
 	switch {
@@ -140,61 +136,77 @@ func (s *Service) searchScope(ctx context.Context, u urls, containerID string) (
 			return nil, err
 		}
 		out.Containers = append(out.Containers, root.Containers...)
-		if visible[core.LibraryKindMovie] {
-			movies, err := s.movieChildren(ctx, u)
-			if err != nil {
-				return nil, err
-			}
-			out.Items = append(out.Items, movies.Items...)
-		}
-		// One loop, so a shelf is searchable exactly when it is browsable. A
-		// root search that walked a shelf the root does not advertise would be
-		// the classic way an invisible library leaks: most clients prefer
-		// Search over walking Browse.
-		for _, sh := range shelves {
-			if !visible[sh.libraryKind] {
-				continue
-			}
-			if err := s.shelfScope(ctx, u, sh, out); err != nil {
-				return nil, err
-			}
-		}
-	case containerID == moviesID:
-		movies, err := s.movieChildren(ctx, u)
+		v, err := s.visibility(ctx)
 		if err != nil {
 			return nil, err
 		}
-		out.Items = append(out.Items, movies.Items...)
+		// One loop over the same libraries rootChildren advertises, so a
+		// library is searchable exactly when it is browsable. A root search
+		// that walked a library the root does not advertise would be the
+		// classic way an invisible library leaks: most clients prefer Search
+		// over walking Browse.
+		for _, lib := range v.visible() {
+			if err := s.libraryScope(ctx, u, lib, out); err != nil {
+				return nil, err
+			}
+		}
 	case strings.HasPrefix(containerID, movieItemPrefix):
 		// Searching under an item is a well-formed question with an empty
 		// answer, exactly like browsing its children.
 	default:
-		sh, ok := shelfOf(containerID)
+		lib, isContainer, err := s.containerLibrary(ctx, containerID)
+		if err != nil {
+			return nil, err
+		}
+		if isContainer {
+			if err := s.libraryScope(ctx, u, *lib, out); err != nil {
+				return nil, err
+			}
+			break
+		}
+		space, ok := shelfSpaceOf(containerID)
 		if !ok {
 			return nil, errNoObject
 		}
-		switch {
-		case containerID == sh.containerID:
-			if err := s.shelfScope(ctx, u, sh, out); err != nil {
-				return nil, err
-			}
-		case strings.HasPrefix(containerID, sh.seriesPrefix):
-			seriesID, season, hasSeason, err := sh.parseSeriesID(containerID)
+		if !strings.HasPrefix(containerID, space.seriesPrefix) {
+			break
+		}
+		seriesID, season, hasSeason, err := space.parseSeriesID(containerID)
+		if err != nil {
+			return nil, err
+		}
+		sh, _, err := s.shelfOfSeries(ctx, space, seriesID)
+		if err != nil {
+			return nil, err
+		}
+		if hasSeason {
+			episodes, err := s.episodeChildren(ctx, u, sh, seriesID, season)
 			if err != nil {
 				return nil, err
 			}
-			if hasSeason {
-				episodes, err := s.episodeChildren(ctx, u, sh, seriesID, season)
-				if err != nil {
-					return nil, err
-				}
-				out.Items = append(out.Items, episodes.Items...)
-			} else if err := s.seriesScope(ctx, u, sh, seriesID, out); err != nil {
-				return nil, err
-			}
+			out.Items = append(out.Items, episodes.Items...)
+		} else if err := s.seriesScope(ctx, u, sh, seriesID, out); err != nil {
+			return nil, err
 		}
 	}
 	return out, nil
+}
+
+// libraryScope appends everything one library holds, whichever kind it is.
+func (s *Service) libraryScope(ctx context.Context, u urls, lib core.Library, out *didlLite) error {
+	if lib.Kind == core.LibraryKindMovie {
+		movies, err := s.movieChildren(ctx, u, lib)
+		if err != nil {
+			return err
+		}
+		out.Items = append(out.Items, movies.Items...)
+		return nil
+	}
+	sh, ok := shelfFor(lib)
+	if !ok {
+		return nil
+	}
+	return s.shelfScope(ctx, u, sh, out)
 }
 
 // shelfScope appends one shelf's series containers, season containers, and
@@ -205,10 +217,10 @@ func (s *Service) shelfScope(ctx context.Context, u urls, sh shelf, out *didlLit
 		return err
 	}
 	out.Containers = append(out.Containers, series.Containers...)
-	// One kind only, for the reason seriesChildren gives: a site is a series
-	// row, and a search that walked every kind would answer the television
-	// shelf with scenes.
-	all, err := s.st.ListSeriesByKind(ctx, sh.seriesKind)
+	// The same list seriesChildren walked, for the reason it gives: a site is a
+	// series row, and a search that walked every kind — or every library of one
+	// kind — would answer this shelf with somebody else's rows.
+	all, err := s.shelfSeries(ctx, sh)
 	if err != nil {
 		return err
 	}

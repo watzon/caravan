@@ -395,9 +395,9 @@
     <EmptyState
       icon="settings"
       title="No metadata source configured"
-      message="Scenes come from a stash-box endpoint, so this needs an API key. Add one under Settings → Adult content and this screen fills in.">
+      message="Scenes come from a stash-box endpoint, so this needs an API key. Add one under Settings → Metadata and this screen fills in.">
       {#snippet action()}
-        <Button variant="primary" href="/settings/adult">Open adult settings</Button>
+        <Button variant="primary" href="/settings/metadata">Open metadata settings</Button>
       {/snippet}
     </EmptyState>
   {:else if error && status === 400}

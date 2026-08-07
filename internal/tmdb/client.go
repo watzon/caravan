@@ -63,7 +63,23 @@ var (
 	// ErrRateLimited means TMDB throttled the request and the one retry did
 	// not clear it.
 	ErrRateLimited = errors.New("tmdb: rate limited")
+	// ErrInvalidRef means the ref handed to Get* is not a TMDB id. It is
+	// deliberately NOT ErrNotFound: asking TMDB for a stash-box UUID is a
+	// wiring mistake in Caravan, not a title TMDB happens to be missing, and
+	// it must read like one rather than park a file as "unmatched".
+	ErrInvalidRef = errors.New("tmdb: ref is not a tmdb id")
 )
+
+// parseRef converts a provider-native ref into the numeric id TMDB's URLs
+// need. It is the one place this package turns the seam's string vocabulary
+// back into its own.
+func parseRef(ref string) (int64, error) {
+	id, err := strconv.ParseInt(ref, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, fmt.Errorf("%w: %q", ErrInvalidRef, ref)
+	}
+	return id, nil
+}
 
 // APIError is a non-2xx response from TMDB. StatusCode is the HTTP status;
 // Code and Message are TMDB's own `status_code`/`status_message` body fields,

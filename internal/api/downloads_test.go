@@ -447,9 +447,7 @@ func TestListDownloadsRespectsAdultVisibility(t *testing.T) {
 		}
 	}
 
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	enableAdultLibrary(t, st)
 	for _, path := range []string{"/api/v1/downloads", "/api/v1/downloads?limit=10"} {
 		if got := names(path); !got[adult.Title] {
 			t.Errorf("GET %s with adult enabled omitted %q: %v", path, adult.Title, got)

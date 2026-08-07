@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/watzon/caravan/internal/core"
 	"github.com/watzon/caravan/internal/store"
 )
 
@@ -321,22 +322,24 @@ func episodeTag(season int, episodes []int) string {
 	return tag
 }
 
-// movieDir returns a movie folder's storage-root-relative path.
-func movieDir(title string, year int) string {
-	return path.Join(LibraryDir, MoviesDir, movieFolderName(title, year))
+// movieDir returns a movie folder's storage-root-relative path, under the
+// root of the library that owns the movie. Which library that is was decided
+// before any path is built — see libraries.go for the resolution rule.
+func movieDir(lib *core.Library, title string, year int) string {
+	return path.Join(lib.RootPath, movieFolderName(title, year))
 }
 
 // seriesDir returns a series folder's storage-root-relative path.
-func seriesDir(title string, year int) string {
-	return path.Join(LibraryDir, TVDir, seriesFolderName(title, year))
+func seriesDir(lib *core.Library, title string, year int) string {
+	return path.Join(lib.RootPath, seriesFolderName(title, year))
 }
 
-func (m *Manager) movieDir(title string, year int) string {
-	return path.Join(LibraryDir, MoviesDir, m.movieFolderName(title, year))
+func (m *Manager) movieDir(lib *core.Library, title string, year int) string {
+	return path.Join(lib.RootPath, m.movieFolderName(title, year))
 }
 
-func (m *Manager) seriesDir(title string, year int) string {
-	return path.Join(LibraryDir, TVDir, m.seriesFolderName(title, year))
+func (m *Manager) seriesDir(lib *core.Library, title string, year int) string {
+	return path.Join(lib.RootPath, m.seriesFolderName(title, year))
 }
 
 // sortTitle is the case-folded, article-stripped title the store orders by.

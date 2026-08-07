@@ -6,7 +6,7 @@
    */
   import { onMount } from 'svelte';
   import { api, errorText } from '../api/client';
-  import type { UnmatchedFile } from '../api/types';
+  import type { MovieMeta, SeriesMeta, UnmatchedFile } from '../api/types';
   import AddItemModal from '../components/AddItemModal.svelte';
   import Badge from '../components/Badge.svelte';
   import Banner from '../components/Banner.svelte';
@@ -22,6 +22,7 @@
     formatConfidence,
     truncateMiddle,
   } from '../format';
+  import { libraries } from '../state/libraries.svelte';
   import { pushToast } from '../state/toast.svelte';
   import { system } from '../state/system.svelte';
 
@@ -44,7 +45,12 @@
     }
   }
 
-  onMount(load);
+  onMount(() => {
+    void load();
+    // Names for the library column. /libraries is admin-only and this screen
+    // is an admin's, so the lazy load is safe here.
+    void libraries.load();
+  });
 
   async function rescan() {
     scanning = true;
@@ -76,11 +82,21 @@
     }
   }
 
-  async function confirmMatch(kind: 'movie' | 'series', tmdbID: number) {
+  async function confirmMatch(kind: 'movie' | 'series', row: MovieMeta | SeriesMeta) {
     const file = matching;
     if (!file) return;
     try {
-      await api.matchUnmatched(file.id, { type: kind, tmdb_id: tmdbID });
+      // The ref pair travels beside tmdb_id, not instead of it: the pair is the
+      // only thing that names a hit from a provider other than TMDB (which
+      // carries tmdb_id 0), and the server lets it win where both are present.
+      // Half a pair is refused, so an old stub with no ref sends neither.
+      await api.matchUnmatched(file.id, {
+        type: kind,
+        tmdb_id: row.tmdb_id,
+        ...(row.provider && row.provider_ref
+          ? { provider: row.provider, provider_ref: row.provider_ref }
+          : {}),
+      });
       files = (files ?? []).filter((f) => f.id !== file.id);
       matching = null;
       pushToast('Matched and queued for import.', 'success');
@@ -89,8 +105,63 @@
     }
   }
 
+  /**
+   * What the manual match searches for.
+   *
+   * A file the scanner parked is only ever what its name looks like. A file an
+   * untied universal-search grab parked knows better than that: the user
+   * already said which library it belongs to, and a library has exactly one
+   * kind — so that answer beats the parser's guess. An adult library is the
+   * one case it cannot answer, because a site is named by a stash-box id and
+   * the match dialog resolves movie and series refs; there the parse still
+   * decides.
+   */
   function guessKind(file: UnmatchedFile): 'movie' | 'series' {
+    const kind = libraryOf(file)?.kind;
+    if (kind === 'movie') return 'movie';
+    if (kind === 'tv') return 'series';
     return (file.parsed.episodes?.length ?? 0) > 0 ? 'series' : 'movie';
+  }
+
+  function libraryOf(file: UnmatchedFile) {
+    if (!file.library_id) return undefined;
+    return libraries.all.find((l) => l.id === file.library_id);
+  }
+
+  /**
+   * The library whose provider chain the match dialog should search — the one
+   * that will identify the file, so the hand match sees what the automatic
+   * one would have.
+   *
+   * It is 0 for a row with no library, for one whose library the store has not
+   * loaded, and deliberately for an adult one: GET /search refuses an adult
+   * library id, exactly as `guessKind` cannot answer for one. Zero there means
+   * "the kind's default", which is what this dialog searched before libraries
+   * were plural.
+   */
+  function matchLibraryID(file: UnmatchedFile): number {
+    const kind = libraryOf(file)?.kind;
+    return kind === 'movie' || kind === 'tv' ? file.library_id : 0;
+  }
+
+  /**
+   * The library column's text, or "" when the row has no library. A scoped row
+   * whose library is not in the store yet — the list is still loading, or the
+   * library was deleted — still says so by id rather than reading as unscoped.
+   */
+  function libraryPill(file: UnmatchedFile): string {
+    if (!file.library_id) return '';
+    return libraryOf(file)?.name ?? `Library ${file.library_id}`;
+  }
+
+  /**
+   * The park reason in the user's words. `manual-grab` is
+   * library.ReasonManualGrab — an untied grab from the universal search, which
+   * is not a failure at all: it is the outcome the user asked for, and reading
+   * the raw token as one more scanner complaint would be wrong.
+   */
+  function reasonLabel(reason: string): string {
+    return reason === 'manual-grab' ? 'Grabbed manually' : reason || UNKNOWN;
   }
 
   let queue = $derived(files ?? []);
@@ -156,12 +227,13 @@
     </EmptyState>
   {:else}
     <div class="overflow-x-auto rounded-md border border-border">
-      <table class="w-full min-w-[900px] border-collapse text-sm">
+      <table class="w-full min-w-[1000px] border-collapse text-sm">
         <thead>
           <tr class="bg-surface text-left">
             <th class="micro-label px-3 py-2 font-semibold">File</th>
             <th class="micro-label px-3 py-2 font-semibold">Parser guess</th>
             <th class="micro-label px-3 py-2 font-semibold">Confidence</th>
+            <th class="micro-label px-3 py-2 font-semibold">Library</th>
             <th class="micro-label px-3 py-2 font-semibold">Reason</th>
             <th class="micro-label px-3 py-2 text-right font-semibold">Size</th>
             <th class="micro-label px-3 py-2 text-right font-semibold">Actions</th>
@@ -170,6 +242,7 @@
         <tbody>
           {#each queue as file (file.id)}
             {@const parsed = file.parsed}
+            {@const libraryName = libraryPill(file)}
             <tr class="border-t border-border align-top transition-colors duration-150 hover:bg-raised">
               <td class="px-3 py-3 font-mono text-ink" title={file.path}>
                 {truncateMiddle(file.path, 56)}
@@ -210,7 +283,19 @@
                   {formatConfidence(parsed.confidence)}
                 </Badge>
               </td>
-              <td class="px-3 py-3 text-ink-secondary">{file.reason || UNKNOWN}</td>
+              <td class="px-3 py-3">
+                <!-- Only when there is one. A scan-parked file has no library
+                     yet — that is what the match decides — and an em dash says
+                     "not yet" where a blank cell would just look broken. -->
+                {#if libraryName}
+                  <Badge tone="info" title="This file is scoped to one library">
+                    {libraryName}
+                  </Badge>
+                {:else}
+                  <span class="text-ink-muted">{UNKNOWN}</span>
+                {/if}
+              </td>
+              <td class="px-3 py-3 text-ink-secondary">{reasonLabel(file.reason)}</td>
               <td class="px-3 py-3 text-right font-mono text-ink-secondary">
                 {formatBytes(file.size)}
               </td>
@@ -245,6 +330,7 @@
     title="Match “{matching.path}”"
     kind={guessKind(matching)}
     initialQuery={matching.parsed.title}
+    libraryID={matchLibraryID(matching)}
     onpick={confirmMatch}
     onclose={() => (matching = null)} />
 {/if}

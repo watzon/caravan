@@ -10,13 +10,13 @@ import (
 	"time"
 )
 
-// await blocks until an engine for the given library kind exists, returning nil
-// if ctx is done first. "" is an operation belonging to no library.
-func (p *engineProvider) await(ctx context.Context, kind string) core.Engine {
+// await blocks until an engine for the given library exists, returning nil
+// if ctx is done first. (0, "") is an operation belonging to no library.
+func (p *engineProvider) await(ctx context.Context, libraryID int64, kind string) core.Engine {
 	ticker := time.NewTicker(engineWaitInterval)
 	defer ticker.Stop()
 	for {
-		if engine := p.EngineFor(kind); engine != nil {
+		if engine := p.EngineFor(libraryID, kind); engine != nil {
 			return engine
 		}
 		select {
@@ -33,7 +33,7 @@ func (p *engineProvider) await(ctx context.Context, kind string) core.Engine {
 // It waits for an engine rather than requiring one, so a first run reaches the
 // setup screen and then starts importing without a restart.
 func runImportWatcher(ctx context.Context, engines *engineProvider, adapter *libraryAdapter, log *slog.Logger) {
-	engine := engines.await(ctx, "")
+	engine := engines.await(ctx, 0, "")
 	if engine == nil {
 		return
 	}
@@ -80,20 +80,20 @@ func (l lateMetadata) SearchSeries(ctx context.Context, q string) ([]core.Series
 	return p.SearchSeries(ctx, q)
 }
 
-func (l lateMetadata) GetMovie(ctx context.Context, tmdbID int64) (*core.MovieMeta, error) {
+func (l lateMetadata) GetMovie(ctx context.Context, ref string) (*core.MovieMeta, error) {
 	p, err := l.provider(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return p.GetMovie(ctx, tmdbID)
+	return p.GetMovie(ctx, ref)
 }
 
-func (l lateMetadata) GetSeries(ctx context.Context, tmdbID int64) (*core.SeriesMeta, error) {
+func (l lateMetadata) GetSeries(ctx context.Context, ref string) (*core.SeriesMeta, error) {
 	p, err := l.provider(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return p.GetSeries(ctx, tmdbID)
+	return p.GetSeries(ctx, ref)
 }
 
 // provider resolves the configured provider, reporting the absence of one as

@@ -34,27 +34,43 @@ const (
 	SettingEpisodeFileFormat  = "episode_file_format"
 	// SettingTMDBAPIKey is the metadata provider credential.
 	SettingTMDBAPIKey = "tmdb_api_key"
-	// SettingStashboxEndpoint and SettingStashboxAPIKey configure the adult
-	// library's metadata provider (PLAN phase 9 task 1). "stash-box" is a
-	// protocol rather than a service, so the endpoint is a value: TPDB is the
-	// preset (stashbox.DefaultEndpoint), and StashDB, FansDB or a self-hosted
-	// box are the same code with a different URL. An unset endpoint means the
-	// preset, which is why "just paste a key" is the whole configuration.
+	// SettingTheTVDBAPIKey and SettingTheTVDBPIN are TheTVDB v4's credential.
+	// It is a pair rather than a key because TheTVDB sells two kinds of
+	// subscription: a licensed key logs in alone, and a user-supported key logs
+	// in with the subscriber's PIN beside it (see internal/thetvdb).
 	//
-	// Neither key does anything on its own. The adult module is gated by its
-	// own enable flag and a per-user grant, and nothing reads these until both
-	// are satisfied — a stored endpoint is not a reason to talk to it.
+	// The PIN is stored as a credential, not as a preference: it is half of what
+	// /login consumes, so it is write-only on the wire exactly as the key is.
+	// An empty PIN is the licensed case and means the field is omitted from the
+	// login body entirely — a stored empty string and a stored " " are the same
+	// thing, which is why both keys are trimmed on the way in.
+	SettingTheTVDBAPIKey = "thetvdb_api_key"
+	SettingTheTVDBPIN    = "thetvdb_pin"
+	// SettingStashboxEndpoint and SettingStashboxAPIKey are RETIRED. They
+	// configured the adult library's single metadata endpoint until migration
+	// 0026 carried the pair into `stashbox_instances` and deleted both rows;
+	// "stash-box" is a protocol rather than a service, and one key-value pair
+	// could only ever describe one of the boxes speaking it.
+	//
+	// Nothing writes them, nothing reads them, and neither is writable through
+	// PUT /settings. What still names them is the migration's own upgrade-in-
+	// place tests, which have to write the pre-0026 rows to prove they are
+	// carried in — so the constants are the old vocabulary kept for the code
+	// that must still spell it, not configuration. Do not add a reader.
 	SettingStashboxEndpoint = "stashbox_endpoint"
 	SettingStashboxAPIKey   = "stashbox_api_key"
-	// SettingAdultEnabled is the server-wide switch for the adult module (PLAN
-	// phase 9 task 5). Stored as "true"/"false"; absent and unparseable both
-	// read as OFF, which is the opposite default to SettingDLNAEnabled and for
-	// the opposite reason — a typo must never be what turns this on.
+	// SettingAdultEnabled is RETIRED, on the same terms and for the same kind of
+	// reason. It was the server-wide switch for the adult module (PLAN phase 9
+	// task 5) until per-library `active` generalized it: a switch that binds
+	// every caller is a property of a library, not of the server, and a server
+	// that can hold two adult libraries cannot answer for them with one flag.
 	//
-	// It is deliberately NOT in the PUT /settings allowlist. Flipping it has
-	// consequences a key-value write cannot carry out (the Adult library row is
-	// created on first enable), so it has its own endpoint, exactly as
-	// SettingStorageRoot does. Read it through AdultEnabled, never by hand.
+	// Migration 0027 read it to decide whether an upgraded install's adult
+	// library came out active, and 0028 then deleted the row. Nothing writes it,
+	// nothing reads it, and it was never in the PUT /settings allowlist. What
+	// still names it is the migrations' own upgrade-in-place tests, which have to
+	// write the pre-0028 row to prove it is read and then removed. Ask
+	// AnyActiveLibraryOfKind instead, and do not add a reader.
 	SettingAdultEnabled = "adult_enabled"
 	// SettingAPIKey is Caravan's own API credential, used by endpoints an
 	// external app subscribes to (the iCal feed, PLAN phase 3 task 9). It is
@@ -145,10 +161,11 @@ const (
 	// same way — Enabled is "true"/"false" and anything else reads as off.
 	//
 	// Like the stash-box credential, none of them does anything on its own: the
-	// handoff also requires SettingAdultEnabled, so a stored Stash address is
-	// not a reason to talk to one. They are deliberately absent from the PUT
-	// /settings allowlist and from GET /settings for a caller the adult module
-	// is not visible to; POST /adult/stash is the only door.
+	// handoff also requires an active adult library (AnyActiveLibraryOfKind), so
+	// a stored Stash address is not a reason to talk to one. They are
+	// deliberately absent from the PUT /settings allowlist and from GET /settings
+	// for a caller no adult library is visible to; POST /adult/stash is the only
+	// door.
 	SettingStashURL     = "stash_url"
 	SettingStashAPIKey  = "stash_api_key"
 	SettingStashEnabled = "stash_enabled"

@@ -43,7 +43,7 @@ func TestLateMetadataFollowsTheSettingsTable(t *testing.T) {
 	adapter, st := testAdapter(t)
 	meta := lateMetadata{adapter: adapter}
 
-	if _, err := meta.GetMovie(ctx, smokeTMDBID); !errors.Is(err, core.ErrNoMetadataProvider) {
+	if _, err := meta.GetMovie(ctx, strconv.FormatInt(smokeTMDBID, 10)); !errors.Is(err, core.ErrNoMetadataProvider) {
 		t.Fatalf("GetMovie with no key = %v, want ErrNoMetadataProvider", err)
 	}
 
@@ -53,7 +53,7 @@ func TestLateMetadataFollowsTheSettingsTable(t *testing.T) {
 		t.Fatalf("set tmdb key: %v", err)
 	}
 
-	got, err := meta.GetMovie(ctx, smokeTMDBID)
+	got, err := meta.GetMovie(ctx, strconv.FormatInt(smokeTMDBID, 10))
 	if err != nil {
 		t.Fatalf("GetMovie after the key was set: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestTMDBCredentialValidationDoesNotEvictWorkingClient(t *testing.T) {
 
 	working := adapter.metadata(ctx)
 	tmdbMovieGenres(t, working)
-	if err := adapter.ValidateMetadataKey(ctx, "candidate-key"); err != nil {
+	if err := adapter.ValidateMetadataKey(ctx, core.ProviderTMDB, "candidate-key"); err != nil {
 		t.Fatalf("ValidateMetadataKey: %v", err)
 	}
 	afterValidation := adapter.metadata(ctx)
@@ -1019,7 +1019,7 @@ func TestEngineForRoutesGrabsThroughTheLibrarysOwnClient(t *testing.T) {
 
 	// A library with no override of its own reads the global default, which is
 	// the built-in engine until something else is picked.
-	if got := provider.EngineFor(core.LibraryKindTV).(*download.Router).EngineNameFor(ctx, core.ProtocolTorrent); got != download.EngineName {
+	if got := provider.EngineFor(0, core.LibraryKindTV).(*download.Router).EngineNameFor(ctx, core.ProtocolTorrent); got != download.EngineName {
 		t.Fatalf("torrents route to %q before any override, want the built-in %q", got, download.EngineName)
 	}
 
@@ -1037,7 +1037,7 @@ func TestEngineForRoutesGrabsThroughTheLibrarysOwnClient(t *testing.T) {
 
 	// Both clients are the same backend, so the name alone cannot tell them
 	// apart: the handle prefix names the `download_clients` row that took it.
-	got, err := provider.EngineFor(core.LibraryKindTV).Add(ctx, core.Release{
+	got, err := provider.EngineFor(0, core.LibraryKindTV).Add(ctx, core.Release{
 		Title: "Example Series S01E01", Protocol: core.ProtocolTorrent,
 		DownloadURL: "magnet:?xt=urn:btih:0000000000000000000000000000000000000000",
 	}, core.AddOpts{Category: "tv"})
@@ -1051,7 +1051,7 @@ func TestEngineForRoutesGrabsThroughTheLibrarysOwnClient(t *testing.T) {
 	// The library that set no override is untouched, and so is every operation
 	// that belongs to no library at all.
 	for _, kind := range []string{core.LibraryKindMovie, ""} {
-		id, err := provider.EngineFor(kind).Add(ctx, core.Release{
+		id, err := provider.EngineFor(0, kind).Add(ctx, core.Release{
 			Title: "Example Movie 2024", Protocol: core.ProtocolTorrent,
 			DownloadURL: "magnet:?xt=urn:btih:1111111111111111111111111111111111111111",
 		}, core.AddOpts{Category: "movies"})
@@ -1087,14 +1087,14 @@ func TestEngineForRoutesUsenetThroughTheLibrarysOwnClient(t *testing.T) {
 		t.Fatalf("update movie library: %v", err)
 	}
 
-	movieRouter := provider.EngineFor(core.LibraryKindMovie).(*download.Router)
+	movieRouter := provider.EngineFor(0, core.LibraryKindMovie).(*download.Router)
 	if got := movieRouter.EngineNameFor(ctx, core.ProtocolUsenet); got != core.DownloadClientSABnzbd {
 		t.Errorf("movie usenet releases route to %q, want %q", got, core.DownloadClientSABnzbd)
 	}
 	if got := movieRouter.EngineNameFor(ctx, core.ProtocolTorrent); got != download.EngineName {
 		t.Errorf("the usenet override moved torrents to %q as well, want the built-in %q", got, download.EngineName)
 	}
-	tvRouter := provider.EngineFor(core.LibraryKindTV).(*download.Router)
+	tvRouter := provider.EngineFor(0, core.LibraryKindTV).(*download.Router)
 	if got := tvRouter.EngineNameFor(ctx, core.ProtocolUsenet); got != usenet.EngineName {
 		t.Errorf("the movie library's override reached tv usenet releases as %q, want the built-in %q", got, usenet.EngineName)
 	}

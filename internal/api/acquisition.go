@@ -37,9 +37,11 @@ type EngineProvider interface {
 // with a single engine behind it — a test double, a build with nothing
 // configured — is a complete EngineProvider already, and routes globally.
 type LibraryEngineProvider interface {
-	// EngineFor returns the engine a grab on behalf of the library of this
-	// core.LibraryKind* must go through, or nil when none is configured.
-	EngineFor(kind string) core.Engine
+	// EngineFor returns the engine a grab on behalf of one library must go
+	// through, or nil when none is configured. libraryID is the item's own
+	// library; kind (a core.LibraryKind* constant) answers for an item that
+	// names none. (0, "") is an operation belonging to no library.
+	EngineFor(libraryID int64, kind string) core.Engine
 }
 
 // HealthReporter is an optional EngineProvider extension for providers that
@@ -123,19 +125,19 @@ const (
 // no library — the queue, a pause, a removal — writing a 503 and returning
 // false when none is configured.
 func (s *server) requireEngine(w http.ResponseWriter) (core.Engine, bool) {
-	return s.requireEngineFor(w, "")
+	return s.requireEngineFor(w, 0, "")
 }
 
 // requireEngineFor is requireEngine for a grab made on behalf of one library,
 // so a library that routes its downloads elsewhere is honoured rather than
 // stored and ignored (PLAN phase 8 task 2). A provider that does not implement
 // LibraryEngineProvider routes globally, exactly as it did before.
-func (s *server) requireEngineFor(w http.ResponseWriter, kind string) (core.Engine, bool) {
+func (s *server) requireEngineFor(w http.ResponseWriter, libraryID int64, kind string) (core.Engine, bool) {
 	if s.engine == nil {
 		writeError(w, http.StatusServiceUnavailable, "no download engine configured")
 		return nil, false
 	}
-	engine := s.libraryEngine(kind)
+	engine := s.libraryEngine(libraryID, kind)
 	if engine == nil {
 		writeError(w, http.StatusServiceUnavailable, "no download engine configured")
 		return nil, false
@@ -143,11 +145,11 @@ func (s *server) requireEngineFor(w http.ResponseWriter, kind string) (core.Engi
 	return engine, true
 }
 
-// libraryEngine picks the engine for a library kind, falling back to the
+// libraryEngine picks the engine for one library, falling back to the
 // provider's single engine when it has no per-library answer.
-func (s *server) libraryEngine(kind string) core.Engine {
-	if p, ok := s.engine.(LibraryEngineProvider); ok && kind != "" {
-		return p.EngineFor(kind)
+func (s *server) libraryEngine(libraryID int64, kind string) core.Engine {
+	if p, ok := s.engine.(LibraryEngineProvider); ok && (libraryID != 0 || kind != "") {
+		return p.EngineFor(libraryID, kind)
 	}
 	return s.engine.Engine()
 }

@@ -23,9 +23,10 @@ import (
 // mux would keep compiling and silently lose its gate, which is why api.go says
 // so at the registration site too.
 //
-// The one adult-shaped route that is NOT here is the master switch
-// (POST /settings/adult, in settings.go): it has to be reachable while the
-// module is off, because turning it on is its whole job.
+// There is no master switch outside this mux any more. Turning the module on is
+// POST /libraries with kind=adult, which is an ordinary library route — and
+// which is why the library has to exist before anything here, including the
+// instance CRUD, can answer.
 
 // siteJSON is one site on the Adult grid.
 //
@@ -49,6 +50,7 @@ type siteJSON struct {
 	PosterURL        string `json:"poster_url"`
 	Monitored        bool   `json:"monitored"`
 	QualityProfileID int64  `json:"quality_profile_id"`
+	LibraryID        int64  `json:"library_id"`
 	AddedAt          string `json:"added_at"`
 	UpdatedAt        string `json:"updated_at"`
 	// SceneCount and SceneFileCount are the grid's "18 / 240" badge, carried on
@@ -123,8 +125,12 @@ type sceneJSON struct {
 // siteMetaJSON is a provider search hit: a site that may or may not be in the
 // library yet, so it carries a stash id and no library id.
 type siteMetaJSON struct {
-	StashID string `json:"stash_id"`
-	Name    string `json:"name"`
+	// Provider is the instance that answered — the id a later add repeats so
+	// the row is pinned to the box whose UUIDs it carries. Two boxes can hold
+	// the same site under the same UUID, so a hit without it names nothing.
+	Provider string `json:"provider"`
+	StashID  string `json:"stash_id"`
+	Name     string `json:"name"`
 	// Aliases are the other names the provider knows this site by. The picker
 	// shows them because a release name carries whichever one the packager saw,
 	// and picking the right site is easier when its aliases are visible.
@@ -142,6 +148,9 @@ type siteMetaJSON struct {
 // the discover screen's row. It mirrors discoverItemJSON's in_library/requested
 // pair, because it answers the same two questions a title card does.
 type sceneMetaJSON struct {
+	// Provider is the instance that answered, for siteMetaJSON.Provider's
+	// reason.
+	Provider    string   `json:"provider"`
 	MediaType   string   `json:"media_type"`
 	StashID     string   `json:"stash_id"`
 	SiteStashID string   `json:"site_stash_id"`
@@ -214,7 +223,7 @@ func (s *server) handleGetSite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	years, count, withFile, err := s.siteYears(ctx, sr.ID)
+	years, count, withFile, err := s.siteYears(ctx, sr)
 	if err != nil {
 		s.writeStoreError(w, "read scenes", err)
 		return
@@ -223,7 +232,7 @@ func (s *server) handleGetSite(w http.ResponseWriter, r *http.Request) {
 	dto.SceneCount, dto.SceneFileCount = count, withFile
 	writeJSON(w, http.StatusOK, siteDetailJSON{
 		siteJSON:    dto,
-		ProviderURL: s.siteProviderURL(ctx, sr.StashID),
+		ProviderURL: s.siteProviderURL(ctx, sr),
 		Cataloguing: s.siteCataloguing(ctx, sr.ID),
 		Years:       years,
 	})
@@ -261,22 +270,49 @@ func (s *server) siteCataloguing(ctx context.Context, seriesID int64) bool {
 	return false
 }
 
-// siteProviderURL is the site's page on the configured endpoint's website.
+// siteProviderURL is the site's page on ITS OWN instance's website.
 //
-// A settings read that fails is not worth failing the page for: the link is the
-// least important thing on it, and a site with no link renders exactly as one
-// whose provider has no page.
-func (s *server) siteProviderURL(ctx context.Context, stashID string) string {
-	endpoint, err := s.st.GetSetting(ctx, store.SettingStashboxEndpoint)
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
+// The row's provider decides it, not a server-wide setting: two instances have
+// two websites, and a link built from the wrong one lands on a page about a
+// different site — or on a 404 — while looking exactly like a working link.
+//
+// A lookup that fails is not worth failing the page for: the link is the least
+// important thing on it, and a site with no link renders exactly as one whose
+// provider has no page. A gone instance is the same nothing.
+func (s *server) siteProviderURL(ctx context.Context, sr *core.Series) string {
+	endpoint := s.siteEndpoint(ctx, sr)
+	if endpoint == "" {
+		// NOT stashbox.SiteWebURL's own blank-means-the-preset rule: that
+		// sentinel died with the settings pair (0026). A gone instance links
+		// nowhere rather than at whichever box the preset happens to name.
 		return ""
 	}
-	return stashbox.SiteWebURL(endpoint, stashID)
+	return stashbox.SiteWebURL(endpoint, sr.StashID)
+}
+
+// siteEndpoint is the endpoint a site's own stash-box instance answers on, or
+// "" when the instance is gone or unreadable. An empty provider is the legacy
+// instance, which is what every adult row written before 0026 carries.
+func (s *server) siteEndpoint(ctx context.Context, sr *core.Series) string {
+	providerID := sr.Provider
+	if providerID == "" {
+		providerID = core.ProviderStashbox
+	}
+	in, err := s.st.GetStashboxInstanceByProviderID(ctx, providerID)
+	if err != nil {
+		if !errors.Is(err, store.ErrNotFound) {
+			s.log.Error("read stash-box instance for a site link",
+				"provider", providerID, "error", err)
+		}
+		return ""
+	}
+	return in.Endpoint
 }
 
 // siteYears assembles a site's release years and their scenes, and reports the
 // totals so the page header does not need a second pass.
-func (s *server) siteYears(ctx context.Context, seriesID int64) ([]siteYearJSON, int, int, error) {
+func (s *server) siteYears(ctx context.Context, sr *core.Series) ([]siteYearJSON, int, int, error) {
+	seriesID := sr.ID
 	seasons, err := s.st.ListSeasons(ctx, seriesID)
 	if err != nil {
 		return nil, 0, 0, err
@@ -295,12 +331,11 @@ func (s *server) siteYears(ctx context.Context, seriesID int64) ([]siteYearJSON,
 	}
 
 	profile := s.activeTVProfile(ctx)
-	// Read once for the whole page, tolerantly for the reason siteProviderURL
-	// is: scenes with no provider link render fine.
-	endpoint, err := s.st.GetSetting(ctx, store.SettingStashboxEndpoint)
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		endpoint = ""
-	}
+	// The SITE's instance, read once for the whole page: every scene on it was
+	// minted by the same box the site was, so one lookup answers the lot.
+	// Tolerant for the reason siteProviderURL is — scenes with no provider link
+	// render fine.
+	endpoint := s.siteEndpoint(ctx, sr)
 	byYear := map[int][]sceneJSON{}
 	total, withFile := 0, 0
 	for _, e := range episodes {
@@ -310,7 +345,9 @@ func (s *server) siteYears(ctx context.Context, seriesID int64) ([]siteYearJSON,
 			withFile++
 		}
 		scene := sceneDTO(e, firstFileDTO(files, profile))
-		scene.ProviderURL = stashbox.SceneWebURL(endpoint, e.StashID)
+		if endpoint != "" {
+			scene.ProviderURL = stashbox.SceneWebURL(endpoint, e.StashID)
+		}
 		byYear[e.SeasonNumber] = append(byYear[e.SeasonNumber], scene)
 	}
 
@@ -349,6 +386,11 @@ func (s *server) siteYears(ctx context.Context, seriesID int64) ([]siteYearJSON,
 // counterpart: a site is named by its stash-box id and nothing else.
 type addSiteRequest struct {
 	StashID string `json:"stash_id"`
+	// Provider names the stash-box instance whose catalogue this stash id was
+	// read from — the id GET /adult/search hands back on the hit. Empty means
+	// the default instance, which is what every client written before instances
+	// sends and what a single-box install always resolves to anyway.
+	Provider string `json:"provider"`
 	// Monitored is the dialog's "Add and monitor" checkbox, and reads exactly
 	// as addRequest.Monitored does — absent means monitored.
 	Monitored *bool `json:"monitored"`
@@ -357,6 +399,9 @@ type addSiteRequest struct {
 	// core.JobSyncSitePayload): before the walk the site has no episode rows,
 	// so a search queued now would queue nothing.
 	SearchNow bool `json:"search_now"`
+	// LibraryID reads exactly as addRequest.LibraryID: the adult library a
+	// NEW site lands in, zero for the default.
+	LibraryID int64 `json:"library_id"`
 }
 
 // handleAddSite adds a site to the library and queues the walk of its
@@ -380,11 +425,23 @@ func (s *server) handleAddSite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "stash_id is required")
 		return
 	}
+	if !s.validAddLibraryID(w, r, body.LibraryID, core.LibraryKindAdult) {
+		return
+	}
 
 	ctx := r.Context()
-	sr, err := s.mgr.AddSite(ctx, stashID, body.Monitored)
+	// The instance the hit came from, validated here and CARRIED: it is what the
+	// row is pinned to, and every later refresh of this site asks that box and
+	// no other. An omitted provider resolves to the default instance rather than
+	// travelling empty, so the row records which box actually answered instead
+	// of leaving the library layer to guess again later.
+	providerID, ok := s.adultRefProvider(w, r, body.Provider)
+	if !ok {
+		return
+	}
+	sr, err := s.mgr.AddSite(ctx, core.ItemRef{Provider: providerID, Ref: stashID}, body.Monitored, body.LibraryID)
 	if err != nil {
-		s.writeManagerError(w, "add site", err)
+		s.writeManagerError(w, "", "add site", err)
 		return
 	}
 	if err := s.enqueueSiteSync(ctx, sr.ID, body.SearchNow); err != nil {
@@ -430,7 +487,7 @@ func (s *server) enqueueSiteSync(ctx context.Context, seriesID int64, searchNow 
 // anything is typed, exactly as GET /adult/discover opens on the newest scenes.
 func (s *server) handleSearchSites(w http.ResponseWriter, r *http.Request) {
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
-	provider, ok := s.adultProvider(w)
+	provider, providerID, ok := s.adultProvider(w, r)
 	if !ok {
 		return
 	}
@@ -450,6 +507,7 @@ func (s *server) handleSearchSites(w http.ResponseWriter, r *http.Request) {
 	out := make([]siteMetaJSON, 0, len(sites))
 	for _, site := range sites {
 		dto := siteMetaJSON{
+			Provider:   providerID,
 			StashID:    site.StashID,
 			Name:       site.Name,
 			Aliases:    site.Aliases,
@@ -479,7 +537,7 @@ func (s *server) handleSearchSites(w http.ResponseWriter, r *http.Request) {
 // reach, and their /discover is byte-for-byte the one they had before the
 // module existed.
 func (s *server) handleAdultDiscover(w http.ResponseWriter, r *http.Request) {
-	provider, ok := s.adultProvider(w)
+	provider, providerID, ok := s.adultProvider(w, r)
 	if !ok {
 		return
 	}
@@ -516,7 +574,7 @@ func (s *server) handleAdultDiscover(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]sceneMetaJSON, 0, len(result.Scenes))
 	for _, scene := range result.Scenes {
-		out = append(out, state.decorate(scene))
+		out = append(out, state.decorate(scene, providerID))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"page":     result.Page,
@@ -555,7 +613,7 @@ func (s *server) sceneState(ctx context.Context, scenes []core.SceneMeta) (*scen
 	return &sceneLibraryState{episodes: episodes, pending: pending}, nil
 }
 
-func (st *sceneLibraryState) decorate(scene core.SceneMeta) sceneMetaJSON {
+func (st *sceneLibraryState) decorate(scene core.SceneMeta, providerID string) sceneMetaJSON {
 	performers := make([]string, 0, len(scene.Performers))
 	for _, p := range scene.Performers {
 		name := p.As
@@ -568,6 +626,7 @@ func (st *sceneLibraryState) decorate(scene core.SceneMeta) sceneMetaJSON {
 	}
 	libraryID := st.episodes[scene.StashID]
 	return sceneMetaJSON{
+		Provider:    providerID,
 		MediaType:   MediaTypeScene,
 		StashID:     scene.StashID,
 		SiteStashID: scene.SiteStashID,
@@ -611,109 +670,85 @@ func (s *server) siteIDsByStashID(ctx context.Context, sites []core.SiteMeta) (m
 	return out, nil
 }
 
-// adultUserJSON is one account and its grant, for the member-access card.
+// adultProvider returns the stash-box instance this request is about, and the
+// id of the one it chose, writing the refusal itself.
 //
-// It is a DTO of its own rather than a field added to userJSON so that
-// GET /users — which is reachable whether or not the module exists — carries no
-// adult field at all. A `"adult_access": false` on every row of an install that
-// has never turned the module on is precisely the trace this phase promises not
-// to leave.
-type adultUserJSON struct {
-	ID       int64  `json:"id"`
-	Username string `json:"username"`
-	Role     string `json:"role"`
-	// Granted is the account's own adult_access flag. It is false on an admin
-	// row and meaningless there: AlwaysGranted is what the card renders.
-	Granted bool `json:"granted"`
-	// AlwaysGranted says the account reaches the module through its role rather
-	// than through a grant, which is true of every admin (core.AdultVisible).
-	// The client shows "Always has access" instead of a toggle.
-	AlwaysGranted bool `json:"always_granted"`
-}
-
-func adultUserDTO(u core.User) adultUserJSON {
-	return adultUserJSON{
-		ID:            u.ID,
-		Username:      u.Username,
-		Role:          u.Role,
-		Granted:       u.AdultAccess,
-		AlwaysGranted: u.Role == core.RoleAdmin,
-	}
-}
-
-// handleListAdultUsers answers the member-access card. Admin-only by absence
-// from memberAllowed — a member who could read this would learn the household's
-// account roster, which is the one thing a failed login goes out of its way not
-// to confirm.
-func (s *server) handleListAdultUsers(w http.ResponseWriter, r *http.Request) {
-	users, err := s.st.ListUsers(r.Context())
-	if err != nil {
-		s.writeStoreError(w, "list users", err)
-		return
-	}
-	out := make([]adultUserJSON, 0, len(users))
-	for _, u := range users {
-		out = append(out, adultUserDTO(u))
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"users": out})
-}
-
-// adultAccessRequest is the body of PUT /adult/users/{id}/access.
-type adultAccessRequest struct {
-	// Granted is a pointer so an absent field is a client bug rather than a
-	// silent revoke, exactly as monitorRequest treats Monitored.
-	Granted *bool `json:"granted"`
-}
-
-// handleSetAdultAccess grants or revokes one account's access.
+// `?provider=` names an instance; omitting it means the default one
+// (Manager.DefaultAdultMetadata). The id is VALIDATED rather than passed
+// through: an id nothing answers to would otherwise reach the manager and come
+// back as the same nil a module with no credential gives, which would report a
+// caller's typo as a configuration problem.
 //
-// Revoking takes effect on the account's very next request without a logout:
-// requireAuth reads the row every time (see requestUser.AdultAccess), so there
-// is no session to invalidate and no window in which a revoked grant is still
-// good. That is why this does not touch the session store, unlike a password
-// reset — the grant is not a credential.
-func (s *server) handleSetAdultAccess(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
-	}
-	var body adultAccessRequest
-	if !decodeJSON(w, r, &body) {
-		return
-	}
-	if body.Granted == nil {
-		writeError(w, http.StatusBadRequest, "granted is required")
-		return
-	}
-
+// A missing credential is configuration, not a retry, so it reads the same way a
+// missing TMDB key does on GET /search. The code matters as much as the status:
+// the SPA reads an UNCODED 503 as a missing TMDB key, so naming the adult
+// credential here is what keeps a stash-box failure from being reported as a
+// TMDB one.
+func (s *server) adultProvider(w http.ResponseWriter, r *http.Request) (core.AdultMetadataProvider, string, bool) {
 	ctx := r.Context()
-	if err := s.st.SetUserAdultAccess(ctx, id, *body.Granted); err != nil {
-		s.writeStoreError(w, "set adult access", err)
-		return
+	if named := strings.TrimSpace(r.URL.Query().Get("provider")); named != "" {
+		if !s.validAdultInstance(ctx, w, named) {
+			return nil, "", false
+		}
+		provider := s.mgr.AdultMetadataFor(ctx, named)
+		if provider == nil {
+			writeCodedError(w, http.StatusServiceUnavailable, CodeAdultCredentialAbsent,
+				"no adult metadata provider configured")
+			return nil, "", false
+		}
+		return provider, named, true
 	}
-	user, err := s.st.GetUser(ctx, id)
-	if err != nil {
-		s.writeStoreError(w, "read user", err)
-		return
-	}
-	writeJSON(w, http.StatusOK, adultUserDTO(*user))
-}
 
-// adultProvider returns the configured stash-box provider, writing the 503
-// itself when there is none. A missing credential is configuration, not a
-// retry, so it reads the same way a missing TMDB key does on GET /search.
-//
-// The code matters as much as the status: the SPA reads an UNCODED 503 as a
-// missing TMDB key, so naming the adult credential here is what keeps a
-// stash-box failure from being reported as a TMDB one.
-func (s *server) adultProvider(w http.ResponseWriter) (core.AdultMetadataProvider, bool) {
-	provider := s.mgr.AdultMetadata()
+	provider, providerID := s.mgr.DefaultAdultMetadata(ctx)
 	if provider == nil {
 		writeCodedError(w, http.StatusServiceUnavailable, CodeAdultCredentialAbsent,
 			"no adult metadata provider configured")
-		return nil, false
+		return nil, "", false
 	}
-	return provider, true
+	return provider, providerID, true
+}
+
+// adultRefProvider resolves the instance a body named, defaulting to the one a
+// surface with no opinion answers from. It writes the refusal itself, and it is
+// how every adult body spells "which box" — the query-parameter twin is
+// adultProvider.
+func (s *server) adultRefProvider(w http.ResponseWriter, r *http.Request, named string) (string, bool) {
+	ctx := r.Context()
+	if named = strings.TrimSpace(named); named != "" {
+		if !s.validAdultInstance(ctx, w, named) {
+			return "", false
+		}
+		return named, true
+	}
+	provider, providerID := s.mgr.DefaultAdultMetadata(ctx)
+	if provider == nil {
+		writeCodedError(w, http.StatusServiceUnavailable, CodeAdultCredentialAbsent,
+			"no adult metadata provider configured")
+		return "", false
+	}
+	return providerID, true
+}
+
+// validAdultInstance refuses an id that is not a configured stash-box instance,
+// writing the 400. It is itemRefFrom's check under another name — the same
+// question asked of a query parameter instead of a body — and the message names
+// the id because a caller that sent one can fix it.
+func (s *server) validAdultInstance(ctx context.Context, w http.ResponseWriter, providerID string) bool {
+	if core.ProviderBase(providerID) != core.ProviderStashbox ||
+		!core.ValidProviderInstanceID(providerID) {
+		writeError(w, http.StatusBadRequest, providerID+" is not a stash-box provider")
+		return false
+	}
+	known, err := s.knownProviderInstance(ctx, providerID)
+	if err != nil {
+		s.writeStoreError(w, "get stash-box instance", err)
+		return false
+	}
+	if !known {
+		writeError(w, http.StatusBadRequest, "no stash-box instance named "+providerID+" is configured")
+		return false
+	}
+	return true
 }
 
 // writeAdultProviderError reports an upstream failure as a bad gateway, the way
@@ -746,6 +781,7 @@ func siteDTO(sr core.Series) siteJSON {
 		PosterURL:        sr.PosterURL,
 		Monitored:        sr.Monitored,
 		QualityProfileID: sr.QualityProfileID,
+		LibraryID:        sr.LibraryID,
 		AddedAt:          jsonTime(sr.AddedAt),
 		UpdatedAt:        jsonTime(sr.UpdatedAt),
 	}

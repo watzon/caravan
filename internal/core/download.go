@@ -121,6 +121,8 @@ type AddOpts struct {
 	// EpisodeIDs are the episodes.id values the grab is expected to satisfy.
 	// A season pack lists all of them.
 	EpisodeIDs []int64
+	// LibraryID reads exactly as GrabInfo.LibraryID does.
+	LibraryID int64
 	// Paused adds the download without starting it.
 	//
 	// It is how a concurrency cap reaches an external download client. Caravan
@@ -322,6 +324,12 @@ type GrabInfo struct {
 	// ReleaseTitle is the release name that was grabbed, kept so a stuck
 	// import can tell the user what it was trying to import.
 	ReleaseTitle string
+	// LibraryID is the library the grab's payload belongs to. On a grab tied
+	// to a movie or series it mirrors the item's own library; on a universal
+	// search grab tied to nothing it is the WHOLE target — the finished
+	// download parks in scan review scoped to this library. 0 on rows from
+	// before universal search existed.
+	LibraryID int64
 }
 
 // Grab statuses.
@@ -392,7 +400,24 @@ const (
 	// visits MONITORED sites, and a site added unmonitored still needs its
 	// catalogue: the rows are what the site page shows as missing.
 	JobSyncSite = "sync_site"
+
+	// JobMoveItem moves one library item's files and row into another library
+	// of the same kind. Durable for the reason JobSyncSite is: a series can
+	// be hundreds of files, and the HTTP request that asked must not own the
+	// transfer. The handler is idempotent — a move to the library the item is
+	// already in is a successful no-op — which is what at-least-once delivery
+	// requires.
+	JobMoveItem = "move_item"
 )
+
+// JobMoveItemPayload is JobMoveItem's payload. ItemType is MediaTypeMovie or
+// MediaTypeSeries; ids rather than rows for the reason every payload carries
+// ids — the values are re-read when the job runs, not captured when queued.
+type JobMoveItemPayload struct {
+	ItemType  string `json:"item_type"`
+	ItemID    int64  `json:"item_id"`
+	LibraryID int64  `json:"library_id"`
+}
 
 // JobSearchMoviePayload is the search_movie job's arguments. The encoded form
 // is also the queue's dedupe key (store.HasOpenJob matches on the payload

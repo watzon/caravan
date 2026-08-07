@@ -22,7 +22,7 @@ func TestAddMovieCreatesTheRowWithoutTouchingDisk(t *testing.T) {
 		PosterURL: h.posterURL,
 	}
 
-	mv, err := h.mgr.AddMovie(ctx, 10378, "", nil)
+	mv, err := h.mgr.AddMovie(ctx, core.TMDBRef(10378), "", nil, 0)
 	if err != nil {
 		t.Fatalf("AddMovie: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestAddMovieAgainKeepsUserIntent(t *testing.T) {
 	ctx := context.Background()
 	h.provider.movieByID[10378] = core.MovieMeta{TMDBID: 10378, Title: "Big Buck Bunny", Year: 2008}
 
-	first, err := h.mgr.AddMovie(ctx, 10378, "", nil)
+	first, err := h.mgr.AddMovie(ctx, core.TMDBRef(10378), "", nil, 0)
 	if err != nil {
 		t.Fatalf("AddMovie: %v", err)
 	}
@@ -80,7 +80,7 @@ func TestAddMovieAgainKeepsUserIntent(t *testing.T) {
 	// Re-adding refreshes provider metadata; it must not undo the user's
 	// choices, exactly as a rescan does not.
 	h.provider.movieByID[10378] = core.MovieMeta{TMDBID: 10378, Title: "Big Buck Bunny", Year: 2008, Overview: "Updated."}
-	second, err := h.mgr.AddMovie(ctx, 10378, "", nil)
+	second, err := h.mgr.AddMovie(ctx, core.TMDBRef(10378), "", nil, 0)
 	if err != nil {
 		t.Fatalf("AddMovie again: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestAddSeriesWritesTheWholeTree(t *testing.T) {
 		}},
 	}
 
-	sr, err := h.mgr.AddSeries(ctx, 66732, nil)
+	sr, err := h.mgr.AddSeries(ctx, core.TMDBRef(66732), nil, 0)
 	if err != nil {
 		t.Fatalf("AddSeries: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestAddSeriesLeavesSpecialsUnmonitored(t *testing.T) {
 	}
 	h.provider.seriesByID[meta.TMDBID] = meta
 
-	sr, err := h.mgr.AddSeries(ctx, meta.TMDBID, nil)
+	sr, err := h.mgr.AddSeries(ctx, core.TMDBRef(meta.TMDBID), nil, 0)
 	if err != nil {
 		t.Fatalf("AddSeries: %v", err)
 	}
@@ -210,7 +210,7 @@ func TestAddSeriesLeavesSpecialsUnmonitored(t *testing.T) {
 	if err := h.st.UpsertSeason(ctx, &specials); err != nil {
 		t.Fatalf("UpsertSeason: %v", err)
 	}
-	if _, err := h.mgr.AddSeries(ctx, meta.TMDBID, nil); err != nil {
+	if _, err := h.mgr.AddSeries(ctx, core.TMDBRef(meta.TMDBID), nil, 0); err != nil {
 		t.Fatalf("AddSeries again: %v", err)
 	}
 	seasons, err = h.st.ListSeasons(ctx, sr.ID)
@@ -228,10 +228,10 @@ func TestAddWithoutProviderIsRecognizable(t *testing.T) {
 	// a 503 that tells the user to add a key, so it must survive the call.
 	mgr := h.newManager(h.st, nil)
 
-	if _, err := mgr.AddMovie(context.Background(), 1, "", nil); !errors.Is(err, core.ErrNoMetadataProvider) {
+	if _, err := mgr.AddMovie(context.Background(), core.TMDBRef(1), "", nil, 0); !errors.Is(err, core.ErrNoMetadataProvider) {
 		t.Fatalf("AddMovie error = %v, want core.ErrNoMetadataProvider", err)
 	}
-	if _, err := mgr.AddSeries(context.Background(), 1, nil); !errors.Is(err, core.ErrNoMetadataProvider) {
+	if _, err := mgr.AddSeries(context.Background(), core.TMDBRef(1), nil, 0); !errors.Is(err, core.ErrNoMetadataProvider) {
 		t.Fatalf("AddSeries error = %v, want core.ErrNoMetadataProvider", err)
 	}
 }
@@ -239,10 +239,10 @@ func TestAddWithoutProviderIsRecognizable(t *testing.T) {
 func TestAddRejectsInvalidProviderID(t *testing.T) {
 	h := newHarness(t)
 
-	if _, err := h.mgr.AddMovie(context.Background(), 0, "", nil); err == nil {
+	if _, err := h.mgr.AddMovie(context.Background(), core.TMDBRef(0), "", nil, 0); err == nil {
 		t.Fatal("AddMovie(0) succeeded, want an error")
 	}
-	if _, err := h.mgr.AddSeries(context.Background(), -1, nil); err == nil {
+	if _, err := h.mgr.AddSeries(context.Background(), core.TMDBRef(-1), nil, 0); err == nil {
 		t.Fatal("AddSeries(-1) succeeded, want an error")
 	}
 }
@@ -257,7 +257,7 @@ func TestAddMovieMinAvailability(t *testing.T) {
 	h.provider.movieByID[10378] = core.MovieMeta{TMDBID: 10378, Title: "Big Buck Bunny", Year: 2008,
 		DigitalRelease: digital}
 
-	mv, err := h.mgr.AddMovie(ctx, 10378, core.AvailabilityAnnounced, nil)
+	mv, err := h.mgr.AddMovie(ctx, core.TMDBRef(10378), core.AvailabilityAnnounced, nil, 0)
 	if err != nil {
 		t.Fatalf("AddMovie: %v", err)
 	}
@@ -269,7 +269,7 @@ func TestAddMovieMinAvailability(t *testing.T) {
 	}
 
 	// Re-adding with no opinion keeps the choice.
-	kept, err := h.mgr.AddMovie(ctx, 10378, "", nil)
+	kept, err := h.mgr.AddMovie(ctx, core.TMDBRef(10378), "", nil, 0)
 	if err != nil {
 		t.Fatalf("AddMovie again: %v", err)
 	}
@@ -278,7 +278,7 @@ func TestAddMovieMinAvailability(t *testing.T) {
 	}
 
 	// Re-adding with a new choice is fresh user intent.
-	changed, err := h.mgr.AddMovie(ctx, 10378, core.AvailabilityInCinemas, nil)
+	changed, err := h.mgr.AddMovie(ctx, core.TMDBRef(10378), core.AvailabilityInCinemas, nil, 0)
 	if err != nil {
 		t.Fatalf("AddMovie with a new choice: %v", err)
 	}
@@ -294,7 +294,7 @@ func TestAddMovieDefaultsToReleased(t *testing.T) {
 	ctx := context.Background()
 	h.provider.movieByID[10378] = core.MovieMeta{TMDBID: 10378, Title: "Big Buck Bunny", Year: 2008}
 
-	mv, err := h.mgr.AddMovie(ctx, 10378, "", nil)
+	mv, err := h.mgr.AddMovie(ctx, core.TMDBRef(10378), "", nil, 0)
 	if err != nil {
 		t.Fatalf("AddMovie: %v", err)
 	}
@@ -327,7 +327,7 @@ func TestAddMovieHonoursTheMonitoredChoice(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newHarness(t)
 			h.provider.movieByID[10378] = core.MovieMeta{TMDBID: 10378, Title: "Big Buck Bunny", Year: 2008}
-			mv, err := h.mgr.AddMovie(ctx, 10378, "", tt.monitored)
+			mv, err := h.mgr.AddMovie(ctx, core.TMDBRef(10378), "", tt.monitored, 0)
 			if err != nil {
 				t.Fatalf("AddMovie: %v", err)
 			}
@@ -345,10 +345,10 @@ func TestAddMovieLeavesAnExistingRowsMonitoredFlagAlone(t *testing.T) {
 	ctx := context.Background()
 	h.provider.movieByID[10378] = core.MovieMeta{TMDBID: 10378, Title: "Big Buck Bunny", Year: 2008}
 
-	if _, err := h.mgr.AddMovie(ctx, 10378, "", ptr(true)); err != nil {
+	if _, err := h.mgr.AddMovie(ctx, core.TMDBRef(10378), "", ptr(true), 0); err != nil {
 		t.Fatalf("AddMovie: %v", err)
 	}
-	again, err := h.mgr.AddMovie(ctx, 10378, "", ptr(false))
+	again, err := h.mgr.AddMovie(ctx, core.TMDBRef(10378), "", ptr(false), 0)
 	if err != nil {
 		t.Fatalf("AddMovie again: %v", err)
 	}
@@ -374,7 +374,7 @@ func TestAddSeriesUnmonitoredLeavesTheWholeTreeUnmonitored(t *testing.T) {
 		}},
 	}
 
-	sr, err := h.mgr.AddSeries(ctx, 66732, ptr(false))
+	sr, err := h.mgr.AddSeries(ctx, core.TMDBRef(66732), ptr(false), 0)
 	if err != nil {
 		t.Fatalf("AddSeries: %v", err)
 	}
@@ -420,7 +420,7 @@ func TestAddSeriesWithNoOpinionStillMonitorsTheTree(t *testing.T) {
 		},
 	}
 
-	sr, err := h.mgr.AddSeries(ctx, 66732, nil)
+	sr, err := h.mgr.AddSeries(ctx, core.TMDBRef(66732), nil, 0)
 	if err != nil {
 		t.Fatalf("AddSeries: %v", err)
 	}

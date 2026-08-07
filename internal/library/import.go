@@ -40,16 +40,27 @@ func dispositionFor(rel string) sourceDisposition {
 // mediaType is MediaTypeMovie or MediaTypeSeries. The parked file's parsed
 // season and episode numbers are reused as-is — the user is correcting *what*
 // the file is, not which episode of it — so a series import needs a filename
-// the parser found an episode number in.
+// the parser found an episode number in. A filename carrying only an absolute
+// number counts: the number is the file's own claim, and the series the user
+// just named is what places it (resolveAbsolute). That is the door out of a
+// reasonNoAbsoluteMatch park, and without it a file parked for numbering could
+// only ever be re-parked.
 //
 // On success the file is organized, its metadata rows are written, and the
 // unmatched entry is cleared.
-func (m *Manager) ImportUnmatched(ctx context.Context, unmatchedID, tmdbID int64, mediaType string) (*ImportResult, error) {
-	if m.provider == nil {
-		return nil, core.ErrNoMetadataProvider
+//
+// ref names the provider the user's choice came from and that provider's own
+// id for it, and it is the only thing that decides which client is asked.
+// There is deliberately no Manager-level provider gate in front of that: an
+// install whose libraries identify through some other provider entirely has no
+// TMDB client, and must still be able to match a parked file.
+func (m *Manager) ImportUnmatched(ctx context.Context, unmatchedID int64, ref core.ItemRef, mediaType string) (*ImportResult, error) {
+	if !ref.Valid() {
+		return nil, fmt.Errorf("library: invalid provider ref %q/%q", ref.Provider, ref.Ref)
 	}
-	if tmdbID <= 0 {
-		return nil, fmt.Errorf("library: invalid tmdb id %d", tmdbID)
+	provider := m.providerByID(ctx, ref.Provider)
+	if provider == nil {
+		return nil, core.ErrNoMetadataProvider
 	}
 
 	u, err := m.store.GetUnmatchedFile(ctx, unmatchedID)
@@ -68,30 +79,38 @@ func (m *Manager) ImportUnmatched(ctx context.Context, unmatchedID, tmdbID int64
 
 	switch mediaType {
 	case MediaTypeMovie:
-		meta, err := m.provider.GetMovie(ctx, tmdbID)
+		meta, err := provider.GetMovie(ctx, ref.Ref)
 		if err != nil {
-			return nil, fmt.Errorf("library: get movie %d: %w", tmdbID, err)
+			return nil, fmt.Errorf("library: get movie %s/%s: %w", ref.Provider, ref.Ref, err)
 		}
 		if meta == nil {
-			return nil, fmt.Errorf("library: movie %d not found", tmdbID)
+			return nil, fmt.Errorf("library: movie %s/%s not found", ref.Provider, ref.Ref)
 		}
-		res.Path, res.MovieID, err = m.importMovie(ctx, meta, u.Path, info.Size(), u.Parsed, warn, dispositionFor(u.Path))
+		res.Path, res.MovieID, err = m.importMovie(ctx, meta, u.Path, info.Size(), u.Parsed, warn, dispositionFor(u.Path), u.LibraryID)
 		if err != nil {
 			return nil, err
 		}
 
 	case MediaTypeSeries:
-		if !u.Parsed.IsEpisode() {
+		if !u.Parsed.IsEpisode() && !u.Parsed.IsAbsoluteEpisode() {
 			return nil, fmt.Errorf("library: %q has no season/episode number to import as an episode", u.Path)
 		}
-		meta, err := m.provider.GetSeries(ctx, tmdbID)
+		meta, err := provider.GetSeries(ctx, ref.Ref)
 		if err != nil {
-			return nil, fmt.Errorf("library: get series %d: %w", tmdbID, err)
+			return nil, fmt.Errorf("library: get series %s/%s: %w", ref.Provider, ref.Ref, err)
 		}
 		if meta == nil {
-			return nil, fmt.Errorf("library: series %d not found", tmdbID)
+			return nil, fmt.Errorf("library: series %s/%s not found", ref.Provider, ref.Ref)
 		}
-		res.Path, res.SeriesID, err = m.importEpisode(ctx, meta, u.Path, info.Size(), u.Parsed, warn, dispositionFor(u.Path))
+		// The chosen series' own tree places an absolute number, or nothing
+		// does. This is a refusal rather than a park because the user is
+		// standing in front of it: the answer they need is that THIS series
+		// cannot place THAT number, so they can choose another one.
+		p, ok := resolveAbsolute(meta, u.Parsed)
+		if !ok {
+			return nil, fmt.Errorf("library: %q: %s", u.Path, reasonNoAbsoluteMatch)
+		}
+		res.Path, res.SeriesID, err = m.importEpisode(ctx, meta, u.Path, info.Size(), p, warn, dispositionFor(u.Path), u.LibraryID)
 		if err != nil {
 			return nil, err
 		}

@@ -76,7 +76,7 @@ func (h *harness) events() []core.Event {
 func addMovieItem(h *harness) *core.Movie {
 	h.t.Helper()
 	seedMovie(h)
-	mv, err := h.mgr.AddMovie(context.Background(), 10378, "", nil)
+	mv, err := h.mgr.AddMovie(context.Background(), core.TMDBRef(10378), "", nil, 0)
 	if err != nil {
 		h.t.Fatalf("AddMovie: %v", err)
 	}
@@ -87,7 +87,7 @@ func addMovieItem(h *harness) *core.Movie {
 func addSeriesItem(h *harness) *core.Series {
 	h.t.Helper()
 	seedSeries(h)
-	sr, err := h.mgr.AddSeries(context.Background(), 42, nil)
+	sr, err := h.mgr.AddSeries(context.Background(), core.TMDBRef(42), nil, 0)
 	if err != nil {
 		h.t.Fatalf("AddSeries: %v", err)
 	}
@@ -590,7 +590,7 @@ func TestImportDownloadSeasonPackLinksMultiEpisodeFileToEveryEpisode(t *testing.
 	meta := seedSeries(h)
 	meta.Seasons[0].Episodes = meta.Seasons[0].Episodes[:2]
 	h.provider.seriesByID[meta.TMDBID] = meta
-	sr, err := h.mgr.AddSeries(context.Background(), meta.TMDBID, nil)
+	sr, err := h.mgr.AddSeries(context.Background(), core.TMDBRef(meta.TMDBID), nil, 0)
 	if err != nil {
 		t.Fatalf("AddSeries: %v", err)
 	}
@@ -890,7 +890,7 @@ func TestParkedImportIsResolvableByHand(t *testing.T) {
 		t.Fatalf("unmatched queue = %+v, want the unrecognized file parked", parked)
 	}
 
-	res, err := h.mgr.ImportUnmatched(ctx, parked[0].ID, 10378, MediaTypeMovie)
+	res, err := h.mgr.ImportUnmatched(ctx, parked[0].ID, core.TMDBRef(10378), MediaTypeMovie)
 	if err != nil {
 		t.Fatalf("ImportUnmatched: %v", err)
 	}
@@ -905,5 +905,185 @@ func TestParkedImportIsResolvableByHand(t *testing.T) {
 	}
 	if parked := h.unmatched(); len(parked) != 0 {
 		t.Errorf("unmatched queue = %+v, want empty after the manual match", parked)
+	}
+}
+
+// An untied universal-search grab has a library and no item: every video file
+// of the payload parks in scan review scoped to that library, the grab closes
+// as imported (that status is the redelivery guard), and nothing lands in the
+// library itself.
+func TestUntiedGrabParksEveryFileForManualMatch(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	movies, err := h.st.GetDefaultLibrary(ctx, core.LibraryKindMovie)
+	if err != nil {
+		t.Fatalf("GetDefaultLibrary: %v", err)
+	}
+
+	h.writeVideo("downloads/mixed-pack/One.Thing.2020.mkv", "one")
+	h.writeVideo("downloads/mixed-pack/Another.Thing.2021.mkv", "two")
+	dl := core.DownloadStatus{
+		ID: "infohash-untied", State: core.DownloadSeeding, Name: "mixed-pack",
+		Progress: 1, SavePath: "downloads/mixed-pack",
+	}
+	grab := h.grabFor(core.GrabInfo{LibraryID: movies.ID, ReleaseTitle: "Mixed.Pack"})
+
+	if err := h.mgr.ImportDownload(ctx, dl, grab); err != nil {
+		t.Fatalf("ImportDownload: %v", err)
+	}
+
+	parked := h.unmatched()
+	if len(parked) != 2 {
+		t.Fatalf("unmatched queue = %+v, want both payload files parked", parked)
+	}
+	for _, u := range parked {
+		if u.Reason != ReasonManualGrab || u.LibraryID != movies.ID {
+			t.Errorf("parked row = %+v, want reason %q scoped to library %d", u, ReasonManualGrab, movies.ID)
+		}
+	}
+	if got := h.grabStatus(grab.GrabID); got != core.GrabStatusImported {
+		t.Errorf("grab status = %q, want %q (the redelivery guard)", got, core.GrabStatusImported)
+	}
+
+	// Redelivery is a no-op: the imported status short-circuits before any
+	// file is re-parked or re-announced.
+	eventsBefore := len(h.events())
+	if err := h.mgr.ImportDownload(ctx, dl, grab); err != nil {
+		t.Fatalf("ImportDownload(redelivered): %v", err)
+	}
+	if len(h.unmatched()) != 2 || len(h.events()) != eventsBefore {
+		t.Errorf("redelivery changed state: %d parked, %d events (was %d)",
+			len(h.unmatched()), len(h.events()), eventsBefore)
+	}
+}
+
+// addAbsoluteSeriesItem adds the five-season fixture whose provider publishes an
+// absolute order, so a grab against it can be tied to a real episode row.
+func addAbsoluteSeriesItem(h *harness) *core.Series {
+	h.t.Helper()
+	absoluteShowTree(h, true)
+	sr, err := h.mgr.AddSeries(context.Background(), core.TMDBRef(77), nil, 0)
+	if err != nil {
+		h.t.Fatalf("AddSeries: %v", err)
+	}
+	return sr
+}
+
+// A finished grab whose payload is named by absolute number imports against the
+// episode the grab was actually for. The import path resolves the number the
+// same way the scan does — the series is already in hand, so there is nothing
+// to look up and no reason for the two paths to disagree.
+func TestImportDownloadFilesAnAbsoluteNumberedEpisode(t *testing.T) {
+	h := newHarness(t)
+	sr := addAbsoluteSeriesItem(h)
+
+	const release = "[Group] Show - 105 (1080p)"
+	const dir = "incomplete/" + release
+	const file = dir + "/[Group] Show - 105.mkv"
+	h.writeVideo(file, "episode bytes")
+	h.parser[filepath.Base(file)] = absoluteParse("Show", 105)
+
+	grab := h.grabFor(core.GrabInfo{
+		SeriesID:     sr.ID,
+		SeasonNum:    5,
+		EpisodeIDs:   []int64{episodeID(h, sr.ID, 5, 3)},
+		ReleaseTitle: release,
+	})
+	dl := core.DownloadStatus{ID: "u-absolute", State: core.DownloadCompleted, SavePath: dir}
+
+	if err := h.mgr.ImportDownload(context.Background(), dl, grab); err != nil {
+		t.Fatalf("ImportDownload: %v", err)
+	}
+	const organized = "library/TV/Show (2023)/Season 05/Show (2023) - S05E03 - Episode 105.mkv"
+	if !h.exists(organized) {
+		t.Fatalf("absolute-numbered episode was not imported to %s", organized)
+	}
+	if parked := h.unmatched(); len(parked) != 0 {
+		t.Errorf("unmatched queue = %+v, want empty", parked)
+	}
+	if got := h.grabStatus(grab.GrabID); got != core.GrabStatusImported {
+		t.Errorf("grab status = %q, want %q", got, core.GrabStatusImported)
+	}
+}
+
+// The file's own absolute number outranks the grab's release title, exactly as
+// an SxxEyy in the file name does. A payload that says 105 is episode 105 even
+// when the post that carried it was filed under another episode — importing it
+// as the grabbed one would supersede a file that is not the same episode.
+func TestImportDownloadDoesNotRelabelAnAbsoluteClaim(t *testing.T) {
+	h := newHarness(t)
+	sr := addAbsoluteSeriesItem(h)
+
+	const release = "Show.S05E01.1080p.WEB-DL.x265"
+	const dir = "incomplete/" + release
+	const file = dir + "/[Group] Show - 105.mkv"
+	h.writeVideo(file, "episode bytes")
+	// Low confidence: without the absolute number this is precisely the noise
+	// the release-title fallback exists for.
+	claim := absoluteParse("Show", 105)
+	claim.Confidence = 0.1
+	h.parser[filepath.Base(file)] = claim
+	h.parser[release] = episodeParse("Show", 5, 1)
+
+	grab := h.grabFor(core.GrabInfo{
+		SeriesID:     sr.ID,
+		SeasonNum:    5,
+		EpisodeIDs:   []int64{episodeID(h, sr.ID, 5, 1)},
+		ReleaseTitle: release,
+	})
+	dl := core.DownloadStatus{ID: "u-absolute-mismatch", State: core.DownloadCompleted, SavePath: dir}
+
+	if err := h.mgr.ImportDownload(context.Background(), dl, grab); err != nil {
+		t.Fatalf("ImportDownload: %v", err)
+	}
+	if h.exists("library/TV/Show (2023)/Season 05/Show (2023) - S05E01 - Episode 103.mkv") {
+		t.Fatal("the file was imported as the grabbed episode; its own claim was overwritten")
+	}
+	parked := h.unmatched()
+	if len(parked) != 1 {
+		t.Fatalf("unmatched queue = %+v, want the file parked", parked)
+	}
+	if got := h.grabStatus(grab.GrabID); got != core.GrabStatusFailed {
+		t.Errorf("grab status = %q, want %q", got, core.GrabStatusFailed)
+	}
+}
+
+// A number the series' own order does not contain parks under the reason that
+// names the problem: the show is right and the numbering is what nobody knows.
+func TestImportDownloadParksAnUnplaceableAbsoluteNumber(t *testing.T) {
+	h := newHarness(t)
+	sr := addAbsoluteSeriesItem(h)
+
+	const release = "[Group] Show - 9999 (1080p)"
+	const dir = "incomplete/" + release
+	const file = dir + "/[Group] Show - 9999.mkv"
+	h.writeVideo(file, "episode bytes")
+	h.parser[filepath.Base(file)] = absoluteParse("Show", 9999)
+
+	grab := h.grabFor(core.GrabInfo{
+		SeriesID:     sr.ID,
+		SeasonNum:    5,
+		EpisodeIDs:   []int64{episodeID(h, sr.ID, 5, 3)},
+		ReleaseTitle: release,
+	})
+	dl := core.DownloadStatus{ID: "u-absolute-unknown", State: core.DownloadCompleted, SavePath: dir}
+
+	if err := h.mgr.ImportDownload(context.Background(), dl, grab); err != nil {
+		t.Fatalf("ImportDownload: %v", err)
+	}
+	parked := h.unmatched()
+	if len(parked) != 1 {
+		t.Fatalf("unmatched queue = %+v, want the file parked", parked)
+	}
+	// The queue row carries the import vocabulary; the reason itself is what
+	// the event says, which is where a stuck import explains itself.
+	var detail string
+	for _, e := range h.events() {
+		if e.Category == EventCategoryImport {
+			detail = e.Detail
+		}
+	}
+	if !strings.Contains(detail, reasonNoAbsoluteMatch) {
+		t.Errorf("import event detail = %q, want it to name %q", detail, reasonNoAbsoluteMatch)
 	}
 }

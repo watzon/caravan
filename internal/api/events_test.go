@@ -100,9 +100,7 @@ func TestEventsRespectAdultVisibility(t *testing.T) {
 		}
 	}
 
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	enableAdultLibrary(t, st)
 	for _, path := range []string{"/api/v1/events", "/api/v1/events?limit=10"} {
 		if got := messages(read(path).Events); !got["Explicit Adult Event"] {
 			t.Errorf("GET %s with adult enabled omitted the adult event: %v", path, got)
@@ -158,9 +156,7 @@ func TestEventsHideAdultHandoffFailureWhenVisibilityDisabled(t *testing.T) {
 		}
 	}
 
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled(true): %v", err)
-	}
+	enableAdultLibrary(t, st)
 	assertRows("enabled legacy history", read("/api/v1/events").Events, true)
 	enabledFirst := read("/api/v1/events?limit=1")
 	if len(enabledFirst.Events) != 1 || enabledFirst.Events[0].Message != adultMessage {
@@ -172,9 +168,7 @@ func TestEventsHideAdultHandoffFailureWhenVisibilityDisabled(t *testing.T) {
 	enabledSecond := read("/api/v1/events?limit=1&cursor=" + enabledFirst.Next)
 	assertRows("enabled cursor history", append(enabledFirst.Events, enabledSecond.Events...), true)
 
-	if err := st.SetAdultEnabled(ctx, false); err != nil {
-		t.Fatalf("SetAdultEnabled(false): %v", err)
-	}
+	setAdultLibrariesActive(t, st, false)
 	assertRows("disabled legacy history", read("/api/v1/events").Events, false)
 	disabledPage := read("/api/v1/events?limit=1")
 	if len(disabledPage.Events) != 1 || disabledPage.Events[0].Message != importMessage {
@@ -241,9 +235,7 @@ func TestEventsHideUnownedStashPathsWhenAdultVisibilityDisabled(t *testing.T) {
 		}
 	}
 
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled(true): %v", err)
-	}
+	enableAdultLibrary(t, st)
 	assertRows("enabled legacy history", read("/api/v1/events").Events, true)
 	enabledFirst := read("/api/v1/events?limit=1")
 	if len(enabledFirst.Events) != 1 || enabledFirst.Events[0].Message != stashMessage || enabledFirst.Events[0].Detail != scenePath {
@@ -255,9 +247,7 @@ func TestEventsHideUnownedStashPathsWhenAdultVisibilityDisabled(t *testing.T) {
 	enabledSecond := read("/api/v1/events?limit=1&cursor=" + enabledFirst.Next)
 	assertRows("enabled paginated history", append(enabledFirst.Events, enabledSecond.Events...), true)
 
-	if err := st.SetAdultEnabled(ctx, false); err != nil {
-		t.Fatalf("SetAdultEnabled(false): %v", err)
-	}
+	setAdultLibrariesActive(t, st, false)
 	assertRows("disabled legacy history", read("/api/v1/events").Events, false)
 	disabledPage := read("/api/v1/events?limit=1")
 	if len(disabledPage.Events) != 1 || disabledPage.Events[0].Message != orphanMessage {

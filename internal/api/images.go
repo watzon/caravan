@@ -41,7 +41,7 @@ func (s *server) handleImage(w http.ResponseWriter, r *http.Request) {
 	}
 	allowed, err := s.imageAllowed(r, rel)
 	if err != nil {
-		s.writeStoreError(w, "read adult library", err)
+		s.writeStoreError(w, "read libraries", err)
 		return
 	}
 	if !allowed {
@@ -86,66 +86,83 @@ func (s *server) handleImage(w http.ResponseWriter, r *http.Request) {
 
 // imageAllowed decides whether this caller may be served the artwork at rel.
 //
-// Every library but one answers yes: the endpoint is auth-exempt on purpose
-// (authExempt) because a television cannot log in, and what leaks is a poster
-// somebody already put in their own library.
+// EVERY library root is checked, not the adult ones alone: any library can now
+// be switched off or narrowed to a few accounts, and its posters have to go
+// with it. A path under no library root at all is ordinary artwork and stays
+// open, which is what keeps the deliberate hole in authExempt open for the
+// televisions it was cut for.
 //
-// The adult library is the exception, and the reason is the path itself.
-// importScene writes a site's poster to <adult root>/<Site>/poster.jpg, which
-// is derived from the site's PUBLIC name — so an unauthenticated request for
-// library/Adult/Brazzers/poster.jpg is a yes/no oracle for "is this site in
-// this library", answerable by any device on the LAN and by an ungranted
-// housemate. That is the one adult surface reachable with no credential at all,
-// so it is closed here.
+// The reason this endpoint has a rule at all is the path itself. importScene
+// writes a site's poster to <adult root>/<Site>/poster.jpg, derived from the
+// site's PUBLIC name — so an unauthenticated request for
+// library/Adult/Brazzers/poster.jpg is a yes/no oracle for "is this site in this
+// library", answerable by any device on the LAN and by an ungranted housemate.
+// That is the one such surface reachable with no credential at all.
 func (s *server) imageAllowed(r *http.Request, rel string) (bool, error) {
-	lib, err := s.st.GetLibraryByKind(r.Context(), core.LibraryKindAdult)
-	switch {
-	case errors.Is(err, store.ErrNotFound):
-		// The module was never enabled, so there is no row to read a root
-		// from. The seed root is a constant, though, and anything sitting
-		// under it on such an install is not artwork this endpoint should hand
-		// out either — a leftover from before somebody switched the module off
-		// and deleted the row by hand, say. adultArtworkVisible then refuses
-		// it for everyone, because a module that is off has no visible
-		// artwork.
-		lib = &core.Library{RootPath: store.AdultLibraryRoot}
-	case err != nil:
+	libs, err := s.st.ListLibraries(r.Context())
+	if err != nil {
 		return false, err
 	}
-	if !underRoot(rel, lib.RootPath) {
-		return true, nil
+	hasAdult := false
+	for _, lib := range libs {
+		if lib.Kind == core.LibraryKindAdult {
+			hasAdult = true
+			break
+		}
 	}
-	return s.adultArtworkVisible(r, *lib)
+	if !hasAdult {
+		// No adult library, so there is no row to read a root from. The seed
+		// root is a constant, though, and anything sitting under it on such an
+		// install is not artwork this endpoint should hand out either — a
+		// leftover from before somebody deleted the row by hand, say. The
+		// synthetic row is inactive, so artworkVisible refuses it for
+		// everyone: a shelf that is not there shows nobody anything.
+		libs = append(libs, core.Library{RootPath: store.AdultLibraryRoot})
+	}
+	for _, lib := range libs {
+		if underRoot(rel, lib.RootPath) {
+			return s.artworkVisible(r, lib)
+		}
+	}
+	return true, nil
 }
 
-// adultArtworkVisible answers "may this request see the adult library's
-// artwork" on the two honest grounds it can be true:
+// artworkVisible answers "may this request see this library's artwork" on the
+// two honest grounds it can be true:
 //
-//   - the caller presented a credential that reaches the module
-//     (core.AdultVisible) — this is the SPA's Adult screens, whose posters come
-//     through this endpoint like every other screen's;
-//   - the Adult library is advertised on DLNA, which is the owner having
-//     already decided every device on the network may browse it. That is the
-//     same decision that put the hole in authExempt in the first place, so
-//     honouring it here keeps a television's album art working without
-//     widening anything the owner did not widen.
+//   - the caller may see the library itself (core.LibraryVisible) — this is
+//     every SPA screen, whose posters come through this endpoint;
+//   - the library is advertised on DLNA, which is the owner having already
+//     decided every device on the network may browse it. That is the same
+//     decision that put the hole in authExempt in the first place, so honouring
+//     it here keeps a television's album art working without widening anything
+//     the owner did not widen.
+//
+// An INACTIVE library has neither ground: it is dormant for everyone, the admin
+// included, and the dlna_visible the owner left behind does not apply to a shelf
+// that is switched off.
 //
 // The identity comes from resolveUser rather than currentUser: this route is
 // auth-exempt, so no middleware ran and currentUser's fallback would report an
-// implicit admin for an anonymous caller.
-//
-// With the module switched off neither ground can hold, so the whole root is
-// 404 — for the admin too, and for a path guessed from a site's public name.
-func (s *server) adultArtworkVisible(r *http.Request, lib core.Library) (bool, error) {
-	enabled, err := s.st.AdultEnabled(r.Context())
-	if err != nil || !enabled {
-		return false, err
+// implicit admin for an anonymous caller. A caller with no credential is read as
+// an account with no grants, which is why an active, unrestricted library's
+// artwork stays open to a television and a restricted one's does not.
+func (s *server) artworkVisible(r *http.Request, lib core.Library) (bool, error) {
+	if !lib.Active {
+		return false, nil
 	}
 	user, ok, err := s.resolveUser(r)
 	if err != nil {
 		return false, err
 	}
-	if ok && core.AdultVisible(true, user.Role, user.AdultAccess) {
+	if !ok {
+		user = requestUser{Role: core.RoleMember}
+	}
+	visible, err := s.gateFor(user).allows(r.Context(), lib)
+	if err != nil {
+		return false, err
+	}
+	if visible {
 		return true, nil
 	}
 	return lib.DLNAVisible, nil

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/watzon/caravan/internal/core"
+	"github.com/watzon/caravan/internal/library"
 	"github.com/watzon/caravan/internal/store"
 )
 
@@ -41,9 +42,10 @@ type stubManager struct {
 	// addSiteErr, when set, is what AddSite reports instead of writing a row.
 	addSiteErr error
 
-	// addSiteCalls records the stash ids AddSite was asked for, so a test can
-	// prove a scene approval added the SITE rather than something else.
-	addSiteCalls []string
+	// addSiteCalls records the refs AddSite was asked for, so a test can prove
+	// a scene approval added the SITE rather than something else — and, since
+	// instances, which BOX the row was pinned to.
+	addSiteCalls []core.ItemRef
 
 	// addSiteSceneStashID is the scene AddSiteAndWait files as an episode.
 	// Empty derives one from the site id; a test that approves a request for a
@@ -73,19 +75,29 @@ type stubManager struct {
 
 	removeErr error
 
-	// validateKeys is the verdict ValidateMetadataKey gives each API key. A key
-	// with no entry is accepted, so a test only has to name the keys it wants
-	// rejected.
+	// validateKeys is the verdict ValidateMetadataKey gives each API key,
+	// looked up first as "provider/key" and then as the bare key. A key with no
+	// entry either way is accepted, so a test only has to name the keys it wants
+	// rejected — and only has to qualify them when it cares which provider was
+	// asked.
 	validateKeys map[string]error
 
 	// adultCredentialErr is what ValidateAdultCredential reports, nil by
 	// default: the enable gate's happy path.
 	adultCredentialErr error
 
+	// searchHits, when set, is what SearchLibrary answers instead of asking
+	// provider — the seam a chain of more than one provider is proved through,
+	// since the stub provider is a single TMDB.
+	searchHits *library.SearchHits
+
 	mu                   sync.Mutex
+	adultProviderCalls   []string
+	adds                 []addCall
+	searches             []searchCall
 	matches              []matchCall
 	removes              []removeCall
-	validateCalls        []string
+	validateCalls        []validateCall
 	adultCredentialCalls []adultCredential
 }
 
@@ -93,6 +105,17 @@ type matchCall struct {
 	id        int64
 	mediaType string
 	tmdbID    int64
+	// ref is the whole identity the handler resolved, so a match made by
+	// provider/provider_ref can be told apart from one made by tmdb_id — the
+	// tmdbID above is zero for every ref that is not TMDB's.
+	ref core.ItemRef
+}
+
+// searchCall is one SearchLibrary the handlers made.
+type searchCall struct {
+	libraryID int64
+	mediaType string
+	q         string
 }
 
 // removeCall records what the handlers asked the manager to remove. Deleting
@@ -115,10 +138,28 @@ func (m *stubManager) Scan(ctx context.Context) error {
 	return m.scanErr
 }
 
-func (m *stubManager) AddMovie(ctx context.Context, tmdbID int64, minAvailability string, monitored *bool) (*core.Movie, error) {
+// addCall records the identity an add was made with, so a test can prove the
+// handler forwarded the ref the body named rather than a TMDB one built from a
+// field the body did not carry.
+type addCall struct {
+	kind string
+	ref  core.ItemRef
+}
+
+func (m *stubManager) addCalls() []addCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]addCall(nil), m.adds...)
+}
+
+func (m *stubManager) AddMovie(ctx context.Context, ref core.ItemRef, minAvailability string, monitored *bool, libraryID int64) (*core.Movie, error) {
+	m.mu.Lock()
+	m.adds = append(m.adds, addCall{kind: MediaTypeMovie, ref: ref})
+	m.mu.Unlock()
 	if m.addErr != nil {
 		return nil, m.addErr
 	}
+	tmdbID := ref.TMDBID()
 	// The stub persists minAvailability and the monitored choice verbatim (the
 	// store defaults an empty availability), so handler tests can read the row
 	// back to prove the plumbing. It follows the real manager's rule for an
@@ -131,10 +172,14 @@ func (m *stubManager) AddMovie(ctx context.Context, tmdbID int64, minAvailabilit
 	return mv, nil
 }
 
-func (m *stubManager) AddSeries(ctx context.Context, tmdbID int64, monitored *bool) (*core.Series, error) {
+func (m *stubManager) AddSeries(ctx context.Context, ref core.ItemRef, monitored *bool, libraryID int64) (*core.Series, error) {
+	m.mu.Lock()
+	m.adds = append(m.adds, addCall{kind: MediaTypeSeries, ref: ref})
+	m.mu.Unlock()
 	if m.addErr != nil {
 		return nil, m.addErr
 	}
+	tmdbID := ref.TMDBID()
 	sr := &core.Series{TMDBID: tmdbID, Title: "Stub Series", SortTitle: "stub series", Year: 2016,
 		Monitored: monitored == nil || *monitored}
 	if err := m.st.UpsertSeries(ctx, sr); err != nil {
@@ -188,25 +233,69 @@ func (m *stubManager) removeCalls() []removeCall {
 	return append([]removeCall(nil), m.removes...)
 }
 
-func (m *stubManager) MatchUnmatched(ctx context.Context, id int64, mediaType string, tmdbID int64) error {
+func (m *stubManager) MatchUnmatched(ctx context.Context, id int64, mediaType string, ref core.ItemRef) error {
 	m.mu.Lock()
-	m.matches = append(m.matches, matchCall{id: id, mediaType: mediaType, tmdbID: tmdbID})
+	m.matches = append(m.matches, matchCall{id: id, mediaType: mediaType, tmdbID: ref.TMDBID(), ref: ref})
 	m.mu.Unlock()
 	return m.matchErr
+}
+
+// SearchLibrary answers from the same stub provider Metadata does, so every
+// test written before search was per-library keeps meaning what it meant: a
+// stock database chains both default libraries to TMDB, and the stub provider
+// IS that TMDB. What it adds is the record of which library and media type the
+// handler asked about, and the searchHits seam for a longer chain.
+func (m *stubManager) SearchLibrary(ctx context.Context, libraryID int64, mediaType, q string) (*library.SearchHits, error) {
+	m.mu.Lock()
+	m.searches = append(m.searches, searchCall{libraryID: libraryID, mediaType: mediaType, q: q})
+	m.mu.Unlock()
+
+	if m.searchHits != nil {
+		return m.searchHits, nil
+	}
+	// A nil provider is a chain with nothing configured on it, which is what
+	// the real manager reports when no provider on the chain could be built.
+	if m.provider == nil {
+		return nil, core.ErrNoMetadataProvider
+	}
+	hits := &library.SearchHits{Providers: []string{core.ProviderTMDB}}
+	switch mediaType {
+	case MediaTypeMovie:
+		movies, err := m.provider.SearchMovies(ctx, q)
+		if err != nil {
+			return nil, err
+		}
+		hits.Movies = movies
+	case MediaTypeSeries:
+		series, err := m.provider.SearchSeries(ctx, q)
+		if err != nil {
+			return nil, err
+		}
+		hits.Series = series
+	}
+	return hits, nil
+}
+
+func (m *stubManager) searchCalls() []searchCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]searchCall(nil), m.searches...)
 }
 
 // AddSite writes an adult-kind series the way library.AddSite does, so the
 // handler tests read back the same shape a real manager produces — and, like
 // the real one, it files NO scenes. The catalogue walk is a job now, and a stub
 // that quietly did it inline would hide the very split these tests defend.
-func (m *stubManager) AddSite(ctx context.Context, stashID string, monitored *bool) (*core.Series, error) {
+func (m *stubManager) AddSite(ctx context.Context, ref core.ItemRef, monitored *bool, libraryID int64) (*core.Series, error) {
 	m.mu.Lock()
-	m.addSiteCalls = append(m.addSiteCalls, stashID)
+	m.addSiteCalls = append(m.addSiteCalls, ref)
 	m.mu.Unlock()
 	if m.addSiteErr != nil {
 		return nil, m.addSiteErr
 	}
+	stashID := ref.Ref
 	sr := &core.Series{
+		Provider: ref.Provider, ProviderRef: stashID,
 		StashID: stashID, Title: "Stub Site", SortTitle: "stub site",
 		Kind: core.SeriesKindAdult, Monitored: monitored == nil || *monitored,
 		Path: store.AdultLibraryRoot + "/Stub Site",
@@ -223,8 +312,9 @@ func (m *stubManager) AddSite(ctx context.Context, stashID string, monitored *bo
 // exists only on this path, so a caller that switched to the deferred AddSite
 // would leave the request approved with no episode row behind it, and the test
 // would see exactly that.
-func (m *stubManager) AddSiteAndWait(ctx context.Context, stashID string, monitored *bool) (*core.Series, error) {
-	sr, err := m.AddSite(ctx, stashID, monitored)
+func (m *stubManager) AddSiteAndWait(ctx context.Context, ref core.ItemRef, monitored *bool, libraryID int64) (*core.Series, error) {
+	stashID := ref.Ref
+	sr, err := m.AddSite(ctx, ref, monitored, libraryID)
 	if err != nil {
 		return nil, err
 	}
@@ -243,25 +333,108 @@ func (m *stubManager) AddSiteAndWait(ctx context.Context, stashID string, monito
 	return sr, nil
 }
 
+// siteCalls is the stash ids AddSite was asked for; siteRefs is the same calls
+// with the instance each named.
 func (m *stubManager) siteCalls() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return append([]string(nil), m.addSiteCalls...)
+	out := make([]string, 0, len(m.addSiteCalls))
+	for _, ref := range m.addSiteCalls {
+		out = append(out, ref.Ref)
+	}
+	return out
+}
+
+func (m *stubManager) siteRefs() []core.ItemRef {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]core.ItemRef(nil), m.addSiteCalls...)
 }
 
 func (m *stubManager) Metadata() core.MetadataProvider { return m.provider }
 
-func (m *stubManager) AdultMetadata() core.AdultMetadataProvider { return m.adult }
+// AdultMetadataFor answers with the one canned provider for any id a stash-box
+// instance row exists for, so a test that seeds two instances gets the same fake
+// from both — what the handlers are asked to prove is which id they RESOLVED,
+// and adultProviderCalls is where that is recorded.
+func (m *stubManager) AdultMetadataFor(ctx context.Context, providerID string) core.AdultMetadataProvider {
+	m.mu.Lock()
+	m.adultProviderCalls = append(m.adultProviderCalls, providerID)
+	m.mu.Unlock()
+	if m.adult == nil {
+		return nil
+	}
+	if _, err := m.st.GetStashboxInstanceByProviderID(ctx, providerID); err != nil {
+		return nil
+	}
+	return m.adult
+}
+
+// DefaultAdultMetadata resolves the way the real adapter does — the default
+// adult library's chain head, else the oldest instance — so a test can move the
+// default by editing the library rather than by reaching into the stub.
+func (m *stubManager) DefaultAdultMetadata(ctx context.Context) (core.AdultMetadataProvider, string) {
+	if m.adult == nil {
+		return nil, ""
+	}
+	providerID := ""
+	if lib, err := m.st.GetLibraryByKind(ctx, core.LibraryKindAdult); err == nil {
+		for _, id := range lib.ProviderChain() {
+			if core.ProviderBase(id) == core.ProviderStashbox {
+				providerID = id
+				break
+			}
+		}
+	}
+	if providerID == "" {
+		instances, err := m.st.ListStashboxInstances(ctx)
+		if err != nil || len(instances) == 0 {
+			// No instance row at all still resolves to the legacy id: most
+			// tests predate instances and seed none, and their subject is the
+			// surface rather than the endpoint behind it.
+			return m.adult, core.ProviderStashbox
+		}
+		providerID = instances[0].ProviderID
+	}
+	m.mu.Lock()
+	m.adultProviderCalls = append(m.adultProviderCalls, providerID)
+	m.mu.Unlock()
+	return m.adult, providerID
+}
+
+// adultProviders is the instance ids the handlers resolved, in order.
+func (m *stubManager) adultProviders() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.adultProviderCalls...)
+}
 
 // ValidateMetadataKey answers from validateKeys: an entry maps a key to the
 // verdict the provider would give it, and a key with no entry is accepted. The
 // default therefore matches the pre-phase-10 world, where nothing validated
 // anything, so every existing test keeps meaning what it meant.
-func (m *stubManager) ValidateMetadataKey(ctx context.Context, apiKey string) error {
+//
+// The verdicts are keyed by (provider, key) so a test can reject a key for one
+// provider and accept the same string for another — the thing a per-provider
+// credential model has to get right. A bare key with no provider prefix answers
+// for every provider, which is what the tests written before there was a second
+// credentialed one mean.
+func (m *stubManager) ValidateMetadataKey(ctx context.Context, providerID, apiKey string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.validateCalls = append(m.validateCalls, apiKey)
+	m.validateCalls = append(m.validateCalls, validateCall{provider: providerID, key: apiKey})
+	if err, ok := m.validateKeys[providerID+"/"+apiKey]; ok {
+		return err
+	}
 	return m.validateKeys[apiKey]
+}
+
+// validateCall is one ValidateMetadataKey the handlers made, recording the
+// provider as well as the key so a test can prove the right card's Test button
+// asked about the right provider.
+type validateCall struct {
+	provider string
+	key      string
 }
 
 // ValidateAdultCredential answers from adultCredentialErr, recording what it
@@ -281,10 +454,20 @@ type adultCredential struct {
 	key      string
 }
 
+// validatedKeys is the keys that were proved, in order. Tests that do not care
+// which provider was asked read this; validations carries the pair.
 func (m *stubManager) validatedKeys() []string {
+	out := []string{}
+	for _, c := range m.validations() {
+		out = append(out, c.key)
+	}
+	return out
+}
+
+func (m *stubManager) validations() []validateCall {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return append([]string(nil), m.validateCalls...)
+	return append([]validateCall(nil), m.validateCalls...)
 }
 
 func (m *stubManager) adultCredentials() []adultCredential {
@@ -314,11 +497,11 @@ func (p *stubProvider) SearchSeries(ctx context.Context, q string) ([]core.Serie
 	return p.series, p.err
 }
 
-func (p *stubProvider) GetMovie(ctx context.Context, tmdbID int64) (*core.MovieMeta, error) {
+func (p *stubProvider) GetMovie(ctx context.Context, ref string) (*core.MovieMeta, error) {
 	return nil, store.ErrNotFound
 }
 
-func (p *stubProvider) GetSeries(ctx context.Context, tmdbID int64) (*core.SeriesMeta, error) {
+func (p *stubProvider) GetSeries(ctx context.Context, ref string) (*core.SeriesMeta, error) {
 	return nil, store.ErrNotFound
 }
 
@@ -343,6 +526,197 @@ func newTestServer(t *testing.T, opts ...Option) (http.Handler, *store.Store, *s
 
 	mgr := &stubManager{st: st}
 	return NewServer(st, mgr, testDist(), opts...), st, mgr
+}
+
+// libraryFixture is the shape every per-library access test needs: one shelf of
+// each interesting state, and the identities that do and do not reach them.
+//
+// It exists once rather than per test because the matrix is the point — a
+// surface is only proved when the SAME restricted library is invisible to the
+// SAME ungranted account across all of them, and a fixture rebuilt per file
+// drifts until two surfaces are answering about two different libraries.
+type libraryFixture struct {
+	// openTV and openMovie are the seeded shelves: active, unrestricted, and
+	// the answer to "did the filter break the ordinary case".
+	openTV    core.Library
+	openMovie core.Library
+	// kids and kidsFilms are active ORDINARY libraries narrowed to one account.
+	// Non-adult on purpose: the promise of absence must hold on an everyday
+	// shelf, not only on the one it was written for.
+	kids      core.Library
+	kidsFilms core.Library
+	// dormantTV and dormantMovie are switched off, which binds everyone —
+	// admins included.
+	dormantTV    core.Library
+	dormantMovie core.Library
+
+	admin     *core.User
+	granted   *core.User
+	ungranted *core.User
+}
+
+// restrictedLibraryFixture builds the matrix against a fresh store.
+func restrictedLibraryFixture(t *testing.T, st *store.Store) libraryFixture {
+	t.Helper()
+	ctx := context.Background()
+
+	f := libraryFixture{
+		admin:     createUser(t, st, testAdmin, testPassword, core.RoleAdmin),
+		granted:   createUser(t, st, "granted", testPassword, core.RoleMember),
+		ungranted: createUser(t, st, "ungranted", testPassword, core.RoleMember),
+	}
+
+	seeded, err := st.ListLibraries(ctx)
+	if err != nil {
+		t.Fatalf("ListLibraries: %v", err)
+	}
+	for _, l := range seeded {
+		switch l.Kind {
+		case core.LibraryKindTV:
+			f.openTV = l
+		case core.LibraryKindMovie:
+			f.openMovie = l
+		}
+	}
+	if f.openTV.ID == 0 || f.openMovie.ID == 0 {
+		t.Fatalf("seeded libraries = %+v, want one of each ordinary kind", seeded)
+	}
+
+	create := func(kind, name, root string) core.Library {
+		t.Helper()
+		lib := &core.Library{Kind: kind, Name: name, RootPath: root}
+		if err := st.CreateLibrary(ctx, lib); err != nil {
+			t.Fatalf("CreateLibrary(%s): %v", name, err)
+		}
+		return *lib
+	}
+	f.kids = create(core.LibraryKindTV, "Kids", "library/Kids")
+	f.kidsFilms = create(core.LibraryKindMovie, "Kids Films", "library/KidsFilms")
+	f.dormantTV = create(core.LibraryKindTV, "Dormant Shows", "library/Dormant")
+	f.dormantMovie = create(core.LibraryKindMovie, "Dormant Films", "library/Shelved")
+
+	for _, lib := range []*core.Library{&f.kids, &f.kidsFilms} {
+		if err := st.SetLibraryAccess(ctx, lib.ID, true, []int64{f.granted.ID}); err != nil {
+			t.Fatalf("SetLibraryAccess(%s): %v", lib.Name, err)
+		}
+		lib.Restricted = true
+	}
+	for _, lib := range []*core.Library{&f.dormantTV, &f.dormantMovie} {
+		if err := st.SetLibraryActive(ctx, lib.ID, false); err != nil {
+			t.Fatalf("SetLibraryActive(%s): %v", lib.Name, err)
+		}
+		lib.Active = false
+	}
+	return f
+}
+
+// enableAdultLibrary makes the adult module reachable the only way it is
+// reachable: an adult library exists and is switched on.
+//
+// It stands where a call to the server-wide switch used to, and the difference
+// is the point of the whole restructure — there is nothing to enable, only a
+// shelf to have. The row is created restricted and DLNA-dark, which is what
+// POST /libraries writes for kind=adult, so a test seeding through here sees
+// the state the real door produces.
+//
+// Idempotent: an adult library that already exists is switched back on rather
+// than duplicated, so a test may say "and now it is on again" without tracking
+// whether it once was.
+func enableAdultLibrary(t *testing.T, st *store.Store) core.Library {
+	t.Helper()
+	ctx := context.Background()
+
+	libs, err := st.ListLibraries(ctx)
+	if err != nil {
+		t.Fatalf("ListLibraries: %v", err)
+	}
+	for _, l := range libs {
+		if l.Kind != core.LibraryKindAdult {
+			continue
+		}
+		if err := st.SetLibraryActive(ctx, l.ID, true); err != nil {
+			t.Fatalf("SetLibraryActive(%s): %v", l.Name, err)
+		}
+		l.Active = true
+		return l
+	}
+
+	lib := &core.Library{
+		Kind: core.LibraryKindAdult, Name: store.AdultLibraryName,
+		RootPath: store.AdultLibraryRoot, Providers: []string{core.ProviderStashbox},
+		// The kind's default because this branch is the one where there was no
+		// adult library at all; a second one would contend with the partial
+		// unique index that admits one default per kind.
+		IsDefault: true, Restricted: true,
+	}
+	if err := st.CreateLibrary(ctx, lib); err != nil {
+		t.Fatalf("CreateLibrary(adult): %v", err)
+	}
+	return *lib
+}
+
+// setAdultLibrariesActive switches every adult library at once, which is what
+// the module-wide switch did and is now only ever a convenience: a test that
+// cares which library is off should name it.
+func setAdultLibrariesActive(t *testing.T, st *store.Store, active bool) {
+	t.Helper()
+	ctx := context.Background()
+
+	libs, err := st.ListLibraries(ctx)
+	if err != nil {
+		t.Fatalf("ListLibraries: %v", err)
+	}
+	for _, l := range libs {
+		if l.Kind != core.LibraryKindAdult {
+			continue
+		}
+		if err := st.SetLibraryActive(ctx, l.ID, active); err != nil {
+			t.Fatalf("SetLibraryActive(%s): %v", l.Name, err)
+		}
+	}
+}
+
+// grantAdultAccess names one account on every adult library, which is what the
+// account-wide adult_access flag used to mean.
+func grantAdultAccess(t *testing.T, st *store.Store, userID int64, granted bool) {
+	t.Helper()
+	ctx := context.Background()
+
+	libs, err := st.ListLibraries(ctx)
+	if err != nil {
+		t.Fatalf("ListLibraries: %v", err)
+	}
+	for _, l := range libs {
+		if l.Kind != core.LibraryKindAdult {
+			continue
+		}
+		ids := []int64{}
+		if granted {
+			ids = append(ids, userID)
+		}
+		if err := st.SetLibraryAccess(ctx, l.ID, true, ids); err != nil {
+			t.Fatalf("SetLibraryAccess(%s): %v", l.Name, err)
+		}
+	}
+}
+
+// as is the identity a directly-called handler acts under, wired the way
+// requireAuth wires one: the user AND the gate that reads their grants.
+func (f libraryFixture) as(s *server, u requestUser, method, target string) *http.Request {
+	r := withRequestUser(httptest.NewRequest(method, target, nil), u)
+	return withLibraryGate(r, s.gateFor(u))
+}
+
+func (f libraryFixture) adminUser() requestUser {
+	return requestUser{ID: f.admin.ID, Role: core.RoleAdmin}
+}
+
+func (f libraryFixture) grantedUser() requestUser {
+	return requestUser{ID: f.granted.ID, Role: core.RoleMember}
+}
+
+func (f libraryFixture) ungrantedUser() requestUser {
+	return requestUser{ID: f.ungranted.ID, Role: core.RoleMember}
 }
 
 // do issues a request against h. body may be empty.
@@ -493,8 +867,11 @@ func TestSettingsRoundTrip(t *testing.T) {
 			t.Fatalf("seed %s: %v", key, err)
 		}
 	}
+	// The Stash keys below are adult-only in the settings projection, so the
+	// caller has to be able to see an adult library at all for the assertion
+	// about them to mean anything.
+	enableAdultLibrary(t, st)
 	publicSettings := map[string]string{
-		store.SettingAdultEnabled:           "true",
 		store.SettingStashURL:               "http://stash.example.test",
 		store.SettingStashEnabled:           "true",
 		store.SettingJellyfinURL:            "http://jellyfin.example.test",
@@ -525,8 +902,7 @@ func TestSettingsRoundTrip(t *testing.T) {
 		settings[store.SettingRSSSyncIntervalMinutes] != "20" {
 		t.Fatalf("settings = %v, want redacted key flag and interval", settings)
 	}
-	if settings[store.SettingAdultEnabled] != "true" ||
-		settings[store.SettingStashURL] != "http://stash.example.test" ||
+	if settings[store.SettingStashURL] != "http://stash.example.test" ||
 		settings[store.SettingStashEnabled] != "true" {
 		t.Fatalf("adult-visible settings = %v, want public adult settings", settings)
 	}
@@ -541,8 +917,7 @@ func TestSettingsRoundTrip(t *testing.T) {
 		settings[settingTMDBAPIKeySet] != "true" {
 		t.Fatalf("settings = %v, want partial update with preserved key flag", settings)
 	}
-	if settings[store.SettingAdultEnabled] != "true" ||
-		settings[store.SettingStashURL] != "http://stash.example.test" ||
+	if settings[store.SettingStashURL] != "http://stash.example.test" ||
 		settings[store.SettingStashEnabled] != "true" {
 		t.Fatalf("adult-visible PUT settings = %v, want public adult settings", settings)
 	}
@@ -581,12 +956,6 @@ func TestPutSettingsRejectsBadRequests(t *testing.T) {
 		{"unknown key", `{"nonsense":"1"}`},
 		{"malformed json", `{`},
 		{"wrong value type", `{"storage_root":42}`},
-		// An adult metadata endpoint that could never be dialled is rejected
-		// where the user can see it, not swallowed and re-surfaced much later
-		// as a request error inside a refresh nobody is watching.
-		{"stashbox endpoint with no scheme", `{"stashbox_endpoint":"theporndb.net/graphql"}`},
-		{"stashbox endpoint with an undialable scheme", `{"stashbox_endpoint":"ftp://theporndb.net/graphql"}`},
-		{"stashbox endpoint with no host", `{"stashbox_endpoint":"https:///graphql"}`},
 	}
 	baseline, err := st.AllSettings(context.Background())
 	if err != nil {
@@ -651,63 +1020,27 @@ func TestPutSettingsRejectsMode(t *testing.T) {
 	}
 }
 
-func TestPutSettingsAcceptsStashboxCredentials(t *testing.T) {
-	h, st, _ := newTestServer(t)
-
-	// A blank endpoint is legal and means "the TPDB preset": pasting a key is
-	// the whole configuration for the default provider.
-	rec := do(t, h, http.MethodPut, "/api/v1/settings",
-		`{"stashbox_endpoint":"","stashbox_api_key":"sk-adult"}`)
-	wantStatus(t, rec, http.StatusOK)
-	if strings.Contains(rec.Body.String(), "sk-adult") ||
-		strings.Contains(rec.Body.String(), `"`+store.SettingStashboxAPIKey+`"`) {
-		t.Fatalf("settings response exposed stashbox credential: %s", rec.Body.String())
-	}
-
-	var settings map[string]string
-	decodeBody(t, rec, &settings)
-	if _, ok := settings[store.SettingStashboxEndpoint]; !ok {
-		t.Fatalf("stashbox_endpoint missing from %v, want the blank value stored", settings)
-	}
-	stored, err := st.GetSetting(t.Context(), store.SettingStashboxAPIKey)
-	if err != nil {
-		t.Fatalf("GetSetting stashbox_api_key: %v", err)
-	}
-	if stored != "sk-adult" {
-		t.Fatalf("stored stashbox_api_key = %q, want %q", stored, "sk-adult")
-	}
-
-	// Naming another box — StashDB, FansDB, a self-hosted one — is a config
-	// change, not a code change (PLAN phase 9 task 1).
-	rec = do(t, h, http.MethodPut, "/api/v1/settings",
-		`{"stashbox_endpoint":"https://stashdb.org/graphql"}`)
-	wantStatus(t, rec, http.StatusOK)
-	decodeBody(t, rec, &settings)
-	if settings[store.SettingStashboxEndpoint] != "https://stashdb.org/graphql" {
-		t.Fatalf("stashbox_endpoint = %q, want the new endpoint", settings[store.SettingStashboxEndpoint])
-	}
-
-	// An explicit empty field remains the credential's clear operation.
-	rec = do(t, h, http.MethodPut, "/api/v1/settings", `{"stashbox_api_key":""}`)
-	wantStatus(t, rec, http.StatusOK)
-	if strings.Contains(rec.Body.String(), `"`+store.SettingStashboxAPIKey+`"`) {
-		t.Fatalf("settings clear response exposed stashbox credential field: %s", rec.Body.String())
-	}
-	stored, err = st.GetSetting(t.Context(), store.SettingStashboxAPIKey)
-	if err != nil {
-		t.Fatalf("GetSetting cleared stashbox_api_key: %v", err)
-	}
-	if stored != "" {
-		t.Fatalf("stored stashbox_api_key after clear = %q, want empty", stored)
-	}
-}
-
 func TestPutSettingsRequiresBody(t *testing.T) {
 	h, _, _ := newTestServer(t)
 
 	rec := do(t, h, http.MethodPut, "/api/v1/settings", "")
 	wantStatus(t, rec, http.StatusBadRequest)
 	wantErrorBody(t, rec)
+}
+
+// absentCredentials is the credential map of a fresh install: one entry per
+// credentialed provider, every one of them absent, and nothing for the keyless
+// ones — "Ready" is a fact the client reads off the provider list, not a verdict
+// this server reached.
+func absentCredentials() map[string]credentialStateJSON {
+	out := map[string]credentialStateJSON{}
+	for _, p := range core.Providers() {
+		if p.CredentialSetting == "" {
+			continue
+		}
+		out[p.ID] = credentialStateJSON{State: CredentialAbsent}
+	}
+	return out
 }
 
 func TestSystemStatus(t *testing.T) {
@@ -747,10 +1080,18 @@ func TestSystemStatus(t *testing.T) {
 		DiskFreeBytes:  0,
 		DiskTotalBytes: 0,
 		EngineHealth:   "unconfigured",
-		// A fresh database has no TMDB key, which is the first-run state the
-		// wizard's metadata step exists to fix.
-		MetadataCredential: CredentialAbsent,
-		NeedsSetup:         true,
+		// A fresh database has no key for any credentialed provider, which is the
+		// first-run state the wizard's metadata step exists to fix. The flat
+		// field and the map say so together, because the handler fills both from
+		// the same read.
+		//
+		// The map is built from the registry rather than written out, so
+		// registering a provider does not turn this into a false failure. What
+		// the assertion is for is that every credentialed provider is present and
+		// absent, and no keyless one is present at all.
+		MetadataCredential:  CredentialAbsent,
+		MetadataCredentials: absentCredentials(),
+		NeedsSetup:          true,
 		// No provider means nothing polls external clients, and the banner
 		// input is an empty list rather than null.
 		UnhealthyDownloadClients: []unhealthyClientJSON{},

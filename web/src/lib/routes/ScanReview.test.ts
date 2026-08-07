@@ -10,7 +10,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import ScanReview from './ScanReview.svelte';
 import { system } from '../state/system.svelte';
-import type { SystemStatus, UnmatchedFile } from '../api/types';
+import { libraries } from '../state/libraries.svelte';
+import type { Library, SystemStatus, UnmatchedFile } from '../api/types';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -56,8 +57,59 @@ afterEach(() => {
   app = undefined;
   host.remove();
   system.status = null;
+  libraries.all = [];
+  libraries.loaded = false;
   vi.unstubAllGlobals();
 });
+
+function library(overrides: Partial<Library> = {}): Library {
+  return {
+    id: 4,
+    kind: 'movie',
+    name: 'Kids Movies',
+    root_path: 'library/Kids',
+    provider: 'tmdb',
+    providers: ['tmdb'],
+    is_default: false,
+    item_count: 0,
+    active: true,
+    restricted: false,
+    dlna_visible: true,
+    route_torrent: '',
+    route_usenet: '',
+    quality_profile_id: 0,
+    indexers: [],
+    ...overrides,
+  };
+}
+
+function parkedFile(overrides: Partial<UnmatchedFile> = {}): UnmatchedFile {
+  return {
+    id: 1,
+    path: 'downloads/Some.Release.mkv',
+    size: 1_000_000,
+    parsed: {
+      title: 'Some Release',
+      year: 2026,
+      season: 0,
+      episodes: [],
+      quality: '1080p',
+      source: 'WEB-DL',
+      codec: 'x264',
+      audio: 'AC3',
+      bit_depth: 8,
+      group: 'GROUP',
+      proper: false,
+      repack: false,
+      edition: '',
+      confidence: 0.4,
+    },
+    reason: 'No confident match',
+    library_id: 0,
+    seen_at: '2026-08-01T00:00:00Z',
+    ...overrides,
+  };
+}
 
 async function settle() {
   for (let i = 0; i < 4; i += 1) await new Promise((resolve) => setTimeout(resolve, 0));
@@ -116,6 +168,7 @@ describe('ScanReview', () => {
         confidence: 0.4,
       },
       reason: 'No confident match',
+      library_id: 0,
       seen_at: '2026-08-01T00:00:00Z',
     }];
     system.status = { ...STATUS, metadata_credential: 'ok' };
@@ -126,5 +179,65 @@ describe('ScanReview', () => {
     expect(pathCell).not.toBeNull();
     expect(pathCell?.textContent?.trim()).not.toBe(path);
     expect(pathCell?.getAttribute('title')).toBe(path);
+  });
+
+  /**
+   * The universal search's untied grab parks here on purpose (plan part B8),
+   * and it arrives knowing two things a scan-parked file does not: which
+   * library the user chose, and that nothing actually failed.
+   */
+  it('names the library an untied grab was scoped to', async () => {
+    libraries.all = [library()];
+    libraries.loaded = true;
+    unmatched = [parkedFile({ library_id: 4, reason: 'manual-grab' })];
+    system.status = { ...STATUS, metadata_credential: 'ok' };
+    app = mount(ScanReview, { target: host });
+    await settle();
+
+    expect(host.textContent).toContain('Kids Movies');
+  });
+
+  it('reads the manual-grab reason as what it is, not as a scanner complaint', async () => {
+    unmatched = [parkedFile({ library_id: 4, reason: 'manual-grab' })];
+    system.status = { ...STATUS, metadata_credential: 'ok' };
+    app = mount(ScanReview, { target: host });
+    await settle();
+
+    expect(host.textContent).toContain('Grabbed manually');
+    expect(host.textContent).not.toContain('manual-grab');
+  });
+
+  it('leaves a scan-parked file unscoped rather than inventing a library', async () => {
+    libraries.all = [library()];
+    libraries.loaded = true;
+    unmatched = [parkedFile()];
+    system.status = { ...STATUS, metadata_credential: 'ok' };
+    app = mount(ScanReview, { target: host });
+    await settle();
+
+    expect(host.textContent).not.toContain('Kids Movies');
+    expect(host.textContent).toContain('No confident match');
+  });
+
+  /**
+   * A library has exactly one kind, and the user already chose it. That beats
+   * the parser's guess, which here says "movie" because the name has no SxxEyy.
+   */
+  it('pre-selects the match scope from the library an untied grab chose', async () => {
+    libraries.all = [library({ id: 5, kind: 'tv', name: 'TV' })];
+    libraries.loaded = true;
+    unmatched = [parkedFile({ library_id: 5, reason: 'manual-grab' })];
+    system.status = { ...STATUS, metadata_credential: 'ok' };
+    app = mount(ScanReview, { target: host });
+    await settle();
+
+    [...host.querySelectorAll<HTMLButtonElement>('button')]
+      .find((b) => b.textContent?.trim() === 'Match')!
+      .click();
+    flushSync();
+
+    expect(document.querySelector('input[type="search"]')?.getAttribute('placeholder')).toBe(
+      'Search TMDB for a series…',
+    );
   });
 });

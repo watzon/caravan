@@ -6,8 +6,14 @@
 // producing an invented guess, because SPEC §13 requires low-confidence files
 // to park in the unmatched review queue instead of being imported silently.
 //
-// Out of scope for v1 (SPEC §16): anime absolute numbering and daily-dated
-// episodes. Those names must degrade to a low-confidence result, never panic.
+// Anime-style absolute numbering ("[SubsPlease] Show - 105") is recognized as
+// far as the name goes: Parse reports the number in ParsedRelease.Absolute and
+// cuts it out of the title. It never turns it into a season and an episode —
+// that mapping is a fact about the series, not about the name.
+//
+// Still out of scope (SPEC §16): absolute ranges ("Show - 105-106", refused on
+// purpose rather than filed as one episode) and daily-dated episodes. Those
+// names must degrade to a low-confidence result, never panic.
 package parse
 
 import (
@@ -114,6 +120,29 @@ var (
 	reSeasonWord  = regexp.MustCompile(`(?i)\bseason[\s._-]?(\d{1,2})\b`)
 	reSeasonShort = regexp.MustCompile(`(?i)\bs(\d{1,2})\b`)
 	reEpisodeNum  = regexp.MustCompile(`(?i)e(\d{1,3})`)
+
+	// Absolute (series-wide) episode numbers, the anime shape. The dash form is
+	// the fansub convention — "Show - 105", "Show.-.105", "[Group] Show - 05v2"
+	// — and the separators on both sides of the dash are what tell it apart
+	// from a hyphenated title ("Spider-Man") and from a group suffix
+	// ("-SPARKS").
+	reAbsoluteDash = regexp.MustCompile(`(?i)[\s._]-[\s._](\d{1,4})(?:v\d)?\b`)
+	// The bare form is deliberately narrower than the dash form, and this is
+	// THE load-bearing decision of the whole recognizer: the number must be
+	// zero-padded or at least 100. A movie title ending in a small number is
+	// common ("Ocean's 11", "Apollo 13", "Cars 3", "Rocky 4") and reading one
+	// as an episode number would cut the title in half — destroying the search
+	// query, not just inventing a number. "Show 105" and "Show 05" are the two
+	// shapes that survive that rule, and they are the two the convention uses.
+	reAbsoluteBare = regexp.MustCompile(`(?i)[\s._](0\d{1,3}|[1-9]\d{2,3})(?:v\d)?\b`)
+	// A second number joined to the first is a range ("Show - 105-106"), which
+	// is recognized only so it can be refused: taking the first number would
+	// import a two-episode file as one episode and supersede nothing, so SPEC
+	// §13 wants the visible question instead — the file parks unmatched.
+	reAbsoluteRange = regexp.MustCompile(`^[\s._]*[-~][\s._]*\d`)
+	// A bare absolute number, as a standalone token. Only isKnownToken uses it:
+	// "105" and "105v2" are metadata, never release groups.
+	reAbsoluteToken = regexp.MustCompile(`(?i)^\d{1,4}(?:v\d)?$`)
 
 	reYear   = regexp.MustCompile(`\b(19|20)\d{2}\b`)
 	reProper = regexp.MustCompile(`(?i)\bproper\b`)
@@ -242,6 +271,19 @@ func Parse(name string) core.ParsedRelease {
 	if titleCut < 0 {
 		titleCut = len(work)
 	}
+
+	// An absolute number is a claim only a name that named no season and no
+	// episode can be making — S05E03 already answered the question — and only
+	// a name that named no year: "Ocean's 11 (2001)" is a movie, not episode 11
+	// of anything. The recognizer searches the title span alone, because that
+	// is the only place the number ever sits; past it every number belongs to a
+	// technical tag ("H.264", "DDP5.1") and would be read wrong.
+	if seLoc[0] < 0 && p.Season == 0 && len(p.Episodes) == 0 && p.Year == 0 {
+		if n, cut := parseAbsolute(scan, titleStart, titleCut); n > 0 && cut > titleStart {
+			p.Absolute = n
+			titleCut = cut
+		}
+	}
 	p.Title = normalizeTitle(work[titleStart:titleCut])
 
 	p.Group = parseGroup(work, tailEnd, prefixGroup, suffixGroups, seLoc)
@@ -363,6 +405,72 @@ func parseYear(scan string, titleStart, strong int) (year, idx int) {
 	return 0, -1
 }
 
+// parseAbsolute recognizes an anime-style absolute episode number inside
+// [start, end) — the span that would otherwise become the title. It returns the
+// number and the byte index the title has to be cut at, or (0, -1) when the
+// name carries none.
+//
+// The cut matters more than the number. Parse feeds the title into the metadata
+// search query, so leaving "Show - 105" as the title asks the provider about a
+// series that does not exist; and by the same token, cutting "Ocean's 11" down
+// to "Ocean's" asks about a series that does not exist either. Every refusal
+// below buys the second half of that trade, so the recognizer looks at one
+// candidate — the first the forms find, in order — and refuses outright rather
+// than hunting the span for a number it likes better.
+func parseAbsolute(scan string, start, end int) (n, cut int) {
+	if start < 0 || end <= start || end > len(scan) {
+		return 0, -1
+	}
+	window := scan[start:end]
+
+	m := reAbsoluteDash.FindStringSubmatchIndex(window)
+	if m == nil {
+		m = reAbsoluteBare.FindStringSubmatchIndex(window)
+	}
+	if m == nil {
+		return 0, -1
+	}
+	num, matchEnd := window[m[2]:m[3]], start+m[1]
+
+	// A range refuses the whole name, and refuses it without cutting the title:
+	// an unrecognized name keeps its title intact, which is what "Show -
+	// 105-106" is until multi-episode absolute files are in scope. The lookahead
+	// runs against the whole name, not the window, because where the second
+	// number sits is a fact about the name.
+	if reAbsoluteRange.MatchString(scan[matchEnd:]) {
+		return 0, -1
+	}
+	// A number whose own left-hand neighbour is a number is not a series-wide
+	// count: "Show 2 - 05" names a season and an episode within it, and reading
+	// 05 as absolute would file the file against the wrong episode entirely.
+	if precededByNumber(window[:m[2]]) {
+		return 0, -1
+	}
+	// A year is never an absolute number. Parse already refuses to run the
+	// recognizer on a name that carried a year, but a year can also sit in a
+	// span parseYear declined to read as one, and "Show 2049" must not become
+	// episode 2049 on that technicality.
+	if reYear.MatchString(num) {
+		return 0, -1
+	}
+	// "Show - 000" claims no identity, and a cut with no number behind it is
+	// pure loss.
+	if v := atoi(num); v > 0 {
+		return v, start + m[0]
+	}
+	return 0, -1
+}
+
+// precededByNumber reports whether the text immediately left of an absolute
+// candidate ends in a digit, once the separators between them are stepped over.
+func precededByNumber(before string) bool {
+	i := len(before)
+	for i > 0 && strings.ContainsRune(" \t._-~", rune(before[i-1])) {
+		i--
+	}
+	return i > 0 && before[i-1] >= '0' && before[i-1] <= '9'
+}
+
 // bracketPrefix reports where the title starts (after an anime-style "[Group]"
 // prefix, if any) and the bracket's contents.
 func bracketPrefix(s string) (start int, group string) {
@@ -440,6 +548,12 @@ func isKnownToken(s string) bool {
 	if reProper.MatchString(s) || reRepack.MatchString(s) || reNoise.MatchString(s) {
 		return true
 	}
+	// An absolute episode number is metadata as much as "E03" is: the tail of
+	// "[Group] Show - 105" or "Show.-.105v2" must never be read as the group
+	// that released it.
+	if reAbsoluteToken.MatchString(s) {
+		return true
+	}
 	_, eps, loc := parseSeasonEpisodes(s)
 	return len(eps) > 0 || loc[0] >= 0
 }
@@ -466,6 +580,13 @@ func confidence(p core.ParsedRelease) float64 {
 	switch {
 	case len(p.Episodes) > 0:
 		score += 0.30
+	// An absolute number IS an episode identity — it names one episode of one
+	// series as precisely as S05E03 does — so it scores the same. The
+	// conservatism lives in the recognizer, which refuses everything it cannot
+	// vouch for; scoring a recognized number lower would only park files the
+	// parser was right about.
+	case p.Absolute > 0:
+		score += 0.30
 	case p.Season > 0:
 		score += 0.22
 	case p.Year > 0:
@@ -489,7 +610,7 @@ func confidence(p core.ParsedRelease) float64 {
 
 	// A name with no identity and no technical tags is a bare string. Whatever
 	// it scored for having a title, it is not something to import on.
-	if p.Year == 0 && p.Season == 0 && len(p.Episodes) == 0 &&
+	if p.Year == 0 && p.Season == 0 && len(p.Episodes) == 0 && p.Absolute == 0 &&
 		p.Quality == core.QualityUnknown && p.Source == core.SourceUnknown &&
 		p.Codec == "" && p.Audio == "" {
 		score = math.Min(score, 0.15)

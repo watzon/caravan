@@ -47,3 +47,88 @@ func TestComputeSkipsKnownFutureEpisodesAndKeepsUnknownDates(t *testing.T) {
 		t.Fatalf("wanted episodes = %v, want [Past Unknown]", got)
 	}
 }
+
+// The wanted list is what the backlog sweep, the RSS matcher and the wanted
+// screen all read, so an item that never enters it cannot leak out of any of
+// them. That is where a dormant library's items have to be dropped — and it
+// applies to movies as well as episodes, which is new: the switch this
+// generalizes could only ever be off for adult series.
+func TestComputeDropsAnInactiveLibrarysItems(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "caravan.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	series := &core.Series{TMDBID: 42, Title: "Example Series", SortTitle: "example series", Monitored: true}
+	if err := st.UpsertSeries(ctx, series); err != nil {
+		t.Fatalf("upsert series: %v", err)
+	}
+	episode := &core.Episode{SeriesID: series.ID, SeasonNumber: 1, EpisodeNumber: 1, Title: "Pilot", Monitored: true}
+	if err := st.UpsertEpisode(ctx, episode); err != nil {
+		t.Fatalf("upsert episode: %v", err)
+	}
+	movie := &core.Movie{TMDBID: 603, Title: "The Matrix", SortTitle: "matrix", Year: 1999, Monitored: true}
+	if err := st.UpsertMovie(ctx, movie); err != nil {
+		t.Fatalf("upsert movie: %v", err)
+	}
+
+	lists, err := Compute(ctx, st)
+	if err != nil {
+		t.Fatalf("compute wanted: %v", err)
+	}
+	if len(lists.Movies) != 1 || len(lists.Episodes) != 1 {
+		t.Fatalf("wanted with both libraries on = %d movies, %d episodes, want one each",
+			len(lists.Movies), len(lists.Episodes))
+	}
+
+	tv, err := st.GetLibraryByKind(ctx, core.LibraryKindTV)
+	if err != nil {
+		t.Fatalf("GetLibraryByKind(tv): %v", err)
+	}
+	if err := st.SetLibraryActive(ctx, tv.ID, false); err != nil {
+		t.Fatalf("SetLibraryActive(tv, false): %v", err)
+	}
+	lists, err = Compute(ctx, st)
+	if err != nil {
+		t.Fatalf("compute wanted: %v", err)
+	}
+	if len(lists.Episodes) != 0 {
+		t.Errorf("wanted still carries %d episodes from an inactive library", len(lists.Episodes))
+	}
+	if len(lists.Movies) != 1 {
+		t.Errorf("switching the tv library off dropped %d movies too", 1-len(lists.Movies))
+	}
+
+	movies, err := st.GetLibraryByKind(ctx, core.LibraryKindMovie)
+	if err != nil {
+		t.Fatalf("GetLibraryByKind(movie): %v", err)
+	}
+	if err := st.SetLibraryActive(ctx, movies.ID, false); err != nil {
+		t.Fatalf("SetLibraryActive(movie, false): %v", err)
+	}
+	lists, err = Compute(ctx, st)
+	if err != nil {
+		t.Fatalf("compute wanted: %v", err)
+	}
+	if len(lists.Movies) != 0 {
+		t.Errorf("wanted still carries %d movies from an inactive library", len(lists.Movies))
+	}
+
+	// Nothing was deleted: switching both back on restores the whole list.
+	if err := st.SetLibraryActive(ctx, tv.ID, true); err != nil {
+		t.Fatalf("SetLibraryActive(tv, true): %v", err)
+	}
+	if err := st.SetLibraryActive(ctx, movies.ID, true); err != nil {
+		t.Fatalf("SetLibraryActive(movie, true): %v", err)
+	}
+	lists, err = Compute(ctx, st)
+	if err != nil {
+		t.Fatalf("compute wanted: %v", err)
+	}
+	if len(lists.Movies) != 1 || len(lists.Episodes) != 1 {
+		t.Errorf("reactivating restored %d movies and %d episodes, want one each",
+			len(lists.Movies), len(lists.Episodes))
+	}
+}

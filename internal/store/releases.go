@@ -11,7 +11,7 @@ import (
 )
 
 const releaseColumns = `id, indexer_id, indexer_name, title, guid, download_url, info_hash,
-	protocol, size, seeders, leechers, published_at, parsed`
+	protocol, size, seeders, leechers, published_at, parsed, categories`
 
 // UpsertRelease caches a search result and writes back the assigned ID.
 //
@@ -25,19 +25,31 @@ func (s *Store) UpsertRelease(ctx context.Context, r *core.Release) error {
 		return fmt.Errorf("store: encode parsed release for %q: %w", r.Title, err)
 	}
 
+	// Empty stays "" rather than "[]": a release filed under no category and
+	// one cached before 0023 answer the adult gate identically (no adult
+	// category in evidence), so the distinction is not worth a sentinel.
+	categories := ""
+	if len(r.Categories) > 0 {
+		encoded, err := json.Marshal(r.Categories)
+		if err != nil {
+			return fmt.Errorf("store: encode categories for %q: %w", r.Title, err)
+		}
+		categories = string(encoded)
+	}
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO releases (indexer_id, indexer_name, title, guid, download_url, info_hash,
-			protocol, size, seeders, leechers, published_at, parsed, seen_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			protocol, size, seeders, leechers, published_at, parsed, categories, seen_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (indexer_id, guid) DO UPDATE SET
 			indexer_name = excluded.indexer_name, title = excluded.title,
 			download_url = excluded.download_url, info_hash = excluded.info_hash,
 			protocol = excluded.protocol, size = excluded.size,
 			seeders = excluded.seeders, leechers = excluded.leechers,
 			published_at = excluded.published_at, parsed = excluded.parsed,
-			seen_at = excluded.seen_at`,
+			categories = excluded.categories, seen_at = excluded.seen_at`,
 		r.IndexerID, r.Indexer, r.Title, r.GUID, r.DownloadURL, r.InfoHash, r.Protocol,
-		r.Size, r.Seeders, r.Leechers, formatTime(r.PublishedAt), string(parsed), formatTime(now()))
+		r.Size, r.Seeders, r.Leechers, formatTime(r.PublishedAt), string(parsed),
+		categories, formatTime(now()))
 	if err != nil {
 		return fmt.Errorf("store: upsert release %q: %w", r.Title, err)
 	}
@@ -86,9 +98,11 @@ func scanRelease(sc scanner) (*core.Release, error) {
 		r           core.Release
 		publishedAt string
 		parsed      string
+		categories  string
 	)
 	err := sc.Scan(&r.ID, &r.IndexerID, &r.Indexer, &r.Title, &r.GUID, &r.DownloadURL,
-		&r.InfoHash, &r.Protocol, &r.Size, &r.Seeders, &r.Leechers, &publishedAt, &parsed)
+		&r.InfoHash, &r.Protocol, &r.Size, &r.Seeders, &r.Leechers, &publishedAt, &parsed,
+		&categories)
 	if err != nil {
 		return nil, err
 	}
@@ -96,6 +110,9 @@ func scanRelease(sc scanner) (*core.Release, error) {
 		// As with unmatched files: a row whose JSON no longer decodes must
 		// still be readable, because the title is re-parseable at any time.
 		_ = json.Unmarshal([]byte(parsed), &r.Parsed)
+	}
+	if categories != "" {
+		_ = json.Unmarshal([]byte(categories), &r.Categories)
 	}
 	r.PublishedAt = parseTime(publishedAt)
 	return &r, nil

@@ -106,7 +106,7 @@ func (m *Manager) removeItemFiles(ctx context.Context, dir, nfoName string, file
 
 	prune := make([]string, 0, len(files)+1)
 	for _, f := range files {
-		abs, err := m.insideLibrary(f.Path)
+		abs, err := m.insideLibrary(ctx, f.Path)
 		if err != nil {
 			m.refuseRemoval(ctx, f.Path, err)
 			continue
@@ -121,7 +121,7 @@ func (m *Manager) removeItemFiles(ctx context.Context, dir, nfoName string, file
 	}
 
 	if dir != "" {
-		abs, err := m.insideLibrary(dir)
+		abs, err := m.insideLibrary(ctx, dir)
 		if err != nil {
 			m.refuseRemoval(ctx, dir, err)
 		} else {
@@ -135,7 +135,7 @@ func (m *Manager) removeItemFiles(ctx context.Context, dir, nfoName string, file
 	}
 
 	for _, abs := range prune {
-		if err := m.pruneEmpty(abs); err != nil {
+		if err := m.pruneEmpty(ctx, abs); err != nil {
 			return err
 		}
 	}
@@ -166,7 +166,7 @@ func (m *Manager) recycleItemFiles(ctx context.Context, dir, nfoName string, fil
 	movedFiles := make([]string, 0, len(files))
 	moved := 0
 	move := func(rel string) (bool, error) {
-		abs, err := m.insideLibrary(rel)
+		abs, err := m.insideLibrary(ctx, rel)
 		if err != nil {
 			m.refuseRemoval(ctx, rel, err)
 			return false, nil
@@ -205,7 +205,7 @@ func (m *Manager) recycleItemFiles(ctx context.Context, dir, nfoName string, fil
 		}
 	}
 	for _, abs := range prune {
-		if err := m.pruneEmpty(abs); err != nil {
+		if err := m.pruneEmpty(ctx, abs); err != nil {
 			return nil, err
 		}
 	}
@@ -262,15 +262,21 @@ func (m *Manager) HandleRecycleCleanup(ctx context.Context, _ *store.Store, _ js
 }
 
 // insideLibrary resolves a storage-root-relative path and returns it only when
-// it lands strictly inside one of the library's section directories.
+// it lands strictly inside one of the removable library roots.
 //
 // It is the one guard every removal goes through, and it answers two questions
 // at once. A path that escapes the storage root — an absolute row written
 // before the path model was enforced, or one with a ".." in it — is not under
-// any section and is refused. And a path that *is* a section directory, the
-// library directory, or the storage root itself is refused too: those are the
-// layout SPEC §6 promises to players, and they outlive every item in them.
-func (m *Manager) insideLibrary(rel string) (string, error) {
+// any root and is refused. And a path that *is* a library root, the library
+// directory, or the storage root itself is refused too: those are the layout
+// SPEC §6 promises to players, and they outlive every item in them.
+//
+// Adult roots are deliberately NOT removable through this guard, and never
+// have been (the old fixed list was Movies and TV). An adult file a removal
+// names is refused with a feed warning rather than deleted — the same
+// asymmetry the module's disable contract has: turning things off deletes
+// nothing.
+func (m *Manager) insideLibrary(ctx context.Context, rel string) (string, error) {
 	root, err := filepath.Abs(m.root)
 	if err != nil {
 		return "", fmt.Errorf("library: resolve storage root %s: %w", m.root, err)
@@ -279,17 +285,40 @@ func (m *Manager) insideLibrary(rel string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("library: resolve %s: %w", rel, err)
 	}
-	if !insideSection(root, abs) {
+	roots, err := m.removableRoots(ctx)
+	if err != nil {
+		return "", err
+	}
+	if !insideRoots(root, abs, roots) {
 		return "", fmt.Errorf("library: %s: %w", rel, ErrOutsideLibrary)
 	}
 	return abs, nil
 }
 
-// insideSection reports whether abs is strictly below library/Movies or
-// library/TV under root. Both paths are already absolute and cleaned.
-func insideSection(root, abs string) bool {
-	for _, section := range []string{MoviesDir, TVDir} {
-		base := filepath.Join(root, LibraryDir, section) + string(filepath.Separator)
+// removableRoots lists the storage-root-relative roots removals may touch:
+// every non-adult library's root (see insideLibrary for why adult roots are
+// excluded).
+func (m *Manager) removableRoots(ctx context.Context) ([]string, error) {
+	libs, err := m.store.ListLibraries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	roots := make([]string, 0, len(libs))
+	for _, lib := range libs {
+		if lib.Kind == core.LibraryKindAdult || lib.RootPath == "" {
+			continue
+		}
+		roots = append(roots, lib.RootPath)
+	}
+	return roots, nil
+}
+
+// insideRoots reports whether abs is strictly below one of the given
+// storage-root-relative roots under root. root and abs are already absolute
+// and cleaned.
+func insideRoots(root, abs string, roots []string) bool {
+	for _, r := range roots {
+		base := filepath.Join(root, filepath.FromSlash(r)) + string(filepath.Separator)
 		if strings.HasPrefix(abs, base) {
 			return true
 		}
@@ -298,14 +327,18 @@ func insideSection(root, abs string) bool {
 }
 
 // pruneEmpty removes abs and each parent that the removal emptied, stopping as
-// soon as a directory still holds something or the walk reaches a section
-// directory.
-func (m *Manager) pruneEmpty(abs string) error {
+// soon as a directory still holds something or the walk reaches a library
+// root.
+func (m *Manager) pruneEmpty(ctx context.Context, abs string) error {
 	root, err := filepath.Abs(m.root)
 	if err != nil {
 		return fmt.Errorf("library: resolve storage root %s: %w", m.root, err)
 	}
-	for insideSection(root, abs) {
+	roots, err := m.removableRoots(ctx)
+	if err != nil {
+		return err
+	}
+	for insideRoots(root, abs, roots) {
 		entries, err := os.ReadDir(abs)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):

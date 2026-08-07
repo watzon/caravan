@@ -119,7 +119,7 @@ func TestGetSendsAPIKeyAndPath(t *testing.T) {
 		"/movie/78": {okJSON(t, "movie_detail.json")},
 	})
 
-	if _, err := c.GetMovie(context.Background(), 78); err != nil {
+	if _, err := c.GetMovie(context.Background(), "78"); err != nil {
 		t.Fatalf("GetMovie: %v", err)
 	}
 
@@ -186,7 +186,7 @@ func TestAPIErrors(t *testing.T) {
 				"/movie/78": {errJSON(t, tt.status, tt.fixture)},
 			})
 
-			_, err := c.GetMovie(context.Background(), 78)
+			_, err := c.GetMovie(context.Background(), "78")
 			if err == nil {
 				t.Fatal("GetMovie: want error, got nil")
 			}
@@ -225,7 +225,7 @@ func TestRateLimitRetriesOnceAndSucceeds(t *testing.T) {
 		return nil
 	}
 
-	m, err := c.GetMovie(context.Background(), 78)
+	m, err := c.GetMovie(context.Background(), "78")
 	if err != nil {
 		t.Fatalf("GetMovie: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestRateLimitGivesUpAfterOneRetry(t *testing.T) {
 		"/movie/78": {throttled},
 	})
 
-	_, err := c.GetMovie(context.Background(), 78)
+	_, err := c.GetMovie(context.Background(), "78")
 	if !errors.Is(err, ErrRateLimited) {
 		t.Fatalf("errors.Is(err, ErrRateLimited) = false; err = %v", err)
 	}
@@ -272,7 +272,7 @@ func TestRateLimitRetryHonorsContext(t *testing.T) {
 		return sleepCtx(ctx, d)
 	}
 
-	_, err := c.GetMovie(ctx, 78)
+	_, err := c.GetMovie(ctx, "78")
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want context.Canceled", err)
 	}
@@ -375,7 +375,7 @@ func TestDecodeErrorIsReported(t *testing.T) {
 		"/movie/78": {{status: http.StatusOK, body: []byte("{not json")}},
 	})
 
-	_, err := c.GetMovie(context.Background(), 78)
+	_, err := c.GetMovie(context.Background(), "78")
 	if err == nil {
 		t.Fatal("GetMovie: want decode error, got nil")
 	}
@@ -394,7 +394,7 @@ func TestTransportErrorDoesNotLeakAPIKey(t *testing.T) {
 	c := New(testAPIKey, &http.Client{Timeout: time.Second})
 	c.BaseURL = base
 
-	_, err := c.GetMovie(context.Background(), 78)
+	_, err := c.GetMovie(context.Background(), "78")
 	if err == nil {
 		t.Fatal("GetMovie: want transport error, got nil")
 	}
@@ -461,5 +461,30 @@ func TestTestDoesNotConfuseAnOutageWithABadKey(t *testing.T) {
 	}
 	if errors.Is(err, core.ErrMetadataUnauthorized) {
 		t.Fatalf("a 502 reported itself as a rejected credential: %v", err)
+	}
+}
+
+// A ref this client cannot read is a wiring bug in Caravan — another provider's
+// ref reached a TMDB client — not a title TMDB is missing. It must NOT read as
+// ErrNotFound, which upstream parks a file as "unmatched" and moves on, and it
+// must not cost a request to discover.
+func TestGetRejectsForeignRefsWithoutAsking(t *testing.T) {
+	refs := []string{"9f3b1c2e-0000-4a5b-8c9d-1e2f3a4b5c6d", "", "tt0083658", "-4", "0"}
+	for _, ref := range refs {
+		c, s := newStub(t, nil)
+
+		if _, err := c.GetMovie(context.Background(), ref); !errors.Is(err, ErrInvalidRef) {
+			t.Errorf("GetMovie(%q) = %v, want ErrInvalidRef", ref, err)
+		} else if errors.Is(err, ErrNotFound) {
+			t.Errorf("GetMovie(%q) also reads as ErrNotFound", ref)
+		}
+		if _, err := c.GetSeries(context.Background(), ref); !errors.Is(err, ErrInvalidRef) {
+			t.Errorf("GetSeries(%q) = %v, want ErrInvalidRef", ref, err)
+		} else if errors.Is(err, ErrNotFound) {
+			t.Errorf("GetSeries(%q) also reads as ErrNotFound", ref)
+		}
+		if seen := s.seen(); len(seen) != 0 {
+			t.Errorf("ref %q reached TMDB as %+v", ref, seen)
+		}
 	}
 }

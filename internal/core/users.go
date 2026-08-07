@@ -36,18 +36,15 @@ type User struct {
 	PasswordHash string
 	// Role is RoleAdmin or RoleMember.
 	Role string
-	// AdultAccess is the admin-granted permission to see the adult module
-	// (PLAN phase 9 task 5). It is the one permission that does live on this
-	// row rather than in the API's allowlist, and the exception proves the rule
-	// above it: every other flag would WIDEN what an account may reach, which
-	// is why they are not stored. This one only ever narrows — it is checked in
-	// addition to the allowlist and to the server-wide adult_enabled setting
-	// (see AdultVisible), so a row somebody managed to flip still opens nothing
-	// the owner has not turned on server-wide.
+	// There is deliberately no permission flag here, not even a narrowing one.
+	// `adult_access` was the single exception until migration 0028 dropped it:
+	// a per-account grant on the row, checked in addition to the allowlist. What
+	// replaced it lives in `library_access`, keyed by the library it grants — a
+	// grant names a thing, and a boolean on a person can only name a category
+	// somebody has to keep in sync with the libraries in it.
 	//
-	// Meaningless on an admin, who is implicitly granted; it is stored anyway
-	// so a demoted admin does not silently keep access.
-	AdultAccess bool
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	// The rule above therefore has no exception left. A permission that lives on
+	// this row is a permission somebody can grant themselves.
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }

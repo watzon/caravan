@@ -8,7 +8,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import AddItemModal from './AddItemModal.svelte';
-import type { SessionUser } from '../api/types';
+import type { MovieMeta, SeriesMeta, SessionUser } from '../api/types';
 import { session } from '../state/session.svelte';
 import { clearToasts, toasts } from '../state/toast.svelte';
 
@@ -18,7 +18,9 @@ let app: Record<string, unknown> | undefined;
 function mountModal(props: {
   kind?: 'movie' | 'series' | 'site' | null;
   initialKind?: 'movie' | 'series' | 'site';
-  onpick?: (kind: 'movie' | 'series', tmdbID: number) => void;
+  libraryID?: number;
+  onpick?: (kind: 'movie' | 'series', row: MovieMeta | SeriesMeta) => void;
+  onadded?: (kind: 'movie' | 'series', item: { id: number; title: string }) => void;
   onclose?: () => void;
 } = {}): HTMLElement {
   host = document.createElement('div');
@@ -380,6 +382,49 @@ describe('AddItemModal', () => {
     expect((post?.body as Record<string, unknown>).search_now).toBeUndefined();
   });
 
+  /**
+   * The grab-target dialog adds a title mid-flow and then ties a release to
+   * it, so the add must not navigate: it would abandon the release the user
+   * came in with. `onadded` is what suppresses that, and nothing else.
+   */
+  it('hands a created movie back instead of navigating, when asked to', async () => {
+    vi.useFakeTimers();
+    const calls = stubSearchAndAdd(undefined, { id: 9, title: 'Dune' });
+    const handed: unknown[] = [];
+    let closed = 0;
+    mountModal({
+      onadded: (kind, item) => handed.push([kind, item]),
+      onclose: () => (closed += 1),
+    });
+
+    await addFirstResult();
+
+    // The add itself is unchanged; only what happens afterwards is.
+    expect(calls.find((c) => c.method === 'POST')?.url).toBe('/api/v1/library/movies');
+    expect(handed).toEqual([['movie', { id: 9, title: 'Dune' }]]);
+    expect(closed).toBe(0);
+    expect(window.location.pathname).not.toBe('/movies/9');
+  });
+
+  it('hands a created series back under its own kind', async () => {
+    vi.useFakeTimers();
+    stubSearchAndAdd(undefined, { id: 12, title: 'Severance' });
+    const handed: unknown[] = [];
+    mountModal({ initialKind: 'series', onadded: (kind, item) => handed.push([kind, item]) });
+
+    await addFirstResult('series');
+
+    expect(handed).toEqual([['series', { id: 12, title: 'Severance' }]]);
+  });
+
+  it('drops the adult scope for a hand-back caller, which can only tie two kinds', () => {
+    session.user = { username: 'admin', role: 'admin', open: false, adult: true } as SessionUser;
+    mountModal({ onadded: () => {} });
+
+    const tabs = [...host!.querySelectorAll('[role="tab"]')].map((t) => t.textContent?.trim());
+    expect(tabs).toEqual(['Movies', 'Series']);
+  });
+
   it('forgets the choice between modals: the options are per-add, not a habit', async () => {
     vi.useFakeTimers();
     stubSearchAndAdd();
@@ -708,7 +753,9 @@ describe('AddItemModal', () => {
     await vi.advanceTimersByTimeAsync(0);
     flushSync();
 
-    expect(onpick).toHaveBeenCalledWith('movie', 15);
+    // The whole row, not an id: a chain hit is named by provider/provider_ref,
+    // and everything but a TMDB hit carries tmdb_id 0.
+    expect(onpick).toHaveBeenCalledWith('movie', expect.objectContaining({ tmdb_id: 15 }));
     expect(buttonWithText('Add title anyway')).toBeNull();
     expect(buttonWithText('Add unreleased title')).toBeNull();
     expect(calls.filter((call) => call.method === 'POST')).toHaveLength(0);
@@ -1349,5 +1396,442 @@ describe('AddItemModal — metadata credential', () => {
 
     expect(host!.textContent).toContain('tmdb: http 500');
     expect(host!.textContent).not.toContain('Settings → Metadata');
+  });
+});
+
+describe('AddItemModal — target library', () => {
+  afterEach(() => {
+    if (app) unmount(app);
+    app = undefined;
+    host?.remove();
+    host = undefined;
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+    clearToasts();
+  });
+
+  function lib(over: Record<string, unknown>) {
+    return {
+      id: 1,
+      kind: 'tv',
+      name: 'Series',
+      root_path: 'library/TV',
+      provider: 'tmdb',
+      is_default: true,
+      item_count: 0,
+      dlna_visible: true,
+      route_torrent: '',
+      route_usenet: '',
+      quality_profile_id: 0,
+      indexers: [],
+      ...over,
+    };
+  }
+
+  it('offers a library select when a kind has several and sends the pick', async () => {
+    vi.useFakeTimers();
+    const calls: { url: string; method: string; body: unknown }[] = [];
+    const series = [
+      {
+        tmdb_id: 2,
+        title: 'Frieren',
+        year: 2023,
+        overview: '',
+        first_air_date: '2023-09-29',
+        vote_average: 8.9,
+        vote_count: 1000,
+        poster_url: '',
+      },
+    ];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? 'GET';
+        calls.push({
+          url,
+          method,
+          body: typeof init?.body === 'string' ? JSON.parse(init.body) : null,
+        });
+        let payload: unknown = { movies: [], series };
+        let status = 200;
+        if (url.includes('/libraries')) {
+          payload = {
+            libraries: [
+              lib({}),
+              lib({ id: 9, name: 'Anime', root_path: 'library/Anime', is_default: false }),
+            ],
+          };
+        } else if (method === 'POST') {
+          payload = { id: 7, title: 'Frieren' };
+          status = 201;
+        }
+        return new Response(JSON.stringify(payload), {
+          status,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    );
+
+    const { libraries } = await import('../state/libraries.svelte');
+    await libraries.load(true);
+
+    mountModal({ initialKind: 'series' });
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    const select = host!.querySelector(
+      'select[aria-label="Target library"]',
+    ) as HTMLSelectElement;
+    expect(select, 'library select').not.toBeNull();
+    select.value = '9';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+
+    const input = host!.querySelector('input[type="search"]') as HTMLInputElement;
+    input.value = 'frieren';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    await vi.advanceTimersByTimeAsync(300);
+    flushSync();
+
+    const add = host!.querySelector('ul button') as HTMLButtonElement;
+    add.click();
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    const post = calls.find((c) => c.method === 'POST');
+    expect(post?.url).toBe('/api/v1/library/series');
+    expect(post?.body).toMatchObject({ tmdb_id: 2, library_id: 9 });
+  });
+});
+
+/**
+ * Merged provider chains (PLAN phase 8).
+ *
+ * A library may name several metadata providers, and then one search is
+ * several providers' answers in one list. Three things change, and each is a
+ * way the single-provider dialog was quietly wrong:
+ *
+ *   - identity. Every hit from a provider that is not TMDB carries tmdb_id 0,
+ *     so the old `(row.tmdb_id)` key gave a whole AniList page the same key
+ *     and Svelte refused to render the list at all.
+ *   - the question. The chain belongs to a library, so changing the target
+ *     library asks a different set of providers and must re-run the search.
+ *   - the answer. An add says which provider identified the title, because
+ *     "154587" means different titles to different providers.
+ */
+describe('AddItemModal — provider chains', () => {
+  const PROVIDERS = [
+    { id: 'tmdb', name: 'TMDB', kinds: ['movie', 'tv'] },
+    { id: 'anilist', name: 'AniList', kinds: ['tv'] },
+  ];
+
+  /** Two providers' hits in one list, the AniList ones with no TMDB id at all. */
+  const CHAIN_SERIES = [
+    {
+      tmdb_id: 95_479,
+      provider: 'tmdb',
+      provider_ref: '95479',
+      title: 'Jujutsu Kaisen',
+      year: 2020,
+      overview: '',
+      first_air_date: '2020-10-03',
+      vote_average: 8.6,
+      vote_count: 3_000,
+      poster_url: '',
+    },
+    {
+      tmdb_id: 0,
+      provider: 'anilist',
+      provider_ref: '113415',
+      title: 'Jujutsu Kaisen (AniList)',
+      year: 2020,
+      overview: '',
+      first_air_date: '2020-10-03',
+      vote_average: 8.6,
+      vote_count: 3_000,
+      poster_url: '',
+    },
+    {
+      tmdb_id: 0,
+      provider: 'anilist',
+      provider_ref: '145064',
+      title: 'Jujutsu Kaisen 2nd Season',
+      year: 2023,
+      overview: '',
+      first_air_date: '2023-07-06',
+      vote_average: 8.7,
+      vote_count: 1_200,
+      poster_url: '',
+    },
+  ];
+
+  function lib(over: Record<string, unknown>) {
+    return {
+      id: 1,
+      kind: 'tv',
+      name: 'Series',
+      root_path: 'library/TV',
+      provider: 'tmdb',
+      providers: ['tmdb'],
+      is_default: true,
+      item_count: 0,
+      dlna_visible: true,
+      route_torrent: '',
+      route_usenet: '',
+      quality_profile_id: 0,
+      indexers: [],
+      ...over,
+    };
+  }
+
+  const LIBRARIES = [
+    lib({}),
+    lib({
+      id: 9,
+      name: 'Anime',
+      root_path: 'library/Anime',
+      is_default: false,
+      provider: 'tmdb',
+      providers: ['tmdb', 'anilist'],
+    }),
+  ];
+
+  interface Call {
+    url: string;
+    method: string;
+    body: unknown;
+  }
+
+  let calls: Call[];
+
+  /**
+   * Answers /search with the merged chain, /libraries and
+   * /libraries/providers with the fixtures above, and any POST with a created
+   * item. Every request is recorded so a test can assert what was asked.
+   */
+  function stubChain(): Call[] {
+    calls = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? 'GET';
+        calls.push({
+          url,
+          method,
+          body: typeof init?.body === 'string' ? JSON.parse(init.body) : null,
+        });
+        const json = (payload: unknown, status = 200) =>
+          new Response(JSON.stringify(payload), {
+            status,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        if (method === 'POST') return json({ id: 7, title: 'Jujutsu Kaisen' }, 201);
+        if (url.includes('/libraries/providers')) return json({ providers: PROVIDERS });
+        if (url.includes('/libraries')) return json({ libraries: LIBRARIES });
+        return json({
+          movies: [],
+          series: CHAIN_SERIES,
+          providers: ['tmdb', 'anilist'],
+          library_id: 9,
+          errors: [],
+        });
+      }),
+    );
+    return calls;
+  }
+
+  const searches = () => calls.filter((c) => c.url.includes('/api/v1/search'));
+
+  async function loadStores() {
+    const [{ libraries }, { providers }] = await Promise.all([
+      import('../state/libraries.svelte'),
+      import('../state/providers.svelte'),
+    ]);
+    providers.all = [];
+    providers.loaded = false;
+    await libraries.load(true);
+  }
+
+  async function type(text: string) {
+    const input = host!.querySelector('input[type="search"]') as HTMLInputElement;
+    input.value = text;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    await vi.advanceTimersByTimeAsync(300);
+    flushSync();
+  }
+
+  function targetSelect(): HTMLSelectElement {
+    const found = host!.querySelector('select[aria-label="Target library"]');
+    expect(found, 'library select').not.toBeNull();
+    return found as HTMLSelectElement;
+  }
+
+  afterEach(async () => {
+    const { providers } = await import('../state/providers.svelte');
+    providers.all = [];
+    providers.loaded = false;
+  });
+
+  it('renders every chain hit and names the provider that answered', async () => {
+    vi.useFakeTimers();
+    stubChain();
+    await loadStores();
+    mountModal({ initialKind: 'series' });
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    await type('jujutsu');
+
+    // Three rows, two of which share tmdb_id 0: keying on it made this list
+    // impossible to render at all.
+    const rows = [...host!.querySelectorAll('ul li')];
+    expect(rows).toHaveLength(3);
+    // Named, not id'd: the badge reads the provider list, not the raw token.
+    expect(rows[0]!.textContent).toContain('TMDB');
+    expect(rows[1]!.textContent).toContain('AniList');
+    expect(rows[2]!.textContent).toContain('AniList');
+    // The copy stops naming one provider once several are answering.
+    expect(host!.querySelector('input[type="search"]')?.getAttribute('aria-label')).toBe(
+      'Search the metadata providers',
+    );
+  });
+
+  it('leaves a single-provider chain unbadged and its copy naming TMDB', async () => {
+    vi.useFakeTimers();
+    calls = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        calls.push({ url, method: init?.method ?? 'GET', body: null });
+        const json = (payload: unknown) =>
+          new Response(JSON.stringify(payload), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        if (url.includes('/libraries')) return json({ libraries: [lib({})] });
+        return json({
+          movies: [],
+          series: [CHAIN_SERIES[0]],
+          providers: ['tmdb'],
+          library_id: 1,
+          errors: [],
+        });
+      }),
+    );
+    await loadStores();
+    mountModal({ initialKind: 'series' });
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    await type('jujutsu');
+
+    expect(host!.querySelector('ul li')!.textContent).not.toContain('TMDB');
+    // Not even fetched: the provider list is admin-only, and nothing on screen
+    // needs a provider's name.
+    expect(calls.some((c) => c.url.includes('/libraries/providers'))).toBe(false);
+    expect(host!.querySelector('input[type="search"]')?.getAttribute('aria-label')).toBe(
+      'Search TMDB',
+    );
+  });
+
+  it('re-asks the search when the target library changes, naming the new one', async () => {
+    vi.useFakeTimers();
+    stubChain();
+    await loadStores();
+    mountModal({ initialKind: 'series' });
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    await type('jujutsu');
+    // The default library needs no id: an absent library_id already means it.
+    expect(searches().at(-1)!.url).toBe('/api/v1/search?q=jujutsu&type=series');
+
+    const select = targetSelect();
+    select.value = '9';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    await vi.advanceTimersByTimeAsync(300);
+    flushSync();
+
+    // Not just one more request: the same query asked of a different chain.
+    expect(searches()).toHaveLength(2);
+    expect(searches().at(-1)!.url).toBe('/api/v1/search?q=jujutsu&type=series&library_id=9');
+  });
+
+  it('adds the ref pair the picked row carries, beside the compat tmdb_id', async () => {
+    vi.useFakeTimers();
+    stubChain();
+    await loadStores();
+    mountModal({ initialKind: 'series' });
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    await type('jujutsu');
+
+    // The second row: an AniList hit, which tmdb_id alone could not name.
+    const add = [...host!.querySelectorAll<HTMLButtonElement>('ul button')][1]!;
+    add.click();
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    const post = calls.find((c) => c.method === 'POST');
+    expect(post?.url).toBe('/api/v1/library/series');
+    expect(post?.body).toMatchObject({
+      tmdb_id: 0,
+      provider: 'anilist',
+      provider_ref: '113415',
+    });
+  });
+
+  it('sends no half pair for a stub from before provider refs existed', async () => {
+    vi.useFakeTimers();
+    calls = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? 'GET';
+        calls.push({
+          url,
+          method,
+          body: typeof init?.body === 'string' ? JSON.parse(init.body) : null,
+        });
+        const json = (payload: unknown, status = 200) =>
+          new Response(JSON.stringify(payload), {
+            status,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        if (method === 'POST') return json({ id: 7, title: 'Jujutsu Kaisen' }, 201);
+        if (url.includes('/libraries')) return json({ libraries: [lib({})] });
+        // No provider, no ref: what a server from before chains answered with.
+        return json({
+          movies: [],
+          series: [{ ...CHAIN_SERIES[0], provider: '', provider_ref: '' }],
+          providers: [],
+          library_id: 0,
+          errors: [],
+        });
+      }),
+    );
+    await loadStores();
+    mountModal({ initialKind: 'series' });
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    await type('jujutsu');
+    (host!.querySelector('ul button') as HTMLButtonElement).click();
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    // Half a pair is a 400, so a row with neither half sends neither.
+    const body = calls.find((c) => c.method === 'POST')?.body as Record<string, unknown>;
+    expect(body).toMatchObject({ tmdb_id: 95_479 });
+    expect(body.provider).toBeUndefined();
+    expect(body.provider_ref).toBeUndefined();
   });
 });

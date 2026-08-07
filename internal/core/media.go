@@ -12,13 +12,18 @@ import "time"
 
 // Movie is a library movie: a wanted item, an owned item, or both.
 type Movie struct {
-	ID        int64
-	TMDBID    int64
-	IMDBID    string
-	Title     string
-	SortTitle string
-	Year      int
-	Overview  string
+	ID int64
+	// Provider and ProviderRef are the provider that identified this row and
+	// that provider's own id — the item is PINNED to it; a refresh asks this
+	// provider and no other. Empty on a row no provider has identified.
+	Provider    string
+	ProviderRef string
+	TMDBID      int64
+	IMDBID      string
+	Title       string
+	SortTitle   string
+	Year        int
+	Overview    string
 	// Path is the movie's folder, relative to the storage root
 	// ("Movies/Big Buck Bunny (2008)"). Empty until the movie is organized.
 	Path string
@@ -34,6 +39,10 @@ type Movie struct {
 	// QualityProfileID references quality_profiles.id; 0 means "use the
 	// default profile".
 	QualityProfileID int64
+	// LibraryID references libraries.id — which movie library owns this row.
+	// Soft like QualityProfileID; 0 means "unknown", which resolves through
+	// the kind's default library until a rescan heals it from Path.
+	LibraryID int64
 	// ReleaseDate is the theatrical release date, zero when unknown.
 	ReleaseDate time.Time
 	// DigitalRelease and PhysicalRelease are the home-release dates, zero when
@@ -91,8 +100,13 @@ func ValidSeriesKind(s string) bool {
 
 // Series is a library TV series, or — when Kind is SeriesKindAdult — a site.
 type Series struct {
-	ID     int64
-	TMDBID int64
+	ID int64
+	// Provider and ProviderRef are the provider that identified this row and
+	// that provider's own id — the item is PINNED to it; a refresh asks this
+	// provider and no other. Empty on a row no provider has identified.
+	Provider    string
+	ProviderRef string
+	TMDBID      int64
 	// StashID is the stash-box id of the site behind an adult series, a UUID
 	// string. Empty on every television series and on an adult series that has
 	// not been matched to a site yet. It is unique among the rows that set it,
@@ -126,6 +140,11 @@ type Series struct {
 	// QualityProfileID references quality_profiles.id; 0 means "use the
 	// default profile".
 	QualityProfileID int64
+	// LibraryID references libraries.id — which library owns this series. Its
+	// library's kind always agrees with Kind (UpsertSeries asserts it). Soft
+	// like QualityProfileID; 0 means "unknown", which resolves through the
+	// kind's default library until a rescan heals it from Path.
+	LibraryID int64
 	// FirstAired is the first air date, zero when unknown.
 	FirstAired time.Time
 	AddedAt    time.Time
@@ -169,6 +188,11 @@ type Episode struct {
 	// it is the release date, and its year is the season the scene lands in.
 	AirDate   time.Time
 	Monitored bool
+	// AbsoluteNumber is the provider's series-wide episode number — the count
+	// an anime-style release name uses ("Show - 105") — and 0 when no provider
+	// ever served one for this episode. Zero is "not known", not "the zeroth
+	// episode", so nothing may derive it (migration 0025).
+	AbsoluteNumber int
 	// Scene is the scene-side metadata of an adult episode, nil on every
 	// television episode. It rides in one JSON column because nothing queries
 	// on it — it is rendered on a scene row and nowhere else.
@@ -342,5 +366,9 @@ type UnmatchedFile struct {
 	// Reason explains why it was not matched ("no metadata match",
 	// "low parser confidence", …).
 	Reason string
-	SeenAt time.Time
+	// LibraryID scopes the manual match: a file parked by an untied universal
+	// search grab already knows which library its user chose, and the review
+	// screen pre-selects it. 0 — every scan-parked file — means unscoped.
+	LibraryID int64
+	SeenAt    time.Time
 }

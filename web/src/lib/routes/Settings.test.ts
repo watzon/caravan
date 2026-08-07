@@ -6,7 +6,10 @@ import FilterOptions from '../components/FilterOptions.svelte';
 import PosterCard from '../components/PosterCard.svelte';
 import { reactiveProps } from '../reactiveprops.svelte';
 import { system } from '../state/system.svelte';
+import { providers } from '../state/providers.svelte';
+import { session } from '../state/session.svelte';
 import { navigate, router } from '../router.svelte';
+import { SETTINGS_CATALOG, settingsMatches } from '../settings/catalog';
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
@@ -45,6 +48,12 @@ beforeEach(() => {
 afterEach(() => {
   // A module singleton: a status one test seeded must not decide the next.
   system.status = null;
+  // Same for the provider list, which load() otherwise fetches only once.
+  providers.all = [];
+  providers.loaded = false;
+  // And for the identity: a session one test seeded decides whether the next
+  // one renders an adult-module card at all.
+  session.user = null;
   unmount(app);
   host.remove();
   localStorage.clear();
@@ -89,6 +98,8 @@ function stubFetch() {
     if (url.endsWith('/usenet-servers')) return jsonResponse({ usenet_servers: [] });
     if (url.endsWith('/download-clients/types')) return jsonResponse({ types: [] });
     if (url.endsWith('/download-clients')) return jsonResponse({ download_clients: [] });
+    if (url.endsWith('/libraries/providers')) return jsonResponse({ providers: [] });
+    if (url.endsWith('/quality-profiles')) return jsonResponse({ profiles: [] });
     if (url.endsWith('/dlna')) {
       return jsonResponse({ enabled: true, friendly_name: 'Caravan', advertising: true, uuid: 'u' });
     }
@@ -296,6 +307,37 @@ describe('Settings overview and route resolution', () => {
     expect(host.querySelector('#dlna-friendly-name')).not.toBeNull();
     expect(host.querySelector('#jellyfin-url')).not.toBeNull();
   });
+
+  /**
+   * The Adult content page dissolved into the library cards (PLAN Part 3
+   * phase 5): its master switch is a library's Active toggle and its member
+   * roster is a library's Access card. A bookmark has to land where both now
+   * are, not on the generic Metadata fallback that an unknown slug gets.
+   */
+  it('lands the retired adult slug on Libraries', async () => {
+    stubFetch();
+    app = mount(Settings, { target: host, props: { section: 'adult' } });
+    await settle();
+
+    expect(host.querySelector('h1#libraries')?.textContent).toContain('Libraries');
+    expect(host.querySelector('h1#metadata')).toBeNull();
+  });
+
+  it('offers no Adult content destination anywhere in the catalog', async () => {
+    stubFetch();
+    app = mount(Settings, { target: host });
+    await settle();
+
+    expect(host.textContent).not.toContain('Adult content');
+    expect(host.querySelector('a[href^="/settings/adult"]')).toBeNull();
+
+    // The words somebody would have searched for on the retired page have to
+    // reach the screen that answers them now.
+    for (const term of ['adult', 'privacy', 'access', 'restricted', 'active']) {
+      const hits = SETTINGS_CATALOG.filter((entry) => settingsMatches(entry, term));
+      expect(hits.map((entry) => entry.label), term).toContain('Libraries');
+    }
+  });
 });
 
 describe('Plan 020 truncation contracts', () => {
@@ -435,7 +477,28 @@ describe('Settings engine tab', () => {
  * has to be saved to find out it was one.
  */
 describe('Settings metadata pane', () => {
-  function stubMetadata(testReply: () => Response): { url: string; method: string; body: unknown }[] {
+  const ALL_PROVIDERS = [
+    { id: 'tmdb', name: 'TMDB', kinds: ['movie', 'tv'] },
+    { id: 'anilist', name: 'AniList', kinds: ['tv'] },
+    { id: 'stashbox', name: 'Stash-box', kinds: ['adult'] },
+  ];
+
+  const STASHBOX_INSTANCES = [
+    {
+      id: 1,
+      provider_id: 'stashbox',
+      name: 'ThePornDB',
+      endpoint: 'https://theporndb.net/graphql',
+      has_api_key: true,
+      library_count: 1,
+      item_count: 4,
+    },
+  ];
+
+  function stubMetadata(
+    testReply: () => Response,
+    providerList: unknown[] = ALL_PROVIDERS,
+  ): { url: string; method: string; body: unknown }[] {
     const calls: { url: string; method: string; body: unknown }[] = [];
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -445,6 +508,14 @@ describe('Settings metadata pane', () => {
         body: typeof init?.body === 'string' ? JSON.parse(init.body) : null,
       });
       if (url.includes('/settings/metadata/test')) return testReply();
+      if (url.endsWith('/adult/stashbox-instances')) {
+        // What the server answers a session that does not see the module: the
+        // route is not merely empty, it is not there.
+        return session.user?.adult
+          ? jsonResponse({ instances: STASHBOX_INSTANCES })
+          : jsonResponse({ error: 'not found' }, 404);
+      }
+      if (url.endsWith('/libraries/providers')) return jsonResponse({ providers: providerList });
       if (url.endsWith('/settings')) return jsonResponse({ tmdb_api_key_set: 'true' });
       if (url.endsWith('/system/status')) return jsonResponse(SYSTEM_STATUS);
       if (url.endsWith('/indexers')) return jsonResponse({ indexers: [] });
@@ -560,5 +631,179 @@ describe('Settings metadata pane', () => {
 
     expect(host.textContent).not.toContain('No TMDB API key yet');
     expect(host.textContent).not.toContain('TMDB rejected this key');
+  });
+
+  // Jellyfin's split: this page is each provider's own configuration; which
+  // library uses which provider lives in Libraries. The page must say both.
+  it('shows a card per provider and points chain ordering at Libraries', async () => {
+    stubMetadata(() => jsonResponse({ status: 'ok' }));
+    app = mount(Settings, { target: host, props: { section: 'metadata' } });
+    await settle();
+
+    expect(host.textContent).toContain('AniList needs no key or account');
+    expect(host.querySelector('a[href="/settings/libraries#libraries"]')).not.toBeNull();
+  });
+
+  // TVmaze is keyless, so "Ready" is the whole of its configuration. The
+  // negative half is the load-bearing one: a card with a key field on it would
+  // ask for a credential that does not exist, and the next provider to gain one
+  // must not gain it here by accident.
+  it('offers TVmaze as ready with nothing to enter', async () => {
+    stubMetadata(() => jsonResponse({ status: 'ok' }), [
+      ...ALL_PROVIDERS,
+      { id: 'tvmaze', name: 'TVmaze', kinds: ['tv'] },
+    ]);
+    app = mount(Settings, { target: host, props: { section: 'metadata' } });
+    await settle();
+
+    const card = [...host.querySelectorAll('section')].find(
+      (s) => s.querySelector('h3')?.textContent === 'TVmaze',
+    );
+    expect(card).toBeDefined();
+    expect(card!.textContent).toContain('Ready');
+    expect(card!.textContent).toContain('TVmaze needs no key or account');
+    expect(card!.querySelector('input')).toBeNull();
+  });
+
+  // TheTVDB is the second key-based provider, so the card it renders through is
+  // shared with TMDB. These say the shared card is addressed per provider —
+  // its own field ids, its own settings keys, its own `provider` on the test —
+  // which is the whole of what "shared" is allowed to mean.
+  it('offers TheTVDB a key field and the subscriber PIN beside it', async () => {
+    stubMetadata(() => jsonResponse({ status: 'ok' }));
+    app = mount(Settings, { target: host, props: { section: 'metadata' } });
+    await settle();
+
+    const card = [...host.querySelectorAll('section')].find(
+      (s) => s.querySelector('h3')?.textContent === 'TheTVDB',
+    );
+    expect(card).toBeDefined();
+    expect(card!.querySelector('#thetvdb-key')).not.toBeNull();
+    expect(card!.querySelector('#thetvdb-pin')).not.toBeNull();
+    expect(card!.textContent).toContain('Subscriber PIN');
+    // The support question the PIN raises, answered where it is asked.
+    expect(card!.textContent).toContain('Only for user-supported keys. Leave blank for a licensed key.');
+  });
+
+  it('tests the TheTVDB field against TheTVDB, not TMDB', async () => {
+    const calls = stubMetadata(() => jsonResponse({ status: 'ok' }));
+    app = mount(Settings, { target: host, props: { section: 'metadata' } });
+    await settle();
+
+    const field = host.querySelector('#thetvdb-key') as HTMLInputElement;
+    field.value = 'tvdb-key';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+
+    cardButton('#thetvdb-key', 'Test').click();
+    await settle();
+
+    expect(calls.find((c) => c.url.includes('/settings/metadata/test'))).toMatchObject({
+      method: 'POST',
+      body: { api_key: 'tvdb-key', provider: 'thetvdb' },
+    });
+    expect(host.textContent).toContain('TheTVDB accepted this key');
+  });
+
+  it('saves the TheTVDB key and the PIN to their own settings keys', async () => {
+    const calls = stubMetadata(() => jsonResponse({ status: 'ok' }));
+    app = mount(Settings, { target: host, props: { section: 'metadata' } });
+    await settle();
+
+    const key = host.querySelector('#thetvdb-key') as HTMLInputElement;
+    key.value = 'tvdb-key';
+    key.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    cardButton('#thetvdb-key', 'Save').click();
+    await settle();
+    expect(calls.filter((c) => c.method === 'PUT').at(-1)?.body).toEqual({
+      thetvdb_api_key: 'tvdb-key',
+    });
+
+    // A licensed key needs no PIN, so the PIN is savable on its own — a blank
+    // key beside it must not be read as "clear the key".
+    key.value = '';
+    key.dispatchEvent(new Event('input', { bubbles: true }));
+    const pin = host.querySelector('#thetvdb-pin') as HTMLInputElement;
+    pin.value = '  1234  ';
+    pin.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    cardButton('#thetvdb-key', 'Save').click();
+    await settle();
+    expect(calls.filter((c) => c.method === 'PUT').at(-1)?.body).toEqual({ thetvdb_pin: '1234' });
+  });
+
+  // The point of the per-provider map (phase 5): one rejected key marks its own
+  // provider and says nothing about the other.
+  it('reads each card’s badge from that provider’s entry in the status map', async () => {
+    stubMetadata(() => jsonResponse({ status: 'ok' }));
+    system.status = {
+      ...SYSTEM_STATUS,
+      metadata_credentials: {
+        tmdb: { state: 'ok', reason: '', checked_at: '' },
+        thetvdb: { state: 'invalid', reason: 'TheTVDB says no', checked_at: '' },
+      },
+    } as never;
+    app = mount(Settings, { target: host, props: { section: 'metadata' } });
+    await settle();
+
+    const cardFor = (title: string) =>
+      [...host.querySelectorAll('section')].find((s) => s.querySelector('h3')?.textContent === title)!;
+
+    expect(cardFor('TheTVDB').textContent).toContain('Key rejected');
+    expect(cardFor('TheTVDB').textContent).toContain('TheTVDB rejected this key');
+    // The provider's own complaint, not a generic one.
+    expect(cardFor('TheTVDB').textContent).toContain('TheTVDB says no');
+    expect(cardFor('TMDB').textContent).toContain('Connected');
+    expect(cardFor('TMDB').textContent).not.toContain('TMDB rejected this key');
+  });
+
+  // The keyless cards must not gain a field from the card the keyed ones share.
+  it('leaves the keyless providers with nothing to enter', async () => {
+    stubMetadata(() => jsonResponse({ status: 'ok' }), [
+      ...ALL_PROVIDERS,
+      { id: 'tvmaze', name: 'TVmaze', kinds: ['tv'] },
+    ]);
+    app = mount(Settings, { target: host, props: { section: 'metadata' } });
+    await settle();
+
+    for (const title of ['AniList', 'TVmaze']) {
+      const card = [...host.querySelectorAll('section')].find(
+        (s) => s.querySelector('h3')?.textContent === title,
+      );
+      expect(card, `${title} card`).toBeDefined();
+      expect(card!.querySelector('input'), `${title} key input`).toBeNull();
+    }
+  });
+
+  // The pointer card is gone (PLAN Part 2 phase 8): stash-box endpoints are
+  // managed HERE now, one row per configured box.
+  it('manages the stash-box instances for a session that sees the module', async () => {
+    session.user = { username: 'root', role: 'admin', open: false, adult: true };
+    stubMetadata(() => jsonResponse({ status: 'ok' }));
+    app = mount(Settings, { target: host, props: { section: 'metadata' } });
+    await settle();
+
+    const card = [...host.querySelectorAll('section')].find(
+      (s) => s.querySelector('h3')?.textContent === 'Stash-box',
+    );
+    expect(card).toBeDefined();
+    expect(card!.textContent).toContain('ThePornDB');
+    expect(card!.textContent).toContain('https://theporndb.net/graphql');
+    expect(card!.textContent).toContain('Used by 1 library · 4 items');
+    // The old pointer at Adult content is gone with the card it stood in for.
+    expect(host.querySelector('a[href="/settings/adult#adult-content"]')).toBeNull();
+  });
+
+  // Promise-of-absence: an admin the module is not visible to gets no card at
+  // all — not an empty one, and no request that would 404.
+  it('omits the Stash-box card entirely for a session without the module', async () => {
+    const calls = stubMetadata(() => jsonResponse({ status: 'ok' }));
+    app = mount(Settings, { target: host, props: { section: 'metadata' } });
+    await settle();
+
+    expect(host.textContent).toContain('AniList');
+    expect(host.textContent).not.toContain('Stash-box');
+    expect(calls.some((c) => c.url.includes('stashbox-instances'))).toBe(false);
   });
 });

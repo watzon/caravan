@@ -65,10 +65,15 @@ func TestCalendarHidesScenesFromEveryoneWithoutTheGrant(t *testing.T) {
 	}
 	storeCalendarEpisode(t, st, series.ID, 1, 1, "Television", yesterday, true)
 
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	lib := enableAdultLibrary(t, st)
 	seedScene(t, st, "Brazzers", yesterday)
+	// The grant lives in `library_access`, keyed on a real account: it is a
+	// foreign key, so the identities below name rows rather than numbers.
+	grantedUser := createUser(t, st, "granted", testPassword, core.RoleMember)
+	createUser(t, st, "ungranted", testPassword, core.RoleMember)
+	if err := st.SetLibraryAccess(ctx, lib.ID, true, []int64{grantedUser.ID}); err != nil {
+		t.Fatalf("SetLibraryAccess: %v", err)
+	}
 
 	entriesFor := func(u requestUser) []calendarEntry {
 		t.Helper()
@@ -81,8 +86,8 @@ func TestCalendarHidesScenesFromEveryoneWithoutTheGrant(t *testing.T) {
 	}
 
 	admin := requestUser{ID: 1, Role: core.RoleAdmin}
-	ungranted := requestUser{ID: 2, Role: core.RoleMember}
-	granted := requestUser{ID: 3, Role: core.RoleMember, AdultAccess: true}
+	ungranted := requestUser{ID: grantedUser.ID + 1, Role: core.RoleMember}
+	granted := requestUser{ID: grantedUser.ID, Role: core.RoleMember}
 
 	// An admin is implicitly granted, so the scene is on their calendar.
 	if got := entriesFor(admin); !hasTitle(got, "Brazzers") || !hasTitle(got, "Calendar Show") {
@@ -102,9 +107,7 @@ func TestCalendarHidesScenesFromEveryoneWithoutTheGrant(t *testing.T) {
 	}
 
 	// Switch the module off and it is gone for everybody, the admin included.
-	if err := st.SetAdultEnabled(ctx, false); err != nil {
-		t.Fatalf("SetAdultEnabled(false): %v", err)
-	}
+	setAdultLibrariesActive(t, st, false)
 	for _, u := range []requestUser{admin, granted, ungranted} {
 		if got := entriesFor(u); hasTitle(got, "Brazzers") {
 			t.Errorf("%s's calendar carries a scene with the module off: %+v", u.Role, got)
@@ -115,13 +118,10 @@ func TestCalendarHidesScenesFromEveryoneWithoutTheGrant(t *testing.T) {
 // The HTTP surface, for the roles that can reach it: an admin's calendar loses
 // its scenes the moment the module is switched off.
 func TestCalendarEndpointDropsScenesWhenTheModuleIsOff(t *testing.T) {
-	ctx := context.Background()
 	h, st, _ := newTestServer(t)
 	today := calendarDate(time.Now())
 
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	enableAdultLibrary(t, st)
 	seedScene(t, st, "Brazzers", today.AddDate(0, 0, -1))
 
 	titles := func() []string {
@@ -148,9 +148,7 @@ func TestCalendarEndpointDropsScenesWhenTheModuleIsOff(t *testing.T) {
 		t.Fatalf("calendar with the module on = %v, want the scene", got)
 	}
 
-	if err := st.SetAdultEnabled(ctx, false); err != nil {
-		t.Fatalf("SetAdultEnabled(false): %v", err)
-	}
+	setAdultLibrariesActive(t, st, false)
 	if got := titles(); len(got) != 0 {
 		t.Errorf("calendar with the module off = %v, want nothing adult", got)
 	}
@@ -178,9 +176,7 @@ func TestCalendarICSNeverCarriesAScene(t *testing.T) {
 	if err := st.SetSetting(ctx, store.SettingAPIKey, apiKey); err != nil {
 		t.Fatalf("SetSetting(api key): %v", err)
 	}
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	enableAdultLibrary(t, st)
 
 	series := &core.Series{TMDBID: 100, Title: "Calendar Show", SortTitle: "calendar show", Monitored: true}
 	if err := st.UpsertSeries(ctx, series); err != nil {
@@ -216,9 +212,7 @@ func TestSeriesScreenAndStatusCountHoldNoSites(t *testing.T) {
 	if err := st.UpsertSeries(ctx, series); err != nil {
 		t.Fatalf("UpsertSeries: %v", err)
 	}
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	enableAdultLibrary(t, st)
 	seedScene(t, st, "Brazzers", time.Now().UTC())
 
 	rec := do(t, h, http.MethodGet, "/api/v1/library/series", "")

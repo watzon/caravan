@@ -89,9 +89,16 @@ type releasesResponse struct {
 	Query string `json:"query"`
 	// Queries is every search that was run, in the order they were run. It has
 	// one entry for everything but a scene.
-	Queries  []string           `json:"queries"`
-	Releases []releaseJSON      `json:"releases"`
-	Errors   []indexerErrorJSON `json:"errors"`
+	Queries []string `json:"queries"`
+	// Truncated reports that the universal search cut the list at its limit.
+	// Every cut row is still cached, so narrowing the search re-finds it.
+	Truncated bool `json:"truncated,omitempty"`
+	// LibraryID echoes the library whose quality profile scored the rows, so
+	// the client can confirm what the scores were measured against. 0 on the
+	// per-item endpoints, whose item names its own library.
+	LibraryID int64              `json:"library_id,omitempty"`
+	Releases  []releaseJSON      `json:"releases"`
+	Errors    []indexerErrorJSON `json:"errors"`
 }
 
 // grabRequest is the body of the grab endpoints: the release the user picked,
@@ -121,12 +128,12 @@ func (s *server) handleMovieReleases(w http.ResponseWriter, r *http.Request) {
 	if m.Year > 0 {
 		query = fmt.Sprintf("%s %d", m.Title, m.Year)
 	}
-	profile, err := s.st.ResolveItemQualityProfile(r.Context(), core.LibraryKindMovie, m.QualityProfileID)
+	profile, err := s.st.ResolveItemQualityProfileByLibrary(r.Context(), m.LibraryID, core.LibraryKindMovie, m.QualityProfileID)
 	if err != nil {
 		s.writeStoreError(w, "resolve movie quality profile", err)
 		return
 	}
-	s.serveReleases(w, r, core.LibraryKindMovie, []string{query}, profile, func(rel core.Release) []string {
+	s.serveReleases(w, r, m.LibraryID, core.LibraryKindMovie, []string{query}, profile, func(rel core.Release) []string {
 		return movieReleaseFlags(rel, *m)
 	})
 }
@@ -146,7 +153,7 @@ func (s *server) handleSeriesReleases(w http.ResponseWriter, r *http.Request) {
 	}
 
 	kind := core.LibraryKindForSeries(sr.Kind)
-	profile, err := s.st.ResolveItemQualityProfile(r.Context(), kind, sr.QualityProfileID)
+	profile, err := s.st.ResolveItemQualityProfileByLibrary(r.Context(), sr.LibraryID, kind, sr.QualityProfileID)
 	if err != nil {
 		s.writeStoreError(w, "resolve series quality profile", err)
 		return
@@ -171,7 +178,7 @@ func (s *server) handleSeriesReleases(w http.ResponseWriter, r *http.Request) {
 	case season >= 0:
 		query = fmt.Sprintf("%s S%02d", sr.Title, season)
 	}
-	s.serveReleases(w, r, kind, []string{query}, profile, func(rel core.Release) []string {
+	s.serveReleases(w, r, sr.LibraryID, kind, []string{query}, profile, func(rel core.Release) []string {
 		return seriesReleaseFlags(rel, season, episode)
 	})
 }
@@ -221,23 +228,24 @@ func (s *server) serveSceneReleases(w http.ResponseWriter, r *http.Request, sr c
 		queries = []string{sr.Title}
 	}
 
-	s.serveReleases(w, r, core.LibraryKindAdult, queries, profile, func(rel core.Release) []string {
+	s.serveReleases(w, r, sr.LibraryID, core.LibraryKindAdult, queries, profile, func(rel core.Release) []string {
 		return sceneReleaseFlags(rel, airDate)
 	})
 }
 
 // serveReleases runs one interactive search and writes the picker payload:
-// fan out, merge, cache, flag, score, sort. kind is the core.LibraryKind* the
-// searched item belongs to, which decides which indexers answer and with which
-// categories (PLAN phase 8 task 4). profile is resolved once from the item,
-// its library, and then the system default.
-func (s *server) serveReleases(w http.ResponseWriter, r *http.Request, kind string, queries []string, profile *core.QualityProfile, flags func(core.Release) []string) {
+// fan out, merge, cache, flag, score, sort. libraryID is the searched item's
+// own library — which decides which indexers answer and with which categories
+// (PLAN phase 8 task 4) — with kind as the fallback for an item that names
+// none. profile is resolved once from the item, its library, and then the
+// system default.
+func (s *server) serveReleases(w http.ResponseWriter, r *http.Request, libraryID int64, kind string, queries []string, profile *core.QualityProfile, flags func(core.Release) []string) {
 	newClient, ok := s.requireIndexerClients(w)
 	if !ok {
 		return
 	}
 
-	settings, err := s.st.ResolveLibrarySettingsByKind(r.Context(), kind)
+	settings, err := s.st.ResolveLibrarySettingsForItem(r.Context(), libraryID, kind)
 	if err != nil {
 		s.writeStoreError(w, "resolve library settings", err)
 		return
@@ -544,9 +552,12 @@ func (s *server) handleMovieGrab(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.grab(w, r, core.LibraryKindMovie, core.GrabInfo{MovieID: m.ID}, core.AddOpts{
-		Category: engineCategoryMovies,
-		MovieID:  m.ID,
+	s.grab(w, r, m.LibraryID, core.LibraryKindMovie, core.GrabInfo{
+		MovieID: m.ID, LibraryID: m.LibraryID,
+	}, core.AddOpts{
+		Category:  engineCategoryMovies,
+		MovieID:   m.ID,
+		LibraryID: m.LibraryID,
 	})
 }
 
@@ -574,6 +585,22 @@ func (s *server) handleSeriesGrab(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreError(w, "list episodes", err)
 		return
 	}
+	episodeIDs, seasonNum := seriesGrabScope(episodes, season, episode)
+	if (season >= 0 || episode > 0) && len(episodeIDs) == 0 {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+
+	info, opts := seriesGrabTarget(*sr, seasonNum, episodeIDs)
+	s.grab(w, r, sr.LibraryID, core.LibraryKindForSeries(sr.Kind), info, opts)
+}
+
+// seriesGrabScope resolves the episode rows a series grab of this scope must
+// satisfy. A whole-series grab (season < 0) has no season to record, so it
+// reports 0 — the same value season 0 (specials) has; the episode ids are
+// what the import pipeline actually matches against, and those are
+// unambiguous.
+func seriesGrabScope(episodes []core.Episode, season, episode int) ([]int64, int) {
 	episodeIDs := []int64{}
 	for _, e := range episodes {
 		if season >= 0 && e.SeasonNumber != season {
@@ -584,38 +611,38 @@ func (s *server) handleSeriesGrab(w http.ResponseWriter, r *http.Request) {
 		}
 		episodeIDs = append(episodeIDs, e.ID)
 	}
-	if (season >= 0 || episode > 0) && len(episodeIDs) == 0 {
-		writeError(w, http.StatusNotFound, "not found")
-		return
-	}
-
-	// A whole-series grab has no season to record, so it reports 0 — the same
-	// value season 0 (specials) has. The episode ids are what the import
-	// pipeline actually matches against, and those are unambiguous.
 	seasonNum := season
 	if seasonNum < 0 {
 		seasonNum = 0
 	}
-	// The library a series belongs to decides which engine the download is
-	// routed to and which label it lands under, so a scene picked by hand goes
-	// exactly where automation.grabEpisode sends one found by the sweep — never
-	// into the television library's download folder under category "tv", which
-	// importDownloadedEpisodes would then have to un-guess.
+	return episodeIDs, seasonNum
+}
+
+// seriesGrabTarget builds the grab record and engine options for a series
+// grab, shared by the per-item picker and the universal search's tied grab.
+// The library a series belongs to decides which engine the download is routed
+// to and which label it lands under, so a scene picked by hand goes exactly
+// where automation.grabEpisode sends one found by the sweep — never into the
+// television library's download folder under category "tv", which
+// importDownloadedEpisodes would then have to un-guess.
+func seriesGrabTarget(sr core.Series, seasonNum int, episodeIDs []int64) (core.GrabInfo, core.AddOpts) {
 	kind := core.LibraryKindForSeries(sr.Kind)
 	category := engineCategoryTV
 	if kind == core.LibraryKindAdult {
 		category = engineCategoryAdult
 	}
-	s.grab(w, r, kind, core.GrabInfo{
-		SeriesID:   sr.ID,
-		SeasonNum:  seasonNum,
-		EpisodeIDs: episodeIDs,
-	}, core.AddOpts{
-		Category:   category,
-		SeriesID:   sr.ID,
-		SeasonNum:  seasonNum,
-		EpisodeIDs: episodeIDs,
-	})
+	return core.GrabInfo{
+			SeriesID:   sr.ID,
+			SeasonNum:  seasonNum,
+			EpisodeIDs: episodeIDs,
+			LibraryID:  sr.LibraryID,
+		}, core.AddOpts{
+			Category:   category,
+			SeriesID:   sr.ID,
+			SeasonNum:  seasonNum,
+			EpisodeIDs: episodeIDs,
+			LibraryID:  sr.LibraryID,
+		}
 }
 
 // grab sends a picked release to the engine and records it.
@@ -624,7 +651,7 @@ func (s *server) handleSeriesGrab(w http.ResponseWriter, r *http.Request) {
 // history: "we tried this release and it was rejected" is the answer to "why is
 // nothing downloading", and SPEC §7 keeps that explanation even when the
 // attempt produced no download.
-func (s *server) grab(w http.ResponseWriter, r *http.Request, kind string, info core.GrabInfo, opts core.AddOpts) {
+func (s *server) grab(w http.ResponseWriter, r *http.Request, libraryID int64, kind string, info core.GrabInfo, opts core.AddOpts) {
 	var body grabRequest
 	if !decodeJSON(w, r, &body) {
 		return
@@ -633,13 +660,21 @@ func (s *server) grab(w http.ResponseWriter, r *http.Request, kind string, info 
 		writeError(w, http.StatusBadRequest, "release_id is required")
 		return
 	}
-	engine, ok := s.requireEngineFor(w, kind)
+	s.grabRelease(w, r, libraryID, kind, body.ReleaseID, info, opts)
+}
+
+// grabRelease is grab with the release id already decoded, so the universal
+// search's grab — whose body carries more than a release id — shares the grab
+// row, engine dispatch, error mapping and history event without a second
+// copy.
+func (s *server) grabRelease(w http.ResponseWriter, r *http.Request, libraryID int64, kind string, releaseID int64, info core.GrabInfo, opts core.AddOpts) {
+	engine, ok := s.requireEngineFor(w, libraryID, kind)
 	if !ok {
 		return
 	}
 	ctx := r.Context()
 
-	rel, err := s.st.GetRelease(ctx, body.ReleaseID)
+	rel, err := s.st.GetRelease(ctx, releaseID)
 	if err != nil {
 		s.writeStoreError(w, "get release", err)
 		return

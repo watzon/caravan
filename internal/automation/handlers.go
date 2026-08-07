@@ -46,6 +46,10 @@ func (r *Runner) handleRSSSync(ctx context.Context, st *store.Store, payload jso
 	if err != nil {
 		return err
 	}
+	defaults, err := defaultLibraryIDs(ctx, st)
+	if err != nil {
+		return err
+	}
 	if r.indexers == nil {
 		return fmt.Errorf("no indexer client configured")
 	}
@@ -63,7 +67,7 @@ func (r *Runner) handleRSSSync(ctx context.Context, st *store.Store, payload jso
 			if err := st.UpsertRelease(ctx, &release); err != nil {
 				return fmt.Errorf("store: cache rss release: %w", err)
 			}
-			if err := r.matchRSSRelease(ctx, st, release, lists, feed.kindsFor(release)); err != nil {
+			if err := r.matchRSSRelease(ctx, st, release, lists, feed.libsFor(release), defaults); err != nil {
 				return err
 			}
 		}
@@ -88,15 +92,17 @@ type rssFeed struct {
 
 // rssSubscriber is one library's subscription to a shared feed.
 type rssSubscriber struct {
-	// kind is one of the core.LibraryKind* constants.
-	kind string
+	// libraryID is the subscribing library's row id — the id, not its kind,
+	// because two libraries of one kind may subscribe with different
+	// categories and the decision below is per library.
+	libraryID int64
 	// categories are the categories this library asked this indexer for, empty
 	// when it asked unfiltered.
 	categories []int
 }
 
-// kindsFor is the per-library half of a shared fetch: the library kinds that
-// may act on this release.
+// libsFor is the per-library half of a shared fetch: the libraries that may
+// act on this release.
 //
 // The union that made one fetch out of many is exactly what makes this
 // necessary. A library that narrowed an indexer to its own categories still
@@ -104,14 +110,14 @@ type rssSubscriber struct {
 // offering those to its wanted items would grab releases the interactive and
 // backlog searches for the same item would never have seen (PLAN phase 8 task
 // 5).
-func (f rssFeed) kindsFor(release core.Release) map[string]bool {
-	kinds := map[string]bool{}
+func (f rssFeed) libsFor(release core.Release) map[int64]bool {
+	libs := map[int64]bool{}
 	for _, sub := range f.subscribers {
 		if release.InCategories(sub.categories) {
-			kinds[sub.kind] = true
+			libs[sub.libraryID] = true
 		}
 	}
-	return kinds
+	return libs
 }
 
 // rssFeeds groups the libraries' resolved indexer sets by indexer.
@@ -122,30 +128,25 @@ func (f rssFeed) kindsFor(release core.Release) map[string]bool {
 // library that enabled it, and the per-library decision moves to matching
 // (PLAN phase 8 task 5).
 //
-// A library the module it belongs to has switched off contributes nothing. That
-// matters for exactly one library: store.SetAdultEnabled deliberately does not
-// delete the Adult row when the module is disabled, so without this the adult
+// A library that is switched off contributes nothing. Deactivating deliberately
+// does not delete the row (store.SetLibraryActive), so without this a dormant
 // library's categories stay in the union forever and every RSS poll keeps
-// asking each indexer for `cat=…,6000`, once per sync interval, on an install
-// whose owner turned the module off. Nothing would be grabbed — wanted.Compute
-// drops adult items when disabled — but the request itself is a durable trace
-// of a module this phase promises is absent, visible in the indexer's own
-// request log, and it is a wider fetch than the enabled libraries asked for.
-// Scan skips the adult tree and refreshSites no-ops for the same reason.
+// asking each indexer for them, once per sync interval, on an install whose
+// owner turned that shelf off. Nothing would be grabbed — wanted.Compute drops
+// an inactive library's items — but the request itself is a durable trace of a
+// shelf that is meant to be absent, visible in the indexer's own request log,
+// and it is a wider fetch than the active libraries asked for. Scan skips
+// inactive roots and refreshSites no-ops for the same reason.
 func rssFeeds(ctx context.Context, st *store.Store) ([]rssFeed, error) {
 	libraries, err := st.ListLibraries(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: list libraries: %w", err)
 	}
-	adultEnabled, err := st.AdultEnabled(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("store: read adult setting: %w", err)
-	}
 
 	feeds := []*rssFeed{}
 	byIndexer := map[int64]*rssFeed{}
 	for _, library := range libraries {
-		if library.Kind == core.LibraryKindAdult && !adultEnabled {
+		if !library.Active {
 			continue
 		}
 		settings, err := st.ResolveLibrarySettings(ctx, library.ID)
@@ -160,7 +161,7 @@ func rssFeeds(ctx context.Context, st *store.Store) ([]rssFeed, error) {
 				feeds = append(feeds, feed)
 			}
 			feed.subscribers = append(feed.subscribers, rssSubscriber{
-				kind: library.Kind, categories: cfg.Categories,
+				libraryID: library.ID, categories: cfg.Categories,
 			})
 			if len(cfg.Categories) == 0 {
 				feed.unfiltered = true
@@ -197,21 +198,22 @@ func unionCategories(feed *rssFeed) []int {
 	return cats
 }
 
-// matchRSSRelease offers one release to the wanted items of every library kind
-// the feed it came from answers for with this release. A library that disabled
-// the indexer, or that narrowed it to categories this release is not in, is not
-// among them — so its items never see the release even though the fetch was
-// shared.
-func (r *Runner) matchRSSRelease(ctx context.Context, st *store.Store, release core.Release, lists *wanted.Lists, kinds map[string]bool) error {
-	movies, episodes := lists.Movies, lists.Episodes
-	if !kinds[core.LibraryKindMovie] {
-		movies = nil
-	}
-	for _, target := range movies {
-		if !matchesMovie(release, target.Movie) {
+// matchRSSRelease offers one release to the wanted items of every LIBRARY the
+// feed it came from answers for with this release. A library that disabled
+// the indexer, or that narrowed it to categories this release is not in, is
+// not among them — so its items never see the release even though the fetch
+// was shared. defaults maps each kind to its default library, which is what an
+// item whose library_id is still 0 belongs to.
+func (r *Runner) matchRSSRelease(ctx context.Context, st *store.Store, release core.Release, lists *wanted.Lists, libs map[int64]bool, defaults map[string]int64) error {
+	for _, target := range lists.Movies {
+		libID := target.Movie.LibraryID
+		if libID == 0 {
+			libID = defaults[core.LibraryKindMovie]
+		}
+		if !libs[libID] || !matchesMovie(release, target.Movie) {
 			continue
 		}
-		profile, err := st.ResolveItemQualityProfile(ctx, core.LibraryKindMovie, target.QualityProfileID)
+		profile, err := st.ResolveItemQualityProfileByLibrary(ctx, target.Movie.LibraryID, core.LibraryKindMovie, target.QualityProfileID)
 		if err != nil {
 			return fmt.Errorf("store: resolve movie profile: %w", err)
 		}
@@ -223,21 +225,25 @@ func (r *Runner) matchRSSRelease(ctx context.Context, st *store.Store, release c
 			return err
 		}
 	}
-	for _, target := range episodes {
+	for _, target := range lists.Episodes {
 		// The library an episode belongs to is its series' library, so a scene
-		// is only offered releases from a feed the ADULT library subscribed to
-		// with categories this release is in. A television library that shares
-		// the indexer sees the same fetch and never these releases, and the
-		// reverse holds too.
+		// is only offered releases from a feed its OWN adult library
+		// subscribed to with categories this release is in. Another library
+		// that shares the indexer — of the other kind or of the same one —
+		// sees the same fetch and never these releases.
 		kind := core.LibraryKindForSeries(target.SeriesKind)
-		if !kinds[kind] || !matchesRSSEpisode(release, target) {
+		libID := target.SeriesLibraryID
+		if libID == 0 {
+			libID = defaults[kind]
+		}
+		if !libs[libID] || !matchesRSSEpisode(release, target) {
 			continue
 		}
 		series, err := st.GetSeries(ctx, target.SeriesID)
 		if err != nil {
 			return fmt.Errorf("store: get series for rss episode: %w", err)
 		}
-		profile, err := st.ResolveItemQualityProfile(ctx, kind, series.QualityProfileID)
+		profile, err := st.ResolveItemQualityProfileByLibrary(ctx, series.LibraryID, kind, series.QualityProfileID)
 		if err != nil {
 			return fmt.Errorf("store: resolve episode profile: %w", err)
 		}
@@ -245,11 +251,29 @@ func (r *Runner) matchRSSRelease(ctx context.Context, st *store.Store, release c
 		if reject != "" || (target.Reason == wanted.ReasonBelowCutoff && !wanted.IsUpgrade(release.Parsed.Quality, target.FileQuality)) {
 			continue
 		}
-		if err := r.grabEpisode(ctx, st, kind, target.Episode, release, score, "automatic rss"); err != nil {
+		if err := r.grabEpisode(ctx, st, series.LibraryID, kind, target.Episode, release, score, "automatic rss"); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// defaultLibraryIDs maps each kind to its default library's id, so an item
+// whose library_id is still 0 can take part in the per-library RSS decision.
+// A kind with no library row at all is simply absent.
+func defaultLibraryIDs(ctx context.Context, st *store.Store) (map[string]int64, error) {
+	out := map[string]int64{}
+	for _, kind := range []string{core.LibraryKindMovie, core.LibraryKindTV, core.LibraryKindAdult} {
+		lib, err := st.GetDefaultLibrary(ctx, kind)
+		if errors.Is(err, store.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		out[kind] = lib.ID
+	}
+	return out, nil
 }
 
 func (r *Runner) handleBacklogSweep(ctx context.Context, st *store.Store, payload json.RawMessage) error {
@@ -293,7 +317,17 @@ func (r *Runner) handleSearchMovie(ctx context.Context, st *store.Store, payload
 	if err != nil {
 		return fmt.Errorf("store: get movie: %w", err)
 	}
-	profile, err := st.ResolveItemQualityProfile(ctx, core.LibraryKindMovie, movie.QualityProfileID)
+	// handleSearchEpisode's rule, for the other item kind: a job outlives the
+	// switch, so the library is re-read rather than trusted from when the job
+	// was queued.
+	libraries, err := st.ListLibraries(ctx)
+	if err != nil {
+		return fmt.Errorf("store: list libraries: %w", err)
+	}
+	if !core.NewLibrarySet(libraries).Active(movie.LibraryID, core.LibraryKindMovie) {
+		return nil
+	}
+	profile, err := st.ResolveItemQualityProfileByLibrary(ctx, movie.LibraryID, core.LibraryKindMovie, movie.QualityProfileID)
 	if err != nil {
 		return fmt.Errorf("store: resolve movie profile: %w", err)
 	}
@@ -307,7 +341,7 @@ func (r *Runner) handleSearchMovie(ctx context.Context, st *store.Store, payload
 	if movie.Year > 0 {
 		query = fmt.Sprintf("%s %d", movie.Title, movie.Year)
 	}
-	candidates, err := r.searchMovies(ctx, st, query)
+	candidates, err := r.searchMovies(ctx, st, movie.LibraryID, query)
 	if err != nil {
 		return err
 	}
@@ -341,22 +375,20 @@ func (r *Runner) handleSearchEpisode(ctx context.Context, st *store.Store, paylo
 	if err != nil {
 		return fmt.Errorf("store: get series: %w", err)
 	}
-	// A job queued before the module was switched off is the one path that can
-	// reach a scene search on a server with adult content disabled, so the
-	// switch is re-read here rather than trusted from when the job was made.
-	// Dropping the job is the right answer: the item is not wanted any more
-	// (wanted.Compute agrees), so there is nothing to retry.
-	if series.Kind == core.SeriesKindAdult {
-		enabled, err := st.AdultEnabled(ctx)
-		if err != nil {
-			return fmt.Errorf("store: read adult setting: %w", err)
-		}
-		if !enabled {
-			return nil
-		}
-	}
 	kind := core.LibraryKindForSeries(series.Kind)
-	profile, err := st.ResolveItemQualityProfile(ctx, kind, series.QualityProfileID)
+	// A job queued before the series' library was switched off is the one path
+	// that can reach an indexer on a dormant library's behalf, so the switch is
+	// re-read here rather than trusted from when the job was made. Dropping the
+	// job is the right answer: the item is not wanted any more (wanted.Compute
+	// agrees), so there is nothing to retry.
+	libraries, err := st.ListLibraries(ctx)
+	if err != nil {
+		return fmt.Errorf("store: list libraries: %w", err)
+	}
+	if !core.NewLibrarySet(libraries).Active(series.LibraryID, kind) {
+		return nil
+	}
+	profile, err := st.ResolveItemQualityProfileByLibrary(ctx, series.LibraryID, kind, series.QualityProfileID)
 	if err != nil {
 		return fmt.Errorf("store: resolve episode profile: %w", err)
 	}
@@ -370,7 +402,7 @@ func (r *Runner) handleSearchEpisode(ctx context.Context, st *store.Store, paylo
 		return r.searchScene(ctx, st, *series, *episode, profile)
 	}
 
-	candidates, err := r.searchEpisodes(ctx, st, series.Title, episode.SeasonNumber, episode.EpisodeNumber)
+	candidates, err := r.searchEpisodes(ctx, st, series.LibraryID, series.Title, episode.SeasonNumber, episode.EpisodeNumber)
 	if err != nil {
 		return err
 	}
@@ -406,7 +438,7 @@ func (r *Runner) handleSearchEpisode(ctx context.Context, st *store.Store, paylo
 		return recordNoRelease(ctx, st, episode.Title, len(automatic), 0, series.ID)
 	}
 	score, _ := wanted.ScoreRelease(*best, profile)
-	return r.grabEpisode(ctx, st, kind, *episode, *best, score, "automatic search")
+	return r.grabEpisode(ctx, st, series.LibraryID, kind, *episode, *best, score, "automatic search")
 }
 
 // searchScene is handleSearchEpisode's adult branch (PLAN phase 9 task 3).
@@ -448,7 +480,7 @@ func (r *Runner) searchScene(ctx context.Context, st *store.Store, series core.S
 	matched := 0
 
 	for _, search := range searches {
-		candidates, err := r.searchIndexers(ctx, st, core.LibraryKindAdult,
+		candidates, err := r.searchIndexers(ctx, st, series.LibraryID, core.LibraryKindAdult,
 			func(ctx context.Context, client api.IndexerClient, cfg core.IndexerConfig) ([]core.Release, error) {
 				return client.Search(ctx, search.Query, cfg.Categories)
 			})
@@ -478,7 +510,7 @@ func (r *Runner) searchScene(ctx context.Context, st *store.Store, series core.S
 		}
 		if best != nil {
 			score, _ := wanted.ScoreRelease(*best, profile)
-			return r.grabEpisode(ctx, st, core.LibraryKindAdult, episode, *best, score, "automatic search")
+			return r.grabEpisode(ctx, st, series.LibraryID, core.LibraryKindAdult, episode, *best, score, "automatic search")
 		}
 	}
 	return recordNoRelease(ctx, st, episode.Title, matched, 0, series.ID, tried...)
@@ -629,8 +661,8 @@ func sameReleaseDay(a, b time.Time) bool {
 	return ay == by && am == bm && ad == bd
 }
 
-func (r *Runner) searchMovies(ctx context.Context, st *store.Store, query string) ([]core.Release, error) {
-	return r.searchIndexers(ctx, st, core.LibraryKindMovie, func(ctx context.Context, client api.IndexerClient, cfg core.IndexerConfig) ([]core.Release, error) {
+func (r *Runner) searchMovies(ctx context.Context, st *store.Store, libraryID int64, query string) ([]core.Release, error) {
+	return r.searchIndexers(ctx, st, libraryID, core.LibraryKindMovie, func(ctx context.Context, client api.IndexerClient, cfg core.IndexerConfig) ([]core.Release, error) {
 		searcher, ok := client.(movieSearcher)
 		if !ok {
 			return nil, fmt.Errorf("indexer %q does not support movie search", cfg.Name)
@@ -639,8 +671,8 @@ func (r *Runner) searchMovies(ctx context.Context, st *store.Store, query string
 	})
 }
 
-func (r *Runner) searchEpisodes(ctx context.Context, st *store.Store, title string, season, episode int) ([]core.Release, error) {
-	return r.searchIndexers(ctx, st, core.LibraryKindTV, func(ctx context.Context, client api.IndexerClient, cfg core.IndexerConfig) ([]core.Release, error) {
+func (r *Runner) searchEpisodes(ctx context.Context, st *store.Store, libraryID int64, title string, season, episode int) ([]core.Release, error) {
+	return r.searchIndexers(ctx, st, libraryID, core.LibraryKindTV, func(ctx context.Context, client api.IndexerClient, cfg core.IndexerConfig) ([]core.Release, error) {
 		searcher, ok := client.(tvSearcher)
 		if !ok {
 			return nil, fmt.Errorf("indexer %q does not support tv search", cfg.Name)
@@ -657,11 +689,12 @@ type indexerResult struct {
 	releases []core.Release
 }
 
-// searchIndexers fans one search out over the indexers the library of the given
-// core.LibraryKind* searches, each already carrying the categories that search
-// must send (PLAN phase 8 task 4).
-func (r *Runner) searchIndexers(ctx context.Context, st *store.Store, kind string, search indexerSearch) ([]core.Release, error) {
-	settings, err := st.ResolveLibrarySettingsByKind(ctx, kind)
+// searchIndexers fans one search out over the indexers the ITEM'S library
+// searches, each already carrying the categories that search must send (PLAN
+// phase 8 task 4). libraryID 0 — an item from before 0022 — resolves through
+// the kind's default library.
+func (r *Runner) searchIndexers(ctx context.Context, st *store.Store, libraryID int64, kind string, search indexerSearch) ([]core.Release, error) {
+	settings, err := st.ResolveLibrarySettingsForItem(ctx, libraryID, kind)
 	if err != nil {
 		return nil, fmt.Errorf("store: resolve %s library settings: %w", kind, err)
 	}
@@ -710,37 +743,38 @@ func (r *Runner) grabMovie(ctx context.Context, st *store.Store, movie core.Movi
 	} else if active {
 		return nil
 	}
-	return r.grab(ctx, st, core.LibraryKindMovie, release, score, source, core.GrabInfo{MovieID: movie.ID}, core.AddOpts{
+	return r.grab(ctx, st, movie.LibraryID, core.LibraryKindMovie, release, score, source, core.GrabInfo{MovieID: movie.ID}, core.AddOpts{
 		Category: "movies", MovieID: movie.ID,
 	})
 }
 
 // grabEpisode hands a release to the engine the episode's own library routes
-// to. kind is one of the core.LibraryKind* constants — the television library
-// for a television episode, the adult library for a scene — and it decides both
-// the download route and the client-side category, so a scene never lands in
-// the television library's download folder.
-func (r *Runner) grabEpisode(ctx context.Context, st *store.Store, kind string, episode core.Episode, release core.Release, score int, source string) error {
+// to. libraryID is the series' library and kind is one of the
+// core.LibraryKind* constants — the television kind for a television episode,
+// the adult kind for a scene — deciding the download route and the
+// client-side category, so a scene never lands in the television library's
+// download folder.
+func (r *Runner) grabEpisode(ctx context.Context, st *store.Store, libraryID int64, kind string, episode core.Episode, release core.Release, score int, source string) error {
 	if _, active, err := st.ActiveGrabForEpisode(ctx, episode.ID); err != nil {
 		return fmt.Errorf("store: find active episode grab: %w", err)
 	} else if active {
 		return nil
 	}
 	info := core.GrabInfo{SeriesID: episode.SeriesID, SeasonNum: episode.SeasonNumber, EpisodeIDs: []int64{episode.ID}}
-	return r.grab(ctx, st, kind, release, score, source, info, core.AddOpts{
+	return r.grab(ctx, st, libraryID, kind, release, score, source, info, core.AddOpts{
 		Category: kind, SeriesID: episode.SeriesID, SeasonNum: episode.SeasonNumber, EpisodeIDs: []int64{episode.ID},
 	})
 }
 
-// grab hands one release to the engine the library of kind routes its
+// grab hands one release to the engine the item's library routes its
 // downloads to, and records the attempt either way.
-func (r *Runner) grab(ctx context.Context, st *store.Store, kind string, release core.Release, score int, source string, info core.GrabInfo, opts core.AddOpts) error {
+func (r *Runner) grab(ctx context.Context, st *store.Store, libraryID int64, kind string, release core.Release, score int, source string, info core.GrabInfo, opts core.AddOpts) error {
 	if r.engine == nil {
 		return fmt.Errorf("download engine unavailable")
 	}
 	engineCtx, cancel := context.WithTimeout(ctx, engineWaitTimeout)
 	defer cancel()
-	engine := r.engine(engineCtx, kind)
+	engine := r.engine(engineCtx, libraryID, kind)
 	if engine == nil {
 		return fmt.Errorf("download engine unavailable")
 	}

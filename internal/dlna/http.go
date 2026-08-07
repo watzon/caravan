@@ -353,13 +353,16 @@ func (s *Service) handleMedia(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	kind, err := s.st.GetMediaFileLibraryKind(ctx, id)
+	// The owning library decides, not the owning kind: with several libraries
+	// per kind, a file in a library the owner stopped sharing must stop
+	// playing even while its sibling library is still on the LAN.
+	libID, kind, err := s.st.GetMediaFileLibrary(ctx, id)
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	visible, err := s.visibleLibraries(ctx)
-	if err != nil || !visible[kind] {
+	v, err := s.visibility(ctx)
+	if err != nil || !v.library(libID, kind) {
 		http.NotFound(w, r)
 		return
 	}

@@ -47,8 +47,12 @@ func TestMigrateSeedsLibrariesIntoExistingDatabase(t *testing.T) {
 		t.Fatalf("ListLibraries: %v", err)
 	}
 	want := []core.Library{
-		{ID: 1, Kind: core.LibraryKindMovie, Name: "Movies", RootPath: "library/Movies", DLNAVisible: true},
-		{ID: 2, Kind: core.LibraryKindTV, Name: "Series", RootPath: "library/TV", DLNAVisible: true},
+		{ID: 1, Kind: core.LibraryKindMovie, Name: "Movies", RootPath: "library/Movies",
+			DLNAVisible: true, Provider: core.ProviderTMDB,
+			Providers: []string{core.ProviderTMDB}, IsDefault: true, Active: true},
+		{ID: 2, Kind: core.LibraryKindTV, Name: "Series", RootPath: "library/TV",
+			DLNAVisible: true, Provider: core.ProviderTMDB,
+			Providers: []string{core.ProviderTMDB}, IsDefault: true, Active: true},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("ListLibraries = %+v, want %+v", got, want)
@@ -81,6 +85,75 @@ func TestGetLibraryByKind(t *testing.T) {
 
 	if _, err := st.GetLibraryByKind(ctx, "adult"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("GetLibraryByKind(adult) error = %v, want ErrNotFound", err)
+	}
+}
+
+// An adult library is deleted under the two ordinary guards and no others. It
+// once had a third, refusing the kind outright, because the module switch owned
+// the row and promised that switching off destroyed nothing; `active` keeps
+// that promise now and is the deliberate "off". A kind-shaped exception here
+// would only mean the one shelf an owner can never tidy away — and it would
+// leave them deleting the row by hand, which takes the grants and the items
+// with it silently.
+func TestDeleteLibraryAcceptsAnAdultLibrary(t *testing.T) {
+	ctx := context.Background()
+	st, _ := openTemp(t)
+
+	lib := &core.Library{
+		Kind: core.LibraryKindAdult, Name: "Scenes", RootPath: "library/Scenes",
+		Providers: []string{core.ProviderStashbox}, Restricted: true,
+	}
+	if err := st.CreateLibrary(ctx, lib); err != nil {
+		t.Fatalf("CreateLibrary(adult): %v", err)
+	}
+
+	// The emptiness guard applies to it exactly as it does to any other shelf:
+	// its sites are items, and deleting the row under them would strand them.
+	site := &core.Series{Kind: core.SeriesKindAdult, StashID: "site-1", Title: "Example Site",
+		LibraryID: lib.ID}
+	if err := st.UpsertSeries(ctx, site); err != nil {
+		t.Fatalf("UpsertSeries: %v", err)
+	}
+	if err := st.DeleteLibrary(ctx, lib.ID); !errors.Is(err, ErrLibraryNotEmpty) {
+		t.Errorf("DeleteLibrary(non-empty adult) = %v, want ErrLibraryNotEmpty", err)
+	}
+
+	if err := st.DeleteSeries(ctx, site.ID); err != nil {
+		t.Fatalf("DeleteSeries: %v", err)
+	}
+	if err := st.DeleteLibrary(ctx, lib.ID); err != nil {
+		t.Fatalf("DeleteLibrary(empty adult) = %v, want the delete to go through", err)
+	}
+	if _, err := st.GetLibrary(ctx, lib.ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("GetLibrary after delete = %v, want ErrNotFound", err)
+	}
+}
+
+// The default guard is NOT the adult exception wearing a different name, and
+// this test exists so that nobody reading the one above deletes this one as a
+// leftover. ErrLibraryIsDefault is about by-kind lookups keeping an answer:
+// GetLibraryByKind and GetDefaultLibrary are what a scan, an import and a
+// scene request resolve their shelf through, and a kind whose default was
+// deleted answers ErrNotFound to all three. The refusal is per row and is
+// lifted by demoting it, which is a thing an owner can actually do — that is
+// what makes it a guard rather than the ban that was removed.
+func TestDeleteLibraryRefusesADefaultAdultLibrary(t *testing.T) {
+	ctx := context.Background()
+	st, _ := openTemp(t)
+
+	lib := &core.Library{
+		Kind: core.LibraryKindAdult, Name: AdultLibraryName, RootPath: AdultLibraryRoot,
+		Providers: []string{core.ProviderStashbox}, Restricted: true, IsDefault: true,
+	}
+	if err := st.CreateLibrary(ctx, lib); err != nil {
+		t.Fatalf("CreateLibrary(adult): %v", err)
+	}
+
+	if err := st.DeleteLibrary(ctx, lib.ID); !errors.Is(err, ErrLibraryIsDefault) {
+		t.Errorf("DeleteLibrary(default adult) = %v, want ErrLibraryIsDefault", err)
+	}
+	if _, err := st.GetLibrary(ctx, lib.ID); err != nil {
+		t.Errorf("the refused delete removed the library anyway: %v", err)
 	}
 }
 

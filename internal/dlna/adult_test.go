@@ -14,16 +14,86 @@ import (
 	"github.com/watzon/caravan/internal/store"
 )
 
+// enableAdultLibrary makes adult content reachable: the Adult library exists
+// and is switched on. An adult library IS the module — there is no server-wide
+// switch above it — so a test that needs scenes to be visible creates one.
+//
+// It is idempotent, because the enable it stands for was: a library that is
+// already there is switched back on rather than duplicated, keeping whatever
+// the owner has since done to it. Switching on is a whole-kind act for the same
+// reason the off half is (see setAdultLibrariesActive), so a second adult
+// library is switched on beside the seed one.
+//
+// The seed row is born with dlna_visible OFF and restricted ON. DLNA has no
+// accounts, so a container advertised on the LAN is readable by every device on
+// it, and sharing the shelf is a second, separate decision the owner makes; the
+// restriction is the account-side half of the same caution. It is the kind's
+// default only on the branch that creates it, because
+// idx_libraries_default_per_kind allows exactly one and the row is never
+// deleted, so a later enable would contend with the one it made itself.
+func enableAdultLibrary(t *testing.T, st *store.Store) core.Library {
+	t.Helper()
+	ctx := context.Background()
+
+	existing, err := st.ListLibrariesByKind(ctx, core.LibraryKindAdult)
+	if err != nil {
+		t.Fatalf("ListLibrariesByKind(adult): %v", err)
+	}
+	if len(existing) == 0 {
+		library := &core.Library{
+			Kind:        core.LibraryKindAdult,
+			Name:        store.AdultLibraryName,
+			RootPath:    store.AdultLibraryRoot,
+			Providers:   []string{core.ProviderStashbox},
+			DLNAVisible: false,
+			Restricted:  true,
+			IsDefault:   true,
+		}
+		if err := st.CreateLibrary(ctx, library); err != nil {
+			t.Fatalf("CreateLibrary(adult): %v", err)
+		}
+	}
+	setAdultLibrariesActive(t, st, true)
+
+	library, err := st.GetLibraryByKind(ctx, core.LibraryKindAdult)
+	if err != nil {
+		t.Fatalf("GetLibraryByKind(adult): %v", err)
+	}
+	return *library
+}
+
+// setAdultLibrariesActive switches every adult library at once, which is the
+// only way to say "no adult content anywhere" now that the state lives per
+// library: one library left on is one shelf still on the LAN, and a test that
+// switched off only the default would be asserting against a server that still
+// serves scenes.
+//
+// Switching off deletes nothing — not the row, not the series, not the files.
+// Off is a visibility promise, not a retention policy, so each library keeps
+// the dlna_visible its owner last chose and finds it again when it comes back.
+func setAdultLibrariesActive(t *testing.T, st *store.Store, active bool) {
+	t.Helper()
+	ctx := context.Background()
+
+	libraries, err := st.ListLibrariesByKind(ctx, core.LibraryKindAdult)
+	if err != nil {
+		t.Fatalf("ListLibrariesByKind(adult): %v", err)
+	}
+	for _, library := range libraries {
+		if err := st.SetLibraryActive(ctx, library.ID, active); err != nil {
+			t.Fatalf("SetLibraryActive(%d, %v): %v", library.ID, active, err)
+		}
+	}
+}
+
 // seedSite puts a site in the library the way library.AddSite does — a series
 // of kind adult with a release year for a season and one scene with a file on
-// disk — plus the Adult library row, which is what SetAdultEnabled creates.
+// disk — plus the Adult library row it hangs under.
 func seedSite(t *testing.T, st *store.Store) *core.MediaFile {
 	t.Helper()
 	ctx := context.Background()
 
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	enableAdultLibrary(t, st)
 	series := &core.Series{
 		StashID: "site-1", Title: "Brazzers", SortTitle: "brazzers",
 		Kind: core.SeriesKindAdult, Monitored: true, Path: store.AdultLibraryRoot + "/Brazzers",
@@ -132,9 +202,7 @@ func TestFreshAdultEnableLeavesTheAdultLibraryHiddenFromDLNA(t *testing.T) {
 	_, st, _ := newTestService(t)
 	ctx := context.Background()
 
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	enableAdultLibrary(t, st)
 	library, err := st.GetLibraryByKind(ctx, core.LibraryKindAdult)
 	if err != nil {
 		t.Fatalf("GetLibraryByKind: %v", err)
@@ -199,9 +267,7 @@ func TestDirectAdultMediaRequiresVisibleEnabledLibrary(t *testing.T) {
 		t.Fatalf("visible Adult media: status = %d, body = %q", rec.Code, rec.Body.String())
 	}
 
-	if err := st.SetAdultEnabled(t.Context(), false); err != nil {
-		t.Fatalf("SetAdultEnabled(false): %v", err)
-	}
+	setAdultLibrariesActive(t, st, false)
 	rec = requestDirectMedia(t, svc, file.ID)
 	if rec.Code != unknown.Code || rec.Body.String() != unknown.Body.String() {
 		t.Fatalf(
@@ -218,9 +284,7 @@ func TestDirectAdultMediaRequiresVisibleEnabledLibrary(t *testing.T) {
 		t.Fatal("disabling Adult forgot the remembered DLNA visibility toggle")
 	}
 
-	if err := st.SetAdultEnabled(t.Context(), true); err != nil {
-		t.Fatalf("SetAdultEnabled(true): %v", err)
-	}
+	enableAdultLibrary(t, st)
 	rec = requestDirectMedia(t, svc, file.ID)
 	if rec.Code != http.StatusOK || rec.Body.String() != string(body) {
 		t.Fatalf("re-enabled Adult media: status = %d, body = %q", rec.Code, rec.Body.String())
@@ -368,9 +432,7 @@ func TestDisablingTheModuleTakesTheAdultShelfOffTheLAN(t *testing.T) {
 	}
 	siteID := sites.Containers[0].ID
 
-	if err := st.SetAdultEnabled(ctx, false); err != nil {
-		t.Fatalf("SetAdultEnabled(false): %v", err)
-	}
+	setAdultLibrariesActive(t, st, false)
 
 	root, err = svc.children(ctx, testURLs, rootID)
 	if err != nil {
@@ -406,9 +468,7 @@ func TestDisablingTheModuleTakesTheAdultShelfOffTheLAN(t *testing.T) {
 
 	// Turning it back on finds the owner's sharing decision exactly as they
 	// left it: the switch hides the shelf, it does not unshare it.
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled(true): %v", err)
-	}
+	enableAdultLibrary(t, st)
 	root, err = svc.children(ctx, testURLs, rootID)
 	if err != nil {
 		t.Fatalf("children(root): %v", err)
@@ -445,10 +505,10 @@ func TestTheTwoShelvesRefuseEachOthersRows(t *testing.T) {
 	// The site through the television prefix, and the show through the adult
 	// one. Both are "no such object".
 	for _, objectID := range []string{
-		tvShelf.seriesObjectID(sites[0].ID),
-		tvShelf.seasonObjectID(sites[0].ID, 2022),
-		adultShelf.seriesObjectID(shows[0].ID),
-		adultShelf.seasonObjectID(shows[0].ID, 1),
+		tvIDSpace.seriesObjectID(sites[0].ID),
+		tvIDSpace.seasonObjectID(sites[0].ID, 2022),
+		adultIDSpace.seriesObjectID(shows[0].ID),
+		adultIDSpace.seasonObjectID(shows[0].ID, 1),
 	} {
 		if _, err := svc.children(ctx, testURLs, objectID); !errors.Is(err, errNoObject) {
 			t.Errorf("children(%s) = %v, want errNoObject", objectID, err)
@@ -459,30 +519,30 @@ func TestTheTwoShelvesRefuseEachOthersRows(t *testing.T) {
 	}
 }
 
-// The prefixes have to stay mutually exclusive, or shelfOf would answer for the
-// wrong shelf and every check above it would be reasoning about the wrong rows.
+// The prefixes have to stay mutually exclusive, or shelfSpaceOf would answer
+// for the wrong id space and every check above it would be reasoning about the
+// wrong rows. Container ids are not in this test any more: which library a
+// container id names is a row lookup now, not a prefix match.
 func TestShelfPrefixesAreUnambiguous(t *testing.T) {
 	for _, tc := range []struct {
 		objectID string
 		want     string
 	}{
-		{tvID, tvID},
-		{adultID, adultID},
-		{"s:1", tvID},
-		{"s:1:2", tvID},
-		{"e:1:2", tvID},
-		{"as:1", adultID},
-		{"as:1:2022", adultID},
-		{"ae:1:2", adultID},
+		{"s:1", core.SeriesKindTV},
+		{"s:1:2", core.SeriesKindTV},
+		{"e:1:2", core.SeriesKindTV},
+		{"as:1", core.SeriesKindAdult},
+		{"as:1:2022", core.SeriesKindAdult},
+		{"ae:1:2", core.SeriesKindAdult},
 	} {
-		sh, ok := shelfOf(tc.objectID)
-		if !ok || sh.containerID != tc.want {
-			t.Errorf("shelfOf(%q) = %q,%v, want %q", tc.objectID, sh.containerID, ok, tc.want)
+		space, ok := shelfSpaceOf(tc.objectID)
+		if !ok || space.seriesKind != tc.want {
+			t.Errorf("shelfSpaceOf(%q) = %q,%v, want %q", tc.objectID, space.seriesKind, ok, tc.want)
 		}
 	}
-	for _, objectID := range []string{rootID, moviesID, "m:1", "nonsense", ""} {
-		if sh, ok := shelfOf(objectID); ok {
-			t.Errorf("shelfOf(%q) = %q, want no shelf", objectID, sh.containerID)
+	for _, objectID := range []string{rootID, moviesID, tvID, adultID, "lib:3", "m:1", "nonsense", ""} {
+		if space, ok := shelfSpaceOf(objectID); ok {
+			t.Errorf("shelfSpaceOf(%q) = %q, want no id space", objectID, space.seriesKind)
 		}
 	}
 }

@@ -100,7 +100,7 @@ func scanSeason(sc scanner) (*core.Season, error) {
 }
 
 const episodeColumns = `id, series_id, season_number, episode_number, tmdb_id, stash_id,
-	title, overview, air_date, monitored, scene`
+	title, overview, air_date, monitored, scene, absolute_number`
 
 // UpsertEpisode inserts or updates an episode and writes back the assigned ID.
 // Identity is (SeriesID, SeasonNumber, EpisodeNumber) — for a scene, that is
@@ -114,15 +114,26 @@ func (s *Store) UpsertEpisode(ctx context.Context, e *core.Episode) error {
 	}
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO episodes (series_id, season_number, episode_number, tmdb_id, stash_id,
-			title, overview, air_date, monitored, scene)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			title, overview, air_date, monitored, scene, absolute_number)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (series_id, season_number, episode_number) DO UPDATE SET
 			tmdb_id = excluded.tmdb_id, stash_id = excluded.stash_id,
 			title = excluded.title, overview = excluded.overview,
 			air_date = excluded.air_date, monitored = excluded.monitored,
-			scene = excluded.scene`,
+			scene = excluded.scene,
+			-- A zero never erases a known absolute number. Most writers of an
+			-- episode row have no opinion about the absolute count — the scan's
+			-- placeholder rows for episodes no provider listed, and every write
+			-- built from a struct that was not filled from a provider tree —
+			-- and they must not be able to undo a refresh by saying nothing.
+			-- 0 means "not known" here (migration 0025), and "not known" is
+			-- never evidence against what is known. Same rule as the library_id
+			-- a refresh must never move (UpsertSeries) and the grab_id a
+			-- download update must never drop.
+			absolute_number = CASE WHEN excluded.absolute_number != 0
+				THEN excluded.absolute_number ELSE episodes.absolute_number END`,
 		e.SeriesID, e.SeasonNumber, e.EpisodeNumber, e.TMDBID, e.StashID, e.Title, e.Overview,
-		formatTime(e.AirDate), e.Monitored, scene)
+		formatTime(e.AirDate), e.Monitored, scene, e.AbsoluteNumber)
 	if err != nil {
 		return fmt.Errorf("store: upsert episode S%02dE%02d of series %d: %w",
 			e.SeasonNumber, e.EpisodeNumber, e.SeriesID, err)
@@ -186,6 +197,36 @@ func (s *Store) GetEpisodeByNumber(ctx context.Context, seriesID int64, season, 
 	}
 	if err != nil {
 		return nil, fmt.Errorf("store: get series %d S%02dE%02d: %w", seriesID, season, episode, err)
+	}
+	return e, nil
+}
+
+// GetEpisodeByAbsoluteNumber returns the episode a series-wide (absolute)
+// number names, or ErrNotFound. It is the store-level half of what an
+// anime-style filename asks: the name says "the 105th episode" and only the
+// series' own numbering says which season that is.
+//
+// A zero or negative absolute matches nothing rather than matching every
+// episode whose provider served no absolute number at all — the same rule
+// GetEpisodeByStashID follows about a blank id.
+//
+// The index behind this is not unique (migration 0025 says why), so the lowest
+// season and episode wins rather than "whichever row the engine reached
+// first": a renumbering that transiently doubles a number must not make this
+// lookup flip between refreshes.
+func (s *Store) GetEpisodeByAbsoluteNumber(ctx context.Context, seriesID int64, absolute int) (*core.Episode, error) {
+	if absolute <= 0 {
+		return nil, fmt.Errorf("store: series %d absolute %d: %w", seriesID, absolute, ErrNotFound)
+	}
+	row := s.db.QueryRowContext(ctx, "SELECT "+episodeColumns+
+		" FROM episodes WHERE series_id = ? AND absolute_number = ?"+
+		" ORDER BY season_number, episode_number LIMIT 1", seriesID, absolute)
+	e, err := scanEpisode(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("store: series %d absolute %d: %w", seriesID, absolute, ErrNotFound)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("store: get series %d absolute %d: %w", seriesID, absolute, err)
 	}
 	return e, nil
 }
@@ -302,7 +343,7 @@ func scanEpisode(sc scanner) (*core.Episode, error) {
 		scene   string
 	)
 	err := sc.Scan(&e.ID, &e.SeriesID, &e.SeasonNumber, &e.EpisodeNumber, &e.TMDBID, &e.StashID,
-		&e.Title, &e.Overview, &airDate, &e.Monitored, &scene)
+		&e.Title, &e.Overview, &airDate, &e.Monitored, &scene, &e.AbsoluteNumber)
 	if err != nil {
 		return nil, err
 	}

@@ -105,6 +105,77 @@ func date(y int, m time.Month, d int) time.Time {
 	return time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
 }
 
+// siteRef is a stash id on the LEGACY instance, which is what a single-box
+// install and every pre-instances client name. adultchain_test.go is where the
+// second box appears.
+func siteRef(stashID string) core.ItemRef {
+	return core.ItemRef{Provider: core.ProviderStashbox, Ref: stashID}
+}
+
+// enableAdultLibrary says the whole enable directly: the Adult library exists
+// and is switched on. An adult library IS the module — every gate below asks
+// AnyActiveLibraryOfKind, never a setting (see adultReady) — so a test that
+// wants scenes reachable has to own a row rather than a flag.
+//
+// The row it writes is the one an install carries, and each field is load
+// bearing. Restricted and NOT dlna_visible because the LAN tree has no accounts:
+// a shelf on it is readable by every device in the house, which is the one
+// mistake this module may not make. The legacy `stashbox` chain because that is
+// what a single-box install is named by, here and in every pre-instances client
+// (0026). IsDefault only where no adult library exists yet — the partial unique
+// index admits one default per kind — and Active is CreateLibrary's own doing,
+// so nothing here sets it.
+//
+// Idempotent, so a harness may call it on a store some earlier step already
+// switched off: an existing row is switched back on rather than duplicated,
+// which would leave two shelves fighting over one root path.
+func enableAdultLibrary(t *testing.T, st *store.Store) core.Library {
+	t.Helper()
+	ctx := context.Background()
+	lib, err := st.GetDefaultLibrary(ctx, core.LibraryKindAdult)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("GetDefaultLibrary(adult): %v", err)
+	}
+	if lib != nil {
+		if err := st.SetLibraryActive(ctx, lib.ID, true); err != nil {
+			t.Fatalf("SetLibraryActive(%d, true): %v", lib.ID, err)
+		}
+		lib.Active = true
+		return *lib
+	}
+	created := &core.Library{
+		Kind: core.LibraryKindAdult, Name: store.AdultLibraryName,
+		RootPath: store.AdultLibraryRoot, Providers: []string{core.ProviderStashbox},
+		DLNAVisible: false, Restricted: true, IsDefault: true,
+	}
+	if err := st.CreateLibrary(ctx, created); err != nil {
+		t.Fatalf("CreateLibrary(adult): %v", err)
+	}
+	return *created
+}
+
+// setAdultLibrariesActive is the other half of the same switch, spelled per
+// library because that is where it lives now.
+//
+// It has to reach EVERY adult library or it says nothing: the module gate is
+// "is any adult library active", so an off that left a sibling on would leave
+// the module reachable while the test believed it had shut it. The rows, the
+// files and the grants all survive the flip — switching off hides, it never
+// deletes — which is what the tests below then check.
+func setAdultLibrariesActive(t *testing.T, st *store.Store, active bool) {
+	t.Helper()
+	ctx := context.Background()
+	libs, err := st.ListLibrariesByKind(ctx, core.LibraryKindAdult)
+	if err != nil {
+		t.Fatalf("ListLibrariesByKind(adult): %v", err)
+	}
+	for _, lib := range libs {
+		if err := st.SetLibraryActive(ctx, lib.ID, active); err != nil {
+			t.Fatalf("SetLibraryActive(%d, %t): %v", lib.ID, active, err)
+		}
+	}
+}
+
 // adultHarness is the library harness plus an adult provider and the module
 // switched on.
 type adultHarness struct {
@@ -117,9 +188,7 @@ func newAdultHarness(t *testing.T, enabled bool) *adultHarness {
 	h := newHarness(t)
 	a := &adultHarness{harness: h, adult: &stubAdultProvider{scenes: map[string][]core.SceneMeta{}}}
 	if enabled {
-		if err := h.st.SetAdultEnabled(context.Background(), true); err != nil {
-			t.Fatalf("SetAdultEnabled: %v", err)
-		}
+		enableAdultLibrary(t, h.st)
 	}
 	h.mgr = a.newManager(h.st, h.provider)
 	return a
@@ -156,7 +225,7 @@ func (a *adultHarness) seedBrazzers() {
 // the same thing about the same walk.
 func (a *adultHarness) addSite(id string) *core.Series {
 	a.t.Helper()
-	sr, err := a.mgr.AddSiteAndWait(context.Background(), id, nil)
+	sr, err := a.mgr.AddSiteAndWait(context.Background(), siteRef(id), nil, 0)
 	if err != nil {
 		a.t.Fatalf("AddSiteAndWait: %v", err)
 	}
@@ -186,14 +255,14 @@ func TestAdultRootMatchesTheAdultLibraryRow(t *testing.T) {
 	if got := path.Join(LibraryDir, AdultDir); got != store.AdultLibraryRoot {
 		t.Errorf("library adult root = %q, store.AdultLibraryRoot = %q", got, store.AdultLibraryRoot)
 	}
-	if got := adultSeriesDir("Brazzers"); got != "library/Adult/Brazzers" {
+	if got := adultSeriesDir(stockAdultLib(), "Brazzers"); got != "library/Adult/Brazzers" {
 		t.Errorf("adultSeriesDir = %q, want library/Adult/Brazzers", got)
 	}
 	// A site with characters no filesystem accepts still lands under the adult
 	// root rather than escaping it.
-	if got := adultSeriesDir("Bad/Name:*"); !strings.HasPrefix(got, "library/Adult/") ||
+	if got := adultSeriesDir(stockAdultLib(), "Bad/Name:*"); !strings.HasPrefix(got, "library/Adult/") ||
 		strings.Count(got, "/") != 2 {
-		t.Errorf("adultSeriesDir(unsafe) = %q, want a single component under library/Adult", got)
+		t.Errorf("adultSeriesDir(stockAdultLib(), unsafe) = %q, want a single component under library/Adult", got)
 	}
 }
 
@@ -357,7 +426,7 @@ func TestAddSiteRefusesWhenTheModuleIsDisabled(t *testing.T) {
 	h := newAdultHarness(t, false)
 	h.seedBrazzers()
 
-	if _, err := h.mgr.AddSite(context.Background(), "site-1", nil); !errors.Is(err, ErrAdultDisabled) {
+	if _, err := h.mgr.AddSite(context.Background(), siteRef("site-1"), nil, 0); !errors.Is(err, ErrAdultDisabled) {
 		t.Errorf("AddSite error = %v, want ErrAdultDisabled", err)
 	}
 	if h.adult.calls != 0 {
@@ -368,7 +437,7 @@ func TestAddSiteRefusesWhenTheModuleIsDisabled(t *testing.T) {
 func TestAddSiteReportsAMissingProvider(t *testing.T) {
 	h := newAdultHarness(t, true)
 	h.mgr.adult = nil
-	if _, err := h.mgr.AddSite(context.Background(), "site-1", nil); !errors.Is(err, core.ErrNoAdultProvider) {
+	if _, err := h.mgr.AddSite(context.Background(), siteRef("site-1"), nil, 0); !errors.Is(err, core.ErrNoAdultProvider) {
 		t.Errorf("AddSite error = %v, want ErrNoAdultProvider", err)
 	}
 }
@@ -382,9 +451,7 @@ func TestRefreshMakesNoAdultRequestWhenDisabled(t *testing.T) {
 	h.seedBrazzers()
 	sr := h.addSite("site-1")
 
-	if err := h.st.SetAdultEnabled(context.Background(), false); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	setAdultLibrariesActive(t, h.st, false)
 	h.adult.calls = 0
 
 	res := &RefreshResult{}
@@ -456,7 +523,7 @@ func TestRefreshLibraryDoesNotSendSitesToTMDB(t *testing.T) {
 func (a *adultHarness) collectScenes(id string) []core.SceneMeta {
 	a.t.Helper()
 	var out []core.SceneMeta
-	err := a.mgr.walkSiteScenes(context.Background(), id, func(batch []core.SceneMeta) error {
+	err := a.mgr.walkSiteScenes(context.Background(), a.mgr.adult, id, func(batch []core.SceneMeta) error {
 		out = append(out, batch...)
 		return nil
 	})
@@ -590,9 +657,7 @@ func TestAdultLibrarySurvivesADatabaseWipe(t *testing.T) {
 	}
 
 	fresh := h.openStore(t.TempDir() + "/caravan.db")
-	if err := fresh.SetAdultEnabled(context.Background(), true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	enableAdultLibrary(t, fresh)
 	mgr := h.newManager(fresh, h.provider)
 
 	res, err := mgr.Scan(context.Background())
@@ -639,9 +704,7 @@ func TestScanIgnoresTheAdultTreeWhenDisabled(t *testing.T) {
 	h.scan()
 
 	const organized = "library/Adult/Brazzers/Season 2022/Brazzers - 2022-03-14 - Deep Impact.mkv"
-	if err := h.st.SetAdultEnabled(context.Background(), false); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	setAdultLibrariesActive(t, h.st, false)
 	h.writeVideo("library/Adult/Brazzers.23.02.01.Third.XXX.1080p.MP4-KTR.mkv", "another scene")
 	h.adult.calls = 0
 
@@ -954,7 +1017,7 @@ func TestAddSiteDefersTheCatalogueWalk(t *testing.T) {
 	a.seedBrazzers()
 	ctx := context.Background()
 
-	sr, err := a.mgr.AddSite(ctx, "site-1", nil)
+	sr, err := a.mgr.AddSite(ctx, siteRef("site-1"), nil, 0)
 	if err != nil {
 		t.Fatalf("AddSite: %v", err)
 	}
@@ -994,11 +1057,11 @@ func TestAddSiteTwiceIsOneSite(t *testing.T) {
 	a.seedBrazzers()
 	ctx := context.Background()
 
-	first, err := a.mgr.AddSite(ctx, "site-1", nil)
+	first, err := a.mgr.AddSite(ctx, siteRef("site-1"), nil, 0)
 	if err != nil {
 		t.Fatalf("AddSite: %v", err)
 	}
-	second, err := a.mgr.AddSite(ctx, "site-1", nil)
+	second, err := a.mgr.AddSite(ctx, siteRef("site-1"), nil, 0)
 	if err != nil {
 		t.Fatalf("AddSite again: %v", err)
 	}
@@ -1021,7 +1084,7 @@ func TestAddSiteAndWaitLandsTheCatalogueBeforeReturning(t *testing.T) {
 	a := newAdultHarness(t, true)
 	a.seedBrazzers()
 
-	sr, err := a.mgr.AddSiteAndWait(context.Background(), "site-1", nil)
+	sr, err := a.mgr.AddSiteAndWait(context.Background(), siteRef("site-1"), nil, 0)
 	if err != nil {
 		t.Fatalf("AddSiteAndWait: %v", err)
 	}
@@ -1055,13 +1118,11 @@ func TestSyncSiteIsANoOpWhenThereIsNothingToWalk(t *testing.T) {
 		t.Errorf("SyncSite filed %d scenes under a television series", len(eps))
 	}
 
-	sr, err := a.mgr.AddSite(ctx, "site-1", nil)
+	sr, err := a.mgr.AddSite(ctx, siteRef("site-1"), nil, 0)
 	if err != nil {
 		t.Fatalf("AddSite: %v", err)
 	}
-	if err := a.st.SetAdultEnabled(ctx, false); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	setAdultLibrariesActive(t, a.st, false)
 	before := a.adult.calls
 	if err := a.mgr.SyncSite(ctx, sr.ID); err != nil {
 		t.Errorf("SyncSite with the module off = %v, want a silent no-op", err)
@@ -1079,7 +1140,7 @@ func TestAddSiteUnmonitoredLeavesItsScenesUnmonitored(t *testing.T) {
 	a.seedBrazzers()
 	ctx := context.Background()
 
-	sr, err := a.mgr.AddSiteAndWait(ctx, "site-1", ptr(false))
+	sr, err := a.mgr.AddSiteAndWait(ctx, siteRef("site-1"), ptr(false), 0)
 	if err != nil {
 		t.Fatalf("AddSiteAndWait: %v", err)
 	}
@@ -1188,7 +1249,7 @@ func TestCatalogueWalkPublishesEachYearBeforeItFinishes(t *testing.T) {
 	a.seedThreeYears()
 	ctx := context.Background()
 
-	sr, err := a.mgr.AddSite(ctx, "site-1", nil)
+	sr, err := a.mgr.AddSite(ctx, siteRef("site-1"), nil, 0)
 	if err != nil {
 		t.Fatalf("AddSite: %v", err)
 	}
@@ -1309,7 +1370,7 @@ func TestFailedWalkKeepsTheYearsItAlreadyPublished(t *testing.T) {
 	a.seedThreeYears()
 	ctx := context.Background()
 
-	sr, err := a.mgr.AddSite(ctx, "site-1", nil)
+	sr, err := a.mgr.AddSite(ctx, siteRef("site-1"), nil, 0)
 	if err != nil {
 		t.Fatalf("AddSite: %v", err)
 	}
@@ -1340,5 +1401,85 @@ func TestFailedWalkKeepsTheYearsItAlreadyPublished(t *testing.T) {
 		if e.StashID == "s2024a" && e.EpisodeNumber != 1 {
 			t.Errorf("s2024a is episode %d after the retry, want 1", e.EpisodeNumber)
 		}
+	}
+}
+
+// The gate is the TARGET library's own switch, not the kind's. A second adult
+// library still being on is not permission to add into a dormant one — that is
+// exactly what the module-wide switch could not express, and getting it wrong
+// would reach the endpoint on behalf of a shelf the owner turned off.
+func TestAddSiteRefusesAnInactiveLibraryWhileASiblingIsOn(t *testing.T) {
+	ctx := context.Background()
+	a := newAdultHarness(t, true)
+	a.seedBrazzers()
+
+	second := &core.Library{Kind: core.LibraryKindAdult, Name: "Studios",
+		RootPath: "library/Studios", Provider: core.ProviderStashbox}
+	if err := a.st.CreateLibrary(ctx, second); err != nil {
+		t.Fatalf("CreateLibrary: %v", err)
+	}
+	if err := a.st.SetLibraryActive(ctx, second.ID, false); err != nil {
+		t.Fatalf("SetLibraryActive: %v", err)
+	}
+	a.adult.calls = 0
+
+	if _, err := a.mgr.AddSite(ctx, siteRef("site-1"), nil, second.ID); !errors.Is(err, ErrAdultDisabled) {
+		t.Errorf("AddSite into an inactive library = %v, want ErrAdultDisabled", err)
+	}
+	if a.adult.calls != 0 {
+		t.Errorf("the refused add made %d provider calls, want 0", a.adult.calls)
+	}
+
+	// The still-active default library is provably unaffected.
+	if _, err := a.mgr.AddSite(ctx, siteRef("site-1"), nil, 0); err != nil {
+		t.Fatalf("AddSite into the active library: %v", err)
+	}
+}
+
+// The refresh sweep names no library, so its gate can only ask whether ANY
+// adult shelf is on. A site under a dormant one is skipped individually, or the
+// sweep would walk its catalogue because a sibling happened to be on.
+func TestRefreshSitesSkipsSitesUnderAnInactiveLibrary(t *testing.T) {
+	ctx := context.Background()
+	a := newAdultHarness(t, true)
+	a.seedBrazzers()
+	sr := a.addSite("site-1")
+
+	lib, err := a.st.GetLibrary(ctx, sr.LibraryID)
+	if err != nil {
+		t.Fatalf("GetLibrary: %v", err)
+	}
+	// A second, active adult library, so the sweep's own gate stays open.
+	second := &core.Library{Kind: core.LibraryKindAdult, Name: "Studios",
+		RootPath: "library/Studios", Provider: core.ProviderStashbox}
+	if err := a.st.CreateLibrary(ctx, second); err != nil {
+		t.Fatalf("CreateLibrary: %v", err)
+	}
+	if err := a.st.SetLibraryActive(ctx, lib.ID, false); err != nil {
+		t.Fatalf("SetLibraryActive: %v", err)
+	}
+	a.adult.calls = 0
+
+	res := &RefreshResult{}
+	if err := a.mgr.refreshSites(ctx, res); err != nil {
+		t.Fatalf("refreshSites: %v", err)
+	}
+	if a.adult.calls != 0 {
+		t.Errorf("the sweep made %d provider calls for a dormant library's site, want 0", a.adult.calls)
+	}
+	if res.Sites != 0 || len(res.Errors) != 0 {
+		t.Errorf("result = %+v, want an untouched no-op", res)
+	}
+	// The queued catalogue walk agrees, so the other door onto the same rows is
+	// shut too.
+	if err := a.mgr.SyncSite(ctx, sr.ID); err != nil {
+		t.Errorf("SyncSite under an inactive library = %v, want a silent no-op", err)
+	}
+	if a.adult.calls != 0 {
+		t.Errorf("SyncSite reached the provider %d times for a dormant library, want 0", a.adult.calls)
+	}
+	// And the rows are all still there: switching off hides, it never deletes.
+	if eps := a.episodes(sr.ID); len(eps) != 3 {
+		t.Errorf("episodes after the switch = %d, want 3", len(eps))
 	}
 }

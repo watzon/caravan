@@ -42,6 +42,68 @@ func exec(t *testing.T, db *sql.DB, query string, args ...any) {
 	}
 }
 
+// enableAdultLibrary says directly what a module-wide enable used to say for a
+// test: the Adult library exists and is switched on. An adult library IS the
+// module now — there is no server-wide flag left to set — so a test that wants
+// adult content reachable creates one, exactly as the create form does.
+//
+// It is idempotent the way the enable it replaces was: an existing row is
+// switched back on rather than duplicated, because the kind admits several
+// libraries and a second Adult shelf appearing mid-test would be a fixture bug
+// that reads as a product one.
+//
+// The created row carries the seed values the module always gave it: hidden
+// from DLNA and restricted, because a shelf of scenes was only ever reachable
+// by a named account and the LAN has no accounts to name. IsDefault is true
+// only because this branch runs when no adult library exists at all, and the
+// partial unique index admits exactly one default per kind.
+func enableAdultLibrary(t *testing.T, s *Store) core.Library {
+	t.Helper()
+	ctx := context.Background()
+
+	lib, err := s.GetLibraryByKind(ctx, core.LibraryKindAdult)
+	if errors.Is(err, ErrNotFound) {
+		lib = &core.Library{
+			Kind: core.LibraryKindAdult, Name: AdultLibraryName, RootPath: AdultLibraryRoot,
+			Providers: []string{core.ProviderStashbox}, DLNAVisible: false,
+			Restricted: true, IsDefault: true,
+		}
+		if err := s.CreateLibrary(ctx, lib); err != nil {
+			t.Fatalf("CreateLibrary(adult): %v", err)
+		}
+		return *lib
+	}
+	if err != nil {
+		t.Fatalf("GetLibraryByKind(adult): %v", err)
+	}
+	if err := s.SetLibraryActive(ctx, lib.ID, true); err != nil {
+		t.Fatalf("SetLibraryActive(%d, true): %v", lib.ID, err)
+	}
+	lib.Active = true
+	return *lib
+}
+
+// setAdultLibrariesActive is the other half of what the module switch did: it
+// bound every adult library at once, and that is now spelled per library.
+//
+// Off is a visibility answer and never a retention one, which is why this walks
+// the rows rather than deleting them — a test that turns the module off and
+// expects its scenes back is testing the promise, not the fixture.
+func setAdultLibrariesActive(t *testing.T, s *Store, active bool) {
+	t.Helper()
+	ctx := context.Background()
+
+	libs, err := s.ListLibrariesByKind(ctx, core.LibraryKindAdult)
+	if err != nil {
+		t.Fatalf("ListLibrariesByKind(adult): %v", err)
+	}
+	for _, lib := range libs {
+		if err := s.SetLibraryActive(ctx, lib.ID, active); err != nil {
+			t.Fatalf("SetLibraryActive(%d, %t): %v", lib.ID, active, err)
+		}
+	}
+}
+
 // 0013 rebuilds three tables to widen CHECK constraints. Rebuilding a table is
 // where installs lose data, and `libraries` is the dangerous one: its child
 // `library_indexers` cascades on delete, and DROP TABLE with foreign keys on
@@ -100,9 +162,13 @@ func TestMigrate0013PreservesThePhase8Install(t *testing.T) {
 		t.Fatalf("ListLibraries: %v", err)
 	}
 	wantLibraries := []core.Library{
-		{ID: 1, Kind: core.LibraryKindMovie, Name: "Movies", RootPath: "library/Movies", DLNAVisible: true},
+		{ID: 1, Kind: core.LibraryKindMovie, Name: "Movies", RootPath: "library/Movies",
+			DLNAVisible: true, Provider: core.ProviderTMDB,
+			Providers: []string{core.ProviderTMDB}, IsDefault: true, Active: true},
 		{ID: 2, Kind: core.LibraryKindTV, Name: "Series", RootPath: "library/TV",
-			DLNAVisible: false, RouteTorrent: "embedded", QualityProfileID: 1},
+			DLNAVisible: false, RouteTorrent: "embedded", QualityProfileID: 1,
+			Provider: core.ProviderTMDB, Providers: []string{core.ProviderTMDB},
+			IsDefault: true, Active: true},
 	}
 	if !reflect.DeepEqual(libraries, wantLibraries) {
 		t.Errorf("ListLibraries = %+v, want %+v", libraries, wantLibraries)
@@ -164,23 +230,20 @@ func TestMigrate0013PreservesThePhase8Install(t *testing.T) {
 			episode.StashID, episode.Scene)
 	}
 
-	// Nobody is granted by an upgrade.
-	user, err := st.GetUser(ctx, 4)
+	// Nobody is granted by an upgrade. 0013's per-account flag was the thing
+	// being asserted here until 0028 dropped it; the promise outlived the column
+	// and is now asked of the grants that replaced it.
+	grants, err := st.ListLibraryAccessForUser(ctx, 4)
 	if err != nil {
-		t.Fatalf("GetUser(4): %v", err)
+		t.Fatalf("ListLibraryAccessForUser(4): %v", err)
 	}
-	if user.AdultAccess {
-		t.Error("the upgrade granted an existing account adult access")
+	if len(grants) != 0 {
+		t.Errorf("the upgrade granted an existing account %v", grants)
 	}
 
-	// And the module is off, with no shelf to show for it.
-	enabled, err := st.AdultEnabled(ctx)
-	if err != nil {
-		t.Fatalf("AdultEnabled: %v", err)
-	}
-	if enabled {
-		t.Error("the upgrade enabled the adult module")
-	}
+	// And the module is off, which is now the same sentence as "there is no
+	// adult library on the install": an adult shelf IS the module, so an upgrade
+	// that produced one would be an upgrade that switched it on.
 	if _, err := st.GetLibraryByKind(ctx, core.LibraryKindAdult); !errors.Is(err, ErrNotFound) {
 		t.Errorf("GetLibraryByKind(adult) after upgrade = %v, want ErrNotFound", err)
 	}
@@ -222,13 +285,7 @@ func TestMigrate0013LeavesTheForeignKeysSound(t *testing.T) {
 	}
 
 	// The cascade the reference exists for still fires.
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
-	lib, err := st.GetLibraryByKind(ctx, core.LibraryKindAdult)
-	if err != nil {
-		t.Fatalf("GetLibraryByKind(adult): %v", err)
-	}
+	lib := enableAdultLibrary(t, st)
 	ix := &core.IndexerConfig{
 		Name: "Nzbee", Type: core.IndexerTypeNewznab, URL: "http://nzb.example", Enabled: true,
 	}
@@ -262,92 +319,18 @@ func TestFreshInstallHasNoAdultLibrary(t *testing.T) {
 	}
 }
 
-func TestAdultEnabledDefaultsOff(t *testing.T) {
+// Switching the module off is a visibility promise, not a retention policy: it
+// hides the shelf and deletes nothing, so switching it back on finds the
+// library, its sites, and its scenes exactly as they were left.
+//
+// The rows deletion would take are the ones nothing else can rebuild. A scan
+// can find the files again; the stash-box ids matched onto them, and the
+// requests that named them, it cannot.
+func TestSwitchingAdultOffDeletesNothing(t *testing.T) {
 	ctx := context.Background()
 	st, _ := openTemp(t)
 
-	enabled, err := st.AdultEnabled(ctx)
-	if err != nil {
-		t.Fatalf("AdultEnabled: %v", err)
-	}
-	if enabled {
-		t.Error("AdultEnabled on a fresh install = true, want false")
-	}
-
-	// A value nobody meant must not be what turns the module on.
-	if err := st.SetSetting(ctx, SettingAdultEnabled, "sure"); err != nil {
-		t.Fatalf("SetSetting: %v", err)
-	}
-	enabled, err = st.AdultEnabled(ctx)
-	if err != nil {
-		t.Fatalf("AdultEnabled: %v", err)
-	}
-	if enabled {
-		t.Error("an unparseable adult_enabled read as on")
-	}
-}
-
-// Enabling creates the shelf, once, hidden from DLNA — and enabling again
-// reuses it rather than fighting the kind column's UNIQUE constraint.
-func TestSetAdultEnabledCreatesTheLibraryOnce(t *testing.T) {
-	ctx := context.Background()
-	st, _ := openTemp(t)
-
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled(true): %v", err)
-	}
-
-	lib, err := st.GetLibraryByKind(ctx, core.LibraryKindAdult)
-	if err != nil {
-		t.Fatalf("GetLibraryByKind(adult): %v", err)
-	}
-	want := &core.Library{
-		ID: 3, Kind: core.LibraryKindAdult, Name: AdultLibraryName,
-		RootPath: AdultLibraryRoot, DLNAVisible: false,
-	}
-	if !reflect.DeepEqual(lib, want) {
-		t.Errorf("adult library = %+v, want %+v", lib, want)
-	}
-
-	// The owner shares it over DLNA and turns the module off and on again. The
-	// second enable must not resurrect a fresh, differently-configured row.
-	lib.DLNAVisible = true
-	if err := st.UpdateLibrary(ctx, lib); err != nil {
-		t.Fatalf("UpdateLibrary: %v", err)
-	}
-	if err := st.SetAdultEnabled(ctx, false); err != nil {
-		t.Fatalf("SetAdultEnabled(false): %v", err)
-	}
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled(true) again: %v", err)
-	}
-
-	libraries, err := st.ListLibraries(ctx)
-	if err != nil {
-		t.Fatalf("ListLibraries: %v", err)
-	}
-	if len(libraries) != 3 {
-		t.Fatalf("re-enabling produced %d libraries, want 3", len(libraries))
-	}
-	again, err := st.GetLibraryByKind(ctx, core.LibraryKindAdult)
-	if err != nil {
-		t.Fatalf("GetLibraryByKind(adult): %v", err)
-	}
-	if again.ID != lib.ID || !again.DLNAVisible {
-		t.Errorf("re-enabled adult library = %+v, want the edited row %+v back", again, lib)
-	}
-}
-
-// Disabling is a visibility promise, not a retention policy: it hides the
-// module and deletes nothing, so turning it back on finds the library exactly
-// as it was left.
-func TestDisablingAdultDeletesNothing(t *testing.T) {
-	ctx := context.Background()
-	st, _ := openTemp(t)
-
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled(true): %v", err)
-	}
+	enableAdultLibrary(t, st)
 	site := &core.Series{Kind: core.SeriesKindAdult, StashID: "site-1", Title: "Example Site"}
 	if err := st.UpsertSeries(ctx, site); err != nil {
 		t.Fatalf("UpsertSeries: %v", err)
@@ -360,63 +343,20 @@ func TestDisablingAdultDeletesNothing(t *testing.T) {
 		t.Fatalf("UpsertEpisode: %v", err)
 	}
 
-	if err := st.SetAdultEnabled(ctx, false); err != nil {
-		t.Fatalf("SetAdultEnabled(false): %v", err)
-	}
+	setAdultLibrariesActive(t, st, false)
 
-	enabled, err := st.AdultEnabled(ctx)
+	off, err := st.GetLibraryByKind(ctx, core.LibraryKindAdult)
 	if err != nil {
-		t.Fatalf("AdultEnabled: %v", err)
+		t.Fatalf("switching the module off removed the adult library: %v", err)
 	}
-	if enabled {
-		t.Fatal("AdultEnabled after disabling = true")
-	}
-	if _, err := st.GetLibraryByKind(ctx, core.LibraryKindAdult); err != nil {
-		t.Errorf("disabling removed the adult library: %v", err)
+	if off.Active {
+		t.Fatal("adult library is still active after being switched off")
 	}
 	if _, err := st.GetSeriesByStashID(ctx, "site-1"); err != nil {
-		t.Errorf("disabling removed the site: %v", err)
+		t.Errorf("switching the module off removed the site: %v", err)
 	}
 	if _, err := st.GetEpisodeByStashID(ctx, "scene-1"); err != nil {
-		t.Errorf("disabling removed the scene: %v", err)
-	}
-}
-
-func TestSetUserAdultAccess(t *testing.T) {
-	ctx := context.Background()
-	st, _ := openTemp(t)
-
-	u := &core.User{Username: "housemate", PasswordHash: "hash", Role: core.RoleMember}
-	if err := st.CreateUser(ctx, u); err != nil {
-		t.Fatalf("CreateUser: %v", err)
-	}
-	if u.AdultAccess {
-		t.Fatal("a new account was created already granted")
-	}
-
-	if err := st.SetUserAdultAccess(ctx, u.ID, true); err != nil {
-		t.Fatalf("SetUserAdultAccess(true): %v", err)
-	}
-	got, err := st.GetUser(ctx, u.ID)
-	if err != nil {
-		t.Fatalf("GetUser: %v", err)
-	}
-	if !got.AdultAccess {
-		t.Error("the grant did not stick")
-	}
-
-	if err := st.SetUserAdultAccess(ctx, u.ID, false); err != nil {
-		t.Fatalf("SetUserAdultAccess(false): %v", err)
-	}
-	if got, err = st.GetUser(ctx, u.ID); err != nil {
-		t.Fatalf("GetUser: %v", err)
-	}
-	if got.AdultAccess {
-		t.Error("the revoke did not stick")
-	}
-
-	if err := st.SetUserAdultAccess(ctx, 999, true); !errors.Is(err, ErrNotFound) {
-		t.Errorf("SetUserAdultAccess on an absent account = %v, want ErrNotFound", err)
+		t.Errorf("switching the module off removed the scene: %v", err)
 	}
 }
 
@@ -446,10 +386,18 @@ func TestUpsertSeriesDefaultsToTVAndRejectsAnUnknownKind(t *testing.T) {
 	}
 }
 
-// stash_id gets tmdb_id's treatment: unique among matched rows, unconstrained
-// among unmatched ones. A scan that found scene files before it found metadata
-// produces any number of the latter.
-func TestSeriesStashIDIsUniqueOnlyWhenSet(t *testing.T) {
+// Where a site's identity is enforced, after 0026 moved it.
+//
+// 0013 made stash_id itself globally unique, because there was one box and its
+// UUIDs were therefore unambiguous. 0026 demoted that index: the public boxes
+// are forks of one another and mint identical UUIDs, so a global rule would
+// refuse the second box's copy of a site outright. The rule did not go away, it
+// moved to 0024's UNIQUE (provider, provider_ref) — which is where a site's
+// identity has actually lived since every matched row started carrying both.
+//
+// Unmatched rows stay unconstrained either way: a scan that found scene files
+// before it found metadata produces any number of them.
+func TestAdultSeriesIdentityIsUniquePerProvider(t *testing.T) {
 	ctx := context.Background()
 	st, _ := openTemp(t)
 
@@ -464,13 +412,17 @@ func TestSeriesStashIDIsUniqueOnlyWhenSet(t *testing.T) {
 	if err := st.UpsertSeries(ctx, first); err != nil {
 		t.Fatalf("UpsertSeries: %v", err)
 	}
-	// A different row claiming the same site id is a duplicate the index must
-	// refuse; the upsert path below is how a legitimate refresh gets there.
+	if first.Provider != core.ProviderStashbox || first.ProviderRef != "site-1" {
+		t.Fatalf("site identity = %q/%q, want the write door to fill in stashbox/site-1",
+			first.Provider, first.ProviderRef)
+	}
+	// A different row claiming the same site on the SAME instance is the
+	// duplicate that must still be refused.
 	_, err := st.DB().ExecContext(ctx, `
-		INSERT INTO series (kind, stash_id, title, added_at, updated_at)
-		VALUES ('adult', 'site-1', 'Impostor', '', '')`)
+		INSERT INTO series (kind, stash_id, provider, provider_ref, title, added_at, updated_at)
+		VALUES ('adult', 'site-1', 'stashbox', 'site-1', 'Impostor', '', '')`)
 	if err == nil {
-		t.Error("a second series claimed the same stash id")
+		t.Error("a second series claimed the same site on the same instance")
 	}
 }
 

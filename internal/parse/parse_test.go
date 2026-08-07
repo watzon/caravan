@@ -91,6 +91,11 @@ func checkParsed(t *testing.T, fn, name string, got core.ParsedRelease, want exp
 	if !slices.Equal(got.Episodes, w.Episodes) {
 		t.Errorf("%s(%q).Episodes = %v, want %v", fn, name, got.Episodes, w.Episodes)
 	}
+	// Asserted by omission on every other line in the corpus, which is what
+	// makes the whole corpus a false-positive guard for the recognizer.
+	if got.Absolute != w.Absolute {
+		t.Errorf("%s(%q).Absolute = %d, want %d", fn, name, got.Absolute, w.Absolute)
+	}
 	if got.Quality != w.Quality {
 		t.Errorf("%s(%q).Quality = %q, want %q", fn, name, got.Quality, w.Quality)
 	}
@@ -157,6 +162,8 @@ func parseExpectation(spec string) (expectation, error) {
 			want.rel.Year, err = strconv.Atoi(value)
 		case "season":
 			want.rel.Season, err = strconv.Atoi(value)
+		case "absolute":
+			want.rel.Absolute, err = strconv.Atoi(value)
 		case "episodes":
 			for _, e := range strings.Split(value, ",") {
 				n, convErr := strconv.Atoi(strings.TrimSpace(e))
@@ -341,12 +348,148 @@ func TestGroupIsNotInvented(t *testing.T) {
 	}
 }
 
+// The anime shape, end to end. Title is asserted on every row: cutting the
+// number out of the title is what makes the derived search query right, and it
+// is the half of this feature the library layer cannot repair later.
+func TestParseAbsoluteEpisode(t *testing.T) {
+	tests := []struct {
+		name string
+		want core.ParsedRelease
+	}{{
+		name: "[SubsPlease] Show - 105 (1080p) [A1B2C3D4].mkv",
+		want: core.ParsedRelease{Title: "Show", Absolute: 105, Quality: core.Quality1080p, Group: "SubsPlease"},
+	}, {
+		// No dash and no tags at all: the bare form carries the whole name.
+		name: "Show 105.mkv",
+		want: core.ParsedRelease{Title: "Show", Absolute: 105},
+	}, {
+		// Dots for separators, the same claim.
+		name: "Show.-.05.mkv",
+		want: core.ParsedRelease{Title: "Show", Absolute: 5},
+	}, {
+		// A version suffix marks a re-encode of one episode, not another
+		// episode; it belongs in neither the number nor the title.
+		name: "Show - 105v2",
+		want: core.ParsedRelease{Title: "Show", Absolute: 105},
+	}, {
+		// Zero-padded and under 100: the padding is what tells this apart from
+		// a movie title ending in a number, so the bare form accepts it.
+		name: "Show 012.mkv",
+		want: core.ParsedRelease{Title: "Show", Absolute: 12},
+	}, {
+		// The quality/absolute collision, pinned deliberately. "1080" in the
+		// dash form is a number the name offers as an episode: bare 1080 is not
+		// a resolution (the resolution rules all require the trailing p or i,
+		// and "[1080p]" is where this name states its resolution), so reading
+		// it as episode 1080 is reading the name as written. The alternative —
+		// suppressing any number that looks like a resolution — would lose
+		// One Piece's genuine four-digit episodes to a coincidence.
+		name: "[Erai-raws] Show - 1080 [1080p]",
+		want: core.ParsedRelease{Title: "Show", Absolute: 1080, Quality: core.Quality1080p, Group: "Erai-raws"},
+	}}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Parse(tt.name)
+			if got.Title != tt.want.Title {
+				t.Errorf("Title = %q, want %q", got.Title, tt.want.Title)
+			}
+			if got.Absolute != tt.want.Absolute {
+				t.Errorf("Absolute = %d, want %d", got.Absolute, tt.want.Absolute)
+			}
+			if got.Season != 0 || len(got.Episodes) != 0 {
+				t.Errorf("Season/Episodes = %d/%v, want 0/none: an absolute number is never a placed episode", got.Season, got.Episodes)
+			}
+			if !got.IsAbsoluteEpisode() {
+				t.Error("IsAbsoluteEpisode() = false, want true")
+			}
+			if got.IsEpisode() {
+				t.Error("IsEpisode() = true, want false: the name named no season")
+			}
+			if got.Quality != tt.want.Quality && tt.want.Quality != "" {
+				t.Errorf("Quality = %q, want %q", got.Quality, tt.want.Quality)
+			}
+			if got.Group != tt.want.Group {
+				t.Errorf("Group = %q, want %q", got.Group, tt.want.Group)
+			}
+		})
+	}
+}
+
+// The important half. Every row asserts the number is refused AND that Title
+// and Year are byte-for-byte what the parser produced before the recognizer
+// existed — a false positive here does not merely miss a number, it cuts a
+// movie title in half and sends the wrong search query to the provider.
+//
+// The wanted values were captured from the pre-change parser, not written from
+// memory.
+func TestParseAbsoluteNegatives(t *testing.T) {
+	tests := []struct {
+		name  string
+		title string
+		year  int
+		why   string
+	}{
+		{name: "Ocean's 11 (2001) 1080p BluRay", title: "Ocean's 11", year: 2001,
+			why: "unpadded and under 100"},
+		{name: "Apollo 13 1995", title: "Apollo 13", year: 1995,
+			why: "unpadded and under 100"},
+		{name: "Cars 3 2017", title: "Cars 3", year: 2017,
+			why: "single digit"},
+		{name: "Blade Runner 2049 (2017)", title: "Blade Runner 2049", year: 2017,
+			why: "2049 is a year shape, and the name carries a year besides"},
+		{name: "1917 (2019)", title: "1917", year: 2019,
+			why: "the title IS a year shape"},
+		{name: "1917.2019.1080p.BluRay.x264-VETO", title: "1917", year: 2019,
+			why: "same title, full scene name"},
+		{name: "2012.2009.720p.BluRay.x264-METiS", title: "2012", year: 2009,
+			why: "same again, and the year sits in the title span"},
+		{name: "Show S01E05", title: "Show", year: 0,
+			why: "the name already named a season and an episode"},
+		{name: "Show - 105-106", title: "Show - 105-106", year: 0,
+			why: "a range is refused whole, title included"},
+		{name: "Show 2 - 05", title: "Show 2 - 05", year: 0,
+			why: "the number in front of the dash is a season"},
+		{name: "Spider-Man.Into.the.Spider-Verse.2018.1080p.BluRay.x264-SPARKS",
+			title: "Spider-Man Into the Spider-Verse", year: 2018,
+			why: "a hyphenated title is not the dash form"},
+		{name: "Movie.With.No.Year.1080p.WEB-DL.DDP5.1.H.264-NTb",
+			title: "Movie With No Year", year: 0,
+			why: "H.264 and DDP5.1 are technical tags, and they sit past the title span"},
+		{name: "The.Departed.2006.1080p.BluRay.x264.anoXmous", title: "The Departed", year: 2006,
+			why: "no candidate at all — the guard is that it stays that way"},
+		{name: "Se7en.1995.REMASTERED.1080p.BluRay.DD5.1.x264-playHD", title: "Se7en", year: 1995,
+			why: "digits inside title and audio tags alike"},
+		{name: "Fahrenheit 451 (1966) 1080p BluRay", title: "Fahrenheit 451", year: 1966,
+			why: "over 100 and unpadded: only the year rule keeps this title whole"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Parse(tt.name)
+			if got.Absolute != 0 {
+				t.Errorf("Absolute = %d, want 0 (%s)", got.Absolute, tt.why)
+			}
+			if got.IsAbsoluteEpisode() {
+				t.Error("IsAbsoluteEpisode() = true, want false")
+			}
+			if got.Title != tt.title {
+				t.Errorf("Title = %q, want %q (unchanged by the recognizer)", got.Title, tt.title)
+			}
+			if got.Year != tt.year {
+				t.Errorf("Year = %d, want %d (unchanged by the recognizer)", got.Year, tt.year)
+			}
+		})
+	}
+}
+
 func FuzzParse(f *testing.F) {
 	seeds := []string{
 		"Big.Buck.Bunny.2008.1080p.BluRay.x264-GROUP",
 		"Planet Earth II (2016) - S01E01 - Islands.mkv",
 		"[SubsPlease] Frieren - 12 (1080p) [F0E9D2A1].mkv",
 		"S01E01-E03", "(((", "]]]", "S99E999-E001", "1x99", "____", "..mkv",
+		"[SubsPlease] Show - 105 (1080p)", "Ocean's 11", "Show - 105-106",
 	}
 	for _, s := range seeds {
 		f.Add(s)
@@ -362,6 +505,14 @@ func FuzzParse(f *testing.F) {
 		}
 		if got.Season < 0 {
 			t.Fatalf("Parse(%q).Season = %d, want >= 0", name, got.Season)
+		}
+		if got.Absolute < 0 {
+			t.Fatalf("Parse(%q).Absolute = %d, want >= 0", name, got.Absolute)
+		}
+		// The two numbering claims are exclusive by construction. Phase 12's
+		// resolver reads one or the other and never has to reconcile both.
+		if got.Absolute > 0 && len(got.Episodes) > 0 {
+			t.Fatalf("Parse(%q) = absolute %d with episodes %v, want at most one of the two", name, got.Absolute, got.Episodes)
 		}
 	})
 }

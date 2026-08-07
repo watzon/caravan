@@ -376,10 +376,20 @@ describe('task intervals', () => {
 });
 
 describe('interactive search', () => {
-  it('fetches movie releases and unwraps them', async () => {
-    stubFetch({ releases: [{ guid: 'a' }, { guid: 'b' }] });
-    expect(await api.movieReleases(7)).toHaveLength(2);
+  it('fetches movie releases with the whole envelope', async () => {
+    // The envelope, not bare rows: the picker seeds its editable query box
+    // from `query` and surfaces the per-indexer `errors`.
+    stubFetch({ query: 'dune 2021', releases: [{ guid: 'a' }, { guid: 'b' }], errors: [] });
+    const found = await api.movieReleases(7);
+    expect(found.releases).toHaveLength(2);
+    expect(found.query).toBe('dune 2021');
     expect(only().url).toBe('/api/v1/library/movies/7/releases');
+  });
+
+  it('encodes the universal search params comma-joined and omits empties', async () => {
+    stubFetch({ query: 'x', releases: [], errors: [] });
+    await api.searchReleases({ q: 'ubuntu iso', cats: [2000, 5000], indexer_ids: [] });
+    expect(only().url).toBe('/api/v1/search/releases?q=ubuntu+iso&cats=2000%2C5000');
   });
 
   it('sends no season or episode for a bare series search', async () => {
@@ -398,6 +408,30 @@ describe('interactive search', () => {
     stubFetch({ releases: [] });
     await api.seriesReleases(9, { season: 0, episode: 1 });
     expect(only().url).toBe('/api/v1/library/series/9/releases?season=0&episode=1');
+  });
+});
+
+/**
+ * Metadata search. The library is what picks the provider chain, so it is part
+ * of the question: the same query asked of two libraries has two answers.
+ */
+describe('metadata search', () => {
+  it('names the library whose chain should answer', async () => {
+    stubFetch({ movies: [], series: [], providers: ['tmdb'], library_id: 9, errors: [] });
+    await api.search('frieren', 'series', 9);
+    expect(only().url).toBe('/api/v1/search?q=frieren&type=series&library_id=9');
+  });
+
+  it.each([
+    { name: 'omitted', libraryID: undefined },
+    // Zero is "the kind's default library", which is what an absent parameter
+    // already means — sending it would be a filter on library 0, which is not
+    // a library.
+    { name: 'zero', libraryID: 0 },
+  ])('sends no library_id when it is $name', async ({ libraryID }) => {
+    stubFetch({ movies: [], series: [], providers: ['tmdb'], library_id: 1, errors: [] });
+    await api.search('dune', 'movie', libraryID);
+    expect(only().url).toBe('/api/v1/search?q=dune&type=movie');
   });
 });
 

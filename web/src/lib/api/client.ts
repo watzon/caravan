@@ -11,7 +11,6 @@ import type {
   EventPage,
   AddSiteRequest,
   AdultDiscoverPage,
-  AdultUser,
   ApproveRequestBody,
   ApproveRequestResult,
   AuthState,
@@ -46,10 +45,14 @@ import type {
   Job,
   Library,
   JobPage,
+  LibraryAccess,
+  LibraryAccessInput,
+  LibraryCreate,
   LibraryIndexerOverride,
   LibraryPatch,
   MatchRequest,
   MediaRequest,
+  MetadataProviderInfo,
   MinAvailability,
   MediaType,
   Movie,
@@ -57,7 +60,9 @@ import type {
   QualityProfileInput,
   QualityProfileTestRequest,
   QualityProfileTestResponse,
-  Release,
+  ReleasesResponse,
+  SearchGrabRequest,
+  SearchReleasesParams,
   NotificationWebhook,
   NotificationWebhookInput,
   RemotePathMapping,
@@ -76,6 +81,8 @@ import type {
   Site,
   SiteDetail,
   SiteMeta,
+  StashboxInstance,
+  StashboxInstanceInput,
   StashConfig,
   StashTestResult,
   StorageMigration,
@@ -247,6 +254,10 @@ export const endpoints = {
   library: (id: number) => `${API_BASE}/libraries/${id}`,
   libraryIndexer: (id: number, indexerID: number) =>
     `${API_BASE}/libraries/${id}/indexers/${indexerID}`,
+  // Who reaches one library. Admin-only like the rest of this block, and for a
+  // sharper reason: a member who could read it would learn the household's
+  // whole account roster.
+  libraryAccess: (id: number) => `${API_BASE}/libraries/${id}/access`,
 
   // Discover — browse the provider rather than search it. Every id in this
   // block is a TMDB id; library ids only appear in the decorated payloads.
@@ -279,17 +290,19 @@ export const endpoints = {
   adultDiscover: () => `${API_BASE}/adult/discover`,
   adultPerformers: () => `${API_BASE}/adult/performers`,
   adultTags: () => `${API_BASE}/adult/tags`,
-  adultUsers: () => `${API_BASE}/adult/users`,
-  adultUserAccess: (id: number) => `${API_BASE}/adult/users/${id}/access`,
   // Phase 11 — the Stash handoff. Inside the gated subtree with the rest of
   // /adult rather than beside /handoff/jellyfin, so an adult-module setting is
   // absent for an ungranted caller rather than merely switched off.
   adultStash: () => `${API_BASE}/adult/stash`,
   adultStashTest: () => `${API_BASE}/adult/stash/test`,
-  // The master switch, and the one adult route outside the gated subtree: it
-  // has to be reachable while the module is off, because turning it on is what
-  // it is for.
-  settingsAdult: () => `${API_BASE}/settings/adult`,
+  // The stash-box instances. Inside the gated subtree for the reason the
+  // handoff is: a list of the catalogues a household subscribes to is exactly
+  // the trace the module promises not to leave, so it 404s while the module is
+  // off rather than answering an empty list.
+  stashboxInstances: () => `${API_BASE}/adult/stashbox-instances`,
+  stashboxInstance: (id: number) => `${API_BASE}/adult/stashbox-instances/${id}`,
+  stashboxInstanceTest: (id: number) => `${API_BASE}/adult/stashbox-instances/${id}/test`,
+  stashboxConfigTest: () => `${API_BASE}/adult/stashbox-instances/test`,
 } as const;
 
 /**
@@ -517,20 +530,25 @@ export const api = {
     request<Settings>(endpoints.settings(), { method: 'PUT', body: patch }),
 
   /**
-   * Prove a TMDB API key against TMDB (PLAN phase 10 task 4).
+   * Prove one provider's API key against that provider (PLAN phase 10 task 4).
    *
    * Passing the key tests that exact string without storing it, which is what
    * the first-run wizard and the settings field both do — so a wrong key is
    * caught before it is saved. Passing nothing tests the stored one.
    *
+   * `provider` defaults to TMDB, which is what the server assumes for a body
+   * that names none — so a caller that has only ever had one key to prove keeps
+   * asking the question it always asked. An id with no key field of its own is
+   * a 400 rather than a test that quietly proves TMDB's key instead.
+   *
    * The server caches the verdict against the key's value, so testing and then
    * saving the same key costs one upstream call, not two: prefer test-then-save
    * over saving blind.
    */
-  testMetadataKey: (apiKey = '') =>
+  testMetadataKey: (apiKey = '', provider = 'tmdb') =>
     request<{ status: string }>(endpoints.metadataTest(), {
       method: 'POST',
-      body: { api_key: apiKey },
+      body: { api_key: apiKey, provider },
     }),
 
   /**
@@ -688,8 +706,23 @@ export const api = {
   dismissUnmatched: (id: number) =>
     request<void>(endpoints.unmatchedItem(id), { method: 'DELETE' }),
 
-  search: (q: string, kind: 'movie' | 'series' | 'all' = 'all', signal?: AbortSignal) =>
-    request<SearchResults>(endpoints.search(), { query: { q, type: kind }, signal }),
+  /**
+   * Identify a title through a library's provider chain.
+   *
+   * `libraryID` names the shelf the add will land on, and therefore the chain
+   * that answers. Zero or omitted lets the kind's default library answer —
+   * which is the shelf an untargeted add lands on anyway.
+   */
+  search: (
+    q: string,
+    kind: 'movie' | 'series' | 'all' = 'all',
+    libraryID?: number,
+    signal?: AbortSignal,
+  ) =>
+    request<SearchResults>(endpoints.search(), {
+      query: { q, type: kind, library_id: libraryID || undefined },
+      signal,
+    }),
 
   /* ------------------------------------------------------------------------
    * Phase 2 — search & download.
@@ -835,26 +868,46 @@ export const api = {
    * skeleton rows.
    */
   movieReleases: (id: number, signal?: AbortSignal) =>
-    listOf<Release>(endpoints.movieReleases(id), 'releases', signal),
+    request<ReleasesResponse>(endpoints.movieReleases(id), { signal }),
 
   /**
    * Episode and season search. `season`/`episode` are numbers as they appear on
    * screen, because they are what the query sent to the indexer is built from;
    * the grab that follows targets episodes by id.
+   *
+   * Both return the whole envelope rather than the bare rows: the picker
+   * seeds its editable query box with the exact string the server sent, and
+   * finally surfaces the per-indexer failures it always answered with.
    */
   seriesReleases: (
     id: number,
     opts: { season?: number; episode?: number } = {},
     signal?: AbortSignal,
   ) =>
-    listOf<Release>(
+    request<ReleasesResponse>(
       withQuery(endpoints.seriesReleases(id), {
         season: opts.season,
         episode: opts.episode,
       }),
-      'releases',
-      signal,
+      { signal },
     ),
+
+  /** The Prowlarr-style universal search: any query, any categories. */
+  searchReleases: (params: SearchReleasesParams, signal?: AbortSignal) =>
+    request<ReleasesResponse>(
+      withQuery(`${API_BASE}/search/releases`, {
+        q: params.q,
+        cats: params.cats?.length ? params.cats.join(',') : undefined,
+        indexer_ids: params.indexer_ids?.length ? params.indexer_ids.join(',') : undefined,
+        library_id: params.library_id || undefined,
+        limit: params.limit,
+      }),
+      { signal },
+    ),
+
+  /** Grab from the universal search: into a library, optionally tied to an item. */
+  grabFromSearch: (body: SearchGrabRequest) =>
+    request<void>(`${API_BASE}/search/grab`, { method: 'POST', body }),
 
   grabForMovie: (id: number, body: GrabRequest) =>
     request<void>(endpoints.movieGrab(id), { method: 'POST', body }),
@@ -1076,11 +1129,49 @@ export const api = {
   listLibraries: (signal?: AbortSignal) =>
     listOf<Library>(endpoints.libraries(), 'libraries', signal),
 
+  createLibrary: (body: LibraryCreate) =>
+    request<Library>(endpoints.libraries(), { method: 'POST', body }),
+
+  deleteLibrary: (id: number) => request<void>(endpoints.library(id), { method: 'DELETE' }),
+
+  /** Queue a movie's move into another library; the transfer is a durable job. */
+  moveMovie: (id: number, libraryID: number) =>
+    request<{ status: string }>(`${endpoints.movie(id)}/move`, {
+      method: 'POST',
+      body: { library_id: libraryID },
+    }),
+
+  /** moveMovie's series twin, covering adult sites too. */
+  moveSeries: (id: number, libraryID: number) =>
+    request<{ status: string }>(`${endpoints.series(id)}/move`, {
+      method: 'POST',
+      body: { library_id: libraryID },
+    }),
+
+  listMetadataProviders: (signal?: AbortSignal) =>
+    listOf<MetadataProviderInfo>(`${endpoints.libraries()}/providers`, 'providers', signal),
+
   updateLibrary: (id: number, body: LibraryPatch) =>
     request<Library>(endpoints.library(id), { method: 'PATCH', body }),
 
   setLibraryIndexer: (id: number, indexerID: number, body: LibraryIndexerOverride) =>
     request<Library>(endpoints.libraryIndexer(id, indexerID), { method: 'PUT', body }),
+
+  /** The Access card: this library's restriction and every account beside it. */
+  getLibraryAccess: (id: number, signal?: AbortSignal) =>
+    request<LibraryAccess>(endpoints.libraryAccess(id), { signal }),
+
+  /**
+   * Write the whole decision — the flag and the complete allow-list — in one
+   * request. There is no per-user verb, deliberately: split in two there is a
+   * window in which the library is restricted to nobody.
+   *
+   * Restricting also clears the library's `dlna_visible` server-side, because
+   * DLNA has no accounts. The answer carries only the access pair, so a caller
+   * holding the library row has to reflect that clearing itself.
+   */
+  setLibraryAccess: (id: number, body: LibraryAccessInput) =>
+    request<LibraryAccess>(endpoints.libraryAccess(id), { method: 'PUT', body }),
 
   /* ------------------------------------------------------------------------
    * Discover & requests.
@@ -1224,40 +1315,52 @@ export const api = {
    * Phase 9 — the adult module.
    *
    * 503 means no stash-box credential is configured (send the user to
-   * Settings → Adult content); 502 means the provider is unhappy. Both arrive
+   * Settings → Metadata); 502 means the provider is unhappy. Both arrive
    * as an ApiError, same as the TMDB-backed screens, so callers branch on
    * `status`. A 404 means the module is not visible to this caller — which is
    * indistinguishable from the route not existing, deliberately.
    * --------------------------------------------------------------------- */
 
   /**
-   * Turn the module on or off. The first enable creates the Adult library row
-   * (hidden from DLNA); a disable deletes nothing, so turning it back on finds
-   * the sites, the scenes and the files exactly as they were.
+   * The configured stash-box endpoints (PLAN Part 2 phase 3).
    *
-   * An enable carries the credential it is made with (PLAN phase 10 task 5):
-   * the server proves the stash-box endpoint and key BEFORE it writes anything
-   * and commits `adult_enabled` last, so a credential that does not work leaves
-   * the endpoint, the key and the switch byte-identical. Omitting either field
-   * means "use what is stored", which is what re-enabling a module that was
-   * configured once and switched off should send.
-   *
-   * A failure arrives as an ApiError coded `adult_credential_absent` (nothing
-   * to authenticate with) or `adult_credential_invalid` (the endpoint refused
-   * it) — see credentials.ts.
+   * Every one of these 404s while the module is off, so the settings card that
+   * calls them is mounted only for a session that already sees the module.
    */
-  setAdultEnabled: (
-    enabled: boolean,
-    credential?: { endpoint?: string; apiKey?: string },
-  ) =>
-    request<{ enabled: boolean }>(endpoints.settingsAdult(), {
-      method: 'POST',
-      body: {
-        enabled,
-        ...(credential?.endpoint === undefined ? {} : { stashbox_endpoint: credential.endpoint }),
-        ...(credential?.apiKey === undefined ? {} : { stashbox_api_key: credential.apiKey }),
-      },
-    }),
+  listStashboxInstances: (signal?: AbortSignal) =>
+    listOf<StashboxInstance>(endpoints.stashboxInstances(), 'instances', signal),
+
+  createStashboxInstance: (body: StashboxInstanceInput) =>
+    request<StashboxInstance>(endpoints.stashboxInstances(), { method: 'POST', body }),
+
+  /**
+   * Edit the two fields an instance owns after creation: its label and its
+   * credential. An endpoint change is refused by the server — every item pinned
+   * to the instance carries a UUID only that box minted — so the edit form does
+   * not offer one.
+   */
+  updateStashboxInstance: (id: number, body: StashboxInstanceInput) =>
+    request<StashboxInstance>(endpoints.stashboxInstance(id), { method: 'PUT', body }),
+
+  /**
+   * Remove an instance nothing depends on. A 409 names what still uses it, or
+   * says it is the last one while the module is on; callers show that message
+   * as it arrived.
+   */
+  deleteStashboxInstance: (id: number) =>
+    request<void>(endpoints.stashboxInstance(id), { method: 'DELETE' }),
+
+  /** Ask a stored instance's box whether it answers with the key on file. */
+  testStashboxInstance: (id: number) =>
+    request<void>(endpoints.stashboxInstanceTest(id), { method: 'POST' }),
+
+  /**
+   * The same question for an endpoint and key that are not stored yet, which is
+   * what the add form needs while the user is still typing — before the
+   * instance exists to have an id.
+   */
+  testStashboxConfig: (body: StashboxInstanceInput) =>
+    request<void>(endpoints.stashboxConfigTest(), { method: 'POST', body }),
 
   /** Every site in the library, with the scene counts the grid badges. */
   listSites: (signal?: AbortSignal) => listOf<Site>(endpoints.adultSites(), 'sites', signal),
@@ -1304,18 +1407,6 @@ export const api = {
 
   adultTags: (query: string, signal?: AbortSignal) =>
     listOf<SceneFilterRef>(withQuery(endpoints.adultTags(), { q: query }), 'tags', signal),
-
-  /** The member-access card: every account and whether it reaches the module. */
-  listAdultUsers: (signal?: AbortSignal) =>
-    listOf<AdultUser>(endpoints.adultUsers(), 'users', signal),
-
-  /**
-   * Grant or revoke one account's access. It takes effect on that account's
-   * very next request — the grant is not a credential, so there is no session
-   * to invalidate and nobody gets signed out.
-   */
-  setAdultAccess: (id: number, granted: boolean) =>
-    request<AdultUser>(endpoints.adultUserAccess(id), { method: 'PUT', body: { granted } }),
 
   /* ------------------------------------------------------------------------
    * Phase 11 — the Stash handoff (SPEC §5.2's adult twin). Like Jellyfin's,

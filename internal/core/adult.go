@@ -17,33 +17,40 @@ import (
 // turned it on is the place that has to say so.
 var ErrNoAdultProvider = errors.New("core: no adult metadata provider configured")
 
-// AdultVisible is the whole access rule for the adult module (PLAN phase 9
-// task 5), in one pure function so there is exactly one truth table to read and
-// exactly one to test.
+// StashboxInstance is one configured stash-box endpoint.
 //
-// Two switches, and both must be on:
-//
-//   - enabled is the server-wide `adult_enabled` setting. Nobody bypasses it,
-//     including an admin: it is the switch that makes the module absent rather
-//     than merely locked, and an admin who can see adult routes on a server
-//     they turned the module off on is a trace this phase promises not to
-//     leave. It is also what guarantees zero stash-box traffic when off.
-//   - granted is the per-account `adult_access` flag. An admin is implicitly
-//     granted — the person who can flip the global switch and hand out the
-//     grants gains nothing from being made to grant themselves — so the flag
-//     is only ever consulted for a member.
-//
-// The open server (no accounts at all) authenticates as an implicit admin, so
-// it reaches this with role RoleAdmin and needs only the global switch, which
-// is the same trusted-LAN default the rest of Caravan has.
-func AdultVisible(enabled bool, role string, granted bool) bool {
-	if !enabled {
-		return false
-	}
-	if role == RoleAdmin {
-		return true
-	}
-	return granted
+// "stash-box" is a protocol, so a single endpoint setting could only ever
+// describe one of the catalogues speaking it. Each configured endpoint is its
+// own provider: it has its own account, its own capabilities, and its own
+// UUIDs, and the public boxes are forks of one another that mint identical
+// UUIDs for different rows of different catalogues.
+type StashboxInstance struct {
+	ID int64
+	// ProviderID is the id stored in `series.provider` and in a library's
+	// provider chain. It is the instance's identity — 'stashbox' for the
+	// endpoint configured before instances existed, 'stashbox:<slug>' for every
+	// one minted since — and it is immutable: renaming an instance must never
+	// re-point the rows pinned to it.
+	ProviderID string
+	// Name is the user-facing label, unique across instances.
+	Name string
+	// Endpoint is the box's GraphQL URL, always absolute. There is no "" means
+	// the preset here: with several instances that sentinel would let two of
+	// them be silently the same box. The preset belongs to the picker that
+	// offers it, not to the stored value.
+	//
+	// It is immutable after creation for the reason the provider id is: every
+	// item pinned to this instance carries a UUID that only this box minted, and
+	// re-pointing it at another box would have the next refresh overwrite those
+	// rows with whatever the new box happens to hold under the same ids. Moving
+	// to another box is adding an instance.
+	Endpoint string
+	// APIKey is the credential. It lives in the database, never in the bootstrap
+	// YAML and never in logs (SPEC §12). Empty is legitimate: a box that serves
+	// anonymous reads needs none.
+	APIKey    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }
 
 // AdultMetadataProvider is the metadata source behind the adult library

@@ -12,6 +12,17 @@ func TestMediaFileLibraryKind(t *testing.T) {
 	st, _ := openTemp(t)
 	ctx := context.Background()
 
+	// A second television library, so the answer has to name a library and not
+	// just a kind: the DLNA tree gates a media URL on the owning library's own
+	// dlna_visible flag.
+	anime := &core.Library{
+		Kind: core.LibraryKindTV, Name: "Anime", RootPath: "library/Anime",
+		Provider: core.ProviderTMDB,
+	}
+	if err := st.CreateLibrary(ctx, anime); err != nil {
+		t.Fatalf("CreateLibrary: %v", err)
+	}
+
 	movie := &core.Movie{TMDBID: 1, Title: "Movie", SortTitle: "movie"}
 	if err := st.UpsertMovie(ctx, movie); err != nil {
 		t.Fatalf("UpsertMovie: %v", err)
@@ -19,6 +30,10 @@ func TestMediaFileLibraryKind(t *testing.T) {
 	tv := &core.Series{TMDBID: 2, Title: "Show", SortTitle: "show"}
 	if err := st.UpsertSeries(ctx, tv); err != nil {
 		t.Fatalf("UpsertSeries(tv): %v", err)
+	}
+	animeSeries := &core.Series{TMDBID: 3, Title: "Frieren", SortTitle: "frieren", LibraryID: anime.ID}
+	if err := st.UpsertSeries(ctx, animeSeries); err != nil {
+		t.Fatalf("UpsertSeries(anime): %v", err)
 	}
 	adult := &core.Series{
 		Kind: core.SeriesKindAdult, StashID: "site-1", Title: "Site", SortTitle: "site",
@@ -28,12 +43,15 @@ func TestMediaFileLibraryKind(t *testing.T) {
 	}
 
 	tvEpisode := &core.Episode{SeriesID: tv.ID, SeasonNumber: 1, EpisodeNumber: 1}
+	animeEpisode := &core.Episode{SeriesID: animeSeries.ID, SeasonNumber: 1, EpisodeNumber: 1}
 	adultEpisodes := []*core.Episode{
 		{SeriesID: adult.ID, SeasonNumber: 2025, EpisodeNumber: 1},
 		{SeriesID: adult.ID, SeasonNumber: 2025, EpisodeNumber: 2},
 	}
-	if err := st.UpsertEpisode(ctx, tvEpisode); err != nil {
-		t.Fatalf("UpsertEpisode(tv): %v", err)
+	for _, episode := range []*core.Episode{tvEpisode, animeEpisode} {
+		if err := st.UpsertEpisode(ctx, episode); err != nil {
+			t.Fatalf("UpsertEpisode(tv): %v", err)
+		}
 	}
 	for _, episode := range adultEpisodes {
 		if err := st.UpsertEpisode(ctx, episode); err != nil {
@@ -43,13 +61,16 @@ func TestMediaFileLibraryKind(t *testing.T) {
 
 	movieFile := &core.MediaFile{Path: "Movies/movie.mkv", MovieID: movie.ID}
 	tvFile := &core.MediaFile{Path: "TV/show.mkv"}
+	animeFile := &core.MediaFile{Path: "Anime/frieren.mkv"}
 	adultFile := &core.MediaFile{Path: "Adult/scene.mkv"}
 	multiAdultFile := &core.MediaFile{Path: "Adult/double-scene.mkv"}
 	unownedFile := &core.MediaFile{Path: "unowned.mkv"}
 	mixedKindFile := &core.MediaFile{Path: "mixed-kind.mkv"}
+	mixedLibraryFile := &core.MediaFile{Path: "mixed-library.mkv"}
 	movieEpisodeFile := &core.MediaFile{Path: "movie-episode.mkv", MovieID: movie.ID}
 	for _, file := range []*core.MediaFile{
-		movieFile, tvFile, adultFile, multiAdultFile, unownedFile, mixedKindFile, movieEpisodeFile,
+		movieFile, tvFile, animeFile, adultFile, multiAdultFile, unownedFile,
+		mixedKindFile, mixedLibraryFile, movieEpisodeFile,
 	} {
 		if err := st.UpsertMediaFile(ctx, file); err != nil {
 			t.Fatalf("UpsertMediaFile(%q): %v", file.Path, err)
@@ -60,11 +81,14 @@ func TestMediaFileLibraryKind(t *testing.T) {
 		fileID    int64
 	}{
 		{tvEpisode.ID, tvFile.ID},
+		{animeEpisode.ID, animeFile.ID},
 		{adultEpisodes[0].ID, adultFile.ID},
 		{adultEpisodes[0].ID, multiAdultFile.ID},
 		{adultEpisodes[1].ID, multiAdultFile.ID},
 		{tvEpisode.ID, mixedKindFile.ID},
 		{adultEpisodes[0].ID, mixedKindFile.ID},
+		{tvEpisode.ID, mixedLibraryFile.ID},
+		{animeEpisode.ID, mixedLibraryFile.ID},
 		{tvEpisode.ID, movieEpisodeFile.ID},
 	} {
 		if err := st.LinkEpisodeFile(ctx, link.episodeID, link.fileID); err != nil {
@@ -73,36 +97,40 @@ func TestMediaFileLibraryKind(t *testing.T) {
 	}
 
 	tests := []struct {
-		name string
-		id   int64
-		want string
+		name    string
+		id      int64
+		want    string
+		wantLib int64
 	}{
 		{name: "movie", id: movieFile.ID, want: core.LibraryKindMovie},
 		{name: "television", id: tvFile.ID, want: core.LibraryKindTV},
+		{name: "second television library", id: animeFile.ID, want: core.LibraryKindTV, wantLib: anime.ID},
 		{name: "adult", id: adultFile.ID, want: core.LibraryKindAdult},
 		{name: "multi-episode adult", id: multiAdultFile.ID, want: core.LibraryKindAdult},
 		{name: "unowned", id: unownedFile.ID},
 		{name: "mixed television and adult", id: mixedKindFile.ID},
+		{name: "two television libraries", id: mixedLibraryFile.ID},
 		{name: "movie and episode", id: movieEpisodeFile.ID},
 		{name: "missing", id: 9999},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := st.GetMediaFileLibraryKind(ctx, tt.id)
+			gotLib, got, err := st.GetMediaFileLibrary(ctx, tt.id)
 			if tt.want == "" {
 				if !errors.Is(err, ErrNotFound) {
-					t.Fatalf("GetMediaFileLibraryKind(%d) error = %v, want ErrNotFound", tt.id, err)
+					t.Fatalf("GetMediaFileLibrary(%d) error = %v, want ErrNotFound", tt.id, err)
 				}
-				if got != "" {
-					t.Fatalf("GetMediaFileLibraryKind(%d) = %q, want empty", tt.id, got)
+				if got != "" || gotLib != 0 {
+					t.Fatalf("GetMediaFileLibrary(%d) = %d, %q, want zero", tt.id, gotLib, got)
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("GetMediaFileLibraryKind(%d): %v", tt.id, err)
+				t.Fatalf("GetMediaFileLibrary(%d): %v", tt.id, err)
 			}
-			if got != tt.want {
-				t.Fatalf("GetMediaFileLibraryKind(%d) = %q, want %q", tt.id, got, tt.want)
+			if got != tt.want || gotLib != tt.wantLib {
+				t.Fatalf("GetMediaFileLibrary(%d) = %d, %q, want %d, %q",
+					tt.id, gotLib, got, tt.wantLib, tt.want)
 			}
 		})
 	}
@@ -125,11 +153,17 @@ func TestMediaFileLibraryKind(t *testing.T) {
 			}
 		}
 	}
+	// Conversion is not an exposure surface, so its ownership rule stays by
+	// kind: a file shared by two television libraries is still one television
+	// file to convert, even though GetMediaFileLibrary refuses to name an owner
+	// for it.
 	allCandidates := []struct{ path, kind string }{
 		{"Adult/double-scene.mkv", core.LibraryKindAdult},
 		{"Adult/scene.mkv", core.LibraryKindAdult},
+		{"Anime/frieren.mkv", core.LibraryKindTV},
 		{"Movies/movie.mkv", core.LibraryKindMovie},
 		{"TV/show.mkv", core.LibraryKindTV},
+		{"mixed-library.mkv", core.LibraryKindTV},
 	}
 	assertCandidates(allCandidates)
 
@@ -139,7 +173,8 @@ func TestMediaFileLibraryKind(t *testing.T) {
 	if err := st.CreateConversion(ctx, conversion); err != nil {
 		t.Fatalf("CreateConversion: %v", err)
 	}
-	assertCandidates(allCandidates[:3])
+	withoutShow := append(append([]struct{ path, kind string }{}, allCandidates[:4]...), allCandidates[5:]...)
+	assertCandidates(withoutShow)
 
 	// Terminal history does not hide a file that still needs work.
 	conversion.Status = core.ConversionCancelled

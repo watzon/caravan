@@ -141,7 +141,7 @@ func TestImportUnmatchedNotifies(t *testing.T) {
 		t.Fatalf("UpsertUnmatchedFile: %v", err)
 	}
 
-	if _, err := h.mgr.ImportUnmatched(context.Background(), u.ID, 10378, MediaTypeMovie); err != nil {
+	if _, err := h.mgr.ImportUnmatched(context.Background(), u.ID, core.TMDBRef(10378), MediaTypeMovie); err != nil {
 		t.Fatalf("ImportUnmatched: %v", err)
 	}
 	if notify.calls != 1 {

@@ -29,6 +29,11 @@ const (
 	paramDate          = "date"
 	paramDateOp        = "date_op"
 	paramDuration      = "duration"
+	// paramProvider names which configured stash-box instance answers. It is
+	// not a filter — it chooses the catalogue the filters are applied to — but
+	// it rides in the same query string, so the allowlist has to know it or
+	// rejectUnknown would refuse it as an unserved filter.
+	paramProvider = "provider"
 )
 
 // sceneFilterParams is the allowlist for GET /adult/discover. As on the movie
@@ -39,7 +44,7 @@ var sceneFilterParams = []string{
 	paramQuery, paramPage, paramSite, paramScope,
 	paramPerformers, paramPerformersAll, paramTags, paramTagsAll,
 	paramYear, paramDate, paramDateOp, paramDuration,
-	paramSort, paramOrder,
+	paramSort, paramOrder, paramProvider,
 }
 
 // sceneFilterRefJSON is one performer or tag, in a typeahead answer and in the
@@ -112,7 +117,7 @@ func (s *server) handleAdultTags(w http.ResponseWriter, r *http.Request) {
 // separate because the two read different credentials and answer different
 // coded 503s.
 func (s *server) adultTypeahead(w http.ResponseWriter, r *http.Request) (core.AdultMetadataProvider, string, bool) {
-	provider, ok := s.adultProvider(w)
+	provider, _, ok := s.adultProvider(w, r)
 	if !ok {
 		return nil, "", false
 	}

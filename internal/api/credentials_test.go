@@ -308,249 +308,413 @@ func (p *countingProvider) SearchSeries(ctx context.Context, q string) ([]core.S
 }
 
 // ---------------------------------------------------------------------------
-// Adult enable gating (PLAN phase 10 task 5).
+// Per-provider credential state.
 //
-// Turning the module on is one decision, and the server refuses it as a unit: a
-// stash-box credential that does not work leaves the endpoint, the key and
-// adult_enabled exactly as they were. Cancel changes nothing because a failed
-// enable already changed nothing.
+// "The metadata provider" stopped being singular when libraries gained chains,
+// so the verdict did too. What these pin is that generalizing it narrowed
+// nothing: the flat TMDB fields still say what they always said, and they say
+// it because they are read out of the same map.
 
-// adultSettings reads the two stash-box settings and the module switch.
-func adultSettings(t *testing.T, st *store.Store) (endpoint, key string, enabled bool) {
-	t.Helper()
-	ctx := context.Background()
-	settings, err := st.AllSettings(ctx)
-	if err != nil {
-		t.Fatalf("AllSettings: %v", err)
+// TestProviderCredentialSettingsMatchStoreKeys is the fitness test
+// ProviderDescriptor.CredentialSetting's comment names.
+//
+// core cannot import store, so the settings key is written out as a literal
+// there and as a constant in store, and nothing but this makes the two agree. A
+// silent disagreement is a credential card reading a settings row nobody writes:
+// the key is stored, the state says "absent", and there is no error anywhere.
+func TestProviderCredentialSettingsMatchStoreKeys(t *testing.T) {
+	if got := core.ProviderCredentialSetting(core.ProviderTMDB); got != store.SettingTMDBAPIKey {
+		t.Fatalf("tmdb credential setting = %q, want %q", got, store.SettingTMDBAPIKey)
 	}
-	enabled, err = st.AdultEnabled(ctx)
-	if err != nil {
-		t.Fatalf("AdultEnabled: %v", err)
+	if got := core.ProviderCredentialSetting(core.ProviderTheTVDB); got != store.SettingTheTVDBAPIKey {
+		t.Fatalf("thetvdb credential setting = %q, want %q", got, store.SettingTheTVDBAPIKey)
 	}
-	return settings[store.SettingStashboxEndpoint], settings[store.SettingStashboxAPIKey], enabled
+
+	// TheTVDB's PIN is the other half of one credential and is invisible to the
+	// loop below, because CredentialSetting names one row. It has to be held to
+	// the same three rules by hand: a PIN that could not be written would make a
+	// user-supported subscription unusable, an untrimmed one would be sent with
+	// the whitespace a paste brought along, and a readable one would put half a
+	// credential in a browser response (SPEC §12).
+	if !writableSettings[store.SettingTheTVDBPIN] {
+		t.Errorf("%q is not writable through PUT /settings", store.SettingTheTVDBPIN)
+	}
+	if !trimmedSettings[store.SettingTheTVDBPIN] {
+		t.Errorf("%q is not trimmed on the way in", store.SettingTheTVDBPIN)
+	}
+	if publicSettingKeys[store.SettingTheTVDBPIN] {
+		t.Errorf("%q is readable through GET /settings — it is half a credential (SPEC §12)",
+			store.SettingTheTVDBPIN)
+	}
+
+	// Every key the registry names must be one PUT /settings will accept and
+	// store trimmed, or the card that offers a field would write somewhere the
+	// credential machinery never looks.
+	for _, p := range core.Providers() {
+		if p.CredentialSetting == "" {
+			continue
+		}
+		if !writableSettings[p.CredentialSetting] {
+			t.Errorf("%s: %q is not writable through PUT /settings", p.ID, p.CredentialSetting)
+		}
+		if !trimmedSettings[p.CredentialSetting] {
+			t.Errorf("%s: %q is not trimmed on the way in", p.ID, p.CredentialSetting)
+		}
+		if publicSettingKeys[p.CredentialSetting] {
+			t.Errorf("%s: %q is readable through GET /settings — credentials are write-only (SPEC §12)",
+				p.ID, p.CredentialSetting)
+		}
+	}
 }
 
-func TestAdultEnableLeavesEverythingOffWhenTheCredentialFails(t *testing.T) {
-	tests := []struct {
-		name        string
-		body        string
-		validateErr error
-		wantStatus  int
-		wantCode    string
-		// wantValidated is whether the endpoint should have been contacted at
-		// all. A malformed endpoint is refused before any request is made.
-		wantValidated bool
-	}{
-		{
-			name:       "no credential anywhere",
-			body:       `{"enabled":true}`,
-			wantStatus: http.StatusBadRequest,
-			wantCode:   CodeAdultCredentialAbsent,
-		},
-		{
-			name:       "blank key",
-			body:       `{"enabled":true,"stashbox_api_key":"  "}`,
-			wantStatus: http.StatusBadRequest,
-			wantCode:   CodeAdultCredentialAbsent,
-		},
-		{
-			name:       "endpoint that could never be dialled",
-			body:       `{"enabled":true,"stashbox_endpoint":"/graphql","stashbox_api_key":"k"}`,
-			wantStatus: http.StatusBadRequest,
-		},
-		{
-			name:          "the endpoint rejects the key",
-			body:          `{"enabled":true,"stashbox_endpoint":"https://stashdb.org/graphql","stashbox_api_key":"nope"}`,
-			validateErr:   fmt.Errorf("stashbox: SearchSites: unauthorized"),
-			wantStatus:    http.StatusBadGateway,
-			wantCode:      CodeAdultCredentialInvalid,
-			wantValidated: true,
-		},
+// The status map carries one entry per credentialed provider and agrees with
+// the flat TMDB fields, which are lifted out of it.
+func TestSystemStatusReportsPerProviderCredentials(t *testing.T) {
+	h, st, mgr := newTestServer(t)
+	mgr.validateKeys = map[string]error{"revoked": errKeyRejected}
+
+	// Fresh install: TMDB is in the map and absent, and nothing else is in it.
+	status := credentialState(t, h)
+	assertCredentialMapAgrees(t, status)
+	if got := status.MetadataCredentials[core.ProviderTMDB].State; got != CredentialAbsent {
+		t.Fatalf("metadata_credentials[tmdb].state = %q, want %q", got, CredentialAbsent)
+	}
+	// A keyless provider has no server verdict at all: "Ready" is a fact the
+	// client reads off the provider list, and an entry here saying "ok" for a
+	// key that does not exist would be this server claiming to have checked
+	// something.
+	for _, p := range core.Providers() {
+		if p.CredentialSetting != "" {
+			continue
+		}
+		if _, ok := status.MetadataCredentials[p.ID]; ok {
+			t.Errorf("keyless provider %q has a credential state: %+v", p.ID, status.MetadataCredentials[p.ID])
+		}
 	}
 
+	// A stored key nobody has proven wrong, then one that was.
+	setSetting(t, st, store.SettingTMDBAPIKey, "k")
+	assertCredentialMapAgrees(t, credentialState(t, h))
+	if got := credentialState(t, h).MetadataCredentials[core.ProviderTMDB].State; got != CredentialOK {
+		t.Fatalf("metadata_credentials[tmdb].state = %q, want %q", got, CredentialOK)
+	}
+
+	wantStatus(t, do(t, h, http.MethodPut, "/api/v1/settings", `{"tmdb_api_key":"revoked"}`), http.StatusOK)
+	status = credentialState(t, h)
+	assertCredentialMapAgrees(t, status)
+	entry := status.MetadataCredentials[core.ProviderTMDB]
+	if entry.State != CredentialInvalid || entry.Reason == "" || entry.CheckedAt == "" {
+		t.Fatalf("metadata_credentials[tmdb] = %+v, want an invalid verdict with a reason and a time", entry)
+	}
+	if strings.Contains(entry.Reason, "revoked") {
+		t.Errorf("the API key leaked into the credential map: %q", entry.Reason)
+	}
+}
+
+// assertCredentialMapAgrees is the invariant handleSystemStatus is written to
+// keep: the three flat fields are the map's TMDB entry, so a client reading
+// either one is reading the same verdict.
+func assertCredentialMapAgrees(t *testing.T, status statusResponse) {
+	t.Helper()
+	entry, ok := status.MetadataCredentials[core.ProviderTMDB]
+	if !ok {
+		t.Fatalf("metadata_credentials has no tmdb entry: %+v", status.MetadataCredentials)
+	}
+	if entry.State != status.MetadataCredential ||
+		entry.Reason != status.MetadataCredentialReason ||
+		entry.CheckedAt != status.MetadataCredentialCheckedAt {
+		t.Fatalf("metadata_credentials[tmdb] = %+v, want it to agree with the flat fields %q/%q/%q",
+			entry, status.MetadataCredential, status.MetadataCredentialReason,
+			status.MetadataCredentialCheckedAt)
+	}
+}
+
+// A verdict belongs to the provider it was reached about. Sharing one across
+// providers is the failure the whole per-provider model exists to prevent: a
+// revoked TMDB key would mark a working TheTVDB key bad, and the settings
+// screen would send someone to re-enter a credential that works.
+func TestACredentialVerdictNeverAnswersForAnotherProvider(t *testing.T) {
+	var c metadataCredentials
+
+	// The same key string under two providers. It is the realistic shape of the
+	// mistake: nothing stops a person pasting the same value into both cards,
+	// and a cache keyed on the value alone would then be one verdict.
+	c.record(core.ProviderTMDB, "shared", errKeyRejected)
+
+	if rejected, reason, checkedAt := c.verdict(core.ProviderTMDB, "shared"); !rejected ||
+		reason == "" || checkedAt.IsZero() {
+		t.Fatalf("tmdb verdict = %v/%q/%v, want the rejection it was told about", rejected, reason, checkedAt)
+	}
+	if rejected, _, _ := c.verdict("thetvdb", "shared"); rejected {
+		t.Fatal("a rejection recorded for tmdb answered for another provider")
+	}
+
+	// A pass for one provider leaves the other's rejection standing.
+	c.record("thetvdb", "shared", nil)
+	if rejected, _, _ := c.verdict(core.ProviderTMDB, "shared"); !rejected {
+		t.Fatal("another provider's passing check cleared the tmdb rejection")
+	}
+
+	// And the verdict is still about that exact string: an edited key is simply
+	// not the key that was refused.
+	if rejected, _, _ := c.verdict(core.ProviderTMDB, "edited"); rejected {
+		t.Fatal("an edited key inherited the old key's rejection")
+	}
+}
+
+// soleCredentialedProvider is what decides whether a chain-level failure may be
+// attributed at all. Getting it wrong in the permissive direction marks the
+// wrong key bad; getting it wrong in the strict direction loses the transition
+// that flips a revoked key without waiting for the Test button.
+func TestSoleCredentialedProvider(t *testing.T) {
+	tests := []struct {
+		name string
+		ids  []string
+		want string
+	}{
+		{"nothing ran", nil, ""},
+		{"a keyless chain", []string{core.ProviderAniList, core.ProviderTVmaze}, ""},
+		{"one credential", []string{core.ProviderTMDB}, core.ProviderTMDB},
+		{"one credential beside keyless ones", []string{core.ProviderTMDB, core.ProviderAniList}, core.ProviderTMDB},
+		{"the same one twice", []string{core.ProviderTMDB, core.ProviderTMDB}, core.ProviderTMDB},
+		// An id nothing implements holds no credential, so it cannot be the one
+		// that was refused and cannot make the answer ambiguous either. The row
+		// for two REGISTERED credentials arrives with TheTVDB, which is the
+		// first provider able to make this return "".
+		{"an unknown id beside a credential", []string{core.ProviderTMDB, "nope"}, core.ProviderTMDB},
+	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			h, st, mgr := newTestServer(t)
-			mgr.adultCredentialErr = tt.validateErr
-
-			rec := do(t, h, http.MethodPost, "/api/v1/settings/adult", tt.body)
-			wantStatus(t, rec, tt.wantStatus)
-			if tt.wantCode != "" {
-				wantCode(t, rec, tt.wantCode)
-			} else {
-				wantErrorBody(t, rec)
-			}
-
-			endpoint, key, enabled := adultSettings(t, st)
-			if enabled {
-				t.Error("adult_enabled is on after a failed enable")
-			}
-			if endpoint != "" || key != "" {
-				t.Errorf("a failed enable stored endpoint=%q key=%q, want nothing", endpoint, key)
-			}
-			if got := len(mgr.adultCredentials()) > 0; got != tt.wantValidated {
-				t.Errorf("credential contacted = %v, want %v", got, tt.wantValidated)
+			if got := soleCredentialedProvider(tt.ids); got != tt.want {
+				t.Fatalf("soleCredentialedProvider(%v) = %q, want %q", tt.ids, got, tt.want)
 			}
 		})
 	}
 }
 
-func TestAdultEnableCommitsTheCredentialItProved(t *testing.T) {
-	h, st, mgr := newTestServer(t)
-
-	rec := do(t, h, http.MethodPost, "/api/v1/settings/adult",
-		`{"enabled":true,"stashbox_endpoint":"https://stashdb.org/graphql","stashbox_api_key":"k"}`)
-	wantStatus(t, rec, http.StatusOK)
-
-	// The credential in the request is the one that was tested — not whatever
-	// happened to be stored.
-	want := adultCredential{endpoint: "https://stashdb.org/graphql", key: "k"}
-	if got := mgr.adultCredentials(); len(got) != 1 || got[0] != want {
-		t.Fatalf("validated %v, want exactly [%v]", got, want)
-	}
-
-	endpoint, key, enabled := adultSettings(t, st)
-	if !enabled {
-		t.Error("adult_enabled is off after a passing enable")
-	}
-	if endpoint != want.endpoint || key != want.key {
-		t.Errorf("stored endpoint=%q key=%q, want %q / %q", endpoint, key, want.endpoint, want.key)
-	}
-	// The enable created the library row the module needs, exactly as before.
-	if _, err := st.GetLibraryByKind(context.Background(), core.LibraryKindAdult); err != nil {
-		t.Errorf("GetLibraryByKind: %v", err)
-	}
-}
-
-// A blank endpoint is legal and means the TPDB preset — pasting a key is the
-// whole configuration for the default provider.
-func TestAdultEnableAcceptsTheDefaultEndpoint(t *testing.T) {
-	h, st, mgr := newTestServer(t)
-
-	wantStatus(t, do(t, h, http.MethodPost, "/api/v1/settings/adult",
-		`{"enabled":true,"stashbox_endpoint":"","stashbox_api_key":"k"}`), http.StatusOK)
-
-	if got := mgr.adultCredentials(); len(got) != 1 || got[0].endpoint != "" {
-		t.Fatalf("validated %v, want the blank endpoint forwarded as the preset", got)
-	}
-	if _, _, enabled := adultSettings(t, st); !enabled {
-		t.Error("adult_enabled is off after a passing enable")
-	}
-}
-
-// Re-enabling a module that was configured once needs no credential in the
-// body: the stored one is tested instead.
-func TestAdultEnableFallsBackToTheStoredCredential(t *testing.T) {
-	h, st, mgr := newTestServer(t)
-	setSetting(t, st, store.SettingStashboxEndpoint, "https://stashdb.org/graphql")
-	setSetting(t, st, store.SettingStashboxAPIKey, "stored")
-
-	wantStatus(t, do(t, h, http.MethodPost, "/api/v1/settings/adult", `{"enabled":true}`), http.StatusOK)
-
-	want := adultCredential{endpoint: "https://stashdb.org/graphql", key: "stored"}
-	if got := mgr.adultCredentials(); len(got) != 1 || got[0] != want {
-		t.Fatalf("validated %v, want exactly [%v]", got, want)
-	}
-}
-
-// Switching a module off must work when the credential behind it has expired,
-// which is one of the reasons a person switches it off.
-func TestAdultDisableNeverValidates(t *testing.T) {
-	h, st, mgr := newTestServer(t)
-	wantStatus(t, do(t, h, http.MethodPost, "/api/v1/settings/adult",
-		`{"enabled":true,"stashbox_api_key":"k"}`), http.StatusOK)
-
-	mgr.adultCredentialErr = fmt.Errorf("stashbox: SearchSites: unauthorized")
-	before := len(mgr.adultCredentials())
-
-	wantStatus(t, do(t, h, http.MethodPost, "/api/v1/settings/adult", `{"enabled":false}`), http.StatusOK)
-
-	if _, _, enabled := adultSettings(t, st); enabled {
-		t.Error("adult_enabled survived a disable")
-	}
-	if after := len(mgr.adultCredentials()); after != before {
-		t.Fatalf("disabling made %d validations, want none", after-before)
-	}
-}
-
-// The enable gate is not the only way in. Both stash-box settings are writable
-// through PUT /settings, so the credential of a module that is ALREADY on can
-// be replaced or blanked there — and the invariant SPEC §10.2 states is that
-// the switch is on only while a credential that was proved sits behind it, not
-// that it was proved once.
-func TestSettingsPutCannotBreakTheCredentialOfALiveAdultModule(t *testing.T) {
-	// enabled arranges a module that is on with a working credential, the way
-	// the enable gate leaves it.
-	enabled := func(t *testing.T) (http.Handler, *store.Store, *stubManager) {
-		t.Helper()
+// The Test button names the provider it is testing. A default of TMDB keeps
+// every body written before there was a second credentialed provider — and the
+// bodyless POST the settings screen sends — meaning exactly what it meant.
+func TestMetadataTestNamesItsProvider(t *testing.T) {
+	t.Run("an explicit tmdb is the same request as none", func(t *testing.T) {
 		h, st, mgr := newTestServer(t)
-		wantStatus(t, do(t, h, http.MethodPost, "/api/v1/settings/adult",
-			`{"enabled":true,"stashbox_endpoint":"https://stashdb.org/graphql","stashbox_api_key":"good"}`),
-			http.StatusOK)
-		return h, st, mgr
-	}
+		setSetting(t, st, store.SettingTMDBAPIKey, "stored")
 
-	t.Run("clearing the key is refused", func(t *testing.T) {
-		h, st, _ := enabled(t)
+		wantStatus(t, do(t, h, http.MethodPost, "/api/v1/settings/metadata/test",
+			`{"provider":"tmdb"}`), http.StatusOK)
 
-		rec := do(t, h, http.MethodPut, "/api/v1/settings", `{"stashbox_api_key":""}`)
-		wantStatus(t, rec, http.StatusBadRequest)
-		wantCode(t, rec, CodeAdultCredentialAbsent)
-
-		endpoint, key, on := adultSettings(t, st)
-		if key != "good" || endpoint != "https://stashdb.org/graphql" || !on {
-			t.Fatalf("stored endpoint=%q key=%q enabled=%v, want the credential untouched",
-				endpoint, key, on)
+		want := validateCall{provider: core.ProviderTMDB, key: "stored"}
+		if got := mgr.validations(); len(got) != 1 || got[0] != want {
+			t.Fatalf("validated %v, want exactly [%v]", got, want)
 		}
 	})
 
-	t.Run("a rejected replacement is refused", func(t *testing.T) {
-		h, st, mgr := enabled(t)
-		mgr.adultCredentialErr = fmt.Errorf("stashbox: SearchSites: unauthorized")
-
-		rec := do(t, h, http.MethodPut, "/api/v1/settings", `{"stashbox_api_key":"typo"}`)
-		wantStatus(t, rec, http.StatusBadGateway)
-		wantCode(t, rec, CodeAdultCredentialInvalid)
-		if strings.Contains(rec.Body.String(), "typo") {
-			t.Errorf("the rejected key was echoed back: %q", rec.Body.String())
-		}
-
-		if _, key, _ := adultSettings(t, st); key != "good" {
-			t.Fatalf("stashbox_api_key = %q, want the working key kept", key)
-		}
-	})
-
-	t.Run("an endpoint edit is validated against the stored key", func(t *testing.T) {
-		h, _, mgr := enabled(t)
-		before := len(mgr.adultCredentials())
-
-		wantStatus(t, do(t, h, http.MethodPut, "/api/v1/settings",
-			`{"stashbox_endpoint":"https://fansdb.cc/graphql"}`), http.StatusOK)
-
-		got := mgr.adultCredentials()
-		if len(got) != before+1 {
-			t.Fatalf("validations = %d, want one more than %d", len(got), before)
-		}
-		want := adultCredential{endpoint: "https://fansdb.cc/graphql", key: "good"}
-		if got[len(got)-1] != want {
-			t.Fatalf("validated %v, want %v — the pair the write would leave behind",
-				got[len(got)-1], want)
-		}
-	})
-
-	// With the module off there is nothing running against the credential and
-	// the enable gate still has to prove whatever is stored, so configuring it
-	// ahead of time stays a free, upstream-free write.
-	t.Run("the module being off costs no upstream call", func(t *testing.T) {
+	// A keyless provider's card has no field on it, so a Test that passed would
+	// be reporting the health of nothing.
+	t.Run("a keyless provider is refused", func(t *testing.T) {
 		h, _, mgr := newTestServer(t)
 
-		wantStatus(t, do(t, h, http.MethodPut, "/api/v1/settings",
-			`{"stashbox_api_key":"later"}`), http.StatusOK)
-
-		if got := mgr.adultCredentials(); len(got) != 0 {
-			t.Fatalf("a settings write with the module off validated %v, want nothing", got)
+		rec := do(t, h, http.MethodPost, "/api/v1/settings/metadata/test",
+			`{"provider":"anilist","api_key":"whatever"}`)
+		wantStatus(t, rec, http.StatusBadRequest)
+		wantErrorBody(t, rec)
+		if got := mgr.validations(); len(got) != 0 {
+			t.Fatalf("a keyless provider was validated: %v", got)
 		}
 	})
+
+	t.Run("an unknown provider is refused", func(t *testing.T) {
+		h, _, mgr := newTestServer(t)
+
+		rec := do(t, h, http.MethodPost, "/api/v1/settings/metadata/test",
+			`{"provider":"bogus","api_key":"whatever"}`)
+		wantStatus(t, rec, http.StatusBadRequest)
+		wantErrorBody(t, rec)
+		if got := mgr.validations(); len(got) != 0 {
+			t.Fatalf("an unknown provider was validated: %v", got)
+		}
+	})
+
+	// A rejection from the Test button lands under the provider that was tested
+	// and nowhere else.
+	t.Run("a rejection lands under the provider tested", func(t *testing.T) {
+		h, st, mgr := newTestServer(t)
+		setSetting(t, st, store.SettingTMDBAPIKey, "revoked")
+		mgr.validateKeys = map[string]error{core.ProviderTMDB + "/revoked": errKeyRejected}
+
+		rec := do(t, h, http.MethodPost, "/api/v1/settings/metadata/test", `{"provider":"tmdb"}`)
+		wantStatus(t, rec, http.StatusBadGateway)
+		wantCode(t, rec, CodeMetadataCredentialInvalid)
+
+		status := credentialState(t, h)
+		assertCredentialMapAgrees(t, status)
+		if got := status.MetadataCredentials[core.ProviderTMDB].State; got != CredentialInvalid {
+			t.Fatalf("metadata_credentials[tmdb].state = %q, want %q", got, CredentialInvalid)
+		}
+		// One entry per CREDENTIALED provider and no more: the keyless ones are
+		// absent because "Ready" is a fact the client reads off the provider
+		// list, not a verdict this server reached.
+		if len(status.MetadataCredentials) != credentialedProviderCount() {
+			t.Fatalf("credential map = %+v, want only the credentialed providers in it",
+				status.MetadataCredentials)
+		}
+		// The other credential is untouched: nobody entered a TheTVDB key, and a
+		// TMDB rejection is not a reason to say anything about it.
+		if got := status.MetadataCredentials[core.ProviderTheTVDB].State; got != CredentialAbsent {
+			t.Fatalf("metadata_credentials[thetvdb].state = %q, want %q", got, CredentialAbsent)
+		}
+	})
+}
+
+// credentialedProviderCount is how many entries GET /system/status' credential
+// map must carry. It is derived rather than written out so registering a
+// provider does not turn a count assertion into a false failure.
+func credentialedProviderCount() int {
+	n := 0
+	for _, p := range core.Providers() {
+		if p.CredentialSetting != "" {
+			n++
+		}
+	}
+	return n
+}
+
+// ---------------------------------------------------------------------------
+// TheTVDB: the first consumer of the per-provider credential model.
+//
+// TMDB was the only credential when the model was generalized, so nothing could
+// prove that generalizing it meant anything. These are that proof.
+
+// THE acceptance assertion of the per-provider model: a rejected TheTVDB key
+// marks TheTVDB and nothing else. While "the metadata credential" was one
+// field, this rejection would have put the TMDB card — and every Discover
+// surface behind it — into the "your key is wrong" state, and the fix offered
+// would have been to re-enter a key that works.
+func TestARejectedTheTVDBKeyLeavesTMDBHealthy(t *testing.T) {
+	h, st, mgr := newTestServer(t)
+	setSetting(t, st, store.SettingTMDBAPIKey, "good")
+	setSetting(t, st, store.SettingTheTVDBAPIKey, "revoked")
+	mgr.validateKeys = map[string]error{core.ProviderTheTVDB + "/revoked": errKeyRejected}
+
+	rec := do(t, h, http.MethodPost, "/api/v1/settings/metadata/test", `{"provider":"thetvdb"}`)
+	wantStatus(t, rec, http.StatusBadGateway)
+	wantCode(t, rec, CodeMetadataCredentialInvalid)
+
+	status := credentialState(t, h)
+	assertCredentialMapAgrees(t, status)
+	if got := status.MetadataCredentials[core.ProviderTheTVDB].State; got != CredentialInvalid {
+		t.Fatalf("metadata_credentials[thetvdb].state = %q, want %q", got, CredentialInvalid)
+	}
+	if got := status.MetadataCredentials[core.ProviderTMDB].State; got != CredentialOK {
+		t.Fatalf("metadata_credentials[tmdb].state = %q, want it untouched at %q", got, CredentialOK)
+	}
+	// The flat field is the TMDB entry, so the same thing said the old way.
+	if status.MetadataCredential != CredentialOK {
+		t.Fatalf("metadata_credential = %q, want the TMDB key still %q",
+			status.MetadataCredential, CredentialOK)
+	}
+	// The Test button asked about the provider whose card it sits on, with the
+	// key stored for THAT provider.
+	want := validateCall{provider: core.ProviderTheTVDB, key: "revoked"}
+	if got := mgr.validations(); len(got) != 1 || got[0] != want {
+		t.Fatalf("validated %v, want exactly [%v]", got, want)
+	}
+}
+
+// A PIN edit is a credential edit. TheTVDB's login consumes the key and the PIN
+// together, so saving a PIN changes the exchange even though the settings row
+// ProviderDescriptor.CredentialSetting names did not move — and the verdict on
+// file is then about a login this server no longer makes.
+func TestATheTVDBPINEditRechecksTheCredential(t *testing.T) {
+	h, st, mgr := newTestServer(t)
+	setSetting(t, st, store.SettingTheTVDBAPIKey, "supporter-key")
+
+	// Prove the pair, so a verdict is cached against the key string.
+	wantStatus(t, do(t, h, http.MethodPost, "/api/v1/settings/metadata/test",
+		`{"provider":"thetvdb"}`), http.StatusOK)
+	if got := credentialState(t, h).MetadataCredentials[core.ProviderTheTVDB].State; got != CredentialOK {
+		t.Fatalf("metadata_credentials[thetvdb].state = %q, want %q", got, CredentialOK)
+	}
+
+	// The pair stops working, and the only thing that changed is the PIN.
+	mgr.validateKeys = map[string]error{core.ProviderTheTVDB + "/supporter-key": errKeyRejected}
+	wantStatus(t, do(t, h, http.MethodPut, "/api/v1/settings",
+		`{"thetvdb_pin":"9999"}`), http.StatusOK)
+	if got := credentialState(t, h).MetadataCredentials[core.ProviderTheTVDB].State; got != CredentialInvalid {
+		t.Fatalf("metadata_credentials[thetvdb].state = %q after a PIN edit, want %q — "+
+			"the cached verdict was about a login this server no longer makes", got, CredentialInvalid)
+	}
+
+	// And the way back out. A mistyped PIN that is corrected has to clear the
+	// rejection, or the card would stay red until somebody retyped the key.
+	mgr.validateKeys = nil
+	wantStatus(t, do(t, h, http.MethodPut, "/api/v1/settings",
+		`{"thetvdb_pin":"1234"}`), http.StatusOK)
+	if got := credentialState(t, h).MetadataCredentials[core.ProviderTheTVDB].State; got != CredentialOK {
+		t.Fatalf("metadata_credentials[thetvdb].state = %q after the PIN was fixed, want %q", got, CredentialOK)
+	}
+}
+
+// TheTVDB needed no edit to publicSettings to get its "a key is stored" flag:
+// the loop that landed with the credential map derives one per credentialed
+// descriptor. Neither half of the credential is readable.
+func TestTheTVDBKeySetFlagComesFromTheRegistry(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	const setFlag = store.SettingTheTVDBAPIKey + credentialSetSuffix
+
+	rec := do(t, h, http.MethodGet, "/api/v1/settings", "")
+	wantStatus(t, rec, http.StatusOK)
+	var settings map[string]string
+	decodeBody(t, rec, &settings)
+	if settings[setFlag] != "false" {
+		t.Fatalf("fresh settings = %v, want %s=false", settings, setFlag)
+	}
+
+	setSetting(t, st, store.SettingTheTVDBAPIKey, "licensed-key")
+	setSetting(t, st, store.SettingTheTVDBPIN, "1234")
+
+	rec = do(t, h, http.MethodGet, "/api/v1/settings", "")
+	wantStatus(t, rec, http.StatusOK)
+	decodeBody(t, rec, &settings)
+	if settings[setFlag] != "true" {
+		t.Fatalf("settings = %v, want %s=true", settings, setFlag)
+	}
+	if _, ok := settings[store.SettingTheTVDBAPIKey]; ok {
+		t.Errorf("settings exposed %s: %v", store.SettingTheTVDBAPIKey, settings)
+	}
+	// The PIN is half a credential and gets no flag and no value: there is one
+	// card and one question, "is a credential on file".
+	if _, ok := settings[store.SettingTheTVDBPIN]; ok {
+		t.Errorf("settings exposed %s: %v", store.SettingTheTVDBPIN, settings)
+	}
+	if _, ok := settings[store.SettingTheTVDBPIN+credentialSetSuffix]; ok {
+		t.Errorf("settings carry a set-flag for the PIN: %v", settings)
+	}
+}
+
+// Both halves are stored with their surrounding whitespace removed. A pasted
+// PIN that kept its trailing space would be sent to /login verbatim while
+// everything that judges the credential trimmed it — a card reading healthy
+// while nothing works.
+func TestTheTVDBCredentialIsTrimmedOnTheWayIn(t *testing.T) {
+	h, st, _ := newTestServer(t)
+
+	wantStatus(t, do(t, h, http.MethodPut, "/api/v1/settings",
+		`{"thetvdb_api_key":"  licensed-key  ","thetvdb_pin":" 1234 "}`), http.StatusOK)
+
+	ctx := context.Background()
+	for key, want := range map[string]string{
+		store.SettingTheTVDBAPIKey: "licensed-key",
+		store.SettingTheTVDBPIN:    "1234",
+	} {
+		got, err := st.GetSetting(ctx, key)
+		if err != nil {
+			t.Fatalf("GetSetting(%s): %v", key, err)
+		}
+		if got != want {
+			t.Errorf("stored %s = %q, want %q", key, got, want)
+		}
+	}
 }
 
 // The value that is stored must be the value that was validated and the value

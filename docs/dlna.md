@@ -26,7 +26,10 @@ port and one firewall rule.
 Discovery is SSDP on `239.255.255.250:1900`: `ssdp:alive` notifications on a
 timer, `ssdp:byebye` on shutdown, and unicast answers to `M-SEARCH`.
 
-The content tree is `root → Movies / TV → series → seasons → episodes`. Only
+The content tree is `root → one container per shared library → series →
+seasons → episodes` (a movie library holds its films directly). Each kind's
+default library keeps the container ids clients have always seen — `movies`,
+`tv`, `adult` — and any further library of that kind is `lib:<id>`. Only
 files that exist in the library appear; a wanted-but-unowned movie is not a
 browsable dead end. Posters are served through the existing
 `/api/v1/images/{path}` endpoint as `upnp:albumArtURI`.

@@ -31,11 +31,12 @@ const (
 type Handler func(ctx context.Context, st *store.Store, payload json.RawMessage) error
 
 // EngineGetter waits for, or returns, the currently configured download engine
-// for grabs made on behalf of the library of one core.LibraryKind* — "" for an
-// operation belonging to no library. The kind is what honours a library's own
-// download routing (PLAN phase 8 task 2). It may return nil when no storage
-// root has been configured yet.
-type EngineGetter func(ctx context.Context, kind string) core.Engine
+// for grabs made on behalf of one library: the item's own library id, with a
+// core.LibraryKind* as the fallback for an item that names none — (0, "") for
+// an operation belonging to no library. The pair is what honours a library's
+// own download routing (PLAN phase 8 task 2). It may return nil when no
+// storage root has been configured yet.
+type EngineGetter func(ctx context.Context, libraryID int64, kind string) core.Engine
 
 // Runner claims durable jobs and dispatches them to idempotent handlers.
 type Runner struct {

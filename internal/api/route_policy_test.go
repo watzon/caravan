@@ -44,7 +44,8 @@ func TestRoutePolicyMemberAndExemptionMatching(t *testing.T) {
 		{http.MethodDelete, "/requests/12", true},
 		{http.MethodGet, "/adult/sites/4", true},
 		{http.MethodPost, "/adult/sites", false},
-		{http.MethodPost, "/settings/adult", false},
+		{http.MethodGet, "/libraries/4/access", false},
+		{http.MethodPut, "/libraries/4/access", false},
 		{http.MethodGet, "/library/movies", false},
 		{http.MethodPost, "/library/episodes/7/search", false},
 	} {
@@ -77,7 +78,19 @@ func TestRoutePolicyAdultSurfaceIsClosed(t *testing.T) {
 			t.Errorf("adult policy %q is outside the gated subtree", policy.Name)
 		}
 	}
-	if policy, ok := policyForRegistration(http.MethodPost, "/settings/adult"); !ok || policy.Access != routeAdmin {
-		t.Fatal("POST /settings/adult must remain admin-only outside the adult gate")
+	// The access routes are the module's replacement doors and they live OUTSIDE
+	// the gated subtree, deliberately: an adult library's roster has to be
+	// editable, and restriction is not an adult idea any more. They are
+	// admin-only instead, by the ordinary rule.
+	for _, method := range []string{http.MethodGet, http.MethodPut} {
+		policy, ok := policyForRegistration(method, "/libraries/{id}/access")
+		if !ok || policy.Access != routeAdmin || policy.Member {
+			t.Fatalf("%s /libraries/{id}/access policy = %+v, %v; want admin-only",
+				method, policy, ok)
+		}
+	}
+	// And nothing answers at the retired module switch, on any mux.
+	if _, ok := policyForRegistration(http.MethodPost, "/settings/adult"); ok {
+		t.Fatal("POST /settings/adult still has a policy row; the module switch is gone")
 	}
 }

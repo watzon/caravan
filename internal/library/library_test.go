@@ -91,34 +91,76 @@ func (s *stubProvider) SearchMovies(_ context.Context, _ string) ([]core.MovieMe
 	if s.searchErr != nil {
 		return nil, s.searchErr
 	}
-	return s.movies, nil
+	out := make([]core.MovieMeta, len(s.movies))
+	for i, m := range s.movies {
+		out[i] = stubMovieMeta(m)
+	}
+	return out, nil
 }
 
 func (s *stubProvider) SearchSeries(_ context.Context, _ string) ([]core.SeriesMeta, error) {
 	if s.searchErr != nil {
 		return nil, s.searchErr
 	}
-	return s.series, nil
+	out := make([]core.SeriesMeta, len(s.series))
+	for i, sr := range s.series {
+		out[i] = stubSeriesMeta(sr)
+	}
+	return out, nil
 }
 
-func (s *stubProvider) GetMovie(_ context.Context, tmdbID int64) (*core.MovieMeta, error) {
+func (s *stubProvider) GetMovie(_ context.Context, ref string) (*core.MovieMeta, error) {
 	if s.getErr != nil {
 		return nil, s.getErr
 	}
-	if m, ok := s.movieByID[tmdbID]; ok {
+	if m, ok := s.movieByID[stubRefID(ref)]; ok {
+		m = stubMovieMeta(m)
 		return &m, nil
 	}
 	return nil, errors.New("stub: no such movie")
 }
 
-func (s *stubProvider) GetSeries(_ context.Context, tmdbID int64) (*core.SeriesMeta, error) {
+func (s *stubProvider) GetSeries(_ context.Context, ref string) (*core.SeriesMeta, error) {
 	if s.getErr != nil {
 		return nil, s.getErr
 	}
-	if sr, ok := s.seriesByID[tmdbID]; ok {
+	if sr, ok := s.seriesByID[stubRefID(ref)]; ok {
+		sr = stubSeriesMeta(sr)
 		return &sr, nil
 	}
 	return nil, errors.New("stub: no such series")
+}
+
+// stubMovieMeta and stubSeriesMeta stamp the provider identity every real
+// client puts on every answer it returns (see tmdb.movieMeta), so the fixtures
+// below can stay keyed by a bare TMDB id while the code under test reads refs.
+// A fixture that names its own provider — one standing in for a second
+// registry client — is left exactly as written.
+func stubMovieMeta(m core.MovieMeta) core.MovieMeta {
+	if m.Provider == "" && m.TMDBID != 0 {
+		ref := core.TMDBRef(m.TMDBID)
+		m.Provider, m.ProviderRef = ref.Provider, ref.Ref
+	}
+	return m
+}
+
+func stubSeriesMeta(s core.SeriesMeta) core.SeriesMeta {
+	if s.Provider == "" && s.TMDBID != 0 {
+		ref := core.TMDBRef(s.TMDBID)
+		s.Provider, s.ProviderRef = ref.Provider, ref.Ref
+	}
+	return s
+}
+
+// stubRefID parses a TMDB-shaped ref back into the int64 the stub's fixture
+// maps are keyed by. An unparsable ref yields 0, which matches nothing — the
+// same "no such title" answer the real client's ErrInvalidRef amounts to here.
+func stubRefID(ref string) int64 {
+	id, err := strconv.ParseInt(ref, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return id
 }
 
 // posterBytes is what the stub image host serves.
@@ -136,6 +178,18 @@ type harness struct {
 	// hc is the stub image host's client; every Manager the harness builds
 	// uses it so no test can reach the real network.
 	hc *http.Client
+}
+
+// Stock library rows matching the seeded defaults, for tests that assert the
+// paths the builders produce without caring which row they came from.
+func stockMovieLib() *core.Library {
+	return &core.Library{Kind: core.LibraryKindMovie, RootPath: "library/Movies"}
+}
+func stockTVLib() *core.Library {
+	return &core.Library{Kind: core.LibraryKindTV, RootPath: "library/TV"}
+}
+func stockAdultLib() *core.Library {
+	return &core.Library{Kind: core.LibraryKindAdult, RootPath: "library/Adult"}
 }
 
 // newHarness builds a Manager over a temp storage root, a real sqlite store,

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -22,7 +21,17 @@ import (
 // report it. The serving process writes it at startup from the bootstrap
 // config; an unset value reports ModeServer.
 const SettingMode = "mode"
-const settingTMDBAPIKeySet = "tmdb_api_key_set"
+
+// credentialSetSuffix turns a credential's settings key into the public "a key
+// is stored" flag beside it. The key itself is write-only (SPEC §12), and the
+// settings screen still has to render a card that says whether one is on file.
+const credentialSetSuffix = "_set"
+
+// settingTMDBAPIKeySet is that flag as it has always been spelled on the wire.
+// publicSettings derives it from the registry now; this names the exact string
+// every existing consumer reads, and derives it the same way so the two cannot
+// drift apart.
+const settingTMDBAPIKeySet = store.SettingTMDBAPIKey + credentialSetSuffix
 
 // Deployment modes reported by GET /system/status.
 const (
@@ -41,8 +50,8 @@ const (
 // only way in (SPEC §10); see internal/api/storage.go.
 var writableSettings = map[string]bool{
 	store.SettingTMDBAPIKey:             true,
-	store.SettingStashboxEndpoint:       true,
-	store.SettingStashboxAPIKey:         true,
+	store.SettingTheTVDBAPIKey:          true,
+	store.SettingTheTVDBPIN:             true,
 	store.SettingRSSSyncIntervalMinutes: true,
 	store.SettingBacklogIntervalMinutes: true,
 	store.SettingRefreshIntervalMinutes: true,
@@ -83,8 +92,8 @@ var writableSettings = map[string]bool{
 // string and the sent string the same value.
 var trimmedSettings = map[string]bool{
 	store.SettingTMDBAPIKey:              true,
-	store.SettingStashboxEndpoint:        true,
-	store.SettingStashboxAPIKey:          true,
+	store.SettingTheTVDBAPIKey:           true,
+	store.SettingTheTVDBPIN:              true,
 	store.SettingConvertVideoPreset:      true,
 	store.SettingConvertVideoCRF:         true,
 	store.SettingConvertAudioBitrateKbps: true,
@@ -106,7 +115,6 @@ type engineSettingsApplier interface {
 // accidentally becoming readable because AllSettings grew a new key.
 var publicSettingKeys = map[string]bool{
 	store.SettingStorageRoot:                  true,
-	store.SettingStashboxEndpoint:             true,
 	store.SettingRSSSyncIntervalMinutes:       true,
 	store.SettingBacklogIntervalMinutes:       true,
 	store.SettingRefreshIntervalMinutes:       true,
@@ -139,17 +147,20 @@ var publicSettingKeys = map[string]bool{
 	store.SettingEpisodeFileFormat:            true,
 }
 
-// adultOnlySettings are public settings readable only by a caller the adult
-// module is visible to. They are the Stash handoff's non-secret settings and
-// the module switch (PLAN phase 11).
+// adultOnlySettings are public settings readable only by a caller some adult
+// library is visible to. They are the Stash handoff's non-secret settings
+// (PLAN phase 11).
 //
-// The module's promise is to be *absent* when it is off, not merely disabled
-// (see requireAdult), and a settings object carrying a stash_url is a module
-// announcing itself. Their own endpoints already sit on the adult mux; this is
-// the same door on the one other path from the settings table to a response
-// body.
+// The promise is to be *absent* when there is nothing to see, not merely
+// disabled (see requireAdult), and a settings object carrying a stash_url is
+// the handoff announcing itself. Their own endpoints already sit on the adult
+// mux; this is the same door on the one other path from the settings table to a
+// response body.
+//
+// The module switch used to be the third entry. It is gone with migration 0028
+// — the switch is per-library now, and a library reports its own `active` on
+// the surface that owns it, not through the settings bag.
 var adultOnlySettings = map[string]bool{
-	store.SettingAdultEnabled: true,
 	store.SettingStashURL:     true,
 	store.SettingStashEnabled: true,
 }
@@ -167,9 +178,19 @@ func (s *server) publicSettings(r *http.Request) (map[string]string, error) {
 			settings[key] = value
 		}
 	}
-	settings[settingTMDBAPIKeySet] = strconv.FormatBool(stored[store.SettingTMDBAPIKey] != "")
+	// One flag per credentialed provider, from the registry rather than from a
+	// list written out here: a provider added later gets its "a key is stored"
+	// flag without an edit to this file, which is the same reason the status map
+	// and the revalidation below are loops.
+	for _, p := range core.Providers() {
+		if p.CredentialSetting == "" {
+			continue
+		}
+		settings[p.CredentialSetting+credentialSetSuffix] =
+			strconv.FormatBool(stored[p.CredentialSetting] != "")
+	}
 
-	visible, err := s.adultVisible(r)
+	visible, err := s.gate(r).seesAdult(r.Context())
 	if err != nil {
 		return nil, err
 	}
@@ -230,10 +251,6 @@ func (s *server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := validateStashboxSettings(body); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
 	if err := s.validateRouteSettings(r.Context(), body); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -246,10 +263,6 @@ func (s *server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if !s.guardAdultCredentialEdit(w, r, body) {
-		return
-	}
-
 	// Sorted so a partial failure is at least deterministic.
 	keys := make([]string, 0, len(body))
 	for key := range body {
@@ -267,12 +280,40 @@ func (s *server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// TheTVDB's credential is a PAIR: the login consumes the key and, when the
+	// subscription is user-supported, the PIN beside it. The loop below can only
+	// see the key, because ProviderDescriptor.CredentialSetting names one
+	// settings row — so a PIN edit changes what a login sends while leaving that
+	// loop nothing to notice, and the cached verdict, which is filed under the
+	// key string, survives an edit it is no longer true of.
+	//
+	// Dropping it first is what makes the recheck a recheck. When the key came in
+	// this body too, the loop below then proves the new pair; when it did not,
+	// the stored key is what the new PIN will travel with, so it is proved here.
+	// A settings read that fails leaves the state optimistic rather than failing
+	// a save that has already landed, exactly as revalidateMetadataKey does with
+	// an unreachable provider.
+	if _, ok := body[store.SettingTheTVDBPIN]; ok {
+		s.credentials.forget(core.ProviderTheTVDB)
+		if _, keyEdited := body[store.SettingTheTVDBAPIKey]; !keyEdited {
+			if key, err := s.settingValue(r.Context(), store.SettingTheTVDBAPIKey); err == nil {
+				s.revalidateMetadataKey(r.Context(), core.ProviderTheTVDB, key)
+			}
+		}
+	}
+
 	// A key edit is the first of the two credential-state transitions (PLAN
 	// phase 10 task 2). It runs after the write, costs at most one upstream
-	// call, and is skipped entirely for a key the Test button already proved —
-	// see revalidateMetadataKey.
-	if key, ok := body[store.SettingTMDBAPIKey]; ok {
-		s.revalidateMetadataKey(r.Context(), strings.TrimSpace(key))
+	// call per edited credential, and is skipped entirely for a key the Test
+	// button already proved — see revalidateMetadataKey. Only the keys this body
+	// actually carried are checked, so saving an unrelated setting stays free.
+	for _, p := range core.Providers() {
+		if p.CredentialSetting == "" {
+			continue
+		}
+		if key, ok := body[p.CredentialSetting]; ok {
+			s.revalidateMetadataKey(r.Context(), p.ID, strings.TrimSpace(key))
+		}
 	}
 
 	settings, err := s.publicSettings(r)
@@ -296,224 +337,6 @@ func (s *server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, settings)
 }
 
-// adultEnabledRequest is the body of POST /settings/adult.
-type adultEnabledRequest struct {
-	// Enabled is a pointer so an absent field is a client bug rather than a
-	// silent switch-off, the way monitorRequest treats Monitored. Getting this
-	// wrong would be a module that turns itself off on a malformed save.
-	Enabled *bool `json:"enabled"`
-
-	// StashboxEndpoint and StashboxAPIKey are the credential the enable is made
-	// with (PLAN phase 10 task 5). They travel in this request rather than in a
-	// separate PUT /settings so the whole enable is one decision the server can
-	// refuse as a unit: a credential that does not work leaves the endpoint, the
-	// key and adult_enabled exactly as they were.
-	//
-	// Both are pointers so "not supplied" is distinguishable from "set to
-	// empty". Absent means "use what is already stored", which is what the
-	// settings screen sends when it re-enables a module that was configured
-	// once and switched off.
-	StashboxEndpoint *string `json:"stashbox_endpoint"`
-	StashboxAPIKey   *string `json:"stashbox_api_key"`
-}
-
-// handleSetAdultEnabled flips the server-wide adult switch.
-//
-// It is a route of its own rather than a key in writableSettings because
-// enabling has a consequence a key-value PUT cannot carry out: the first enable
-// creates the Adult library row (store.SetAdultEnabled). storage_root is absent
-// from that allowlist for the same reason — a setting with rules attached needs
-// a door that knows them.
-//
-// Admin-only, and it must stay that way: memberAllowed does not name it, so a
-// member is refused by requireAuth before this runs. It is also the one
-// adult-shaped route that cannot sit behind requireAdult, because the gate
-// answers 404 while the module is off and turning it on is precisely what this
-// is for.
-//
-// Disabling deletes nothing (see store.SetAdultEnabled): the library row, the
-// sites, the scenes and the files all stay, and turning it back on finds them
-// as they were.
-// Enabling is gated on a working stash-box credential (PLAN phase 10 task 5).
-// The whole request is refused before a single row is written when the
-// credential is missing or the endpoint rejects it, so a failed enable is
-// indistinguishable from one that never happened. Disabling never validates:
-// switching a module off must work when the credential behind it has expired,
-// which is one of the reasons a person switches it off.
-func (s *server) handleSetAdultEnabled(w http.ResponseWriter, r *http.Request) {
-	var body adultEnabledRequest
-	if !decodeJSON(w, r, &body) {
-		return
-	}
-	if body.Enabled == nil {
-		writeError(w, http.StatusBadRequest, "enabled is required")
-		return
-	}
-
-	if !*body.Enabled {
-		// Credentials in a disable body are ignored rather than rejected: the
-		// settings screen posts the card it is looking at, and a stale field on
-		// a switch-off is not a reason to fail.
-		if err := s.st.SetAdultEnabled(r.Context(), false); err != nil {
-			s.writeStoreError(w, "set adult enabled", err)
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"enabled": false})
-		return
-	}
-
-	endpoint, key, ok := s.resolveAdultCredential(w, r, body)
-	if !ok {
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(r.Context(), credentialCheckTimeout)
-	defer cancel()
-	if err := s.mgr.ValidateAdultCredential(ctx, endpoint, key); err != nil {
-		// The endpoint's own message, for the same reason the indexer test
-		// returns one: "it did not work" without a reason cannot be acted on.
-		// It is not logged — see handleTestIndexer.
-		writeCodedError(w, http.StatusBadGateway, CodeAdultCredentialInvalid,
-			"stash-box test failed: "+err.Error())
-		return
-	}
-
-	// Ordered so no interruption can leave the module on without the credential
-	// that was proved for it. SetAdultEnabled is last, and it is the only write
-	// here that anything reads as "the module is on".
-	//
-	// The credential goes in as one write because it is one value: two
-	// SetSetting calls could commit a new endpoint beside the old key if the
-	// second failed, and on a module that is already on that mismatched pair is
-	// live immediately — a combination nothing ever validated.
-	if err := s.st.SetSettings(r.Context(), map[string]string{
-		store.SettingStashboxEndpoint: endpoint,
-		store.SettingStashboxAPIKey:   key,
-	}); err != nil {
-		s.writeStoreError(w, "write settings", err)
-		return
-	}
-	if err := s.st.SetAdultEnabled(r.Context(), true); err != nil {
-		s.writeStoreError(w, "set adult enabled", err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"enabled": true})
-}
-
-// resolveAdultCredential works out which stash-box endpoint and key the enable
-// is being made with, refusing the request when there is nothing to test.
-//
-// A field the body omits falls back to the stored value, so re-enabling a
-// module that was configured once needs no credential in the body at all. A
-// field the body sends empty is taken literally — clearing the endpoint means
-// "the TPDB preset", which is exactly what a blank endpoint means everywhere
-// else — but an empty key is nothing to authenticate with and is refused.
-func (s *server) resolveAdultCredential(w http.ResponseWriter, r *http.Request, body adultEnabledRequest) (endpoint, key string, ok bool) {
-	ctx := r.Context()
-
-	endpoint, err := s.credentialField(ctx, body.StashboxEndpoint, store.SettingStashboxEndpoint)
-	if err != nil {
-		s.writeStoreError(w, "read stash-box endpoint", err)
-		return "", "", false
-	}
-	// The same shape check PUT /settings applies, run here because this route
-	// bypasses that allowlist entirely.
-	if err := validateStashboxSettings(map[string]string{store.SettingStashboxEndpoint: endpoint}); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return "", "", false
-	}
-
-	key, err = s.credentialField(ctx, body.StashboxAPIKey, store.SettingStashboxAPIKey)
-	if err != nil {
-		s.writeStoreError(w, "read stash-box api key", err)
-		return "", "", false
-	}
-	if key == "" {
-		writeCodedError(w, http.StatusBadRequest, CodeAdultCredentialAbsent,
-			"a stash-box API key is required to enable adult content")
-		return "", "", false
-	}
-	return endpoint, key, true
-}
-
-// guardAdultCredentialEdit keeps a settings PUT from replacing or blanking the
-// stash-box credential of a module that is already on.
-//
-// POST /settings/adult gates the switch on a working credential (SPEC §10.2),
-// but that gate is one-time unless this one exists: both stash-box keys are in
-// writableSettings, so clearing the key on Settings → Adult → Metadata source
-// would leave adult_enabled true with nothing to authenticate with, and every
-// adult surface answering 503. The invariant is "the module is on only while a
-// credential that was proved is behind it", and an edit is as much a way to
-// break it as a bad enable.
-//
-// It runs only when the body touches one of the two fields AND the module is
-// on. With the module off there is nothing running against the credential, and
-// the enable gate will prove whatever is stored before anything turns on — so
-// storing a key to enable with later stays a legal, upstream-free write.
-//
-// It reports false when it has written the response itself.
-func (s *server) guardAdultCredentialEdit(w http.ResponseWriter, r *http.Request, body map[string]string) bool {
-	suppliedEndpoint, hasEndpoint := body[store.SettingStashboxEndpoint]
-	suppliedKey, hasKey := body[store.SettingStashboxAPIKey]
-	if !hasEndpoint && !hasKey {
-		return true
-	}
-
-	ctx := r.Context()
-	enabled, err := s.st.AdultEnabled(ctx)
-	if err != nil {
-		s.writeStoreError(w, "read adult setting", err)
-		return false
-	}
-	if !enabled {
-		return true
-	}
-
-	// A field the body omits keeps its stored value, so the pair validated here
-	// is exactly the pair the write would leave behind.
-	endpoint, key := suppliedEndpoint, suppliedKey
-	if !hasEndpoint {
-		if endpoint, err = s.settingValue(ctx, store.SettingStashboxEndpoint); err != nil {
-			s.writeStoreError(w, "read stash-box endpoint", err)
-			return false
-		}
-	}
-	if !hasKey {
-		if key, err = s.settingValue(ctx, store.SettingStashboxAPIKey); err != nil {
-			s.writeStoreError(w, "read stash-box api key", err)
-			return false
-		}
-	}
-	endpoint, key = strings.TrimSpace(endpoint), strings.TrimSpace(key)
-
-	if key == "" {
-		writeCodedError(w, http.StatusBadRequest, CodeAdultCredentialAbsent,
-			"a stash-box API key is required while adult content is on")
-		return false
-	}
-
-	testCtx, cancel := context.WithTimeout(ctx, credentialCheckTimeout)
-	defer cancel()
-	if err := s.mgr.ValidateAdultCredential(testCtx, endpoint, key); err != nil {
-		// The endpoint's own message, for the reason handleSetAdultEnabled
-		// gives: "it did not work" without a reason cannot be acted on. Not
-		// logged, and it never carries the key.
-		writeCodedError(w, http.StatusBadGateway, CodeAdultCredentialInvalid,
-			"stash-box test failed: "+err.Error())
-		return false
-	}
-	return true
-}
-
-// credentialField resolves one supplied-or-stored credential field.
-func (s *server) credentialField(ctx context.Context, supplied *string, key string) (string, error) {
-	if supplied != nil {
-		return strings.TrimSpace(*supplied), nil
-	}
-	return s.settingValue(ctx, key)
-}
-
 // validateDLNASettings refuses values the media server would silently reinterpret.
 //
 // An unparseable dlna_enabled reads as off, and a friendly name that is only
@@ -535,30 +358,6 @@ func validateDLNASettings(settings map[string]string) error {
 		if len([]rune(name)) > 64 {
 			return fmt.Errorf("invalid %s", store.SettingDLNAFriendlyName)
 		}
-	}
-	return nil
-}
-
-// validateStashboxSettings refuses an adult metadata endpoint that could never
-// be called.
-//
-// The client falls back to its TPDB preset for a blank endpoint, so blank is
-// legal and means "the default". Anything else has to be an absolute http(s)
-// URL: a relative path or a scheme nothing dials would otherwise be stored
-// happily and only fail much later, inside a refresh, as a request error nobody
-// is watching (SPEC §13 — surprises belong where the user can see them).
-func validateStashboxSettings(settings map[string]string) error {
-	raw, ok := settings[store.SettingStashboxEndpoint]
-	if !ok {
-		return nil
-	}
-	endpoint := strings.TrimSpace(raw)
-	if endpoint == "" {
-		return nil
-	}
-	u, err := url.Parse(endpoint)
-	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
-		return fmt.Errorf("invalid %s: expected an absolute http(s) URL", store.SettingStashboxEndpoint)
 	}
 	return nil
 }
@@ -704,6 +503,18 @@ type statusResponse struct {
 	// when the key has never been checked. It is what lets the settings screen
 	// say "tested 2 minutes ago" rather than implying a check just ran.
 	MetadataCredentialCheckedAt string `json:"metadata_credential_checked_at,omitempty"`
+	// MetadataCredentials is every credentialed provider's health, keyed by
+	// provider id, since "the metadata provider" stopped being singular.
+	//
+	// The three flat fields above are this map's TMDB entry, filled from it in
+	// handleSystemStatus so the two can never disagree. They stay because every
+	// existing consumer reads them, and because TMDB is still the provider the
+	// first-run wizard and the Discover surfaces are about.
+	//
+	// Keyless providers are absent rather than "ok": what a provider needs is a
+	// fact the client reads off the provider list, not a verdict this server
+	// reached.
+	MetadataCredentials map[string]credentialStateJSON `json:"metadata_credentials"`
 	// UnhealthyDownloadClients names the external clients the queue poller
 	// cannot reach (PLAN phase 6 task 4). Empty is the normal case; a
 	// non-empty list is what raises the "client X unreachable" banner. The
@@ -822,9 +633,9 @@ func (s *server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 	// The adult shelf's count, only for a caller the module is visible to —
 	// the same predicate that decides whether the nav item this badge sits on
 	// exists at all.
-	adultVisible, err := s.adultVisible(r)
+	adultVisible, err := s.gate(r).seesAdult(ctx)
 	if err != nil {
-		s.writeStoreError(w, "resolve adult visibility", err)
+		s.writeStoreError(w, "read library access", err)
 		return
 	}
 	sites := 0
@@ -869,11 +680,15 @@ func (s *server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	credential, credentialReason, credentialCheckedAt, err := s.metadataCredentialState(ctx)
+	// One read of the whole map, and the flat TMDB fields are lifted out of it
+	// rather than derived a second time: two paths to the same answer are two
+	// answers waiting to disagree.
+	credentials, err := s.credentialStates(ctx)
 	if err != nil {
 		s.writeStoreError(w, "read metadata credential", err)
 		return
 	}
+	tmdbCredential := credentials[core.ProviderTMDB]
 
 	var diskFree, diskTotal int64
 	if root != "" {
@@ -904,9 +719,10 @@ func (s *server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 		DiskFreeBytes:               diskFree,
 		DiskTotalBytes:              diskTotal,
 		EngineHealth:                s.engineHealth(),
-		MetadataCredential:          credential,
-		MetadataCredentialReason:    credentialReason,
-		MetadataCredentialCheckedAt: jsonTime(credentialCheckedAt),
+		MetadataCredential:          tmdbCredential.State,
+		MetadataCredentialReason:    tmdbCredential.Reason,
+		MetadataCredentialCheckedAt: tmdbCredential.CheckedAt,
+		MetadataCredentials:         credentials,
 		UnhealthyDownloadClients:    s.unhealthyDownloadClients(),
 		StashUnreachable:            s.stashHealth(adultVisible),
 		FFmpegAvailable:             s.ffmpegAvailable(),

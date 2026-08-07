@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/watzon/caravan/internal/core"
-	"github.com/watzon/caravan/internal/stashbox"
 	"github.com/watzon/caravan/internal/store"
 )
 
@@ -190,15 +189,15 @@ func (s *Service) Config(ctx context.Context) (Config, error) {
 // active resolves the configuration a handoff would run with right now, and
 // reports whether it may run at all.
 //
-// The adult module's own switch is checked first and independently of the
-// handoff's. Stash is an adult-module feature: with the module off there is no
-// adult library to hand over, and a Caravan that still talked to a Stash server
-// would be making a request the user believes they turned off (PLAN phase 9's
-// zero-traffic rule, applied to the other end of the pipe). Both switches are
-// read at run time rather than carried in a job payload, so a handoff switched
-// off between the import and the job is simply not made.
+// Whether any adult library is switched on is checked first and independently
+// of the handoff's own switch. Stash is an adult-library feature: with every
+// adult shelf dormant there is nothing to hand over, and a Caravan that still
+// talked to a Stash server would be making a request the user believes they
+// turned off (the zero-traffic rule, applied to the other end of the pipe).
+// Both switches are read at run time rather than carried in a job payload, so a
+// handoff switched off between the import and the job is simply not made.
 func (s *Service) active(ctx context.Context) (Config, bool, error) {
-	on, err := s.st.AdultEnabled(ctx)
+	on, err := s.st.AnyActiveLibraryOfKind(ctx, core.LibraryKindAdult)
 	if err != nil {
 		return Config{}, false, err
 	}
@@ -435,18 +434,18 @@ func (s *Service) HandleScan(ctx context.Context, _ *store.Store, payload json.R
 		s.markReachable()
 		return nil
 	}
-	root, err := s.adultRoot(ctx)
+	roots, err := s.adultRoots(ctx)
 	if err != nil {
 		return err
 	}
-	if root == "" {
+	if len(roots) == 0 {
 		// No storage root means no library on disk to point at. There is
 		// nothing to retry into, so this is a log line rather than a failed job.
 		s.log.Warn("stash: no storage root configured, skipping scan")
 		return nil
 	}
 
-	if _, err := NewClient(cfg.URL, cfg.APIKey, s.hc).Scan(ctx, []string{root}); err != nil {
+	if _, err := NewClient(cfg.URL, cfg.APIKey, s.hc).Scan(ctx, roots); err != nil {
 		if !s.note(ctx, "Stash library scan could not be triggered", cfg.URL, err) {
 			// A server that answered and refused will refuse the same request
 			// again. Asking every thirty seconds for two hours would fill the
@@ -461,7 +460,7 @@ func (s *Service) HandleScan(ctx context.Context, _ *store.Store, payload json.R
 	// Deliberately a log line and not an event: every import already writes an
 	// "Imported X" entry, and a successful handoff that doubles the feed is
 	// noise rather than news.
-	s.log.Info("stash: scoped library scan triggered", "url", redactURL(cfg.URL), "path", root)
+	s.log.Info("stash: scoped library scan triggered", "url", redactURL(cfg.URL), "paths", strings.Join(roots, ", "))
 	return nil
 }
 
@@ -622,7 +621,7 @@ func (s *Service) scenePush(ctx context.Context, episodeID int64) (scenePush, bo
 		return scenePush{}, false, nil
 	}
 
-	endpoint, err := s.stashboxEndpoint(ctx)
+	endpoint, err := s.endpointForSeries(ctx, series)
 	if err != nil {
 		return scenePush{}, false, err
 	}
@@ -631,11 +630,22 @@ func (s *Service) scenePush(ctx context.Context, episodeID int64) (scenePush, bo
 		path:  filepath.Join(root, filepath.FromSlash(files[0].Path)),
 		title: episode.Title,
 	}
-	if episode.StashID != "" {
-		push.stashIDs = []StashID{{Endpoint: endpoint, StashID: episode.StashID}}
-	}
-	if series.StashID != "" {
-		push.studioIDs = []StashID{{Endpoint: endpoint, StashID: series.StashID}}
+	// No endpoint means the instance these ids were minted by is gone, and the
+	// file is pushed with NO stash ids at all — not with a guess.
+	//
+	// A StashIDInput carrying the wrong endpoint is worse than none: it writes
+	// into the user's own Stash a claim that box X issued a UUID it never
+	// issued, Stash's identify step then trusts it, and undoing it means
+	// finding every scene the guess touched. An absent id leaves the scene
+	// merely unidentified, which the next push repairs the moment the instance
+	// is added back.
+	if endpoint != "" {
+		if episode.StashID != "" {
+			push.stashIDs = []StashID{{Endpoint: endpoint, StashID: episode.StashID}}
+		}
+		if series.StashID != "" {
+			push.studioIDs = []StashID{{Endpoint: endpoint, StashID: series.StashID}}
+		}
 	}
 	if !episode.AirDate.IsZero() {
 		push.date = episode.AirDate.Format("2006-01-02")
@@ -815,34 +825,58 @@ func redactURL(raw string) string {
 	return parsed.Scheme + "://" + parsed.Host
 }
 
-// adultRoot is the absolute path of the adult library, the one directory a scan
-// is ever pointed at.
-func (s *Service) adultRoot(ctx context.Context) (string, error) {
+// adultRoots are the absolute paths of every adult library — the only
+// directories a scan is ever pointed at. Plural since 0022: a second adult
+// library missed here would simply never be scanned by Stash, so the roots
+// come from the rows rather than the seed constant, with the constant as the
+// fallback for an install whose rows predate the module.
+func (s *Service) adultRoots(ctx context.Context) ([]string, error) {
 	root, err := s.storageRoot(ctx)
 	if err != nil || root == "" {
-		return "", err
+		return nil, err
 	}
-	return filepath.Join(root, filepath.FromSlash(store.AdultLibraryRoot)), nil
+	libs, err := s.st.ListLibrariesByKind(ctx, core.LibraryKindAdult)
+	if err != nil {
+		return nil, err
+	}
+	if len(libs) == 0 {
+		return []string{filepath.Join(root, filepath.FromSlash(store.AdultLibraryRoot))}, nil
+	}
+	out := make([]string, 0, len(libs))
+	for _, lib := range libs {
+		out = append(out, filepath.Join(root, filepath.FromSlash(lib.RootPath)))
+	}
+	return out, nil
 }
 
 func (s *Service) storageRoot(ctx context.Context) (string, error) {
 	return s.setting(ctx, store.SettingStorageRoot)
 }
 
-// stashboxEndpoint is which stash-box the ids being pushed came from. It is
-// part of the identity: a UUID means nothing without the box that issued it,
-// which is exactly what StashIDInput.endpoint is for. A blank setting means the
-// client's own preset, so the endpoint pushed is the one that was actually
-// queried.
-func (s *Service) stashboxEndpoint(ctx context.Context) (string, error) {
-	endpoint, err := s.setting(ctx, store.SettingStashboxEndpoint)
+// endpointForSeries is which stash-box the ids on this site's rows came from.
+//
+// It is part of the identity, which is exactly what StashIDInput.endpoint is
+// for: a UUID means nothing without the box that issued it, and since 0026 the
+// public boxes are forks of one another minting identical UUIDs for different
+// records. The instance is read from the ITEM rather than from a setting for
+// that reason — a server-wide endpoint could only ever be right for one box.
+//
+// An empty provider is the legacy instance (`stashbox`), which is what every
+// adult row written before instances carries. An instance the owner deleted
+// answers "" — see scenePush for what that suppresses.
+func (s *Service) endpointForSeries(ctx context.Context, sr *core.Series) (string, error) {
+	providerID := sr.Provider
+	if providerID == "" {
+		providerID = core.ProviderStashbox
+	}
+	in, err := s.st.GetStashboxInstanceByProviderID(ctx, providerID)
+	if errors.Is(err, store.ErrNotFound) {
+		return "", nil
+	}
 	if err != nil {
 		return "", err
 	}
-	if endpoint == "" {
-		return stashbox.DefaultEndpoint, nil
-	}
-	return endpoint, nil
+	return strings.TrimSpace(in.Endpoint), nil
 }
 
 func (s *Service) setting(ctx context.Context, key string) (string, error) {

@@ -28,11 +28,15 @@ var adultRoutes = []struct{ method, path string }{
 	{http.MethodGet, "/api/v1/adult/discover"},
 	{http.MethodGet, "/api/v1/adult/performers?q=mia"},
 	{http.MethodGet, "/api/v1/adult/tags?q=anal"},
-	{http.MethodGet, "/api/v1/adult/users"},
-	{http.MethodPut, "/api/v1/adult/users/1/access"},
 	{http.MethodGet, "/api/v1/adult/stash"},
 	{http.MethodPost, "/api/v1/adult/stash"},
 	{http.MethodPost, "/api/v1/adult/stash/test"},
+	{http.MethodGet, "/api/v1/adult/stashbox-instances"},
+	{http.MethodPost, "/api/v1/adult/stashbox-instances"},
+	{http.MethodPost, "/api/v1/adult/stashbox-instances/test"},
+	{http.MethodPut, "/api/v1/adult/stashbox-instances/1"},
+	{http.MethodDelete, "/api/v1/adult/stashbox-instances/1"},
+	{http.MethodPost, "/api/v1/adult/stashbox-instances/1/test"},
 }
 
 // fakeAdultProvider is a canned core.AdultMetadataProvider that records every
@@ -138,24 +142,32 @@ func fakeScenes() []core.SceneMeta {
 	}}
 }
 
-// enableAdult turns the module on the way POST /settings/adult does.
-func enableAdult(t *testing.T, st *store.Store) {
+// enableAdult gives the install an adult library, switched on, which is what
+// makes the module reachable at all. It returns the row because every test that
+// then switches the module off, or names who may see it, does so through that
+// library's own routes.
+func enableAdult(t *testing.T, st *store.Store) core.Library {
 	t.Helper()
-	if err := st.SetAdultEnabled(context.Background(), true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	return enableAdultLibrary(t, st)
 }
 
 // seedSite puts one site with one scene in the library, the way library.AddSite
-// does.
+// does. It is pinned to the legacy instance, which is what a single-box install
+// and every row written before 0026 carry; seedSiteOn pins it elsewhere.
 func seedSite(t *testing.T, st *store.Store) *core.Series {
+	t.Helper()
+	return seedSiteOn(t, st, core.ProviderStashbox, "site-1", "scene-1", "Brazzers")
+}
+
+func seedSiteOn(t *testing.T, st *store.Store, providerID, siteID, sceneID, title string) *core.Series {
 	t.Helper()
 	ctx := context.Background()
 
 	sr := &core.Series{
-		StashID: "site-1", Title: "Brazzers", SortTitle: "brazzers",
+		Provider: providerID, ProviderRef: siteID,
+		StashID: siteID, Title: title, SortTitle: strings.ToLower(title),
 		Kind: core.SeriesKindAdult, Monitored: true,
-		Path: store.AdultLibraryRoot + "/Brazzers",
+		Path: store.AdultLibraryRoot + "/" + title,
 	}
 	if err := st.UpsertSeries(ctx, sr); err != nil {
 		t.Fatalf("UpsertSeries: %v", err)
@@ -166,10 +178,10 @@ func seedSite(t *testing.T, st *store.Store) *core.Series {
 		t.Fatalf("UpsertSeason: %v", err)
 	}
 	if err := st.UpsertEpisode(ctx, &core.Episode{
-		SeriesID: sr.ID, SeasonNumber: 2022, EpisodeNumber: 1, StashID: "scene-1",
+		SeriesID: sr.ID, SeasonNumber: 2022, EpisodeNumber: 1, StashID: sceneID,
 		Title: "Deep Impact", AirDate: time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC),
 		Monitored: true,
-		Scene:     &core.SceneInfo{Studio: "Brazzers", Performers: []string{"Janie"}, URL: "https://example.test/s/1"},
+		Scene:     &core.SceneInfo{Studio: title, Performers: []string{"Janie"}, URL: "https://example.test/s/1"},
 	}); err != nil {
 		t.Fatalf("UpsertEpisode: %v", err)
 	}
@@ -250,17 +262,13 @@ func TestUngrantedMemberSeesNothingAdultOnAnySharedSurface(t *testing.T) {
 	// sees only their own rows anyway, so an admin's row would make the
 	// requests-screen assertion below true for a reason that has nothing to do
 	// with the adult filter.
-	if err := st.SetUserAdultAccess(context.Background(), member.ID, true); err != nil {
-		t.Fatalf("SetUserAdultAccess: %v", err)
-	}
+	grantAdultAccess(t, st, member.ID, true)
 	rec := doAuth(t, h, http.MethodPost, "/api/v1/requests",
 		`{"media_type":"scene","stash_id":"scene-2","title":"Another Scene"}`, withCookie(cookie))
 	wantStatus(t, rec, http.StatusCreated)
 	var mine requestJSON
 	decodeBody(t, rec, &mine)
-	if err := st.SetUserAdultAccess(context.Background(), member.ID, false); err != nil {
-		t.Fatalf("SetUserAdultAccess: %v", err)
-	}
+	grantAdultAccess(t, st, member.ID, false)
 
 	// And an admin's scene row, which the member must not reach by id either.
 	rec = doAuth(t, h, http.MethodPost, "/api/v1/requests",
@@ -363,7 +371,7 @@ func TestUngrantedMemberSeesNothingAdultOnAnySharedSurface(t *testing.T) {
 func TestDisablingTheModuleHidesSceneRequestsFromTheAdminToo(t *testing.T) {
 	h, st, mgr := newTestServer(t)
 	mgr.adult = &fakeAdultProvider{scenes: fakeScenes()}
-	enableAdult(t, st)
+	lib := enableAdult(t, st)
 	createUser(t, st, testAdmin, testPassword, core.RoleAdmin)
 	cookie := login(t, h, testAdmin, testPassword)
 
@@ -378,8 +386,8 @@ func TestDisablingTheModuleHidesSceneRequestsFromTheAdminToo(t *testing.T) {
 		t.Fatalf("the admin cannot see their own scene request: %s", rec.Body.String())
 	}
 
-	wantStatus(t, doAuth(t, h, http.MethodPost, "/api/v1/settings/adult",
-		`{"enabled":false}`, withCookie(cookie)), http.StatusOK)
+	wantStatus(t, doAuth(t, h, http.MethodPatch, "/api/v1/libraries/"+itoa(lib.ID),
+		`{"active":false}`, withCookie(cookie)), http.StatusOK)
 
 	rec = doAuth(t, h, http.MethodGet, "/api/v1/requests", "", withCookie(cookie))
 	wantStatus(t, rec, http.StatusOK)
@@ -390,11 +398,11 @@ func TestDisablingTheModuleHidesSceneRequestsFromTheAdminToo(t *testing.T) {
 	wantStatus(t, doAuth(t, h, http.MethodPost, "/api/v1/requests/"+itoa(created.ID)+"/approve",
 		"{}", withCookie(cookie)), http.StatusNotFound)
 
-	// Nothing was deleted: turning it back on finds the row as it was. The
-	// re-enable carries the credential the gate now insists on (PLAN phase 10
-	// task 5); see TestAdultEnableGate for the gate's own tests.
-	wantStatus(t, doAuth(t, h, http.MethodPost, "/api/v1/settings/adult",
-		`{"enabled":true,"stashbox_api_key":"stash-key"}`, withCookie(cookie)), http.StatusOK)
+	// Nothing was deleted: switching it back on finds the row as it was. The
+	// library route is reachable throughout, which is the whole difference
+	// between a dormant shelf and a hidden one — see manageableLibrary.
+	wantStatus(t, doAuth(t, h, http.MethodPatch, "/api/v1/libraries/"+itoa(lib.ID),
+		`{"active":true}`, withCookie(cookie)), http.StatusOK)
 	rec = doAuth(t, h, http.MethodGet, "/api/v1/requests", "", withCookie(cookie))
 	if !strings.Contains(rec.Body.String(), "Deep Impact") {
 		t.Errorf("disabling deleted the scene request: %s", rec.Body.String())
@@ -412,7 +420,7 @@ func TestGrantedMemberCanDiscoverAndRequestAScene(t *testing.T) {
 		scenes: fakeScenes(),
 	}
 	mgr.adult = provider
-	enableAdult(t, st)
+	lib := enableAdult(t, st)
 
 	createUser(t, st, testAdmin, testPassword, core.RoleAdmin)
 	member := createUser(t, st, testMember, testPassword, core.RoleMember)
@@ -423,12 +431,12 @@ func TestGrantedMemberCanDiscoverAndRequestAScene(t *testing.T) {
 	wantStatus(t, doAuth(t, h, http.MethodGet, "/api/v1/adult/discover", "", withCookie(cookie)),
 		http.StatusNotFound)
 
-	// The admin grants access through the member-access card.
-	rec := doAuth(t, h, http.MethodPut, "/api/v1/adult/users/"+itoa(member.ID)+"/access",
-		`{"granted":true}`, withCookie(adminCookie))
+	// The admin grants access through the library's own access card.
+	rec := doAuth(t, h, http.MethodPut, "/api/v1/libraries/"+itoa(lib.ID)+"/access",
+		`{"restricted":true,"user_ids":[`+itoa(member.ID)+`]}`, withCookie(adminCookie))
 	wantStatus(t, rec, http.StatusOK)
 
-	// No re-login: requireAuth reads the grant per request.
+	// No re-login: the gate reads the grant per request.
 	rec = doAuth(t, h, http.MethodGet, "/api/v1/auth/me", "", withCookie(cookie))
 	var me meResponse
 	decodeBody(t, rec, &me)
@@ -497,7 +505,7 @@ func TestGrantedMemberCanDiscoverAndRequestAScene(t *testing.T) {
 func TestGrantedMemberReadsTheAdultScreensButCannotWrite(t *testing.T) {
 	h, st, mgr := newTestServer(t)
 	mgr.adult = &fakeAdultProvider{sites: []core.SiteMeta{{StashID: "site-1", Name: "Brazzers"}}}
-	enableAdult(t, st)
+	lib := enableAdult(t, st)
 	site := seedSite(t, st)
 	// A television series in the same table, so the grid's kind filter has
 	// something to leave out. Without it the assertion below would hold for a
@@ -510,9 +518,7 @@ func TestGrantedMemberReadsTheAdultScreensButCannotWrite(t *testing.T) {
 
 	createUser(t, st, testAdmin, testPassword, core.RoleAdmin)
 	member := createUser(t, st, testMember, testPassword, core.RoleMember)
-	if err := st.SetUserAdultAccess(context.Background(), member.ID, true); err != nil {
-		t.Fatalf("SetUserAdultAccess: %v", err)
-	}
+	grantAdultAccess(t, st, member.ID, true)
 	cookie := login(t, h, testMember, testPassword)
 
 	rec := doAuth(t, h, http.MethodGet, "/api/v1/adult/sites", "", withCookie(cookie))
@@ -560,9 +566,10 @@ func TestGrantedMemberReadsTheAdultScreensButCannotWrite(t *testing.T) {
 	// answer rather than one that mentions the module.
 	for _, route := range []struct{ method, path, body string }{
 		{http.MethodPost, "/api/v1/adult/sites", `{"stash_id":"site-1"}`},
-		{http.MethodGet, "/api/v1/adult/users", ""},
-		{http.MethodPut, "/api/v1/adult/users/" + itoa(member.ID) + "/access", `{"granted":true}`},
-		{http.MethodPost, "/api/v1/settings/adult", `{"enabled":false}`},
+		{http.MethodGet, "/api/v1/libraries/" + itoa(lib.ID) + "/access", ""},
+		{http.MethodPut, "/api/v1/libraries/" + itoa(lib.ID) + "/access",
+			`{"restricted":true,"user_ids":[` + itoa(member.ID) + `]}`},
+		{http.MethodPatch, "/api/v1/libraries/" + itoa(lib.ID), `{"active":false}`},
 	} {
 		rec := doAuth(t, h, route.method, route.path, route.body, withCookie(cookie))
 		wantStatus(t, rec, http.StatusForbidden)
@@ -673,44 +680,67 @@ func TestSiteEndpointRefusesATelevisionSeries(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// The master switch.
+// Bringing the module into existence.
 // ---------------------------------------------------------------------------
 
-func TestSettingsAdultSwitchCreatesTheLibraryAndIsAdminOnly(t *testing.T) {
+// The whole bootstrap, in the order the only door admits.
+//
+// There is no module switch: an adult library IS the module, so POST /libraries
+// is what turns it on. The ordering is forced rather than chosen — the
+// stash-box instance routes live under /adult, which is absent to a caller who
+// can see no adult library, so the library has to exist before its first
+// endpoint can be configured. That is why creating one is not gated on a
+// credential the way the old enable was: nothing could ever have proved one
+// through a door that is not open yet.
+//
+// The row is born restricted and DLNA-dark, which is what the module's own
+// switch used to guarantee: the household does not acquire a shelf because
+// somebody made one.
+func TestCreatingAnAdultLibraryOpensTheModuleAndThenItsInstanceRoutes(t *testing.T) {
 	h, st, _ := newTestServer(t)
 	createUser(t, st, testAdmin, testPassword, core.RoleAdmin)
-	member := createUser(t, st, testMember, testPassword, core.RoleMember)
-	if err := st.SetUserAdultAccess(context.Background(), member.ID, true); err != nil {
-		t.Fatalf("SetUserAdultAccess: %v", err)
-	}
+	createUser(t, st, testMember, testPassword, core.RoleMember)
 	adminCookie := login(t, h, testAdmin, testPassword)
 	memberCookie := login(t, h, testMember, testPassword)
 
-	// Even a GRANTED member may not flip the server-wide switch: the grant is
-	// permission to see the module, not to install it.
-	wantStatus(t, doAuth(t, h, http.MethodPost, "/api/v1/settings/adult",
-		`{"enabled":true}`, withCookie(memberCookie)), http.StatusForbidden)
+	// Before it exists, the instance routes are not merely empty — they are not
+	// there, for the admin who is about to create the library too.
+	wantStatus(t, doAuth(t, h, http.MethodGet, "/api/v1/adult/stashbox-instances", "",
+		withCookie(adminCookie)), http.StatusNotFound)
 
-	// An absent field is a client bug, not a silent switch-off.
-	rec := doAuth(t, h, http.MethodPost, "/api/v1/settings/adult", `{}`, withCookie(adminCookie))
-	wantStatus(t, rec, http.StatusBadRequest)
-	if enabled, err := st.AdultEnabled(context.Background()); err != nil || enabled {
-		t.Fatalf("AdultEnabled = %v (err %v), want off after a malformed save", enabled, err)
+	// A member may not make one. POST /libraries is admin-only by the ordinary
+	// rule, and a household member acquiring a shelf for everybody is precisely
+	// what that rule is for.
+	wantStatus(t, doAuth(t, h, http.MethodPost, "/api/v1/libraries",
+		`{"kind":"adult","name":"Adult","root_path":"library/Adult"}`,
+		withCookie(memberCookie)), http.StatusForbidden)
+
+	// No stash-box instance is configured, and the create is not refused for it:
+	// the chain defaults to the bare legacy id, which is the id the first
+	// instance ever created is minted with, so it resolves the moment one is.
+	rec := doAuth(t, h, http.MethodPost, "/api/v1/libraries",
+		`{"kind":"adult","name":"Adult","root_path":"library/Adult"}`, withCookie(adminCookie))
+	wantStatus(t, rec, http.StatusCreated)
+	var created libraryJSON
+	decodeBody(t, rec, &created)
+	if !created.Active || !created.Restricted || created.DLNAVisible {
+		t.Fatalf("new adult library = %+v, want active, restricted and DLNA-dark", created)
+	}
+	if len(created.Providers) != 1 || created.Providers[0] != core.ProviderStashbox {
+		t.Errorf("chain = %v, want the legacy stash-box id alone", created.Providers)
 	}
 
-	wantStatus(t, doAuth(t, h, http.MethodPost, "/api/v1/settings/adult",
-		`{"enabled":true,"stashbox_api_key":"stash-key"}`, withCookie(adminCookie)), http.StatusOK)
+	// Now the instance routes answer, which is the point of the ordering.
+	wantStatus(t, doAuth(t, h, http.MethodGet, "/api/v1/adult/stashbox-instances", "",
+		withCookie(adminCookie)), http.StatusOK)
+	wantStatus(t, doAuth(t, h, http.MethodPost, "/api/v1/adult/stashbox-instances",
+		`{"name":"StashDB","endpoint":"https://stashdb.org/graphql","api_key":"stash-key"}`,
+		withCookie(adminCookie)), http.StatusCreated)
 
-	lib, err := st.GetLibraryByKind(context.Background(), core.LibraryKindAdult)
-	if err != nil {
-		t.Fatalf("GetLibraryByKind: %v", err)
-	}
-	if lib.RootPath != store.AdultLibraryRoot {
-		t.Errorf("adult root = %q, want %q", lib.RootPath, store.AdultLibraryRoot)
-	}
-	if lib.DLNAVisible {
-		t.Error("the Adult library was born advertised on the LAN")
-	}
+	// And the member still sees nothing: created restricted means the admins
+	// alone until somebody is named.
+	wantStatus(t, doAuth(t, h, http.MethodGet, "/api/v1/adult/discover", "",
+		withCookie(memberCookie)), http.StatusNotFound)
 }
 
 // PUT /settings must still refuse the switch: it cannot create the library row,
@@ -746,29 +776,37 @@ func TestTheAccountsAPICarriesNoAdultField(t *testing.T) {
 	}
 }
 
-func TestAdultUsersCardReportsGrantsAndAdminsAreAlwaysGranted(t *testing.T) {
+// The Access card, on the library whose promise of absence it decides.
+//
+// Admin rows report always_granted rather than a checkbox: an admin bypasses
+// restriction (core.LibraryVisible), so a toggle beside their name would
+// describe a permission that does nothing — and the person reading the card
+// would believe they had removed access they had not.
+func TestLibraryAccessCardReportsGrantsAndAdminsAreAlwaysGranted(t *testing.T) {
 	h, st, _ := newTestServer(t)
-	enableAdult(t, st)
+	lib := enableAdult(t, st)
 	createUser(t, st, testAdmin, testPassword, core.RoleAdmin)
 	member := createUser(t, st, testMember, testPassword, core.RoleMember)
 	cookie := login(t, h, testAdmin, testPassword)
 
-	read := func() map[string]adultUserJSON {
+	read := func() (libraryAccessJSON, map[string]libraryAccessUserJSON) {
 		t.Helper()
-		rec := doAuth(t, h, http.MethodGet, "/api/v1/adult/users", "", withCookie(cookie))
+		rec := doAuth(t, h, http.MethodGet, "/api/v1/libraries/"+itoa(lib.ID)+"/access", "",
+			withCookie(cookie))
 		wantStatus(t, rec, http.StatusOK)
-		var body struct {
-			Users []adultUserJSON `json:"users"`
-		}
+		var body libraryAccessJSON
 		decodeBody(t, rec, &body)
-		out := map[string]adultUserJSON{}
+		out := map[string]libraryAccessUserJSON{}
 		for _, u := range body.Users {
 			out[u.Username] = u
 		}
-		return out
+		return body, out
 	}
 
-	rows := read()
+	body, rows := read()
+	if !body.Restricted {
+		t.Error("the adult library is not restricted")
+	}
 	if !rows[testAdmin].AlwaysGranted {
 		t.Error("the admin row does not say it always has access")
 	}
@@ -776,20 +814,45 @@ func TestAdultUsersCardReportsGrantsAndAdminsAreAlwaysGranted(t *testing.T) {
 		t.Errorf("a fresh member row = %+v, want no grant", rows[testMember])
 	}
 
-	wantStatus(t, doAuth(t, h, http.MethodPut, "/api/v1/adult/users/"+itoa(member.ID)+"/access",
-		`{"granted":true}`, withCookie(cookie)), http.StatusOK)
-	if !read()[testMember].Granted {
+	// The flag and the roster travel together, and the answer is the same body
+	// a read gives — the screen re-renders the card from the write.
+	rec := doAuth(t, h, http.MethodPut, "/api/v1/libraries/"+itoa(lib.ID)+"/access",
+		`{"restricted":true,"user_ids":[`+itoa(member.ID)+`]}`, withCookie(cookie))
+	wantStatus(t, rec, http.StatusOK)
+	var wrote libraryAccessJSON
+	decodeBody(t, rec, &wrote)
+	if _, rows := read(); !cmpAccess(wrote, rows) {
+		t.Errorf("the write answered %+v, which a read does not agree with", wrote)
+	}
+	if _, rows := read(); !rows[testMember].Granted {
 		t.Error("the grant did not stick")
 	}
 
-	// Revoking takes effect on the very next request, with no logout.
+	// Revoking takes effect on the very next request, with no logout: the roster
+	// is read per request, so there is no window in which a removed name still
+	// opens the shelf.
 	memberCookie := login(t, h, testMember, testPassword)
 	wantStatus(t, doAuth(t, h, http.MethodGet, "/api/v1/adult/sites", "", withCookie(memberCookie)),
 		http.StatusOK)
-	wantStatus(t, doAuth(t, h, http.MethodPut, "/api/v1/adult/users/"+itoa(member.ID)+"/access",
-		`{"granted":false}`, withCookie(cookie)), http.StatusOK)
+	wantStatus(t, doAuth(t, h, http.MethodPut, "/api/v1/libraries/"+itoa(lib.ID)+"/access",
+		`{"restricted":true,"user_ids":[]}`, withCookie(cookie)), http.StatusOK)
 	wantStatus(t, doAuth(t, h, http.MethodGet, "/api/v1/adult/sites", "", withCookie(memberCookie)),
 		http.StatusNotFound)
+}
+
+// cmpAccess reports whether a write's answer says the same thing a read does.
+// The two must agree row for row: a screen that re-rendered from the write and
+// then refreshed would otherwise show the card changing under it.
+func cmpAccess(wrote libraryAccessJSON, read map[string]libraryAccessUserJSON) bool {
+	if !wrote.Restricted || len(wrote.Users) != len(read) {
+		return false
+	}
+	for _, u := range wrote.Users {
+		if read[u.Username] != u {
+			return false
+		}
+	}
+	return true
 }
 
 // ---------------------------------------------------------------------------
@@ -857,9 +920,13 @@ func TestMemberAllowlistNamesExactlyTheAdultReadRoutes(t *testing.T) {
 	refused := []string{
 		http.MethodPost + " /adult/sites",
 		http.MethodDelete + " /adult/sites/7",
-		http.MethodGet + " /adult/users",
-		http.MethodPut + " /adult/users/7/access",
-		http.MethodPost + " /settings/adult",
+		http.MethodGet + " /adult/stashbox-instances",
+		http.MethodPost + " /adult/stashbox-instances",
+		http.MethodPut + " /adult/stashbox-instances/7",
+		http.MethodDelete + " /adult/stashbox-instances/7",
+		http.MethodPost + " /adult/stashbox-instances/7/test",
+		http.MethodGet + " /libraries/7/access",
+		http.MethodPut + " /libraries/7/access",
 	}
 	for _, entry := range allowed {
 		method, path, _ := strings.Cut(entry, " ")
@@ -1062,41 +1129,43 @@ func TestSiteSearchWithNoQueryAsksTheProviderForItsDefaultList(t *testing.T) {
 }
 
 // The provider id on a site's page is a link out, and where it points depends on
-// which endpoint is configured — which is why the server derives it: the setting
-// is admin-only, and this page is one a granted member reads.
-func TestSiteDetailCarriesTheProviderLink(t *testing.T) {
-	tests := []struct {
+// which endpoint the SITE's own instance answers on — which is why the server
+// derives it: the instance list is admin-only, and this page is one a granted
+// member reads.
+//
+// Two instances in one install means two websites, so the link is a per-ROW
+// fact and not a server-wide one. A link built from the wrong endpoint lands on
+// a page about a different site, or on a 404, while looking exactly like a
+// working link.
+func TestSiteDetailLinksToTheSitesOwnInstance(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	enableAdult(t, st)
+	seedStashboxInstance(t, st, core.ProviderStashbox, "ThePornDB", "https://theporndb.net/graphql")
+	seedStashboxInstance(t, st, core.ProviderStashbox+":stashdb", "StashDB", "https://stashdb.org/graphql")
+
+	tpdb := seedSiteOn(t, st, core.ProviderStashbox, "site-1", "scene-1", "Brazzers")
+	stashdb := seedSiteOn(t, st, core.ProviderStashbox+":stashdb", "site-2", "scene-2", "Vixen")
+
+	for _, tt := range []struct {
 		name      string
-		endpoint  string
+		site      *core.Series
 		want      string
 		wantScene string
 	}{
 		{
-			// TPDB files a site under /sites; it is the default endpoint.
-			name:      "the default endpoint",
+			// TPDB files a site under /sites.
+			name: "the legacy instance", site: tpdb,
 			want:      "https://theporndb.net/sites/site-1",
 			wantScene: "https://theporndb.net/scenes/scene-1",
 		},
 		{
-			name:      "a stash-box keeps the /studios convention",
-			endpoint:  "https://stashdb.org/graphql",
-			want:      "https://stashdb.org/studios/site-1",
-			wantScene: "https://stashdb.org/scenes/scene-1",
+			name: "a stash-box keeps the /studios convention", site: stashdb,
+			want:      "https://stashdb.org/studios/site-2",
+			wantScene: "https://stashdb.org/scenes/scene-2",
 		},
-	}
-
-	for _, tt := range tests {
+	} {
 		t.Run(tt.name, func(t *testing.T) {
-			h, st, _ := newTestServer(t)
-			enableAdult(t, st)
-			if tt.endpoint != "" {
-				if err := st.SetSetting(context.Background(), store.SettingStashboxEndpoint, tt.endpoint); err != nil {
-					t.Fatalf("set endpoint: %v", err)
-				}
-			}
-			site := seedSite(t, st)
-
-			rec := do(t, h, http.MethodGet, "/api/v1/adult/sites/"+itoa(site.ID), "")
+			rec := do(t, h, http.MethodGet, "/api/v1/adult/sites/"+itoa(tt.site.ID), "")
 			wantStatus(t, rec, http.StatusOK)
 			var body siteDetailJSON
 			decodeBody(t, rec, &body)
@@ -1112,6 +1181,26 @@ func TestSiteDetailCarriesTheProviderLink(t *testing.T) {
 				t.Errorf("scene provider_url = %q, want %q", got, tt.wantScene)
 			}
 		})
+	}
+}
+
+// A site whose instance is gone renders with no link rather than with a guessed
+// one: a link into a box that never held this UUID is worse than no link, and a
+// site with none renders exactly as one whose provider has no page.
+func TestSiteDetailHasNoLinkWhenTheInstanceIsGone(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	enableAdult(t, st)
+	site := seedSiteOn(t, st, core.ProviderStashbox+":gone", "site-1", "scene-1", "Brazzers")
+
+	rec := do(t, h, http.MethodGet, "/api/v1/adult/sites/"+itoa(site.ID), "")
+	wantStatus(t, rec, http.StatusOK)
+	var body siteDetailJSON
+	decodeBody(t, rec, &body)
+	if body.ProviderURL != "" {
+		t.Errorf("provider_url = %q, want none", body.ProviderURL)
+	}
+	if got := body.Years[0].Scenes[0].ProviderURL; got != "" {
+		t.Errorf("scene provider_url = %q, want none", got)
 	}
 }
 
@@ -1188,11 +1277,9 @@ func TestSeriesByIDRoutesAre404ForASiteWhenTheModuleIsDisabled(t *testing.T) {
 	createUser(t, st, testAdmin, testPassword, core.RoleAdmin)
 	cookie := login(t, h, testAdmin, testPassword)
 
-	// The gate is the SWITCH, not the seeding: the rows stay, as
-	// store.SetAdultEnabled promises.
-	if err := st.SetAdultEnabled(context.Background(), false); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	// The gate is the SWITCH, not the seeding: switching a library off deletes
+	// nothing, so every row this test is about is still there to be refused.
+	setAdultLibrariesActive(t, st, false)
 
 	control := doAuth(t, h, http.MethodGet, "/api/v1/library/series/9999", "", withCookie(cookie))
 	wantStatus(t, control, http.StatusNotFound)
@@ -1298,7 +1385,7 @@ func (p *routingEngineProvider) Engine() core.Engine { return p.byKind[core.Libr
 
 func (p *routingEngineProvider) Name() string { return "routing-stub" }
 
-func (p *routingEngineProvider) EngineFor(kind string) core.Engine {
+func (p *routingEngineProvider) EngineFor(_ int64, kind string) core.Engine {
 	p.mu.Lock()
 	p.asked = append(p.asked, kind)
 	p.mu.Unlock()
@@ -1963,5 +2050,73 @@ func TestSiteDetailIgnoresAnotherSitesWalk(t *testing.T) {
 	}
 	if !siteCataloguingFlag(t, h, other.ID) {
 		t.Error("the site actually being walked does not read as cataloguing")
+	}
+}
+
+// The universal search is a new door to cached adult rows, so it carries the
+// same promise of absence every other surface does: with the module off, an
+// adult category search answers empty without asking any indexer, a cached
+// adult release id is not grabbable, and a file parked into an adult library
+// is absent from the review queue.
+func TestUniversalSearchKeepsAdultAbsentWithTheModuleOff(t *testing.T) {
+	ctx := context.Background()
+	fake := newFakeIndexer(t)
+	h, st, _ := newTestServer(t, WithIndexerClients(fake.factory()))
+	enableAdult(t, st)
+	addIndexer(t, st, fake, "alpha", 6000)
+
+	// Cached while the module was on: an adult release and a file parked into
+	// the adult library by an untied grab.
+	adultRel := torrentRelease("Site.22.03.14.Scene", "guid-adult", 5,
+		core.ParsedRelease{Title: "Site"})
+	adultRel.IndexerID = 1
+	adultRel.Categories = []int{6010}
+	if err := st.UpsertRelease(ctx, &adultRel); err != nil {
+		t.Fatalf("UpsertRelease: %v", err)
+	}
+	adultLib, err := st.GetDefaultLibrary(ctx, core.LibraryKindAdult)
+	if err != nil {
+		t.Fatalf("GetDefaultLibrary(adult): %v", err)
+	}
+	if err := st.UpsertUnmatchedFile(ctx, &core.UnmatchedFile{
+		Path: "downloads/scene.mkv", Size: 1, Reason: "manual-grab", LibraryID: adultLib.ID,
+	}); err != nil {
+		t.Fatalf("UpsertUnmatchedFile: %v", err)
+	}
+
+	setAdultLibrariesActive(t, st, false)
+	createUser(t, st, testAdmin, testPassword, core.RoleAdmin)
+	cookie := login(t, h, testAdmin, testPassword)
+
+	// An all-adult category request short-circuits: empty answer, zero
+	// outbound searches — indistinguishable from a search that matched nothing.
+	rec := doAuth(t, h, http.MethodGet, "/api/v1/search/releases?q=scene&cats=6000,6010", "",
+		withCookie(cookie))
+	wantStatus(t, rec, http.StatusOK)
+	var body releasesResponse
+	decodeBody(t, rec, &body)
+	if len(body.Releases) != 0 || len(fake.recorded()) != 0 {
+		t.Fatalf("releases = %+v, searches = %+v; want silence", body.Releases, fake.recorded())
+	}
+
+	// The cached adult release id is not a grabbable handle.
+	movies, err := st.GetDefaultLibrary(ctx, core.LibraryKindMovie)
+	if err != nil {
+		t.Fatalf("GetDefaultLibrary(movie): %v", err)
+	}
+	rec = doAuth(t, h, http.MethodPost, "/api/v1/search/grab",
+		`{"release_id":`+itoa(adultRel.ID)+`,"library_id":`+itoa(movies.ID)+`}`,
+		withCookie(cookie))
+	wantStatus(t, rec, http.StatusNotFound)
+
+	// The parked file is absent from the review queue, and unreachable by id.
+	rec = doAuth(t, h, http.MethodGet, "/api/v1/import/queue", "", withCookie(cookie))
+	wantStatus(t, rec, http.StatusOK)
+	var queue struct {
+		Items []unmatchedJSON `json:"items"`
+	}
+	decodeBody(t, rec, &queue)
+	if len(queue.Items) != 0 {
+		t.Fatalf("import queue = %+v, want the adult-parked file hidden", queue.Items)
 	}
 }

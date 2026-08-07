@@ -48,6 +48,12 @@ const (
 	reasonNoEpisodeNum = "under TV/ but no season/episode in filename"
 	reasonNoMatch      = "no metadata match"
 	reasonProviderErr  = "metadata provider error"
+	// reasonNoAbsoluteMatch parks a file named by absolute episode number that
+	// the matched series' own episode tree cannot place. It is a different
+	// problem from reasonNoMatch and only one of them is about the show being
+	// wrong: here the right show was found and its numbering does not contain
+	// the number the name claims.
+	reasonNoAbsoluteMatch = "absolute episode number is not in the provider's episode list"
 	// Adult park reasons (PLAN phase 9 task 4). They name the scene vocabulary
 	// rather than reusing the episode one, because "no season/episode in
 	// filename" would be advice nobody can act on for a file that is supposed
@@ -56,6 +62,11 @@ const (
 	reasonNoSceneMatch   = "no scene released on that date"
 	reasonAmbiguousScene = "several scenes released on that date"
 	reasonSceneNotInGrab = "file is a different scene than the one grabbed"
+	// reasonNoLibrary parks a file loose under library/ that no library root
+	// claims. Before 0022 such a file was silently read as a movie; with
+	// several libraries there is no defensible default, and a visible park
+	// beats a silent misfile.
+	reasonNoLibrary = "not under any library root"
 )
 
 // ScanResult summarizes one library scan.
@@ -93,6 +104,15 @@ func (m *Manager) Scan(ctx context.Context) (*ScanResult, error) {
 	res := &ScanResult{}
 	m.syncedSites = map[int64]bool{}
 
+	// The library set is snapshotted once per scan, like syncedSites: a walk
+	// over thousands of files must not re-query the table per file, and a
+	// library created mid-scan is the next scan's business.
+	libs, err := m.store.ListLibraries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	m.scanLibs = libs
+
 	libAbs := m.abs(LibraryDir)
 	info, err := os.Stat(libAbs)
 	switch {
@@ -108,16 +128,23 @@ func (m *Manager) Scan(ctx context.Context) (*ScanResult, error) {
 		return nil, fmt.Errorf("library: %s is not a directory", libAbs)
 	}
 
-	// A disabled adult module is not walked at all, which is stronger than
-	// walking it and refusing to match: a scene filename parked in the review
-	// queue is a UI trace of a module the owner turned off, and this phase
-	// promises there are none (PLAN phase 9 task 5). It is also the cheapest
-	// possible guarantee that a scan makes no stash-box request.
-	adultEnabled, err := m.store.AdultEnabled(ctx)
-	if err != nil {
-		return nil, err
+	// An inactive library is not walked at all, which is stronger than walking
+	// it and refusing to match: a filename parked in the review queue is a UI
+	// trace of a shelf the owner switched off, and `active = 0` promises there
+	// are none. For an adult library it is also the cheapest possible guarantee
+	// that a scan makes no stash-box request.
+	//
+	// Every inactive library's root is skipped, of every kind. Before the switch
+	// generalized this was the adult module's rule alone, and it had to name
+	// every adult library rather than the seed one for the same reason it now
+	// names every kind: a root missed here parks filenames from a shelf that is
+	// meant to be absent.
+	inactiveRoots := map[string]bool{}
+	for _, lib := range libs {
+		if !lib.Active {
+			inactiveRoots[m.abs(lib.RootPath)] = true
+		}
 	}
-	adultAbs := m.abs(path.Join(LibraryDir, AdultDir))
 
 	// The pre-scan snapshots serve two purposes: they tell an added file from
 	// an updated one, and they are the removal candidates once the walk knows
@@ -159,7 +186,7 @@ func (m *Manager) Scan(ctx context.Context) (*ScanResult, error) {
 				if p != libAbs && strings.HasPrefix(name, ".") {
 					return fs.SkipDir
 				}
-				if !adultEnabled && p == adultAbs {
+				if inactiveRoots[p] {
 					return fs.SkipDir
 				}
 				return nil
@@ -190,7 +217,7 @@ func (m *Manager) Scan(ctx context.Context) (*ScanResult, error) {
 		return nil, fmt.Errorf("library: scan %s: %w", libAbs, walkErr)
 	}
 
-	if err := m.reconcileRemovals(ctx, res, before, beforeUnmatched, seenFiles, seenUnmatched, adultEnabled); err != nil {
+	if err := m.reconcileRemovals(ctx, res, before, beforeUnmatched, seenFiles, seenUnmatched); err != nil {
 		return nil, err
 	}
 	if err := m.healStaleArtwork(ctx, res); err != nil {
@@ -247,9 +274,11 @@ func fileExists(p string) bool {
 // everything it can go wrong about is either a park reason or a scan error.
 func (m *Manager) scanFile(ctx context.Context, rel string, size int64, res *ScanResult, known, seenFiles, seenUnmatched map[string]bool) {
 	// Which parser reads the name is decided by where the file is, not by what
-	// the name looks like: a date under library/TV is a daily episode and a
-	// date under library/Adult is a scene, and the same string means both.
-	isScene := sectionOf(rel) == AdultDir
+	// the name looks like: a date under a tv root is a daily episode and a
+	// date under an adult root is a scene, and the same string means both.
+	// "Where the file is" is the library whose root holds it (libraries.go).
+	lib := libraryForPath(m.scanLibs, rel)
+	isScene := lib != nil && lib.Kind == core.LibraryKindAdult
 	parse := m.parse
 	if isScene {
 		parse = m.parseScene
@@ -271,12 +300,19 @@ func (m *Manager) scanFile(ctx context.Context, rel string, size int64, res *Sca
 		res.Unmatched++
 	}
 
+	if lib == nil {
+		park(reasonNoLibrary)
+		return
+	}
+
 	isEpisode := p.IsEpisode()
 	switch {
 	case isScene && !p.IsScene():
 		park(reasonNoSceneDate)
 		return
-	case !isScene && !isEpisode && sectionOf(rel) == TVDir:
+	case !isScene && !isEpisode && !p.IsAbsoluteEpisode() && lib.Kind == core.LibraryKindTV:
+		// An absolute number is a season/episode claim the series has not
+		// answered yet, so it is not "no number in the filename".
 		park(reasonNoEpisodeNum)
 		return
 	}
@@ -287,10 +323,14 @@ func (m *Manager) scanFile(ctx context.Context, rel string, size int64, res *Sca
 	case p.Confidence < m.minConfidence:
 		park(reasonLowParse)
 		return
-	case isScene && m.adult == nil:
+	case isScene && len(m.adultChain(ctx, lib)) == 0:
+		// Not one configured instance on the library's chain: nothing can
+		// identify this site, which is the same dead end a nil provider was.
 		park(reasonNoProvider)
 		return
-	case !isScene && m.provider == nil:
+	case !isScene && len(m.metadataChain(ctx, lib)) == 0:
+		// Not one configured provider on the library's chain: nothing can
+		// identify this file, which is the same dead end a nil provider was.
 		park(reasonNoProvider)
 		return
 	}
@@ -301,11 +341,16 @@ func (m *Manager) scanFile(ctx context.Context, rel string, size int64, res *Sca
 	)
 	switch {
 	case isScene:
-		finalRel, err = m.matchAndImportScene(ctx, rel, size, p, res, park)
-	case isEpisode:
-		finalRel, err = m.matchAndImportEpisode(ctx, rel, size, p, res, park)
+		finalRel, err = m.matchAndImportScene(ctx, lib, rel, size, p, res, park)
+	// The library kind decides, exactly as it does above: only a TV library
+	// routes an absolute-looking name into the episode path. A movie whose
+	// title ends in a number is the shape the parser's own negative table
+	// guards against, and under a movie root it must stay a movie however the
+	// number reads.
+	case isEpisode || (lib.Kind == core.LibraryKindTV && p.IsAbsoluteEpisode()):
+		finalRel, err = m.matchAndImportEpisode(ctx, lib, rel, size, p, res, park)
 	default:
-		finalRel, err = m.matchAndImportMovie(ctx, rel, size, p, res, park)
+		finalRel, err = m.matchAndImportMovie(ctx, lib, rel, size, p, res, park)
 	}
 	if err != nil {
 		res.addErr("import %s: %v", rel, err)
@@ -327,66 +372,151 @@ func (m *Manager) scanFile(ctx context.Context, rel string, size int64, res *Sca
 	}
 }
 
-// matchAndImportMovie searches the provider for rel's parsed title and imports
-// the winner. A provider failure or a weak match parks the file rather than
-// failing the scan.
-func (m *Manager) matchAndImportMovie(ctx context.Context, rel string, size int64, p core.ParsedRelease, res *ScanResult, park func(string)) (string, error) {
-	results, err := m.provider.SearchMovies(ctx, p.Title)
-	if err != nil {
-		res.addErr("search movies for %s: %v", rel, err)
-		park(reasonProviderErr)
+// chainOutcome counts what a chain walk met, so the park reason can tell
+// "nobody could be asked" from "everybody answered and none of them knew it".
+// The two are different problems and only one of them is the user's to fix.
+type chainOutcome struct {
+	// answered is how many providers returned a result set, matching or not;
+	// failed is how many returned an error. Providers that do not serve the
+	// kind are counted in neither: nothing went wrong and nothing was asked.
+	answered int
+	failed   int
+	// unresolved is how many providers recognized the show but could not place
+	// the file's absolute episode number in their own episode list. Such a
+	// provider answered a different question than the others got wrong.
+	unresolved int
+}
+
+// park chooses this walk's park reason: a provider error only when EVERY
+// provider that could be asked errored, no absolute match when a provider knew
+// the show but not the number, and no match when at least one of them answered
+// without recognizing the title.
+func (o chainOutcome) reason() string {
+	if o.answered == 0 && o.failed > 0 {
+		return reasonProviderErr
+	}
+	// "Right show, unknown numbering" outranks "wrong show": it is the more
+	// specific thing anybody learned about the file, and it is the one the user
+	// can act on — by chaining a provider that publishes an absolute order.
+	if o.unresolved > 0 {
+		return reasonNoAbsoluteMatch
+	}
+	return reasonNoMatch
+}
+
+// matchAndImportMovie walks the file's library's provider chain for rel's
+// parsed title and imports the first confident match. A provider failure or a
+// weak match parks the file rather than failing the scan.
+//
+// FIRST confident match, not the best of a merged set. A match score is
+// computed against one provider's own titles and release years, so scores from
+// two providers are not comparable — picking the higher one would be arithmetic
+// on two different scales. The chain's ORDER is the answer to "which provider
+// do you believe about this library", and this honors it.
+func (m *Manager) matchAndImportMovie(ctx context.Context, lib *core.Library, rel string, size int64, p core.ParsedRelease, res *ScanResult, park func(string)) (string, error) {
+	var (
+		meta    *core.MovieMeta
+		outcome chainOutcome
+	)
+	for _, b := range m.metadataChain(ctx, lib) {
+		results, err := b.P.SearchMovies(ctx, p.Title)
+		switch {
+		case errors.Is(err, core.ErrProviderKindUnsupported):
+			// Not a failure: this rung of the chain simply has nothing to say
+			// about this kind of item.
+			continue
+		case err != nil:
+			res.addErr("search movies for %s through %q: %v", rel, b.ID, err)
+			outcome.failed++
+			continue
+		}
+		outcome.answered++
+
+		cands := make([]candidate, len(results))
+		for i, r := range results {
+			cands[i] = candidate{title: r.Title, originalTitle: r.OriginalTitle, year: r.Year}
+		}
+		if idx := bestMatch(cands, p.Title, p.Year); idx >= 0 {
+			meta = &results[idx]
+			break
+		}
+	}
+	if meta == nil {
+		park(outcome.reason())
 		return "", nil
 	}
 
-	cands := make([]candidate, len(results))
-	for i, r := range results {
-		cands[i] = candidate{title: r.Title, originalTitle: r.OriginalTitle, year: r.Year}
-	}
-	idx := bestMatch(cands, p.Title, p.Year)
-	if idx < 0 {
-		park(reasonNoMatch)
-		return "", nil
-	}
-
-	meta := results[idx]
-	finalRel, _, err := m.importMovie(ctx, &meta, rel, size, p, res.addErr, consumeSource)
+	finalRel, _, err := m.importMovie(ctx, meta, rel, size, p, res.addErr, consumeSource, lib.ID)
 	return finalRel, err
 }
 
-// matchAndImportEpisode is matchAndImportMovie's series twin. It resolves the
-// full series details after the search, because episode titles and the season
-// tree only come back from GetSeries.
-func (m *Manager) matchAndImportEpisode(ctx context.Context, rel string, size int64, p core.ParsedRelease, res *ScanResult, park func(string)) (string, error) {
-	results, err := m.provider.SearchSeries(ctx, p.Title)
-	if err != nil {
-		res.addErr("search series for %s: %v", rel, err)
-		park(reasonProviderErr)
-		return "", nil
-	}
+// matchAndImportEpisode is matchAndImportMovie's series twin, walking the same
+// chain under the same first-confident-match rule. It resolves the full series
+// details after the search, because episode titles and the season tree only
+// come back from GetSeries — through the SAME provider that matched, by the ref
+// its own answer carried: a search result's id is written in that provider's
+// vocabulary and means nothing to any other one.
+func (m *Manager) matchAndImportEpisode(ctx context.Context, lib *core.Library, rel string, size int64, p core.ParsedRelease, res *ScanResult, park func(string)) (string, error) {
+	var (
+		full    *core.SeriesMeta
+		outcome chainOutcome
+	)
+	for _, b := range m.metadataChain(ctx, lib) {
+		results, err := b.P.SearchSeries(ctx, p.Title)
+		switch {
+		case errors.Is(err, core.ErrProviderKindUnsupported):
+			continue
+		case err != nil:
+			res.addErr("search series for %s through %q: %v", rel, b.ID, err)
+			outcome.failed++
+			continue
+		}
 
-	cands := make([]candidate, len(results))
-	for i, r := range results {
-		cands[i] = candidate{title: r.Title, originalTitle: r.OriginalTitle, year: r.Year}
-	}
-	idx := bestMatch(cands, p.Title, p.Year)
-	if idx < 0 {
-		park(reasonNoMatch)
-		return "", nil
-	}
+		cands := make([]candidate, len(results))
+		for i, r := range results {
+			cands[i] = candidate{title: r.Title, originalTitle: r.OriginalTitle, year: r.Year}
+		}
+		idx := bestMatch(cands, p.Title, p.Year)
+		if idx < 0 {
+			outcome.answered++
+			continue
+		}
 
-	meta := results[idx]
-	full, err := m.provider.GetSeries(ctx, meta.TMDBID)
-	if err != nil {
-		res.addErr("get series %d for %s: %v", meta.TMDBID, rel, err)
-		park(reasonProviderErr)
-		return "", nil
+		ref := results[idx].Ref()
+		detail, err := b.P.GetSeries(ctx, ref.Ref)
+		if err != nil {
+			// The provider's turn failed, matched or not: it is the same
+			// unreachable provider the search would have failed on.
+			res.addErr("get series %q from %q for %s: %v", ref.Ref, b.ID, rel, err)
+			outcome.failed++
+			continue
+		}
+		outcome.answered++
+		if detail == nil {
+			// It matched and then could not describe what it matched. That is
+			// an answer, not a failure, and the next rung may still know the
+			// show.
+			continue
+		}
+		// An absolute-numbered name is only placeable against a tree that
+		// publishes the order. A rung that cannot place it has recognized the
+		// show and answered nothing about the file, so the walk goes on: the
+		// next provider may be the one that keeps an absolute order at all.
+		resolved, ok := resolveAbsolute(detail, p)
+		if !ok {
+			outcome.unresolved++
+			continue
+		}
+		p = resolved
+		full = detail
+		break
 	}
 	if full == nil {
-		park(reasonNoMatch)
+		park(outcome.reason())
 		return "", nil
 	}
 
-	finalRel, _, err := m.importEpisode(ctx, full, rel, size, p, res.addErr, consumeSource)
+	finalRel, _, err := m.importEpisode(ctx, full, rel, size, p, res.addErr, consumeSource, lib.ID)
 	return finalRel, err
 }
 
@@ -399,12 +529,20 @@ func (m *Manager) matchAndImportEpisode(ctx context.Context, rel string, size in
 // with no file is a legitimate wanted item (SPEC §9), and a rescan must never
 // delete user intent.
 // A tree the walk deliberately skipped is not a tree whose files are gone, so
-// the adult rows survive a scan made with the module switched off. Disabling
-// deletes nothing (store.SetAdultEnabled says so about the library row); a
-// reconciliation that quietly dropped every adult media_files row would make
-// that promise false at the first rescan.
-func (m *Manager) reconcileRemovals(ctx context.Context, res *ScanResult, before []core.MediaFile, beforeUnmatched []core.UnmatchedFile, seenFiles, seenUnmatched map[string]bool, adultEnabled bool) error {
-	skipped := func(rel string) bool { return !adultEnabled && sectionOf(rel) == AdultDir }
+// the rows under an INACTIVE library survive a scan made while it is off.
+// Deactivating deletes nothing (store.SetLibraryActive says so about the row);
+// a reconciliation that quietly dropped every media_files row under a dormant
+// library would make that promise false at the first rescan, and switching the
+// library back on would find an empty shelf.
+//
+// The skip set is read off m.scanLibs rather than passed in: the same snapshot
+// the walk took its inactive roots from is the one that answers here, so the
+// two halves of one scan cannot disagree about which libraries were off.
+func (m *Manager) reconcileRemovals(ctx context.Context, res *ScanResult, before []core.MediaFile, beforeUnmatched []core.UnmatchedFile, seenFiles, seenUnmatched map[string]bool) error {
+	skipped := func(rel string) bool {
+		lib := libraryForPath(m.scanLibs, rel)
+		return lib != nil && !lib.Active
+	}
 
 	for _, f := range before {
 		// A file that moved into the unmatched queue during this scan already
@@ -436,14 +574,4 @@ func (m *Manager) reconcileRemovals(ctx context.Context, res *ScanResult, before
 		}
 	}
 	return nil
-}
-
-// sectionOf returns the library section a path sits in ("Movies", "TV"), or
-// the empty string for a file loose at the library root.
-func sectionOf(rel string) string {
-	parts := strings.Split(rel, "/")
-	if len(parts) < 3 || parts[0] != LibraryDir {
-		return ""
-	}
-	return parts[1]
 }

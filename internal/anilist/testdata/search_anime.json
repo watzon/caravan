@@ -1,0 +1,54 @@
+{
+  "data": {
+    "Page": {
+      "media": [
+        {
+          "id": 16498,
+          "title": {
+            "romaji": "Shingeki no Kyojin",
+            "english": "Attack on Titan",
+            "native": "進撃の巨人"
+          },
+          "startDate": { "year": 2013, "month": 4, "day": 7 },
+          "endDate": { "year": 2013, "month": 9, "day": 29 },
+          "description": "Several hundred years ago, humans were nearly exterminated by titans.<br>\n<br>\n(Source: MangaHelpers)",
+          "averageScore": 84,
+          "status": "FINISHED",
+          "episodes": 25,
+          "coverImage": {
+            "extraLarge": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx16498-C6FPmWm59CyP.jpg",
+            "large": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx16498-C6FPmWm59CyP.jpg"
+          },
+          "stats": {
+            "scoreDistribution": [
+              { "amount": 1120 },
+              { "amount": 480 },
+              { "amount": 9400 }
+            ]
+          }
+        },
+        {
+          "id": 21519,
+          "title": {
+            "romaji": "Kimi no Na wa.",
+            "english": null,
+            "native": "君の名は。"
+          },
+          "startDate": { "year": 2016, "month": null, "day": null },
+          "endDate": { "year": null, "month": null, "day": null },
+          "description": null,
+          "averageScore": null,
+          "status": "FINISHED",
+          "episodes": 1,
+          "coverImage": {
+            "extraLarge": null,
+            "large": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx21519-XIr3PeqA4Pgb.png"
+          },
+          "stats": {
+            "scoreDistribution": []
+          }
+        }
+      ]
+    }
+  }
+}

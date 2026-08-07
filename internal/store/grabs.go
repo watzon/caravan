@@ -17,7 +17,7 @@ import (
 const sqliteIDQueryBatchSize = 500
 
 const grabColumns = `id, release_id, movie_id, series_id, season_number, episode_ids,
-	release_title, reason, status, created_at`
+	release_title, reason, status, created_at, library_id`
 
 // InsertGrab appends a grab to the history and writes back the assigned
 // GrabID. Grabs are append-only: a grab that later succeeds or fails is
@@ -36,10 +36,10 @@ func (s *Store) InsertGrab(ctx context.Context, g *core.Grab) error {
 
 	res, err := s.db.ExecContext(ctx, `
 		INSERT INTO grabs (release_id, movie_id, series_id, season_number, episode_ids,
-			release_title, reason, status, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			release_title, reason, status, created_at, library_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		g.ReleaseID, g.MovieID, g.SeriesID, g.SeasonNum, string(episodeIDs),
-		g.ReleaseTitle, g.Reason, g.Status, formatTime(g.CreatedAt))
+		g.ReleaseTitle, g.Reason, g.Status, formatTime(g.CreatedAt), nullInt64(g.LibraryID))
 	if err != nil {
 		return fmt.Errorf("store: insert grab of %q: %w", g.ReleaseTitle, err)
 	}
@@ -241,12 +241,14 @@ func scanGrab(sc scanner) (*core.Grab, error) {
 		g          core.Grab
 		episodeIDs string
 		createdAt  string
+		libraryID  sql.NullInt64
 	)
 	err := sc.Scan(&g.GrabID, &g.ReleaseID, &g.MovieID, &g.SeriesID, &g.SeasonNum,
-		&episodeIDs, &g.ReleaseTitle, &g.Reason, &g.Status, &createdAt)
+		&episodeIDs, &g.ReleaseTitle, &g.Reason, &g.Status, &createdAt, &libraryID)
 	if err != nil {
 		return nil, err
 	}
+	g.LibraryID = libraryID.Int64
 	if episodeIDs != "" {
 		if err := json.Unmarshal([]byte(episodeIDs), &g.EpisodeIDs); err != nil {
 			return nil, fmt.Errorf("decode episode ids of grab %d: %w", g.GrabID, err)

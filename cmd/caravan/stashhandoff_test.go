@@ -73,8 +73,14 @@ func newStashHarness(t *testing.T, adult bool) *stashHarness {
 	}); err != nil {
 		t.Fatalf("SetSettings: %v", err)
 	}
-	if err := st.SetAdultEnabled(ctx, adult); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
+	// The control half wants adult unreachable, and a store nobody has made an
+	// adult library in is already that — deactivating an empty kind is the
+	// no-op it looks like. It is spelled out anyway so the two halves of the
+	// harness differ by one word rather than by an absence.
+	if adult {
+		enableAdultLibrary(t, st)
+	} else {
+		setAdultLibrariesActive(t, st, false)
 	}
 	// A television import resolves its series through the metadata provider, so
 	// the control half of this proof needs one that answers. The adult half does

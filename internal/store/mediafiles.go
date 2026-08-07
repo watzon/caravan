@@ -81,54 +81,68 @@ func (s *Store) GetMediaFile(ctx context.Context, id int64) (*core.MediaFile, er
 	return f, nil
 }
 
-// GetMediaFileLibraryKind resolves the one library that owns a media file.
-// Files with no owner, or with conflicting movie/episode or TV/Adult owners,
-// return ErrNotFound so callers fail closed instead of choosing one link.
-func (s *Store) GetMediaFileLibraryKind(ctx context.Context, id int64) (string, error) {
+// GetMediaFileLibrary resolves the one library that owns a media file: its
+// kind, and the `libraries` row the owning movie or series names. A zero
+// library id is the usual "names none", which callers resolve through the
+// kind's default library (see core.Movie.LibraryID) — the DLNA tree needs both
+// halves, because with several libraries per kind the kind alone no longer
+// says whose dlna_visible flag applies.
+//
+// Files with no owner, or with conflicting movie/episode owners, or with
+// episode owners across two libraries, return ErrNotFound so callers fail
+// closed instead of choosing one link.
+func (s *Store) GetMediaFileLibrary(ctx context.Context, id int64) (int64, string, error) {
+	fail := func(err error) (int64, string, error) { return 0, "", err }
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT DISTINCT mf.movie_id, s.kind
+		SELECT DISTINCT mf.movie_id, m.library_id, s.kind, s.library_id
 		FROM media_files mf
+		LEFT JOIN movies m ON m.id = mf.movie_id
 		LEFT JOIN episode_files ef ON ef.media_file_id = mf.id
 		LEFT JOIN episodes e ON e.id = ef.episode_id
 		LEFT JOIN series s ON s.id = e.series_id
 		WHERE mf.id = ?`, id)
 	if err != nil {
-		return "", fmt.Errorf("store: get media file %d library: %w", id, err)
+		return fail(fmt.Errorf("store: get media file %d library: %w", id, err))
 	}
 	defer rows.Close()
 
 	found := false
 	movieOwned := false
+	movieLibrary := int64(0)
 	episodeKind := ""
+	episodeLibrary := int64(0)
 	for rows.Next() {
 		found = true
 		var (
-			movieID    int64
-			seriesKind sql.NullString
+			movieID     int64
+			movieLibID  sql.NullInt64
+			seriesKind  sql.NullString
+			seriesLibID sql.NullInt64
 		)
-		if err := rows.Scan(&movieID, &seriesKind); err != nil {
-			return "", fmt.Errorf("store: scan media file %d library: %w", id, err)
+		if err := rows.Scan(&movieID, &movieLibID, &seriesKind, &seriesLibID); err != nil {
+			return fail(fmt.Errorf("store: scan media file %d library: %w", id, err))
 		}
 		movieOwned = movieID != 0
+		movieLibrary = movieLibID.Int64
 		if !seriesKind.Valid {
 			continue
 		}
 		kind := core.LibraryKindForSeries(seriesKind.String)
-		if episodeKind != "" && episodeKind != kind {
-			return "", fmt.Errorf("store: media file %d library: %w", id, ErrNotFound)
+		if episodeKind != "" && (episodeKind != kind || episodeLibrary != seriesLibID.Int64) {
+			return fail(fmt.Errorf("store: media file %d library: %w", id, ErrNotFound))
 		}
-		episodeKind = kind
+		episodeKind, episodeLibrary = kind, seriesLibID.Int64
 	}
 	if err := rows.Err(); err != nil {
-		return "", fmt.Errorf("store: get media file %d library: %w", id, err)
+		return fail(fmt.Errorf("store: get media file %d library: %w", id, err))
 	}
 	if !found || (movieOwned && episodeKind != "") || (!movieOwned && episodeKind == "") {
-		return "", fmt.Errorf("store: media file %d library: %w", id, ErrNotFound)
+		return fail(fmt.Errorf("store: media file %d library: %w", id, ErrNotFound))
 	}
 	if movieOwned {
-		return core.LibraryKindMovie, nil
+		return movieLibrary, core.LibraryKindMovie, nil
 	}
-	return episodeKind, nil
+	return episodeLibrary, episodeKind, nil
 }
 
 // UpdateMediaFileConverted repoints a media file at the file ffmpeg produced
@@ -152,16 +166,32 @@ func (s *Store) UpdateMediaFileConverted(ctx context.Context, id int64, path str
 	return affectedOne(res, "update converted media file", id)
 }
 
+// UpdateMediaFilePath repoints one media file row at the location a move put
+// its file. The row id survives on purpose — episode links reference it, and
+// a delete-and-reinsert would orphan them (the same reason
+// UpdateMediaFileConverted updates in place).
+func (s *Store) UpdateMediaFilePath(ctx context.Context, id int64, path string) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE media_files SET path = ?, modified_at = ? WHERE id = ?`,
+		path, formatTime(now()), id)
+	if err != nil {
+		return fmt.Errorf("store: update media file %d path: %w", id, err)
+	}
+	return affectedOne(res, "update media file path", id)
+}
+
 // ListMediaFiles returns every media file ordered by path.
 func (s *Store) ListMediaFiles(ctx context.Context) ([]core.MediaFile, error) {
 	return s.queryMediaFiles(ctx, "SELECT "+mediaFileColumns+" FROM media_files ORDER BY path")
 }
 
 // ConversionCandidate is a current library file with no queued or running
-// conversion. LibraryKind lets shared API surfaces apply the adult visibility
-// rule without an ownership query per file.
+// conversion. LibraryID and LibraryKind let shared API surfaces apply the
+// per-library visibility rule without an ownership query per file — the id when
+// the owning row names one, the kind for a row that still answers by kind.
 type ConversionCandidate struct {
 	File        core.MediaFile
+	LibraryID   int64
 	LibraryKind string
 }
 
@@ -169,7 +199,7 @@ type ConversionCandidate struct {
 // ordered by path. Compatibility is profile-dependent and belongs to the API;
 // this query only resolves ownership and excludes open conversion rows.
 //
-// Ownership fails closed, matching GetMediaFileLibraryKind: unowned files,
+// Ownership fails closed, matching GetMediaFileLibrary: unowned files,
 // files attached to both a movie and an episode, and files attached across TV
 // and adult series do not become shared-surface candidates.
 func (s *Store) ListConversionCandidates(ctx context.Context) ([]ConversionCandidate, error) {
@@ -177,8 +207,10 @@ func (s *Store) ListConversionCandidates(ctx context.Context) ([]ConversionCandi
 		SELECT `+mediaFileColumnsQualified+`,
 			COUNT(ef.episode_id),
 			COUNT(DISTINCT CASE WHEN s.kind = ? THEN ? ELSE ? END),
-			MAX(CASE WHEN s.kind = ? THEN 1 ELSE 0 END)
+			MAX(CASE WHEN s.kind = ? THEN 1 ELSE 0 END),
+			COALESCE(MAX(m.library_id), 0), COALESCE(MAX(s.library_id), 0)
 		FROM media_files mf
+		LEFT JOIN movies m ON m.id = mf.movie_id
 		LEFT JOIN episode_files ef ON ef.media_file_id = mf.id
 		LEFT JOIN episodes e ON e.id = ef.episode_id
 		LEFT JOIN series s ON s.id = e.series_id
@@ -205,12 +237,15 @@ func (s *Store) ListConversionCandidates(ctx context.Context) ([]ConversionCandi
 			episodeCount     int
 			libraryKindCount int
 			hasAdult         int
+			movieLibraryID   int64
+			seriesLibraryID  int64
 		)
 		err := rows.Scan(
 			&candidate.File.ID, &candidate.File.Path, &candidate.File.Size,
 			&candidate.File.MovieID, &candidate.File.Quality, &candidate.File.Source,
 			&candidate.File.Codec, &candidate.File.Audio, &candidate.File.ReleaseGroup,
 			&addedAt, &modifiedAt, &episodeCount, &libraryKindCount, &hasAdult,
+			&movieLibraryID, &seriesLibraryID,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("store: scan conversion candidate: %w", err)
@@ -218,11 +253,13 @@ func (s *Store) ListConversionCandidates(ctx context.Context) ([]ConversionCandi
 		switch {
 		case candidate.File.MovieID != 0 && episodeCount == 0:
 			candidate.LibraryKind = core.LibraryKindMovie
+			candidate.LibraryID = movieLibraryID
 		case candidate.File.MovieID == 0 && episodeCount > 0 && libraryKindCount == 1:
 			candidate.LibraryKind = core.LibraryKindTV
 			if hasAdult != 0 {
 				candidate.LibraryKind = core.LibraryKindAdult
 			}
+			candidate.LibraryID = seriesLibraryID
 		default:
 			continue
 		}

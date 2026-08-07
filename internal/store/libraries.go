@@ -11,7 +11,8 @@ import (
 )
 
 const libraryColumns = `id, kind, name, root_path, dlna_visible,
-	route_torrent, route_usenet, quality_profile_id`
+	route_torrent, route_usenet, quality_profile_id, provider, providers, is_default,
+	active, restricted`
 
 // ListLibraries returns every library ordered by id, which is the order 0012
 // seeded them in: Movies first, then Series.
@@ -49,12 +50,17 @@ func (s *Store) GetLibrary(ctx context.Context, id int64) (*core.Library, error)
 	return l, nil
 }
 
-// GetLibraryByKind returns the library for one of the core.LibraryKind*
-// constants, or ErrNotFound. This is how an item finds its library: kind is
-// the only mapping, so a movie row and the movie library never need a join
-// column between them.
+// GetLibraryByKind returns the DEFAULT library of the given kind, or
+// ErrNotFound when no library of that kind exists at all.
+//
+// Before 0022 kind identified a library outright; now it identifies the
+// default one, which is what every call site written under the old rule
+// means by the lookup. A kind whose default flag was somehow lost falls back
+// to the lowest id, so a by-kind caller never fails while a library of the
+// kind exists.
 func (s *Store) GetLibraryByKind(ctx context.Context, kind string) (*core.Library, error) {
-	row := s.db.QueryRowContext(ctx, "SELECT "+libraryColumns+" FROM libraries WHERE kind = ?", kind)
+	row := s.db.QueryRowContext(ctx, "SELECT "+libraryColumns+
+		" FROM libraries WHERE kind = ? ORDER BY is_default DESC, id LIMIT 1", kind)
 	l, err := scanLibrary(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("store: library of kind %q: %w", kind, ErrNotFound)
@@ -65,8 +71,166 @@ func (s *Store) GetLibraryByKind(ctx context.Context, kind string) (*core.Librar
 	return l, nil
 }
 
+// GetDefaultLibrary is GetLibraryByKind under its post-0022 name. New code
+// should say what it means; the old name survives for the call sites written
+// when kind was the whole mapping.
+func (s *Store) GetDefaultLibrary(ctx context.Context, kind string) (*core.Library, error) {
+	return s.GetLibraryByKind(ctx, kind)
+}
+
+// ListLibrariesByKind returns every library of one kind ordered by id, the
+// default first among equals only by virtue of usually being oldest — callers
+// that need the default ask GetDefaultLibrary.
+func (s *Store) ListLibrariesByKind(ctx context.Context, kind string) ([]core.Library, error) {
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT "+libraryColumns+" FROM libraries WHERE kind = ? ORDER BY id", kind)
+	if err != nil {
+		return nil, fmt.Errorf("store: list libraries of kind %q: %w", kind, err)
+	}
+	defer rows.Close()
+
+	out := []core.Library{}
+	for rows.Next() {
+		l, err := scanLibrary(rows)
+		if err != nil {
+			return nil, fmt.Errorf("store: scan library: %w", err)
+		}
+		out = append(out, *l)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list libraries of kind %q: %w", kind, err)
+	}
+	return out, nil
+}
+
+// Library deletion refusals. Each is a distinct error because the API answers
+// each with a different message, and the difference matters to the user: one
+// asks them to move items first, the others say the row is structural.
+var (
+	// ErrLibraryNotEmpty refuses to delete a library that still owns items.
+	ErrLibraryNotEmpty = errors.New("store: library still has items")
+	// ErrLibraryIsDefault refuses to delete a kind's default library —
+	// demote it first, so every by-kind lookup keeps an answer.
+	ErrLibraryIsDefault = errors.New("store: library is its kind's default")
+)
+
+// CreateLibrary inserts a new library and writes back the assigned id. The
+// caller (the API layer) validates the kind, the provider and the root path —
+// this function only owns what the schema owns: root uniqueness, and the DLNA
+// tree version, which must advance when a visible container appears.
+//
+// A library is born ACTIVE, whatever the caller left in the field. Dormancy is
+// a later and deliberate act on a library that exists — there is no form that
+// creates one already switched off, and a Go zero value silently meaning "off"
+// would make every caller written before the column existed create libraries
+// nobody can see. Restriction is the opposite: it IS a create-time decision
+// (an adult library is born restricted), so it is passed through.
+func (s *Store) CreateLibrary(ctx context.Context, l *core.Library) error {
+	chain, err := normalizeChain(l)
+	if err != nil {
+		return fmt.Errorf("store: create library %q: %w", l.Name, err)
+	}
+	l.Active = true
+	res, err := s.db.ExecContext(ctx, `
+		INSERT INTO libraries (kind, name, root_path, dlna_visible,
+			route_torrent, route_usenet, quality_profile_id, provider, providers, is_default,
+			active, restricted)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		l.Kind, l.Name, l.RootPath, l.DLNAVisible,
+		nullString(l.RouteTorrent), nullString(l.RouteUsenet), nullInt64(l.QualityProfileID),
+		l.Provider, chain, l.IsDefault, l.Active, l.Restricted)
+	if err != nil {
+		return fmt.Errorf("store: create library %q: %w", l.Name, err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return fmt.Errorf("store: create library %q: %w", l.Name, err)
+	}
+	l.ID = id
+	if l.DLNAVisible {
+		return s.bumpDLNAUpdateID(ctx)
+	}
+	return nil
+}
+
+// DeleteLibrary removes an empty, non-default library. The guards live here
+// rather than in the API so no second caller can forget one: a library that
+// still owns items is ErrLibraryNotEmpty (with items stranded nowhere), and the
+// kind's default is ErrLibraryIsDefault.
+//
+// An adult library is deleted under those two guards and no others. It used to
+// have a third, because the module switch owned the row and promised that
+// switching off destroyed nothing; `active` keeps that promise now, and it is
+// the deliberate "off". Once a library is an ordinary object, a kind-shaped
+// exception here would only mean the one shelf an owner cannot tidy away.
+func (s *Store) DeleteLibrary(ctx context.Context, id int64) error {
+	lib, err := s.GetLibrary(ctx, id)
+	if err != nil {
+		return err
+	}
+	if lib.IsDefault {
+		return ErrLibraryIsDefault
+	}
+	n, err := s.CountLibraryItems(ctx, id)
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		return fmt.Errorf("%w: %d", ErrLibraryNotEmpty, n)
+	}
+	if _, err := s.db.ExecContext(ctx, "DELETE FROM libraries WHERE id = ?", id); err != nil {
+		return fmt.Errorf("store: delete library %d: %w", id, err)
+	}
+	if lib.DLNAVisible {
+		return s.bumpDLNAUpdateID(ctx)
+	}
+	return nil
+}
+
+// CountLibraryItems reports how many movies and series name the library as
+// theirs. It is the emptiness check DeleteLibrary runs and the item_count the
+// Libraries screen renders, so both always agree.
+func (s *Store) CountLibraryItems(ctx context.Context, id int64) (int64, error) {
+	var n int64
+	err := s.db.QueryRowContext(ctx, `
+		SELECT (SELECT COUNT(*) FROM movies WHERE library_id = ?)
+		     + (SELECT COUNT(*) FROM series WHERE library_id = ?)`, id, id).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("store: count items of library %d: %w", id, err)
+	}
+	return n, nil
+}
+
+// SetDefaultLibrary makes the given library its kind's default. Clear-then-set
+// in one transaction: the partial unique index admits at most one default per
+// kind, so the old flag must be gone before the new one lands.
+func (s *Store) SetDefaultLibrary(ctx context.Context, id int64) error {
+	lib, err := s.GetLibrary(ctx, id)
+	if err != nil {
+		return err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("store: set default library %d: %w", id, err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx,
+		"UPDATE libraries SET is_default = 0 WHERE kind = ? AND is_default = 1", lib.Kind); err != nil {
+		return fmt.Errorf("store: set default library %d: %w", id, err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		"UPDATE libraries SET is_default = 1 WHERE id = ?", id); err != nil {
+		return fmt.Errorf("store: set default library %d: %w", id, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: set default library %d: %w", id, err)
+	}
+	return nil
+}
+
 // UpdateLibrary rewrites the mutable fields of an existing library. Kind is
 // not among them: it is the library's identity and what items are mapped by.
+// Neither is is_default — that is SetDefaultLibrary's transactional job.
 // Updating an absent library is ErrNotFound.
 //
 // Flipping dlna_visible also advances SettingDLNAUpdateID, because that flag is
@@ -75,25 +239,37 @@ func (s *Store) GetLibraryByKind(ctx context.Context, kind string) (*core.Librar
 // while the counter stood still is one the TV keeps showing. Doing it here
 // rather than in the caller is what makes the two impossible to get out of
 // step.
+//
+// `active` advances it too, but only for a library dlna_visible was already on
+// for. The DLNA rule is `active AND dlna_visible`, so deactivating a shared
+// library removes its container and reactivating puts it back — both are tree
+// changes a cached client must be told about. For a library nobody shares, the
+// tree did not contain the container either way and the counter has nothing to
+// report.
 func (s *Store) UpdateLibrary(ctx context.Context, l *core.Library) error {
 	prev, err := s.GetLibrary(ctx, l.ID)
 	if err != nil {
 		return err
 	}
+	chain, err := normalizeChain(l)
+	if err != nil {
+		return fmt.Errorf("store: update library %d: %w", l.ID, err)
+	}
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE libraries SET name = ?, root_path = ?, dlna_visible = ?,
-			route_torrent = ?, route_usenet = ?, quality_profile_id = ?
+			route_torrent = ?, route_usenet = ?, quality_profile_id = ?, provider = ?,
+			providers = ?, active = ?, restricted = ?
 		WHERE id = ?`,
 		l.Name, l.RootPath, l.DLNAVisible,
 		nullString(l.RouteTorrent), nullString(l.RouteUsenet), nullInt64(l.QualityProfileID),
-		l.ID)
+		l.Provider, chain, l.Active, l.Restricted, l.ID)
 	if err != nil {
 		return fmt.Errorf("store: update library %d: %w", l.ID, err)
 	}
 	if err := affectedOne(res, "library", l.ID); err != nil {
 		return err
 	}
-	if prev.DLNAVisible != l.DLNAVisible {
+	if prev.DLNAVisible != l.DLNAVisible || (prev.Active != l.Active && l.DLNAVisible) {
 		return s.bumpDLNAUpdateID(ctx)
 	}
 	return nil
@@ -285,6 +461,22 @@ func DefaultLibraryCategories(kind string, own []int) []int {
 	return adult
 }
 
+// ResolveLibrarySettingsForItem resolves the effective settings of the library
+// an item names, falling back to the kind's default library when the item
+// names none — an item from before 0022 — or names one that has vanished.
+func (s *Store) ResolveLibrarySettingsForItem(ctx context.Context, libraryID int64, kind string) (*core.LibrarySettings, error) {
+	if libraryID != 0 {
+		settings, err := s.ResolveLibrarySettings(ctx, libraryID)
+		if err == nil {
+			return settings, nil
+		}
+		if !errors.Is(err, ErrNotFound) {
+			return nil, err
+		}
+	}
+	return s.ResolveLibrarySettingsByKind(ctx, kind)
+}
+
 // ResolveLibrarySettingsByKind resolves the settings of the library that items
 // of the given core.LibraryKind* belong to.
 //
@@ -299,18 +491,20 @@ func (s *Store) ResolveLibrarySettingsByKind(ctx context.Context, kind string) (
 	return s.ResolveLibrarySettings(ctx, lib.ID)
 }
 
-// ResolveItemQualityProfile returns the effective profile for one library item:
-// the profile the item names, the default of the library its kind maps to when
-// it names none, and the store-wide default when neither answers.
+// ResolveItemQualityProfileByLibrary returns the effective profile for one
+// library item: the profile the item names, its library's default when it
+// names none, and the store-wide default when neither answers.
 //
 // It is the library step ResolveQualityProfile deliberately has no notion of.
-// Every scoring site goes through here rather than through ResolveQualityProfile
-// directly, because a library default nobody reads is a setting that saves,
-// renders as an override, and changes nothing (PLAN phase 8 task 2).
+// Every scoring site goes through here (or the by-kind wrapper below) rather
+// than through ResolveQualityProfile directly, because a library default
+// nobody reads is a setting that saves, renders as an override, and changes
+// nothing (PLAN phase 8 task 2).
 //
-// A missing libraries row — a database not yet migrated past 0012 — resolves
-// exactly as it did before there were libraries.
-func (s *Store) ResolveItemQualityProfile(ctx context.Context, kind string, itemProfileID int64) (*core.QualityProfile, error) {
+// libraryID 0 — an item from before 0022, or one whose library vanished — and
+// kind fill the gap: the kind's default library answers, which is exactly what
+// the item's zero means everywhere else (see core.Movie.LibraryID).
+func (s *Store) ResolveItemQualityProfileByLibrary(ctx context.Context, libraryID int64, kind string, itemProfileID int64) (*core.QualityProfile, error) {
 	if itemProfileID > 0 {
 		p, err := s.GetQualityProfile(ctx, itemProfileID)
 		if err == nil {
@@ -320,14 +514,34 @@ func (s *Store) ResolveItemQualityProfile(ctx context.Context, kind string, item
 			return nil, err
 		}
 	}
-	lib, err := s.GetLibraryByKind(ctx, kind)
-	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return s.ResolveQualityProfile(ctx, 0)
+	var (
+		lib *core.Library
+		err error
+	)
+	if libraryID != 0 {
+		lib, err = s.GetLibrary(ctx, libraryID)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return nil, err
 		}
-		return nil, err
+	}
+	if lib == nil {
+		lib, err = s.GetLibraryByKind(ctx, kind)
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				return s.ResolveQualityProfile(ctx, 0)
+			}
+			return nil, err
+		}
 	}
 	return s.ResolveQualityProfile(ctx, lib.QualityProfileID)
+}
+
+// ResolveItemQualityProfile is the by-kind form of the resolution above, for
+// call sites that have no item row in hand (a kind-scoped sweep, a default).
+// It reads the kind's DEFAULT library, which is what every caller written
+// before 0022 meant.
+func (s *Store) ResolveItemQualityProfile(ctx context.Context, kind string, itemProfileID int64) (*core.QualityProfile, error) {
+	return s.ResolveItemQualityProfileByLibrary(ctx, 0, kind, itemProfileID)
 }
 
 // overrideOrGlobal is the whole fallback rule: the library answers when it has
@@ -348,19 +562,58 @@ func nullInt64(v int64) any {
 	return v
 }
 
+// normalizeChain settles l's two provider columns against each other and
+// returns the encoded `providers` value to store.
+//
+// Both columns are written from this one result, by every writer, so they
+// cannot disagree: `provider` is defined as the chain's head, and a row whose
+// head contradicts its list would make two readers of the same library reach
+// two different providers. It also fills a chain in from a caller that only
+// set the head, which is every caller written before 0024.
+func normalizeChain(l *core.Library) (string, error) {
+	chain := l.Providers
+	if len(chain) == 0 && l.Provider != "" {
+		chain = []string{l.Provider}
+	}
+	l.Providers = chain
+	if len(chain) == 0 {
+		// A library nobody assigned a provider. Empty rather than "[]" so it
+		// reads back the same as a row the migration left alone.
+		l.Provider = ""
+		return "", nil
+	}
+	l.Provider = chain[0]
+	b, err := json.Marshal(chain)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
 func scanLibrary(sc scanner) (*core.Library, error) {
 	var (
 		l         core.Library
 		torrent   sql.NullString
 		usenet    sql.NullString
 		profileID sql.NullInt64
+		providers sql.NullString
 	)
 	if err := sc.Scan(&l.ID, &l.Kind, &l.Name, &l.RootPath, &l.DLNAVisible,
-		&torrent, &usenet, &profileID); err != nil {
+		&torrent, &usenet, &profileID, &l.Provider, &providers, &l.IsDefault,
+		&l.Active, &l.Restricted); err != nil {
 		return nil, err
 	}
 	l.RouteTorrent = torrent.String
 	l.RouteUsenet = usenet.String
 	l.QualityProfileID = profileID.Int64
+	// A chain that will not decode is treated as absent rather than as an
+	// error: `provider` is the head and still answers, so a library with a
+	// mangled list keeps working exactly as it did before 0024 instead of
+	// making the whole Libraries screen unreadable.
+	if providers.Valid && providers.String != "" {
+		if err := json.Unmarshal([]byte(providers.String), &l.Providers); err != nil {
+			l.Providers = nil
+		}
+	}
 	return &l, nil
 }

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -283,22 +284,23 @@ func putLibraryIndexer(t *testing.T, h http.Handler, libraryID, indexerID int64,
 		"/api/v1/libraries/"+itoa(libraryID)+"/indexers/"+itoa(indexerID), body)
 }
 
-// A disabled module leaves no library behind either.
+// A dormant library is still the admin's to work, and nobody else's to see.
 //
-// The Adult row is never deleted — that is deliberate, so turning the module
-// back on finds the sites, the scenes and the files as they were — but a row
-// that outlives the switch would keep GET /libraries answering with an "Adult"
-// pill, its root path and its DLNA state on an install whose owner turned the
-// whole thing off. The Libraries screen renders one pill per returned row, so
-// the response IS the UI trace.
-func TestLibrariesHideTheAdultRowWhenTheModuleIsOff(t *testing.T) {
-	ctx := context.Background()
+// The two halves are the whole point of the manageable/visible split. Every
+// CONTENT route answers 404 for an inactive library, an admin included — that
+// is what "dormant for everyone" means. The MANAGEMENT surface keeps answering,
+// because the toggle that undoes dormancy lives on it: a library switched off
+// and then dropped from the only list it appears in would be a one-way door.
+//
+// GET /libraries is admin-only (routePolicies; memberAllowed names none of it),
+// so the row a member was never meant to see does not reach one here — the
+// filter that hides it from a member is the same `manages` predicate, with the
+// role rule inside core.LibraryVisible doing the work.
+func TestDormantLibrariesStayManageableAndUnreachable(t *testing.T) {
 	h, st, _ := newTestServer(t)
 	seedIndexer(t, st, "jackett", []int{2000, 5000}, true)
 
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	enableAdultLibrary(t, st)
 
 	list := func() libraryListBody {
 		t.Helper()
@@ -318,39 +320,55 @@ func TestLibrariesHideTheAdultRowWhenTheModuleIsOff(t *testing.T) {
 	rec := do(t, h, http.MethodPatch, "/api/v1/libraries/"+itoa(adult.ID), `{"dlna_visible":true}`)
 	wantStatus(t, rec, http.StatusOK)
 
-	if err := st.SetAdultEnabled(ctx, false); err != nil {
-		t.Fatalf("SetAdultEnabled(false): %v", err)
+	// Switched off through the door that does it, which is the toggle the
+	// screen renders and not a store call reaching around it.
+	wantStatus(t, do(t, h, http.MethodPatch, "/api/v1/libraries/"+itoa(adult.ID),
+		`{"active":false}`), http.StatusOK)
+
+	dormant := libraryOfKind(t, list(), core.LibraryKindAdult)
+	if dormant.Active {
+		t.Fatalf("the switched-off library reads as active: %+v", dormant)
+	}
+	// Its DLNA state is remembered rather than cleared: dormancy is not
+	// un-sharing, and switching it back on must not need the owner to redo a
+	// decision they never revoked.
+	if !dormant.DLNAVisible {
+		t.Errorf("switching the library off forgot that it was shared: %+v", dormant)
 	}
 
-	body := list()
-	for _, l := range body.Libraries {
-		if l.Kind == core.LibraryKindAdult {
-			t.Fatalf("GET /libraries still names the adult library with the module off: %+v", l)
+	// Content routes are shut for the admin too. 404, not 403: "there is
+	// nothing here" is the same answer every gated route gives.
+	for _, target := range []string{
+		"/api/v1/adult/sites",
+		"/api/v1/adult/discover",
+	} {
+		if rec := do(t, h, http.MethodGet, target, ""); rec.Code != http.StatusNotFound {
+			t.Errorf("GET %s = %d with the library off, want 404", target, rec.Code)
 		}
 	}
-	if len(body.Libraries) != 2 {
-		t.Errorf("libraries = %+v, want only Movies and Series", body.Libraries)
-	}
 
-	// And the row is not reachable by id either, or the pill would be gone
-	// while the card behind it stayed fully editable. 404, not 403: "there is
-	// nothing here" is the same answer every adult route gives.
+	// The management routes are not, or there would be no way back.
 	for _, tc := range []struct{ method, target, body string }{
-		{http.MethodPatch, "/api/v1/libraries/" + itoa(adult.ID), `{"dlna_visible":false}`},
+		{http.MethodPatch, "/api/v1/libraries/" + itoa(adult.ID), `{"dlna_visible":true}`},
 		{http.MethodPut, "/api/v1/libraries/" + itoa(adult.ID) + "/indexers/1", `{"enabled":false}`},
+		{http.MethodGet, "/api/v1/libraries/" + itoa(adult.ID) + "/access", ""},
+		{http.MethodPut, "/api/v1/libraries/" + itoa(adult.ID) + "/access", `{"restricted":true}`},
 	} {
 		rec := do(t, h, tc.method, tc.target, tc.body)
-		if rec.Code != http.StatusNotFound {
-			t.Errorf("%s %s = %d, want 404", tc.method, tc.target, rec.Code)
+		if rec.Code != http.StatusOK {
+			t.Errorf("%s %s = %d with the library off, want 200 (body %q)",
+				tc.method, tc.target, rec.Code, rec.Body.String())
 		}
 	}
 
-	// Turning it back on finds the row exactly as it was left.
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled(true): %v", err)
-	}
-	if back := libraryOfKind(t, list(), core.LibraryKindAdult); !back.DLNAVisible {
-		t.Errorf("re-enabling the module forgot the library's state: %+v", back)
+	// And back on, through the same toggle, with the state it was left in. The
+	// access write above restricted it, which clears dlna_visible — so the
+	// PATCH that re-shared it is what this reads back.
+	wantStatus(t, do(t, h, http.MethodPatch, "/api/v1/libraries/"+itoa(adult.ID),
+		`{"active":true,"dlna_visible":true}`), http.StatusOK)
+	back := libraryOfKind(t, list(), core.LibraryKindAdult)
+	if !back.Active || !back.DLNAVisible {
+		t.Errorf("switching the library back on forgot its state: %+v", back)
 	}
 }
 
@@ -363,9 +381,7 @@ func TestAdultLibraryCardShowsTheAdultCategoriesAsItsDefault(t *testing.T) {
 	ctx := context.Background()
 	h, st, _ := newTestServer(t)
 	cfg := seedIndexer(t, st, "jackett", []int{2000, 5000}, true)
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	enableAdultLibrary(t, st)
 
 	rec := do(t, h, http.MethodGet, "/api/v1/libraries", "")
 	wantStatus(t, rec, http.StatusOK)
@@ -404,5 +420,257 @@ func TestAdultLibraryCardShowsTheAdultCategoriesAsItsDefault(t *testing.T) {
 	if !reflect.DeepEqual(settings.Indexers[0].Categories, row.Categories) {
 		t.Errorf("the card shows %v but a search sends %v",
 			row.Categories, settings.Indexers[0].Categories)
+	}
+}
+
+// The create endpoint owns every guard the schema does not: kind and provider
+// agreement, root placement under library/, and no nesting among roots. A
+// created library starts with DLNA sharing off (the per-library tree is a
+// later phase) and is never the default.
+func TestCreateLibraryValidatesAndCreates(t *testing.T) {
+	h, st, _ := newTestServer(t)
+
+	rec := do(t, h, http.MethodPost, "/api/v1/libraries",
+		`{"kind":"tv","name":"Anime","root_path":"library/Anime"}`)
+	wantStatus(t, rec, http.StatusCreated)
+	var created libraryJSON
+	decodeBody(t, rec, &created)
+	if created.Provider != core.ProviderTMDB || created.IsDefault || created.DLNAVisible {
+		t.Errorf("created = %+v, want tmdb default provider, not default, dlna off", created)
+	}
+
+	for name, body := range map[string]string{
+		"root outside library/": `{"kind":"tv","name":"X","root_path":"media/X"}`,
+		"root is library/":      `{"kind":"tv","name":"X","root_path":"library"}`,
+		"nested root":           `{"kind":"tv","name":"X","root_path":"library/Anime/Sub"}`,
+		"duplicate root":        `{"kind":"movie","name":"X","root_path":"library/Anime"}`,
+		"dotdot root":           `{"kind":"tv","name":"X","root_path":"library/../etc"}`,
+		"wrong provider":        `{"kind":"movie","name":"X","root_path":"library/X","provider":"stashbox"}`,
+		"unknown kind":          `{"kind":"music","name":"X","root_path":"library/X"}`,
+		"empty name":            `{"kind":"tv","name":"  ","root_path":"library/X"}`,
+		// An adult chain that names a PARTICULAR box gets no bootstrap benefit:
+		// only the bare legacy id is a forward reference to the instance about
+		// to be minted, and a qualified one has nothing to resolve into.
+		"adult on a named box": `{"kind":"adult","name":"X","root_path":"library/X","providers":["stashbox:fansdb"]}`,
+	} {
+		rec := do(t, h, http.MethodPost, "/api/v1/libraries", body)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400", name, rec.Code)
+		}
+	}
+
+	// Deleting: the fresh, empty, non-default library goes; the defaults stay.
+	rec = do(t, h, http.MethodDelete, "/api/v1/libraries/"+itoa(created.ID), "")
+	wantStatus(t, rec, http.StatusNoContent)
+
+	def, err := st.GetDefaultLibrary(context.Background(), core.LibraryKindTV)
+	if err != nil {
+		t.Fatalf("GetDefaultLibrary: %v", err)
+	}
+	rec = do(t, h, http.MethodDelete, "/api/v1/libraries/"+itoa(def.ID), "")
+	wantStatus(t, rec, http.StatusConflict)
+}
+
+// Deleting a library that still owns items is refused with the count-bearing
+// message; promoting another library moves the default flag transactionally;
+// and a non-default library may be shared over DLNA, which is what the tree's
+// per-library containers made possible.
+func TestLibraryDefaultHandoffAndGuards(t *testing.T) {
+	ctx := context.Background()
+	h, st, _ := newTestServer(t)
+
+	rec := do(t, h, http.MethodPost, "/api/v1/libraries",
+		`{"kind":"tv","name":"Anime","root_path":"library/Anime"}`)
+	wantStatus(t, rec, http.StatusCreated)
+	var anime libraryJSON
+	decodeBody(t, rec, &anime)
+
+	sr := &core.Series{TMDBID: 7, Title: "Frieren", Kind: core.SeriesKindTV, LibraryID: anime.ID}
+	if err := st.UpsertSeries(ctx, sr); err != nil {
+		t.Fatalf("UpsertSeries: %v", err)
+	}
+	rec = do(t, h, http.MethodDelete, "/api/v1/libraries/"+itoa(anime.ID), "")
+	wantStatus(t, rec, http.StatusConflict)
+
+	rec = do(t, h, http.MethodPatch, "/api/v1/libraries/"+itoa(anime.ID), `{"dlna_visible":true}`)
+	wantStatus(t, rec, http.StatusOK)
+	var shared libraryJSON
+	decodeBody(t, rec, &shared)
+	if !shared.DLNAVisible {
+		t.Errorf("library = %+v, want dlna_visible saved on a non-default library", shared)
+	}
+	saved, err := st.GetLibrary(ctx, anime.ID)
+	if err != nil {
+		t.Fatalf("GetLibrary: %v", err)
+	}
+	if !saved.DLNAVisible {
+		t.Error("the flag came back on the response but never reached the row")
+	}
+
+	rec = do(t, h, http.MethodPatch, "/api/v1/libraries/"+itoa(anime.ID), `{"is_default":true}`)
+	wantStatus(t, rec, http.StatusOK)
+	def, err := st.GetDefaultLibrary(ctx, core.LibraryKindTV)
+	if err != nil {
+		t.Fatalf("GetDefaultLibrary: %v", err)
+	}
+	if def.ID != anime.ID {
+		t.Errorf("default tv library = %+v, want Anime promoted", def)
+	}
+	rec = do(t, h, http.MethodPatch, "/api/v1/libraries/"+itoa(anime.ID), `{"is_default":false}`)
+	wantStatus(t, rec, http.StatusBadRequest)
+}
+
+// The provider list is the create form's vocabulary. Without the adult module
+// it must not name a provider that serves only adult libraries: a picker
+// entry is a trace of a module whose promise is absence.
+func TestListProvidersOmitsAdultWithoutTheModule(t *testing.T) {
+	h, _, _ := newTestServer(t)
+	rec := do(t, h, http.MethodGet, "/api/v1/libraries/providers", "")
+	wantStatus(t, rec, http.StatusOK)
+	var body struct {
+		Providers []struct {
+			ID    string   `json:"id"`
+			Kinds []string `json:"kinds"`
+		} `json:"providers"`
+	}
+	decodeBody(t, rec, &body)
+	for _, p := range body.Providers {
+		if p.ID == core.ProviderStashbox {
+			t.Errorf("providers = %+v, want stashbox absent with the module off", body.Providers)
+		}
+		for _, k := range p.Kinds {
+			if k == core.LibraryKindAdult {
+				t.Errorf("provider %s lists the adult kind with the module off", p.ID)
+			}
+		}
+	}
+}
+
+// AniList is a non-adult provider, so the create form offers it to everybody —
+// and it offers it for television ONLY, which is what stops a movie library
+// being chained to a provider that refuses every movie lookup.
+func TestListProvidersOffersAniListForTV(t *testing.T) {
+	h, _, _ := newTestServer(t)
+	rec := do(t, h, http.MethodGet, "/api/v1/libraries/providers", "")
+	wantStatus(t, rec, http.StatusOK)
+	var body struct {
+		Providers []struct {
+			ID    string   `json:"id"`
+			Kinds []string `json:"kinds"`
+		} `json:"providers"`
+	}
+	decodeBody(t, rec, &body)
+	for _, p := range body.Providers {
+		if p.ID != core.ProviderAniList {
+			continue
+		}
+		if !reflect.DeepEqual(p.Kinds, []string{core.LibraryKindTV}) {
+			t.Errorf("anilist kinds = %v, want [tv]", p.Kinds)
+		}
+		return
+	}
+	t.Errorf("providers = %+v, want anilist listed", body.Providers)
+}
+
+// A library carries an ordered provider CHAIN, and the wire keeps both
+// spellings: `providers` is the list, `provider` is its read-only head, so a
+// client written before chains keeps reading exactly what it always did.
+func TestCreateLibraryAcceptsAProviderChain(t *testing.T) {
+	h, _, _ := newTestServer(t)
+
+	rec := do(t, h, http.MethodPost, "/api/v1/libraries",
+		`{"kind":"tv","name":"Anime","root_path":"library/Anime","providers":["tmdb"]}`)
+	wantStatus(t, rec, http.StatusCreated)
+	var created libraryJSON
+	decodeBody(t, rec, &created)
+	if created.Provider != core.ProviderTMDB ||
+		!reflect.DeepEqual(created.Providers, []string{core.ProviderTMDB}) {
+		t.Errorf("created = %+v, want the chain and its head", created)
+	}
+
+	// The singular spelling is still a chain of one.
+	rec = do(t, h, http.MethodPost, "/api/v1/libraries",
+		`{"kind":"movie","name":"Docs","root_path":"library/Docs","provider":"tmdb"}`)
+	wantStatus(t, rec, http.StatusCreated)
+	decodeBody(t, rec, &created)
+	if !reflect.DeepEqual(created.Providers, []string{core.ProviderTMDB}) {
+		t.Errorf("created = %+v, want the singular provider read as a chain", created)
+	}
+
+	for name, body := range map[string]string{
+		"repeated provider": `{"kind":"tv","name":"X","root_path":"library/X","providers":["tmdb","tmdb"]}`,
+		"wrong kind":        `{"kind":"movie","name":"X","root_path":"library/X","providers":["stashbox"]}`,
+		"unknown provider":  `{"kind":"tv","name":"X","root_path":"library/X","providers":["nope"]}`,
+	} {
+		rec := do(t, h, http.MethodPost, "/api/v1/libraries", body)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400", name, rec.Code)
+		}
+	}
+}
+
+// PATCH takes the same chain under the same rules. An explicit empty list is a
+// request to make the library identify nothing, which is refused rather than
+// quietly read as "leave it alone".
+func TestPatchLibraryValidatesTheProviderChain(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	def, err := st.GetDefaultLibrary(context.Background(), core.LibraryKindTV)
+	if err != nil {
+		t.Fatalf("GetDefaultLibrary: %v", err)
+	}
+	path := "/api/v1/libraries/" + itoa(def.ID)
+
+	rec := do(t, h, http.MethodPatch, path, `{"providers":["tmdb"]}`)
+	wantStatus(t, rec, http.StatusOK)
+	var patched libraryJSON
+	decodeBody(t, rec, &patched)
+	if patched.Provider != core.ProviderTMDB ||
+		!reflect.DeepEqual(patched.Providers, []string{core.ProviderTMDB}) {
+		t.Errorf("patched = %+v, want the chain and its head", patched)
+	}
+
+	for name, body := range map[string]string{
+		"empty chain":       `{"providers":[]}`,
+		"repeated provider": `{"providers":["tmdb","tmdb"]}`,
+		"wrong kind":        `{"providers":["stashbox"]}`,
+		"singular wrong":    `{"provider":"stashbox"}`,
+	} {
+		rec := do(t, h, http.MethodPatch, path, body)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("%s: status = %d, want 400", name, rec.Code)
+		}
+	}
+}
+
+// An adult library's chain can only ever name stash-box instances, and not
+// because a rule says so: no other compiled-in provider serves the adult kind,
+// and the per-element check is what makes that a consequence rather than a
+// promise. The instance half is a database question — a well-formed id for a box
+// this install does not hold is refused too, because a chain that names one
+// walks to a provider nothing can build.
+func TestProviderChainForAdultNamesConfiguredInstancesAlone(t *testing.T) {
+	st := newTestStore(t)
+	seedStashboxInstance(t, st, core.ProviderStashbox, "StashDB", "https://stashdb.org/graphql")
+	seedStashboxInstance(t, st, core.ProviderStashbox+":fansdb", "FansDB", "https://fansdb.cc/graphql")
+	s := &server{st: st, log: slog.Default()}
+
+	cases := []struct {
+		chain []string
+		want  bool
+	}{
+		{[]string{core.ProviderStashbox}, true},
+		{[]string{core.ProviderStashbox, core.ProviderStashbox + ":fansdb"}, true},
+		{[]string{core.ProviderStashbox, core.ProviderStashbox}, false},
+		{[]string{core.ProviderStashbox + ":pmvstash"}, false},
+		{[]string{core.ProviderStashbox, core.ProviderTMDB}, false},
+		{[]string{core.ProviderTMDB}, false},
+		{nil, false},
+	}
+	for _, c := range cases {
+		w := httptest.NewRecorder()
+		if got := s.validProviderChain(context.Background(), w, c.chain, core.LibraryKindAdult); got != c.want {
+			t.Errorf("validProviderChain(%v, adult) = %v, want %v (body %q)",
+				c.chain, got, c.want, w.Body.String())
+		}
 	}
 }

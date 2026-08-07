@@ -469,7 +469,11 @@ func (s *server) writeDiscoverError(w http.ResponseWriter, r *http.Request, what
 	// A rejected credential is the credential model's second transition: mark
 	// it and answer the code, so a key revoked since it was entered turns the
 	// discover screen into the same directed empty state an absent key does.
-	if s.noteMetadataFailure(err) {
+	//
+	// TMDB by name and not by chain: these shelves are TMDB list ids, resolved
+	// through metadataProvider, so there is exactly one credential that could
+	// have been refused here and no guess to make about which.
+	if s.noteMetadataFailure(core.ProviderTMDB, err) {
 		writeCodedError(w, http.StatusServiceUnavailable, CodeMetadataCredentialInvalid,
 			"the TMDB API key was rejected")
 		return

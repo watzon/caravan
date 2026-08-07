@@ -33,10 +33,74 @@ func addSite(t *testing.T, ctx context.Context, st *store.Store, title string, r
 	return series, episode
 }
 
-func enableAdult(t *testing.T, ctx context.Context, st *store.Store) {
+// enableAdultLibrary makes adult content reachable: the Adult library exists
+// and is switched on. An adult library IS the module — there is no server-wide
+// switch above it — so a test that needs scenes searched for creates one.
+//
+// It is idempotent, because the enable it stands for was: a library that is
+// already there is switched back on rather than duplicated, keeping whatever
+// the owner has since done to it. Switching on is a whole-kind act for the same
+// reason the off half is (see setAdultLibrariesActive), so a second adult
+// library is switched on beside the seed one.
+//
+// The seed row is born restricted: the module was only ever reachable by an
+// account somebody granted, and a row born open would hand the whole household
+// a shelf on the enable that made it. It is the kind's default only on the
+// branch that creates it, because idx_libraries_default_per_kind allows exactly
+// one and the row is never deleted, so a later enable would contend with the
+// one it made itself.
+func enableAdultLibrary(t *testing.T, st *store.Store) core.Library {
 	t.Helper()
-	if err := st.SetAdultEnabled(ctx, true); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
+	ctx := context.Background()
+
+	existing, err := st.ListLibrariesByKind(ctx, core.LibraryKindAdult)
+	if err != nil {
+		t.Fatalf("ListLibrariesByKind(adult): %v", err)
+	}
+	if len(existing) == 0 {
+		library := &core.Library{
+			Kind:        core.LibraryKindAdult,
+			Name:        store.AdultLibraryName,
+			RootPath:    store.AdultLibraryRoot,
+			Providers:   []string{core.ProviderStashbox},
+			DLNAVisible: false,
+			Restricted:  true,
+			IsDefault:   true,
+		}
+		if err := st.CreateLibrary(ctx, library); err != nil {
+			t.Fatalf("CreateLibrary(adult): %v", err)
+		}
+	}
+	setAdultLibrariesActive(t, st, true)
+
+	library, err := st.GetLibraryByKind(ctx, core.LibraryKindAdult)
+	if err != nil {
+		t.Fatalf("GetLibraryByKind(adult): %v", err)
+	}
+	return *library
+}
+
+// setAdultLibrariesActive switches every adult library at once, which is the
+// only way to say "no adult content anywhere" now that the state lives per
+// library: one library left on is one library still fanning 6000 out to every
+// indexer, and a test that switched off only the default would be asserting
+// against a server that still searches for scenes.
+//
+// Switching off deletes nothing — not the row, not the series, not the
+// episodes. Off is a reachability promise, not a retention policy, so a library
+// that comes back finds its indexer overrides exactly as they were left.
+func setAdultLibrariesActive(t *testing.T, st *store.Store, active bool) {
+	t.Helper()
+	ctx := context.Background()
+
+	libraries, err := st.ListLibrariesByKind(ctx, core.LibraryKindAdult)
+	if err != nil {
+		t.Fatalf("ListLibrariesByKind(adult): %v", err)
+	}
+	for _, library := range libraries {
+		if err := st.SetLibraryActive(ctx, library.ID, active); err != nil {
+			t.Fatalf("SetLibraryActive(%d, %v): %v", library.ID, active, err)
+		}
 	}
 }
 
@@ -47,7 +111,7 @@ func enableAdult(t *testing.T, ctx context.Context, st *store.Store) {
 func TestSceneSearchSendsOnlyTheAdultLibrarysCategories(t *testing.T) {
 	ctx := context.Background()
 	st := openStore(t)
-	enableAdult(t, ctx, st)
+	enableAdultLibrary(t, st)
 
 	fake := startFakeTorznab(t)
 	cfg := addTorznabIndexer(t, ctx, st, fake, "shared", 5000, 6000)
@@ -56,7 +120,7 @@ func TestSceneSearchSendsOnlyTheAdultLibrarysCategories(t *testing.T) {
 
 	_, scene := addSite(t, ctx, st, "Brazzers", time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC))
 	episode := addEpisode(t, ctx, st, "Example Series")
-	runner := NewRunner(st, fake.factory(), func(context.Context, string) core.Engine { return &fakeEngine{} })
+	runner := NewRunner(st, fake.factory(), func(context.Context, int64, string) core.Engine { return &fakeEngine{} })
 
 	searchEpisodeJob(t, ctx, runner, st, scene.ID)
 	got := fake.recorded()
@@ -90,17 +154,15 @@ func TestSceneSearchSendsOnlyTheAdultLibrarysCategories(t *testing.T) {
 func TestSceneSearchIsDroppedWhenTheModuleIsDisabled(t *testing.T) {
 	ctx := context.Background()
 	st := openStore(t)
-	enableAdult(t, ctx, st)
+	enableAdultLibrary(t, st)
 
 	fake := startFakeTorznab(t)
 	cfg := addTorznabIndexer(t, ctx, st, fake, "shared", 6000)
 	overrideLibraryIndexer(t, ctx, st, core.LibraryKindAdult, cfg.ID, true, []int{6000})
 	_, scene := addSite(t, ctx, st, "Brazzers", time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC))
 
-	if err := st.SetAdultEnabled(ctx, false); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
-	runner := NewRunner(st, fake.factory(), func(context.Context, string) core.Engine { return &fakeEngine{} })
+	setAdultLibrariesActive(t, st, false)
+	runner := NewRunner(st, fake.factory(), func(context.Context, int64, string) core.Engine { return &fakeEngine{} })
 	searchEpisodeJob(t, ctx, runner, st, scene.ID)
 
 	if got := fake.recorded(); len(got) != 0 {
@@ -113,7 +175,7 @@ func TestSceneSearchIsDroppedWhenTheModuleIsDisabled(t *testing.T) {
 func TestDisabledAdultItemsNeverEnterTheWantedList(t *testing.T) {
 	ctx := context.Background()
 	st := openStore(t)
-	enableAdult(t, ctx, st)
+	enableAdultLibrary(t, st)
 	addSite(t, ctx, st, "Brazzers", time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC))
 	addEpisode(t, ctx, st, "Example Series")
 
@@ -125,9 +187,7 @@ func TestDisabledAdultItemsNeverEnterTheWantedList(t *testing.T) {
 		t.Fatalf("wanted episodes with the module on = %d, want the scene and the episode", len(lists.Episodes))
 	}
 
-	if err := st.SetAdultEnabled(ctx, false); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	setAdultLibrariesActive(t, st, false)
 	lists, err = wanted.Compute(ctx, st)
 	if err != nil {
 		t.Fatalf("Compute: %v", err)
@@ -146,12 +206,10 @@ func TestDisabledAdultItemsNeverEnterTheWantedList(t *testing.T) {
 func TestBacklogSweepEnqueuesNoSceneSearchWhenDisabled(t *testing.T) {
 	ctx := context.Background()
 	st := openStore(t)
-	enableAdult(t, ctx, st)
+	enableAdultLibrary(t, st)
 	_, scene := addSite(t, ctx, st, "Brazzers", time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC))
 	episode := addEpisode(t, ctx, st, "Example Series")
-	if err := st.SetAdultEnabled(ctx, false); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	setAdultLibrariesActive(t, st, false)
 
 	runner := NewRunner(st, nil, nil)
 	if err := runner.handleBacklogSweep(ctx, st, json.RawMessage("{}")); err != nil {
@@ -242,7 +300,7 @@ func TestRSSDoesNotOfferASceneReleaseToATelevisionEpisode(t *testing.T) {
 func TestSceneSearchSendsAdultCategoriesWithNoOverrideConfigured(t *testing.T) {
 	ctx := context.Background()
 	st := openStore(t)
-	enableAdult(t, ctx, st)
+	enableAdultLibrary(t, st)
 
 	fake := startFakeTorznab(t)
 	// The indexer's own categories, exactly as an install that has only ever
@@ -251,7 +309,7 @@ func TestSceneSearchSendsAdultCategoriesWithNoOverrideConfigured(t *testing.T) {
 	addTorznabIndexer(t, ctx, st, fake, "shared", 5000, 2000)
 
 	_, scene := addSite(t, ctx, st, "Brazzers", time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC))
-	runner := NewRunner(st, fake.factory(), func(context.Context, string) core.Engine { return &fakeEngine{} })
+	runner := NewRunner(st, fake.factory(), func(context.Context, int64, string) core.Engine { return &fakeEngine{} })
 
 	searchEpisodeJob(t, ctx, runner, st, scene.ID)
 	got := fake.recorded()
@@ -271,13 +329,13 @@ func TestSceneSearchSendsAdultCategoriesWithNoOverrideConfigured(t *testing.T) {
 func TestSceneSearchKeepsTheIndexersOwnAdultSubcategories(t *testing.T) {
 	ctx := context.Background()
 	st := openStore(t)
-	enableAdult(t, ctx, st)
+	enableAdultLibrary(t, st)
 
 	fake := startFakeTorznab(t)
 	addTorznabIndexer(t, ctx, st, fake, "shared", 5000, 6040, 6090)
 
 	_, scene := addSite(t, ctx, st, "Brazzers", time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC))
-	runner := NewRunner(st, fake.factory(), func(context.Context, string) core.Engine { return &fakeEngine{} })
+	runner := NewRunner(st, fake.factory(), func(context.Context, int64, string) core.Engine { return &fakeEngine{} })
 
 	searchEpisodeJob(t, ctx, runner, st, scene.ID)
 	got := fake.recorded()
@@ -300,7 +358,7 @@ func TestSceneSearchKeepsTheIndexersOwnAdultSubcategories(t *testing.T) {
 func TestRSSSyncDropsTheAdultLibraryWhenTheModuleIsDisabled(t *testing.T) {
 	ctx := context.Background()
 	st := openStore(t)
-	enableAdult(t, ctx, st)
+	enableAdultLibrary(t, st)
 
 	fake := startFakeTorznab(t)
 	cfg := addTorznabIndexer(t, ctx, st, fake, "shared", 5000, 6000)
@@ -309,7 +367,7 @@ func TestRSSSyncDropsTheAdultLibraryWhenTheModuleIsDisabled(t *testing.T) {
 	overrideLibraryIndexer(t, ctx, st, core.LibraryKindMovie, cfg.ID, true, []int{2000})
 	overrideLibraryIndexer(t, ctx, st, core.LibraryKindTV, cfg.ID, true, []int{5000})
 	overrideLibraryIndexer(t, ctx, st, core.LibraryKindAdult, cfg.ID, true, []int{6000})
-	runner := NewRunner(st, fake.factory(), func(context.Context, string) core.Engine { return &fakeEngine{} })
+	runner := NewRunner(st, fake.factory(), func(context.Context, int64, string) core.Engine { return &fakeEngine{} })
 
 	// While it is on, the adult library is a subscriber like any other.
 	if err := runner.handleRSSSync(ctx, st, json.RawMessage("{}")); err != nil {
@@ -319,9 +377,7 @@ func TestRSSSyncDropsTheAdultLibraryWhenTheModuleIsDisabled(t *testing.T) {
 		t.Fatalf("rss fetch with the module on = %s, want the union", formatRequests(got))
 	}
 
-	if err := st.SetAdultEnabled(ctx, false); err != nil {
-		t.Fatalf("SetAdultEnabled: %v", err)
-	}
+	setAdultLibrariesActive(t, st, false)
 	fake.reset()
 	if err := runner.handleRSSSync(ctx, st, json.RawMessage("{}")); err != nil {
 		t.Fatalf("handle rss sync: %v", err)
@@ -381,7 +437,7 @@ func grabbedTitles(t *testing.T, ctx context.Context, st *store.Store) []string 
 func TestSceneSearchStopsAtTheDateVariantWhenItFinds(t *testing.T) {
 	ctx := context.Background()
 	st := openStore(t)
-	enableAdult(t, ctx, st)
+	enableAdultLibrary(t, st)
 
 	fake := startFakeTorznab(t)
 	cfg := addTorznabIndexer(t, ctx, st, fake, "shared", 6000)
@@ -394,7 +450,7 @@ func TestSceneSearchStopsAtTheDateVariantWhenItFinds(t *testing.T) {
 		guid:  "by-date",
 	})
 
-	runner := NewRunner(st, fake.factory(), func(context.Context, string) core.Engine { return &fakeEngine{} })
+	runner := NewRunner(st, fake.factory(), func(context.Context, int64, string) core.Engine { return &fakeEngine{} })
 	searchEpisodeJob(t, ctx, runner, st, scene.ID)
 
 	if got := fake.queries(); len(got) != 1 || got[0] != "Brazzers 22.03.14" {
@@ -412,7 +468,7 @@ func TestSceneSearchStopsAtTheDateVariantWhenItFinds(t *testing.T) {
 func TestSceneSearchFallsBackToTheTitleVariant(t *testing.T) {
 	ctx := context.Background()
 	st := openStore(t)
-	enableAdult(t, ctx, st)
+	enableAdultLibrary(t, st)
 
 	fake := startFakeTorznab(t)
 	cfg := addTorznabIndexer(t, ctx, st, fake, "shared", 6000)
@@ -427,7 +483,7 @@ func TestSceneSearchFallsBackToTheTitleVariant(t *testing.T) {
 		guid:  "by-title",
 	})
 
-	runner := NewRunner(st, fake.factory(), func(context.Context, string) core.Engine { return &fakeEngine{} })
+	runner := NewRunner(st, fake.factory(), func(context.Context, int64, string) core.Engine { return &fakeEngine{} })
 	searchEpisodeJob(t, ctx, runner, st, scene.ID)
 
 	want := []string{"Brazzers 22.03.14", "Brazzers Deep Impact"}
@@ -444,7 +500,7 @@ func TestSceneSearchFallsBackToTheTitleVariant(t *testing.T) {
 func TestSceneSearchRecordsWhichVariantsItTried(t *testing.T) {
 	ctx := context.Background()
 	st := openStore(t)
-	enableAdult(t, ctx, st)
+	enableAdultLibrary(t, st)
 
 	fake := startFakeTorznab(t)
 	cfg := addTorznabIndexer(t, ctx, st, fake, "shared", 6000)
@@ -453,7 +509,7 @@ func TestSceneSearchRecordsWhichVariantsItTried(t *testing.T) {
 	released := time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC)
 	_, scene := addSceneWithTitle(t, ctx, st, "Brazzers", "Deep Impact", released)
 
-	runner := NewRunner(st, fake.factory(), func(context.Context, string) core.Engine { return &fakeEngine{} })
+	runner := NewRunner(st, fake.factory(), func(context.Context, int64, string) core.Engine { return &fakeEngine{} })
 	searchEpisodeJob(t, ctx, runner, st, scene.ID)
 
 	if got := fake.queries(); len(got) != 2 {
@@ -483,14 +539,14 @@ func TestSceneSearchRecordsWhichVariantsItTried(t *testing.T) {
 func TestSceneSearchWithoutADateUsesTheTitleAlone(t *testing.T) {
 	ctx := context.Background()
 	st := openStore(t)
-	enableAdult(t, ctx, st)
+	enableAdultLibrary(t, st)
 
 	fake := startFakeTorznab(t)
 	cfg := addTorznabIndexer(t, ctx, st, fake, "shared", 6000)
 	overrideLibraryIndexer(t, ctx, st, core.LibraryKindAdult, cfg.ID, true, []int{6000})
 
 	_, dated := addSceneWithTitle(t, ctx, st, "Brazzers", "Deep Impact", time.Time{})
-	runner := NewRunner(st, fake.factory(), func(context.Context, string) core.Engine { return &fakeEngine{} })
+	runner := NewRunner(st, fake.factory(), func(context.Context, int64, string) core.Engine { return &fakeEngine{} })
 	searchEpisodeJob(t, ctx, runner, st, dated.ID)
 
 	if got := fake.queries(); len(got) != 1 || got[0] != "Brazzers Deep Impact" {

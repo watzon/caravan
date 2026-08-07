@@ -1,0 +1,15 @@
+{
+  "data": {
+    "Media": {
+      "airingSchedule": {
+        "pageInfo": { "hasNextPage": false },
+        "nodes": [
+          { "episode": 9, "airingAt": 1519862400 },
+          { "episode": 10, "airingAt": 1520467200 },
+          { "episode": 11, "airingAt": 1521072000 },
+          { "episode": 12, "airingAt": 1521676800 }
+        ]
+      }
+    }
+  }
+}

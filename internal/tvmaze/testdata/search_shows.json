@@ -1,0 +1,39 @@
+[
+  {
+    "score": 0.92,
+    "show": {
+      "id": 169,
+      "name": "Breaking Bad",
+      "type": "Scripted",
+      "language": "English",
+      "status": "Ended",
+      "runtime": 60,
+      "premiered": "2008-01-20",
+      "ended": "2013-09-29",
+      "rating": { "average": 9.2 },
+      "externals": { "tvrage": 18164, "thetvdb": 81189, "imdb": "tt0903747" },
+      "image": {
+        "medium": "https://static.tvmaze.com/uploads/images/medium_portrait/0/2400.jpg",
+        "original": "https://static.tvmaze.com/uploads/images/original_untouched/0/2400.jpg"
+      },
+      "summary": "<p><b>Breaking Bad</b> follows Walter White, a chemistry teacher.</p><p>Diagnosed with cancer, he turns to a life of crime.</p>"
+    }
+  },
+  {
+    "score": 0.61,
+    "show": {
+      "id": 44778,
+      "name": "Better Call Saul",
+      "type": "Scripted",
+      "language": "English",
+      "status": "In Development",
+      "runtime": null,
+      "premiered": null,
+      "ended": null,
+      "rating": { "average": null },
+      "externals": { "tvrage": null, "thetvdb": null, "imdb": null },
+      "image": null,
+      "summary": null
+    }
+  }
+]

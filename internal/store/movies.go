@@ -9,15 +9,36 @@ import (
 	"github.com/watzon/caravan/internal/core"
 )
 
-const movieColumns = `id, tmdb_id, imdb_id, title, sort_title, year, overview,
+const movieColumns = `id, provider, provider_ref, tmdb_id, imdb_id, title, sort_title, year, overview,
 	path, poster_path, poster_url, monitored, quality_profile_id, release_date,
-	digital_release, physical_release, min_availability, added_at, updated_at`
+	digital_release, physical_release, min_availability, added_at, updated_at,
+	library_id`
 
 // UpsertMovie inserts or updates m and writes back the assigned ID.
 //
-// Identity is m.ID when set, otherwise m.TMDBID. A movie with neither is
-// always inserted: an unmatched movie has no stable identity to collapse on.
+// Identity is m.ID when set, otherwise the provider ref, otherwise m.TMDBID. A
+// movie with none of the three is always inserted: an unmatched movie has no
+// stable identity to collapse on.
+//
+// The ref rung comes FIRST and the tmdb_id rung is the compatibility alias
+// behind it. Reversed, a re-fetched TMDB movie would match on tmdb_id, and any
+// movie identified by a provider that writes no tmdb_id would match on nothing
+// and insert a duplicate on every refresh.
 func (s *Store) UpsertMovie(ctx context.Context, m *core.Movie) error {
+	normalizeMovieProvider(m)
+
+	if m.ID == 0 && m.ProviderRef != "" {
+		existing, err := s.GetMovieByProviderRef(ctx, m.Provider, m.ProviderRef)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return err
+		}
+		if err == nil {
+			m.ID = existing.ID
+			if m.AddedAt.IsZero() {
+				m.AddedAt = existing.AddedAt
+			}
+		}
+	}
 	if m.ID == 0 && m.TMDBID != 0 {
 		existing, err := s.GetMovieByTMDBID(ctx, m.TMDBID)
 		if err != nil && !errors.Is(err, ErrNotFound) {
@@ -42,16 +63,23 @@ func (s *Store) UpsertMovie(ctx context.Context, m *core.Movie) error {
 	}
 
 	if m.ID != 0 {
+		// library_id 0 keeps the stored value: a caller that rebuilt the
+		// struct from provider metadata has not decided the movie moves, and a
+		// rescan must never move an item between libraries. A move names its
+		// target explicitly.
 		res, err := s.db.ExecContext(ctx, `
-			UPDATE movies SET tmdb_id = ?, imdb_id = ?, title = ?, sort_title = ?, year = ?,
+			UPDATE movies SET provider = ?, provider_ref = ?, tmdb_id = ?, imdb_id = ?,
+				title = ?, sort_title = ?, year = ?,
 				overview = ?, path = ?, poster_path = ?, poster_url = ?, monitored = ?,
 				quality_profile_id = ?, release_date = ?, digital_release = ?,
-				physical_release = ?, min_availability = ?, added_at = ?, updated_at = ?
+				physical_release = ?, min_availability = ?, added_at = ?, updated_at = ?,
+				library_id = COALESCE(NULLIF(?, 0), library_id)
 			WHERE id = ?`,
-			m.TMDBID, m.IMDBID, m.Title, m.SortTitle, m.Year, m.Overview, m.Path, m.PosterPath,
+			m.Provider, m.ProviderRef, m.TMDBID, m.IMDBID, m.Title, m.SortTitle, m.Year,
+			m.Overview, m.Path, m.PosterPath,
 			m.PosterURL, m.Monitored, m.QualityProfileID, formatTime(m.ReleaseDate),
 			formatTime(m.DigitalRelease), formatTime(m.PhysicalRelease), m.MinAvailability,
-			formatTime(m.AddedAt), formatTime(m.UpdatedAt), m.ID)
+			formatTime(m.AddedAt), formatTime(m.UpdatedAt), m.LibraryID, m.ID)
 		if err != nil {
 			return fmt.Errorf("store: update movie %d: %w", m.ID, err)
 		}
@@ -66,14 +94,17 @@ func (s *Store) UpsertMovie(ctx context.Context, m *core.Movie) error {
 	}
 
 	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO movies (tmdb_id, imdb_id, title, sort_title, year, overview, path,
+		INSERT INTO movies (provider, provider_ref, tmdb_id, imdb_id, title, sort_title,
+			year, overview, path,
 			poster_path, poster_url, monitored, quality_profile_id, release_date,
-			digital_release, physical_release, min_availability, added_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		m.TMDBID, m.IMDBID, m.Title, m.SortTitle, m.Year, m.Overview, m.Path, m.PosterPath,
+			digital_release, physical_release, min_availability, added_at, updated_at,
+			library_id)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.Provider, m.ProviderRef, m.TMDBID, m.IMDBID, m.Title, m.SortTitle, m.Year,
+		m.Overview, m.Path, m.PosterPath,
 		m.PosterURL, m.Monitored, m.QualityProfileID, formatTime(m.ReleaseDate),
 		formatTime(m.DigitalRelease), formatTime(m.PhysicalRelease), m.MinAvailability,
-		formatTime(m.AddedAt), formatTime(m.UpdatedAt))
+		formatTime(m.AddedAt), formatTime(m.UpdatedAt), m.LibraryID)
 	if err != nil {
 		return fmt.Errorf("store: insert movie %q: %w", m.Title, err)
 	}
@@ -94,6 +125,40 @@ func (s *Store) GetMovie(ctx context.Context, id int64) (*core.Movie, error) {
 	}
 	if err != nil {
 		return nil, fmt.Errorf("store: get movie %d: %w", id, err)
+	}
+	return m, nil
+}
+
+// normalizeMovieProvider derives the provider identity from the legacy TMDB id
+// when the caller supplied none — the same move UpsertSeries makes for Kind,
+// and for the same reason.
+//
+// It is what makes "every matched row carries a ref" a property of the table
+// rather than a habit of its callers: a caller written before 0024 still lands
+// a row the ref lookups can find.
+func normalizeMovieProvider(m *core.Movie) {
+	if m.Provider == "" && m.TMDBID != 0 {
+		ref := core.TMDBRef(m.TMDBID)
+		m.Provider, m.ProviderRef = ref.Provider, ref.Ref
+	}
+}
+
+// GetMovieByProviderRef returns the movie one provider identified by ref, or
+// ErrNotFound. A blank ref matches nothing rather than matching every
+// unidentified row — "" is precisely the value the partial unique index
+// excludes (GetSeriesByStashID's rule, generalized).
+func (s *Store) GetMovieByProviderRef(ctx context.Context, provider, ref string) (*core.Movie, error) {
+	if provider == "" || ref == "" {
+		return nil, fmt.Errorf("store: movie %s/%s: %w", provider, ref, ErrNotFound)
+	}
+	row := s.db.QueryRowContext(ctx, "SELECT "+movieColumns+
+		" FROM movies WHERE provider = ? AND provider_ref = ?", provider, ref)
+	m, err := scanMovie(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("store: movie %s/%s: %w", provider, ref, ErrNotFound)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("store: get movie %s/%s: %w", provider, ref, err)
 	}
 	return m, nil
 }

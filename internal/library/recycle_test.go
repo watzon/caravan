@@ -17,7 +17,7 @@ func TestRemoveMovieRecyclesOnlyOwnedFiles(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 	mv, rel := h.addMovieWithFile("Big Buck Bunny", 2008)
-	dir := movieDir("Big Buck Bunny", 2008)
+	dir := movieDir(stockMovieLib(), "Big Buck Bunny", 2008)
 	h.writeVideo(dir+"/user.srt", "subtitle")
 	if err := h.st.SetSetting(ctx, store.SettingRecycleRetentionDays, "30"); err != nil {
 		t.Fatal(err)
@@ -50,7 +50,7 @@ func TestRemoveMovieRecyclesOnlyOwnedFiles(t *testing.T) {
 func TestRecycleRetentionReadFailureLeavesFilesAndRowsUntouched(t *testing.T) {
 	h := newHarness(t)
 	mv, rel := h.addMovieWithFile("Big Buck Bunny", 2008)
-	dir := movieDir("Big Buck Bunny", 2008)
+	dir := movieDir(stockMovieLib(), "Big Buck Bunny", 2008)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 

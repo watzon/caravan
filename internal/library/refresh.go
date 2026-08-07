@@ -39,10 +39,14 @@ func (r *RefreshResult) addErr(format string, args ...any) {
 //
 // Unmonitored titles are skipped: nothing downstream acts on their metadata,
 // and the sweep's cost is provider round trips.
+//
+// Every title is re-fetched through the provider that identified it, by that
+// provider's own ref (see providerByID). There is no Manager-level gate in
+// front of the sweep: an install whose items are all pinned to some other
+// provider has no TMDB client and still has a library to refresh, and a title
+// whose provider is not configured is one recorded error rather than a dead
+// sweep.
 func (m *Manager) RefreshLibrary(ctx context.Context) (*RefreshResult, error) {
-	if m.provider == nil {
-		return nil, core.ErrNoMetadataProvider
-	}
 	res := &RefreshResult{}
 
 	movies, err := m.store.ListMovies(ctx)
@@ -53,10 +57,15 @@ func (m *Manager) RefreshLibrary(ctx context.Context) (*RefreshResult, error) {
 		if err := ctx.Err(); err != nil {
 			return res, err
 		}
-		if !mv.Monitored || mv.TMDBID == 0 {
+		if !mv.Monitored || mv.ProviderRef == "" {
 			continue
 		}
-		meta, err := m.provider.GetMovie(ctx, mv.TMDBID)
+		provider := m.providerByID(ctx, mv.Provider)
+		if provider == nil {
+			res.addErr("refresh movie %q: provider %q is not configured", mv.Title, mv.Provider)
+			continue
+		}
+		meta, err := provider.GetMovie(ctx, mv.ProviderRef)
 		if err != nil {
 			res.addErr("refresh movie %q: %v", mv.Title, err)
 			continue
@@ -67,7 +76,7 @@ func (m *Manager) RefreshLibrary(ctx context.Context) (*RefreshResult, error) {
 		// The row's own path, not a recomputed one: the folder on disk is
 		// ground truth, and a provider retitle must not point the row at a
 		// directory that does not exist.
-		if _, _, err := m.upsertMovieRow(ctx, meta, mv.Path, "", "", nil); err != nil {
+		if _, _, err := m.upsertMovieRow(ctx, meta, mv.Path, "", "", nil, mv.LibraryID); err != nil {
 			return res, err
 		}
 		res.Movies++
@@ -84,10 +93,15 @@ func (m *Manager) RefreshLibrary(ctx context.Context) (*RefreshResult, error) {
 		if err := ctx.Err(); err != nil {
 			return res, err
 		}
-		if !sr.Monitored || sr.TMDBID == 0 {
+		if !sr.Monitored || sr.ProviderRef == "" {
 			continue
 		}
-		meta, err := m.provider.GetSeries(ctx, sr.TMDBID)
+		provider := m.providerByID(ctx, sr.Provider)
+		if provider == nil {
+			res.addErr("refresh series %q: provider %q is not configured", sr.Title, sr.Provider)
+			continue
+		}
+		meta, err := provider.GetSeries(ctx, sr.ProviderRef)
 		if err != nil {
 			res.addErr("refresh series %q: %v", sr.Title, err)
 			continue
@@ -95,7 +109,7 @@ func (m *Manager) RefreshLibrary(ctx context.Context) (*RefreshResult, error) {
 		if meta == nil {
 			continue
 		}
-		row, _, err := m.upsertSeriesRow(ctx, meta, sr.Path, "", nil)
+		row, _, err := m.upsertSeriesRow(ctx, meta, sr.Path, "", nil, sr.LibraryID)
 		if err != nil {
 			return res, err
 		}

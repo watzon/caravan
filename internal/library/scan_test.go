@@ -825,3 +825,74 @@ func TestScanAbsorbsPendingRequests(t *testing.T) {
 		}
 	}
 }
+
+// The generalized form of "a disabled adult tree is not walked", now that any
+// library can be switched off: an inactive library's root is not walked, the
+// rows already under it survive the rescan that skipped them, and switching it
+// back on finds the files again.
+//
+// A television library is the fixture on purpose. The adult module could only
+// ever be off as a whole, so this is the capability the switch gained by moving
+// onto the rows, and the preservation rule is the one thing about it that must
+// not be adult-shaped.
+func TestScanSkipsAnInactiveLibraryAndKeepsItsRows(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+	seedSeries(h)
+
+	anime := &core.Library{Kind: core.LibraryKindTV, Name: "Anime",
+		RootPath: "library/Anime", Provider: core.ProviderTMDB}
+	if err := h.st.CreateLibrary(ctx, anime); err != nil {
+		t.Fatalf("CreateLibrary: %v", err)
+	}
+
+	raw := "library/Anime/Planet.Earth.II.S01E01.720p.mkv"
+	h.parser["Planet.Earth.II.S01E01.720p.mkv"] = episodeParse("Planet Earth II", 1, 1)
+	h.writeVideo(raw, "episode bytes")
+	if res := h.scan(); res.Added != 1 {
+		t.Fatalf("first scan: %+v", res)
+	}
+	const organized = "library/Anime/Planet Earth II (2016)/Season 01/Planet Earth II (2016) - S01E01 - Islands.mkv"
+	if !h.exists(organized) {
+		t.Fatalf("first scan did not organize into the Anime library")
+	}
+
+	if err := h.st.SetLibraryActive(ctx, anime.ID, false); err != nil {
+		t.Fatalf("SetLibraryActive(false): %v", err)
+	}
+	// A new file dropped into the dormant root while it is off, so the walk has
+	// something to find if it walks at all.
+	h.parser["Planet.Earth.II.S01E02.720p.mkv"] = episodeParse("Planet Earth II", 1, 2)
+	h.writeVideo("library/Anime/Planet.Earth.II.S01E02.720p.mkv", "second episode bytes")
+
+	res := h.scan()
+	if res.Scanned != 0 || res.Added != 0 || res.Unmatched != 0 || res.Removed != 0 {
+		t.Errorf("the scan touched an inactive library: %+v", res)
+	}
+	// Nothing is parked either: a filename in the review queue is a UI trace of
+	// a shelf that is meant to be absent.
+	if parked := h.unmatched(); len(parked) != 0 {
+		t.Errorf("the inactive scan parked %+v", parked)
+	}
+	// And the row that was already there survives, which is the half a
+	// reconciliation would silently get wrong: a tree the walk skipped is not a
+	// tree whose files are gone.
+	if _, err := h.st.GetMediaFileByPath(ctx, organized); err != nil {
+		t.Errorf("the inactive scan dropped an already-imported file: %v", err)
+	}
+	if !h.exists(organized) {
+		t.Error("the inactive scan removed the file from disk")
+	}
+
+	if err := h.st.SetLibraryActive(ctx, anime.ID, true); err != nil {
+		t.Fatalf("SetLibraryActive(true): %v", err)
+	}
+	res = h.scan()
+	if res.Added != 1 || res.Updated != 1 || len(res.Errors) != 0 {
+		t.Fatalf("rescan after reactivation: %+v", res)
+	}
+	const second = "library/Anime/Planet Earth II (2016)/Season 01/Planet Earth II (2016) - S01E02 - Mountains.mkv"
+	if !h.exists(second) {
+		t.Errorf("reactivating did not find the file dropped while the library was off")
+	}
+}

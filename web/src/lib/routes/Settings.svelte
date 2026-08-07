@@ -2,12 +2,16 @@
   /** Settings overview and the route-compatible configuration panes. */
   import { onMount } from 'svelte';
   import { api, errorText } from '../api/client';
-  import { SETTING_TMDB_API_KEY, SETTING_TMDB_API_KEY_SET, type Settings } from '../api/types';
-  import AdultSettings from '../components/AdultSettings.svelte';
+  import {
+    SETTING_THETVDB_API_KEY,
+    SETTING_THETVDB_API_KEY_SET,
+    SETTING_THETVDB_PIN,
+    SETTING_TMDB_API_KEY,
+    SETTING_TMDB_API_KEY_SET,
+    type Settings,
+  } from '../api/types';
   import Badge from '../components/Badge.svelte';
-  import Banner from '../components/Banner.svelte';
   import Button from '../components/Button.svelte';
-  import Field from '../components/Field.svelte';
   import Icon from '../components/Icon.svelte';
   import DownloadsSettings from '../components/DownloadsSettings.svelte';
   import IndexerSettings from '../components/IndexerSettings.svelte';
@@ -16,11 +20,12 @@
   import LoadError from '../components/LoadError.svelte';
   import NotificationSettings from '../components/NotificationSettings.svelte';
   import PlaybackSettings from '../components/PlaybackSettings.svelte';
+  import ProviderKeyCard from '../components/ProviderKeyCard.svelte';
   import Skeleton from '../components/Skeleton.svelte';
-  import TextInput from '../components/TextInput.svelte';
   import QualityProfiles from '../components/QualityProfiles.svelte';
   import SecuritySettings from '../components/SecuritySettings.svelte';
   import SettingsCard from '../components/SettingsCard.svelte';
+  import StashboxSettings from '../components/StashboxSettings.svelte';
   import RuntimeDiagnostics from '../components/RuntimeDiagnostics.svelte';
   import StorageSettings from '../components/StorageSettings.svelte';
   import TasksSettings from '../components/TasksSettings.svelte';
@@ -36,6 +41,7 @@
   } from '../settings/catalog';
   import { pushToast } from '../state/toast.svelte';
   import { page } from '../state/page.svelte';
+  import { session } from '../state/session.svelte';
   import { system } from '../state/system.svelte';
 
   interface Props {
@@ -67,13 +73,12 @@
   let saving = $state(false);
   let overviewState = $state({ libraries: null as number | null, sources: null as number | null });
 
-  let tmdbKey = $state('');
-  let tmdbTest = $state<{ ok: boolean; message: string } | null>(null);
-  let testingTMDB = $state(false);
-
   let status = $derived(system.status);
   let metadataState = $derived(system.metadataCredential);
   let hasTMDBKey = $derived(settings?.[SETTING_TMDB_API_KEY_SET] === 'true');
+  // TMDB-only on purpose, and it stays that way as key-based providers arrive:
+  // Discover and the request flow are TMDB surfaces, so a TheTVDB key leaves
+  // the checklist item exactly as unfinished as it was.
   let metadataConfigured = $derived(
     hasTMDBKey || (status !== null && metadataState === 'ok'),
   );
@@ -88,7 +93,7 @@
     },
     {
       label: 'Connect metadata',
-      description: 'Add a TMDB API key for search, titles, and artwork.',
+      description: 'Add a TMDB API key for Discover, requests, and TMDB libraries.',
       href: '/settings/metadata#metadata',
       complete: metadataConfigured,
     },
@@ -111,9 +116,7 @@
     settings = null;
     error = null;
     try {
-      const loaded = await api.getSettings();
-      settings = loaded;
-      tmdbKey = '';
+      settings = await api.getSettings();
     } catch (err) {
       error = errorText(err);
     } finally {
@@ -170,19 +173,6 @@
       return false;
     } finally {
       saving = false;
-    }
-  }
-
-  async function testMetadata() {
-    testingTMDB = true;
-    try {
-      await api.testMetadataKey(tmdbKey.trim());
-      tmdbTest = { ok: true, message: 'TMDB accepted this key.' };
-    } catch (err) {
-      tmdbTest = { ok: false, message: errorText(err) };
-    } finally {
-      testingTMDB = false;
-      await system.refresh();
     }
   }
 </script>
@@ -287,8 +277,6 @@
       <DownloadsSettings {settings} {saving} {showAdvanced} onsave={save} />
     {:else if activeEntry?.route === '/settings/playback' && settings}
       <PlaybackSettings {settings} {saving} onsave={save} />
-    {:else if activeEntry?.route === '/settings/adult' && settings}
-      <AdultSettings {settings} {saving} onsave={save} />
     {:else if activeEntry?.route === '/settings/interface'}
       <InterfaceSettings />
     {:else if activeEntry?.route === '/settings/security' && settings}
@@ -324,58 +312,84 @@
       {/if}
 
       </section>
-    {:else if activeEntry?.route === '/settings/metadata'}
+    {:else if activeEntry?.route === '/settings/metadata' && settings}
       <section class="flex flex-col gap-6">
-        {#if metadataState !== 'ok'}
-          <Banner
-            tone="warning"
-            icon="warning"
-            title={metadataState === 'invalid' ? 'TMDB rejected this key' : 'No TMDB API key yet'}
-            message={metadataState === 'invalid'
-              ? system.metadataCredentialReason ||
-                'The key on file was refused. Correct it below and press Test.'
-              : 'Search, Discover and adding a title all read TMDB. Enter a key below and press Test.'} />
-        {/if}
+        <p class="text-sm text-ink-secondary">
+          Each provider keeps its own configuration here. Which providers a library uses — and in
+          which order — is set per library in
+          <a href="/settings/libraries#libraries" class="text-accent-text hover:underline">Libraries</a>.
+        </p>
 
-        <Field
-          label="TMDB API key"
-          for="tmdb-key"
-          help="Stored in the database, never in caravan.yaml or logs."
-          error={tmdbTest && !tmdbTest.ok ? tmdbTest.message : null}>
-          <TextInput
-            id="tmdb-key"
-            bind:value={tmdbKey}
-            type="password"
-            mono
-            placeholder="•••••"
-            oninput={() => (tmdbTest = null)} />
-        </Field>
-        {#if hasTMDBKey}
-          <p class="-mt-4 text-sm text-ink-secondary">A key is stored. Leave blank to keep it.</p>
-        {/if}
+        <!--
+          The key-based providers come first as a pair, then the keyless ones:
+          a reader scanning for something to enter finds every field before the
+          cards that only say "Ready".
+        -->
+        <ProviderKeyCard
+          providerId="tmdb"
+          title="TMDB"
+          description="Movies and series: titles, artwork, episode data, Discover, and requests."
+          inputId="tmdb-key"
+          keySetting={SETTING_TMDB_API_KEY}
+          keySetSetting={SETTING_TMDB_API_KEY_SET}
+          absentMessage="Discover, requests, and every library that uses TMDB read this key. Enter it below and press Test."
+          {settings}
+          {saving}
+          onsave={save} />
 
-        {#if tmdbTest?.ok}
-          <p class="-mt-4 text-sm text-success">✓ {tmdbTest.message}</p>
-        {/if}
+        <ProviderKeyCard
+          providerId="thetvdb"
+          title="TheTVDB"
+          description="Series: titles, episode data, and alternate orders from TheTVDB. Needs your own v4 API key."
+          inputId="thetvdb-key"
+          keySetting={SETTING_THETVDB_API_KEY}
+          keySetSetting={SETTING_THETVDB_API_KEY_SET}
+          absentMessage="Every series library that uses TheTVDB reads this key. Enter it below and press Test."
+          pin={{
+            setting: SETTING_THETVDB_PIN,
+            inputId: 'thetvdb-pin',
+            label: 'Subscriber PIN',
+            help: 'Only for user-supported keys. Leave blank for a licensed key.',
+          }}
+          {settings}
+          {saving}
+          onsave={save} />
 
-        <div class="flex flex-wrap items-center gap-2">
-          <Button
-            variant="primary"
-            disabled={saving || tmdbKey.trim() === ''}
-            onclick={() => save({ [SETTING_TMDB_API_KEY]: tmdbKey.trim() }, 'TMDB API key saved.')}>
-            <Icon name="check" size={14} />
-            {saving ? 'Saving…' : 'Save'}
-          </Button>
-          <Button
-            variant="secondary"
-            disabled={!hasTMDBKey || saving}
-            onclick={() => save({ [SETTING_TMDB_API_KEY]: '' }, 'TMDB API key cleared.')}>
-            Clear
-          </Button>
-          <Button variant="secondary" disabled={testingTMDB} onclick={testMetadata}>
-            {testingTMDB ? 'Testing…' : 'Test'}
-          </Button>
-        </div>
+        <SettingsCard
+          title="AniList"
+          description="Anime series: titles, episode counts, and artwork from AniList.">
+          {#snippet action()}
+            <Badge tone="success">Ready</Badge>
+          {/snippet}
+          <p class="text-sm text-ink-secondary">
+            AniList needs no key or account. To use it, add it to a series library’s provider list
+            in
+            <a href="/settings/libraries#libraries" class="text-accent-text hover:underline">Libraries</a>.
+          </p>
+        </SettingsCard>
+
+        <SettingsCard
+          title="TVmaze"
+          description="Series: titles, real season and episode data, and artwork from TVmaze.">
+          {#snippet action()}
+            <Badge tone="success">Ready</Badge>
+          {/snippet}
+          <p class="text-sm text-ink-secondary">
+            TVmaze needs no key or account. To use it, add it to a series library’s provider list
+            in
+            <a href="/settings/libraries#libraries" class="text-accent-text hover:underline">Libraries</a>.
+          </p>
+        </SettingsCard>
+
+        <!--
+          Gated on the session rather than on the provider list: every route the
+          card calls 404s while the module is off, so a card that mounted and
+          then failed to load would itself be the trace the module promises not
+          to leave.
+        -->
+        {#if session.adult}
+          <StashboxSettings />
+        {/if}
       </section>
     {/if}
   </div>

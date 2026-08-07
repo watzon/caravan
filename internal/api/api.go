@@ -102,10 +102,11 @@ type server struct {
 	// request while the status endpoint and the queue read it from others.
 	dirty atomic.Bool
 
-	// credentials is the cached verdict on the TMDB API key (SPEC §10.1, PLAN
-	// phase 10 task 2). It is why GET /system/status can report credential
-	// health on every poll without a single upstream call; see credentials.go.
-	credentials metadataCredential
+	// credentials is the cached verdict on each credentialed provider's API key
+	// (SPEC §10.1, PLAN phase 10 task 2). It is why GET /system/status can
+	// report credential health on every poll without a single upstream call;
+	// see credentials.go.
+	credentials metadataCredentials
 
 	// shutdown is the orderly-stop trigger POST /system/shutdown pulls, wired
 	// by the serving process to the same cancel a signal uses. Nil means this
@@ -263,6 +264,10 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	// down to one episode.
 	api.HandleFunc("GET /library/movies/{id}/releases", s.handleMovieReleases)
 	api.HandleFunc("POST /library/movies/{id}/grab", s.handleMovieGrab)
+	api.HandleFunc("POST /library/movies/{id}/move", s.handleMoveMovie)
+	api.HandleFunc("POST /library/series/{id}/move", s.handleMoveSeries)
+	api.HandleFunc("GET /search/releases", s.handleSearchReleases)
+	api.HandleFunc("POST /search/grab", s.handleSearchGrab)
 	api.HandleFunc("GET /library/series/{id}/releases", s.handleSeriesReleases)
 	api.HandleFunc("POST /library/series/{id}/grab", s.handleSeriesGrab)
 
@@ -312,8 +317,16 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	// seeded by the migration, so there is no create or delete — a library is
 	// part of the layout, not a thing a user adds.
 	api.HandleFunc("GET /libraries", s.handleListLibraries)
+	api.HandleFunc("POST /libraries", s.handleCreateLibrary)
+	api.HandleFunc("GET /libraries/providers", s.handleListProviders)
 	api.HandleFunc("PATCH /libraries/{id}", s.handleUpdateLibrary)
+	api.HandleFunc("DELETE /libraries/{id}", s.handleDeleteLibrary)
 	api.HandleFunc("PUT /libraries/{id}/indexers/{indexerID}", s.handleSetLibraryIndexer)
+	// Who may see one library. Here rather than under /adult because it is not
+	// an adult question any more: any library can be restricted, and the shelf
+	// whose promise is absence is described by its own flags like every other.
+	api.HandleFunc("GET /libraries/{id}/access", s.handleGetLibraryAccess)
+	api.HandleFunc("PUT /libraries/{id}/access", s.handleSetLibraryAccess)
 
 	// The adult module (PLAN phase 9). Its routes are registered on a mux of
 	// their own and mounted behind requireAdult, so the gate is a property of
@@ -345,11 +358,6 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	// granted member does not.
 	adult.HandleFunc("GET /adult/performers", s.handleAdultPerformers)
 	adult.HandleFunc("GET /adult/tags", s.handleAdultTags)
-	// The member-access card. It lives under /adult rather than beside
-	// GET /users so that the accounts API carries no adult field on an install
-	// that has never enabled the module.
-	adult.HandleFunc("GET /adult/users", s.handleListAdultUsers)
-	adult.HandleFunc("PUT /adult/users/{id}/access", s.handleSetAdultAccess)
 	// The Stash handoff (PLAN phase 11), the adult twin of
 	// /handoff/jellyfin. It lives here rather than beside its twin because
 	// Stash is an adult-module feature: with the module off it must be absent,
@@ -361,13 +369,23 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	adult.HandleFunc("GET /adult/stash", s.handleGetStash)
 	adult.HandleFunc("POST /adult/stash", s.handleSetStash)
 	adult.HandleFunc("POST /adult/stash/test", s.handleTestStash)
+	// The configured stash-box endpoints (PLAN Part 2 phase 3). They are the
+	// adult module's metadata sources, so they belong on this subtree even
+	// though the screen that edits them is Settings → Metadata: a list of
+	// catalogues a household subscribes to is exactly what "absent when off"
+	// has to cover. /test with no id in the path probes an unsaved
+	// configuration, as the indexer category and download-client endpoints do.
+	adult.HandleFunc("GET /adult/stashbox-instances", s.handleListStashboxInstances)
+	adult.HandleFunc("POST /adult/stashbox-instances", s.handleCreateStashboxInstance)
+	adult.HandleFunc("POST /adult/stashbox-instances/test", s.handleTestStashboxInstanceConfig)
+	adult.HandleFunc("PUT /adult/stashbox-instances/{id}", s.handleUpdateStashboxInstance)
+	adult.HandleFunc("DELETE /adult/stashbox-instances/{id}", s.handleDeleteStashboxInstance)
+	adult.HandleFunc("POST /adult/stashbox-instances/{id}/test", s.handleTestStashboxInstance)
+	// The module has no master switch left to register. Turning it on is
+	// POST /libraries with kind=adult — the one door into this subtree, and the
+	// reason it sits outside it — and turning it off is PATCH {active:false} on
+	// every adult library.
 	api.Handle("/adult/", s.requireAdult(adult))
-
-	// The master switch. It is the one adult route that cannot live behind
-	// requireAdult, because turning the module ON is what it is for and the
-	// gate would refuse it forever. It is admin-only instead, by the ordinary
-	// rule: memberAllowed does not name it.
-	api.HandleFunc("POST /settings/adult", s.handleSetAdultEnabled)
 
 	api.HandleFunc("GET /indexers", s.handleListIndexers)
 	api.HandleFunc("POST /indexers", s.handleCreateIndexer)
