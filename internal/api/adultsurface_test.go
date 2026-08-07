@@ -404,10 +404,11 @@ func TestDisablingTheModuleHidesSceneRequestsFromTheAdminToo(t *testing.T) {
 		"{}", withCookie(cookie)), http.StatusNotFound)
 
 	// Nothing was deleted: turning it back on finds the row as it was. The
-	// re-enable carries the credential the gate now insists on (PLAN phase 10
-	// task 5); see TestAdultEnableGate for the gate's own tests.
+	// re-enable carries the instance the gate now insists on (PLAN Part 2
+	// phase 7); see the enable-gate tests in credentials_test.go for its own.
 	wantStatus(t, doAuth(t, h, http.MethodPost, "/api/v1/settings/adult",
-		`{"enabled":true,"stashbox_api_key":"stash-key"}`, withCookie(cookie)), http.StatusOK)
+		`{"enabled":true,"instance":{"name":"StashDB","endpoint":"https://stashdb.org/graphql","api_key":"stash-key"}}`,
+		withCookie(cookie)), http.StatusOK)
 	rec = doAuth(t, h, http.MethodGet, "/api/v1/requests", "", withCookie(cookie))
 	if !strings.Contains(rec.Body.String(), "Deep Impact") {
 		t.Errorf("disabling deleted the scene request: %s", rec.Body.String())
@@ -712,7 +713,8 @@ func TestSettingsAdultSwitchCreatesTheLibraryAndIsAdminOnly(t *testing.T) {
 	}
 
 	wantStatus(t, doAuth(t, h, http.MethodPost, "/api/v1/settings/adult",
-		`{"enabled":true,"stashbox_api_key":"stash-key"}`, withCookie(adminCookie)), http.StatusOK)
+		`{"enabled":true,"instance":{"name":"StashDB","endpoint":"https://stashdb.org/graphql","api_key":"stash-key"}}`,
+		withCookie(adminCookie)), http.StatusOK)
 
 	lib, err := st.GetLibraryByKind(context.Background(), core.LibraryKindAdult)
 	if err != nil {

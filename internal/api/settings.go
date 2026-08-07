@@ -341,18 +341,19 @@ type adultEnabledRequest struct {
 	// wrong would be a module that turns itself off on a malformed save.
 	Enabled *bool `json:"enabled"`
 
-	// StashboxEndpoint and StashboxAPIKey are the credential the enable is made
-	// with (PLAN phase 10 task 5). They travel in this request rather than in a
-	// separate PUT /settings so the whole enable is one decision the server can
-	// refuse as a unit: a credential that does not work leaves the endpoint, the
-	// key and adult_enabled exactly as they were.
+	// Instance is the stash-box endpoint the enable is made with: the module's
+	// FIRST one, in the shape POST /adult/stashbox-instances takes. It travels
+	// in this request rather than in a separate call so the whole enable is one
+	// decision the server can refuse as a unit — an endpoint that does not
+	// answer leaves no instance row and the module off.
 	//
-	// Both are pointers so "not supplied" is distinguishable from "set to
-	// empty". Absent means "use what is already stored", which is what the
-	// settings screen sends when it re-enables a module that was configured
-	// once and switched off.
-	StashboxEndpoint *string `json:"stashbox_endpoint"`
-	StashboxAPIKey   *string `json:"stashbox_api_key"`
+	// It is optional, and its absence is not "use what is stored" but "there is
+	// already something to use". A module switched off and back on again has its
+	// instances still there (nothing deletes them), and re-proving a credential
+	// nobody edited would make a switch-on fail because a box is having a bad
+	// afternoon. An absent instance with an EMPTY table is the genuine gap, and
+	// that is the one refusal below.
+	Instance *stashboxInstanceRequest `json:"instance"`
 }
 
 // handleSetAdultEnabled flips the server-wide adult switch.
@@ -372,12 +373,20 @@ type adultEnabledRequest struct {
 // Disabling deletes nothing (see store.SetAdultEnabled): the library row, the
 // sites, the scenes and the files all stay, and turning it back on finds them
 // as they were.
-// Enabling is gated on a working stash-box credential (PLAN phase 10 task 5).
-// The whole request is refused before a single row is written when the
-// credential is missing or the endpoint rejects it, so a failed enable is
-// indistinguishable from one that never happened. Disabling never validates:
-// switching a module off must work when the credential behind it has expired,
-// which is one of the reasons a person switches it off.
+// Enabling is gated on the module having a stash-box endpoint it can reach.
+// The whole request is refused before a single row is written when the body's
+// endpoint is rejected, so a failed enable is indistinguishable from one that
+// never happened. Disabling never validates: switching a module off must work
+// when the credential behind it has expired, which is one of the reasons a
+// person switches it off.
+//
+// The gate is instance-shaped since 0026. An enable that CARRIES an instance is
+// the first-run flow — prove the endpoint, create the row, switch on — and an
+// enable that carries none is a re-enable, which makes zero upstream calls: the
+// instances survived the switch-off, nobody edited them, and failing a switch-on
+// because a box is having a bad afternoon would be a refusal about nothing the
+// user just did. Only an empty table with no instance in the body is the
+// genuine gap.
 func (s *server) handleSetAdultEnabled(w http.ResponseWriter, r *http.Request) {
 	var body adultEnabledRequest
 	if !decodeJSON(w, r, &body) {
@@ -389,7 +398,7 @@ func (s *server) handleSetAdultEnabled(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !*body.Enabled {
-		// Credentials in a disable body are ignored rather than rejected: the
+		// An instance in a disable body is ignored rather than rejected: the
 		// settings screen posts the card it is looking at, and a stale field on
 		// a switch-off is not a reason to fail.
 		if err := s.st.SetAdultEnabled(r.Context(), false); err != nil {
@@ -400,90 +409,70 @@ func (s *server) handleSetAdultEnabled(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	endpoint, key, ok := s.resolveAdultCredential(w, r, body)
-	if !ok {
-		return
+	ctx := r.Context()
+	if body.Instance != nil {
+		if !s.enableWithNewInstance(ctx, w, *body.Instance) {
+			return
+		}
+	} else {
+		instances, err := s.st.ListStashboxInstances(ctx)
+		if err != nil {
+			s.writeStoreError(w, "list stash-box instances", err)
+			return
+		}
+		if len(instances) == 0 {
+			writeCodedError(w, http.StatusBadRequest, CodeAdultCredentialAbsent,
+				"a stash-box endpoint is required to enable adult content")
+			return
+		}
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), credentialCheckTimeout)
-	defer cancel()
-	if err := s.mgr.ValidateAdultCredential(ctx, endpoint, key); err != nil {
-		// The endpoint's own message, for the same reason the indexer test
-		// returns one: "it did not work" without a reason cannot be acted on.
-		// It is not logged — see handleTestIndexer.
-		writeCodedError(w, http.StatusBadGateway, CodeAdultCredentialInvalid,
-			"stash-box test failed: "+err.Error())
-		return
-	}
-
-	// Ordered so no interruption can leave the module on without the credential
+	// Ordered so no interruption can leave the module on without the endpoint
 	// that was proved for it. SetAdultEnabled is last, and it is the only write
 	// here that anything reads as "the module is on".
-	//
-	// The credential goes in as one write because it is one value: two
-	// SetSetting calls could commit a new endpoint beside the old key if the
-	// second failed, and on a module that is already on that mismatched pair is
-	// live immediately — a combination nothing ever validated.
-	if err := s.st.SetSettings(r.Context(), map[string]string{
-		store.SettingStashboxEndpoint: endpoint,
-		store.SettingStashboxAPIKey:   key,
-	}); err != nil {
-		s.writeStoreError(w, "write settings", err)
-		return
-	}
-	if err := s.st.SetAdultEnabled(r.Context(), true); err != nil {
+	if err := s.st.SetAdultEnabled(ctx, true); err != nil {
 		s.writeStoreError(w, "set adult enabled", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"enabled": true})
 }
 
-// resolveAdultCredential works out which stash-box endpoint and key the enable
-// is being made with, refusing the request when there is nothing to test.
+// enableWithNewInstance proves the body's endpoint and creates the instance,
+// writing its own refusals. It reports whether the caller may go on to switch
+// the module on.
 //
-// A field the body omits falls back to the stored value, so re-enabling a
-// module that was configured once needs no credential in the body at all. A
-// field the body sends empty is taken literally — clearing the endpoint means
-// "the TPDB preset", which is exactly what a blank endpoint means everywhere
-// else — but an empty key is nothing to authenticate with and is refused.
-func (s *server) resolveAdultCredential(w http.ResponseWriter, r *http.Request, body adultEnabledRequest) (endpoint, key string, ok bool) {
-	ctx := r.Context()
-
-	endpoint, err := s.credentialField(ctx, body.StashboxEndpoint, store.SettingStashboxEndpoint)
-	if err != nil {
-		s.writeStoreError(w, "read stash-box endpoint", err)
-		return "", "", false
+// Proved BEFORE the row is written, which is the ordering the whole enable
+// hangs off: a rejected credential must leave no instance row behind, or the
+// next screen shows an endpoint that has never worked as though it were
+// configured. The minting itself is the create handler's own
+// (mintStashboxInstance), so the first instance on a fresh install takes the
+// same bare id an upgraded install is carried into.
+func (s *server) enableWithNewInstance(ctx context.Context, w http.ResponseWriter,
+	body stashboxInstanceRequest,
+) bool {
+	apiKey := ""
+	if body.APIKey != nil {
+		apiKey = *body.APIKey
 	}
-	// Blank still means "the TPDB preset" on this route, which is the last
-	// reader of that sentinel: an instance row may not hold it (see
-	// core.StashboxInstance.Endpoint), and phase 7 replaces this whole
-	// resolution with an instance-carrying body.
-	if endpoint != "" {
-		if err := stashboxEndpointShape(endpoint); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return "", "", false
-		}
+	in, msg := body.config(apiKey)
+	if msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
+		return false
 	}
 
-	key, err = s.credentialField(ctx, body.StashboxAPIKey, store.SettingStashboxAPIKey)
-	if err != nil {
-		s.writeStoreError(w, "read stash-box api key", err)
-		return "", "", false
+	testCtx, cancel := context.WithTimeout(ctx, credentialCheckTimeout)
+	defer cancel()
+	if err := s.mgr.ValidateAdultCredential(testCtx, in.Endpoint, in.APIKey); err != nil {
+		// The endpoint's own message, for the same reason the indexer test
+		// returns one: "it did not work" without a reason cannot be acted on.
+		// It is not logged — see handleTestIndexer.
+		writeCodedError(w, http.StatusBadGateway, CodeAdultCredentialInvalid,
+			"stash-box test failed: "+err.Error())
+		return false
 	}
-	if key == "" {
-		writeCodedError(w, http.StatusBadRequest, CodeAdultCredentialAbsent,
-			"a stash-box API key is required to enable adult content")
-		return "", "", false
-	}
-	return endpoint, key, true
-}
 
-// credentialField resolves one supplied-or-stored credential field.
-func (s *server) credentialField(ctx context.Context, supplied *string, key string) (string, error) {
-	if supplied != nil {
-		return strings.TrimSpace(*supplied), nil
-	}
-	return s.settingValue(ctx, key)
+	_, ok := s.mintStashboxInstance(ctx, w, body)
+	return ok
 }
 
 // validateDLNASettings refuses values the media server would silently reinterpret.

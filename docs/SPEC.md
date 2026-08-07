@@ -315,7 +315,11 @@ The first run contains no adult-content references at all: the module is invisib
 
 ### 10.2 Enabling adult content
 
-Adult content is off until it is deliberately switched on, and the switch is gated on a working credential. `POST /settings/adult` takes `{"enabled": true, "stashbox_endpoint": "…", "stashbox_api_key": "…"}` — a blank endpoint means the TPDB preset — validates the pair against the endpoint before writing anything, and commits `adult_enabled` last. A missing or rejected credential leaves the endpoint, the key and the switch exactly as they were, so cancelling changes nothing because a failed enable already changed nothing. Disabling never validates: switching the module off has to work when the credential behind it has expired.
+Adult content is off until it is deliberately switched on, and the switch is gated on the module having a stash-box endpoint it can reach. `POST /settings/adult` takes `{"enabled": true, "instance": {"name": "…", "endpoint": "…", "api_key": "…"}}`, validates the endpoint and key against the box before writing anything, creates the instance row, and commits `adult_enabled` last. A rejected or malformed credential leaves no instance row and the switch exactly as it was, so cancelling changes nothing because a failed enable already changed nothing.
+
+The instance is optional, and its absence means "there is already one on file" rather than "use what is stored". Switching the module off deletes no instances, so a re-enable with no instance in the body makes **zero** upstream calls — re-proving a credential nobody edited would fail a switch-on because a box was having a bad afternoon, and the per-instance Test button is where "is this still good" is asked. An enable with no instance and an empty instance table is the genuine gap and is the one refusal (`adult_credential_absent`). Disabling never validates: switching the module off has to work when the credential behind it has expired.
+
+Endpoints are plural (§4): the first instance an install ever creates takes the bare provider id `stashbox`, whichever door it came in through, and every one after it takes `stashbox:<slug>`. Managing them afterwards is `/adult/stashbox-instances`, which lives behind the adult gate — an endpoint list is a list of catalogues a household subscribes to.
 
 ---
 
@@ -326,7 +330,7 @@ Resource-oriented, consumed by the embedded SPA. Outline:
 ```
 GET/PUT   /settings
 POST      /settings/metadata/test   # live TMDB key check (body: api_key, or the stored one)
-POST      /settings/adult           # adult module switch; enabling validates the stash-box credential first
+POST      /settings/adult           # adult module switch; a first enable carries the stash-box instance and validates it first
 GET       /system/status            # mode, storage root, engine health, metadata credential health, dirty flag
 POST      /system/shutdown          # safe shutdown (portable mode)
 POST      /system/verify            # dirty-eject recovery: integrity check + rescan, clears the dirty flag

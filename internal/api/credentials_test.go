@@ -718,26 +718,29 @@ func TestTheTVDBCredentialIsTrimmedOnTheWayIn(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Adult enable gating (PLAN phase 10 task 5).
+// Adult enable gating (PLAN phase 10 task 5, reshaped by Part 2 phase 7).
 //
 // Turning the module on is one decision, and the server refuses it as a unit: a
-// stash-box credential that does not work leaves the endpoint, the key and
-// adult_enabled exactly as they were. Cancel changes nothing because a failed
-// enable already changed nothing.
+// stash-box endpoint that does not answer leaves no instance row and the module
+// off. Cancel changes nothing because a failed enable already changed nothing.
+//
+// The credential travels as an INSTANCE now rather than as a settings pair —
+// stash-box is a protocol, and one pair could only ever describe one of the
+// boxes speaking it (migration 0026).
 
-// adultSettings reads the two stash-box settings and the module switch.
-func adultSettings(t *testing.T, st *store.Store) (endpoint, key string, enabled bool) {
+// adultState reads the configured instances and the module switch.
+func adultState(t *testing.T, st *store.Store) (instances []core.StashboxInstance, enabled bool) {
 	t.Helper()
 	ctx := context.Background()
-	settings, err := st.AllSettings(ctx)
+	instances, err := st.ListStashboxInstances(ctx)
 	if err != nil {
-		t.Fatalf("AllSettings: %v", err)
+		t.Fatalf("ListStashboxInstances: %v", err)
 	}
 	enabled, err = st.AdultEnabled(ctx)
 	if err != nil {
 		t.Fatalf("AdultEnabled: %v", err)
 	}
-	return settings[store.SettingStashboxEndpoint], settings[store.SettingStashboxAPIKey], enabled
+	return instances, enabled
 }
 
 func TestAdultEnableLeavesEverythingOffWhenTheCredentialFails(t *testing.T) {
@@ -748,29 +751,29 @@ func TestAdultEnableLeavesEverythingOffWhenTheCredentialFails(t *testing.T) {
 		wantStatus  int
 		wantCode    string
 		// wantValidated is whether the endpoint should have been contacted at
-		// all. A malformed endpoint is refused before any request is made.
+		// all. A body the server can refuse on its face is refused before any
+		// request is made.
 		wantValidated bool
 	}{
 		{
-			name:       "no credential anywhere",
+			name:       "no instance in the body and none on file",
 			body:       `{"enabled":true}`,
 			wantStatus: http.StatusBadRequest,
 			wantCode:   CodeAdultCredentialAbsent,
 		},
 		{
-			name:       "blank key",
-			body:       `{"enabled":true,"stashbox_api_key":"  "}`,
+			name:       "an instance with no name",
+			body:       `{"enabled":true,"instance":{"endpoint":"https://stashdb.org/graphql","api_key":"k"}}`,
 			wantStatus: http.StatusBadRequest,
-			wantCode:   CodeAdultCredentialAbsent,
 		},
 		{
-			name:       "endpoint that could never be dialled",
-			body:       `{"enabled":true,"stashbox_endpoint":"/graphql","stashbox_api_key":"k"}`,
+			name:       "an endpoint that could never be dialled",
+			body:       `{"enabled":true,"instance":{"name":"StashDB","endpoint":"/graphql","api_key":"k"}}`,
 			wantStatus: http.StatusBadRequest,
 		},
 		{
 			name:          "the endpoint rejects the key",
-			body:          `{"enabled":true,"stashbox_endpoint":"https://stashdb.org/graphql","stashbox_api_key":"nope"}`,
+			body:          `{"enabled":true,"instance":{"name":"StashDB","endpoint":"https://stashdb.org/graphql","api_key":"nope"}}`,
 			validateErr:   fmt.Errorf("stashbox: SearchSites: unauthorized"),
 			wantStatus:    http.StatusBadGateway,
 			wantCode:      CodeAdultCredentialInvalid,
@@ -791,12 +794,12 @@ func TestAdultEnableLeavesEverythingOffWhenTheCredentialFails(t *testing.T) {
 				wantErrorBody(t, rec)
 			}
 
-			endpoint, key, enabled := adultSettings(t, st)
+			instances, enabled := adultState(t, st)
 			if enabled {
 				t.Error("adult_enabled is on after a failed enable")
 			}
-			if endpoint != "" || key != "" {
-				t.Errorf("a failed enable stored endpoint=%q key=%q, want nothing", endpoint, key)
+			if len(instances) != 0 {
+				t.Errorf("a failed enable wrote %+v, want no instance row", instances)
 			}
 			if got := len(mgr.adultCredentials()) > 0; got != tt.wantValidated {
 				t.Errorf("credential contacted = %v, want %v", got, tt.wantValidated)
@@ -805,11 +808,15 @@ func TestAdultEnableLeavesEverythingOffWhenTheCredentialFails(t *testing.T) {
 	}
 }
 
-func TestAdultEnableCommitsTheCredentialItProved(t *testing.T) {
+// The first instance an install ever has takes the BARE id, whichever door it
+// came in through: the enable flow and POST /adult/stashbox-instances mint
+// through one function, so a fresh install reaches the same state migration
+// 0026 carries an upgraded one into.
+func TestAdultEnableCommitsTheInstanceItProved(t *testing.T) {
 	h, st, mgr := newTestServer(t)
 
 	rec := do(t, h, http.MethodPost, "/api/v1/settings/adult",
-		`{"enabled":true,"stashbox_endpoint":"https://stashdb.org/graphql","stashbox_api_key":"k"}`)
+		`{"enabled":true,"instance":{"name":"StashDB","endpoint":"https://stashdb.org/graphql","api_key":"k"}}`)
 	wantStatus(t, rec, http.StatusOK)
 
 	// The credential in the request is the one that was tested — not whatever
@@ -819,12 +826,20 @@ func TestAdultEnableCommitsTheCredentialItProved(t *testing.T) {
 		t.Fatalf("validated %v, want exactly [%v]", got, want)
 	}
 
-	endpoint, key, enabled := adultSettings(t, st)
+	instances, enabled := adultState(t, st)
 	if !enabled {
 		t.Error("adult_enabled is off after a passing enable")
 	}
-	if endpoint != want.endpoint || key != want.key {
-		t.Errorf("stored endpoint=%q key=%q, want %q / %q", endpoint, key, want.endpoint, want.key)
+	if len(instances) != 1 {
+		t.Fatalf("instances = %+v, want the one the enable created", instances)
+	}
+	in := instances[0]
+	if in.ProviderID != core.ProviderStashbox {
+		t.Errorf("provider_id = %q, want the bare %q for an install's first instance",
+			in.ProviderID, core.ProviderStashbox)
+	}
+	if in.Name != "StashDB" || in.Endpoint != want.endpoint || in.APIKey != want.key {
+		t.Errorf("instance = %+v, want the body's own values", in)
 	}
 	// The enable created the library row the module needs, exactly as before.
 	if _, err := st.GetLibraryByKind(context.Background(), core.LibraryKindAdult); err != nil {
@@ -832,34 +847,28 @@ func TestAdultEnableCommitsTheCredentialItProved(t *testing.T) {
 	}
 }
 
-// A blank endpoint is legal and means the TPDB preset — pasting a key is the
-// whole configuration for the default provider.
-func TestAdultEnableAcceptsTheDefaultEndpoint(t *testing.T) {
+// Re-enabling a module that already has an endpoint makes ZERO upstream calls.
+//
+// Nothing deletes an instance when the module goes off, so a switch-on is not a
+// moment anybody supplied a credential — and failing it because a box is having
+// a bad afternoon would be a refusal about nothing the user just did. The
+// per-instance Test button is where "is this still good" is asked.
+func TestAdultReEnableWithAnExistingInstanceValidatesNothing(t *testing.T) {
 	h, st, mgr := newTestServer(t)
-
-	wantStatus(t, do(t, h, http.MethodPost, "/api/v1/settings/adult",
-		`{"enabled":true,"stashbox_endpoint":"","stashbox_api_key":"k"}`), http.StatusOK)
-
-	if got := mgr.adultCredentials(); len(got) != 1 || got[0].endpoint != "" {
-		t.Fatalf("validated %v, want the blank endpoint forwarded as the preset", got)
-	}
-	if _, _, enabled := adultSettings(t, st); !enabled {
-		t.Error("adult_enabled is off after a passing enable")
-	}
-}
-
-// Re-enabling a module that was configured once needs no credential in the
-// body: the stored one is tested instead.
-func TestAdultEnableFallsBackToTheStoredCredential(t *testing.T) {
-	h, st, mgr := newTestServer(t)
-	setSetting(t, st, store.SettingStashboxEndpoint, "https://stashdb.org/graphql")
-	setSetting(t, st, store.SettingStashboxAPIKey, "stored")
+	seedStashboxInstance(t, st, core.ProviderStashbox, "ThePornDB", "https://theporndb.net/graphql")
+	mgr.adultCredentialErr = fmt.Errorf("stashbox: SearchSites: unauthorized")
 
 	wantStatus(t, do(t, h, http.MethodPost, "/api/v1/settings/adult", `{"enabled":true}`), http.StatusOK)
 
-	want := adultCredential{endpoint: "https://stashdb.org/graphql", key: "stored"}
-	if got := mgr.adultCredentials(); len(got) != 1 || got[0] != want {
-		t.Fatalf("validated %v, want exactly [%v]", got, want)
+	if got := mgr.adultCredentials(); len(got) != 0 {
+		t.Fatalf("a re-enable contacted %v, want no upstream call at all", got)
+	}
+	instances, enabled := adultState(t, st)
+	if !enabled {
+		t.Error("adult_enabled is off after a re-enable")
+	}
+	if len(instances) != 1 {
+		t.Errorf("instances = %+v, want the existing one untouched", instances)
 	}
 }
 
@@ -868,14 +877,15 @@ func TestAdultEnableFallsBackToTheStoredCredential(t *testing.T) {
 func TestAdultDisableNeverValidates(t *testing.T) {
 	h, st, mgr := newTestServer(t)
 	wantStatus(t, do(t, h, http.MethodPost, "/api/v1/settings/adult",
-		`{"enabled":true,"stashbox_api_key":"k"}`), http.StatusOK)
+		`{"enabled":true,"instance":{"name":"StashDB","endpoint":"https://stashdb.org/graphql","api_key":"k"}}`),
+		http.StatusOK)
 
 	mgr.adultCredentialErr = fmt.Errorf("stashbox: SearchSites: unauthorized")
 	before := len(mgr.adultCredentials())
 
 	wantStatus(t, do(t, h, http.MethodPost, "/api/v1/settings/adult", `{"enabled":false}`), http.StatusOK)
 
-	if _, _, enabled := adultSettings(t, st); enabled {
+	if _, enabled := adultState(t, st); enabled {
 		t.Error("adult_enabled survived a disable")
 	}
 	if after := len(mgr.adultCredentials()); after != before {

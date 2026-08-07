@@ -46,21 +46,17 @@ const (
 	// thing, which is why both keys are trimmed on the way in.
 	SettingTheTVDBAPIKey = "thetvdb_api_key"
 	SettingTheTVDBPIN    = "thetvdb_pin"
-	// SettingStashboxEndpoint and SettingStashboxAPIKey configure the adult
-	// library's metadata provider (PLAN phase 9 task 1). "stash-box" is a
-	// protocol rather than a service, so the endpoint is a value: TPDB is the
-	// preset (stashbox.DefaultEndpoint), and StashDB, FansDB or a self-hosted
-	// box are the same code with a different URL. An unset endpoint means the
-	// preset, which is why "just paste a key" is the whole configuration.
+	// SettingStashboxEndpoint and SettingStashboxAPIKey are RETIRED. They
+	// configured the adult library's single metadata endpoint until migration
+	// 0026 carried the pair into `stashbox_instances` and deleted both rows;
+	// "stash-box" is a protocol rather than a service, and one key-value pair
+	// could only ever describe one of the boxes speaking it.
 	//
-	// Neither key does anything on its own. The adult module is gated by its
-	// own enable flag and a per-user grant, and nothing reads these until both
-	// are satisfied — a stored endpoint is not a reason to talk to it.
-	//
-	// RETIRED: migration 0026 carried the pair into `stashbox_instances` and
-	// deleted both rows, and neither is writable through PUT /settings any more.
-	// The constants outlive the rows because internal/stash still names them;
-	// they go when that reader does (PLAN Part 2 phase 6).
+	// Nothing writes them, nothing reads them, and neither is writable through
+	// PUT /settings. What still names them is the migration's own upgrade-in-
+	// place tests, which have to write the pre-0026 rows to prove they are
+	// carried in — so the constants are the old vocabulary kept for the code
+	// that must still spell it, not configuration. Do not add a reader.
 	SettingStashboxEndpoint = "stashbox_endpoint"
 	SettingStashboxAPIKey   = "stashbox_api_key"
 	// SettingAdultEnabled is the server-wide switch for the adult module (PLAN

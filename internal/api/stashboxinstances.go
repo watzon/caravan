@@ -123,6 +123,30 @@ func (s *server) handleCreateStashboxInstance(w http.ResponseWriter, r *http.Req
 	if !decodeJSON(w, r, &body) {
 		return
 	}
+	ctx := r.Context()
+	in, ok := s.mintStashboxInstance(ctx, w, body)
+	if !ok {
+		return
+	}
+	dto, err := s.stashboxInstanceDTO(ctx, *in)
+	if err != nil {
+		s.writeStoreError(w, "count stash-box instance use", err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, dto)
+}
+
+// mintStashboxInstance validates a create body, derives the instance's
+// permanent id and writes the row, writing its own refusals and reporting
+// whether it got that far.
+//
+// It is a function rather than the handler's body because the enable flow
+// creates the first instance too (handleSetAdultEnabled): two doors, one
+// id-minting rule. Duplicating it is how a fresh install ends up with an
+// install-wide id that differs from the one an upgrade is carried into.
+func (s *server) mintStashboxInstance(ctx context.Context, w http.ResponseWriter,
+	body stashboxInstanceRequest,
+) (*core.StashboxInstance, bool) {
 	apiKey := ""
 	if body.APIKey != nil {
 		apiKey = *body.APIKey
@@ -130,14 +154,13 @@ func (s *server) handleCreateStashboxInstance(w http.ResponseWriter, r *http.Req
 	in, msg := body.config(apiKey)
 	if msg != "" {
 		writeError(w, http.StatusBadRequest, msg)
-		return
+		return nil, false
 	}
-	ctx := r.Context()
 
 	existing, err := s.st.ListStashboxInstances(ctx)
 	if err != nil {
 		s.writeStoreError(w, "list stash-box instances", err)
-		return
+		return nil, false
 	}
 	if len(existing) == 0 {
 		in.ProviderID = core.ProviderStashbox
@@ -150,24 +173,19 @@ func (s *server) handleCreateStashboxInstance(w http.ResponseWriter, r *http.Req
 			// id here would mint one nobody can recognize in a chain.
 			writeError(w, http.StatusBadRequest,
 				"name must contain at least one letter or digit")
-			return
+			return nil, false
 		}
 		in.ProviderID = core.ProviderStashbox + ":" + slug
 	}
 	if !s.stashboxInstanceFree(w, existing, in.Name, in.ProviderID, 0) {
-		return
+		return nil, false
 	}
 
 	if err := s.st.UpsertStashboxInstance(ctx, &in); err != nil {
 		s.writeStoreError(w, "create stash-box instance", err)
-		return
+		return nil, false
 	}
-	dto, err := s.stashboxInstanceDTO(ctx, in)
-	if err != nil {
-		s.writeStoreError(w, "count stash-box instance use", err)
-		return
-	}
-	writeJSON(w, http.StatusCreated, dto)
+	return &in, true
 }
 
 // handleUpdateStashboxInstance edits the two fields an instance owns after
