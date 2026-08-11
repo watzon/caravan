@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { api, errorText } from '../api/client';
   import type { Library, LibraryKind, QualityProfile } from '../api/types';
+  import { useI18n } from '../i18n.svelte';
   import { pushToast } from '../state/toast.svelte';
 
   interface Props {
@@ -13,6 +14,7 @@
   }
 
   let { profileID, kind, onassign }: Props = $props();
+  const { t } = useI18n();
 
   const fieldID = $props.id();
   const selectID = `${fieldID}-select`;
@@ -50,11 +52,11 @@
       ? profiles.find((profile) => profile.id === library.quality_profile_id) ?? null
       : systemDefault,
   );
-  let inheritedSource = $derived(library?.quality_profile_id ? library.name : 'system default');
+  let inheritedSource = $derived(library?.quality_profile_id ? library.name : t('component.itemQualityProfile.systemDefault'));
   let explicitProfile = $derived(profiles.find((profile) => profile.id === profileID) ?? null);
 
   function profileName(profile: QualityProfile | null): string {
-    return profile?.name ?? 'Unknown profile';
+    return profile?.name ?? t('component.itemQualityProfile.unknown');
   }
 
   async function assign(event: Event) {
@@ -78,31 +80,31 @@
 </script>
 
 <div class="min-w-0">
-  <dt class="micro-label"><label for={selectID}>Quality profile</label></dt>
+  <dt class="micro-label"><label for={selectID}>{t('component.itemQualityProfile.label')}</label></dt>
   <dd class="mt-1 flex min-w-0 flex-col gap-1.5">
     {#if loading}
-      <span class="text-sm text-ink-secondary">Loading profile choices…</span>
+      <span class="text-sm text-ink-secondary">{t('component.itemQualityProfile.loading')}</span>
     {:else if loadError}
       <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-danger" role="alert">
-        <span>Could not load profile choices: {loadError}</span>
+        <span>{t('component.itemQualityProfile.loadError', { message: loadError })}</span>
         <button
           type="button"
           class="font-medium text-danger underline underline-offset-2 hover:text-ink focus:outline-none focus:ring-2 focus:ring-accent"
           onclick={load}>
-          Retry
+          {t('component.itemQualityProfile.retry')}
         </button>
       </div>
     {:else}
       <select
         id={selectID}
-        aria-label="Quality profile"
+        aria-label={t('component.itemQualityProfile.label')}
         aria-describedby={stateID}
         value={String(profileID)}
         disabled={saving}
         onchange={assign}
         class="h-8 w-full rounded-sm border border-border-strong bg-raised px-2 text-sm text-ink
                focus:border-accent focus:outline-none disabled:cursor-wait disabled:opacity-50">
-        <option value="0">Inherit</option>
+        <option value="0">{t('component.itemQualityProfile.inherit')}</option>
         {#each profiles as profile (profile.id)}
           <option value={String(profile.id)}>{profile.name}</option>
         {/each}
@@ -110,9 +112,12 @@
 
       <p id={stateID} class="text-sm text-ink-secondary" aria-live="polite">
         {#if profileID === 0}
-          Inherited from {inheritedSource}: <span class="font-medium text-ink">{profileName(inheritedProfile)}</span>
+          {t('component.itemQualityProfile.inherited', {
+            source: inheritedSource,
+            profile: profileName(inheritedProfile),
+          })}
         {:else}
-          Override: <span class="font-medium text-ink">{profileName(explicitProfile)}</span>
+          {t('component.itemQualityProfile.override', { profile: profileName(explicitProfile) })}
         {/if}
       </p>
     {/if}

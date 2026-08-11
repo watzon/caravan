@@ -9,6 +9,7 @@
 
 import type { Episode, Movie, Series } from './api/types';
 import { isFuture } from './format';
+import { translate } from './i18n.svelte';
 
 export type Tone = 'success' | 'warning' | 'danger' | 'accent' | 'info' | 'neutral';
 
@@ -26,12 +27,12 @@ export interface StatusMeta {
 }
 
 export const STATUS: Record<StatusKey, StatusMeta> = {
-  downloaded: { label: 'Downloaded', tone: 'success' },
-  incomplete: { label: 'Incomplete', tone: 'warning' },
-  wanted: { label: 'Wanted', tone: 'accent' },
-  missing: { label: 'Missing', tone: 'danger' },
-  unaired: { label: 'Unaired', tone: 'info' },
-  unmonitored: { label: 'Unmonitored', tone: 'neutral' },
+  downloaded: { get label() { return translate('status.downloaded'); }, tone: 'success' },
+  incomplete: { get label() { return translate('status.incomplete'); }, tone: 'warning' },
+  wanted: { get label() { return translate('status.wanted'); }, tone: 'accent' },
+  missing: { get label() { return translate('status.missing'); }, tone: 'danger' },
+  unaired: { get label() { return translate('status.unaired'); }, tone: 'info' },
+  unmonitored: { get label() { return translate('status.unmonitored'); }, tone: 'neutral' },
 };
 
 /** One chip in the library filter row. */

@@ -201,7 +201,7 @@ describe('IndexerSettings category picker', () => {
     await settle();
 
     expect((host.querySelector('#indexer-key') as HTMLInputElement).value).toBe('');
-    expect(host.textContent).toContain('A key is stored. Leave blank to keep it.');
+    expect(host.textContent).toContain('A key is stored. Leave this blank to keep it.');
     expect(host.querySelector('#indexer-categories')?.closest('[data-settings-advanced]')).not.toBeNull();
     expect((host.querySelector('#indexer-priority') as HTMLInputElement).value).toBe('25');
     expect(host.textContent).toContain('Priority 25');
@@ -243,7 +243,7 @@ describe('IndexerSettings category picker', () => {
     clickButton('Edit');
     await settle();
     type('indexer-priority', '-1');
-    expect(host.textContent).toContain('Priority must be a whole number of zero or greater.');
+    expect(host.textContent).toContain('Priority must be a whole number of zero or more.');
     const invalidSave = [...editor().querySelectorAll('button')].find(
       (button) => button.textContent?.trim() === 'Fix errors',
     );

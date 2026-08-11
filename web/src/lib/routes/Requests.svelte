@@ -47,12 +47,15 @@
   import { session } from '../state/session.svelte';
   import { pushToast } from '../state/toast.svelte';
   import { REQUESTS_POLL_MS, requests } from '../state/requests.svelte';
+  import { useI18n } from '../i18n.svelte';
+
+  const { t } = useI18n();
 
   type Tab = 'pending' | 'approved';
 
   const TABS: { key: Tab; label: string }[] = [
-    { key: 'pending', label: 'Awaiting approval' },
-    { key: 'approved', label: 'Approved' },
+    { key: 'pending', label: t('route.requests.pendingTab') },
+    { key: 'approved', label: t('route.requests.approvedTab') },
   ];
 
   let approving = $state<MediaRequest | null>(null);
@@ -99,8 +102,8 @@
       requests.forget(request.id);
       pushToast(
         result.search_queued
-          ? `Approved ${request.title} — search queued`
-          : `Approved ${request.title}`,
+          ? t('route.requests.approvedQueued', { title: request.title })
+          : t('route.requests.approved', { title: request.title }),
         'success',
       );
     } catch (err) {
@@ -117,7 +120,9 @@
       await api.dismissRequest(request.id);
       requests.forget(request.id);
       pushToast(
-        isAdmin ? `Dismissed ${request.title}` : `Cancelled ${request.title}`,
+        isAdmin
+          ? t('route.requests.dismissed', { title: request.title })
+          : t('route.requests.cancelled', { title: request.title }),
         'neutral',
       );
       // A member's list keeps every status, so the row belongs back on screen
@@ -140,7 +145,7 @@
       {tabs}
       active={tab}
       onchange={(key) => (tab = key)}
-      ariaLabel="Requests filter" />
+      ariaLabel={t('route.requests.filter')} />
   {/if}
 
   {#if requests.error && requests.items === null}
@@ -156,16 +161,16 @@
       icon="inbox"
       title={isAdmin
         ? tab === 'pending'
-          ? 'No pending requests'
-          : 'Nothing approved yet'
-        : 'No requests yet'}
+          ? t('route.requests.emptyPendingTitle')
+          : t('route.requests.emptyApprovedTitle')
+        : t('route.requests.emptyTitle')}
       message={isAdmin
         ? tab === 'pending'
-          ? 'Nothing is waiting on a decision. Requests made from Discover show up here until they are approved or dismissed.'
-          : 'Approved requests become library items and land here.'
-        : 'Anything you ask for from Discover shows up here, and stays until it is approved or turned down.'}>
+          ? t('route.requests.emptyPendingMessage')
+          : t('route.requests.emptyApprovedMessage')
+        : t('route.requests.emptyMessage')}>
       {#snippet action()}
-        <Button variant="primary" href="/discover">Open Discover</Button>
+        <Button variant="primary" href="/discover">{t('route.requests.openDiscover')}</Button>
       {/snippet}
     </EmptyState>
   {:else}
@@ -209,16 +214,16 @@
               <span>{requestSeasonsLabel(request)}</span>
               {#if request.media_type === 'movie' && request.min_availability}
                 <span class="text-ink-muted">·</span>
-                <span>Wants: {availabilityLabel(request.min_availability)}</span>
+                <span>{t('route.requests.wants', { availability: availabilityLabel(request.min_availability) })}</span>
               {/if}
               <span class="text-ink-muted">·</span>
-              <span>Requested {formatDate(request.created_at)}</span>
+              <span>{t('route.requests.requested', { date: formatDate(request.created_at) })}</span>
               <!-- Empty for a row that predates accounts, one made while the
                    server ran open, or an asker since deleted. All three mean
                    the same thing to whoever is reading: nobody left to ask. -->
               {#if isAdmin && request.requested_by_username}
                 <span class="text-ink-muted">·</span>
-                <span>by {request.requested_by_username}</span>
+                <span>{t('route.requests.by', { username: request.requested_by_username })}</span>
               {/if}
             </p>
           </div>
@@ -231,7 +236,7 @@
                   size="sm"
                   disabled={dismissing === request.id || approvingScene === request.id}
                   onclick={() => void approveScene(request)}>
-                  {approvingScene === request.id ? 'Approving…' : 'Approve'}
+                  {approvingScene === request.id ? t('route.requests.approving') : t('route.requests.approve')}
                 </Button>
               {:else}
                 <Button
@@ -239,7 +244,7 @@
                   size="sm"
                   disabled={dismissing === request.id}
                   onclick={() => (approving = request)}>
-                  Approve
+                  {t('route.requests.approve')}
                 </Button>
               {/if}
               <Button
@@ -247,7 +252,7 @@
                 size="sm"
                 disabled={dismissing === request.id}
                 onclick={() => void dismiss(request)}>
-                {dismissing === request.id ? 'Dismissing…' : 'Dismiss'}
+                {dismissing === request.id ? t('route.requests.dismissing') : t('route.requests.dismiss')}
               </Button>
             {:else if request.status === 'pending'}
               <Button
@@ -255,7 +260,7 @@
                 size="sm"
                 disabled={dismissing === request.id}
                 onclick={() => void dismiss(request)}>
-                {dismissing === request.id ? 'Cancelling…' : 'Cancel'}
+                {dismissing === request.id ? t('route.requests.cancelling') : t('route.requests.cancel')}
               </Button>
             {/if}
           </div>

@@ -18,6 +18,7 @@
   import ExploreScopes from '../components/ExploreScopes.svelte';
   import Icon from '../components/Icon.svelte';
   import Skeleton from '../components/Skeleton.svelte';
+  import { useI18n } from '../i18n.svelte';
   import {
     discoverHref,
     libraryHref,
@@ -29,6 +30,7 @@
   import { discover } from '../state/discover.svelte';
   import { session } from '../state/session.svelte';
 
+  const { t } = useI18n();
   /** The billboard title the modal is open for, in whichever mode the role allows. */
   let acquiring = $state<DiscoverItem | null>(null);
 
@@ -51,17 +53,19 @@
   let heroAction = $derived(
     hero === null
       ? ''
-      : `${mode === 'add' ? 'Add' : 'Request'} ${hero.media_type === 'movie' ? 'movie' : 'series'}`,
+      : mode === 'add'
+        ? t(hero.media_type === 'movie' ? 'route.discover.addMovie' : 'route.discover.addSeries')
+        : t(hero.media_type === 'movie' ? 'route.discover.requestMovie' : 'route.discover.requestSeries'),
   );
 
   /** Trending shelf minus the billboard, so #1 is not on screen twice. */
   let trendingRest = $derived(home ? home.trending.slice(1) : []);
 
   function metaLine(item: DiscoverItem): string {
-    const parts: string[] = [];
-    if (item.year > 0) parts.push(String(item.year));
-    parts.push(item.media_type === 'movie' ? 'Movie' : 'Series');
-    return parts.join(' · ');
+    return t('route.discover.metaLine', {
+      year: item.year,
+      type: t(item.media_type === 'movie' ? 'route.discover.movie' : 'route.discover.series'),
+    });
   }
 </script>
 
@@ -110,7 +114,7 @@
     {#if hero}
       <section
         class="relative overflow-hidden rounded-lg border border-border bg-surface"
-        aria-label="Trending #1">
+        aria-label={t('route.discover.trendingFirst')}>
         {#if hero.backdrop_url}
           <img
             src={hero.backdrop_url}
@@ -131,7 +135,7 @@
 
         <div class="relative flex max-w-2xl flex-col gap-3 px-6 py-10">
           <p class="font-mono text-xs font-medium tracking-wide text-warning">
-            TRENDING #1 · {mediaTypeChip(hero.media_type)}
+            {t('route.discover.trendingFirst')} · {mediaTypeChip(hero.media_type)}
           </p>
           <h2 class="font-display text-2xl font-bold tracking-tight text-ink" title={hero.title}>
             {hero.title}
@@ -139,14 +143,14 @@
           <p class="text-base text-ink-secondary" title={metaLine(hero)}>{metaLine(hero)}</p>
           <p
             class="line-clamp-2 max-w-xl text-base text-ink-secondary"
-            title={hero.overview || 'No overview available.'}>
-            {hero.overview || 'No overview available.'}
+            title={hero.overview || t('route.discover.noOverview')}>
+            {hero.overview || t('route.discover.noOverview')}
           </p>
           <div class="mt-1 flex flex-wrap items-center gap-3">
             {#if hero.in_library && session.isAdmin}
               <Button variant="primary" href={libraryHref(hero.media_type, hero.library_id)}>
                 <Icon name="check" size={14} />
-                In library
+                {t('route.discover.inLibrary')}
               </Button>
             {:else if hero.in_library}
               <!-- /movies/:id and /series/:id are admin screens, so this link
@@ -154,14 +158,14 @@
                    billboard it would read as a button that does nothing. The
                    fact is still worth saying, so it is said rather than
                    linked. -->
-              <Badge tone="success">In library</Badge>
+              <Badge tone="success">{t('route.discover.inLibrary')}</Badge>
             {:else}
               <Button variant="primary" onclick={() => (acquiring = hero)}>
                 <Icon name="plus" size={14} />
                 {heroAction}
               </Button>
             {/if}
-            <Button variant="secondary" href={discoverHref(hero)}>Details</Button>
+            <Button variant="secondary" href={discoverHref(hero)}>{t('route.discover.details')}</Button>
             {#if heroRating}
               <Badge mono tone="neutral" title={heroRating.title}>
                 <span class="inline-flex items-center gap-1">
@@ -179,20 +183,20 @@
       </section>
     {/if}
 
-    <DiscoverShelf title="Trending this week" items={trendingRest} showType />
-    <DiscoverShelf title="Popular movies" items={home.popular_movies} />
-    <DiscoverShelf title="Popular series" items={home.popular_series} />
+    <DiscoverShelf title={t('route.discover.trendingWeek')} items={trendingRest} showType />
+    <DiscoverShelf title={t('route.discover.popularMovies')} items={home.popular_movies} />
+    <DiscoverShelf title={t('route.discover.popularSeries')} items={home.popular_series} />
 
     <!-- The curated lists ARE the whole shelf (internal/api/discover.go), so
          there is no "all networks" screen to link to. -->
-    {@render tiles('Browse by network', home.networks)}
-    {@render tiles('Browse by studio', home.studios)}
+    {@render tiles(t('route.discover.browseByNetwork'), home.networks)}
+    {@render tiles(t('route.discover.browseByStudio'), home.studios)}
 
     {#if home.trending.length === 0 && home.popular_movies.length === 0 && home.popular_series.length === 0}
       <EmptyState
         icon="compass"
-        title="Nothing to discover right now"
-        message="TMDB returned no trending or popular titles. Try again in a moment." />
+        title={t('route.discover.emptyTitle')}
+        message={t('route.discover.emptyMessage')} />
     {/if}
   {/if}
 </div>

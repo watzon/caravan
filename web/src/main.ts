@@ -7,7 +7,7 @@ import './fonts.css';
 import './app.css';
 
 import { mount } from 'svelte';
-import App from './App.svelte';
+import Root from './Root.svelte';
 import { initialiseDisplayPreferences } from './lib/displayPreferences';
 
 const target = document.getElementById('app');
@@ -15,4 +15,4 @@ if (!target) throw new Error('caravan: #app mount point missing from index.html'
 
 initialiseDisplayPreferences();
 
-export default mount(App, { target });
+export default mount(Root, { target });

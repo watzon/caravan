@@ -15,6 +15,7 @@
   import { onMount } from 'svelte';
   import { api, errorText } from '../api/client';
   import type { JellyfinConfig, JellyfinConfigInput } from '../api/types';
+  import { useI18n } from '../i18n.svelte';
   import Banner from './Banner.svelte';
   import Button from './Button.svelte';
   import Field from './Field.svelte';
@@ -30,6 +31,7 @@
     ok: boolean;
     message: string;
   }
+  const { t } = useI18n();
 
   let loaded = $state<JellyfinConfig | null>(null);
   let loading = $state(true);
@@ -84,7 +86,7 @@
       hasAPIKey = cfg.has_api_key;
       clearAPIKey = false;
       enabled = cfg.enabled;
-      pushToast('Jellyfin handoff saved.', 'success');
+      pushToast(t('component.jellyfin.saved'), 'success');
     } catch (err) {
       pushToast(errorText(err), 'danger');
     } finally {
@@ -102,7 +104,10 @@
       if (apiKey.trim() !== '') body.api_key = apiKey.trim();
       const info = await api.testJellyfin(body);
       const name = info.server_name || 'Jellyfin';
-      result = { ok: true, message: `Connected to ${name}${info.version ? ` ${info.version}` : ''}` };
+      result = { ok: true, message: t('component.jellyfin.connected', {
+        name,
+        version: info.version ? ` ${info.version}` : '',
+      }) };
     } catch (err) {
       result = { ok: false, message: errorText(err) };
     } finally {
@@ -113,13 +118,13 @@
 
 <SettingsCard
   title="Jellyfin"
-  description="Optional. Caravan already writes Jellyfin's folder layout; turn this on and every import also tells it to rescan.">
+  description={t('component.jellyfin.description')}>
   {#snippet action()}
     <!-- The header outlives the body's load branch, so it has to refuse a save
          of values that were never fetched. -->
     <Button variant="primary" size="sm" disabled={loaded === null || !canSave} onclick={save}>
       <Icon name="check" size={14} />
-      {saving ? 'Saving…' : 'Save'}
+      {saving ? t('component.jellyfin.saving') : t('component.jellyfin.save')}
     </Button>
   {/snippet}
 
@@ -133,16 +138,16 @@
     </div>
   {:else}
     <Field
-      label="Server URL"
+      label={t('component.jellyfin.serverUrl')}
       for="jellyfin-url"
-      help="Where Jellyfin answers, e.g. http://jellyfin.lan:8096 - the same address you open in a browser.">
+      help={t('component.jellyfin.serverUrlHelp')}>
       <TextInput id="jellyfin-url" bind:value={url} mono placeholder="http://jellyfin.lan:8096" />
     </Field>
 
     <Field
-      label="API key"
+      label={t('component.jellyfin.apiKey')}
       for="jellyfin-api-key"
-      help="Created in Jellyfin under Dashboard - API Keys. Triggering a library scan is an administrator action, so a read-only key will not do.">
+      help={t('component.jellyfin.apiKeyHelp')}>
       <div class="flex flex-col gap-2">
         <TextInput
           id="jellyfin-api-key"
@@ -152,9 +157,9 @@
           placeholder="•••••"
           oninput={() => (clearAPIKey = false)} />
         {#if hasAPIKey}
-          <p class="text-sm text-ink-secondary">A key is stored. Leave blank to keep it.</p>
+          <p class="text-sm text-ink-secondary">{t('component.jellyfin.keyStored')}</p>
           <Button variant="secondary" size="sm" onclick={() => (clearAPIKey = true)}>
-            Clear API key
+            {t('component.jellyfin.clearKey')}
           </Button>
         {/if}
       </div>
@@ -162,7 +167,7 @@
 
     <Toggle
       checked={enabled}
-      label="Trigger a Jellyfin scan after every import"
+      label={t('component.jellyfin.scanAfterImport')}
       onchange={(next) => (enabled = next)} />
 
     <Button
@@ -170,7 +175,7 @@
       class="self-start"
       disabled={testing || url.trim() === ''}
       onclick={test}>
-      {testing ? 'Testing…' : 'Test connection'}
+      {testing ? t('component.jellyfin.testing') : t('component.jellyfin.testConnection')}
     </Button>
 
     {#if result}

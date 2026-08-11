@@ -17,6 +17,7 @@ import type {
   StashHealth,
 } from './api/types';
 import { formatAge, UNKNOWN } from './format';
+import { translate } from './i18n.svelte';
 
 /**
  * How often a site's page re-reads itself while its catalogue walk is running.
@@ -106,14 +107,11 @@ export function stashUnreachableBanner(
   if (!health) return null;
   const parts: string[] = [];
   const reason = health.error.trim();
-  if (reason) parts.push(`${reason}.`);
+  if (reason) parts.push(translate('adult.stash.reason', { reason }));
   const age = formatAge(health.since, now);
-  if (age !== UNKNOWN) parts.push(`Unreachable for ${age}.`);
-  parts.push(
-    'Adult imports still complete and their Stash scan stays queued — it is delivered when ' +
-      'Stash answers again.',
-  );
-  return { title: 'Stash is unreachable', message: parts.join(' ') };
+  if (age !== UNKNOWN) parts.push(translate('adult.stash.unreachableFor', { age }));
+  parts.push(translate('adult.stash.importsContinue'));
+  return { title: translate('adult.stash.unreachable'), message: parts.join(' ') };
 }
 
 /**
@@ -141,7 +139,7 @@ export function siteHref(site: Pick<Site, 'id'>): string {
  * its own width rather than being truncated.
  */
 export function sceneNumber(number: number): string {
-  if (!Number.isFinite(number) || number <= 0) return '#—';
+  if (!Number.isFinite(number) || number <= 0) return `#${UNKNOWN}`;
   return `#${String(Math.trunc(number)).padStart(3, '0')}`;
 }
 

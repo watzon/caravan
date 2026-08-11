@@ -186,18 +186,18 @@ describe('AddRequestModal — season selection', () => {
   it('warns only in add mode, and only about checked seasons with a request', () => {
     mountModal({ mode: 'add' });
     expect(host.textContent).toContain(
-      'Adding Season 02 will absorb its pending request and mark it approved.',
+      'Adding Season 02 will approve its pending request.',
     );
 
     // Unchecking the requested season removes the warning with it.
     checkboxes()[1]!.click();
     flushSync();
-    expect(host.textContent).not.toContain('will absorb');
+    expect(host.textContent).not.toContain('will approve');
   });
 
   it('never warns in request mode, where merging is the point', () => {
     mountModal({ mode: 'request', preselect: [2] });
-    expect(host.textContent).not.toContain('will absorb');
+    expect(host.textContent).not.toContain('will approve');
   });
 });
 
@@ -302,7 +302,7 @@ describe('AddRequestModal — modes', () => {
     await settle();
 
     expect(host.querySelector('#add-profile')).toBeNull();
-    expect(host.textContent).toContain('No quality profiles exist.');
+    expect(host.textContent).toContain('No quality profiles are available.');
     expect(host.querySelector('a[href="/settings/quality-profiles"]')).not.toBeNull();
   });
 
@@ -562,7 +562,7 @@ describe('AddRequestModal — submitting', () => {
         approve: true,
       },
     });
-    expect(toasts.items.map((toast) => toast.message)).toContain('Added Blade Runner');
+    expect(toasts.items.map((toast) => toast.message)).toContain('Added Blade Runner.');
     expect(completed).toEqual({ kind: 'added', mediaType: 'movie', libraryID: 7 });
     expect(closed).toBe(1);
     expect(window.location.pathname).toBe('/movies/7');
@@ -694,7 +694,7 @@ describe('AddRequestModal — metadata credential', () => {
     primary().click();
     await settle();
 
-    expect(toasts.items.map((t) => t.message).join(' ')).toContain('Settings → Metadata');
+    expect(toasts.items.map((t) => t.message).join(' ')).toContain('Settings / Metadata');
   });
 
   // Discover and Requests both mount this modal without a `seasons` prop, so a
@@ -723,7 +723,7 @@ describe('AddRequestModal — metadata credential', () => {
     await settle();
 
     const said = toasts.items.map((t) => t.message).join(' ');
-    expect(said).toContain('Settings → Metadata');
+    expect(said).toContain('Settings / Metadata');
     expect(said).not.toContain('the TMDB API key was rejected');
   });
 
@@ -752,7 +752,7 @@ describe('AddRequestModal — metadata credential', () => {
 
     const said = toasts.items.map((t) => t.message).join(' ');
     expect(said).toContain('Ask a Caravan admin');
-    expect(said).not.toContain('Settings → Metadata');
+    expect(said).not.toContain('Settings / Metadata');
   });
 
   it('leaves an unrelated failure in the server’s own words', async () => {
@@ -774,6 +774,6 @@ describe('AddRequestModal — metadata credential', () => {
 
     const said = toasts.items.map((t) => t.message).join(' ');
     expect(said).toContain('already in the library');
-    expect(said).not.toContain('Settings → Metadata');
+    expect(said).not.toContain('Settings / Metadata');
   });
 });

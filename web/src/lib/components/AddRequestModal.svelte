@@ -51,6 +51,7 @@
     type AddRequestResult,
     type RequestMode,
   } from '../discover';
+  import { useI18n } from '../i18n.svelte';
   import { formatBytes, seasonLabel } from '../format';
   import { navigate } from '../router.svelte';
   import { readSearchOnAdd, writeSearchOnAdd } from '../searchOnAdd';
@@ -130,6 +131,7 @@
   let busy = $state(false);
   let sessionRevision = 0;
 
+  const { t } = useI18n();
 
   let selectable = $derived(selectableSeasons(seasonList));
   let note = $derived(absorbNote(seasonList, selected, mode));
@@ -138,9 +140,12 @@
   let primaryLabel = $derived(submitLabel(mode, mediaType, selected.length));
   let storageSummary = $derived.by(() => {
     const status = system.status;
-    const root = status?.storage_root || 'no storage root';
+    const root = status?.storage_root || t('component.addRequest.noStorageRoot');
     return status && status.disk_total_bytes > 0
-      ? `${root} · ${formatBytes(status.disk_free_bytes)} free`
+      ? t('component.addRequest.storageSummary', {
+          root,
+          free: formatBytes(status.disk_free_bytes),
+        })
       : root;
   });
   let canSubmit = $derived(
@@ -269,7 +274,7 @@
 
   async function sendRequest() {
     const created = await api.createRequest(requestBody());
-    pushToast(`Requested ${title}`, 'success');
+    pushToast(t('component.addRequest.requested', { title }), 'success');
     ondone?.({ kind: 'requested', request: created });
     onclose();
   }
@@ -284,7 +289,7 @@
     const result = await api.requestAndApprove(requestBody());
     const added = mediaType === 'movie' ? result.movie : result.series;
     if (!added) throw new Error('the approval did not return the added title');
-    pushToast(`Added ${added.title}`, 'success');
+    pushToast(t('component.addRequest.added', { title: added.title }), 'success');
     ondone?.({ kind: 'added', mediaType, libraryID: added.id });
     onclose();
     navigate(mediaType === 'movie' ? `/movies/${added.id}` : `/series/${added.id}`);
@@ -295,7 +300,7 @@
     // Monitoring and any chosen profile came with the add itself; the series
     // search follows only after that request has returned successfully.
     if (mediaType === 'series' && monitored && searchNow) await api.searchSeriesNow(added.id);
-    pushToast(`Added ${added.title}`, 'success');
+    pushToast(t('component.addRequest.added', { title: added.title }), 'success');
     ondone?.({ kind: 'added', mediaType, libraryID: added.id });
     onclose();
     navigate(mediaType === 'movie' ? `/movies/${added.id}` : `/series/${added.id}`);
@@ -340,7 +345,7 @@
 </script>
 
 <Modal
-  title={mode === 'add' ? 'Add to library' : 'Request'}
+  title={mode === 'add' ? t('component.addItem.title') : t('component.addRequest.request')}
   width="max-w-xl"
   {onclose}>
   <div class="flex flex-col gap-4 p-4">
@@ -356,13 +361,13 @@
       {:else if seasonList.length > 0}
         <div class="flex flex-col gap-2">
           <div class="flex items-baseline gap-3">
-            <span class="micro-label">Seasons</span>
+            <span class="micro-label">{t('component.addRequest.seasons')}</span>
             {#if selectable.length > 0}
               <button
                 type="button"
                 class="ml-auto text-sm text-accent-text transition-colors duration-150 ease-out hover:text-accent"
                 onclick={() => (selected = everySelected ? [] : allSeasonNumbers(seasonList))}>
-                {everySelected ? 'Deselect all' : 'Select all'}
+                {everySelected ? t('component.addRequest.deselectAll') : t('component.actions.selectAll')}
               </button>
             {/if}
           </div>
@@ -387,9 +392,9 @@
                   {/if}
                   <span class="ml-auto shrink-0">
                     {#if season.in_library}
-                      <Badge tone="success">In library</Badge>
+                      <Badge tone="success">{t('component.status.inLibrary')}</Badge>
                     {:else if season.requested}
-                      <Badge tone="warning">Requested</Badge>
+                      <Badge tone="warning">{t('component.status.requested')}</Badge>
                     {/if}
                   </span>
                 </label>
@@ -406,7 +411,7 @@
 
     {#if mediaType === 'movie'}
       <div class="flex flex-col gap-1">
-        <Field label="Minimum availability" for="add-availability">
+        <Field label={t('component.addRequest.minimumAvailability')} for="add-availability">
           <select id="add-availability" bind:value={minAvailability} class={SELECT_CLASS}>
             {#each AVAILABILITY_OPTIONS as option (option.value)}
               <option value={option.value}>{option.label}</option>
@@ -420,23 +425,23 @@
     {#if mode === 'add'}
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {#if loadingProfiles}
-          <div class="flex flex-col gap-2" aria-label="Loading quality profiles">
-            <span class="micro-label">Quality profile</span>
+          <div class="flex flex-col gap-2" aria-label={t('component.addRequest.loadingProfiles')}>
+            <span class="micro-label">{t('component.addRequest.profile')}</span>
             <Skeleton class="h-9 w-full rounded-sm" />
           </div>
         {:else if profilesError}
           <LoadError message={profilesError} onretry={() => void loadProfiles()} />
         {:else if profiles !== null && profiles.length === 0}
           <div class="flex flex-col gap-1 rounded-sm border border-border bg-raised px-3 py-2">
-            <p class="text-sm text-ink-secondary">No quality profiles exist.</p>
+            <p class="text-sm text-ink-secondary">{t('component.addRequest.noProfiles')}</p>
             <a href="/settings/quality-profiles" class="text-sm text-accent-text hover:underline">
-              Manage quality profiles
+              {t('component.addRequest.manageProfiles')}
             </a>
           </div>
         {:else if profiles}
-          <Field label="Quality profile" for="add-profile">
+          <Field label={t('component.addRequest.profile')} for="add-profile">
             <select id="add-profile" bind:value={profileID} class={SELECT_CLASS}>
-              <option value={0}>Library default</option>
+              <option value={0}>{t('component.addRequest.libraryDefault')}</option>
               {#each profiles as profile (profile.id)}
                 <option value={profile.id}>{profile.name}</option>
               {/each}
@@ -446,7 +451,7 @@
 
         <!-- Caravan has one storage root, so the folder is shown rather than
              chosen: a picker with a single option is a lie about the model. -->
-        <Field label="Root folder" for="add-root">
+        <Field label={t('component.addRequest.rootFolder')} for="add-root">
           <select id="add-root" class={SELECT_CLASS} title={storageSummary} disabled>
             <option>{storageSummary}</option>
           </select>
@@ -461,7 +466,7 @@
             checked={monitored}
             onchange={(event) => (monitored = event.currentTarget.checked)}
             class="size-4 accent-accent" />
-          <span class="text-base text-ink">Add and monitor</span>
+          <span class="text-base text-ink">{t('component.addRequest.addAndMonitor')}</span>
         </label>
         {#if monitored}
           <label class="ml-6 flex items-center gap-3 rounded-md border border-border bg-raised px-3 py-2">
@@ -472,8 +477,8 @@
               class="size-4 accent-accent" />
             <span class="text-base text-ink">
               {mediaType === 'series'
-                ? 'Search for selected seasons right away'
-                : 'Search for it right away'}
+                ? t('component.addRequest.searchSeasonsNow')
+                : t('component.addRequest.searchMovieNow')}
             </span>
           </label>
         {/if}
@@ -482,14 +487,14 @@
   </div>
 
   {#snippet footer()}
-    <Button variant="secondary" disabled={busy} onclick={onclose}>Cancel</Button>
+    <Button variant="secondary" disabled={busy} onclick={onclose}>{t('component.actions.cancel')}</Button>
     {#if mode === 'request' && session.isAdmin}
       <Button variant="secondary" disabled={!canSubmit} onclick={() => void submit(true)}>
-        {busy ? 'Working…' : 'Request and approve'}
+        {busy ? t('component.actions.working') : t('component.addRequest.approve')}
       </Button>
     {/if}
     <Button variant="primary" disabled={!canSubmit} onclick={() => void submit()}>
-      {busy ? 'Working…' : primaryLabel}
+      {busy ? t('component.actions.working') : primaryLabel}
     </Button>
   {/snippet}
 </Modal>

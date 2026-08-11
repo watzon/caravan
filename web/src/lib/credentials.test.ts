@@ -178,8 +178,8 @@ describe('metadataCopy', () => {
     const absent = metadataCopy('absent');
     const invalid = metadataCopy('invalid');
 
-    expect(absent.message).toContain('Settings → Metadata');
-    expect(invalid.message).toContain('Settings → Metadata');
+    expect(absent.message).toContain('Settings / Metadata');
+    expect(invalid.message).toContain('Settings / Metadata');
     expect(absent.title).not.toBe(invalid.title);
   });
 
@@ -189,7 +189,7 @@ describe('metadataCopy', () => {
     for (const fault of ['absent', 'invalid'] as const) {
       const copy = metadataCopy(fault, false);
       expect(copy.message).toContain('Ask a Caravan admin');
-      expect(copy.message).not.toContain('Settings → Metadata');
+      expect(copy.message).not.toContain('Settings / Metadata');
       expect(copy.title).toBe(metadataCopy(fault).title);
     }
   });
@@ -201,7 +201,7 @@ describe('metadataToast', () => {
   it('names the fix for a credential failure', () => {
     expect(
       metadataToast(apiError(503, { error: 'x', code: 'metadata_credential_absent' })),
-    ).toContain('Settings → Metadata');
+    ).toContain('Settings / Metadata');
   });
 
   // Null is the caller's cue to render the server's own words unchanged: a 409

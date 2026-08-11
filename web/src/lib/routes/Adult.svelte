@@ -32,13 +32,17 @@
   import { session } from '../state/session.svelte';
   import { navigate, router } from '../router.svelte';
   import { SERIES_FILTERS, type StatusKey } from '../status';
+  import { useI18n } from '../i18n.svelte';
+
+  const { t } = useI18n();
+
 
   type SortKey = 'title' | 'added' | 'status';
 
   const SORT_OPTIONS: { key: SortKey; label: string }[] = [
-    { key: 'title', label: 'Title' },
-    { key: 'added', label: 'Added' },
-    { key: 'status', label: 'Status' },
+    { key: 'title', label: t('route.adult.sortTitle') },
+    { key: 'added', label: t('route.adult.sortAdded') },
+    { key: 'status', label: t('route.adult.sortStatus') },
   ];
 
   /** The dropdown takes {id, name}; the rail's order is the array's. */
@@ -149,25 +153,30 @@
        with one tab in it is a strip that says nothing. -->
   <div class="flex flex-wrap items-center gap-3">
     <div class="ml-auto flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
-      <Dropdown label="Sort" options={SORT_CHOICES} value={sort} onselect={applySort} shape="box" />
+      <Dropdown
+        label={t('route.adult.sort')}
+        options={SORT_CHOICES}
+        value={sort}
+        onselect={applySort}
+        shape="box" />
       <div class="w-full sm:w-56">
         <TextInput
           bind:value={query}
           type="search"
-          placeholder="Filter sites…"
-          ariaLabel="Filter sites by name" />
+          placeholder={t('route.adult.filterPlaceholder')}
+          ariaLabel={t('route.adult.filterAria')} />
       </div>
       <!-- Ghost-icon refresh: a utility, not a destination. The add button
            stays: the top bar's global add has no adult scope, so this is the
            one way in. -->
-      <Button variant="ghost" onclick={load} title="Reload the site list" class="px-2">
+      <Button variant="ghost" onclick={load} title={t('route.adult.reloadTitle')} class="px-2">
         <Icon name="refresh" size={14} />
-        <span class="sr-only">Refresh</span>
+        <span class="sr-only">{t('route.adult.refresh')}</span>
       </Button>
       {#if session.isAdmin}
         <Button variant="primary" onclick={() => (picking = true)}>
           <Icon name="plus" size={14} />
-          Add site
+          {t('route.adult.addSite')}
         </Button>
       {/if}
     </div>
@@ -180,28 +189,26 @@
   {:else if all.length === 0}
     <EmptyState
       icon="flame"
-      title="No sites yet"
-      message={session.isAdmin
-        ? 'Add a site and Caravan walks its whole catalogue, filing each scene under its release year.'
-        : 'Nothing has been added to this shelf yet. Ask for a scene from Explore and it shows up here once it is approved.'}>
+      title={t('route.adult.emptyTitle')}
+      message={session.isAdmin ? t('route.adult.emptyAdmin') : t('route.adult.emptyMember')}>
       {#snippet action()}
         {#if session.isAdmin}
           <Button variant="primary" onclick={() => (picking = true)}>
             <Icon name="plus" size={14} />
-            Add site
+            {t('route.adult.addSite')}
           </Button>
         {:else}
-          <Button variant="primary" href={ADULT_EXPLORE_HREF}>Browse scenes</Button>
+          <Button variant="primary" href={ADULT_EXPLORE_HREF}>{t('route.adult.browseScenes')}</Button>
         {/if}
       {/snippet}
     </EmptyState>
   {:else if visible.length === 0}
     <EmptyState
       icon="search"
-      title="Nothing matches this filter"
-      message="No site on this shelf matches the current search.">
+      title={t('route.adult.noFilterTitle')}
+      message={t('route.adult.noFilterMessage')}>
       {#snippet action()}
-        <Button variant="secondary" onclick={() => (query = '')}>Clear filter</Button>
+        <Button variant="secondary" onclick={() => (query = '')}>{t('route.adult.clearFilter')}</Button>
       {/snippet}
     </EmptyState>
   {:else}

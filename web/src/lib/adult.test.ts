@@ -129,9 +129,9 @@ describe('sceneNumber', () => {
   });
 
   it('renders an unknown ordinal as a placeholder rather than #000', () => {
-    expect(sceneNumber(0)).toBe('#—');
-    expect(sceneNumber(-1)).toBe('#—');
-    expect(sceneNumber(Number.NaN)).toBe('#—');
+    expect(sceneNumber(0)).toBe(`#${UNKNOWN}`);
+    expect(sceneNumber(-1)).toBe(`#${UNKNOWN}`);
+    expect(sceneNumber(Number.NaN)).toBe(`#${UNKNOWN}`);
   });
 });
 
@@ -300,7 +300,7 @@ describe('stashUnreachableBanner', () => {
 
   it('promises the imports are unaffected, which is the point of the wording', () => {
     const banner = stashUnreachableBanner({ error: 'i/o timeout', since: '' }, NOW);
-    expect(banner?.message).toContain('Adult imports still complete');
+    expect(banner?.message).toContain('Adult imports continue.');
     expect(banner?.message).toContain('queued');
     // No parseable timestamp, no duration clause — never "Unreachable for —".
     expect(banner?.message).not.toContain('Unreachable for');

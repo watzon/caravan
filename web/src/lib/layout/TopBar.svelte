@@ -10,6 +10,7 @@
   import Icon from '../components/Icon.svelte';
   import Button from '../components/Button.svelte';
   import { page } from '../state/page.svelte';
+  import { useI18n } from '../i18n.svelte';
 
   interface Props {
     title: string;
@@ -32,6 +33,8 @@
     menuButton = $bindable(),
   }: Props = $props();
 
+  const { t } = useI18n();
+
   const isMac =
     typeof navigator !== 'undefined' && /mac|iphone|ipad/i.test(navigator.platform || navigator.userAgent);
 </script>
@@ -41,12 +44,12 @@
   <button
     type="button"
     class="flex h-9 items-center rounded-md border border-border-strong bg-raised px-3 text-sm text-ink-secondary transition-colors duration-150 ease-out hover:bg-overlay hover:text-ink md:hidden"
-    aria-label={menuOpen ? 'Close navigation menu' : 'Open navigation menu'}
+    aria-label={menuOpen ? t('topbar.aria.closeMenu') : t('topbar.aria.openMenu')}
     aria-controls="primary-navigation-drawer"
     aria-expanded={menuOpen}
     onclick={onmenu}
     bind:this={menuButton}>
-    Menu
+    {t('topbar.menu')}
   </button>
 
   <h1 class="min-w-0 truncate font-display text-xl font-semibold tracking-tight text-ink" title={title}>
@@ -64,9 +67,9 @@
   {/if}
 
   {#if onadd}
-    <Button variant="secondary" onclick={onadd} title="Add movie or series">
+    <Button variant="secondary" onclick={onadd} title={t('topbar.add')}>
       <Icon name="plus" size={14} />
-      <span class="sr-only lg:not-sr-only">Add movie or series</span>
+      <span class="sr-only lg:not-sr-only">{t('topbar.add')}</span>
       <kbd class="ml-2 hidden rounded-sm bg-surface px-1.5 py-0.5 font-mono text-xs text-ink-muted xl:inline">
         {isMac ? '⌘' : 'Ctrl'}K
       </kbd>

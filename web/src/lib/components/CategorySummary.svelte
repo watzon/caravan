@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { IndexerCategory } from '../api/types';
   import { categoryGroups } from '../indexer';
+  import { useI18n } from '../i18n.svelte';
   import Badge from './Badge.svelte';
 
   interface Props {
@@ -12,6 +13,7 @@
 
   let { tree, selected, label, tone = 'neutral' }: Props = $props();
   let groups = $derived(categoryGroups(selected, tree));
+  const { t } = useI18n();
 </script>
 
 <div class="flex flex-wrap items-start gap-3" role="list" aria-label={label}>
@@ -28,14 +30,16 @@
             ? 'text-accent-text'
             : 'text-ink'
           : 'text-ink-secondary'}"
-        title={group.selected ? `${group.name} is selected` : `${group.name} group`}>
+        title={group.selected
+          ? t('component.categorySummary.selectedGroup', { name: group.name })
+          : t('component.categorySummary.group', { name: group.name })}>
         <span
           aria-hidden="true"
           class="size-1.5 shrink-0 rounded-full
                  {group.selected ? 'bg-accent' : 'border border-border-strong bg-surface'}">
         </span>
         {group.name}
-        <span class="sr-only">{group.selected ? ', parent selected' : ', category group'}</span>
+        <span class="sr-only">{group.selected ? t('component.categorySummary.parentSelected') : t('component.categorySummary.categoryGroup')}</span>
       </span>
 
       {#if group.children.length > 0}

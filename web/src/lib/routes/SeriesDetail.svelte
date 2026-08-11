@@ -38,6 +38,9 @@
   import { episodeStatus, seriesStatus } from '../status';
   import { compatBadge } from '../tvcompat';
   import ItemQualityProfileSelect from '../components/ItemQualityProfileSelect.svelte';
+  import { useI18n } from '../i18n.svelte';
+
+  const { t, tp } = useI18n();
 
   interface Props {
     id: number;
@@ -117,9 +120,9 @@
     try {
       const { queued } = await api.searchSeriesNow(current.id);
       if (queued > 0) {
-        pushToast(`${queued} search${queued === 1 ? '' : 'es'} started`, 'success');
+        pushToast(tp('route.seriesDetail.searchStarted', queued), 'success');
       } else {
-        pushToast('Nothing to search — every monitored episode is covered', 'info');
+        pushToast(t('route.seriesDetail.nothingToSearch'), 'info');
       }
     } catch (err) {
       pushToast(errorText(err), 'danger');
@@ -138,8 +141,8 @@
       confirmingRemove = false;
       pushToast(
         deleteFiles
-          ? `Removed ${current.title} and its files`
-          : `Removed ${current.title} from the library`,
+          ? t('route.seriesDetail.removedFiles', { title: current.title })
+          : t('route.seriesDetail.removed', { title: current.title }),
         'neutral',
       );
       navigate('/series');
@@ -156,7 +159,7 @@
     href="/series"
     class="inline-flex w-fit items-center gap-2 text-base text-ink-secondary transition-colors duration-150 hover:text-ink">
     <Icon name="back" size={14} />
-    Series
+    {t('route.seriesDetail.back')}
   </a>
 
   {#if error}
@@ -199,10 +202,10 @@
           <div class="flex w-full flex-wrap items-center gap-3 sm:w-auto">
             <Button variant="primary" disabled={searching} onclick={searchNow}>
               <Icon name="search" size={14} />
-              {searching ? 'Searching…' : 'Search now'}
+              {searching ? t('route.seriesDetail.searching') : t('route.seriesDetail.searchNow')}
             </Button>
             <Button variant="secondary" href="/series/{current.id}/search">
-              Interactive search
+              {t('route.seriesDetail.interactiveSearch')}
             </Button>
             <MonitorButton
               monitored={current.monitored}
@@ -211,7 +214,7 @@
               onchange={(next) =>
                 run(
                   () => api.setSeriesMonitored(current.id, next),
-                  'Could not update the series',
+                  t('route.seriesDetail.updateFailed'),
                 )} />
             <!-- Removal lives behind the ⋯ rather than one mis-click from the
                  search buttons. There is no per-series metadata refresh route,
@@ -222,13 +225,13 @@
                 ...(canMove
                   ? [
                       {
-                        label: 'Move to library…',
+                        label: t('route.seriesDetail.moveLibrary'),
                         onselect: () => (movingLibrary = true),
                       },
                     ]
                   : []),
                 {
-                  label: 'Remove from library…',
+                  label: t('route.seriesDetail.removeLibrary'),
                   danger: true,
                   disabled: removing,
                   onselect: () => (confirmingRemove = true),
@@ -238,24 +241,24 @@
         </div>
 
         <p class="max-w-3xl text-md text-ink-secondary">
-          {current.overview || 'No overview available.'}
+          {current.overview || t('route.seriesDetail.noOverview')}
         </p>
 
         <dl class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <div>
-            <dt class="micro-label">Folder</dt>
+            <dt class="micro-label">{t('route.seriesDetail.folder')}</dt>
             <dd class="mt-1 truncate font-mono text-sm text-ink" title={current.path}>
               {current.path || UNKNOWN}
             </dd>
           </div>
           <div>
-            <dt class="micro-label">TMDB id</dt>
+            <dt class="micro-label">{t('route.seriesDetail.tmdbId')}</dt>
             <dd class="mt-1 font-mono text-sm text-ink">
               {current.tmdb_id > 0 ? current.tmdb_id : UNKNOWN}
             </dd>
           </div>
           <div>
-            <dt class="micro-label">First aired</dt>
+            <dt class="micro-label">{t('route.seriesDetail.firstAired')}</dt>
             <dd class="mt-1 text-sm text-ink">{formatDate(current.first_aired)}</dd>
           </div>
           <ItemQualityProfileSelect
@@ -269,8 +272,8 @@
     {#if seasons.length === 0}
       <EmptyState
         icon="tv"
-        title="No seasons yet"
-        message="Caravan has no season data for this series. Refresh metadata or run a library scan." />
+        title={t('route.seriesDetail.noSeasonsTitle')}
+        message={t('route.seriesDetail.noSeasonsMessage')} />
     {:else}
       <div class="flex flex-col gap-4">
         {#each seasons as season (season.season_number)}
@@ -296,7 +299,7 @@
                     : ownedCount(season) > 0
                       ? 'warning'
                       : 'neutral'}>
-                  {ownedCount(season)} of {episodes.length} on disk
+                  {t('route.seriesDetail.onDisk', { owned: ownedCount(season), total: episodes.length })}
                 </Badge>
               </button>
 
@@ -304,41 +307,41 @@
                 variant="secondary"
                 size="sm"
                 href="/series/{current.id}/search/{season.season_number}"
-                title={`Search for a ${seasonLabel(season.season_number)} pack`}>
+                title={t('route.seriesDetail.searchSeasonPack', { season: seasonLabel(season.season_number) })}>
                 <Icon name="search" size={14} />
-                Search
+                {t('route.seriesDetail.search')}
               </Button>
 
               <Toggle
                 checked={season.monitored}
-                label={`Monitor ${seasonLabel(season.season_number)}`}
+                label={t('route.seriesDetail.monitorSeason', { season: seasonLabel(season.season_number) })}
                 labelHidden
                 disabled={busy}
                 onchange={(next) =>
                   run(
                     () => api.setSeasonMonitored(current.id, season.season_number, next),
-                    'Could not update the season',
+                    t('route.seriesDetail.updateSeasonFailed'),
                   )} />
             </header>
 
             {#if !isCollapsed}
               {#if episodes.length === 0}
                 <p class="px-3 py-6 text-center text-sm text-ink-secondary">
-                  No episodes known for this season.
+                  {t('route.seriesDetail.noEpisodes')}
                 </p>
               {:else}
                 <div class="overflow-x-auto">
                   <table class="w-full min-w-[800px] border-collapse text-sm">
                     <thead>
                       <tr class="bg-surface text-left">
-                        <th class="micro-label px-3 py-2 font-semibold">Episode</th>
-                        <th class="micro-label px-3 py-2 font-semibold">Title</th>
-                        <th class="micro-label px-3 py-2 font-semibold">Air date</th>
-                        <th class="micro-label px-3 py-2 font-semibold">Status</th>
-                        <th class="micro-label px-3 py-2 font-semibold">Quality</th>
-                        <th class="micro-label px-3 py-2 text-right font-semibold">Size</th>
-                        <th class="micro-label px-3 py-2 text-right font-semibold">Monitored</th>
-                        <th class="micro-label px-3 py-2 text-right font-semibold">Search</th>
+                        <th class="micro-label px-3 py-2 font-semibold">{t('route.seriesDetail.episode')}</th>
+                        <th class="micro-label px-3 py-2 font-semibold">{t('route.seriesDetail.title')}</th>
+                        <th class="micro-label px-3 py-2 font-semibold">{t('route.seriesDetail.airDate')}</th>
+                        <th class="micro-label px-3 py-2 font-semibold">{t('route.seriesDetail.status')}</th>
+                        <th class="micro-label px-3 py-2 font-semibold">{t('route.seriesDetail.quality')}</th>
+                        <th class="micro-label px-3 py-2 text-right font-semibold">{t('route.seriesDetail.size')}</th>
+                        <th class="micro-label px-3 py-2 text-right font-semibold">{t('route.seriesDetail.monitored')}</th>
+                        <th class="micro-label px-3 py-2 text-right font-semibold">{t('route.seriesDetail.search')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -382,23 +385,23 @@
                                 {/if}
                               </div>
                             {:else}
-                              <span class="text-ink-muted">No file</span>
+                              <span class="text-ink-muted">{t('route.seriesDetail.noFile')}</span>
                             {/if}
                           </td>
                           <td class="px-3 py-2 text-right font-mono text-ink-secondary">
-                            {episode.file ? formatBytes(episode.file.size) : 'No file'}
+                            {episode.file ? formatBytes(episode.file.size) : t('route.seriesDetail.noFile')}
                           </td>
                           <td class="px-3 py-2">
                             <div class="flex justify-end">
                               <Toggle
                                 checked={episode.monitored}
-                                label={`Monitor ${episodeCode(episode.season_number, episode.episode_number)}`}
+                                label={t('route.seriesDetail.monitorEpisode', { episode: episodeCode(episode.season_number, episode.episode_number) })}
                                 labelHidden
                                 disabled={busy}
                                 onchange={(next) =>
                                   run(
                                     () => api.setEpisodeMonitored(episode.id, next),
-                                    'Could not update the episode',
+                                    t('route.seriesDetail.updateEpisodeFailed'),
                                   )} />
                             </div>
                           </td>
@@ -411,10 +414,10 @@
                                 variant="ghost"
                                 size="sm"
                                 href="/series/{current.id}/search/{episode.season_number}/{episode.episode_number}"
-                                title={`Search for ${episodeCode(episode.season_number, episode.episode_number)}`}>
+                                title={t('route.seriesDetail.searchEpisode', { episode: episodeCode(episode.season_number, episode.episode_number) })}>
                                 <Icon name="search" size={14} />
                                 <span class="sr-only">
-                                  Search for {episodeCode(episode.season_number, episode.episode_number)}
+                                  {t('route.seriesDetail.searchEpisode', { episode: episodeCode(episode.season_number, episode.episode_number) })}
                                 </span>
                               </Button>
                             </div>
@@ -433,7 +436,7 @@
 
     {#if confirmingRemove}
       <RemoveItemModal
-        title="Remove {current.title}"
+        title={t('route.seriesDetail.removeTitle', { title: current.title })}
         subject={titleWithYear(current.title, current.year)}
         {fileCount}
         busy={removing}

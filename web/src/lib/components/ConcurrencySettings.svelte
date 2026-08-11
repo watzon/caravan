@@ -14,6 +14,7 @@
     SETTING_EMBEDDED_USENET_MAX_CONCURRENT,
     SETTING_MAX_CONCURRENT_DOWNLOADS,
   } from '../api/types';
+  import { useI18n } from '../i18n.svelte';
   import Button from './Button.svelte';
   import Field from './Field.svelte';
   import Icon from './Icon.svelte';
@@ -26,6 +27,7 @@
   }
 
   let { settings, saving = false, onsave }: Props = $props();
+  const { t } = useI18n();
 
   let global = $state('');
   let torrent = $state('');
@@ -100,21 +102,21 @@
 </script>
 
 <SettingsCard
-  title="Concurrency"
-  description="How many downloads run at once. 0 is unlimited - everything starts the moment it is grabbed, which is what makes ten downloads all crawl.">
+  title={t('component.concurrency.title')}
+  description={t('component.concurrency.description')}>
   {#snippet action()}
     <Button variant="primary" size="sm" disabled={saving || !canSave || !hasChanges} onclick={save}>
       <Icon name="check" size={14} />
-      {saving ? 'Saving...' : !canSave ? 'Fix errors' : !hasChanges ? 'No changes' : 'Save changes'}
+      {saving ? t('component.actions.saving') : !canSave ? t('component.actions.fixErrors') : !hasChanges ? t('component.actions.noChanges') : t('component.actions.saveChanges')}
     </Button>
   {/snippet}
 
   <div class="flex flex-col gap-4">
     <Field
-      label="Max concurrent downloads"
+      label={t('component.concurrency.maxDownloads')}
       for="max-concurrent-downloads"
-      help="Across every engine and download client together. Anything over the limit waits in the queue, oldest first."
-      error={normalizedGlobal === null ? 'Enter a non-negative whole number.' : null}>
+      help={t('component.concurrency.maxDownloadsHelp')}
+      error={normalizedGlobal === null ? t('component.validation.nonNegativeInteger') : null}>
       <input
         id="max-concurrent-downloads"
         type="number"
@@ -127,12 +129,12 @@
   </div>
 
   <div data-settings-advanced class="flex flex-col gap-4">
-    <h2 class="micro-label">Per engine</h2>
+    <h2 class="micro-label">{t('component.concurrency.perEngine')}</h2>
     <Field
-      label="Torrent engine"
+      label={t('component.concurrency.torrentEngine')}
       for="embedded-torrent-max-concurrent"
-      help="The built-in torrent engine's own limit. The overall limit above still applies."
-      error={normalizedTorrent === null ? 'Enter a non-negative whole number.' : null}>
+      help={t('component.concurrency.torrentHelp')}
+      error={normalizedTorrent === null ? t('component.validation.nonNegativeInteger') : null}>
       <input
         id="embedded-torrent-max-concurrent"
         type="number"
@@ -143,10 +145,10 @@
         class="h-9 w-full rounded-sm border border-border-strong bg-raised px-3 font-mono text-sm text-ink focus:border-accent focus:outline-none" />
     </Field>
     <Field
-      label="Usenet engine"
+      label={t('component.concurrency.usenetEngine')}
       for="embedded-usenet-max-concurrent"
-      help="A small number is right here - 2 is a good default. Parallel NZBs share one pool of connections to the same news servers, so a second download does not arrive faster; it halves both and doubles how long either takes to become importable."
-      error={normalizedUsenet === null ? 'Enter a non-negative whole number.' : null}>
+      help={t('component.concurrency.usenetHelp')}
+      error={normalizedUsenet === null ? t('component.validation.nonNegativeInteger') : null}>
       <input
         id="embedded-usenet-max-concurrent"
         type="number"

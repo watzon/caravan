@@ -53,42 +53,45 @@ import Search from './lib/routes/Search.svelte';
   import { session } from './lib/state/session.svelte';
   import { shutdown } from './lib/state/shutdown.svelte';
   import { system } from './lib/state/system.svelte';
+  import { useI18n, type TranslationKey } from './lib/i18n.svelte';
 
-  const TITLES: Record<RoutePattern, string> = {
-    '/first-run': 'Welcome',
-    '/': 'Discover',
-    '/discover': 'Discover',
-    '/discover/movies': 'Discover',
-    '/discover/series': 'Discover',
-    '/discover/adult': 'Discover',
-    '/discover/network/:id': 'Discover',
-    '/discover/studio/:id': 'Discover',
-    '/discover/movie/:tmdbId': 'Discover',
-    '/discover/series/:tmdbId': 'Discover',
-    '/requests': 'Requests',
-    '/movies': 'Movies',
-    '/movies/:id': 'Movies',
-    '/movies/:id/search': 'Interactive Search',
-    '/series': 'Series',
-    '/series/:id': 'Series',
-    '/series/:id/search': 'Interactive Search',
-    '/series/:id/search/:season': 'Interactive Search',
-    '/series/:id/search/:season/:episode': 'Interactive Search',
-    '/adult': 'Adult',
-    '/adult/scenes': 'Adult',
-    '/adult/sites/:id': 'Adult',
-    '/adult/sites/:id/search': 'Interactive Search',
-    '/adult/sites/:id/search/:year': 'Interactive Search',
-    '/adult/sites/:id/search/:year/:number': 'Interactive Search',
-    '/search': 'Search',
-    '/queue': 'Queue',
-    '/convert': 'Convert',
-    '/wanted': 'Wanted',
-    '/calendar': 'Calendar',
-    '/history': 'History',
-    '/scan-review': 'Scan Review',
-    '/settings': 'Settings',
-    '/settings/:section': 'Settings',
+  const { t } = useI18n();
+
+  const TITLES: Record<RoutePattern, TranslationKey> = {
+    '/first-run': 'app.title.firstRun',
+    '/': 'app.title.discover',
+    '/discover': 'app.title.discover',
+    '/discover/movies': 'app.title.discover',
+    '/discover/series': 'app.title.discover',
+    '/discover/adult': 'app.title.discover',
+    '/discover/network/:id': 'app.title.discover',
+    '/discover/studio/:id': 'app.title.discover',
+    '/discover/movie/:tmdbId': 'app.title.discover',
+    '/discover/series/:tmdbId': 'app.title.discover',
+    '/requests': 'app.title.requests',
+    '/movies': 'app.title.movies',
+    '/movies/:id': 'app.title.movies',
+    '/movies/:id/search': 'app.title.interactiveSearch',
+    '/series': 'app.title.series',
+    '/series/:id': 'app.title.series',
+    '/series/:id/search': 'app.title.interactiveSearch',
+    '/series/:id/search/:season': 'app.title.interactiveSearch',
+    '/series/:id/search/:season/:episode': 'app.title.interactiveSearch',
+    '/adult': 'app.title.adult',
+    '/adult/scenes': 'app.title.adult',
+    '/adult/sites/:id': 'app.title.adult',
+    '/adult/sites/:id/search': 'app.title.interactiveSearch',
+    '/adult/sites/:id/search/:year': 'app.title.interactiveSearch',
+    '/adult/sites/:id/search/:year/:number': 'app.title.interactiveSearch',
+    '/search': 'app.title.search',
+    '/queue': 'app.title.queue',
+    '/convert': 'app.title.convert',
+    '/wanted': 'app.title.wanted',
+    '/calendar': 'app.title.calendar',
+    '/history': 'app.title.history',
+    '/scan-review': 'app.title.scanReview',
+    '/settings': 'app.title.settings',
+    '/settings/:section': 'app.title.settings',
   };
 
   let sidebarOpen = $state(false);
@@ -285,8 +288,8 @@ import Search from './lib/routes/Search.svelte';
     }
     return match.params.section ?? '';
   });
-  let title = $derived(match ? TITLES[match.pattern] : 'Not found');
-  let document_title = $derived(match ? `${TITLES[match.pattern]} · Caravan` : 'Caravan');
+  let title = $derived(match ? t(TITLES[match.pattern]) : t('app.title.notFound'));
+  let document_title = $derived(match ? `${t(TITLES[match.pattern])} · Caravan` : 'Caravan');
 </script>
 
 <svelte:window onkeydown={onKeydown} />
@@ -333,7 +336,7 @@ import Search from './lib/routes/Search.svelte';
             <Banner
               tone="danger"
               icon="warning"
-              title="Caravan server unreachable"
+              title={t('app.banner.serverUnreachable')}
               message={system.error} />
           {:else if system.status?.dirty}
             <DirtyRecovery />
@@ -364,14 +367,16 @@ import Search from './lib/routes/Search.svelte';
             <Banner
               tone="warning"
               icon="warning"
-              title="Listening on every interface without a password"
-              message="Anyone on this network can reach Caravan and change its settings.">
+              title={t('app.banner.publicBind.title')}
+              message={t('app.banner.publicBind.message')}>
               {#snippet action()}
                 <div class="flex items-center gap-3">
                   <a href="/settings/users" class="text-sm font-semibold text-accent-text hover:underline">
-                    Settings → Users
+                    {t('app.banner.publicBind.settingsLink')}
                   </a>
-                  <Button variant="secondary" size="sm" onclick={dismissNag}>Dismiss</Button>
+                  <Button variant="secondary" size="sm" onclick={dismissNag}>
+                    {t('common.dismiss')}
+                  </Button>
                 </div>
               {/snippet}
             </Banner>

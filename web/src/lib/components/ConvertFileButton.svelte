@@ -15,6 +15,7 @@
   import { convertible } from '../conversion';
   import { system } from '../state/system.svelte';
   import { pushToast } from '../state/toast.svelte';
+  import { useI18n } from '../i18n.svelte';
   import Button from './Button.svelte';
   import Icon from './Icon.svelte';
 
@@ -27,13 +28,14 @@
   }
 
   let { file, compact = false, onqueued }: Props = $props();
+  const { t } = useI18n();
 
   let busy = $state(false);
   let queued = $state(false);
 
   let shown = $derived((system.status?.ffmpeg_available ?? false) && convertible(file.compatibility));
 
-  const label = 'Convert for TV';
+  const label = t('component.convertFile.label');
 
   async function convert() {
     busy = true;
@@ -42,7 +44,7 @@
       await api.convertMediaFile(file.id);
       queued = true;
       notifyQueued = true;
-      pushToast('Queued for conversion.', 'neutral');
+      pushToast(t('component.convertFile.queued'), 'neutral');
     } catch (err) {
       // Already queued is not a failure the user caused twice; say so and
       // leave the button in its queued state.
@@ -62,12 +64,12 @@
 
 {#if shown}
   {#if queued}
-    <Button variant="ghost" size="sm" href="/convert" title="Open the convert queue">
+    <Button variant="ghost" size="sm" href="/convert" title={t('component.convertFile.openQueue')}>
       <Icon name="refresh" size={14} />
       {#if compact}
-        <span class="sr-only">In the convert queue</span>
+        <span class="sr-only">{t('component.convertFile.inQueue')}</span>
       {:else}
-        In the convert queue
+        {t('component.convertFile.inQueue')}
       {/if}
     </Button>
   {:else}

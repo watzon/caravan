@@ -102,7 +102,7 @@ describe('dirty-eject recovery', () => {
     app = mount(DirtyRecovery, { target: host });
     flushSync();
 
-    button('Verify & rescan').click();
+    button('Verify and rescan').click();
     await settle();
 
     expect(posted).toEqual(['/api/v1/system/verify']);
@@ -115,7 +115,7 @@ describe('dirty-eject recovery', () => {
     app = mount(DirtyRecovery, { target: host });
     flushSync();
 
-    button('Verify & rescan').click();
+    button('Verify and rescan').click();
     await settle();
 
     // The flag stays set: this is exactly the case downloads must not resume in.

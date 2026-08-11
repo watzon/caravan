@@ -177,7 +177,7 @@ describe('a filtered movie scope', () => {
     await open('movie', '/discover/movies?genres=878:Science+Fiction&people=1245:Pedro+Pascal');
 
     expect(host.textContent).toContain('Genre: Science Fiction');
-    expect(host.textContent).toContain('Cast & crew: Pedro Pascal');
+    expect(host.textContent).toContain('Cast and crew: Pedro Pascal');
     expect(host.textContent).toContain('Clear all');
   });
 

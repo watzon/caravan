@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { useI18n } from '../i18n.svelte';
   import PosterGrid from './PosterGrid.svelte';
   import Skeleton from './Skeleton.svelte';
 
@@ -7,9 +8,10 @@
   }
 
   let { count = 12 }: Props = $props();
+  const { t } = useI18n();
 </script>
 
-<span class="sr-only" role="status">Loading items…</span>
+<span class="sr-only" role="status">{t('component.posterGrid.loading')}</span>
 
 <PosterGrid>
   {#each Array.from({ length: count }) as _, i (i)}

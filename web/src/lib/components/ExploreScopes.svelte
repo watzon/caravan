@@ -12,6 +12,7 @@
    * (isAdultRoute), so a hidden pill is a courtesy and not the enforcement.
    */
   import { exploreScopeHref, visibleScopes, type ExploreScope } from '../explore';
+  import { useI18n } from '../i18n.svelte';
   import { session } from '../state/session.svelte';
 
   interface Props {
@@ -21,12 +22,13 @@
   }
 
   let { active, note = '' }: Props = $props();
+  const { t } = useI18n();
 
   let scopes = $derived(visibleScopes(session.adult));
 </script>
 
 <div class="flex flex-col gap-2">
-  <nav class="flex flex-wrap gap-2" aria-label="Explore scopes">
+  <nav class="flex flex-wrap gap-2" aria-label={t('component.exploreScopes.aria')}>
     {#each scopes as scope (scope.key)}
       <a
         href={exploreScopeHref(scope.key)}

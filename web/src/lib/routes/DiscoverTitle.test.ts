@@ -231,7 +231,7 @@ describe('Discover text fallbacks', () => {
 describe('DiscoverTitle — season rows', () => {
   it('offers a Request for a missing season of a title nobody owns', async () => {
     await mountTitle(payload({ seasons: [season(1, { requested: true }), season(2)] }));
-    expect(seasonSlots()).toEqual(['Requested · pending approval', 'Request']);
+    expect(seasonSlots()).toEqual(['Requested, pending approval', 'Request']);
   });
 
   /**
@@ -261,7 +261,7 @@ describe('DiscoverTitle — facts', () => {
     expect(facts()).toMatchObject({
       Status: 'Ended',
       'First aired': '20 Jan 2008',
-      'Last aired': '29 Sep 2013',
+      'Last aired': '29 Sept 2013',
       Network: 'AMC',
       Language: 'English',
     });

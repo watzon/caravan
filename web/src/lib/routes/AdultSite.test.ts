@@ -667,7 +667,7 @@ describe('AdultSite cataloguing', () => {
     // Still working, but there is something to look at — so the page keeps the
     // scenes and says so in one line, with the live count.
     expect(host!.textContent).toContain('Deep Impact');
-    expect(host!.textContent).toContain('Cataloguing scenes — 3 so far');
+    expect(host!.textContent).toContain('Cataloguing 3 scenes.');
     expect(host!.textContent).not.toContain('there is nothing to do but watch');
   });
 

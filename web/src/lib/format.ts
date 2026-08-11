@@ -1,18 +1,21 @@
 /** Pure display formatters. No DOM, no I/O — unit-tested in format.test.ts. */
 
+import { currentLocale, translate } from './i18n.svelte';
+
 const UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'] as const;
-const MONTHS = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-] as const;
 
 /** The placeholder for "we do not know", used everywhere instead of blanks. */
-export const UNKNOWN = '—';
+export const UNKNOWN = '-';
 
 /** Human byte size, base 1024, at most one decimal. */
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes < 0) return UNKNOWN;
-  if (bytes < 1024) return `${Math.round(bytes)} B`;
+  if (bytes < 1024) {
+    return translate('format.bytes', {
+      value: new Intl.NumberFormat(currentLocale()).format(Math.round(bytes)),
+      unit: 'B',
+    });
+  }
 
   let value = bytes;
   let unit = 0;
@@ -21,8 +24,10 @@ export function formatBytes(bytes: number): string {
     unit++;
   }
   const rounded = Math.round(value * 10) / 10;
-  const text = Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
-  return `${text} ${UNITS[unit]}`;
+  const text = new Intl.NumberFormat(currentLocale(), {
+    maximumFractionDigits: 1,
+  }).format(rounded);
+  return translate('format.bytes', { value: text, unit: UNITS[unit] ?? 'B' });
 }
 
 /**
@@ -34,7 +39,12 @@ export function formatDate(value: string | null | undefined): string {
   const ms = Date.parse(value);
   if (Number.isNaN(ms)) return UNKNOWN;
   const d = new Date(ms);
-  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+  return new Intl.DateTimeFormat(currentLocale(), {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(d);
 }
 
 /** True when the date is in the future (an unaired episode). */
@@ -60,7 +70,9 @@ export function truncateMiddle(text: string, max: number): string {
 
 /** Season 0 is the specials season (SPEC §7). */
 export function seasonLabel(number: number): string {
-  return number === 0 ? 'Specials' : `Season ${String(number).padStart(2, '0')}`;
+  return number === 0
+    ? translate('format.season.specials')
+    : translate('format.season.number', { number: String(number).padStart(2, '0') });
 }
 
 /** "S01E02" — the scene form, rendered in mono everywhere. */
@@ -70,7 +82,7 @@ export function episodeCode(season: number, episode: number): string {
 
 /** Title with year, the way library items are labelled: "Big Buck Bunny (2008)". */
 export function titleWithYear(title: string, year: number): string {
-  return year > 0 ? `${title} (${year})` : title;
+  return year > 0 ? translate('format.titleWithYear', { title, year }) : title;
 }
 
 /** Parser confidence as a whole percent. */
@@ -94,12 +106,18 @@ export function formatAge(value: string | null | undefined, now: number = Date.n
   if (Number.isNaN(ms)) return UNKNOWN;
 
   const seconds = Math.max(0, Math.round((now - ms) / 1000));
-  if (seconds < HOUR_S) return `${Math.max(1, Math.floor(seconds / MINUTE_S))}m`;
-  if (seconds < DAY_S) return `${Math.floor(seconds / HOUR_S)}h`;
+  if (seconds < HOUR_S) {
+    return translate('format.age.minute', {
+      count: Math.max(1, Math.floor(seconds / MINUTE_S)),
+    });
+  }
+  if (seconds < DAY_S) {
+    return translate('format.age.hour', { count: Math.floor(seconds / HOUR_S) });
+  }
   const days = Math.floor(seconds / DAY_S);
-  if (days < 30) return `${days}d`;
-  if (days < 365) return `${Math.floor(days / 30)}mo`;
-  return `${Math.floor(days / 365)}y`;
+  if (days < 30) return translate('format.age.day', { count: days });
+  if (days < 365) return translate('format.age.month', { count: Math.floor(days / 30) });
+  return translate('format.age.year', { count: Math.floor(days / 365) });
 }
 
 /**
@@ -113,10 +131,16 @@ export function formatUntil(value: string | null | undefined, now: number = Date
   if (Number.isNaN(ms)) return UNKNOWN;
 
   const seconds = Math.round((ms - now) / 1000);
-  if (seconds <= 0) return 'now';
-  if (seconds < HOUR_S) return `in ${Math.max(1, Math.round(seconds / MINUTE_S))}m`;
-  if (seconds < DAY_S) return `in ${Math.round(seconds / HOUR_S)}h`;
-  return `in ${Math.round(seconds / DAY_S)}d`;
+  if (seconds <= 0) return translate('format.until.now');
+  if (seconds < HOUR_S) {
+    return translate('format.until.minute', {
+      count: Math.max(1, Math.round(seconds / MINUTE_S)),
+    });
+  }
+  if (seconds < DAY_S) {
+    return translate('format.until.hour', { count: Math.round(seconds / HOUR_S) });
+  }
+  return translate('format.until.day', { count: Math.round(seconds / DAY_S) });
 }
 
 /**
@@ -125,14 +149,24 @@ export function formatUntil(value: string | null | undefined, now: number = Date
  */
 export function formatInterval(minutes: number): string {
   if (!Number.isFinite(minutes) || minutes <= 0) return UNKNOWN;
-  if (minutes < 60) return `${Math.round(minutes)} min`;
+  if (minutes < 60) {
+    return translate('format.interval.minute', { count: Math.round(minutes) });
+  }
   const hours = minutes / 60;
   if (hours < 24) {
     const rounded = Math.round(hours * 10) / 10;
-    return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)} h`;
+    return translate('format.interval.hour', {
+      count: new Intl.NumberFormat(currentLocale(), {
+        maximumFractionDigits: 1,
+      }).format(rounded),
+    });
   }
   const days = Math.round((minutes / (24 * 60)) * 10) / 10;
-  return `${Number.isInteger(days) ? days : days.toFixed(1)} d`;
+  return translate('format.interval.day', {
+    count: new Intl.NumberFormat(currentLocale(), {
+      maximumFractionDigits: 1,
+    }).format(days),
+  });
 }
 
 /**
@@ -142,7 +176,7 @@ export function formatInterval(minutes: number): string {
  */
 export function formatRate(bytesPerSecond: number): string {
   if (!Number.isFinite(bytesPerSecond) || bytesPerSecond <= 0) return UNKNOWN;
-  return `${formatBytes(bytesPerSecond)}/s`;
+  return translate('format.rate.perSecond', { rate: formatBytes(bytesPerSecond) });
 }
 
 /**
@@ -152,14 +186,24 @@ export function formatRate(bytesPerSecond: number): string {
  */
 export function formatDuration(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds < 0 || seconds > 365 * DAY_S) return UNKNOWN;
-  if (seconds < MINUTE_S) return `${Math.round(seconds)}s`;
-  if (seconds < HOUR_S) return `${Math.floor(seconds / MINUTE_S)}m`;
+  if (seconds < MINUTE_S) {
+    return translate('format.duration.second', { count: Math.round(seconds) });
+  }
+  if (seconds < HOUR_S) {
+    return translate('format.duration.minute', {
+      count: Math.floor(seconds / MINUTE_S),
+    });
+  }
   if (seconds < DAY_S) {
     const hours = Math.floor(seconds / HOUR_S);
     const minutes = Math.floor((seconds % HOUR_S) / MINUTE_S);
-    return minutes === 0 ? `${hours}h` : `${hours}h ${minutes}m`;
+    return minutes === 0
+      ? translate('format.duration.hour', { count: hours })
+      : translate('format.duration.hourMinute', { hours, minutes });
   }
   const days = Math.floor(seconds / DAY_S);
   const hours = Math.floor((seconds % DAY_S) / HOUR_S);
-  return hours === 0 ? `${days}d` : `${days}d ${hours}h`;
+  return hours === 0
+    ? translate('format.duration.day', { count: days })
+    : translate('format.duration.dayHour', { days, hours });
 }

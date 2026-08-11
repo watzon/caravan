@@ -18,6 +18,7 @@
     type Library,
     type Settings,
   } from '../api/types';
+  import { useI18n } from '../i18n.svelte';
   import { pushToast } from '../state/toast.svelte';
   import Badge from './Badge.svelte';
   import Banner from './Banner.svelte';
@@ -35,6 +36,8 @@
     saving?: boolean;
     onsave: (patch: Settings) => Promise<boolean>;
   }
+
+  const { t } = useI18n();
 
   let { settings, saving = false, onsave }: Props = $props();
 
@@ -104,7 +107,7 @@
     try {
       adultLibrary = await api.updateLibrary(lib.id, { dlna_visible: next });
       pushToast(
-        next ? 'The Adult library is now on the network.' : 'The Adult library is off the network.',
+        next ? t('component.dlna.adultShared') : t('component.dlna.adultNotShared'),
         next ? 'warning' : 'neutral',
       );
     } catch (err) {
@@ -134,8 +137,8 @@
 </script>
 
 <SettingsCard
-  title="DLNA"
-  description="The built-in media server. TVs and apps browse and play the library directly — no account, no transcoding.">
+  title={t('component.dlna.title')}
+  description={t('component.dlna.description')}>
 
   {#if error}
     <LoadError message={error} onretry={load} />
@@ -148,7 +151,7 @@
   {:else if status}
     <Toggle
       checked={enabled}
-      label="Advertise this library on the local network"
+      label={t('component.dlna.advertise')}
       onchange={(next) => (enabled = next)} />
 
     <!-- Indented under the switch it depends on, because it is a second,
@@ -162,52 +165,55 @@
         <Toggle
           checked={adultLibrary.dlna_visible}
           disabled={sharingAdult}
-          label="Also share the Adult library"
+          label={t('component.dlna.shareAdult')}
           onchange={shareAdult} />
         {#if adultLibrary.dlna_visible}
           <Banner
             tone="warning"
             icon="warning"
-            message="DLNA has no accounts — every device on this network can browse anything shared here." />
+            message={t('component.dlna.adultWarning')} />
         {:else}
           <p class="text-sm text-ink-secondary">
-            DLNA has no accounts — every device on this network can browse anything shared here.
+            {t('component.dlna.adultWarning')}
           </p>
         {/if}
       </div>
     {/if}
 
     <Field
-      label="Device name"
+      label={t('component.dlna.deviceName')}
       for="dlna-friendly-name"
-      help="What the server calls itself in a TV's list of media servers.">
-      <TextInput id="dlna-friendly-name" bind:value={friendlyName} placeholder="Caravan" />
+      help={t('component.dlna.deviceNameHelp')}>
+      <TextInput
+        id="dlna-friendly-name"
+        bind:value={friendlyName}
+        placeholder={t('component.dlna.defaultName')} />
     </Field>
 
     <Button variant="primary" class="self-start" disabled={!canSave} onclick={save}>
       <Icon name="check" size={14} />
-      {saving ? 'Saving…' : 'Save'}
+      {saving ? t('component.actions.saving') : t('component.actions.save')}
     </Button>
 
     <dl class="grid grid-cols-1 gap-4 rounded-md border border-border bg-surface p-4 sm:grid-cols-2">
       <div>
-        <dt class="micro-label">Status</dt>
+        <dt class="micro-label">{t('component.dlna.status')}</dt>
         <dd class="mt-1">
           {#if status.advertising}
-            <Badge tone="success">Advertising</Badge>
+            <Badge tone="success">{t('component.dlna.advertising')}</Badge>
           {:else if status.enabled}
-            <Badge tone="warning">Not on the network</Badge>
+            <Badge tone="warning">{t('component.dlna.notOnNetwork')}</Badge>
           {:else}
-            <Badge tone="neutral">Off</Badge>
+            <Badge tone="neutral">{t('component.dlna.off')}</Badge>
           {/if}
         </dd>
       </div>
       <div class="min-w-0">
-        <dt class="micro-label">Device ID</dt>
+        <dt class="micro-label">{t('component.dlna.deviceID')}</dt>
         <dd
           class="mt-1 truncate font-mono text-sm text-ink"
           title={status.uuid || undefined}>
-          {status.uuid || '—'}
+          {status.uuid || t('component.dlna.noDeviceID')}
         </dd>
       </div>
     </dl>
@@ -216,15 +222,15 @@
       <Banner
         tone="warning"
         icon="warning"
-        title="Enabled, but not discoverable"
+        title={t('component.dlna.notDiscoverable')}
         message={status.error
-          ? `Caravan could not join the discovery group: ${status.error}. Hosts without multicast - a container on a bridge network, or a VPN-only interface - cannot advertise.`
-          : 'Caravan is not advertising yet. Restart the server to try again.'} />
+          ? t('component.dlna.discoveryError', { error: status.error })
+          : t('component.dlna.notAdvertising')} />
     {:else if unchanged && status.advertising}
       <Banner
         tone="info"
         icon="check"
-        message="Look for “{status.friendly_name}” under media servers, sources or inputs on your TV. Discovery can take a minute after a change." />
+        message={t('component.dlna.discoveryHint', { name: status.friendly_name })} />
     {/if}
   {/if}
 </SettingsCard>

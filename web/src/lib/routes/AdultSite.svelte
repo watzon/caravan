@@ -58,6 +58,10 @@
   import { pushToast } from '../state/toast.svelte';
   import { episodeStatus } from '../status';
   import { compatBadge } from '../tvcompat';
+  import { useI18n } from '../i18n.svelte';
+
+  const { t, tp } = useI18n();
+
 
   interface Props {
     id: number;
@@ -156,9 +160,9 @@
     try {
       const { queued } = await api.searchSeriesNow(current.id);
       if (queued > 0) {
-        pushToast(`${queued} search${queued === 1 ? '' : 'es'} started`, 'success');
+        pushToast(tp('route.adultSite.searchStarted', queued), 'success');
       } else {
-        pushToast('Nothing to search — every monitored scene is covered', 'info');
+        pushToast(t('route.adultSite.searchNone'), 'info');
       }
     } catch (err) {
       pushToast(errorText(err), 'danger');
@@ -195,8 +199,8 @@
       confirmingRemove = false;
       pushToast(
         deleteFiles
-          ? `Removed ${current.title} and its files`
-          : `Removed ${current.title} from the library`,
+          ? t('route.adultSite.removedFiles', { title: current.title })
+          : t('route.adultSite.removedLibrary', { title: current.title }),
         'neutral',
       );
       navigate('/adult');
@@ -221,7 +225,7 @@
     href="/adult"
     class="inline-flex w-fit items-center gap-2 text-base text-ink-secondary transition-colors duration-150 hover:text-ink">
     <Icon name="back" size={14} />
-    Adult
+    {t('route.adultSite.back')}
   </a>
 
   {#if error}
@@ -258,12 +262,12 @@
               {current.title}
             </h2>
             <p class="mt-1 flex flex-wrap items-center gap-3 text-base text-ink-secondary">
-              <span>{current.scene_file_count} / {current.scene_count} scenes</span>
+              <span>{current.scene_file_count} / {tp('route.adultSite.scenes', current.scene_count)}</span>
               <span class="text-ink-muted">·</span>
-              <span>{years.length} year{years.length === 1 ? '' : 's'}</span>
+              <span>{tp('route.adultSite.years', years.length)}</span>
               {#if !current.monitored}
                 <span class="text-ink-muted">·</span>
-                <Badge tone="neutral">Unmonitored</Badge>
+                <Badge tone="neutral">{t('route.adultSite.unmonitored')}</Badge>
               {/if}
             </p>
             <div class="mt-2">
@@ -274,17 +278,17 @@
             <div class="flex w-full flex-wrap items-center gap-3 sm:w-auto">
               <Button variant="primary" disabled={searching} onclick={searchNow}>
                 <Icon name="search" size={14} />
-                {searching ? 'Searching…' : 'Search monitored'}
+                {searching ? t('route.adultSite.searching') : t('route.adultSite.searchMonitored')}
               </Button>
               <Button variant="secondary" href="/adult/sites/{current.id}/search">
-                Interactive search
+                {t('route.adultSite.interactiveSearch')}
               </Button>
               <MonitorButton
                 monitored={current.monitored}
                 subject={current.title}
                 disabled={busy}
                 onchange={(next) =>
-                  run(() => api.setSeriesMonitored(current.id, next), 'Could not update the site')} />
+                  run(() => api.setSeriesMonitored(current.id, next), t('route.adultSite.updateSiteFailed'))} />
               <!-- Removal lives behind the ⋯ rather than one mis-click from the
                    search buttons. There is no per-site metadata refresh route,
                    so removal is the only item there is. -->
@@ -294,13 +298,13 @@
                   ...(canMove
                     ? [
                         {
-                          label: 'Move to library…',
+                          label: t('route.adultSite.moveToLibrary'),
                           onselect: () => (movingLibrary = true),
                         },
                       ]
                     : []),
                   {
-                    label: 'Remove from library…',
+                    label: t('route.adultSite.removeFromLibrary'),
                     danger: true,
                     disabled: removing,
                     onselect: () => (confirmingRemove = true),
@@ -311,18 +315,18 @@
         </div>
 
         <p class="max-w-3xl text-md text-ink-secondary">
-          {current.overview || 'No overview available.'}
+          {current.overview || t('route.adultSite.noOverview')}
         </p>
 
         <dl class="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div>
-            <dt class="micro-label">Folder</dt>
+            <dt class="micro-label">{t('route.adultSite.folder')}</dt>
             <dd class="mt-1 truncate font-mono text-sm text-ink" title={current.path}>
               {current.path || UNKNOWN}
             </dd>
           </div>
           <div class="min-w-0">
-            <dt class="micro-label">Provider id</dt>
+            <dt class="micro-label">{t('route.adultSite.providerId')}</dt>
             <!-- Plain text, as the movie and series pages keep their TMDB id:
                  the header's provider chip is where the link lives. -->
             <dd class="mt-1 truncate font-mono text-sm text-ink" title={current.stash_id}>
@@ -330,7 +334,7 @@
             </dd>
           </div>
           <div>
-            <dt class="micro-label">Added</dt>
+            <dt class="micro-label">{t('route.adultSite.added')}</dt>
             <dd class="mt-1 text-sm text-ink">{formatDate(current.added_at)}</dd>
           </div>
         </dl>
@@ -346,20 +350,20 @@
       <Banner
         tone="info"
         icon="refresh"
-        message="Cataloguing scenes — {current.scene_count} so far. More release years appear as they are indexed." />
+        message={t('route.adultSite.cataloguingProgress', { count: current.scene_count })} />
     {/if}
 
     {#if years.length === 0}
       {#if current.cataloguing}
         <EmptyState
           icon="refresh"
-          title="Cataloguing scenes"
-          message="Caravan is reading this site's catalogue from the metadata provider. Its release years appear here as they are indexed, newest first — there is nothing to do but watch." />
+          title={t('route.adultSite.cataloguingTitle')}
+          message={t('route.adultSite.cataloguingEmpty')} />
       {:else}
         <EmptyState
           icon="flame"
-          title="No scenes yet"
-          message="Caravan knows this site but has no scenes filed under it. A metadata refresh fills the catalogue in." />
+          title={t('route.adultSite.noScenesTitle')}
+          message={t('route.adultSite.noScenesMessage')} />
       {/if}
     {:else}
       <div class="flex flex-col gap-4">
@@ -385,7 +389,7 @@
                   {ownedCount(year)} / {year.scenes.length}
                 </Badge>
                 {#if !year.monitored}
-                  <Badge tone="neutral">Unmonitored</Badge>
+                  <Badge tone="neutral">{t('route.adultSite.unmonitored')}</Badge>
                 {/if}
               </button>
 
@@ -394,20 +398,20 @@
                   variant="secondary"
                   size="sm"
                   href="/adult/sites/{current.id}/search/{year.year}"
-                  title={`Search for a ${year.year} pack`}>
+                  title={t('route.adultSite.searchPackTitle', { year: year.year })}>
                   <Icon name="search" size={14} />
-                  Search
+                  {t('route.adultSite.search')}
                 </Button>
 
                 <Toggle
                   checked={year.monitored}
-                  label={`Monitor ${year.year}`}
+                  label={t('route.adultSite.monitorYear', { year: year.year })}
                   labelHidden
                   disabled={busy}
                   onchange={(next) =>
                     run(
                       () => api.setSeasonMonitored(current.id, year.year, next),
-                      'Could not update the year',
+                      t('route.adultSite.updateYearFailed'),
                     )} />
               {/if}
             </header>
@@ -415,26 +419,26 @@
             {#if !isCollapsed}
               {#if year.scenes.length === 0}
                 <p class="px-3 py-6 text-center text-sm text-ink-secondary">
-                  No scenes known for this year.
+                  {t('route.adultSite.noYearScenes')}
                 </p>
               {:else}
                 <div class="overflow-x-auto">
                   <table class="w-full min-w-[720px] border-collapse text-sm">
                     <thead>
                       <tr class="bg-surface text-left">
-                        <th class="micro-label px-3 py-2 font-semibold">Scene</th>
+                        <th class="micro-label px-3 py-2 font-semibold">{t('route.adultSite.scene')}</th>
                         <!-- On a scene, the performers are what a title is on an
                              episode: the thing somebody is actually looking for.
                              They get a column rather than a suffix on the title.
-                             Quality and size left with them — a scene either has
+                             Quality and size left with them - a scene either has
                              its file or does not, which the status says, and the
                              picker is where a release's quality is chosen. -->
-                        <th class="micro-label px-3 py-2 font-semibold">Performers</th>
-                        <th class="micro-label px-3 py-2 font-semibold">Released</th>
-                        <th class="micro-label px-3 py-2 font-semibold">Status</th>
+                        <th class="micro-label px-3 py-2 font-semibold">{t('route.adultSite.performers')}</th>
+                        <th class="micro-label px-3 py-2 font-semibold">{t('route.adultSite.released')}</th>
+                        <th class="micro-label px-3 py-2 font-semibold">{t('route.adultSite.status')}</th>
                         {#if session.isAdmin}
-                          <th class="micro-label px-3 py-2 text-right font-semibold">Monitored</th>
-                          <th class="micro-label px-3 py-2 text-right font-semibold">Search</th>
+                          <th class="micro-label px-3 py-2 text-right font-semibold">{t('route.adultSite.monitored')}</th>
+                          <th class="micro-label px-3 py-2 text-right font-semibold">{t('route.adultSite.search')}</th>
                         {/if}
                       </tr>
                     </thead>
@@ -498,13 +502,15 @@
                               <div class="flex justify-end">
                                 <Toggle
                                   checked={scene.monitored}
-                                  label={`Monitor ${sceneNumber(scene.number)}`}
+                                  label={t('route.adultSite.monitorScene', {
+                                    scene: sceneNumber(scene.number),
+                                  })}
                                   labelHidden
                                   disabled={busy}
                                   onchange={(next) =>
                                     run(
                                       () => api.setEpisodeMonitored(scene.id, next),
-                                      'Could not update the scene',
+                                      t('route.adultSite.updateSceneFailed'),
                                     )} />
                               </div>
                             </td>
@@ -517,10 +523,14 @@
                                   variant="ghost"
                                   size="sm"
                                   href="/adult/sites/{current.id}/search/{year.year}/{scene.number}"
-                                  title={`Search for ${sceneNumber(scene.number)}`}>
+                                  title={t('route.adultSite.searchSceneTitle', {
+                                    scene: sceneNumber(scene.number),
+                                  })}>
                                   <Icon name="search" size={14} />
                                   <span class="sr-only">
-                                    Search for {sceneNumber(scene.number)}
+                                    {t('route.adultSite.searchScene', {
+                                      scene: sceneNumber(scene.number),
+                                    })}
                                   </span>
                                 </Button>
                               </div>
@@ -540,7 +550,7 @@
 
     {#if confirmingRemove}
       <RemoveItemModal
-        title="Remove {current.title}"
+        title={t('route.adultSite.removeTitle', { title: current.title })}
         subject={current.title}
         {fileCount}
         busy={removing}

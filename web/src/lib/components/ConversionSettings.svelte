@@ -6,6 +6,7 @@
     SETTING_CONVERT_VIDEO_PRESET,
     type Settings,
   } from '../api/types';
+  import { useI18n } from '../i18n.svelte';
   import Button from './Button.svelte';
   import Field from './Field.svelte';
   import Icon from './Icon.svelte';
@@ -17,16 +18,18 @@
     onsave: (patch: Settings) => Promise<boolean>;
   }
 
+  const { t } = useI18n();
+
   const PRESETS = [
-    { value: 'ultrafast', label: 'Ultra fast' },
-    { value: 'superfast', label: 'Super fast' },
-    { value: 'veryfast', label: 'Very fast' },
-    { value: 'faster', label: 'Faster' },
-    { value: 'fast', label: 'Fast' },
-    { value: 'medium', label: 'Medium' },
-    { value: 'slow', label: 'Slow' },
-    { value: 'slower', label: 'Slower' },
-    { value: 'veryslow', label: 'Very slow' },
+    { value: 'ultrafast', label: t('component.conversionSettings.preset.ultrafast') },
+    { value: 'superfast', label: t('component.conversionSettings.preset.superfast') },
+    { value: 'veryfast', label: t('component.conversionSettings.preset.veryfast') },
+    { value: 'faster', label: t('component.conversionSettings.preset.faster') },
+    { value: 'fast', label: t('component.conversionSettings.preset.fast') },
+    { value: 'medium', label: t('component.conversionSettings.preset.medium') },
+    { value: 'slow', label: t('component.conversionSettings.preset.slow') },
+    { value: 'slower', label: t('component.conversionSettings.preset.slower') },
+    { value: 'veryslow', label: t('component.conversionSettings.preset.veryslow') },
   ] as const;
 
   let { settings, saving = false, onsave }: Props = $props();
@@ -74,19 +77,19 @@
 </script>
 
 <SettingsCard
-  title="Conversion output"
-  description="Controls required re-encoding for the active TV compatibility target.">
+  title={t('component.conversionSettings.title')}
+  description={t('component.conversionSettings.description')}>
   {#snippet action()}
     <Button variant="primary" size="sm" disabled={saving || !canSave} onclick={save}>
       <Icon name="check" size={14} />
-      {saving ? 'Saving...' : 'Save changes'}
+      {saving ? t('component.actions.saving') : t('component.actions.saveChanges')}
     </Button>
   {/snippet}
 
   <Field
-    label="Encoding speed"
+    label={t('component.conversionSettings.encodingSpeed')}
     for="convert-video-preset"
-    help="Faster presets finish sooner. Slower presets can make smaller files. Very fast is the default.">
+    help={t('component.conversionSettings.encodingSpeedHelp')}>
     <select
       id="convert-video-preset"
       bind:value={preset}
@@ -98,10 +101,10 @@
   </Field>
 
   <Field
-    label="Video quality (CRF)"
+    label={t('component.conversionSettings.videoQuality')}
     for="convert-video-crf"
-    help="Lower CRF means higher quality and larger files. Choose a whole number from 0 to 51; 20 is the default."
-    error={normalizedCrf === null ? 'Enter a whole number from 0 to 51.' : null}>
+    help={t('component.conversionSettings.videoQualityHelp')}
+    error={normalizedCrf === null ? t('component.conversionSettings.videoQualityError') : null}>
     <input
       id="convert-video-crf"
       type="number"
@@ -113,10 +116,10 @@
       class="h-9 w-full rounded-sm border border-border-strong bg-raised px-3 font-mono text-sm text-ink focus:border-accent focus:outline-none" />
   </Field>
   <Field
-    label="AAC bitrate"
+    label={t('component.conversionSettings.audioBitrate')}
     for="convert-audio-bitrate-kbps"
-    help="Used only when audio must be re-encoded to AAC. Choose 64 to 512 kb/s; 192 is the default."
-    error={normalizedAudioBitrateKbps === null ? 'Enter a whole number from 64 to 512.' : null}>
+    help={t('component.conversionSettings.audioBitrateHelp')}
+    error={normalizedAudioBitrateKbps === null ? t('component.conversionSettings.audioBitrateError') : null}>
     <input
       id="convert-audio-bitrate-kbps"
       type="number"
@@ -129,7 +132,6 @@
   </Field>
 
   <p class="text-sm text-ink-secondary">
-    Container-only conversions copy streams.
-    A running conversion keeps the settings it started with.
+    {t('component.conversionSettings.note')}
   </p>
 </SettingsCard>

@@ -1,3 +1,5 @@
+import { translate } from './i18n.svelte';
+
 /**
  * Running one per-item endpoint over a selection.
  *
@@ -35,6 +37,6 @@ export async function runBulk(
 /** "Monitored 5", or "Monitored 4 of 5" when some failed. */
 export function bulkSummary(result: BulkResult, verb: string): string {
   return result.failed === 0
-    ? `${verb} ${result.total}`
-    : `${verb} ${result.ok} of ${result.total}`;
+    ? translate('bulk.complete', { verb, total: result.total })
+    : translate('bulk.partial', { verb, ok: result.ok, total: result.total });
 }

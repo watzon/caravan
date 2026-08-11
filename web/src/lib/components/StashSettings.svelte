@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { useI18n } from '../i18n.svelte';
   /**
    * The Stash handoff for the adult library (PLAN phase 11 task 5).
    *
@@ -75,7 +76,7 @@
       });
       loaded = cfg;
       url = cfg.url;
-      pushToast('Stash handoff saved.', 'success');
+      pushToast(t('component.stashSettings.saved'), 'success');
     } catch (err) {
       pushToast(errorText(err), 'danger');
     } finally {
@@ -90,19 +91,21 @@
       // The form's current values, not the saved ones: the point of a test
       // button is to find the typo before it is stored.
       const info = await api.testStash({ url: url.trim(), api_key: apiKey.trim() });
-      const version = info.version || 'an unknown build';
-      result = { ok: true, message: `Connected to Stash ${version}` };
+      const version = info.version || t('component.stashSettings.unknownBuild');
+      result = { ok: true, message: t('component.stashSettings.connected', { version }) };
     } catch (err) {
       result = { ok: false, message: errorText(err) };
     } finally {
       testing = false;
     }
   }
+
+  const { t, tp } = useI18n();
 </script>
 
 <SettingsCard
-  title="Stash"
-  description="The adult library's Jellyfin. Imports trigger a scan scoped to library/Adult, then Caravan pushes the stash-box ID so scenes arrive already identified.">
+  title={t('component.stashSettings.stash')}
+  description={t('component.stashSettings.theAdultLibrarySJellyfinImportsTriggerAScanScopedToLibraryAdultThenCaravanPushesTheStashBoxIdSoScenesArriveAlreadyIdentified')}>
   {#snippet action()}
     <!-- The header outlives the body's load branch, so it has to refuse a save
          of values that were never fetched. -->
@@ -122,30 +125,29 @@
     </div>
   {:else}
     <Field
-      label="Server URL"
+      label={t('component.stashSettings.serverUrl')}
       for="stash-url"
-      help="Where Stash answers, e.g. http://stash.lan:9999 - the same address you open in a browser.">
-      <TextInput id="stash-url" bind:value={url} mono placeholder="http://stash.lan:9999" />
+      help={t('component.stashSettings.whereStashAnswersEGHttpStashLan9999TheSameAddressYouOpenInABrowser')}>
+      <TextInput id="stash-url" bind:value={url} mono placeholder={t('component.stashSettings.httpStashLan9999')} />
     </Field>
 
     <Field
-      label="API key"
+      label={t('component.stashSettings.apiKey')}
       for="stash-api-key"
-      help="Created in Stash under Settings - Security. Required only on a Stash that has authentication turned on.">
+      help={t('component.stashSettings.createdInStashUnderSettingsSecurityRequiredOnlyOnAStashThatHasAuthenticationTurnedOn')}>
       <TextInput id="stash-api-key" bind:value={apiKey} type="password" mono placeholder="•••••" />
     </Field>
 
     <Toggle
       checked={enabled}
-      label="Identify scenes in Stash after every adult import"
+      label={t('component.stashSettings.identifyScenesInStashAfterEveryAdultImport')}
       onchange={(next) => (enabled = next)} />
 
     <!-- The scope promise, on the card rather than in the docs: this is an API
          key for somebody's adult server, and what Caravan does with it is one
          directory and nothing else. -->
     <p class="text-sm text-ink-secondary">
-      Scans the Adult library only — <span class="font-mono">library/Adult</span>. Movies and Series
-      are never sent to Stash.
+      {t('component.stashSettings.adultScanScope', { path: 'library/Adult' })}
     </p>
 
     <Button
@@ -153,7 +155,7 @@
       class="self-start"
       disabled={testing || url.trim() === ''}
       onclick={test}>
-      {testing ? 'Testing…' : 'Test connection'}
+      {testing ? t('component.stashSettings.testing') : t('component.stashSettings.testConnection')}
     </Button>
 
     {#if result}

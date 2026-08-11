@@ -86,13 +86,13 @@ describe('DiscoverShelf', () => {
     );
     expect(card.querySelector('.truncate')?.getAttribute('title')).toBe(fullTitle);
     expect(card.querySelector('[title="Rated 7.0/10"]')).not.toBeNull();
-    expect(card.textContent).toContain('IN LIBRARY');
+    expect(card.textContent).toContain('In library');
     expect(
       host.querySelector('a[href="/discover/movie/2"]')?.getAttribute('aria-label'),
     ).toContain('Requested');
     expect(
       host.querySelector('a[href="/discover/movie/3"]')?.getAttribute('aria-label'),
-    ).toContain('Title 3, Year unknown');
+    ).toContain('Title 3, year unknown');
   });
 
   it('shows no arrows while the row fits its viewport', () => {

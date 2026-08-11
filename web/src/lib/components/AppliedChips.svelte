@@ -13,6 +13,7 @@
    */
   import type { AppliedChip } from '../explore';
   import type { Snippet } from 'svelte';
+  import { useI18n } from '../i18n.svelte';
   import Icon from './Icon.svelte';
 
   interface Props {
@@ -24,10 +25,11 @@
   }
 
   let { chips, onremove, onclear, trailing }: Props = $props();
+  const { t } = useI18n();
 </script>
 
 {#if chips.length > 0 || trailing}
-  <div class="flex flex-wrap items-center gap-2" role="group" aria-label="Applied filters">
+  <div class="flex flex-wrap items-center gap-2" role="group" aria-label={t('component.filters.applied')}>
     {#each chips as chip (chip.key)}
       <span
         class="inline-flex h-7 max-w-full items-center gap-1.5 rounded-full border border-accent
@@ -35,7 +37,7 @@
         <span class="min-w-0 truncate" title={chip.label}>{chip.label}</span>
         <button
           type="button"
-          aria-label="Remove filter {chip.label}"
+          aria-label={t('component.filters.remove', { label: chip.label })}
           onclick={() => onremove(chip.key)}
           class="inline-flex size-4 shrink-0 items-center justify-center rounded-full
                  transition-colors duration-150 ease-out hover:bg-accent hover:text-ink-inverse">
@@ -52,7 +54,7 @@
         onclick={onclear}
         class="text-sm text-ink-secondary underline-offset-2 transition-colors duration-150
                ease-out hover:text-ink hover:underline">
-        Clear all
+        {t('component.actions.clearAll')}
       </button>
     {/if}
   </div>

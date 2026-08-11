@@ -62,7 +62,7 @@ describe('AddItemModal', () => {
     mountModal({ initialKind: 'series' });
     expect(selectedTab()).toBe('Series');
     expect(host!.querySelector('input')?.getAttribute('placeholder')).toBe(
-      'Search TMDB for a series…',
+      'Search TMDB for a series...',
     );
   });
 
@@ -70,7 +70,7 @@ describe('AddItemModal', () => {
     mountModal({ kind: 'movie', initialKind: 'series' });
     expect(host!.querySelector('[role="tablist"]')).toBeNull();
     expect(host!.querySelector('input')?.getAttribute('placeholder')).toBe(
-      'Search TMDB for a movie…',
+      'Search TMDB for a movie...',
     );
   });
 
@@ -308,14 +308,14 @@ describe('AddItemModal', () => {
     expect(boxes).toHaveLength(1);
     expect(boxes[0]!.checked).toBe(false);
     expect(host!.textContent).toContain('Add and monitor');
-    expect(host!.textContent).not.toContain('Start searching immediately');
+    expect(host!.textContent).not.toContain('Search now');
 
     toggle(boxes[0]!, true);
     boxes = optionBoxes();
     expect(boxes).toHaveLength(2);
     // Revealed, but not pre-answered: the second decision is its own.
     expect(boxes[1]!.checked).toBe(false);
-    expect(host!.textContent).toContain('Start searching immediately');
+    expect(host!.textContent).toContain('Search now');
   });
 
   it('unchecking monitor hides the search box and resets it', async () => {
@@ -723,7 +723,7 @@ describe('AddItemModal', () => {
     flushSync();
 
     expect(onclose).toHaveBeenCalledOnce();
-    expect(toasts.items.at(-1)).toMatchObject({ message: 'Added Dune', tone: 'success' });
+    expect(toasts.items.at(-1)).toMatchObject({ message: 'Added Dune.', tone: 'success' });
     expect(pushState).toHaveBeenCalledWith({}, '', '/movies/41');
   });
 
@@ -923,7 +923,7 @@ describe('AddItemModal adult scope', () => {
     // the adult endpoint is never touched.
     expect(adultCalls(calls)).toEqual([]);
     expect(host!.querySelector('input')?.getAttribute('placeholder')).toBe(
-      'Search TMDB for a movie…',
+      'Search TMDB for a movie...',
     );
   });
 
@@ -1021,7 +1021,7 @@ describe('AddItemModal adult scope', () => {
     const row = host!.querySelector('ul li')!;
     expect(row.querySelector('.truncate')?.getAttribute('title')).toBe(fullName);
     expect(row.querySelectorAll('.truncate')[1]?.getAttribute('title')).toBe(
-      `also ${aliases.join(', ')}`,
+      `Also ${aliases.join(', ')}`,
     );
   });
 
@@ -1230,8 +1230,8 @@ describe('AddItemModal — metadata credential', () => {
 
     await search('dune');
 
-    expect(host!.textContent).toContain('No TMDB API key yet');
-    expect(host!.textContent).toContain('Settings → Metadata');
+    expect(host!.textContent).toContain('No TMDB API key');
+    expect(host!.textContent).toContain('Settings / Metadata');
     expect(host!.querySelector('a[href="/settings/metadata"]')).not.toBeNull();
     // An empty state, not an error toast.
     expect(toasts.items).toHaveLength(0);
@@ -1297,9 +1297,9 @@ describe('AddItemModal — metadata credential', () => {
 
     await search('dune');
 
-    expect(host!.textContent).toContain('No TMDB API key yet');
+    expect(host!.textContent).toContain('No TMDB API key');
     expect(host!.textContent).toContain('Ask a Caravan admin');
-    expect(host!.textContent).not.toContain('Settings → Metadata');
+    expect(host!.textContent).not.toContain('Settings / Metadata');
     expect(host!.querySelector('a[href="/settings/metadata"]')).toBeNull();
     expect(toasts.items).toHaveLength(0);
   });
@@ -1395,7 +1395,7 @@ describe('AddItemModal — metadata credential', () => {
     await search('dune');
 
     expect(host!.textContent).toContain('tmdb: http 500');
-    expect(host!.textContent).not.toContain('Settings → Metadata');
+    expect(host!.textContent).not.toContain('Settings / Metadata');
   });
 });
 
@@ -1696,7 +1696,7 @@ describe('AddItemModal — provider chains', () => {
     expect(rows[2]!.textContent).toContain('AniList');
     // The copy stops naming one provider once several are answering.
     expect(host!.querySelector('input[type="search"]')?.getAttribute('aria-label')).toBe(
-      'Search the metadata providers',
+      'Search metadata providers',
     );
   });
 

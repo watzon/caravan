@@ -8,6 +8,7 @@
 
 import type { Conversion, ConversionStatus, ConversionStrategy, TVCompatibility } from './api/types';
 import type { Tone } from './status';
+import { translate } from './i18n.svelte';
 
 export interface ConversionStateMeta {
   label: string;
@@ -17,11 +18,11 @@ export interface ConversionStateMeta {
 }
 
 export const CONVERSION_STATES: Record<ConversionStatus, ConversionStateMeta> = {
-  queued: { label: 'Queued', tone: 'neutral', active: true },
-  running: { label: 'Converting', tone: 'accent', active: true },
-  done: { label: 'Done', tone: 'success', active: false },
-  failed: { label: 'Failed', tone: 'danger', active: false },
-  cancelled: { label: 'Cancelled', tone: 'neutral', active: false },
+  queued: { get label() { return translate('conversion.state.queued'); }, tone: 'neutral', active: true },
+  running: { get label() { return translate('conversion.state.running'); }, tone: 'accent', active: true },
+  done: { get label() { return translate('conversion.state.done'); }, tone: 'success', active: false },
+  failed: { get label() { return translate('conversion.state.failed'); }, tone: 'danger', active: false },
+  cancelled: { get label() { return translate('conversion.state.cancelled'); }, tone: 'neutral', active: false },
 };
 
 /**
@@ -31,7 +32,7 @@ export const CONVERSION_STATES: Record<ConversionStatus, ConversionStateMeta> = 
 export function conversionStateMeta(status: string): ConversionStateMeta {
   return (
     CONVERSION_STATES[status as ConversionStatus] ?? {
-      label: status || 'Unknown',
+      label: status || translate('conversion.state.unknown'),
       tone: 'neutral',
       active: false,
     }
@@ -45,13 +46,13 @@ export function conversionStateMeta(status: string): ConversionStateMeta {
  * which.
  */
 export const CONVERSION_STRATEGIES: Record<Exclude<ConversionStrategy, ''>, string> = {
-  none: 'Nothing to do',
-  remux: 'Convert (stream copy)',
-  transcode: 'Transcode (re-encode)',
+  get none() { return translate('conversion.strategy.none'); },
+  get remux() { return translate('conversion.strategy.remux'); },
+  get transcode() { return translate('conversion.strategy.transcode'); },
 };
 
 export function strategyLabel(strategy: string): string {
-  if (!strategy) return 'Deciding…';
+  if (!strategy) return translate('conversion.strategy.deciding');
   return CONVERSION_STRATEGIES[strategy as Exclude<ConversionStrategy, ''>] ?? strategy;
 }
 

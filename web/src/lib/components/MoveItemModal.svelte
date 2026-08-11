@@ -12,6 +12,7 @@
   import type { LibraryKind } from '../api/types';
   import { libraries } from '../state/libraries.svelte';
   import { pushToast } from '../state/toast.svelte';
+  import { useI18n } from '../i18n.svelte';
   import Button from './Button.svelte';
   import Field from './Field.svelte';
   import Modal from './Modal.svelte';
@@ -30,6 +31,7 @@
   }
 
   let { itemType, itemID, itemTitle, kind, currentLibraryID, onclose, onmoved }: Props = $props();
+  const { t } = useI18n();
 
   let busy = $state(false);
   let choices = $derived(libraries.ofKind(kind).filter((l) => l.id !== currentLibraryID));
@@ -48,7 +50,7 @@
       } else {
         await api.moveSeries(itemID, target.id);
       }
-      pushToast(`Moving ${itemTitle} to ${target.name}. Files move in the background.`, 'success');
+      pushToast(t('component.moveItem.queued', { title: itemTitle, library: target.name }), 'success');
       onmoved?.(target.name);
       onclose();
     } catch (err) {
@@ -59,9 +61,9 @@
   }
 </script>
 
-<Modal title="Move {itemTitle}" width="max-w-md" {onclose}>
+<Modal title={t('component.moveItem.title', { title: itemTitle })} width="max-w-md" {onclose}>
   <div class="flex flex-col gap-4 p-4">
-    <Field label="Move to" for="move-target" help="Files move on disk into the chosen library's folder.">
+    <Field label={t('component.moveItem.target')} for="move-target" help={t('component.moveItem.help')}>
       <select
         id="move-target"
         bind:value={targetID}
@@ -74,9 +76,9 @@
   </div>
   {#snippet footer()}
     <div class="flex w-full flex-wrap items-center justify-end gap-2">
-      <Button variant="ghost" disabled={busy} onclick={onclose}>Cancel</Button>
+      <Button variant="ghost" disabled={busy} onclick={onclose}>{t('component.actions.cancel')}</Button>
       <Button variant="primary" disabled={busy || choices.length === 0} onclick={move}>
-        Move
+        {t('component.actions.move')}
       </Button>
     </div>
   {/snippet}

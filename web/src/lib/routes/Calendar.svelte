@@ -12,18 +12,26 @@
   import { TONE_DOT, TONE_TEXT, TONE_TINT, type Tone } from '../status';
   import { page } from '../state/page.svelte';
   import { pushToast } from '../state/toast.svelte';
+  import { currentLocale, useI18n } from '../i18n.svelte';
+
+  const { t, tp } = useI18n();
+
 
   type View = 'month' | 'agenda';
 
-  const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const MONTH_FORMAT = new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' });
-  const DAY_FORMAT = new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
-  const STATUS: Record<CalendarStatus, { label: string; tone: Tone }> = {
-    downloaded: { label: 'On disk', tone: 'success' },
-    downloading: { label: 'Downloading', tone: 'info' },
-    missing: { label: 'Missing', tone: 'danger' },
-    unaired: { label: 'Not yet released', tone: 'neutral' },
-  };
+  let DAYS = $derived([
+    t('route.calendar.daySun'), t('route.calendar.dayMon'), t('route.calendar.dayTue'),
+    t('route.calendar.dayWed'), t('route.calendar.dayThu'), t('route.calendar.dayFri'),
+    t('route.calendar.daySat'),
+  ]);
+  let MONTH_FORMAT = $derived(new Intl.DateTimeFormat(currentLocale(), { month: 'long', year: 'numeric' }));
+  let DAY_FORMAT = $derived(new Intl.DateTimeFormat(currentLocale(), { weekday: 'long', month: 'long', day: 'numeric' }));
+  let STATUS = $derived<Record<CalendarStatus, { label: string; tone: Tone }>>({
+    downloaded: { label: t('route.calendar.statusDownloaded'), tone: 'success' },
+    downloading: { label: t('route.calendar.statusDownloading'), tone: 'info' },
+    missing: { label: t('route.calendar.statusMissing'), tone: 'danger' },
+    unaired: { label: t('route.calendar.statusUnaired'), tone: 'neutral' },
+  });
 
   function todayMonth() {
     const now = new Date();
@@ -138,7 +146,7 @@
     try {
       const response = await api.regenerateAPIKey();
       settings = { ...(settings ?? {}), api_key: response.api_key };
-      pushToast('Calendar feed key regenerated.', 'success');
+      pushToast(t('route.calendar.feedRegenerated'), 'success');
     } catch (err) {
       pushToast(errorText(err), 'danger');
     } finally {
@@ -149,9 +157,9 @@
   async function copyFeedURL() {
     try {
       await navigator.clipboard.writeText(feedURL);
-      pushToast('Calendar feed URL copied.', 'success');
+      pushToast(t('route.calendar.feedCopied'), 'success');
     } catch {
-      pushToast('Could not copy the calendar feed URL.', 'danger');
+      pushToast(t('route.calendar.feedCopyFailed'), 'danger');
     }
   }
   // The view toggle and feed button are page actions: the shared TopBar
@@ -164,11 +172,11 @@
 
 <div class="flex w-full min-w-0 max-w-[1360px] flex-col gap-5">
   <div class="flex flex-wrap items-center gap-3">
-    <div class="flex flex-wrap items-center justify-center gap-1" aria-label="Calendar month navigation">
+    <div class="flex flex-wrap items-center justify-center gap-1" aria-label={t('route.calendar.monthNavigation')}>
       <button
         type="button"
-        aria-label="Previous month"
-        title="Previous month"
+        aria-label={t('route.calendar.previousMonth')}
+        title={t('route.calendar.previousMonth')}
         onclick={() => (month = addMonths(month, -1))}
         class="inline-flex h-7 items-center justify-center rounded-md px-2 text-sm font-medium text-ink-secondary transition-colors duration-150 ease-out hover:bg-raised hover:text-ink">
         <Icon name="back" size={14} />
@@ -176,17 +184,17 @@
       <p class="min-w-44 text-center font-display text-lg font-semibold tracking-tight text-ink">{MONTH_FORMAT.format(month)}</p>
       <button
         type="button"
-        aria-label="Next month"
-        title="Next month"
+        aria-label={t('route.calendar.nextMonth')}
+        title={t('route.calendar.nextMonth')}
         onclick={() => (month = addMonths(month, 1))}
         class="inline-flex h-7 items-center justify-center rounded-md px-2 text-sm font-medium text-ink-secondary transition-colors duration-150 ease-out hover:bg-raised hover:text-ink">
         <Icon name="chevronRight" size={14} />
       </button>
-      <Button variant="secondary" size="sm" onclick={() => (month = todayMonth())}>Today</Button>
+      <Button variant="secondary" size="sm" onclick={() => (month = todayMonth())}>{t('route.calendar.today')}</Button>
     </div>
   </div>
 
-  <div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-ink-secondary" aria-label="Calendar status legend">
+  <div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-ink-secondary" aria-label={t('route.calendar.statusLegend')}>
     {#each Object.entries(STATUS) as [status, meta] (status)}
       <span class="inline-flex items-center gap-2"><span class="size-2 rounded-full {TONE_DOT[meta.tone]}" aria-hidden="true"></span>{meta.label}</span>
     {/each}
@@ -195,7 +203,7 @@
   {:else if loading && entries === null}
     <Skeleton class="h-[620px] w-full rounded-md" />
   {:else if view === 'month'}
-    <section class="w-full min-w-0 max-w-full overflow-x-auto rounded-md border border-border bg-surface" aria-label="Month calendar">
+    <section class="w-full min-w-0 max-w-full overflow-x-auto rounded-md border border-border bg-surface" aria-label={t('route.calendar.monthView')}>
       <div class="min-w-[760px]">
         <div class="grid grid-cols-7 border-b border-border bg-raised">
           {#each DAYS as day}
@@ -211,7 +219,7 @@
             <div
               data-today={isToday ? 'true' : undefined}
               class="min-h-28 border-b border-r border-border p-2 last:border-r-0 {isToday ? 'bg-accent-tint' : inMonth ? 'bg-surface' : 'bg-bg/40'}">
-              <p aria-current={isToday ? 'date' : undefined} class="relative mb-1 font-mono text-xs {isToday ? 'inline-flex size-5 items-center justify-center rounded-full bg-accent text-ink-inverse' : inMonth ? 'text-ink-secondary' : 'text-ink-muted'}">{#if isToday}<span class="sr-only">Today, </span>{/if}{date.getDate()}</p>
+              <p aria-current={isToday ? 'date' : undefined} class="relative mb-1 font-mono text-xs {isToday ? 'inline-flex size-5 items-center justify-center rounded-full bg-accent text-ink-inverse' : inMonth ? 'text-ink-secondary' : 'text-ink-muted'}">{#if isToday}<span class="sr-only">{t('route.calendar.todayPrefix')}</span>{/if}{date.getDate()}</p>
               <div class="flex flex-col gap-1">
                 {#each cellEntries.slice(0, 3) as entry (entry.kind + entry.title + entry.date)}
                   {@const meta = STATUS[entry.status]}
@@ -225,7 +233,7 @@
                   </a>
                 {/each}
                 {#if cellEntries.length > 3}
-                  <span class="px-1.5 text-xs text-ink-muted">+{cellEntries.length - 3} more</span>
+                  <span class="px-1.5 text-xs text-ink-muted">{tp('route.calendar.more', cellEntries.length - 3)}</span>
                 {/if}
               </div>
             </div>
@@ -234,9 +242,9 @@
       </div>
     </section>
   {:else if agenda.length === 0}
-    <EmptyState icon="inbox" title="Nothing scheduled" message="Upcoming movie and episode availability will appear here." />
+    <EmptyState icon="inbox" title={t('route.calendar.emptyTitle')} message={t('route.calendar.emptyMessage')} />
   {:else}
-    <section class="flex max-w-4xl flex-col gap-5" aria-label="Calendar agenda">
+    <section class="flex max-w-4xl flex-col gap-5" aria-label={t('route.calendar.agenda')}>
       {#each agenda as [date, dayEntries] (date)}
         <div class="flex flex-col gap-2">
           <h2 class="font-display text-lg font-semibold tracking-tight text-ink">{DAY_FORMAT.format(new Date(`${date}T12:00:00`))}</h2>
@@ -245,7 +253,7 @@
               {@const meta = STATUS[entry.status]}
               <li class="flex items-center gap-3 border-b border-border px-3 py-3 last:border-b-0">
                 <span class="size-2 shrink-0 rounded-full {TONE_DOT[meta.tone]}" title={meta.label}></span>
-                <Badge tone={entry.kind === 'movie' ? 'neutral' : 'info'}>{entry.kind === 'movie' ? 'Movie' : 'Episode'}</Badge>
+                <Badge tone={entry.kind === 'movie' ? 'neutral' : 'info'}>{entry.kind === 'movie' ? t('route.calendar.movie') : t('route.calendar.episode')}</Badge>
                 <a href={entry.kind === 'movie' && entry.movie_id ? `/movies/${entry.movie_id}` : entry.series_id ? `/series/${entry.series_id}` : undefined} class="min-w-0 flex-1 truncate font-medium text-ink hover:text-accent-text" title={agendaTitle(entry)}>{agendaTitle(entry)}</a>
                 <span class="text-sm {TONE_TEXT[meta.tone]}">{meta.label}</span>
               </li>
@@ -258,37 +266,37 @@
 </div>
 
 {#if feedOpen}
-  <Modal title="iCal feed" width="max-w-lg" onclose={() => (feedOpen = false)}>
+  <Modal title={t('route.calendar.feedTitle')} width="max-w-lg" onclose={() => (feedOpen = false)}>
     <div class="flex flex-col gap-4 p-4">
-      <p class="text-base text-ink-secondary">Use this private URL in a calendar app to see monitored releases. Regenerating the key invalidates every existing feed URL.</p>
+      <p class="text-base text-ink-secondary">{t('route.calendar.feedDescription')}</p>
       {#if feedLoading}
         <Skeleton class="h-9 w-full" />
       {:else if apiKey}
-        <label class="micro-label" for="calendar-feed-url">Feed URL</label>
+        <label class="micro-label" for="calendar-feed-url">{t('route.calendar.feedUrl')}</label>
         <input id="calendar-feed-url" readonly value={feedURL} class="h-9 w-full rounded-sm border border-border-strong bg-raised px-3 font-mono text-sm text-ink" />
       {:else}
-        <p class="text-base text-ink-secondary">Generate a private key to create a feed URL.</p>
+        <p class="text-base text-ink-secondary">{t('route.calendar.feedNoKey')}</p>
       {/if}
     </div>
     {#snippet footer()}
-      <Button variant="ghost" onclick={() => (feedOpen = false)}>Close</Button>
+      <Button variant="ghost" onclick={() => (feedOpen = false)}>{t('route.calendar.close')}</Button>
       {#if apiKey}
-        <Button variant="danger" disabled={regenerating} onclick={regenerate}>{regenerating ? 'Regenerating...' : 'Regenerate key'}</Button>
-        <Button variant="primary" onclick={copyFeedURL}>Copy URL</Button>
+        <Button variant="danger" disabled={regenerating} onclick={regenerate}>{regenerating ? t('route.calendar.regenerating') : t('route.calendar.regenerateKey')}</Button>
+        <Button variant="primary" onclick={copyFeedURL}>{t('route.calendar.copyUrl')}</Button>
       {:else}
-        <Button variant="primary" disabled={regenerating || feedLoading} onclick={regenerate}>{regenerating ? 'Generating...' : 'Generate key'}</Button>
+        <Button variant="primary" disabled={regenerating || feedLoading} onclick={regenerate}>{regenerating ? t('route.calendar.generating') : t('route.calendar.generateKey')}</Button>
       {/if}
     {/snippet}
   </Modal>
 {/if}
 
 {#snippet headerActions()}
-  <div class="flex rounded-md border border-border bg-surface p-0.5" role="group" aria-label="Calendar view">
-    <button type="button" aria-pressed={view === 'month'} onclick={() => (view = 'month')} class="rounded-sm px-2 py-1 text-sm {view === 'month' ? 'bg-raised text-ink' : 'text-ink-secondary hover:text-ink'}">Month</button>
-    <button type="button" aria-pressed={view === 'agenda'} onclick={() => (view = 'agenda')} class="rounded-sm px-2 py-1 text-sm {view === 'agenda' ? 'bg-raised text-ink' : 'text-ink-secondary hover:text-ink'}">Agenda</button>
+  <div class="flex rounded-md border border-border bg-surface p-0.5" role="group" aria-label={t('route.calendar.view')}>
+    <button type="button" aria-pressed={view === 'month'} onclick={() => (view = 'month')} class="rounded-sm px-2 py-1 text-sm {view === 'month' ? 'bg-raised text-ink' : 'text-ink-secondary hover:text-ink'}">{t('route.calendar.month')}</button>
+    <button type="button" aria-pressed={view === 'agenda'} onclick={() => (view = 'agenda')} class="rounded-sm px-2 py-1 text-sm {view === 'agenda' ? 'bg-raised text-ink' : 'text-ink-secondary hover:text-ink'}">{t('route.calendar.agendaTab')}</button>
   </div>
   <Button variant="secondary" onclick={openFeed}>
     <Icon name="link" size={14} />
-    iCal feed
+    {t('route.calendar.feedTitle')}
   </Button>
 {/snippet}

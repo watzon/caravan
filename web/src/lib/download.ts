@@ -15,6 +15,7 @@ import type {
 } from './api/types';
 import { FALLBACK_DOWNLOAD_CLIENT_TYPES } from './downloadClient';
 import type { Tone } from './status';
+import { translate, translatePlural } from './i18n.svelte';
 
 export interface DownloadStateMeta {
   label: string;
@@ -24,12 +25,12 @@ export interface DownloadStateMeta {
 }
 
 export const DOWNLOAD_STATES: Record<DownloadState, DownloadStateMeta> = {
-  queued: { label: 'Queued', tone: 'neutral', active: true },
-  downloading: { label: 'Downloading', tone: 'accent', active: true },
-  seeding: { label: 'Seeding', tone: 'info', active: true },
-  completed: { label: 'Completed', tone: 'success', active: false },
-  failed: { label: 'Failed', tone: 'danger', active: false },
-  paused: { label: 'Paused', tone: 'warning', active: false },
+  queued: { get label() { return translate('download.state.queued'); }, tone: 'neutral', active: true },
+  downloading: { get label() { return translate('download.state.downloading'); }, tone: 'accent', active: true },
+  seeding: { get label() { return translate('download.state.seeding'); }, tone: 'info', active: true },
+  completed: { get label() { return translate('download.state.completed'); }, tone: 'success', active: false },
+  failed: { get label() { return translate('download.state.failed'); }, tone: 'danger', active: false },
+  paused: { get label() { return translate('download.state.paused'); }, tone: 'warning', active: false },
 };
 
 /**
@@ -42,8 +43,8 @@ export const DOWNLOAD_STATES: Record<DownloadState, DownloadStateMeta> = {
  */
 export const DOWNLOAD_PHASES: Record<DownloadPhase, string> = {
   downloading: '',
-  repairing: 'Repairing',
-  extracting: 'Extracting',
+  get repairing() { return translate('download.phase.repairing'); },
+  get extracting() { return translate('download.phase.extracting'); },
 };
 
 /**
@@ -66,7 +67,7 @@ export function downloadPhaseLabel(status: DownloadStatus): string {
 export function downloadStateMeta(state: string): DownloadStateMeta {
   return (
     DOWNLOAD_STATES[state as DownloadState] ?? {
-      label: state || 'Unknown',
+      label: state || translate('download.state.unknown'),
       tone: 'neutral',
       active: false,
     }
@@ -126,7 +127,7 @@ export const DEFAULT_ENGINE = 'embedded';
  */
 export function engineLabel(status: DownloadStatus): string {
   const engine = status.engine || DEFAULT_ENGINE;
-  if (engine === DEFAULT_ENGINE) return 'Embedded';
+  if (engine === DEFAULT_ENGINE) return translate('download.engine.embedded');
   return (
     FALLBACK_DOWNLOAD_CLIENT_TYPES.find((t) => t.type === (engine as DownloadClientType))?.label ??
     engine
@@ -147,17 +148,11 @@ export function unreachableClientBanner(
 ): { title: string; message: string } | null {
   if (!clients || clients.length === 0) return null;
   const names = clients.map((c) => c.name).join(', ');
-  const title =
-    clients.length === 1
-      ? `Download client ${names} is unreachable`
-      : `Download clients ${names} are unreachable`;
   const reasons = [...new Set(clients.map((c) => c.error).filter(Boolean))].join('; ');
   const detail = reasons ? `${reasons}. ` : '';
   return {
-    title,
-    message:
-      `${detail}Its queue has stopped updating and new grabs routed to it are refused until it ` +
-      'answers again. Everything else — the built-in engine and any other client — is unaffected.',
+    title: translatePlural('download.client.unreachable', clients.length, { names }),
+    message: translatePlural('download.client.unreachable.message', clients.length, { detail }),
   };
 }
 

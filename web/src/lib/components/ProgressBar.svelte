@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { useI18n } from '../i18n.svelte';
   /** DESIGN.md §6: 4px track on --color-border, semantic fill, width-only motion. */
   import { TONE_DOT, type Tone } from '../status';
 
@@ -12,6 +13,8 @@
 
   let { value, tone = 'accent', label, class: klass = '' }: Props = $props();
   let pct = $derived(Math.round(Math.max(0, Math.min(1, value)) * 100));
+
+  const { t, tp } = useI18n();
 </script>
 
 <div
@@ -20,7 +23,7 @@
   aria-valuenow={pct}
   aria-valuemin="0"
   aria-valuemax="100"
-  aria-valuetext={`${pct}%`}
+  aria-valuetext={t('component.progressBar.percent', { percent: pct })}
   aria-label={label}>
   <div
     class="h-full rounded-full transition-[width] duration-150 ease-out {TONE_DOT[tone]}"

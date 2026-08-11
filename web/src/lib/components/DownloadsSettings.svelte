@@ -6,6 +6,7 @@
    * list of things still to configure.
    */
   import type { Settings } from '../api/types';
+  import { useI18n } from '../i18n.svelte';
   import ConcurrencySettings from './ConcurrencySettings.svelte';
   import DownloadClientSettings from './DownloadClientSettings.svelte';
   import EngineSettings from './EngineSettings.svelte';
@@ -21,6 +22,7 @@
   }
 
   let { settings, saving = false, showAdvanced = false, onsave }: Props = $props();
+  const { t } = useI18n();
 </script>
 
 <div class="flex flex-col gap-5">
@@ -28,13 +30,13 @@
     <ConcurrencySettings
       {settings}
       {saving}
-      onsave={(patch) => onsave(patch, 'Concurrency limits saved.')} />
+      onsave={(patch) => onsave(patch, t('component.downloadsSettings.concurrencySaved'))} />
   </section>
   <section id="torrent-engine" data-settings-advanced hidden={!showAdvanced} aria-hidden={!showAdvanced}>
     <EngineSettings
       {settings}
       {saving}
-      onsave={(patch) => onsave(patch, 'Engine settings saved.')} />
+      onsave={(patch) => onsave(patch, t('component.downloadsSettings.engineSaved'))} />
   </section>
   <section id="usenet-servers">
     <UsenetServerSettings />

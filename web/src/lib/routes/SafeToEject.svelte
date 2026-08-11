@@ -9,6 +9,8 @@
    */
   import Icon from '../components/Icon.svelte';
   import { shutdown } from '../state/shutdown.svelte';
+  import { useI18n } from '../i18n.svelte';
+  const { t } = useI18n();
 </script>
 
 <div class="flex min-h-full items-center justify-center bg-bg p-6">
@@ -25,12 +27,10 @@
       </span>
 
       <h1 class="mt-4 font-display text-xl font-semibold tracking-tight text-ink">
-        Caravan is still stopping
+        {t('route.safeToEject.stillStoppingTitle')}
       </h1>
       <p class="mt-2 text-base text-ink-secondary">
-        It has not finished releasing the drive. Do not unplug yet — wait for the
-        Caravan window or terminal to close, then eject the drive from your
-        desktop.
+        {t('route.safeToEject.stillStoppingDescription')}
       </p>
     {:else}
       <span
@@ -40,15 +40,14 @@
       </span>
 
       <h1 class="mt-4 font-display text-xl font-semibold tracking-tight text-ink">
-        Safe to eject
+        {t('route.safeToEject.readyTitle')}
       </h1>
       <p class="mt-2 text-base text-ink-secondary">
-        Caravan has stopped, flushed its database and released the drive. You can
-        unplug it now.
+        {t('route.safeToEject.readyDescription')}
       </p>
     {/if}
     <p class="mt-4 text-sm text-ink-muted">
-      Reconnect the drive and start Caravan again to pick up where you left off.
+      {t('route.safeToEject.reconnectDescription')}
     </p>
   </div>
 </div>

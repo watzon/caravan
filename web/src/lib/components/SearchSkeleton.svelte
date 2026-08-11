@@ -8,6 +8,7 @@
    * that two screens are unrelated when they are not.
    */
   import Skeleton from './Skeleton.svelte';
+  import { useI18n } from '../i18n.svelte';
 
   interface Props {
     /** How many placeholder rows to draw. */
@@ -15,9 +16,10 @@
   }
 
   let { rows = 4 }: Props = $props();
+  const { t } = useI18n();
 </script>
 
-<span class="sr-only" role="status">Searching…</span>
+<span class="sr-only" role="status">{t('component.search.loading')}</span>
 
 <div class="flex flex-col gap-2">
   {#each Array.from({ length: rows }) as _, i (i)}

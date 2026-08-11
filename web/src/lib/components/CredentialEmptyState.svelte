@@ -16,6 +16,7 @@
    */
   import { metadataCopy, type CredentialFault } from '../credentials';
   import { session } from '../state/session.svelte';
+  import { useI18n } from '../i18n.svelte';
   import Button from './Button.svelte';
   import EmptyState from './EmptyState.svelte';
 
@@ -25,6 +26,7 @@
   }
 
   let { fault, class: klass = '' }: Props = $props();
+  const { t } = useI18n();
 
   let canFix = $derived(session.isAdmin);
   let copy = $derived(metadataCopy(fault, canFix));
@@ -33,7 +35,7 @@
 <EmptyState icon="settings" title={copy.title} message={copy.message} class={klass}>
   {#snippet action()}
     {#if canFix}
-      <Button variant="primary" href="/settings/metadata">Open metadata settings</Button>
+      <Button variant="primary" href="/settings/metadata">{t('component.credentials.openSettings')}</Button>
     {/if}
   {/snippet}
 </EmptyState>

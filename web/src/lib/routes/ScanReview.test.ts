@@ -237,7 +237,7 @@ describe('ScanReview', () => {
     flushSync();
 
     expect(document.querySelector('input[type="search"]')?.getAttribute('placeholder')).toBe(
-      'Search TMDB for a series…',
+      'Search TMDB for a series...',
     );
   });
 });

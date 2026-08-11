@@ -12,7 +12,12 @@ import { discover } from './lib/state/discover.svelte';
 import { session } from './lib/state/session.svelte';
 import { system } from './lib/state/system.svelte';
 import { shutdown } from './lib/state/shutdown.svelte';
-import { SETTINGS_CATALOG, SETTINGS_CATEGORIES, settingsHref } from './lib/settings/catalog';
+import {
+  SETTINGS_CATALOG,
+  SETTINGS_CATEGORIES,
+  settingsCategoryLabel,
+  settingsHref,
+} from './lib/settings/catalog';
 import type {
   DiscoverHome,
   DownloadStatus,
@@ -430,7 +435,7 @@ describe('App shell', () => {
     expect(back.getAttribute('href')).toBe('/movies');
     expect(back.textContent).toContain('Back to Caravan');
     expect(categories.map((group) => group.querySelector('p')?.textContent?.trim())).toEqual(
-      SETTINGS_CATEGORIES,
+      SETTINGS_CATEGORIES.map((category) => settingsCategoryLabel(category)),
     );
     for (const entry of SETTINGS_CATALOG) {
       expect(settingsNavigation.querySelector(`a[href="${settingsHref(entry)}"]`)).not.toBeNull();
@@ -584,7 +589,7 @@ describe('App shell', () => {
     expect(host.querySelector('a[href="/discover"]')).not.toBeNull();
     expect(host.querySelector('a[href="/requests"]')).not.toBeNull();
     // The trending billboard, from the stubbed /discover payload.
-    expect(host.textContent).toContain('TRENDING #1 · SERIES');
+    expect(host.textContent).toContain('Trending #1 · SERIES');
     expect(host.textContent).toContain('Severance');
     expect(host.textContent).toContain('Browse by network');
     // The movie grid did not come along for the ride.
@@ -800,7 +805,7 @@ describe('App shell', () => {
     expect(host.textContent).toContain('Stash is unreachable');
     expect(host.textContent).toContain('connection refused');
     // The promise the banner exists to make: imports are unaffected.
-    expect(host.textContent).toContain('Adult imports still complete');
+    expect(host.textContent).toContain('Adult imports continue');
     // And the shell around it is untouched.
     expect(host.textContent).toContain('CARAVAN');
     expect(host.textContent).not.toContain('Caravan server unreachable');
@@ -904,7 +909,7 @@ describe('App shell', () => {
 
     // The recovery banner is up, with the way out on it (SPEC §13).
     expect(host.textContent).toContain('Last shutdown was not clean');
-    expect(host.textContent).toContain('Verify & rescan');
+    expect(host.textContent).toContain('Verify and rescan');
     // And portable mode gets the eject control the drive needs (SPEC §2.3).
     expect(host.textContent).toContain('Shut down safely');
   });
@@ -994,9 +999,9 @@ describe('App shell', () => {
     await settle();
 
     expect(host.querySelector('a[href="/settings/users"]')).not.toBeNull();
-    expect(host.textContent).toContain('Settings → Users');
+    expect(host.textContent).toContain('Settings / Users');
     const warning = [...host.querySelectorAll<HTMLElement>('[role="alert"]')].find((alert) =>
-      alert.textContent?.includes('Listening on every interface without a password'),
+      alert.textContent?.includes('Anyone on this network can open Caravan'),
     );
     expect(warning?.classList).toContain('bg-warning-tint');
     expect(warning?.querySelector('.bg-warning')).not.toBeNull();

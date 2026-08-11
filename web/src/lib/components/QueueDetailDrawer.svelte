@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { useI18n } from '../i18n.svelte';
   /**
    * Detail drawer for one active download.
    *
@@ -212,7 +213,7 @@
       downKbps = String(down);
       upKbps = String(up);
       await onlimitsapplied?.();
-      pushToast('Rate limits applied.', 'success');
+      pushToast(t('component.queueDetailDrawer.rateLimitsApplied'), 'success');
     } catch (err) {
       pushToast(errorText(err), 'danger');
     } finally {
@@ -225,6 +226,8 @@
     upKbps = '0';
     await applyLimits();
   }
+
+  const { t, tp } = useI18n();
 </script>
 
 <svelte:window {onkeydown} />
@@ -262,14 +265,14 @@
       <button
         type="button"
         class="shrink-0 rounded-sm p-1 text-ink-secondary transition-colors duration-150 hover:bg-raised hover:text-ink"
-        aria-label="Close download details"
+        aria-label={t('component.queueDetailDrawer.closeDownloadDetails')}
         onclick={onclose}>
         <Icon name="close" />
       </button>
     </header>
 
     <div class="min-h-0 flex-1 overflow-y-auto">
-      <section class="flex flex-col gap-4 border-b border-border px-5 py-4" aria-label="Transfer status">
+      <section class="flex flex-col gap-4 border-b border-border px-5 py-4" aria-label={t('component.queueDetailDrawer.transferStatus')}>
         <div class="flex items-end justify-between gap-4">
           <div>
             <p class="font-mono text-xl font-semibold text-ink">
@@ -288,13 +291,13 @@
         {#if usenet}
           <dl class="grid grid-cols-2 gap-2">
             <div class="min-w-0">
-              <dt class="micro-label">Down</dt>
+              <dt class="micro-label">{t('component.queueDetailDrawer.down')}</dt>
               <dd class="mt-1 truncate font-mono text-sm text-ink" title={formatRate(download.down_rate)}>
                 {formatRate(download.down_rate)}
               </dd>
             </div>
             <div class="min-w-0">
-              <dt class="micro-label">ETA</dt>
+              <dt class="micro-label">{t('component.queueDetailDrawer.eta')}</dt>
               <dd class="mt-1 truncate font-mono text-sm text-ink" title={formatDuration(download.eta_seconds)}>
                 {formatDuration(download.eta_seconds)}
               </dd>
@@ -303,23 +306,23 @@
         {:else}
           <dl class="grid grid-cols-2 gap-2 sm:grid-cols-4">
             <div class="min-w-0">
-              <dt class="micro-label">Down</dt>
+              <dt class="micro-label">{t('component.queueDetailDrawer.down')}</dt>
               <dd class="mt-1 truncate font-mono text-sm text-ink" title={formatRate(download.down_rate)}>
                 {formatRate(download.down_rate)}
               </dd>
             </div>
             <div class="min-w-0">
-              <dt class="micro-label">Up</dt>
+              <dt class="micro-label">{t('component.queueDetailDrawer.up')}</dt>
               <dd class="mt-1 truncate font-mono text-sm text-ink" title={formatRate(download.up_rate)}>
                 {formatRate(download.up_rate)}
               </dd>
             </div>
             <div class="min-w-0">
-              <dt class="micro-label">Ratio</dt>
+              <dt class="micro-label">{t('component.queueDetailDrawer.ratio')}</dt>
               <dd class="mt-1 font-mono text-sm text-ink">{download.ratio.toFixed(2)}</dd>
             </div>
             <div class="min-w-0">
-              <dt class="micro-label">Availability</dt>
+              <dt class="micro-label">{t('component.queueDetailDrawer.availability')}</dt>
               <dd class="mt-1 font-mono text-sm text-ink">
                 {insight ? insight.availability.toFixed(2) : UNKNOWN}
               </dd>
@@ -333,10 +336,10 @@
              and "my queue is stuck". -->
         {#if download.state === 'queued' && (usenet || download.size > 0)}
           <p class="rounded-sm border border-border bg-raised px-3 py-2 text-sm text-ink-secondary">
-            Waiting for a free download slot. Raise the limit under
+            {t('component.queueDetailDrawer.waitingForAFreeDownloadSlotRaiseTheLimitUnder')}
             <a
               class="text-accent-text hover:underline"
-              href="/settings/downloads#download-concurrency">Settings → Downloads → Concurrency</a
+              href="/settings/downloads#download-concurrency">{t('component.queueDetailDrawer.settingsDownloadsConcurrency')}</a
             >, or pause something that is running.
           </p>
         {/if}
@@ -355,10 +358,10 @@
             <span>
               {#if download.phase === 'repairing'}
                 {insight?.damaged_segments
-                  ? `${insight.damaged_segments} segment${insight.damaged_segments === 1 ? '' : 's'} to reconstruct`
-                  : 'Rebuilding damaged files from the release’s par2 volumes.'}
+                  ? tp('component.queueDetailDrawer.rebuildSegments', insight.damaged_segments)
+                  : t('component.queueDetailDrawer.rebuildingFiles')}
               {:else if download.phase === 'extracting'}
-                Unpacking the release’s archives.
+                {t('component.queueDetailDrawer.unpackingArchives')}
               {/if}
             </span>
           </p>
@@ -368,13 +371,13 @@
              it is the first thing to check when an import cannot read it. -->
         <dl class="grid grid-cols-1 gap-2 sm:grid-cols-4">
           <div class="min-w-0">
-            <dt class="micro-label">Client</dt>
+            <dt class="micro-label">{t('component.queueDetailDrawer.client')}</dt>
             <dd class="mt-1 truncate text-sm text-ink" title={engineLabel(download)}>
               {engineLabel(download)}
             </dd>
           </div>
           <div class="min-w-0 sm:col-span-3">
-            <dt class="micro-label">Location</dt>
+            <dt class="micro-label">{t('component.queueDetailDrawer.location')}</dt>
             <dd class="mt-1 truncate font-mono text-sm text-ink-secondary" title={download.save_path || UNKNOWN}>
               {download.save_path || UNKNOWN}
             </dd>
@@ -382,7 +385,7 @@
         </dl>
       </section>
 
-      <div class="flex border-b border-border px-5" role="tablist" aria-label="Download detail sections">
+      <div class="flex border-b border-border px-5" role="tablist" aria-label={t('component.queueDetailDrawer.downloadDetailSections')}>
         {#if usenet}
           <!-- One tab, and deliberately no Limits: the embedded Usenet engine
                implements no per-download rate control, so the tab could only
@@ -436,7 +439,7 @@
             onkeydown={ontabkeydown}
             class="-mb-px border-b-2 px-3 py-2 text-sm transition-colors duration-150 {tab === 'limits' ? 'border-accent text-ink' : 'border-transparent text-ink-secondary hover:text-ink'}"
             onclick={() => (tab = 'limits')}>
-            Limits
+            {t('component.queueDetailDrawer.limits')}
           </button>
         {/if}
       </div>
@@ -447,12 +450,12 @@
             <p class="text-sm text-ink-secondary">File detail is unavailable: {insightError}</p>
           {:else if !insightSupported}
             <p class="text-sm text-ink-secondary">
-              This download client does not report the files inside an NZB.
+              {t('component.queueDetailDrawer.thisDownloadClientDoesNotReportTheFilesInsideAnNzb')}
             </p>
           {:else if insight === null}
-            <p class="text-sm text-ink-secondary">Loading files...</p>
+            <p class="text-sm text-ink-secondary">{t('component.queueDetailDrawer.loadingFiles')}</p>
           {:else if files.length === 0}
-            <p class="text-sm text-ink-secondary">The engine is not reporting any files yet.</p>
+            <p class="text-sm text-ink-secondary">{t('component.queueDetailDrawer.theEngineIsNotReportingAnyFilesYet')}</p>
           {:else}
             <!-- Segments, not bytes: an NZB's per-file size is the on-the-wire
                  total the poster declared, and a file's real progress is how
@@ -468,7 +471,7 @@
                     {#if file.segments_failed > 0}
                       <Badge tone="danger">{file.segments_failed} missing</Badge>
                     {:else if file.complete}
-                      <Badge tone="success">Complete</Badge>
+                      <Badge tone="success">{t('component.queueDetailDrawer.complete')}</Badge>
                     {/if}
                     {#if file.par2}
                       <Badge tone="neutral">par2</Badge>
@@ -491,18 +494,18 @@
           {#if insightError}
             <p class="text-sm text-ink-secondary">Insight is unavailable: {insightError}</p>
           {:else if insight === null}
-            <p class="text-sm text-ink-secondary">Loading peers...</p>
+            <p class="text-sm text-ink-secondary">{t('component.queueDetailDrawer.loadingPeers')}</p>
           {:else if insight.peers.length === 0}
-            <p class="text-sm text-ink-secondary">No peers are connected.</p>
+            <p class="text-sm text-ink-secondary">{t('component.queueDetailDrawer.noPeersAreConnected')}</p>
           {:else}
             <div class="overflow-x-auto">
               <table class="w-full min-w-[360px] table-fixed text-left">
                 <thead class="micro-label">
                   <tr>
-                    <th class="w-[180px] pb-2 font-medium">Peer</th>
+                    <th class="w-[180px] pb-2 font-medium">{t('component.queueDetailDrawer.peer')}</th>
                     <th class="w-14 pb-2 font-medium">%</th>
-                    <th class="w-[82px] pb-2 font-medium">Down</th>
-                    <th class="pb-2 font-medium">Up</th>
+                    <th class="w-[82px] pb-2 font-medium">{t('component.queueDetailDrawer.down')}</th>
+                    <th class="pb-2 font-medium">{t('component.queueDetailDrawer.up')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -525,9 +528,9 @@
       {:else if tab === 'trackers' && insightSupported}
         <div id={trackersPanelID} role="tabpanel" aria-labelledby={trackersTabID} class="px-5 py-4">
           {#if insight === null}
-            <p class="text-sm text-ink-secondary">Open Peers to load tracker information.</p>
+            <p class="text-sm text-ink-secondary">{t('component.queueDetailDrawer.openPeersToLoadTrackerInformation')}</p>
           {:else if insight.trackers.length === 0}
-            <p class="text-sm text-ink-secondary">No trackers are configured.</p>
+            <p class="text-sm text-ink-secondary">{t('component.queueDetailDrawer.noTrackersAreConfigured')}</p>
           {:else}
             <ul class="flex flex-col">
               {#each insight.trackers as tracker (tracker.url)}
@@ -549,12 +552,12 @@
           aria-labelledby={limitsTabID}
           class="flex flex-col gap-6 px-5 py-5">
           <div>
-            <h3 class="micro-label">Rate limits</h3>
+            <h3 class="micro-label">{t('component.queueDetailDrawer.rateLimits')}</h3>
             <div class="mt-3 flex flex-col gap-3">
               <label
                 for={downLimitID}
                 class="grid grid-cols-[128px_minmax(0,1fr)] items-center gap-3 text-sm text-ink">
-                <span>Download limit<span class="sr-only"> in KB/s</span></span>
+                <span>{t('component.queueDetailDrawer.downloadLimit')}<span class="sr-only"> {t('component.queueDetailDrawer.inKbS')}</span></span>
                 <span class="relative">
                   <input
                     id={downLimitID}
@@ -572,7 +575,7 @@
               <label
                 for={upLimitID}
                 class="grid grid-cols-[128px_minmax(0,1fr)] items-center gap-3 text-sm text-ink">
-                <span>Upload limit<span class="sr-only"> in KB/s</span></span>
+                <span>{t('component.queueDetailDrawer.uploadLimit')}<span class="sr-only"> {t('component.queueDetailDrawer.inKbS')}</span></span>
                 <span class="relative">
                   <input
                     id={upLimitID}
@@ -592,22 +595,22 @@
               0 is unlimited. Empty inherits the global limit from
               <a
                 class="text-accent-text hover:underline"
-                href="/settings/downloads#download-concurrency">Settings → Downloads → Concurrency</a
+                href="/settings/downloads#download-concurrency">{t('component.queueDetailDrawer.settingsDownloadsConcurrency')}</a
               >.
             </p>
           </div>
 
           <div>
-            <h3 class="micro-label">Seeding targets</h3>
-            <p class="mt-3 text-sm text-ink-secondary">Stop at ratio [x], or after [days]. Either target stops seeding.</p>
+            <h3 class="micro-label">{t('component.queueDetailDrawer.seedingTargets')}</h3>
+            <p class="mt-3 text-sm text-ink-secondary">{t('component.queueDetailDrawer.stopAtRatioXOrAfterDaysEitherTargetStopsSeeding')}</p>
           </div>
 
           <div class="flex flex-wrap justify-end gap-2">
             <Button variant="secondary" size="sm" disabled={applying} onclick={resetToGlobal}>
-              Reset to global
+              {t('component.queueDetailDrawer.resetToGlobal')}
             </Button>
             <Button variant="primary" size="sm" disabled={applying} onclick={applyLimits}>
-              {applying ? 'Applying...' : 'Apply limits'}
+              {applying ? t('component.queueDetailDrawer.applying') : t('component.queueDetailDrawer.applyLimits')}
             </Button>
           </div>
         </div>
@@ -621,7 +624,7 @@
       {#if retryable}
         <Button variant="primary" size="sm" disabled={busy} onclick={onretry}>
           <Icon name="refresh" size={14} />
-          Retry
+          {t('component.queueDetailDrawer.retry')}
         </Button>
       {:else}
         <Button variant="secondary" size="sm" disabled={busy} onclick={paused ? onresume : onpause}>
@@ -630,8 +633,8 @@
         </Button>
       {/if}
       <span class="flex-1"></span>
-      <Button variant="ghost" size="sm" disabled={busy} onclick={() => onremove(false)}>Remove</Button>
-      <Button variant="danger" size="sm" disabled={busy} onclick={() => onremove(true)}>Remove + data</Button>
+      <Button variant="ghost" size="sm" disabled={busy} onclick={() => onremove(false)}>{t('component.queueDetailDrawer.remove')}</Button>
+      <Button variant="danger" size="sm" disabled={busy} onclick={() => onremove(true)}>{t('component.queueDetailDrawer.removeData')}</Button>
     </footer>
   </div>
 </div>

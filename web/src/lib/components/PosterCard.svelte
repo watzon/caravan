@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { useI18n } from '../i18n.svelte';
   /**
    * DESIGN.md §5: status dot top-left of the poster, title + year below in
    * 13px, hover raises a hairline ring, no zoom gimmicks. The card is one link
@@ -67,6 +68,8 @@
 
   const CIRCLE = `flex size-5 items-center justify-center rounded-full border
     transition-opacity duration-150 ease-out`;
+
+  const { t, tp } = useI18n();
 </script>
 
 {#snippet card()}
@@ -132,7 +135,7 @@
         class="{CIRCLE} absolute right-2 top-2 z-10 border-border-strong bg-bg text-ink-secondary
                opacity-0 hover:border-accent hover:text-accent focus-visible:opacity-100
                group-hover/card:opacity-100 group-focus-within/card:opacity-100 pointer-coarse:opacity-100"
-        aria-label="Select {accessibleName}"
+        aria-label={t('component.posterCard.select', { name: accessibleName })}
         onclick={() => ontoggle?.()}>
         <Icon name="check" size={12} />
       </button>

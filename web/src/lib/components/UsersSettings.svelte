@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { useI18n } from '../i18n.svelte';
   /**
    * Settings → Users (SPEC §11 `/users`): the accounts that can sign in, and
    * what each of them may do.
@@ -112,7 +113,7 @@
     try {
       const created = await api.createUser({ username, password, role });
       users = [...rows, created];
-      pushToast(`Added ${created.username}.`, 'success');
+      pushToast(t('component.usersSettings.added', { name: created.username }), 'success');
       // The first account is what closes an open server, so this browser's own
       // identity just changed from "implicit admin" to a real one.
       await session.refresh();
@@ -129,7 +130,7 @@
     dialogError = null;
     try {
       await api.resetUserPassword(user.id, password);
-      pushToast(`Reset ${user.username}'s password. Their other browsers are signed out.`, 'success');
+      pushToast(t('component.usersSettings.passwordReset', { name: user.username }), 'success');
       close();
     } catch (err) {
       dialogError = errorText(err);
@@ -144,7 +145,7 @@
     try {
       await api.deleteUser(user.id);
       users = rows.filter((u) => u.id !== user.id);
-      pushToast(`Deleted ${user.username}.`, 'neutral');
+      pushToast(t('component.usersSettings.deleted', { name: user.username }), 'neutral');
       close();
     } catch (err) {
       // 409 is the last-admin refusal, and the server's sentence explains it
@@ -162,15 +163,17 @@
     else if (dialog.kind === 'password') void resetPassword(dialog.user);
     else void remove(dialog.user);
   }
+
+  const { t, tp } = useI18n();
 </script>
 
 <SettingsCard
-  title="Users"
-  description="Who can sign in. Admins run Caravan; members can only browse Discover and ask for things.">
+  title={t('component.usersSettings.users')}
+  description={t('component.usersSettings.whoCanSignInAdminsRunCaravanMembersCanOnlyBrowseDiscoverAndAskForThings')}>
   {#snippet action()}
     <Button variant="primary" size="sm" onclick={() => open({ kind: 'create' })}>
       <Icon name="plus" size={14} />
-      Add user
+      {t('component.usersSettings.addUser')}
     </Button>
   {/snippet}
 
@@ -185,10 +188,10 @@
   {:else if rows.length === 0}
     <EmptyState
       icon="inbox"
-      title="No accounts yet"
-      message="This Caravan is open: anyone who can reach it can use and configure it. Adding the first account is what puts a login in front of it — make yourself an admin.">
+      title={t('component.usersSettings.noAccountsYet')}
+      message={t('component.usersSettings.thisCaravanIsOpenAnyoneWhoCanReachItCanUseAndConfigureItAddingTheFirstAccountIsWhatPutsALoginInFrontOfItMakeYourselfAnAdmin')}>
       {#snippet action()}
-        <Button variant="primary" onclick={() => open({ kind: 'create' })}>Add user</Button>
+        <Button variant="primary" onclick={() => open({ kind: 'create' })}>{t('component.usersSettings.addUser')}</Button>
       {/snippet}
     </EmptyState>
   {:else}
@@ -202,7 +205,7 @@
                 {user.role === 'admin' ? 'ADMIN' : 'MEMBER'}
               </Badge>
               {#if user.username === session.username}
-                <Badge tone="info">You</Badge>
+                <Badge tone="info">{t('component.usersSettings.you')}</Badge>
               {/if}
             </p>
           </div>
@@ -212,7 +215,7 @@
               variant="ghost"
               size="sm"
               onclick={() => open({ kind: 'password', user })}>
-              Reset password
+              {t('component.usersSettings.resetPassword')}
             </Button>
             <!-- The last admin cannot go while anyone else has an account: a
                  Caravan with members and no admin can never be administered
@@ -224,11 +227,11 @@
               size="sm"
               disabled={undeletable(user)}
               title={undeletable(user)
-                ? 'The only admin cannot be deleted while other accounts exist'
-                : `Delete ${user.username}`}
+                ? t('component.usersSettings.deleteBlocked')
+                : t('component.usersSettings.deleteTitle', { name: user.username })}
               onclick={() => open({ kind: 'delete', user })}>
               <Icon name="trash" size={14} />
-              <span class="sr-only">Delete {user.username}</span>
+              <span class="sr-only">{t('component.usersSettings.deleteNamed', { name: user.username })}</span>
             </Button>
           </div>
         </li>
@@ -240,11 +243,7 @@
 {#if dialog}
   {@const current = dialog}
   <Modal
-    title={current.kind === 'create'
-      ? 'Add user'
-      : current.kind === 'password'
-        ? `Reset ${current.user.username}'s password`
-        : `Delete ${current.user.username}`}
+    title={current.kind === 'create' ? t('component.usersSettings.addModal') : current.kind === 'password' ? t('component.usersSettings.resetModal', { name: current.user.username }) : t('component.usersSettings.deleteTitle', { name: current.user.username })}
     width="max-w-lg"
     onclose={close}>
     <form
@@ -255,24 +254,22 @@
       }}>
       {#if current.kind === 'delete'}
         <p class="text-base text-ink-secondary">
-          {current.user.username} can no longer sign in, and any browser signed in as them is
-          turned out immediately. What they already asked for stays on the requests screen —
-          deleting somebody does not delete the history of what they wanted.
+          {t('component.usersSettings.deleteMessage', { name: current.user.username })}
         </p>
       {:else}
         {#if current.kind === 'create'}
           <Field
-            label="Username"
+            label={t('component.usersSettings.username')}
             for="user-username"
-            help="Case-insensitive at sign-in. No space at either end — a name nobody can retype is a lockout.">
-            <TextInput id="user-username" bind:value={username} autofocus placeholder="chris" />
+            help={t('component.usersSettings.caseInsensitiveAtSignInNoSpaceAtEitherEndANameNobodyCanRetypeIsALockout')}>
+            <TextInput id="user-username" bind:value={username} autofocus placeholder={t('component.usersSettings.chris')} />
           </Field>
         {/if}
 
         <Field
-          label={current.kind === 'create' ? 'Password' : 'New password'}
+          label={current.kind === 'create' ? t('component.usersSettings.passwordLabel') : t('component.usersSettings.newPasswordLabel')}
           for="user-password"
-          help="At least {MIN_PASSWORD_LENGTH} characters. Stored as an argon2id hash and never returned by the API.">
+          help={t('component.usersSettings.passwordHelp', { count: MIN_PASSWORD_LENGTH })}>
           <TextInput
             id="user-password"
             bind:value={password}
@@ -283,18 +280,17 @@
 
         {#if current.kind === 'create'}
           <Field
-            label="Role"
+            label={t('component.usersSettings.role')}
             for="user-role"
-            help="An admin can do everything on this screen. A member gets Discover and Requests, and nothing else.">
+            help={t('component.usersSettings.anAdminCanDoEverythingOnThisScreenAMemberGetsDiscoverAndRequestsAndNothingElse')}>
             <select id="user-role" bind:value={role} class={SELECT_CLASS}>
-              <option value="member">Member</option>
-              <option value="admin">Admin</option>
+              <option value="member">{t('component.usersSettings.member')}</option>
+              <option value="admin">{t('component.usersSettings.admin')}</option>
             </select>
           </Field>
         {:else}
           <p class="text-sm text-ink-secondary">
-            {current.user.username} is signed out of every browser, including this one if it is
-            them. They are not asked for the old password.
+            {t('component.usersSettings.resetPasswordMessage', { name: current.user.username })}
           </p>
         {/if}
       {/if}
@@ -305,7 +301,7 @@
     </form>
 
     {#snippet footer()}
-      <Button variant="ghost" disabled={busy} onclick={close}>Cancel</Button>
+      <Button variant="ghost" disabled={busy} onclick={close}>{t('component.usersSettings.cancel')}</Button>
       <Button
         variant={current.kind === 'delete' ? 'danger' : 'primary'}
         disabled={!canSubmit}
@@ -314,12 +310,12 @@
           <Icon name="check" size={14} />
         {/if}
         {busy
-          ? 'Working…'
+          ? t('component.usersSettings.working')
           : current.kind === 'create'
-            ? 'Add user'
+            ? t('component.usersSettings.addUser')
             : current.kind === 'password'
-              ? 'Set password'
-              : 'Delete'}
+              ? t('component.usersSettings.setPassword')
+              : t('component.usersSettings.delete')}
       </Button>
     {/snippet}
   </Modal>

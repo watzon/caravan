@@ -217,7 +217,7 @@ describe('URL round trip', () => {
     expect(new URLSearchParams(query).getAll('people')).toEqual(['1245:Pedro Pascal']);
     expect(titleChips('movie', reparseTitle(FULL_MOVIE_FILTER))).toContainEqual({
       key: 'people:1245',
-      label: 'Cast & crew: Pedro Pascal',
+      label: 'Cast and crew: Pedro Pascal',
     });
   });
 
@@ -431,11 +431,11 @@ describe('applied chips', () => {
     expect(titleChips('movie', FULL_MOVIE_FILTER).map((c) => c.label)).toEqual([
       'Genre: Sci-Fi',
       'Genre: Action',
-      'Cast & crew: Pedro Pascal',
+      'Cast and crew: Pedro Pascal',
       'Studio: A24',
       'Keyword: superhero',
-      'Year: 2019–2024',
-      'Runtime: 60–120 min',
+      'Year: 2019-2024',
+      'Runtime: 60-120 min',
       'Rating: 7.5+',
       'Language: Japanese',
     ]);
@@ -454,7 +454,7 @@ describe('applied chips', () => {
    */
   it('hides a filter the scope does not serve', () => {
     const labels = titleChips('series', FULL_MOVIE_FILTER).map((c) => c.label);
-    expect(labels).not.toContain('Cast & crew: Pedro Pascal');
+    expect(labels).not.toContain('Cast and crew: Pedro Pascal');
   });
 
   it('removes one chip and leaves the rest', () => {
@@ -478,7 +478,7 @@ describe('applied chips', () => {
   it('names every applied scene filter once', () => {
     expect(sceneChips(FULL_SCENE_FILTER).map((c) => c.label)).toEqual([
       'Search: poolside',
-      'Site: Vixen · whole network',
+      'Site: Vixen (Whole network)',
       'Performer: Sienna Vale',
       'Performer: Mara Solis',
       'Tag: Outdoor',
@@ -527,9 +527,9 @@ describe('applied chips', () => {
 
   it('reads a one-sided range honestly', () => {
     const from = titleChips('movie', { ...EMPTY_TITLE_FILTER, runtimeMin: 90 });
-    expect(from[0]?.label).toBe('Runtime: from 90 min');
+    expect(from[0]?.label).toBe('Runtime: From 90 min');
     const under = titleChips('movie', { ...EMPTY_TITLE_FILTER, runtimeMax: 45 });
-    expect(under[0]?.label).toBe('Runtime: under 45 min');
+    expect(under[0]?.label).toBe('Runtime: Under 45 min');
     const one = titleChips('movie', { ...EMPTY_TITLE_FILTER, from: '2019-01-01', to: '2019-12-31' });
     expect(one[0]?.label).toBe('Year: 2019');
   });
@@ -556,7 +556,7 @@ describe('durationBadge', () => {
 
 describe('matchCountLine', () => {
   it('counts in the reader’s own thousands separator', () => {
-    expect(matchCountLine(24861, 'movie')).toBe(`${(24861).toLocaleString()} movies match`);
+    expect(matchCountLine(24861, 'movie')).toBe('24,861 movies match');
   });
 
   /** The verb agrees with the noun; "1 scene match" is not a sentence. */

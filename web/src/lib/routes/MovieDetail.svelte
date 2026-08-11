@@ -27,6 +27,10 @@
   import { compatBadge } from '../tvcompat';
 
   import ItemQualityProfileSelect from '../components/ItemQualityProfileSelect.svelte';
+  import { useI18n } from '../i18n.svelte';
+
+  const { t } = useI18n();
+
   interface Props {
     id: number;
   }
@@ -132,9 +136,9 @@
     try {
       const { queued } = await api.searchMovieNow(current.id);
       if (queued > 0) {
-        pushToast('Search started', 'success');
+        pushToast(t('route.movieDetail.searchStarted'), 'success');
       } else {
-        pushToast('Nothing to search — the file already meets the cutoff', 'info');
+        pushToast(t('route.movieDetail.searchNone'), 'info');
       }
     } catch (err) {
       pushToast(errorText(err), 'danger');
@@ -156,8 +160,8 @@
       confirmingRemove = false;
       pushToast(
         deleteFiles
-          ? `Removed ${current.title} and its files`
-          : `Removed ${current.title} from the library`,
+          ? t('route.movieDetail.removedFiles', { title: current.title })
+          : t('route.movieDetail.removedLibrary', { title: current.title }),
         'neutral',
       );
       navigate('/movies');
@@ -174,7 +178,7 @@
     href="/movies"
     class="inline-flex w-fit items-center gap-2 text-base text-ink-secondary transition-colors duration-150 hover:text-ink">
     <Icon name="back" size={14} />
-    Movies
+    {t('route.movieDetail.back')}
   </a>
 
   {#if error}
@@ -207,7 +211,7 @@
               <StatusDot status={movieStatus(movie)} />
               {#if movie.release_date}
                 <span class="text-ink-muted">·</span>
-                <span>Released {formatDate(movie.release_date)}</span>
+                <span>{t('route.movieDetail.released', { date: formatDate(movie.release_date) })}</span>
               {/if}
             </p>
             <div class="mt-2">
@@ -217,10 +221,10 @@
           <div class="flex w-full flex-wrap items-center gap-3 sm:w-auto">
             <Button variant="primary" disabled={searching} onclick={searchNow}>
               <Icon name="search" size={14} />
-              {searching ? 'Searching…' : 'Search now'}
+              {searching ? t('route.movieDetail.searching') : t('route.movieDetail.searchNow')}
             </Button>
             <Button variant="secondary" href="/movies/{movie.id}/search">
-              Interactive search
+              {t('route.movieDetail.interactiveSearch')}
             </Button>
             <MonitorButton
               monitored={movie.monitored}
@@ -236,13 +240,13 @@
                 ...(canMove
                   ? [
                       {
-                        label: 'Move to library…',
+                        label: t('route.movieDetail.moveToLibrary'),
                         onselect: () => (movingLibrary = true),
                       },
                     ]
                   : []),
                 {
-                  label: 'Remove from library…',
+                  label: t('route.movieDetail.removeFromLibrary'),
                   danger: true,
                   disabled: removing,
                   onselect: () => (confirmingRemove = true),
@@ -252,12 +256,12 @@
         </div>
 
         <p class="max-w-3xl text-md text-ink-secondary">
-          {movie.overview || 'No overview available.'}
+          {movie.overview || t('route.movieDetail.noOverview')}
         </p>
 
         {#if cast.length > 0}
           <section class="max-w-3xl" aria-labelledby="movie-cast-heading">
-            <h3 id="movie-cast-heading" class="micro-label">Cast</h3>
+            <h3 id="movie-cast-heading" class="micro-label">{t('route.movieDetail.cast')}</h3>
             <ul class="mt-2 grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-2">
               {#each cast.slice(0, 6) as member (`${member.tmdb_id}-${member.name}-${member.character}`)}
                 <li class="flex min-w-0 items-baseline gap-2 text-sm">
@@ -265,7 +269,7 @@
                     {member.name}
                   </span>
                   {#if member.character}
-                    <span class="shrink-0 text-xs text-ink-muted">as</span>
+                    <span class="shrink-0 text-xs text-ink-muted">{t('route.movieDetail.as')}</span>
                     <span
                       class="min-w-0 flex-1 truncate text-ink-secondary"
                       title={member.character}>
@@ -280,26 +284,26 @@
 
         <dl class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
           <div>
-            <dt class="micro-label">Folder</dt>
+            <dt class="micro-label">{t('route.movieDetail.folder')}</dt>
             <dd class="mt-1 truncate font-mono text-sm text-ink" title={movie.path}>
               {movie.path || UNKNOWN}
             </dd>
           </div>
           <div>
-            <dt class="micro-label">TMDB id</dt>
+            <dt class="micro-label">{t('route.movieDetail.tmdbId')}</dt>
             <dd class="mt-1 font-mono text-sm text-ink">
               {movie.tmdb_id > 0 ? movie.tmdb_id : UNKNOWN}
             </dd>
           </div>
           <div>
-            <dt class="micro-label">Added</dt>
+            <dt class="micro-label">{t('route.movieDetail.added')}</dt>
             <dd class="mt-1 text-sm text-ink">{formatDate(movie.added_at)}</dd>
           </div>
           <div>
-            <dt class="micro-label">Minimum availability</dt>
+            <dt class="micro-label">{t('route.movieDetail.minAvailability')}</dt>
             <dd class="mt-1">
               <select
-                aria-label="Minimum availability"
+                aria-label={t('route.movieDetail.minAvailability')}
                 value={movie.min_availability}
                 onchange={(event) =>
                   setMinAvailability(event.currentTarget.value as MinAvailability)}
@@ -321,7 +325,7 @@
 
     <section class="flex flex-col gap-3">
       <div class="flex flex-wrap items-center gap-3">
-        <h3 class="text-lg font-semibold text-ink">File</h3>
+        <h3 class="text-lg font-semibold text-ink">{t('route.movieDetail.file')}</h3>
         {#if file}
           <div class="ml-auto"><ConvertFileButton {file} /></div>
         {/if}
@@ -330,10 +334,10 @@
       {#if !file}
         <EmptyState
           icon="folder"
-          title="No file imported"
-          message="Caravan has no media file for this movie yet. Run a library scan after copying the file into the storage root.">
+          title={t('route.movieDetail.noFileTitle')}
+          message={t('route.movieDetail.noFileMessage')}>
           {#snippet action()}
-            <Button variant="secondary" href="/scan-review">Open scan review</Button>
+            <Button variant="secondary" href="/scan-review">{t('route.movieDetail.openScanReview')}</Button>
           {/snippet}
         </EmptyState>
       {:else}
@@ -342,13 +346,13 @@
           <table class="w-full min-w-[640px] border-collapse text-sm">
             <thead>
               <tr class="bg-surface text-left">
-                <th class="micro-label px-3 py-2 font-semibold">Path</th>
-                <th class="micro-label px-3 py-2 font-semibold">Quality</th>
-                <th class="micro-label px-3 py-2 font-semibold">Source</th>
-                <th class="micro-label px-3 py-2 font-semibold">Codec</th>
-                <th class="micro-label px-3 py-2 font-semibold">Audio</th>
-                <th class="micro-label px-3 py-2 font-semibold">TV</th>
-                <th class="micro-label px-3 py-2 text-right font-semibold">Size</th>
+                <th class="micro-label px-3 py-2 font-semibold">{t('route.movieDetail.path')}</th>
+                <th class="micro-label px-3 py-2 font-semibold">{t('route.movieDetail.quality')}</th>
+                <th class="micro-label px-3 py-2 font-semibold">{t('route.movieDetail.source')}</th>
+                <th class="micro-label px-3 py-2 font-semibold">{t('route.movieDetail.codec')}</th>
+                <th class="micro-label px-3 py-2 font-semibold">{t('route.movieDetail.audio')}</th>
+                <th class="micro-label px-3 py-2 font-semibold">{t('route.movieDetail.tv')}</th>
+                <th class="micro-label px-3 py-2 text-right font-semibold">{t('route.movieDetail.size')}</th>
               </tr>
             </thead>
             <tbody>
@@ -383,7 +387,7 @@
 
     {#if confirmingRemove}
       <RemoveItemModal
-        title="Remove {movie.title}"
+        title={t('route.movieDetail.removeTitle', { title: movie.title })}
         subject={titleWithYear(movie.title, movie.year)}
         fileCount={file ? 1 : 0}
         busy={removing}

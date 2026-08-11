@@ -2,6 +2,7 @@
   /** Dialog on --color-overlay, radius-lg (DESIGN.md §3/§6). */
   import { tick } from 'svelte';
   import type { Snippet } from 'svelte';
+  import { useI18n } from '../i18n.svelte';
   import Button from './Button.svelte';
   import Icon from './Icon.svelte';
 
@@ -20,6 +21,7 @@
   }
 
   let { title, onclose, dirty = false, width = 'max-w-2xl', children, footer }: Props = $props();
+  const { t } = useI18n();
 
   const modalID = $props.id();
   const titleID = `${modalID}-title`;
@@ -154,14 +156,14 @@
       <h2
         id={titleID}
         class="min-w-0 flex-1 truncate font-display text-md font-semibold tracking-tight text-ink"
-        title={confirmingDiscard ? 'Discard changes?' : title}>
-        {confirmingDiscard ? 'Discard changes?' : title}
+        title={confirmingDiscard ? t('component.modal.discardTitle') : title}>
+        {confirmingDiscard ? t('component.modal.discardTitle') : title}
       </h2>
       {#if !confirmingDiscard}
         <button
           type="button"
           class="rounded-sm p-1 text-ink-secondary transition-colors duration-150 hover:bg-raised hover:text-ink"
-          aria-label="Close"
+          aria-label={t('component.actions.close')}
           onclick={requestClose}>
           <Icon name="close" />
         </button>
@@ -171,14 +173,14 @@
     {#if confirmingDiscard}
       <div data-modal-discard-confirmation class="min-h-0 flex-1 overflow-y-auto p-4">
         <p id={discardDescriptionID} class="text-base text-ink-secondary">
-          You have unsaved changes. Discard them?
+          {t('component.modal.discardDescription')}
         </p>
       </div>
       <footer
         data-modal-discard-actions
         class="flex flex-wrap items-center justify-end gap-2 border-t border-border px-4 py-3">
-        <Button variant="secondary" onclick={keepEditing}>Keep editing</Button>
-        <Button variant="danger" onclick={discardChanges}>Discard changes</Button>
+        <Button variant="secondary" onclick={keepEditing}>{t('component.modal.keepEditing')}</Button>
+        <Button variant="danger" onclick={discardChanges}>{t('component.modal.discardChanges')}</Button>
       </footer>
     {:else}
       <div class="min-h-0 flex-1 overflow-y-auto">{@render children()}</div>

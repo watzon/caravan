@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { useI18n } from '../i18n.svelte';
   /**
    * A scene on the adult explore grid: a 16:9 still with a duration badge, the
    * site and date under it, and the performers under that.
@@ -36,6 +37,8 @@
   let duration = $derived(durationBadge(scene.duration));
   let performers = $derived(scenePerformers(scene));
   let meta = $derived([scene.site_name, scene.date].filter((part) => part !== '').join(' · '));
+
+  const { t, tp } = useI18n();
 </script>
 
 <div class="flex w-full flex-col gap-2">
@@ -47,13 +50,13 @@
     {#if scene.in_library}
       <span class="absolute bottom-2 left-2">
         <Badge tone="success">
-          <span class="inline-flex items-center gap-1"><Icon name="check" size={10} />IN LIBRARY</span>
+          <span class="inline-flex items-center gap-1"><Icon name="check" size={10} />{t('component.sceneCard.inLibrary')}</span>
         </Badge>
       </span>
     {:else if scene.requested}
       <span class="absolute bottom-2 left-2">
         <Badge tone="warning">
-          <span class="inline-flex items-center gap-1"><Icon name="clock" size={10} />REQUESTED</span>
+          <span class="inline-flex items-center gap-1"><Icon name="clock" size={10} />{t('component.sceneCard.requested')}</span>
         </Badge>
       </span>
     {:else}
@@ -63,7 +66,7 @@
           size="sm"
           disabled={busy}
           onclick={() => onrequest(scene)}>
-          {requesting ? 'Requesting…' : 'Request'}
+          {requesting ? t('component.sceneCard.requesting') : t('component.sceneCard.request')}
         </Button>
       </span>
     {/if}

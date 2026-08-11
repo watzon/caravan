@@ -424,7 +424,7 @@ describe('Requests — a scene row', () => {
       body: { search_now: true },
     });
     expect(host.textContent).not.toContain('Deep Impact');
-    expect(toasts.items.map((t) => t.message)).toContain('Approved Deep Impact — search queued');
+    expect(toasts.items.map((t) => t.message)).toContain('Approved Deep Impact. Search queued.');
     resolveRefresh!(json({ requests: served.filter((request) => request.id !== SCENE_ROW.id) }));
     await settle();
   });

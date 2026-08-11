@@ -122,7 +122,7 @@ describe('ReleaseSearchControls', () => {
   it('counts a narrowed selection on the trigger', () => {
     mountControls({ categories: [2000, 5000], indexerIDs: [1] });
     expect(host!.textContent).toContain('2 categories');
-    expect(host!.textContent).toContain('1 indexers');
+    expect(host!.textContent).toContain('1 indexer');
   });
 
   it('shows a locked grab context that offers no way to remove it', () => {

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { useI18n } from '../i18n.svelte';
   /**
    * The active TV profile (SPEC §8): a description of the set the library is
    * played back on, not a filter. Choosing one changes what the release picker
@@ -62,11 +63,13 @@
     if (profile.max_quality) parts.push(`≤ ${profile.max_quality}`);
     return parts;
   }
+
+  const { t, tp } = useI18n();
 </script>
 
 <SettingsCard
-  title="TV profile"
-  description="What the TV on the other end can decode. Search warns before you grab — it never hides a release.">
+  title={t('component.tVProfileSettings.tvProfile')}
+  description={t('component.tVProfileSettings.whatTheTvOnTheOtherEndCanDecodeSearchWarnsBeforeYouGrabItNeverHidesARelease')}>
   {#if error}
     <LoadError message={error} onretry={load} />
   {:else if loading && profiles === null}
@@ -76,7 +79,7 @@
     </div>
   {:else if profiles}
     <fieldset class="flex flex-col gap-3">
-      <legend class="micro-label mb-2">Target set</legend>
+      <legend class="micro-label mb-2">{t('component.tVProfileSettings.targetSet')}</legend>
       {#each profiles as profile (profile.id)}
         <label
           class="flex cursor-pointer gap-3 rounded-md border p-4 transition-colors duration-150
@@ -115,7 +118,7 @@
     <Banner
       tone="info"
       icon="warning"
-      title="DTS is flagged on every profile"
-      message="Current Samsung sets cannot decode DTS at all and it is flaky elsewhere, so a DTS release is called out whichever profile is active." />
+      title={t('component.tVProfileSettings.dtsIsFlaggedOnEveryProfile')}
+      message={t('component.tVProfileSettings.currentSamsungSetsCannotDecodeDtsAtAllAndItIsFlakyElsewhereSoADtsReleaseIsCalledOutWhicheverProfileIsActive')} />
   {/if}
 </SettingsCard>

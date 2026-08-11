@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { useI18n } from '../i18n.svelte';
   /**
    * The floating action bar for a grid selection, and the one confirm the bulk
    * removal goes through. It exists only while something is selected — the
@@ -34,7 +35,7 @@
 
   let { selection, noun, plural, actions, onchanged }: Props = $props();
 
-  let subject = $derived(`${selection.count} selected ${selection.count === 1 ? noun : plural}`);
+  let subject = $derived(t('component.selectActions.selectedNoun', { count: selection.count, noun: selection.count === 1 ? noun : plural }));
 
   let busy = $state(false);
   let confirmingRemove = $state(false);
@@ -59,7 +60,7 @@
     busy = false;
     confirmingRemove = false;
     selection.clear();
-    pushToast(bulkSummary(result, 'Removed'), result.failed === 0 ? 'success' : 'danger');
+    pushToast(bulkSummary(result, t('component.selectActions.removed')), result.failed === 0 ? 'success' : 'danger');
     await onchanged();
   }
 
@@ -69,6 +70,8 @@
       selection.clear();
     }
   }
+
+  const { t, tp } = useI18n();
 </script>
 
 <svelte:window {onkeydown} />
@@ -81,34 +84,34 @@
       class="pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-1 rounded-lg
              border border-border-strong bg-overlay px-1.5 py-1.5 shadow-2xl"
       role="group"
-      aria-label="Actions for {subject}">
+      aria-label={t('component.selectActions.actionsFor', { subject })}>
       <span
         aria-live="polite"
         class="mr-2 basis-full whitespace-nowrap px-2 text-center text-base font-medium text-ink sm:basis-auto sm:px-0">
-        {selection.count} selected
+        {t('component.selectActions.selected', { count: selection.count })}
       </span>
 
       <Button
         variant="ghost"
         size="sm"
         disabled={busy}
-        onclick={() => run('Queued searches for', actions.search)}>
+        onclick={() => run(t('component.selectActions.queuedSearches'), actions.search)}>
         <Icon name="search" size={14} />
-        Search
+        {t('component.selectActions.search')}
       </Button>
       <Button
         variant="ghost"
         size="sm"
         disabled={busy}
-        onclick={() => run('Monitored', (id) => actions.setMonitored(id, true))}>
-        Monitor
+        onclick={() => run(t('component.selectActions.monitored'), (id) => actions.setMonitored(id, true))}>
+        {t('component.selectActions.monitor')}
       </Button>
       <Button
         variant="ghost"
         size="sm"
         disabled={busy}
-        onclick={() => run('Unmonitored', (id) => actions.setMonitored(id, false))}>
-        Unmonitor
+        onclick={() => run(t('component.selectActions.unmonitored'), (id) => actions.setMonitored(id, false))}>
+        {t('component.selectActions.unmonitor')}
       </Button>
       <Button
         variant="danger"
@@ -116,7 +119,7 @@
         disabled={busy}
         onclick={() => (confirmingRemove = true)}>
         <Icon name="trash" size={14} />
-        Remove…
+        {t('component.selectActions.remove')}
       </Button>
 
       <span class="mx-1 hidden h-5 w-px bg-border sm:block" aria-hidden="true"></span>
@@ -126,9 +129,9 @@
         size="sm"
         disabled={busy}
         onclick={() => selection.clear()}
-        title="Clear selection">
+        title={t('component.selectActions.clearSelection')}>
         <Icon name="close" size={14} />
-        <span class="sr-only">Clear selection</span>
+        <span class="sr-only">{t('component.selectActions.clearSelection')}</span>
       </Button>
     </div>
   </div>
@@ -136,7 +139,7 @@
 
 {#if confirmingRemove}
   <RemoveItemModal
-    title="Remove {selection.count === 1 ? noun : plural}"
+    title={t('component.selectActions.removeTitle', { subject: selection.count === 1 ? noun : plural })}
     {subject}
     {busy}
     onconfirm={remove}

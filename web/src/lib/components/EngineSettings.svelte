@@ -9,6 +9,7 @@
     SETTING_ENGINE_SEED_DAYS,
     SETTING_ENGINE_SEED_RATIO,
   } from '../api/types';
+  import { useI18n } from '../i18n.svelte';
   import Banner from './Banner.svelte';
   import Button from './Button.svelte';
   import Field from './Field.svelte';
@@ -20,6 +21,8 @@
     saving?: boolean;
     onsave: (patch: Settings) => Promise<boolean>;
   }
+
+  const { t } = useI18n();
 
   let { settings, saving = false, onsave }: Props = $props();
 
@@ -153,22 +156,22 @@
 </script>
 
 <SettingsCard
-  title="Torrent engine"
-  description="Built in. Defaults for every torrent; a download can override its own limits from the queue.">
+  title={t('component.engine.title')}
+  description={t('component.engine.description')}>
   {#snippet action()}
     <Button variant="primary" size="sm" disabled={saving || !canSave || !hasChanges} onclick={save}>
       <Icon name="check" size={14} />
-      {saving ? 'Saving...' : !canSave ? 'Fix errors' : !hasChanges ? 'No changes' : 'Save changes'}
+      {saving ? t('component.actions.saving') : !canSave ? t('component.actions.fixErrors') : !hasChanges ? t('component.actions.noChanges') : t('component.actions.saveChanges')}
     </Button>
   {/snippet}
 
   <div data-settings-advanced class="flex flex-col gap-4">
-    <h2 class="micro-label">Connection</h2>
+    <h2 class="micro-label">{t('component.engine.connection')}</h2>
     <Field
-      label="Listen port"
+      label={t('component.engine.listenPort')}
       for="engine-listen-port"
-      help="TCP and UDP. Forward this port for best swarm health."
-      error={normalizedListenPort === null ? 'Enter a whole number from 0 to 65,535.' : null}>
+      help={t('component.engine.listenPortHelp')}
+      error={normalizedListenPort === null ? t('component.engine.listenPortError') : null}>
       <input
         id="engine-listen-port"
         type="number"
@@ -180,10 +183,10 @@
         class="h-9 w-full rounded-sm border border-border-strong bg-raised px-3 font-mono text-sm text-ink focus:border-accent focus:outline-none" />
     </Field>
     <Field
-      label="Max connections"
+      label={t('component.engine.maxConnections')}
       for="engine-max-connections"
-      help="Per torrent. Applies to new downloads; changing the port restarts the engine."
-      error={normalizedMaxConnections === null ? 'Enter a non-negative whole number.' : null}>
+      help={t('component.engine.maxConnectionsHelp')}
+      error={normalizedMaxConnections === null ? t('component.validation.nonNegativeInteger') : null}>
       <input
         id="engine-max-connections"
         type="number"
@@ -196,12 +199,12 @@
   </div>
 
   <div data-settings-advanced class="flex flex-col gap-4">
-    <h2 class="micro-label">Global rate limits</h2>
+    <h2 class="micro-label">{t('component.engine.globalRateLimits')}</h2>
     <Field
-      label="Download limit"
+      label={t('component.engine.downloadLimit')}
       for="engine-max-down-kbps"
-      help="KB/s. 0 is unlimited."
-      error={normalizedMaxDownKbps === null ? 'Enter a non-negative whole number.' : null}>
+      help={t('component.engine.rateLimitHelp')}
+      error={normalizedMaxDownKbps === null ? t('component.validation.nonNegativeInteger') : null}>
       <input
         id="engine-max-down-kbps"
         type="number"
@@ -212,10 +215,10 @@
         class="h-9 w-full rounded-sm border border-border-strong bg-raised px-3 font-mono text-sm text-ink focus:border-accent focus:outline-none" />
     </Field>
     <Field
-      label="Upload limit"
+      label={t('component.engine.uploadLimit')}
       for="engine-max-up-kbps"
-      help="KB/s. 0 is unlimited."
-      error={normalizedMaxUpKbps === null ? 'Enter a non-negative whole number.' : null}>
+      help={t('component.engine.rateLimitHelp')}
+      error={normalizedMaxUpKbps === null ? t('component.validation.nonNegativeInteger') : null}>
       <input
         id="engine-max-up-kbps"
         type="number"
@@ -228,12 +231,12 @@
   </div>
 
   <div data-settings-advanced class="flex flex-col gap-4">
-    <h2 class="micro-label">Seeding targets</h2>
+    <h2 class="micro-label">{t('component.engine.seedingTargets')}</h2>
     <Field
-      label="Stop seeding at ratio"
+      label={t('component.engine.stopAtRatio')}
       for="engine-seed-ratio"
-      help="0 disables this target."
-      error={normalizedSeedRatio === null ? 'Enter a non-negative number.' : null}>
+      help={t('component.engine.targetHelp')}
+      error={normalizedSeedRatio === null ? t('component.engine.decimalError') : null}>
       <input
         id="engine-seed-ratio"
         type="number"
@@ -244,10 +247,10 @@
         class="h-9 w-full rounded-sm border border-border-strong bg-raised px-3 font-mono text-sm text-ink focus:border-accent focus:outline-none" />
     </Field>
     <Field
-      label="Stop seeding after days"
+      label={t('component.engine.stopAfterDays')}
       for="engine-seed-days"
-      help="0 disables this target."
-      error={normalizedSeedDays === null ? 'Enter a non-negative whole number.' : null}>
+      help={t('component.engine.targetHelp')}
+      error={normalizedSeedDays === null ? t('component.validation.nonNegativeInteger') : null}>
       <input
         id="engine-seed-days"
         type="number"
@@ -260,11 +263,11 @@
     <Banner
       tone="info"
       icon="warning"
-      title="Portable drive behavior"
-      message="Portable drives pause seeding by default. A drive that can be unplugged keeps no open handles it cannot protect." />
+      title={t('component.engine.portableDriveTitle')}
+      message={t('component.engine.portableDriveMessage')} />
   </div>
 
   {#if restartNotice}
-    <p class="text-sm text-ink-muted">Port and connection changes apply after a restart.</p>
+    <p class="text-sm text-ink-muted">{t('component.engine.portChangeNotice')}</p>
   {/if}
 </SettingsCard>

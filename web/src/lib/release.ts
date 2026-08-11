@@ -11,6 +11,7 @@
 
 import type { Release } from './api/types';
 import type { Tone } from './status';
+import { translate } from './i18n.svelte';
 
 /** Quality ladder, best first — mirrors internal/core.QualityLadder. */
 export const QUALITY_LADDER = ['2160p', '1080p', '720p', '480p'] as const;
@@ -101,36 +102,36 @@ export function releaseFlags(release: Release): ReleaseFlag[] {
   if (RECORDED_SOURCES.has(parsed.source)) {
     flags.push({
       key: 'cam',
-      label: 'CAM',
+      label: translate('release.flag.cam.label'),
       tone: 'danger',
-      title: 'Recorded in a cinema — expect unwatchable video and audio.',
+      title: translate('release.flag.cam.title'),
     });
   }
 
   if (release.protocol === 'torrent' && release.seeders <= 0) {
     flags.push({
       key: 'no-seeds',
-      label: 'NO SEEDS',
+      label: translate('release.flag.noSeeds.label'),
       tone: 'danger',
-      title: 'No seeders: this torrent has nobody to download from and will stall at 0%.',
+      title: translate('release.flag.noSeeds.title'),
     });
   }
 
   if (HARDCODED_RE.test(release.title)) {
     flags.push({
       key: 'hardcoded',
-      label: 'HC SUBS',
+      label: translate('release.flag.hardcodedSubs.label'),
       tone: 'warning',
-      title: 'Hardcoded subtitles are burned into the picture and cannot be turned off.',
+      title: translate('release.flag.hardcodedSubs.title'),
     });
   }
 
   if (parsed.audio.toUpperCase().includes('DTS')) {
     flags.push({
       key: 'dts',
-      label: 'DTS',
+      label: translate('release.flag.dts.label'),
       tone: 'warning',
-      title: 'DTS audio: many TVs cannot decode it, so this may need converting for playback.',
+      title: translate('release.flag.dts.title'),
     });
   }
 

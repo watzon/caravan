@@ -9,10 +9,19 @@
  */
 
 import type { Indexer, IndexerCategory, IndexerType } from './api/types';
+import { translate } from './i18n.svelte';
 
 export const INDEXER_TYPES: { value: IndexerType; label: string; help: string }[] = [
-  { value: 'torznab', label: 'Torznab', help: 'Torrent indexer (Jackett, Prowlarr, private trackers).' },
-  { value: 'newznab', label: 'Newznab', help: 'Usenet indexer (NZBGeek, DrunkenSlug, …).' },
+  {
+    value: 'torznab',
+    get label() { return translate('indexer.type.torznab.label'); },
+    get help() { return translate('indexer.type.torznab.help'); },
+  },
+  {
+    value: 'newznab',
+    get label() { return translate('indexer.type.newznab.label'); },
+    get help() { return translate('indexer.type.newznab.help'); },
+  },
 ];
 
 /**
@@ -127,7 +136,7 @@ export function categoryGroups(
   ): { id: number; name: string }[] => {
     const children: { id: number; name: string }[] = [];
     for (const node of nodes) {
-      const fullName = node.name || `Category ${node.id}`;
+      const fullName = node.name || translate('indexer.category.number', { id: node.id });
       const prefix = `${parentName}/`;
       const segment = fullName.startsWith(prefix) ? fullName.slice(prefix.length) : fullName;
       const childPath = [...path, segment];
@@ -138,7 +147,7 @@ export function categoryGroups(
   };
 
   for (const node of tree) {
-    const name = node.name || `Category ${node.id}`;
+    const name = node.name || translate('indexer.category.number', { id: node.id });
     const children = collectChildren(node.subcats, name);
     if (selected.has(node.id) || children.length > 0) {
       groups.push({ id: node.id, name, selected: selected.has(node.id), children });
@@ -147,9 +156,14 @@ export function categoryGroups(
 
   const unknown = categories
     .filter((id) => !known.has(id))
-    .map((id) => ({ id, name: `Category ${id}` }));
+    .map((id) => ({ id, name: translate('indexer.category.number', { id }) }));
   if (unknown.length > 0) {
-    groups.push({ id: -1, name: 'Not advertised', selected: false, children: unknown });
+    groups.push({
+      id: -1,
+      name: translate('indexer.category.notAdvertised'),
+      selected: false,
+      children: unknown,
+    });
   }
   return groups;
 }
@@ -164,13 +178,13 @@ export function categoryGroups(
 
 /** The standard Newznab/Torznab top-level blocks, in their numeric order. */
 export const STANDARD_CATEGORY_BLOCKS: readonly { id: number; name: string }[] = [
-  { id: 2000, name: 'Movies' },
-  { id: 3000, name: 'Audio' },
-  { id: 4000, name: 'PC' },
-  { id: 5000, name: 'TV' },
-  { id: 6000, name: 'XXX' },
-  { id: 7000, name: 'Books' },
-  { id: 8000, name: 'Other' },
+  { id: 2000, get name() { return translate('indexer.category.movies'); } },
+  { id: 3000, get name() { return translate('indexer.category.audio'); } },
+  { id: 4000, get name() { return translate('indexer.category.pc'); } },
+  { id: 5000, get name() { return translate('indexer.category.tv'); } },
+  { id: 6000, get name() { return translate('indexer.category.adult'); } },
+  { id: 7000, get name() { return translate('indexer.category.books'); } },
+  { id: 8000, get name() { return translate('indexer.category.other'); } },
 ];
 
 /** The adult block, mirroring core.AdultCategoryBase (internal/core/release.go). */
@@ -220,9 +234,9 @@ export function searchCategoryOptions(
  * validates too; this exists so the user is told before a round trip.
  */
 export function validateIndexer(input: { name: string; url: string }): string | null {
-  if (input.name.trim() === '') return 'Give the indexer a name.';
+  if (input.name.trim() === '') return translate('validation.indexer.name');
   const url = input.url.trim();
-  if (url === '') return 'The indexer needs a base URL.';
-  if (!/^https?:\/\//i.test(url)) return 'The URL must start with http:// or https://.';
+  if (url === '') return translate('validation.indexer.urlRequired');
+  if (!/^https?:\/\//i.test(url)) return translate('validation.indexer.urlScheme');
   return null;
 }

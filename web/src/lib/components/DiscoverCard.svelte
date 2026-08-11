@@ -12,6 +12,7 @@
   import type { DiscoverItem } from '../api/types';
   import { discoverHref, mediaTypeChip, ratingPresentation } from '../discover';
   import { UNKNOWN, titleWithYear } from '../format';
+  import { useI18n } from '../i18n.svelte';
   import Badge from './Badge.svelte';
   import Icon from './Icon.svelte';
   import Poster from './Poster.svelte';
@@ -23,16 +24,19 @@
   }
 
   let { item, showType = false }: Props = $props();
+  const { t } = useI18n();
 
   let rating = $derived(ratingPresentation(item.vote_average, item.vote_count, item.date));
   let accessibleLabel = $derived.by(() => {
     const parts = [
-      item.year > 0 ? titleWithYear(item.title, item.year) : `${item.title}, Year unknown`,
+      item.year > 0
+        ? titleWithYear(item.title, item.year)
+        : t('component.discoverCard.yearUnknown', { title: item.title }),
     ];
     if (showType) parts.push(mediaTypeChip(item.media_type));
     parts.push(rating.title);
-    if (item.in_library) parts.push('In library');
-    else if (item.requested) parts.push('Requested');
+    if (item.in_library) parts.push(t('component.status.inLibrary'));
+    else if (item.requested) parts.push(t('component.status.requested'));
     return parts.join(', ');
   });
 </script>
@@ -60,13 +64,13 @@
     {#if item.in_library}
       <span class="absolute bottom-2 left-2">
         <Badge tone="success">
-          <span class="inline-flex items-center gap-1"><Icon name="check" size={10} />IN LIBRARY</span>
+          <span class="inline-flex items-center gap-1"><Icon name="check" size={10} />{t('component.status.inLibrary')}</span>
         </Badge>
       </span>
     {:else if item.requested}
       <span class="absolute bottom-2 left-2">
         <Badge tone="warning">
-          <span class="inline-flex items-center gap-1"><Icon name="clock" size={10} />REQUESTED</span>
+          <span class="inline-flex items-center gap-1"><Icon name="clock" size={10} />{t('component.status.requested')}</span>
         </Badge>
       </span>
     {/if}

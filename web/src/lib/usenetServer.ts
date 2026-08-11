@@ -8,6 +8,8 @@
  * Pure — unit-tested in usenetServer.test.ts.
  */
 
+import { translate } from './i18n.svelte';
+
 /** internal/core.UsenetDefault* — the values the server fills a blank in with. */
 export const DEFAULT_USENET_PORT = 119;
 export const DEFAULT_USENET_TLS_PORT = 563;
@@ -68,19 +70,19 @@ export function validateUsenetServer(input: {
   maxConnections: string;
   hasStoredPassword: boolean;
 }): string | null {
-  if (input.name.trim() === '') return 'Give the news server a name.';
+  if (input.name.trim() === '') return translate('validation.usenet.name');
   const host = input.host.trim();
-  if (host === '') return 'The news server needs a hostname.';
+  if (host === '') return translate('validation.usenet.hostRequired');
   // A hostname, not a URL: pasting the provider's web address is the likely
   // mistake, and it fails at dial time with a much worse message.
-  if (/^[a-z]+:\/\//i.test(host)) return 'Enter just the hostname, without http:// or a path.';
-  if (host.includes('/')) return 'Enter just the hostname, without a path.';
+  if (/^[a-z]+:\/\//i.test(host)) return translate('validation.usenet.hostOnly');
+  if (host.includes('/')) return translate('validation.usenet.hostNoPath');
 
   const port = input.port.trim();
   if (port !== '') {
     const n = Number(port);
     if (!Number.isInteger(n) || n < 1 || n > 65535) {
-      return 'The port must be a whole number between 1 and 65535.';
+      return translate('validation.usenet.port');
     }
   }
 
@@ -88,14 +90,14 @@ export function validateUsenetServer(input: {
   if (max !== '') {
     const n = Number(max);
     if (!Number.isInteger(n) || n < 1) {
-      return 'Connections must be a whole number of at least 1.';
+      return translate('validation.usenet.connections');
     }
   }
 
   // A password with nothing to send it for is the one credential combination
   // the transport refuses outright, so catch it here rather than at dial time.
   if (input.username.trim() === '' && (input.password !== '' || input.hasStoredPassword)) {
-    return 'A password needs a username to go with it.';
+    return translate('validation.usenet.passwordNeedsUsername');
   }
   return null;
 }

@@ -51,7 +51,7 @@ describe('strategyLabel', () => {
   });
 
   it('reads as undecided before the file has been probed', () => {
-    expect(strategyLabel('')).toBe('Deciding…');
+    expect(strategyLabel('')).toBe('Deciding...');
   });
 });
 

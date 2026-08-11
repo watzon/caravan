@@ -11,6 +11,7 @@
   import type { DiscoverBrowse, DiscoverItem, DiscoverSourceType, MediaType } from '../api/types';
   import { api, errorText } from '../api/client';
   import { metadataFault, type CredentialFault } from '../credentials';
+  import { useI18n } from '../i18n.svelte';
   import Button from '../components/Button.svelte';
   import DiscoverCard from '../components/DiscoverCard.svelte';
   import DiscoverError from '../components/DiscoverError.svelte';
@@ -28,18 +29,22 @@
 
   let { type, id }: Props = $props();
 
+  const { t, tp } = useI18n();
+
   type TypeFilter = 'all' | MediaType;
   type SortKey = 'popularity' | 'rating' | 'newest' | 'title';
 
-  const SORTS: { key: SortKey; label: string }[] = [
-    { key: 'popularity', label: 'Popularity' },
-    { key: 'rating', label: 'Rating' },
-    { key: 'newest', label: 'Newest' },
-    { key: 'title', label: 'Title' },
-  ];
-
-  /** The dropdown takes {id, name}; the rail's order is the array's. */
-  const SORT_CHOICES = SORTS.map((option) => ({ id: option.key, name: option.label }));
+  let sortChoices = $derived([
+    { id: 'popularity', name: t('route.discoverBrowse.sort.popularity') },
+    { id: 'rating', name: t('route.discoverBrowse.sort.rating') },
+    { id: 'newest', name: t('route.discoverBrowse.sort.newest') },
+    { id: 'title', name: t('route.discoverBrowse.sort.title') },
+  ]);
+  let typeFilters = $derived([
+    { key: 'all', label: t('route.discoverBrowse.filter.all') },
+    { key: 'series', label: t('route.discoverBrowse.filter.series') },
+    { key: 'movie', label: t('route.discoverBrowse.filter.movies') },
+  ]);
 
   let page = $state<DiscoverBrowse | null>(null);
   let items = $state<DiscoverItem[]>([]);
@@ -127,7 +132,7 @@
     href="/discover"
     class="inline-flex w-fit items-center gap-2 text-base text-ink-secondary transition-colors duration-150 hover:text-ink">
     <Icon name="back" size={14} />
-    Discover
+    {t('route.discoverBrowse.back')}
   </a>
 
   {#if error && items.length === 0}
@@ -144,20 +149,23 @@
         <h2
           class="truncate font-display text-xl font-semibold tracking-tight text-ink"
           title={sourceName || undefined}>
-          {sourceName || 'Loading…'}
+          {sourceName || t('route.discoverBrowse.loading')}
         </h2>
         <!-- No catalogue count: TMDB's is the whole catalogue, not what
              Caravan could get (internal/api/discover.go). What is countable is
              how many of these rows are already ours. -->
         <p class="text-sm text-ink-secondary">
-          {type === 'network' ? 'Network' : 'Studio'} · {ownedCount} in library
+          {t('route.discoverBrowse.sourceMeta', {
+            type: t(type === 'network' ? 'route.discoverBrowse.network' : 'route.discoverBrowse.studio'),
+            owned: tp('route.discoverBrowse.owned', ownedCount),
+          })}
         </p>
       </div>
     </div>
 
     <div class="flex flex-wrap items-center gap-3">
-      <div class="flex gap-2" role="group" aria-label="Filter by type">
-        {#each [{ key: 'all', label: 'All' }, { key: 'series', label: 'Series' }, { key: 'movie', label: 'Movies' }] as pill (pill.key)}
+      <div class="flex gap-2" role="group" aria-label={t('route.discoverBrowse.filterByType')}>
+        {#each typeFilters as pill (pill.key)}
           <button
             type="button"
             aria-pressed={filter === pill.key}
@@ -173,13 +181,13 @@
 
       <Toggle
         checked={hideOwned}
-        label="Hide items in library"
+        label={t('route.discoverBrowse.hideOwned')}
         onchange={(next) => (hideOwned = next)} />
 
       <div class="ml-auto">
         <Dropdown
-          label="Sort"
-          options={SORT_CHOICES}
+          label={t('route.discoverBrowse.sort.label')}
+          options={sortChoices}
           value={sort}
           onselect={(id) => (sort = id as SortKey)} />
       </div>
@@ -190,8 +198,8 @@
     {:else if visible.length === 0}
       <EmptyState
         icon="compass"
-        title="Nothing here"
-        message="No title on this shelf matches the current filter." />
+        title={t('route.discoverBrowse.emptyTitle')}
+        message={t('route.discoverBrowse.emptyMessage')} />
     {:else}
       <PosterGrid>
         {#each visible as item (itemKey(item))}
@@ -212,7 +220,7 @@
           variant="secondary"
           disabled={loadingMore}
           onclick={() => void load(nextPage)}>
-          {loadingMore ? 'Loading…' : 'Load more'}
+          {loadingMore ? t('route.discoverBrowse.loading') : t('route.discoverBrowse.loadMore')}
         </Button>
       </div>
     {/if}

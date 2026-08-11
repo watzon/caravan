@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { useI18n } from '../i18n.svelte';
   /**
    * The Settings → Metadata card for a provider that needs a key.
    *
@@ -83,10 +84,10 @@
   let hasKey = $derived(settings[keySetSetting] === 'true');
   let badge = $derived(
     state === 'invalid'
-      ? { tone: 'danger' as const, label: 'Key rejected' }
+      ? { tone: 'danger' as const, label: t('component.providerKeyCard.keyRejected') }
       : state === 'absent'
-        ? { tone: 'warning' as const, label: 'No key' }
-        : { tone: 'success' as const, label: 'Connected' },
+        ? { tone: 'warning' as const, label: t('component.providerKeyCard.noKey') }
+        : { tone: 'success' as const, label: t('component.providerKeyCard.connected') },
   );
   /** Nothing typed is nothing to write: a blank field keeps what is stored. */
   let nothingTyped = $derived(keyValue.trim() === '' && pinValue.trim() === '');
@@ -102,10 +103,10 @@
   function saveNote(patch: Settings): string {
     if (pin && patch[pin.setting] !== undefined) {
       return patch[keySetting] === undefined
-        ? `${title} ${pin.label} saved.`
-        : `${title} credentials saved.`;
+        ? t('component.providerKeyCard.pinSaved', { title, pin: pin.label })
+        : t('component.providerKeyCard.credentialsSaved', { title });
     }
-    return `${title} API key saved.`;
+    return t('component.providerKeyCard.apiKeySaved', { title });
   }
 
   /**
@@ -115,14 +116,14 @@
   async function clearStored() {
     const patch: Settings = { [keySetting]: '' };
     if (pin) patch[pin.setting] = '';
-    await onsave(patch, pin ? `${title} credentials cleared.` : `${title} API key cleared.`);
+    await onsave(patch, pin ? t('component.providerKeyCard.credentialsCleared') : t('component.providerKeyCard.apiKeyCleared'));
   }
 
   async function testKey() {
     testing = true;
     try {
       await api.testMetadataKey(keyValue.trim(), providerId);
-      test = { ok: true, message: `${title} accepted this key.` };
+      test = { ok: true, message: t('component.providerKeyCard.keyAccepted', { title }) };
     } catch (err) {
       test = { ok: false, message: errorText(err) };
     } finally {
@@ -130,6 +131,8 @@
       await system.refresh();
     }
   }
+
+  const { t, tp } = useI18n();
 </script>
 
 <SettingsCard {title} {description}>
@@ -140,16 +143,16 @@
     <Banner
       tone="warning"
       icon="warning"
-      title={state === 'invalid' ? `${title} rejected this key` : `No ${title} API key yet`}
+      title={state === 'invalid' ? t('component.providerKeyCard.keyRejectedDetail', { title }) : t('component.providerKeyCard.noApiKeyYet', { title })}
       message={state === 'invalid'
-        ? reason || 'The key on file was refused. Correct it below and press Test.'
+        ? reason || t('component.providerKeyCard.storedKeyRefused')
         : absentMessage} />
   {/if}
 
   <Field
-    label="{title} API key"
+    label={t('component.providerKeyCard.apiKeyLabel', { title })}
     for={inputId}
-    help="Stored in the database, never in caravan.yaml or logs."
+    help={t('component.providerKeyCard.storedInTheDatabaseNeverInCaravanYamlOrLogs')}
     error={test && !test.ok ? test.message : null}>
     <TextInput
       id={inputId}
@@ -160,7 +163,7 @@
       oninput={() => (test = null)} />
   </Field>
   {#if hasKey}
-    <p class="-mt-2 text-sm text-ink-secondary">A key is stored. Leave blank to keep it.</p>
+    <p class="-mt-2 text-sm text-ink-secondary">{t('component.providerKeyCard.aKeyIsStoredLeaveBlankToKeepIt')}</p>
   {/if}
 
   {#if pin}
@@ -176,13 +179,13 @@
   <div class="flex flex-wrap items-center gap-2">
     <Button variant="primary" disabled={saving || nothingTyped} onclick={saveTyped}>
       <Icon name="check" size={14} />
-      {saving ? 'Saving…' : 'Save'}
+      {saving ? t('component.providerKeyCard.saving') : t('component.providerKeyCard.save')}
     </Button>
     <Button variant="secondary" disabled={!hasKey || saving} onclick={clearStored}>
-      Clear
+      {t('component.providerKeyCard.clear')}
     </Button>
     <Button variant="secondary" disabled={testing} onclick={testKey}>
-      {testing ? 'Testing…' : 'Test'}
+      {testing ? t('component.providerKeyCard.testing') : t('component.providerKeyCard.test')}
     </Button>
   </div>
 </SettingsCard>

@@ -7,6 +7,7 @@
    */
   import Button from './Button.svelte';
   import Modal from './Modal.svelte';
+  import { useI18n } from '../i18n.svelte';
 
   interface Props {
     title: string;
@@ -24,10 +25,11 @@
   let deleteFiles = $state(false);
 
   let offerFiles = $derived(fileCount === null || fileCount > 0);
+  const { t, tp } = useI18n();
   let filesLabel = $derived(
     fileCount === null
-      ? 'Also delete its files from disk'
-      : `Also delete ${fileCount} file${fileCount === 1 ? '' : 's'} from disk`,
+      ? t('component.removeItem.deleteFiles')
+      : tp('component.removeItem.deleteFilesCount', fileCount),
   );
 </script>
 
@@ -35,8 +37,7 @@
   <div class="flex flex-col gap-3 p-4">
     <p class="text-base text-ink">{subject}</p>
     <p class="text-base text-ink-secondary">
-      Caravan stops tracking it. The files stay where they are, so a library scan would find
-      them again.
+      {t('component.removeItem.description')}
     </p>
 
     {#if offerFiles}
@@ -49,7 +50,7 @@
         <span>
           {filesLabel}
           <span class="block text-sm text-ink-secondary">
-            This cannot be undone, and empty folders are removed with the files.
+            {t('component.removeItem.irreversible')}
           </span>
         </span>
       </label>
@@ -57,9 +58,9 @@
   </div>
 
   {#snippet footer()}
-    <Button variant="ghost" disabled={busy} onclick={onclose}>Cancel</Button>
+    <Button variant="ghost" disabled={busy} onclick={onclose}>{t('component.actions.cancel')}</Button>
     <Button variant="danger" disabled={busy} onclick={() => onconfirm(deleteFiles)}>
-      {busy ? 'Removing…' : 'Remove'}
+      {busy ? t('component.actions.removing') : t('component.actions.remove')}
     </Button>
   {/snippet}
 </Modal>

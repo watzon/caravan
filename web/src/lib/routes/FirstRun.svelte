@@ -33,6 +33,10 @@
   import { system } from '../state/system.svelte';
 
   import { session } from '../state/session.svelte';
+  import { useI18n } from '../i18n.svelte';
+
+  const { t } = useI18n();
+
   let root = $state(system.status?.storage_root ?? '');
   let adminUsername = $state('');
   let adminPassword = $state('');
@@ -76,7 +80,7 @@
 
   async function test() {
     if (trimmedKey === '') {
-      testResult = { ok: false, message: 'Enter a TMDB API key to test.' };
+      testResult = { ok: false, message: t('route.firstRun.keyRequired') };
       return;
     }
     testing = true;
@@ -85,7 +89,7 @@
       // the whole point of testing it here.
       await api.testMetadataKey(trimmedKey);
       proven = trimmedKey;
-      testResult = { ok: true, message: 'Key works — TMDB answered.' };
+      testResult = { ok: true, message: t('route.firstRun.keyWorks') };
     } catch (err) {
       proven = null;
       testResult = { ok: false, message: errorText(err) };
@@ -103,15 +107,15 @@
   async function createAccount() {
     accountError = null;
     if (adminUsername.trim() === '') {
-      accountError = 'Enter a username for the administrator account.';
+      accountError = t('route.firstRun.usernameRequired');
       return;
     }
     if (adminPassword.length < 8) {
-      accountError = 'Use a password with at least 8 characters.';
+      accountError = t('route.firstRun.passwordLength');
       return;
     }
     if (adminPassword !== adminConfirm) {
-      accountError = 'The passwords do not match.';
+      accountError = t('route.firstRun.passwordMismatch');
       return;
     }
     try {
@@ -127,15 +131,15 @@
   async function save() {
     const value = root.trim();
     if (value === '') {
-      error = 'Enter the folder Caravan should treat as its storage root.';
+      error = t('route.firstRun.rootRequired');
       return;
     }
     if (!accountReady) {
-      error = 'Create the administrator account before finishing setup.';
+      error = t('route.firstRun.accountRequired');
       return;
     }
     if (trimmedKey === '' && !skipped) {
-      error = 'Enter a TMDB API key, or skip that step on purpose.';
+      error = t('route.firstRun.keyOrSkip');
       return;
     }
 
@@ -170,10 +174,10 @@
         // first run open while the scan walks the storage root.
         try {
           await api.rescan();
-          pushToast('Scan started in the background.', 'success');
+          pushToast(t('route.firstRun.scanStarted'), 'success');
         } catch (err) {
           pushToast(
-            `Storage root saved, but Caravan could not start the scan: ${errorText(err)}`,
+            t('route.firstRun.scanFailed', { error: errorText(err) }),
             'warning',
           );
         }
@@ -214,11 +218,10 @@
         </svg>
       </span>
       <h1 class="font-display text-2xl font-bold tracking-tight text-ink">
-        Let’s load the caravan
+        {t('route.firstRun.title')}
       </h1>
       <p class="max-w-md text-base text-ink-secondary">
-        Four decisions and you’re done. Everything else ships with sensible defaults and can be
-        changed later in Settings.
+        {t('route.firstRun.intro')}
       </p>
     </header>
 
@@ -229,25 +232,25 @@
         save();
       }}>
       <section class="flex flex-col gap-4 rounded-lg border border-border bg-surface p-5">
-        {@render step(1, 'Create your administrator account')}
+        {@render step(1, t('route.firstRun.accountStep'))}
         {#if accountReady}
           <p class="flex items-center gap-2 text-sm text-success">
             <span class="size-2 shrink-0 rounded-full bg-success"></span>
-            Administrator account created. Keep these credentials safe.
+            {t('route.firstRun.accountCreated')}
           </p>
         {:else}
-          <Field label="Username" for="admin-username" error={accountError}>
+          <Field label={t('route.firstRun.username')} for="admin-username" error={accountError}>
             <TextInput id="admin-username" bind:value={adminUsername} autocomplete="username" />
           </Field>
           <div class="grid gap-4 sm:grid-cols-2">
-            <Field label="Password" for="admin-password" help="At least 8 characters.">
+            <Field label={t('route.firstRun.password')} for="admin-password" help={t('route.firstRun.passwordHelp')}>
               <TextInput
                 id="admin-password"
                 bind:value={adminPassword}
                 type="password"
                 autocomplete="new-password" />
             </Field>
-            <Field label="Confirm password" for="admin-confirm">
+            <Field label={t('route.firstRun.confirmPassword')} for="admin-confirm">
               <TextInput
                 id="admin-confirm"
                 bind:value={adminConfirm}
@@ -255,27 +258,27 @@
                 autocomplete="new-password" />
             </Field>
           </div>
-          <Button variant="secondary" type="button" onclick={createAccount}>Create account</Button>
+          <Button variant="secondary" type="button" onclick={createAccount}>{t('route.firstRun.createAccount')}</Button>
         {/if}
       </section>
 
       <section class="flex flex-col gap-4 rounded-lg border border-border bg-surface p-5">
-        {@render step(2, 'Where does your media live?')}
+        {@render step(2, t('route.firstRun.storageStep'))}
         <Field
-          label="Storage root"
+          label={t('route.firstRun.storageRoot')}
           for="storage-root"
-          help="Absolute path on the machine running Caravan — /data in Docker, the drive root on a portable disk. Downloads, the library and everything in between stay under this one root, so imports are instant hardlinks rather than copies.">
+          help={t('route.firstRun.storageHelp')}>
           <TextInput id="storage-root" bind:value={root} mono autofocus placeholder="/data" />
         </Field>
       </section>
 
       <section class="flex flex-col gap-4 rounded-lg border border-border bg-surface p-5">
-        {@render step(3, 'How should Caravan identify it?')}
+        {@render step(3, t('route.firstRun.identifyStep'))}
         <Field
-          label="TMDB API key"
+          label={t('route.firstRun.tmdbKey')}
           for="tmdb-key"
           error={testResult && !testResult.ok ? testResult.message : null}
-          help="A free TMDB API key names every movie and show Caravan touches. It is stored in the database, never in caravan.yaml or logs.">
+          help={t('route.firstRun.tmdbHelp')}>
           <div class="flex flex-col items-stretch gap-2 sm:flex-row sm:items-start">
             <TextInput
               id="tmdb-key"
@@ -286,7 +289,7 @@
               placeholder="•••••"
               class="min-w-0 flex-1" />
             <Button variant="secondary" disabled={testing} onclick={test} class="shrink-0">
-              {testing ? 'Testing…' : 'Test'}
+              {testing ? t('route.firstRun.testing') : t('route.firstRun.test')}
             </Button>
           </div>
         </Field>
@@ -303,26 +306,24 @@
              that should be made rather than fallen into. -->
         {#if skipped}
           <p class="text-sm text-warning">
-            Skipped. The library still scans and imports, but nothing is matched and no posters
-            arrive until a key lands in Settings → Metadata.
+            {t('route.firstRun.skipped')}
           </p>
         {:else}
-          <Button variant="ghost" onclick={skip} class="self-start">Skip for now</Button>
+          <Button variant="ghost" onclick={skip} class="self-start">{t('route.firstRun.skip')}</Button>
         {/if}
       </section>
 
       <section class="flex flex-col gap-3 rounded-lg border border-border bg-surface p-5">
         <div class="flex items-start justify-between gap-4">
-          {@render step(4, 'Already have a library?')}
+          {@render step(4, t('route.firstRun.libraryStep'))}
           <Toggle
             checked={scanNow}
             labelHidden
-            label="Scan for existing media now"
+            label={t('route.firstRun.scanLabel')}
             onchange={(next) => (scanNow = next)} />
         </div>
         <p class="text-base text-ink-secondary">
-          Scan the storage root now. Caravan matches what it finds, renames into clean Jellyfin
-          folders, and parks anything it cannot identify for your review — nothing is ever deleted.
+          {t('route.firstRun.scanDescription')}
         </p>
       </section>
 
@@ -332,15 +333,15 @@
 
       <Button variant="primary" type="submit" disabled={saving}>
         <Icon name="check" size={14} />
-        {saving ? 'Starting…' : 'Start Caravan'}
+        {saving ? t('route.firstRun.starting') : t('route.firstRun.start')}
       </Button>
 
       <p class="text-center text-sm text-ink-muted">
-        Finish setup in <a href="/settings/indexers" class="text-accent-text hover:underline"
-          >Indexers</a
-        >, <a href="/settings/downloads" class="text-accent-text hover:underline">Downloads</a>,
+        {t('route.firstRun.finishSetupPrefix')}<a href="/settings/indexers" class="text-accent-text hover:underline"
+          >{t('route.firstRun.indexers')}</a
+        >, <a href="/settings/downloads" class="text-accent-text hover:underline">{t('route.firstRun.downloads')}</a>,
         or <a href="/settings/quality-profiles" class="text-accent-text hover:underline"
-          >Download profiles</a
+          >{t('route.firstRun.profiles')}</a
         >.
       </p>
     </form>

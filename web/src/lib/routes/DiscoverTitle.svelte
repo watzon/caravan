@@ -32,6 +32,10 @@
   import { UNKNOWN, formatDate, seasonLabel } from '../format';
   import { discover } from '../state/discover.svelte';
   import { session } from '../state/session.svelte';
+  import { useI18n } from '../i18n.svelte';
+
+  const { t, tp } = useI18n();
+
 
   interface Props {
     type: MediaType;
@@ -68,7 +72,7 @@
   let rating = $derived(
     title
       ? ratingPresentation(title.vote_average, title.vote_count, title.date)
-      : { text: null, title: 'Not yet rated' },
+      : { text: null, title: t('route.discoverTitle.notRated') },
   );
   let genre = $derived(title?.genres[0] ?? '');
   let episodeTotal = $derived(
@@ -80,15 +84,15 @@
    * the library its pending request has already been absorbed.
    */
   let stateChip = $derived.by(() => {
-    const t = title;
-    if (!t) return null;
-    if (t.in_library) return { tone: 'success' as const, label: 'IN LIBRARY' };
-    if (!t.requested) return null;
-    const pending = (t.seasons ?? []).filter((s) => s.requested && !s.in_library);
-    if (t.media_type === 'series' && pending.length === 1) {
-      return { tone: 'warning' as const, label: `${seasonLabel(pending[0]!.season_number).toUpperCase()} REQUESTED` };
+    const current = title;
+    if (!current) return null;
+    if (current.in_library) return { tone: 'success' as const, label: t('route.discoverTitle.inLibraryCaps') };
+    if (!current.requested) return null;
+    const pending = (current.seasons ?? []).filter((season) => season.requested && !season.in_library);
+    if (current.media_type === 'series' && pending.length === 1) {
+      return { tone: 'warning' as const, label: t('route.discoverTitle.requestedSeasonCaps', { season: seasonLabel(pending[0]!.season_number).toUpperCase() }) };
     }
-    return { tone: 'warning' as const, label: 'REQUESTED' };
+    return { tone: 'warning' as const, label: t('route.discoverTitle.requestedCaps') };
   });
 
   let metaParts = $derived.by(() => {
@@ -98,9 +102,9 @@
     if (t.year > 0) parts.push(String(t.year));
     if (t.media_type === 'series') {
       if (t.seasons.length > 0) {
-        parts.push(`${t.seasons.length} season${t.seasons.length === 1 ? '' : 's'}`);
+        parts.push(tp('route.discoverTitle.seasons', t.seasons.length));
       }
-      if (episodeTotal > 0) parts.push(`${episodeTotal} episodes`);
+      if (episodeTotal > 0) parts.push(tp('route.discoverTitle.episodes', episodeTotal));
     }
     if (t.runtime > 0) parts.push(runtimeText(t.runtime));
     // Who made it, under the name its media type uses: a network for a series,
@@ -130,7 +134,7 @@
     href="/discover"
     class="inline-flex w-fit items-center gap-2 text-base text-ink-secondary transition-colors duration-150 hover:text-ink">
     <Icon name="back" size={14} />
-    Back to Discover
+    {t('route.discoverTitle.back')}
   </a>
 
   {#if error}
@@ -165,7 +169,7 @@
 
         <div class="flex min-w-0 flex-1 flex-col gap-3">
           <p class="flex flex-wrap items-center gap-2 font-mono text-xs font-medium tracking-wide text-ink-muted">
-            <span>{title.media_type === 'movie' ? 'MOVIE' : 'SERIES'}{genre ? ` · ${genre.toUpperCase()}` : ''}</span>
+            <span>{title.media_type === 'movie' ? t('route.discoverTitle.movie') : t('route.discoverTitle.series')}{genre ? ` · ${genre.toUpperCase()}` : ''}</span>
             {#if stateChip}
               <Badge mono tone={stateChip.tone}>{stateChip.label}</Badge>
             {/if}
@@ -187,29 +191,29 @@
             {#if title.in_library && session.isAdmin}
               <Button variant="primary" href={libraryHref(title.media_type, title.library_id)}>
                 <Icon name="check" size={14} />
-                Open in library
+                {t('route.discoverTitle.openLibrary')}
               </Button>
             {:else if title.in_library}
               <!-- The library screens are admin-only, so a member following
                    this would be bounced back to Discover. It is the screen's
                    only call to action for a title Caravan already has, which
                    makes a dead one worse than none: state the fact instead. -->
-              <Badge tone="success">In library</Badge>
+              <Badge tone="success">{t('route.discoverTitle.inLibrary')}</Badge>
             {:else}
               <Button variant="primary" onclick={() => open('request')}>
-                Request {title.media_type === 'movie' ? 'movie' : 'series'}
+                {title.media_type === 'movie' ? t('route.discoverTitle.requestMovie') : t('route.discoverTitle.requestSeries')}
               </Button>
               <!-- Adding straight to the library picks a quality profile and a
                    root folder, which are the admin's calls. A member only asks. -->
               {#if session.isAdmin}
-                <Button variant="secondary" onclick={() => open('add')}>Add to library</Button>
+                <Button variant="secondary" onclick={() => open('add')}>{t('route.discoverTitle.addLibrary')}</Button>
               {/if}
             {/if}
           </div>
 
           {#if !title.in_library && session.isAdmin}
             <p class="text-sm text-ink-muted">
-              Direct add is available to admins · picks quality profile &amp; root folder
+              {t('route.discoverTitle.directAdd')}
             </p>
           {/if}
         </div>
@@ -219,22 +223,22 @@
     <div class="flex flex-col gap-8 lg:flex-row">
       <div class="flex min-w-0 flex-1 flex-col gap-8">
         <section class="flex flex-col gap-2">
-          <h3 class="font-display text-lg font-semibold tracking-tight text-ink">Overview</h3>
+          <h3 class="font-display text-lg font-semibold tracking-tight text-ink">{t('route.discoverTitle.overview')}</h3>
           <p class="max-w-3xl text-md text-ink-secondary">
-            {title.overview || 'No overview available.'}
+            {title.overview || t('route.discoverTitle.noOverview')}
           </p>
         </section>
 
         {#if title.cast.length > 0}
           <section class="flex flex-col gap-3">
             <div class="flex items-baseline gap-3">
-              <h3 class="font-display text-lg font-semibold tracking-tight text-ink">Cast</h3>
+              <h3 class="font-display text-lg font-semibold tracking-tight text-ink">{t('route.discoverTitle.cast')}</h3>
               <a
                 href={`https://www.themoviedb.org/${title.media_type === 'movie' ? 'movie' : 'tv'}/${title.tmdb_id}/cast`}
                 target="_blank"
                 rel="noopener noreferrer"
                 class="ml-auto text-sm text-accent-text transition-colors duration-150 ease-out hover:text-accent">
-                Full cast &amp; crew
+                {t('route.discoverTitle.fullCast')}
               </a>
             </div>
             <ul class="flex gap-4 overflow-x-auto pb-1">
@@ -273,7 +277,7 @@
 
         {#if title.seasons.length > 0}
           <section class="flex flex-col gap-3">
-            <h3 class="font-display text-lg font-semibold tracking-tight text-ink">Seasons</h3>
+            <h3 class="font-display text-lg font-semibold tracking-tight text-ink">{t('route.discoverTitle.seasonsHeading')}</h3>
             <ul class="flex flex-col divide-y divide-border overflow-hidden rounded-md border border-border">
               {#each title.seasons as season (season.season_number)}
                 {@const meta = seasonMeta(season)}
@@ -284,21 +288,21 @@
                   {/if}
                   <span class="ml-auto shrink-0">
                     {#if season.in_library}
-                      <Badge tone="success">In library</Badge>
+                      <Badge tone="success">{t('route.discoverTitle.inLibrary')}</Badge>
                     {:else if season.requested}
-                      <Badge tone="warning">Requested · pending approval</Badge>
+                      <Badge tone="warning">{t('route.discoverTitle.requestPending')}</Badge>
                     {:else if canRequestSeason(title.in_library, season)}
                       <Button
                         variant="secondary"
                         size="sm"
                         onclick={() => open('request', [season.season_number])}>
-                        Request
+                        {t('route.discoverTitle.request')}
                       </Button>
                     {:else}
                       <!-- The series is ours, so POST /requests would answer
                            409 for the whole title. Say what is true and let
                            the library screen own the season. -->
-                      <Badge tone="neutral">Not in library</Badge>
+                      <Badge tone="neutral">{t('route.discoverTitle.notInLibrary')}</Badge>
                     {/if}
                   </span>
                 </li>
@@ -319,32 +323,32 @@
         <dl class="flex flex-col gap-3">
           {#if title.status}
             <div>
-              <dt class="micro-label">Status</dt>
+              <dt class="micro-label">{t('route.discoverTitle.status')}</dt>
               <dd class="mt-1 text-sm text-ink">{title.status}</dd>
             </div>
           {/if}
           <div>
-            <dt class="micro-label">{title.media_type === 'movie' ? 'Released' : 'First aired'}</dt>
+            <dt class="micro-label">{title.media_type === 'movie' ? t('route.discoverTitle.released') : t('route.discoverTitle.firstAired')}</dt>
             <dd class="mt-1 text-sm text-ink">{formatDate(title.date)}</dd>
           </div>
           {#if title.media_type === 'series'}
             <div>
-              <dt class="micro-label">Last aired</dt>
+              <dt class="micro-label">{t('route.discoverTitle.lastAired')}</dt>
               <dd class="mt-1 text-sm text-ink">{formatDate(title.last_aired)}</dd>
             </div>
           {/if}
           <div>
-            <dt class="micro-label">{title.media_type === 'movie' ? 'Studio' : 'Network'}</dt>
+            <dt class="micro-label">{title.media_type === 'movie' ? t('route.discoverTitle.studio') : t('route.discoverTitle.network')}</dt>
             <dd class="mt-1 text-sm text-ink">{title.network || UNKNOWN}</dd>
           </div>
           {#if title.runtime > 0}
             <div>
-              <dt class="micro-label">Runtime</dt>
+              <dt class="micro-label">{t('route.discoverTitle.runtime')}</dt>
               <dd class="mt-1 font-mono text-sm text-ink">{runtimeText(title.runtime)}</dd>
             </div>
           {/if}
           <div>
-            <dt class="micro-label">Language</dt>
+            <dt class="micro-label">{t('route.discoverTitle.language')}</dt>
             <dd class="mt-1 text-sm text-ink">{languageName(title.language)}</dd>
           </div>
         </dl>
@@ -361,7 +365,7 @@
       </aside>
     </div>
 
-    <DiscoverShelf title="More like this" items={title.recommendations} showType />
+    <DiscoverShelf title={t('route.discoverTitle.moreLikeThis')} items={title.recommendations} showType />
   {/if}
 </div>
 

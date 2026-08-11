@@ -101,12 +101,12 @@ describe('Wanted', () => {
     expect(host.textContent).toContain('Movies');
     expect(host.textContent).toContain('Episodes');
     expect(host.textContent).toContain('Arrival (2016)');
-    expect(host.textContent).toContain('Severance - S01E02 - Half Loop');
-    expect(host.textContent).toContain('Severance - S01E03 - In Perpetuity');
+    expect(host.textContent).toContain('Severance · S01E02 · Half Loop');
+    expect(host.textContent).toContain('Severance · S01E03 · In Perpetuity');
     expect(host.textContent).toContain('Air date unknown');
     expect(host.querySelector('a[href="/series/3/search/1/2"]')).not.toBeNull();
     expect(host.querySelector('[title="Arrival (2016)"]')).not.toBeNull();
-    expect(host.querySelector('[title="Severance - S01E02 - Half Loop"]')).not.toBeNull();
+    expect(host.querySelector('[title="Severance · S01E02 · Half Loop"]')).not.toBeNull();
     expect(host.querySelector('[title="Air date unknown"]')).not.toBeNull();
     expect(host.textContent).not.toContain('Blade Runner');
 

@@ -2,6 +2,7 @@
   /** Live and durable detail for one convert-for-TV job. */
   import { onMount } from 'svelte';
   import type { Conversion, ConversionStage } from '../api/types';
+  import { useI18n } from '../i18n.svelte';
   import { conversionStateMeta, strategyLabel } from '../conversion';
   import { UNKNOWN, formatAge, formatDate, formatDuration } from '../format';
   import Badge from './Badge.svelte';
@@ -28,11 +29,13 @@
   const drawerID = $props.id();
   const titleID = `${drawerID}-title`;
 
+  const { t } = useI18n();
+
   const STAGE_LABELS: Record<ConversionStage, string> = {
-    probing: 'Inspecting source',
-    converting: 'Encoding media',
-    verifying: 'Verifying output',
-    installing: 'Installing output',
+    probing: t('component.conversionDetail.stage.probing'),
+    converting: t('component.conversionDetail.stage.converting'),
+    verifying: t('component.conversionDetail.stage.verifying'),
+    installing: t('component.conversionDetail.stage.installing'),
   };
 
   const FOCUSABLE =
@@ -50,7 +53,7 @@
   let processedTime = $derived(
     (conversion.processed_seconds ?? 0) > 0
       ? formatDuration(conversion.processed_seconds ?? 0)
-      : '0s',
+      : t('component.conversionDetail.zeroTime'),
   );
   let elapsed = $derived.by(() => {
     if (!conversion.started_at) return null;
@@ -121,7 +124,7 @@
   <button
     type="button"
     class="absolute inset-0 cursor-default bg-black/45"
-    aria-label="Close conversion details"
+    aria-label={t('component.conversionDetail.close')}
     tabindex="-1"
     aria-hidden="true"
     onclick={onclose}></button>
@@ -134,7 +137,7 @@
     tabindex="-1">
     <header class="flex items-start gap-3 border-b border-border px-5 py-4">
       <div class="min-w-0 flex-1">
-        <p class="micro-label">Conversion details</p>
+        <p class="micro-label">{t('component.conversionDetail.title')}</p>
         <h2 id={titleID} class="mt-1 truncate text-lg font-semibold text-ink" title={filename}>
           {filename}
         </h2>
@@ -144,17 +147,17 @@
           {conversion.source_path || UNKNOWN}
         </p>
       </div>
-      <Button variant="ghost" size="sm" title="Close conversion details" onclick={onclose}>
+      <Button variant="ghost" size="sm" title={t('component.conversionDetail.close')} onclick={onclose}>
         <Icon name="x" size={16} />
-        <span class="sr-only">Close</span>
+        <span class="sr-only">{t('component.actions.close')}</span>
       </Button>
     </header>
 
     <div class="min-h-0 flex-1 overflow-y-auto">
-      <section class="flex flex-col gap-4 border-b border-border px-5 py-5" aria-label="Conversion status">
+      <section class="flex flex-col gap-4 border-b border-border px-5 py-5" aria-label={t('component.conversionDetail.status')}>
         <div class="flex flex-wrap items-center gap-2">
           <Badge tone={meta.tone}>{meta.label}</Badge>
-          <Badge mono tone="neutral" title="How this file is being converted">
+          <Badge mono tone="neutral" title={t('component.conversionDetail.strategyHelp')}>
             {strategyLabel(conversion.strategy)}
           </Badge>
           {#if stageLabel && !showProgress}
@@ -173,7 +176,7 @@
             <ProgressBar
               value={conversion.progress ?? 0}
               tone={meta.tone}
-              label="{filename} conversion progress" />
+              label={t('component.conversionDetail.progress', { filename })} />
             <p class="font-mono text-xs text-ink-secondary">
               {`${processedTime} / ${formatDuration(conversion.duration_seconds ?? 0)}`}
             </p>
@@ -183,13 +186,13 @@
         {#if conversion.started_at}
           <dl class="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3">
             <div>
-              <dt class="micro-label">Elapsed</dt>
+              <dt class="micro-label">{t('component.conversionDetail.elapsed')}</dt>
               <dd class="mt-1 font-mono text-sm text-ink">
                 {elapsed === null ? UNKNOWN : formatDuration(elapsed)}
               </dd>
             </div>
             <div>
-              <dt class="micro-label">Remaining</dt>
+              <dt class="micro-label">{t('component.conversionDetail.remaining')}</dt>
               <dd class="mt-1 font-mono text-sm text-ink">
                 {(conversion.eta_seconds ?? 0) > 0
                   ? formatDuration(conversion.eta_seconds!)
@@ -197,7 +200,7 @@
               </dd>
             </div>
             <div>
-              <dt class="micro-label">Speed</dt>
+              <dt class="micro-label">{t('component.conversionDetail.speed')}</dt>
               <dd class="mt-1 font-mono text-sm text-ink">
                 {(conversion.speed ?? 0) > 0 ? `${conversion.speed!.toFixed(1)}x` : UNKNOWN}
               </dd>
@@ -205,41 +208,45 @@
           </dl>
         {:else if conversion.status === 'running'}
           <p class="text-sm text-ink-secondary">
-            Live timing is unavailable. Caravan may have restarted after this job began.
+            {t('component.conversionDetail.liveTimingUnavailable')}
           </p>
         {/if}
       </section>
 
-      <section class="flex flex-col gap-4 px-5 py-5" aria-label="Conversion process">
-        <h3 class="micro-label">Process</h3>
+      <section class="flex flex-col gap-4 px-5 py-5" aria-label={t('component.conversionDetail.process')}>
+        <h3 class="micro-label">{t('component.conversionDetail.process')}</h3>
         <dl class="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div>
-            <dt class="text-xs text-ink-muted">Method</dt>
+            <dt class="text-xs text-ink-muted">{t('component.conversionDetail.method')}</dt>
             <dd class="mt-1 text-sm text-ink">{strategyLabel(conversion.strategy)}</dd>
           </div>
           <div>
-            <dt class="text-xs text-ink-muted">TV profile</dt>
+            <dt class="text-xs text-ink-muted">{t('component.conversionDetail.tvProfile')}</dt>
             <dd class="mt-1 font-mono text-sm text-ink">{conversion.profile_id || UNKNOWN}</dd>
           </div>
           <div>
-            <dt class="text-xs text-ink-muted">Queued</dt>
+            <dt class="text-xs text-ink-muted">{t('component.conversionDetail.queued')}</dt>
             <dd class="mt-1 text-sm text-ink" title={conversion.created_at}>
               {formatDate(conversion.created_at)}
-              <span class="text-ink-secondary">({formatAge(conversion.created_at, now)} ago)</span>
+              <span class="text-ink-secondary">
+                ({t('component.conversionDetail.ago', { age: formatAge(conversion.created_at, now) })})
+              </span>
             </dd>
           </div>
           <div>
-            <dt class="text-xs text-ink-muted">Last update</dt>
+            <dt class="text-xs text-ink-muted">{t('component.conversionDetail.lastUpdate')}</dt>
             <dd class="mt-1 text-sm text-ink" title={conversion.updated_at}>
               {formatDate(conversion.updated_at)}
-              <span class="text-ink-secondary">({formatAge(conversion.updated_at, now)} ago)</span>
+              <span class="text-ink-secondary">
+                ({t('component.conversionDetail.ago', { age: formatAge(conversion.updated_at, now) })})
+              </span>
             </dd>
           </div>
         </dl>
 
         {#if conversion.output_path && conversion.output_path !== conversion.source_path}
           <div>
-            <p class="text-xs text-ink-muted">Output</p>
+            <p class="text-xs text-ink-muted">{t('component.conversionDetail.output')}</p>
             <p class="mt-1 break-all font-mono text-xs text-ink" title={conversion.output_path}>
               {conversion.output_path}
             </p>
@@ -248,7 +255,7 @@
 
         {#if conversion.error}
           <div class="rounded-md border border-danger/30 bg-danger/5 px-3 py-3">
-            <p class="micro-label text-danger">Error</p>
+            <p class="micro-label text-danger">{t('component.conversionDetail.error')}</p>
             <p class="mt-1 break-words text-sm text-danger">{conversion.error}</p>
           </div>
         {/if}
@@ -256,12 +263,12 @@
     </div>
 
     <footer class="flex flex-wrap items-center gap-2 border-t border-border px-5 py-3">
-      <Button variant="ghost" size="sm" onclick={onclose}>Close</Button>
+      <Button variant="ghost" size="sm" onclick={onclose}>{t('component.actions.close')}</Button>
       <span class="flex-1"></span>
       {#if conversion.status === 'queued' && oncancel}
-        <Button variant="secondary" size="sm" disabled={busy} onclick={oncancel}>Cancel</Button>
+        <Button variant="secondary" size="sm" disabled={busy} onclick={oncancel}>{t('component.actions.cancel')}</Button>
       {:else if (conversion.status === 'failed' || conversion.status === 'cancelled') && onretry}
-        <Button variant="primary" size="sm" disabled={busy} onclick={onretry}>Retry</Button>
+        <Button variant="primary" size="sm" disabled={busy} onclick={onretry}>{t('component.actions.retry')}</Button>
       {/if}
     </footer>
   </div>

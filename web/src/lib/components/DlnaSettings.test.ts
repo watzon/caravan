@@ -227,7 +227,7 @@ describe('DlnaSettings', () => {
       // Off is the state a fresh enable leaves it in, and the copy says why it
       // matters before it is flipped, not only after.
       expect(host.textContent).toContain(
-        'DLNA has no accounts — every device on this network can browse anything shared here.',
+        'DLNA has no accounts. Every device on this network can browse anything shared here.',
       );
 
       sub.click();

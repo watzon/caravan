@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { useI18n } from '../i18n.svelte';
   /**
    * Settings → Usenet servers (SPEC §5.1, §11 `/usenet-servers`).
    *
@@ -223,10 +224,10 @@
     try {
       if (editingID === 0) {
         await api.addUsenetServer(body);
-        pushToast(`Added ${body.name}.`, 'success');
+        pushToast(t('component.usenetServerSettings.added', { name: body.name }), 'success');
       } else if (editingID !== null) {
         await api.updateUsenetServer(editingID, body);
-        pushToast(`Saved ${body.name}.`, 'success');
+        pushToast(t('component.usenetServerSettings.saved', { name: body.name }), 'success');
       }
       closeForm();
       await load();
@@ -250,7 +251,7 @@
     formTest = null;
     try {
       await api.testUsenetServerConfig(body);
-      formTest = { ok: true, message: 'Connected' };
+      formTest = { ok: true, message: t('component.usenetServerSettings.connected') };
     } catch (err) {
       formTest = { ok: false, message: errorText(err) };
     } finally {
@@ -262,7 +263,7 @@
     testingID = server.id;
     try {
       await api.testUsenetServer(server.id);
-      tests = { ...tests, [server.id]: { ok: true, message: 'Connected' } };
+      tests = { ...tests, [server.id]: { ok: true, message: t('component.usenetServerSettings.connected') } };
     } catch (err) {
       tests = { ...tests, [server.id]: { ok: false, message: errorText(err) } };
     } finally {
@@ -279,7 +280,7 @@
       servers = (servers ?? []).filter((s) => s.id !== server.id);
       if (editingID === server.id) closeForm();
       confirmingRemove = null;
-      pushToast(`Removed ${server.name}.`, 'neutral');
+      pushToast(t('component.usenetServerSettings.removed', { name: server.name }), 'neutral');
     } catch (err) {
       pushToast(errorText(err), 'danger');
     } finally {
@@ -291,19 +292,21 @@
 
   /** The row the open editor belongs to, which is what its Remove acts on. */
   let editingRow = $derived(rows.find((server) => server.id === editingID) ?? null);
+
+  const { t, tp } = useI18n();
 </script>
 
 <SettingsCard
-  title="Usenet servers"
-  description="News servers the built-in engine reads articles from. Higher priority numbers back up the first.">
+  title={t('component.usenetServerSettings.usenetServers')}
+  description={t('component.usenetServerSettings.newsServersTheBuiltInEngineReadsArticlesFromHigherPriorityNumbersBackUpTheFirst')}>
   {#snippet action()}
     <Button variant="secondary" size="sm" onclick={load}>
       <Icon name="refresh" size={14} />
-      Refresh
+      {t('component.usenetServerSettings.refresh')}
     </Button>
     <Button variant="primary" size="sm" onclick={openAdd}>
       <Icon name="plus" size={14} />
-      Add server
+      {t('component.usenetServerSettings.addServer')}
     </Button>
   {/snippet}
 
@@ -318,10 +321,10 @@
   {:else if rows.length === 0}
     <EmptyState
       icon="link"
-      title="No news servers yet"
-      message="Caravan's built-in engine reads Usenet articles straight from your provider. Add the server details from your provider's account page to download Usenet releases.">
+      title={t('component.usenetServerSettings.noNewsServersYet')}
+      message={t('component.usenetServerSettings.caravanSBuiltInEngineReadsUsenetArticlesStraightFromYourProviderAddTheServerDetailsFromYourProviderSAccountPageToDownloadUsenetReleases')}>
       {#snippet action()}
-        <Button variant="primary" onclick={openAdd}>Add server</Button>
+        <Button variant="primary" onclick={openAdd}>{t('component.usenetServerSettings.addServer')}</Button>
       {/snippet}
     </EmptyState>
   {:else}
@@ -343,11 +346,11 @@
                 {server.tls ? 'TLS' : 'Plaintext'}
               </Badge>
               <Badge mono tone="neutral">
-                {server.max_connections} conn
+                {t('component.usenetServerSettings.connectionCount', { count: server.max_connections })}
               </Badge>
-              <Badge mono tone="neutral">Priority {server.priority}</Badge>
+              <Badge mono tone="neutral">{t('component.usenetServerSettings.priorityValue', { count: server.priority })}</Badge>
               <Badge tone={server.enabled ? 'success' : 'neutral'}>
-                {server.enabled ? 'Enabled' : 'Disabled'}
+                {server.enabled ? t('component.usenetServerSettings.enabled') : t('component.usenetServerSettings.disabled')}
               </Badge>
             </p>
             <p
@@ -369,16 +372,16 @@
               size="sm"
               disabled={testingID === server.id}
               onclick={() => test(server)}>
-              {testingID === server.id ? 'Testing…' : 'Test'}
+              {testingID === server.id ? t('component.usenetServerSettings.testing') : t('component.usenetServerSettings.test')}
             </Button>
-            <Button variant="ghost" size="sm" onclick={() => openEdit(server)}>Edit</Button>
+            <Button variant="ghost" size="sm" onclick={() => openEdit(server)}>{t('component.usenetServerSettings.edit')}</Button>
             <Button
               variant="ghost"
               size="sm"
               disabled={busyID === server.id}
               onclick={() => (confirmingRemove = server)}>
               <Icon name="trash" size={14} />
-              <span class="sr-only">Remove {server.name}</span>
+              <span class="sr-only">{t('component.usenetServerSettings.removeNamed', { name: server.name })}</span>
             </Button>
           </div>
         </li>
@@ -389,7 +392,7 @@
 
 {#if editingID !== null}
   <Modal
-    title={editingID === 0 ? 'Add news server' : 'Edit news server'}
+    title={editingID === 0 ? t('component.usenetServerSettings.addModal') : t('component.usenetServerSettings.editModal')}
     width="max-w-xl"
     dirty={dirty}
     onclose={closeForm}>
@@ -399,61 +402,58 @@
         event.preventDefault();
         void save();
       }}>
-      <Field label="Name" for="usenet-name" help="How this server is labelled in errors and logs.">
-        <TextInput id="usenet-name" bind:value={name} placeholder="Eweka" />
+      <Field label={t('component.usenetServerSettings.name')} for="usenet-name" help={t('component.usenetServerSettings.howThisServerIsLabelledInErrorsAndLogs')}>
+        <TextInput id="usenet-name" bind:value={name} placeholder={t('component.usenetServerSettings.eweka')} />
       </Field>
 
       <Field
-        label="Hostname"
+        label={t('component.usenetServerSettings.hostname')}
         for="usenet-host"
-        help="Just the hostname from your provider — no http:// and no path.">
-        <TextInput id="usenet-host" bind:value={host} mono placeholder="news.eweka.nl" />
+        help={t('component.usenetServerSettings.justTheHostnameFromYourProviderNoHttpAndNoPath')}>
+        <TextInput id="usenet-host" bind:value={host} mono placeholder={t('component.usenetServerSettings.newsEwekaNl')} />
       </Field>
 
       <Field
-        label="Port"
+        label={t('component.usenetServerSettings.port')}
         for="usenet-port"
-        help="Leave the default unless your provider says otherwise: {defaultUsenetPort(
-          true,
-        )} with TLS, {defaultUsenetPort(false)} without.">
+        help={t('component.usenetServerSettings.portHelp', { tlsPort: defaultUsenetPort(true), plainPort: defaultUsenetPort(false) })}>
         <TextInput id="usenet-port" bind:value={port} mono placeholder={String(defaultUsenetPort(tls))} />
       </Field>
 
       <Toggle
         checked={tls}
-        label="Use TLS"
+        label={t('component.usenetServerSettings.useTls')}
         onchange={setTLS} />
       <p class="-mt-2 text-sm text-ink-muted">
-        Encrypts the connection, including the password below. Leave this on unless your
-        provider genuinely has no TLS port.
+        {t('component.usenetServerSettings.tlsHelp')}
       </p>
 
       <Field
-        label="Username"
+        label={t('component.usenetServerSettings.username')}
         for="usenet-username"
-        help="From your provider's account page. Leave blank for a server that needs no login.">
-        <TextInput id="usenet-username" bind:value={username} mono placeholder="user" />
+        help={t('component.usenetServerSettings.fromYourProviderSAccountPageLeaveBlankForAServerThatNeedsNoLogin')}>
+        <TextInput id="usenet-username" bind:value={username} mono placeholder={t('component.usenetServerSettings.user')} />
       </Field>
 
       <Field
-        label="Password"
+        label={t('component.usenetServerSettings.password')}
         for="usenet-password"
         help={storedPassword
-          ? 'A password is stored. Leave this blank to keep it — it is never sent back to the browser.'
-          : 'Stored in the database, never in caravan.yaml and never logged.'}>
+          ? t('component.usenetServerSettings.storedPasswordHelp')
+          : t('component.usenetServerSettings.passwordStorageHelp')}>
         <TextInput
           id="usenet-password"
           bind:value={password}
           type="password"
           mono
-          placeholder={storedPassword ? 'Unchanged' : '•••••'} />
+          placeholder={storedPassword ? t('component.usenetServerSettings.unchanged') : '•••••'} />
       </Field>
 
       <div data-settings-advanced>
         <Field
-          label="Connections"
+          label={t('component.usenetServerSettings.connections')}
           for="usenet-connections"
-          help="Never set this above the limit on your plan: going over gets connections refused rather than downloads slowed.">
+          help={t('component.usenetServerSettings.neverSetThisAboveTheLimitOnYourPlanGoingOverGetsConnectionsRefusedRatherThanDownloadsSlowed')}>
           <TextInput
             id="usenet-connections"
             bind:value={maxConnections}
@@ -464,9 +464,9 @@
 
       <div data-settings-advanced>
         <Field
-          label="Priority"
+          label={t('component.usenetServerSettings.priority')}
           for="usenet-priority"
-          help="Lowest wins. Give a block or backup account a higher number so it is only asked for articles the main server is missing.">
+          help={t('component.usenetServerSettings.lowestWinsGiveABlockOrBackupAccountAHigherNumberSoItIsOnlyAskedForArticlesTheMainServerIsMissing')}>
           <TextInput
             id="usenet-priority"
             bind:value={priority}
@@ -475,17 +475,17 @@
         </Field>
       </div>
 
-      <Toggle checked={enabled} label="Enabled" onchange={(next) => (enabled = next)} />
+      <Toggle checked={enabled} label={t('component.usenetServerSettings.enabled')} onchange={(next) => (enabled = next)} />
 
       {#if formError}
         <p class="text-sm text-danger">{formError}</p>
       {/if}
     </form>
-
     {#snippet footer()}
+
       <div class="mr-auto flex min-w-0 items-center gap-2">
         <Button variant="secondary" onclick={testForm} disabled={formTesting || saving}>
-          {formTesting ? 'Testing…' : 'Test'}
+          {formTesting ? t('component.usenetServerSettings.testing') : t('component.usenetServerSettings.test')}
         </Button>
         {#if formTest}
           <p
@@ -499,14 +499,14 @@
       {#if editingRow}
         {@const target = editingRow}
         <Button variant="danger" disabled={saving} onclick={() => (confirmingRemove = target)}>
-          Remove
+          {t('component.usenetServerSettings.remove')}
         </Button>
         <span class="mx-1 h-5 w-px shrink-0 bg-border"></span>
       {/if}
-      <Button variant="ghost" onclick={closeForm} disabled={saving}>Cancel</Button>
+      <Button variant="ghost" onclick={closeForm} disabled={saving}>{t('component.usenetServerSettings.cancel')}</Button>
       <Button variant="primary" disabled={saving || !dirty || !formValid} onclick={save}>
         <Icon name="check" size={14} />
-        {saving ? 'Saving…' : !dirty ? 'No changes' : 'Save'}
+        {saving ? t('component.usenetServerSettings.saved') : !dirty ? t('component.usenetServerSettings.noChanges') : t('component.usenetServerSettings.save')}
       </Button>
     {/snippet}
   </Modal>
@@ -514,19 +514,17 @@
 
 {#if confirmingRemove}
   {@const target = confirmingRemove}
-  <Modal title="Remove news server" width="max-w-lg" onclose={() => (confirmingRemove = null)}>
+  <Modal title={t('component.usenetServerSettings.removeNewsServer')} width="max-w-lg" onclose={() => (confirmingRemove = null)}>
     <div class="flex flex-col gap-3 p-4">
       <p class="text-base text-ink">{target.name}</p>
       <p class="text-base text-ink-secondary">
-        Caravan stops downloading articles from this server. Nothing already downloaded or
-        imported is affected — only the configuration goes away. If it is the only server
-        configured, Usenet grabs will have nowhere to download from.
+        {t('component.usenetServerSettings.removalMessage')}
       </p>
     </div>
 
     {#snippet footer()}
-      <Button variant="ghost" onclick={() => (confirmingRemove = null)}>Cancel</Button>
-      <Button variant="danger" disabled={busyID === target.id} onclick={remove}>Remove</Button>
+      <Button variant="ghost" onclick={() => (confirmingRemove = null)}>{t('component.usenetServerSettings.cancel')}</Button>
+      <Button variant="danger" disabled={busyID === target.id} onclick={remove}>{t('component.usenetServerSettings.remove')}</Button>
     {/snippet}
   </Modal>
 {/if}

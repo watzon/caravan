@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { useI18n } from '../i18n.svelte';
   /**
    * Settings → Metadata → Stash-box (PLAN Part 2 phase 8).
    *
@@ -35,12 +36,10 @@
   const SELECT_CLASS =
     'h-9 w-full rounded-sm border border-border-strong bg-raised px-3 text-md text-ink ' +
     'focus:border-accent focus:outline-none disabled:opacity-50';
+  const { t, tp } = useI18n();
 
   /** The server's own reason, so the edit form can say why it has no URL field. */
-  const ENDPOINT_IMMUTABLE =
-    'The endpoint cannot be changed. Every item pinned to this instance carries a UUID only this ' +
-    'box minted, so re-pointing it would have the next refresh overwrite those rows with whatever ' +
-    'the new box holds under the same ids. Add an instance for the other box instead.';
+  const ENDPOINT_IMMUTABLE = t('component.stashboxSettings.endpointImmutable');
 
   /** The result of the last test per instance id, so the row can say what happened. */
   type TestResult = { ok: boolean; message: string };
@@ -129,8 +128,8 @@
   }
 
   let validationError = $derived.by(() => {
-    if (name.trim() === '') return 'Give this stash-box a name.';
-    if (endpoint.trim() === '') return 'Enter the stash-box GraphQL endpoint.';
+    if (name.trim() === '') return t('component.stashboxSettings.nameRequired');
+    if (endpoint.trim() === '') return t('component.stashboxSettings.endpointRequired');
     return null;
   });
 
@@ -160,10 +159,10 @@
     try {
       if (editingID === 0) {
         await api.createStashboxInstance(body());
-        pushToast(`Added ${name.trim()}.`, 'success');
+        pushToast(t('component.stashboxSettings.added', { name: name.trim() }), 'success');
       } else if (editingID !== null) {
         await api.updateStashboxInstance(editingID, body());
-        pushToast(`Saved ${name.trim()}.`, 'success');
+        pushToast(t('component.stashboxSettings.saved', { name: name.trim() }), 'success');
       }
       closeForm();
       await load();
@@ -191,7 +190,7 @@
         endpoint: endpoint.trim(),
         api_key: apiKey.trim(),
       });
-      formTest = { ok: true, message: 'The stash-box answered.' };
+      formTest = { ok: true, message: t('component.stashboxSettings.answered') };
     } catch (err) {
       formTest = { ok: false, message: errorText(err) };
     } finally {
@@ -203,7 +202,7 @@
     testingID = instance.id;
     try {
       await api.testStashboxInstance(instance.id);
-      tests = { ...tests, [instance.id]: { ok: true, message: 'Reachable' } };
+      tests = { ...tests, [instance.id]: { ok: true, message: t('component.stashboxSettings.reachable') } };
     } catch (err) {
       tests = { ...tests, [instance.id]: { ok: false, message: errorText(err) } };
     } finally {
@@ -219,7 +218,7 @@
     try {
       await api.deleteStashboxInstance(instance.id);
       confirmingRemove = null;
-      pushToast(`Removed ${instance.name}.`, 'neutral');
+      pushToast(t('component.stashboxSettings.removed', { name: instance.name }), 'neutral');
       await load();
     } catch (err) {
       // Kept on the dialog rather than pushed as a toast: the refusal names
@@ -231,21 +230,23 @@
   }
 
   function usage(instance: StashboxInstance): string {
-    const libraries = `${instance.library_count} ${instance.library_count === 1 ? 'library' : 'libraries'}`;
-    const items = `${instance.item_count} ${instance.item_count === 1 ? 'item' : 'items'}`;
-    return `Used by ${libraries} · ${items}`;
+    return t('component.stashboxSettings.usage', {
+      libraries: tp('component.stashboxSettings.library', instance.library_count),
+      items: tp('component.stashboxSettings.item', instance.item_count),
+    });
   }
 
   let rows = $derived(instances ?? []);
+
 </script>
 
 <SettingsCard
-  title="Stash-box"
-  description="Adult metadata: sites, scenes, performers and artwork. Each endpoint is its own provider — chain them per library in Libraries.">
+  title={t('component.stashboxSettings.stashBox')}
+  description={t('component.stashboxSettings.adultMetadataSitesScenesPerformersAndArtworkEachEndpointIsItsOwnProviderChainThemPerLibraryInLibraries')}>
   {#snippet action()}
     <Button variant="primary" size="sm" onclick={openAdd}>
       <Icon name="plus" size={14} />
-      Add stash-box
+      {t('component.stashboxSettings.addStashBox')}
     </Button>
   {/snippet}
 
@@ -260,10 +261,10 @@
   {:else if rows.length === 0}
     <EmptyState
       icon="link"
-      title="No stash-box endpoint yet"
-      message="Add StashDB, FansDB, PMV-Stash, ThePornDB or your own stash-box, then name it in an adult library's provider chain.">
+      title={t('component.stashboxSettings.noStashBoxEndpointYet')}
+      message={t('component.stashboxSettings.addStashdbFansdbPmvStashTheporndbOrYourOwnStashBoxThenNameItInAnAdultLibrarySProviderChain')}>
       {#snippet action()}
-        <Button variant="primary" onclick={openAdd}>Add stash-box</Button>
+        <Button variant="primary" onclick={openAdd}>{t('component.stashboxSettings.addStashBox')}</Button>
       {/snippet}
     </EmptyState>
   {:else}
@@ -281,7 +282,7 @@
               <!-- The badge is the whole of what may be said about the key:
                    it is write-only, so the value never leaves the server. -->
               <Badge tone={instance.has_api_key ? 'success' : 'neutral'}>
-                {instance.has_api_key ? 'Key stored' : 'No key'}
+                {instance.has_api_key ? t('component.stashboxSettings.keyStored') : t('component.stashboxSettings.noKey')}
               </Badge>
             </p>
             <p class="truncate font-mono text-xs text-ink-muted" title={instance.endpoint}>
@@ -303,12 +304,12 @@
               onclick={() => test(instance)}>
               {testingID === instance.id ? 'Testing…' : 'Test'}
             </Button>
-            <Button variant="ghost" size="sm" onclick={() => openEdit(instance)}>Edit</Button>
+            <Button variant="ghost" size="sm" onclick={() => openEdit(instance)}>{t('component.stashboxSettings.edit')}</Button>
             <Button
               variant="ghost"
               size="sm"
               disabled={busyID === instance.id}
-              title="Remove {instance.name}"
+              title={t('component.stashboxSettings.removeTitle', { name: instance.name })}
               onclick={() => {
                 removeError = null;
                 confirmingRemove = instance;
@@ -325,7 +326,7 @@
 
 {#if editingID !== null}
   <Modal
-    title={editingID === 0 ? 'Add stash-box' : 'Edit stash-box'}
+    title={editingID === 0 ? t('component.stashboxSettings.addModal') : t('component.stashboxSettings.editModal')}
     width="max-w-xl"
     onclose={closeForm}>
     <form
@@ -336,9 +337,9 @@
       }}>
       {#if editingID === 0}
         <Field
-          label="Stash-box"
+          label={t('component.stashboxSettings.stashBox')}
           for="stashbox-preset"
-          help="Fills the two fields below. Both stay editable — pick Custom for a box that is not listed.">
+          help={t('component.stashboxSettings.fillsTheTwoFieldsBelowBothStayEditablePickCustomForABoxThatIsNotListed')}>
           <select
             id="stashbox-preset"
             value={presetID}
@@ -347,35 +348,35 @@
             {#each STASHBOX_PRESETS as preset (preset.id)}
               <option value={preset.id}>{preset.label} — {preset.endpoint}</option>
             {/each}
-            <option value="">Custom stash-box…</option>
+            <option value="">{t('component.stashboxSettings.customStashBox')}</option>
           </select>
         </Field>
       {/if}
 
-      <Field label="Name" for="stashbox-name" help="How this box is labelled in a library's provider chain.">
-        <TextInput id="stashbox-name" bind:value={name} placeholder="StashDB" />
+      <Field label={t('component.stashboxSettings.name')} for="stashbox-name" help={t('component.stashboxSettings.howThisBoxIsLabelledInALibrarySProviderChain')}>
+        <TextInput id="stashbox-name" bind:value={name} placeholder={t('component.stashboxSettings.stashdb')} />
       </Field>
 
       {#if editingID === 0}
         <Field
-          label="Endpoint"
+          label={t('component.stashboxSettings.endpoint')}
           for="stashbox-endpoint"
-          help="The box's GraphQL endpoint — an absolute http(s) URL.">
-          <TextInput id="stashbox-endpoint" bind:value={endpoint} mono placeholder="https://stashdb.org/graphql" />
+          help={t('component.stashboxSettings.theBoxSGraphqlEndpointAnAbsoluteHttpSUrl')}>
+          <TextInput id="stashbox-endpoint" bind:value={endpoint} mono placeholder={t('component.stashboxSettings.httpsStashdbOrgGraphql')} />
         </Field>
       {:else}
         <!-- No field at all rather than a disabled one: the server refuses an
              endpoint change, and an input that cannot be used is an offer the
              screen cannot keep. -->
-        <Field label="Endpoint" help={ENDPOINT_IMMUTABLE}>
+        <Field label={t('component.stashboxSettings.endpoint')} help={ENDPOINT_IMMUTABLE}>
           <p class="truncate font-mono text-sm text-ink-secondary" title={endpoint}>{endpoint}</p>
         </Field>
       {/if}
 
       <Field
-        label="API key"
+        label={t('component.stashboxSettings.apiKey')}
         for="stashbox-api-key"
-        help="Stored in the database, never in caravan.yaml and never logged.">
+        help={t('component.stashboxSettings.storedInTheDatabaseNeverInCaravanYamlAndNeverLogged')}>
         <div class="flex flex-col gap-2">
           <TextInput
             id="stashbox-api-key"
@@ -385,9 +386,9 @@
             placeholder="•••••"
             oninput={() => (clearAPIKey = false)} />
           {#if hasAPIKey}
-            <p class="text-sm text-ink-secondary">A key is stored. Leave blank to keep it.</p>
+            <p class="text-sm text-ink-secondary">{t('component.stashboxSettings.aKeyIsStoredLeaveBlankToKeepIt')}</p>
             <Button variant="secondary" size="sm" onclick={() => (clearAPIKey = true)}>
-              Clear API key
+              {t('component.stashboxSettings.clearApiKey')}
             </Button>
           {/if}
         </div>
@@ -408,7 +409,7 @@
         {formTesting ? 'Testing…' : 'Test'}
       </Button>
       <span class="flex-1"></span>
-      <Button variant="ghost" onclick={closeForm} disabled={saving}>Cancel</Button>
+      <Button variant="ghost" onclick={closeForm} disabled={saving}>{t('component.stashboxSettings.cancel')}</Button>
       <Button variant="primary" disabled={saving || validationError !== null} onclick={save}>
         <Icon name="check" size={14} />
         {saving ? 'Saving…' : 'Save'}
@@ -419,12 +420,11 @@
 
 {#if confirmingRemove}
   {@const target = confirmingRemove}
-  <Modal title="Remove stash-box" width="max-w-lg" onclose={() => (confirmingRemove = null)}>
+  <Modal title={t('component.stashboxSettings.removeStashBox')} width="max-w-lg" onclose={() => (confirmingRemove = null)}>
     <div class="flex flex-col gap-3 p-4">
       <p class="text-base text-ink">{target.name}</p>
       <p class="text-base text-ink-secondary">
-        Caravan stops asking this box. Nothing already imported is deleted — the sites, the scenes
-        and the files stay where they are, and items pinned to this box simply stop refreshing.
+        {t('component.stashboxSettings.removalMessage')}
       </p>
       <p class="text-sm text-ink-secondary">{usage(target)}</p>
       {#if removeError}
@@ -433,8 +433,8 @@
     </div>
 
     {#snippet footer()}
-      <Button variant="ghost" onclick={() => (confirmingRemove = null)}>Cancel</Button>
-      <Button variant="danger" disabled={busyID === target.id} onclick={remove}>Remove</Button>
+      <Button variant="ghost" onclick={() => (confirmingRemove = null)}>{t('component.stashboxSettings.cancel')}</Button>
+      <Button variant="danger" disabled={busyID === target.id} onclick={remove}>{t('component.stashboxSettings.remove')}</Button>
     {/snippet}
   </Modal>
 {/if}

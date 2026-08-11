@@ -9,7 +9,7 @@ import { system } from '../state/system.svelte';
 import { providers } from '../state/providers.svelte';
 import { session } from '../state/session.svelte';
 import { navigate, router } from '../router.svelte';
-import { SETTINGS_CATALOG, settingsMatches } from '../settings/catalog';
+import { SETTINGS_CATALOG, settingsLabel, settingsMatches } from '../settings/catalog';
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
@@ -335,7 +335,7 @@ describe('Settings overview and route resolution', () => {
     // reach the screen that answers them now.
     for (const term of ['adult', 'privacy', 'access', 'restricted', 'active']) {
       const hits = SETTINGS_CATALOG.filter((entry) => settingsMatches(entry, term));
-      expect(hits.map((entry) => entry.label), term).toContain('Libraries');
+      expect(hits.map((entry) => settingsLabel(entry)), term).toContain('Libraries');
     }
   });
 });
@@ -682,7 +682,7 @@ describe('Settings metadata pane', () => {
     expect(card!.querySelector('#thetvdb-pin')).not.toBeNull();
     expect(card!.textContent).toContain('Subscriber PIN');
     // The support question the PIN raises, answered where it is asked.
-    expect(card!.textContent).toContain('Only for user-supported keys. Leave blank for a licensed key.');
+    expect(card!.textContent).toContain('For user-supported keys only. Leave blank for a licensed key.');
   });
 
   it('tests the TheTVDB field against TheTVDB, not TMDB', async () => {

@@ -99,6 +99,7 @@ import type {
   VerifyResult,
   WantedLists,
 } from './types';
+import { translate } from '../i18n.svelte';
 
 export const API_BASE = '/api/v1';
 
@@ -372,7 +373,7 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     // SPEC §13: failures are visible. Surface the transport error as an
     // ApiError with status 0 so callers have one error type to render.
     throw new ApiError(
-      err instanceof Error ? err.message : 'network request failed',
+      err instanceof Error ? err.message : translate('api.networkRequestFailed'),
       0,
     );
   }
@@ -414,7 +415,9 @@ function errorMessage(payload: unknown, res: Response): string {
     }
   }
   if (typeof payload === 'string' && payload !== '') return payload;
-  return `${res.status} ${res.statusText || 'request failed'}`;
+  return res.statusText
+    ? translate('api.requestFailed', { status: res.status, statusText: res.statusText })
+    : translate('api.requestFailedDefault', { status: res.status });
 }
 
 /**
@@ -439,7 +442,9 @@ export function errorCode(err: unknown): string {
 /** Human-readable text for anything thrown by this module. */
 export function errorText(err: unknown): string {
   if (err instanceof ApiError) {
-    return err.status === 0 ? `Cannot reach Caravan: ${err.message}` : err.message;
+    return err.status === 0
+      ? translate('api.cannotReach', { message: err.message })
+      : err.message;
   }
   if (err instanceof Error) return err.message;
   return String(err);
@@ -692,7 +697,7 @@ export const api = {
         };
       }
       if (Date.now() > deadline) {
-        throw new ApiError('the library scan is still running', 0);
+        throw new ApiError(translate('api.libraryScanRunning'), 0);
       }
       await sleep(SCAN_POLL_MS);
     }

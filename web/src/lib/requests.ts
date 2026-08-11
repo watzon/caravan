@@ -11,6 +11,7 @@ import type { MediaRequest, RequestMediaType, RequestStatus } from './api/types'
 import { discoverHref } from './discover';
 import { seasonLabel } from './format';
 import type { Tone } from './status';
+import { translate } from './i18n.svelte';
 
 /** Requests still waiting on a decision, newest first (the server's order). */
 export function pendingRequests(requests: MediaRequest[] | null): MediaRequest[] {
@@ -34,11 +35,11 @@ export function pendingRequestCount(requests: MediaRequest[] | null): number {
 export function requestStatusChip(status: RequestStatus): { label: string; tone: Tone } {
   switch (status) {
     case 'approved':
-      return { label: 'Approved', tone: 'success' };
+      return { label: translate('request.status.approved'), tone: 'success' };
     case 'dismissed':
-      return { label: 'Dismissed', tone: 'neutral' };
+      return { label: translate('request.status.dismissed'), tone: 'neutral' };
     default:
-      return { label: 'Pending', tone: 'warning' };
+      return { label: translate('request.status.pending'), tone: 'warning' };
   }
 }
 
@@ -47,17 +48,20 @@ export function requestStatusChip(status: RequestStatus): { label: string; tone:
  * request, and a series request that covered all of them.
  */
 export function requestSeasonsLabel(request: MediaRequest): string {
-  if (request.media_type === 'movie') return 'Movie';
-  // A scene is not a season ask and never carries one — the server rejects
+  if (request.media_type === 'movie') return translate('request.kind.movie');
+  // A scene is not a season ask and never carries one. The server rejects
   // `seasons` on a scene request outright. Without this case it would fall
   // through to the series branch and read "All seasons", which is both wrong
   // and a promise about what approving it does: approving a scene adds the
   // SITE, not a season of anything.
-  if (request.media_type === 'scene') return 'Scene';
+  if (request.media_type === 'scene') return translate('request.kind.scene');
   const seasons = request.seasons;
-  if (seasons === null || seasons.length === 0) return 'All seasons';
+  if (seasons === null || seasons.length === 0) return translate('request.seasons.all');
   if (seasons.length === 1) return seasonLabel(seasons[0] as number);
-  return `${seasons.length} seasons · ${seasons.map(seasonLabel).join(', ')}`;
+  return translate('request.seasons.multiple', {
+    count: seasons.length,
+    seasons: seasons.map(seasonLabel).join(', '),
+  });
 }
 
 /**
@@ -69,11 +73,11 @@ export function requestSeasonsLabel(request: MediaRequest): string {
 export function requestMediaChip(mediaType: RequestMediaType): string {
   switch (mediaType) {
     case 'movie':
-      return 'MOVIE';
+      return translate('request.kind.movieChip');
     case 'scene':
-      return 'SCENE';
+      return translate('request.kind.sceneChip');
     default:
-      return 'SERIES';
+      return translate('request.kind.seriesChip');
   }
 }
 

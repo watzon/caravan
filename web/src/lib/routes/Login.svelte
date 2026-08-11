@@ -11,20 +11,22 @@
   import Icon from '../components/Icon.svelte';
   import LoadError from '../components/LoadError.svelte';
   import TextInput from '../components/TextInput.svelte';
+  import { useI18n } from '../i18n.svelte';
   import { auth } from '../state/auth.svelte';
   import { session } from '../state/session.svelte';
   import { system } from '../state/system.svelte';
 
+  const { t } = useI18n();
   let username = $state('');
   let password = $state('');
 
   async function submit() {
     if (username.trim() === '') {
-      auth.error = 'Enter your username.';
+      auth.error = t('route.login.usernameRequired');
       return;
     }
     if (password === '') {
-      auth.error = 'Enter your password.';
+      auth.error = t('route.login.passwordRequired');
       return;
     }
     if (await auth.login(username.trim(), password)) {
@@ -55,9 +57,9 @@
       <span class="font-display text-lg font-bold tracking-tight text-ink">CARAVAN</span>
     </div>
 
-    <h1 class="font-display text-xl font-semibold tracking-tight text-ink">Sign in</h1>
+    <h1 class="font-display text-xl font-semibold tracking-tight text-ink">{t('route.login.title')}</h1>
     <p class="mt-2 text-base text-ink-secondary">
-      This Caravan is password-protected. Sign in with your account.
+      {t('route.login.description')}
     </p>
 
     <form
@@ -66,11 +68,11 @@
         event.preventDefault();
         submit();
       }}>
-      <Field label="Username" for="login-username">
-        <TextInput id="login-username" bind:value={username} autofocus placeholder="admin" />
+      <Field label={t('route.login.usernameLabel')} for="login-username">
+        <TextInput id="login-username" bind:value={username} autofocus placeholder={t('route.login.usernamePlaceholder')} />
       </Field>
 
-      <Field label="Password" for="login-password">
+      <Field label={t('route.login.passwordLabel')} for="login-password">
         <TextInput
           id="login-password"
           bind:value={password}
@@ -84,7 +86,7 @@
 
       <Button variant="primary" type="submit" disabled={auth.busy} class="self-start">
         <Icon name="check" size={14} />
-        {auth.busy ? 'Signing in…' : 'Sign in'}
+        {auth.busy ? t('route.login.signingIn') : t('route.login.signIn')}
       </Button>
     </form>
   </div>

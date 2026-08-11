@@ -138,11 +138,11 @@ describe('unreachableClientBanner', () => {
 
   // The user has to be told which client, why, and that the rest of the queue
   // is still running — a bare "unreachable" reads as "Caravan is broken".
-  it('names the client, the reason, and what is unaffected', () => {
+  it('names the client, the reason, and what keeps working', () => {
     const banner = unreachableClientBanner([client()]);
     expect(banner?.title).toBe('Download client Seedbox is unreachable');
     expect(banner?.message).toContain('connection refused');
-    expect(banner?.message).toContain('unaffected');
+    expect(banner?.message).toContain('keep working');
   });
 
   it('names every client that is down, and each distinct reason once', () => {

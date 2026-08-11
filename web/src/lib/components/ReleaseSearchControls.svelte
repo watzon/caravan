@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { useI18n } from '../i18n.svelte';
   /**
    * The query rail every release search wears: what to ask for, which
    * categories, which indexers (plan part B7).
@@ -84,11 +85,16 @@
     onsearch();
   }
 
+  const { t, tp } = useI18n();
   let categoryLabel = $derived(
-    categories.length === 0 ? 'All categories' : `${categories.length} categories`,
+    categories.length === 0
+      ? t('component.releaseSearchControls.allCategories')
+      : tp('component.releaseSearchControls.categories', categories.length),
   );
   let indexerLabel = $derived(
-    indexerIDs.length === 0 ? 'All indexers' : `${indexerIDs.length} indexers`,
+    indexerIDs.length === 0
+      ? t('component.releaseSearchControls.allIndexers')
+      : tp('component.releaseSearchControls.indexers', indexerIDs.length),
   );
 </script>
 
@@ -99,8 +105,8 @@
         bind:value={query}
         type="search"
         {onkeydown}
-        placeholder="Search every enabled indexer…"
-        ariaLabel="Release search query" />
+        placeholder={t('component.releaseSearchControls.searchEveryEnabledIndexer')}
+        ariaLabel={t('component.releaseSearchControls.releaseSearchQuery')} />
     </div>
 
     <FilterPill label={categoryLabel} applied={categories.length > 0} shape="box" width="w-56">
@@ -109,7 +115,7 @@
           options={categoryOptions}
           selected={selectedCategories}
           onselect={toggleCategory}
-          emptyText="No categories to choose from" />
+          emptyText={t('component.releaseSearchControls.noCategoriesToChooseFrom')} />
       {/snippet}
     </FilterPill>
 
@@ -119,13 +125,13 @@
           options={indexerOptions}
           selected={selectedIndexers}
           onselect={toggleIndexer}
-          emptyText="No enabled indexers" />
+          emptyText={t('component.releaseSearchControls.noEnabledIndexers')} />
       {/snippet}
     </FilterPill>
 
     <Button variant="primary" onclick={onsearch} disabled={busy}>
       <Icon name="search" size={14} />
-      {busy ? 'Searching…' : 'Search'}
+      {busy ? t('component.releaseSearchControls.searching') : t('component.releaseSearchControls.search')}
     </Button>
   </div>
 
@@ -139,7 +145,7 @@
         <Icon name="link" size={12} />
         {contextLabel}
       </span>
-      <span class="text-sm text-ink-muted">Grabs land on this item, whatever you search for.</span>
+      <span class="text-sm text-ink-muted">{t('component.releaseSearchControls.grabsLandOnThisItemWhateverYouSearchFor')}</span>
     </div>
   {/if}
 </div>

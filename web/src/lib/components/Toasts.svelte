@@ -1,7 +1,10 @@
 <script lang="ts">
+  import { useI18n } from '../i18n.svelte';
   import { dismissToast, toasts } from '../state/toast.svelte';
   import { TONE_DOT, TONE_TINT } from '../status';
   import Icon from './Icon.svelte';
+
+  const { t, tp } = useI18n();
 </script>
 
 <div class="pointer-events-none fixed bottom-4 left-4 right-4 z-[60] flex w-auto flex-col gap-2 sm:left-auto sm:w-80" aria-live="polite">
@@ -15,7 +18,7 @@
       <button
         type="button"
         class="p-3 text-ink-secondary transition-colors duration-150 hover:text-ink"
-        aria-label="Dismiss notification"
+        aria-label={t('component.toasts.dismissNotification')}
         onclick={() => dismissToast(toast.id)}>
         <Icon name="close" size={14} />
       </button>

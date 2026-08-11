@@ -26,6 +26,7 @@
     describeType,
     validateDownloadClient,
   } from '../downloadClient';
+  import { useI18n } from '../i18n.svelte';
   import { pushToast } from '../state/toast.svelte';
   import Badge from './Badge.svelte';
   import Button from './Button.svelte';
@@ -39,6 +40,8 @@
   import Skeleton from './Skeleton.svelte';
   import TextInput from './TextInput.svelte';
   import Toggle from './Toggle.svelte';
+
+  const { t } = useI18n();
 
   /** The result of the last test per client id, so the row can say what happened. */
   type TestResult = { ok: boolean; message: string };
@@ -105,15 +108,15 @@
     const trimmed = value.trim();
     if (allowEmpty && trimmed === '') return { value: null, error: null };
     if (!allowEmpty && trimmed === '') {
-      return { value: null, error: `${label} must be a whole number of zero or greater.` };
+      return { value: null, error: t('component.downloadClient.wholeNumber', { label }) };
     }
     const parsed = Number(trimmed);
     if (!Number.isFinite(parsed) || !Number.isSafeInteger(parsed) || parsed < 0) {
       return {
         value: null,
         error: allowEmpty
-          ? `${label} must be blank or a whole number of zero or greater.`
-          : `${label} must be a whole number of zero or greater.`,
+          ? t('component.downloadClient.optionalWholeNumber', { label })
+          : t('component.downloadClient.wholeNumber', { label }),
       };
     }
     return { value: parsed, error: null };
@@ -133,11 +136,11 @@
     });
     if (clientError) return clientError;
     if (editingID === 0 && !typeInfo.supported) {
-      return `${typeInfo.label} is not available for new clients in this Caravan build.`;
+      return t('component.downloadClient.newClientUnavailable', { type: typeInfo.label });
     }
     return (
-      nonNegativeInteger(priority, 'Priority').error ??
-      nonNegativeInteger(maxConcurrent, 'Max concurrent downloads', true).error
+      nonNegativeInteger(priority, t('component.downloadClient.priority')).error ??
+      nonNegativeInteger(maxConcurrent, t('component.downloadClient.maxConcurrent'), true).error
     );
   }
 
@@ -223,8 +226,12 @@
       url: url.trim(),
       username: typeInfo.uses_login ? username.trim() : '',
       category: category.trim(),
-      priority: nonNegativeInteger(priority, 'Priority').value!,
-      max_concurrent: nonNegativeInteger(maxConcurrent, 'Max concurrent downloads', true).value,
+      priority: nonNegativeInteger(priority, t('component.downloadClient.priority')).value!,
+      max_concurrent: nonNegativeInteger(
+        maxConcurrent,
+        t('component.downloadClient.maxConcurrent'),
+        true,
+      ).value,
       enabled,
     };
     if (typeInfo.uses_login && password !== '') body.password = password;
@@ -245,7 +252,7 @@
     try {
       if (editingID === 0) {
         await api.addDownloadClient(body);
-        pushToast(`Added ${body.name}.`, 'success');
+        pushToast(t('component.downloadClient.added', { name: body.name }), 'success');
         closeForm();
         await load();
       } else if (editingID !== null) {
@@ -255,7 +262,7 @@
         // server's canonical values. Save is disabled until the user changes
         // the new draft again.
         openEdit(saved);
-        pushToast(`Saved ${body.name}.`, 'success');
+        pushToast(t('component.downloadClient.saved', { name: body.name }), 'success');
       }
     } catch (err) {
       formError = errorText(err);
@@ -276,7 +283,7 @@
     formTest = null;
     try {
       await api.testDownloadClientConfig(body);
-      formTest = { ok: true, message: 'Reachable' };
+      formTest = { ok: true, message: t('component.downloadClient.reachable') };
     } catch (err) {
       formTest = { ok: false, message: errorText(err) };
     } finally {
@@ -288,7 +295,7 @@
     testingID = client.id;
     try {
       await api.testDownloadClient(client.id);
-      tests = { ...tests, [client.id]: { ok: true, message: 'Reachable' } };
+      tests = { ...tests, [client.id]: { ok: true, message: t('component.downloadClient.reachable') } };
     } catch (err) {
       tests = { ...tests, [client.id]: { ok: false, message: errorText(err) } };
     } finally {
@@ -305,7 +312,7 @@
       clients = (clients ?? []).filter((c) => c.id !== client.id);
       if (editingID === client.id) closeForm();
       confirmingRemove = null;
-      pushToast(`Removed ${client.name}.`, 'neutral');
+      pushToast(t('component.downloadClient.removed', { name: client.name }), 'neutral');
     } catch (err) {
       pushToast(errorText(err), 'danger');
     } finally {
@@ -320,16 +327,16 @@
 </script>
 
 <SettingsCard
-  title="External clients"
-  description="Optional. With none configured, the built-in engines handle everything above.">
+  title={t('component.downloadClient.title')}
+  description={t('component.downloadClient.description')}>
   {#snippet action()}
     <Button variant="secondary" size="sm" onclick={load}>
       <Icon name="refresh" size={14} />
-      Refresh
+      {t('component.actions.refresh')}
     </Button>
     <Button variant="primary" size="sm" onclick={openAdd}>
       <Icon name="plus" size={14} />
-      Add client
+      {t('component.downloadClient.add')}
     </Button>
   {/snippet}
 
@@ -344,10 +351,10 @@
   {:else if rows.length === 0}
     <EmptyState
       icon="link"
-      title="No download clients yet"
-      message="Optional. Caravan downloads both torrents and NZBs on its own; add a client here only to hand grabs to qBittorrent, SABnzbd or NZBGet instead.">
+      title={t('component.downloadClient.emptyTitle')}
+      message={t('component.downloadClient.emptyMessage')}>
       {#snippet action()}
-        <Button variant="primary" onclick={openAdd}>Add client</Button>
+        <Button variant="primary" onclick={openAdd}>{t('component.downloadClient.add')}</Button>
       {/snippet}
     </EmptyState>
   {:else}
@@ -370,10 +377,10 @@
                 {info.label}
               </Badge>
               <Badge tone={client.enabled ? 'success' : 'neutral'}>
-                {client.enabled ? 'Enabled' : 'Disabled'}
+                {client.enabled ? t('component.downloadClient.enabled') : t('component.downloadClient.disabled')}
               </Badge>
               {#if !info.supported}
-                <Badge tone="warning">Not supported yet</Badge>
+                <Badge tone="warning">{t('component.downloadClient.notSupported')}</Badge>
               {/if}
             </p>
             <p class="truncate font-mono text-xs text-ink-muted" title={client.url}>
@@ -392,16 +399,16 @@
               size="sm"
               disabled={testingID === client.id}
               onclick={() => test(client)}>
-              {testingID === client.id ? 'Testing…' : 'Test'}
+              {testingID === client.id ? t('component.actions.testing') : t('component.actions.test')}
             </Button>
-            <Button variant="ghost" size="sm" onclick={() => openEdit(client)}>Edit</Button>
+            <Button variant="ghost" size="sm" onclick={() => openEdit(client)}>{t('component.actions.edit')}</Button>
             <Button
               variant="ghost"
               size="sm"
               disabled={busyID === client.id}
               onclick={() => (confirmingRemove = client)}>
               <Icon name="trash" size={14} />
-              <span class="sr-only">Remove {client.name}</span>
+              <span class="sr-only">{t('component.downloadClient.removeNamed', { name: client.name })}</span>
             </Button>
           </div>
         </li>
@@ -421,7 +428,7 @@
 
 {#if editingID !== null}
   <Modal
-    title={editingID === 0 ? 'Add download client' : 'Edit download client'}
+    title={editingID === 0 ? t('component.downloadClient.addTitle') : t('component.downloadClient.editTitle')}
     width="max-w-xl"
     dirty={isDirty}
     onclose={closeForm}>
@@ -432,11 +439,12 @@
         void save();
       }}>
       <Field
-        label="Type"
-        help={`${typeInfo.label} carries ${typeInfo.protocol} releases.${
-          typeInfo.supported ? '' : ' This build cannot talk to it yet.'
-        }`}>
-        <div class="flex flex-wrap gap-2" role="radiogroup" aria-label="Download client type">
+        label={t('component.downloadClient.type')}
+        help={`${t('component.downloadClient.typeHelp', {
+          type: typeInfo.label,
+          protocol: typeInfo.protocol,
+        })}${typeInfo.supported ? '' : ` ${t('component.downloadClient.typeUnsupported')}`}`}>
+        <div class="flex flex-wrap gap-2" role="radiogroup" aria-label={t('component.downloadClient.type')}>
           {#each types as option (option.type)}
             {@const unavailable = !option.supported && (editingID === 0 || type !== option.type)}
             <button
@@ -445,7 +453,7 @@
               aria-checked={type === option.type}
               disabled={unavailable}
               title={unavailable
-                ? `${option.label} is unavailable because this Caravan build cannot connect to it.`
+                ? t('component.downloadClient.typeUnavailable', { type: option.label })
                 : undefined}
               onclick={() => (type = option.type)}
               class="h-8 rounded-full border px-3 text-sm transition-colors duration-150 ease-out
@@ -458,85 +466,96 @@
         </div>
         {#if editingID === 0 && types.some((option) => !option.supported)}
           <p class="text-sm text-ink-secondary">
-            Unsupported types are unavailable for new clients because this Caravan build cannot
-            connect to them yet.
+            {t('component.downloadClient.unsupportedTypes')}
           </p>
         {/if}
       </Field>
 
-      <Field label="Name" for="client-name" help="How this client is labelled in the queue.">
-        <TextInput id="client-name" bind:value={name} placeholder="qBittorrent — NAS" />
+      <Field label={t('component.downloadClient.name')} for="client-name" help={t('component.downloadClient.nameHelp')}>
+        <TextInput id="client-name" bind:value={name} placeholder={t('component.downloadClient.namePlaceholder')} />
       </Field>
 
       <Field
-        label="Base URL"
+        label={t('component.downloadClient.baseURL')}
         for="client-url"
-        help="The client's web UI address, including the port — for example http://127.0.0.1:8080.">
+        help={t('component.downloadClient.baseURLHelp')}>
         <TextInput id="client-url" bind:value={url} mono placeholder="http://127.0.0.1:8080" />
       </Field>
 
       {#if typeInfo.uses_login}
-        <Field label="Username" for="client-username">
-          <TextInput id="client-username" bind:value={username} mono placeholder="admin" />
+        <Field label={t('component.downloadClient.username')} for="client-username">
+          <TextInput
+            id="client-username"
+            bind:value={username}
+            mono
+            placeholder={t('component.downloadClient.usernamePlaceholder')} />
         </Field>
 
         <Field
-          label="Password"
+          label={t('component.downloadClient.password')}
           for="client-password"
           help={storedPassword
-            ? 'A password is stored. Leave this blank to keep it — it is never sent back to the browser.'
-            : 'Stored in the database, never in caravan.yaml and never logged.'}>
+            ? t('component.downloadClient.passwordStored')
+            : t('component.downloadClient.credentialStorage')}>
           <TextInput
             id="client-password"
             bind:value={password}
             type="password"
             mono
-            placeholder={storedPassword ? 'Unchanged' : '•••••'} />
+            placeholder={storedPassword
+              ? t('component.downloadClient.unchanged')
+              : t('component.downloadClient.passwordPlaceholder')} />
         </Field>
       {/if}
 
       {#if typeInfo.uses_api_key}
         <Field
-          label="API key"
+          label={t('component.downloadClient.apiKey')}
           for="client-api-key"
           help={storedAPIKey
-            ? 'An API key is stored. Leave this blank to keep it — it is never sent back to the browser.'
-            : 'Stored in the database, never in caravan.yaml and never logged.'}>
+            ? t('component.downloadClient.apiKeyStored')
+            : t('component.downloadClient.credentialStorage')}>
           <TextInput
             id="client-api-key"
             bind:value={apiKey}
             type="password"
             mono
-            placeholder={storedAPIKey ? 'Unchanged' : '•••••'} />
+            placeholder={storedAPIKey
+              ? t('component.downloadClient.unchanged')
+              : t('component.downloadClient.passwordPlaceholder')} />
         </Field>
       {/if}
 
       <Field
-        label="Category"
+        label={t('component.downloadClient.category')}
         for="client-category"
-        help="The label grabs are filed under in the client. Empty uses the client's default.">
-        <TextInput id="client-category" bind:value={category} mono placeholder="caravan" />
+        help={t('component.downloadClient.categoryHelp')}>
+        <TextInput
+          id="client-category"
+          bind:value={category}
+          mono
+          placeholder={t('component.downloadClient.categoryPlaceholder')} />
       </Field>
 
       <div data-settings-advanced>
         <Field
-          label="Priority"
+          label={t('component.downloadClient.priority')}
           for="client-priority"
-          help="Lowest wins when more than one enabled client can take a release.">
+          help={t('component.downloadClient.priorityHelp')}>
           <TextInput id="client-priority" bind:value={priority} oninput={() => (formError = null)} mono placeholder="25" />
         </Field>
       </div>
 
       <div data-settings-advanced>
         <Field
-          label="Max concurrent downloads"
+          label={t('component.downloadClient.maxConcurrent')}
           for="client-max-concurrent"
-          help="How many downloads Caravan runs here at once. 0 is unlimited, the client's own limits still apply. Anything over it is handed over paused and started when a slot frees.">
+          help={t('component.downloadClient.maxConcurrentHelp')}>
           <TextInput id="client-max-concurrent" bind:value={maxConcurrent} oninput={() => (formError = null)} mono placeholder="0" />
         </Field>
       </div>
 
-      <Toggle checked={enabled} label="Enabled" onchange={(next) => (enabled = next)} />
+      <Toggle checked={enabled} label={t('component.downloadClient.enabled')} onchange={(next) => (enabled = next)} />
 
       {#if formError || (isDirty && validationError)}
         <p class="text-sm text-danger">{formError ?? validationError}</p>
@@ -546,7 +565,7 @@
     {#snippet footer()}
       <div class="mr-auto flex min-w-0 items-center gap-2">
         <Button variant="secondary" onclick={testForm} disabled={formTesting || saving}>
-          {formTesting ? 'Testing…' : 'Test'}
+          {formTesting ? t('component.actions.testing') : t('component.actions.test')}
         </Button>
         {#if formTest}
           <p
@@ -560,18 +579,18 @@
       {#if editingRow}
         {@const target = editingRow}
         <Button variant="danger" disabled={saving} onclick={() => (confirmingRemove = target)}>
-          Remove
+          {t('component.actions.remove')}
         </Button>
         <span class="mx-1 h-5 w-px shrink-0 bg-border"></span>
       {/if}
-      <Button variant="ghost" onclick={closeForm} disabled={saving}>Cancel</Button>
+      <Button variant="ghost" onclick={closeForm} disabled={saving}>{t('component.actions.cancel')}</Button>
       <Button
         variant="primary"
         disabled={saving || !isDirty || validationError !== null}
-        title={!isDirty ? 'No changes to save' : validationError ?? undefined}
+        title={!isDirty ? t('component.downloadClient.noChangesToSave') : validationError ?? undefined}
         onclick={save}>
         <Icon name="check" size={14} />
-        {saving ? 'Saving…' : !isDirty ? 'No changes' : validationError ? 'Fix errors' : 'Save'}
+        {saving ? t('component.actions.saving') : !isDirty ? t('component.actions.noChanges') : validationError ? t('component.actions.fixErrors') : t('component.actions.save')}
       </Button>
     {/snippet}
   </Modal>
@@ -579,18 +598,17 @@
 
 {#if confirmingRemove}
   {@const target = confirmingRemove}
-  <Modal title="Remove download client" width="max-w-lg" onclose={() => (confirmingRemove = null)}>
+  <Modal title={t('component.downloadClient.removeTitle')} width="max-w-lg" onclose={() => (confirmingRemove = null)}>
     <div class="flex flex-col gap-3 p-4">
       <p class="text-base text-ink">{target.name}</p>
       <p class="text-base text-ink-secondary">
-        Caravan stops sending grabs to this client. Nothing already downloaded or imported is
-        affected, and the client keeps whatever it is holding — only the configuration goes away.
+        {t('component.downloadClient.removeDescription')}
       </p>
     </div>
 
     {#snippet footer()}
-      <Button variant="ghost" onclick={() => (confirmingRemove = null)}>Cancel</Button>
-      <Button variant="danger" disabled={busyID === target.id} onclick={remove}>Remove</Button>
+      <Button variant="ghost" onclick={() => (confirmingRemove = null)}>{t('component.actions.cancel')}</Button>
+      <Button variant="danger" disabled={busyID === target.id} onclick={remove}>{t('component.actions.remove')}</Button>
     {/snippet}
   </Modal>
 {/if}

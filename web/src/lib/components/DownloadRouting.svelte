@@ -21,9 +21,11 @@
   } from '../api/types';
   import { describeType } from '../downloadClient';
   import { pushToast } from '../state/toast.svelte';
+  import { useI18n } from '../i18n.svelte';
   import Button from './Button.svelte';
   import Field from './Field.svelte';
   import Icon from './Icon.svelte';
+  import LocalizedText from './LocalizedText.svelte';
 
   interface Props {
     /** The configured clients, so the pickers offer exactly what exists. */
@@ -32,6 +34,7 @@
   }
 
   let { clients, types }: Props = $props();
+  const { t } = useI18n();
 
   let torrent = $state(ROUTE_EMBEDDED);
   let usenet = $state('');
@@ -84,7 +87,7 @@
         [SETTING_ROUTE_TORRENT]: settle(torrent, torrentClients, ROUTE_EMBEDDED),
         [SETTING_ROUTE_USENET]: settle(usenet, usenetClients, ''),
       });
-      pushToast('Routing saved.');
+      pushToast(t('component.downloadRouting.saved'));
     } catch (err) {
       pushToast(errorText(err), 'danger');
     } finally {
@@ -97,18 +100,30 @@
 
 <section
   class="flex flex-col gap-4 rounded-md border border-border bg-surface p-4"
-  aria-label="Routing">
+  aria-label={t('component.downloadRouting.title')}>
   <div>
-    <h3 class="text-base font-medium text-ink">Routing</h3>
+    <h3 class="text-base font-medium text-ink">{t('component.downloadRouting.title')}</h3>
     <p class="mt-1 text-sm text-ink-secondary">
-      Which engine takes a release is decided by its protocol, not per grab. Torznab results go to
-      the torrent engine, Newznab results to the usenet one. Both are built in; an
-      <a class="text-accent-text hover:underline" href="/settings/downloads#download-clients">external client</a>
-      is optional.
+      <LocalizedText
+        message="component.downloadRouting.protocolDescription"
+        links={{
+          clientLink: {
+            href: '/settings/downloads#download-clients',
+            label: 'component.downloadRouting.externalClient',
+            class: 'text-accent-text hover:underline',
+          },
+        }} />
     </p>
     <p class="mt-1 text-sm text-ink-secondary">
-      Library-specific routing is configured under
-      <a class="text-accent-text hover:underline" href="/settings/libraries">Settings → Libraries</a>.
+      <LocalizedText
+        message="component.downloadRouting.libraryDescription"
+        links={{
+          settingsLink: {
+            href: '/settings/libraries',
+            label: 'component.downloadRouting.settingsLibraries',
+            class: 'text-accent-text hover:underline',
+          },
+        }} />
     </p>
   </div>
 
@@ -117,16 +132,16 @@
   {/if}
 
   <Field
-    label="Torrent releases"
+    label={t('component.downloadRouting.torrentReleases')}
     for="route-torrent"
-    help="Caravan's built-in engine needs no configuration and is always available.">
+    help={t('component.downloadRouting.torrentHelp')}>
     <select
       id="route-torrent"
       bind:value={torrent}
       disabled={loading}
       class="h-9 w-full rounded-sm border border-border-strong bg-raised px-3 text-md text-ink
              focus:border-accent focus:outline-none disabled:opacity-50">
-      <option value={ROUTE_EMBEDDED}>Built-in engine</option>
+      <option value={ROUTE_EMBEDDED}>{t('component.downloadRouting.builtInEngine')}</option>
       {#each torrentClients as client (client.id)}
         <option value={String(client.id)}>{client.name}</option>
       {/each}
@@ -134,7 +149,7 @@
   </Field>
 
   <Field
-    label="Usenet releases"
+    label={t('component.downloadRouting.usenetReleases')}
     for="route-usenet">
     <select
       id="route-usenet"
@@ -142,7 +157,7 @@
       disabled={loading}
       class="h-9 w-full rounded-sm border border-border-strong bg-raised px-3 text-md text-ink
              focus:border-accent focus:outline-none disabled:opacity-50">
-      <option value="">Built-in engine</option>
+      <option value="">{t('component.downloadRouting.builtInEngine')}</option>
       {#each usenetClients as client (client.id)}
         <option value={String(client.id)}>{client.name}</option>
       {/each}
@@ -150,15 +165,19 @@
   </Field>
 
   <p class="-mt-2 text-sm text-ink-secondary">
-    Caravan's built-in engine downloads, repairs and unpacks NZBs itself. It needs a news server under
-    <a
-      class="text-accent-text hover:underline"
-      href="/settings/downloads#usenet-servers">Settings → Usenet servers</a
-    >, and no download client.
+    <LocalizedText
+      message="component.downloadRouting.usenetDescription"
+      links={{
+        settingsLink: {
+          href: '/settings/downloads#usenet-servers',
+          label: 'component.downloadRouting.settingsUsenetServers',
+          class: 'text-accent-text hover:underline',
+        },
+      }} />
   </p>
 
   <Button variant="primary" class="self-start" disabled={loading || saving} onclick={save}>
     <Icon name="check" size={14} />
-    {saving ? 'Saving…' : 'Save routing'}
+    {saving ? t('component.actions.saving') : t('component.downloadRouting.save')}
   </Button>
 </section>

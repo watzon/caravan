@@ -26,6 +26,7 @@
   import { session } from '../state/session.svelte';
   import { pushToast } from '../state/toast.svelte';
   import { focusFirstResult, moveResultFocus } from '../typeahead';
+  import { useI18n } from '../i18n.svelte';
   import { createTypeahead } from '../typeahead.svelte';
   import Badge from './Badge.svelte';
   import Button from './Button.svelte';
@@ -103,11 +104,13 @@
     kind: fixedKind = null,
     initialKind = 'movie',
     initialQuery = '',
-    title = 'Add to library',
+    title: suppliedTitle,
     libraryID = 0,
     onpick,
     onadded,
   }: Props = $props();
+  const { t } = useI18n();
+  let title = $derived(suppliedTitle ?? t('component.addItem.title'));
 
   /**
    * The two add options, both OFF by default and both deliberately per-add
@@ -214,9 +217,9 @@
   );
 
   let scopes = $derived<{ key: Scope; label: string }[]>([
-    { key: 'movie', label: 'Movies' },
-    { key: 'series', label: 'Series' },
-    ...(siteScope ? [{ key: 'site' as Scope, label: 'Adult' }] : []),
+    { key: 'movie', label: t('component.media.movies') },
+    { key: 'series', label: t('component.media.series') },
+    ...(siteScope ? [{ key: 'site' as Scope, label: t('component.media.adult') }] : []),
   ]);
 
   /**
@@ -407,7 +410,7 @@
       // answers as soon as the row exists and the scenes arrive from a
       // background job. Saying so is the difference between "still working"
       // and "this site has nothing".
-      pushToast(`Added ${added.title}. Cataloguing scenes in the background.`, 'success');
+      pushToast(t('component.addItem.addedSiteCataloguing', { title: added.title }), 'success');
       onclose();
       navigate(siteHref(added));
     } catch (err) {
@@ -437,7 +440,7 @@
           search_now: searchOnAdd,
           library_id: targetLibraryID || undefined,
         });
-        pushToast(`Added ${added.title}`, 'success');
+        pushToast(t('component.addItem.added', { title: added.title }), 'success');
         if (onadded) {
           onadded('movie', { id: added.id, title: added.title });
           return;
@@ -452,7 +455,7 @@
           search_missing: searchOnAdd,
           library_id: targetLibraryID || undefined,
         });
-        pushToast(`Added ${added.title}`, 'success');
+        pushToast(t('component.addItem.added', { title: added.title }), 'success');
         if (onadded) {
           onadded('series', { id: added.id, title: added.title });
           return;
@@ -476,7 +479,7 @@
   <div bind:this={body} class="flex flex-col gap-4 p-4">
     {#if !fixedKind}
       <div class="flex flex-wrap items-center gap-2">
-        <div class="flex gap-2" role="tablist" aria-label="Search type">
+        <div class="flex gap-2" role="tablist" aria-label={t('component.addItem.searchType')}>
           {#each scopes as tab (tab.key)}
             <button
               type="button"
@@ -493,7 +496,7 @@
         </div>
         <span class="ml-0 flex items-center gap-1 text-xs text-ink-muted sm:ml-auto" aria-hidden="true">
           <kbd class="rounded-sm bg-surface px-1.5 py-0.5 font-mono">Tab</kbd>
-          to switch
+          {t('component.addItem.switchHint')}
         </span>
       </div>
     {/if}
@@ -504,19 +507,19 @@
       autofocus
       onkeydown={onSearchKeydown}
       placeholder={scope === 'site'
-        ? 'Site name…'
+        ? t('component.addItem.sitePlaceholder')
         : scope === 'movie'
           ? manyProviders
-            ? 'Search the metadata providers for a movie…'
-            : 'Search TMDB for a movie…'
+            ? t('component.addItem.movieProviderPlaceholder')
+            : t('component.addItem.movieTmdbPlaceholder')
           : manyProviders
-            ? 'Search the metadata providers for a series…'
-            : 'Search TMDB for a series…'}
+            ? t('component.addItem.seriesProviderPlaceholder')
+            : t('component.addItem.seriesTmdbPlaceholder')}
       ariaLabel={scope === 'site'
-        ? 'Search the metadata provider for a site'
+        ? t('component.addItem.siteSearchLabel')
         : manyProviders
-          ? 'Search the metadata providers'
-          : 'Search TMDB'} />
+          ? t('component.addItem.providerSearchLabel')
+          : t('component.addItem.tmdbSearchLabel')} />
 
     {#if credentialFault}
       <!-- TMDB is what names a movie or a series, so with no usable key there
@@ -535,15 +538,15 @@
       {#if search.idle}
         <EmptyState
           icon="search"
-          title="Keep typing"
-          message="Type at least two characters to look up a site." />
+          title={t('component.addItem.keepTyping')}
+          message={t('component.addItem.siteMinimumCharacters')} />
       {:else if sites.length === 0}
         <EmptyState
           icon="search"
-          title="No matches"
+          title={t('component.addItem.noMatches')}
           message={search.trimmed === ''
-            ? 'The metadata provider offered nothing to start from. Search for a site by name.'
-            : `No site matches “${search.trimmed}”. Try the network above it, or an alias off a release name.`} />
+            ? t('component.addItem.noSites')
+            : t('component.addItem.noSiteMatches', { query: search.trimmed })} />
       {:else}
         <ul class="flex flex-col gap-2">
           {#each sites as hit (hit.stash_id)}
@@ -564,21 +567,21 @@
                   <!-- A release name carries whichever alias its packager saw,
                        so the aliases are what make the right row identifiable. -->
                   {#if hit.aliases.length > 0}
-                    <span class="truncate" title={`also ${hit.aliases.join(', ')}`}>
-                      also {hit.aliases.join(', ')}
+                    <span class="truncate" title={t('component.addItem.aliases', { aliases: hit.aliases.join(', ') })}>
+                      {t('component.addItem.aliases', { aliases: hit.aliases.join(', ') })}
                     </span>
                   {/if}
                 </p>
               </div>
               {#if hit.in_library}
-                <Badge tone="success">In library</Badge>
+                <Badge tone="success">{t('component.status.inLibrary')}</Badge>
               {:else}
                 <Button
                   variant="primary"
                   size="sm"
                   disabled={busyStashID !== null}
                   onclick={() => void addSite(hit)}>
-                  {busyStashID === hit.stash_id ? 'Adding…' : 'Add'}
+                  {busyStashID === hit.stash_id ? t('component.actions.adding') : t('component.actions.add')}
                 </Button>
               {/if}
             </li>
@@ -588,17 +591,19 @@
     {:else if search.idle}
       <EmptyState
         icon="search"
-        title={manyProviders ? 'Search the metadata providers' : 'Search the metadata provider'}
+        title={manyProviders
+          ? t('component.addItem.providerSearchTitle')
+          : t('component.addItem.providerSearchTitleSingle')}
         message={manyProviders
-          ? 'Type at least two characters to look up a title.'
-          : 'Type at least two characters to look up a title on TMDB.'} />
+          ? t('component.addItem.titleMinimumCharacters')
+          : t('component.addItem.tmdbTitleMinimumCharacters')} />
     {:else if rows.length === 0}
       <EmptyState
         icon="search"
-        title="No matches"
+        title={t('component.addItem.noMatches')}
         message={manyProviders
-          ? `The metadata providers returned nothing for “${search.trimmed}”. Try the original-language title, or add the year.`
-          : `TMDB returned nothing for “${search.trimmed}”. Try the original-language title, or add the year.`} />
+          ? t('component.addItem.noProviderMatches', { query: search.trimmed })
+          : t('component.addItem.noTmdbMatches', { query: search.trimmed })} />
     {:else}
       <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
       <ul class="flex flex-col gap-2" onkeydown={onListKeydown}>
@@ -615,7 +620,7 @@
             <div class="min-w-0 flex-1">
               <p class="truncate text-base font-medium text-ink" title={row.title}>{row.title}</p>
               <div class="mt-1 flex flex-wrap items-center gap-1.5">
-                <Badge mono tone="neutral">{row.year > 0 ? row.year : 'Year unknown'}</Badge>
+                <Badge mono tone="neutral">{row.year > 0 ? row.year : t('component.addItem.yearUnknown')}</Badge>
                 <Badge mono tone="neutral" title={rating.title}>
                   {rating.text ?? rating.title}
                 </Badge>
@@ -628,8 +633,8 @@
               </div>
               <p
                 class="line-clamp-2 text-sm text-ink-secondary"
-                title={row.overview || 'No overview available.'}>
-                {row.overview || 'No overview available.'}
+                title={row.overview || t('component.addItem.noOverview')}>
+                {row.overview || t('component.addItem.noOverview')}
               </p>
             </div>
             <Button
@@ -637,7 +642,7 @@
               size="sm"
               disabled={busyKey !== null}
               onclick={() => select(row)}>
-              {busyKey === rowKey(row) ? 'Working…' : onpick ? 'Match' : 'Add'}
+              {busyKey === rowKey(row) ? t('component.actions.working') : onpick ? t('component.actions.match') : t('component.actions.add')}
             </Button>
           </li>
         {/each}
@@ -659,11 +664,11 @@
                question with one answer. -->
           <label
             class="flex items-center gap-3 rounded-md border border-border bg-raised px-3 py-2">
-            <span class="text-base text-ink">Library</span>
+            <span class="text-base text-ink">{t('component.addItem.library')}</span>
             <select
               bind:value={targetLibraryID}
               class="h-8 flex-1 rounded-sm border border-border-strong bg-raised px-2 text-md text-ink focus:border-accent focus:outline-none"
-              aria-label="Target library">
+              aria-label={t('component.addItem.targetLibrary')}>
               {#each libraryChoices as choice (choice.id)}
                 <option value={choice.is_default ? 0 : choice.id}>
                   {choice.name}{choice.is_default ? ' (default)' : ''}
@@ -678,7 +683,7 @@
             checked={monitorOnAdd}
             onchange={(event) => setMonitorOnAdd(event.currentTarget.checked)}
             class="size-4 accent-accent" />
-          <span class="text-base text-ink">Add and monitor</span>
+          <span class="text-base text-ink">{t('component.addItem.addAndMonitor')}</span>
         </label>
         {#if monitorOnAdd}
           <label
@@ -688,7 +693,7 @@
               checked={searchOnAdd}
               onchange={(event) => (searchOnAdd = event.currentTarget.checked)}
               class="size-4 accent-accent" />
-            <span class="text-base text-ink">Start searching immediately</span>
+            <span class="text-base text-ink">{t('component.addItem.searchNow')}</span>
           </label>
         {/if}
       </div>
@@ -700,19 +705,17 @@
   {@const target = confirmingRelease}
   {@const unknownReleaseDate = !hasKnownReleaseDate(target.releaseDate)}
   <Modal
-    title={unknownReleaseDate ? 'Add title with unknown release date' : 'Add unreleased title'}
+    title={unknownReleaseDate ? t('component.addItem.unknownReleaseTitle') : t('component.addItem.unreleasedTitle')}
     width="max-w-lg"
     onclose={() => (confirmingRelease = null)}>
     <div class="flex flex-col gap-3 p-4">
       <p class="text-base text-ink">
-        {#if unknownReleaseDate}
-          <span class="font-medium">{target.row.title}</span>'s release date is unknown.
-        {:else}
-          <span class="font-medium">{target.row.title}</span> has not been released yet.
-        {/if}
+        {unknownReleaseDate
+          ? t('component.addItem.unknownReleaseDate', { title: target.row.title })
+          : t('component.addItem.unreleased', { title: target.row.title })}
       </p>
       <p class="text-base text-ink-secondary">
-        Add it to the library anyway?
+        {t('component.addItem.addAnyway')}
       </p>
     </div>
 
@@ -720,9 +723,9 @@
       <Button
         variant="ghost"
         disabled={busyKey !== null}
-        onclick={() => (confirmingRelease = null)}>Cancel</Button>
+        onclick={() => (confirmingRelease = null)}>{t('component.actions.cancel')}</Button>
       <Button variant="primary" disabled={busyKey !== null} onclick={confirmRelease}>
-        {unknownReleaseDate ? 'Add title anyway' : 'Add unreleased title'}
+        {unknownReleaseDate ? t('component.addItem.addTitleAnyway') : t('component.addItem.unreleasedTitle')}
       </Button>
     {/snippet}
   </Modal>

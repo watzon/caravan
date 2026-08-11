@@ -53,6 +53,10 @@
   import { navigate, router } from '../router.svelte';
   import { session } from '../state/session.svelte';
   import { pushToast } from '../state/toast.svelte';
+  import { useI18n } from '../i18n.svelte';
+
+  const { t } = useI18n();
+
 
 
   let filter = $derived(parseSceneFilter(router.params));
@@ -143,7 +147,7 @@
       scenes = scenes.map((s) =>
         s.stash_id === scene.stash_id ? { ...s, requested: true } : s,
       );
-      pushToast(`Requested ${scene.title}`, 'success');
+      pushToast(t('route.exploreAdult.requested', { title: scene.title }), 'success');
     } catch (err) {
       pushToast(errorText(err), 'danger');
     } finally {
@@ -173,10 +177,10 @@
    */
   let emptyMessage = $derived(
     filter.hideOwned && scenes.length > 0
-      ? 'Every scene on this page is already in the library. Turn off "Hide in library" to see them.'
+      ? t('route.exploreAdult.hideOwnedEmpty')
       : chips.length === 0
-        ? 'The metadata provider returned nothing.'
-        : 'No scene matches every filter. Try removing one.',
+        ? t('route.exploreAdult.providerEmpty')
+        : t('route.exploreAdult.filterEmpty'),
   );
   /**
    * What the configured endpoint can actually answer (PLAN phase 12,
@@ -242,16 +246,16 @@
         <TextInput
           bind:value={text}
           type="search"
-          placeholder="Search scenes…"
-          ariaLabel="Search the metadata provider for scenes" />
+          placeholder={t('route.exploreAdult.searchPlaceholder')}
+          ariaLabel={t('route.exploreAdult.searchAria')} />
       </div>
       <Button class="shrink-0" variant="secondary" type="submit" disabled={loading}>
         <Icon name="search" size={14} />
-        Search
+        {t('route.exploreAdult.search')}
       </Button>
     </form>
 
-    <FilterPill label="Site" applied={filter.site !== null} width="w-72">
+    <FilterPill label={t('route.exploreAdult.site')} applied={filter.site !== null} width="w-72">
       {#snippet children()}
         <div class="flex flex-col gap-3">
           <FilterTypeahead
@@ -268,8 +272,8 @@
                   ? { ...filter, site: null, scope: 'site' }
                   : { ...filter, site: ref },
               )}
-            placeholder="Search sites…"
-            ariaLabel="Search sites" />
+            placeholder={t('route.exploreAdult.searchSites')}
+            ariaLabel={t('route.exploreAdult.searchSites')} />
 
           {#if filter.site && can.site_scope}
             <!-- The widening ladder only exists once there is something to
@@ -288,7 +292,7 @@
       {/snippet}
     </FilterPill>
 
-    <FilterPill label="Performers" applied={filter.performers.length > 0} width="w-72">
+    <FilterPill label={t('route.exploreAdult.performers')} applied={filter.performers.length > 0} width="w-72">
       {#snippet children()}
         <FilterTypeahead
           search={async (q, signal) =>
@@ -296,20 +300,20 @@
           selected={filter.performers}
           ontoggle={(ref: FilterRef) =>
             apply({ ...filter, performers: toggleRef(filter.performers, ref) })}
-          placeholder="Search performers…"
-          ariaLabel="Search performers" />
+          placeholder={t('route.exploreAdult.searchPerformers')}
+          ariaLabel={t('route.exploreAdult.searchPerformers')} />
       {/snippet}
     </FilterPill>
 
-    <FilterPill label="Tags" applied={filter.tags.length > 0} width="w-72">
+    <FilterPill label={t('route.exploreAdult.tags')} applied={filter.tags.length > 0} width="w-72">
       {#snippet children()}
         <FilterTypeahead
           search={async (q, signal) =>
             (await api.adultTags(q, signal)).map((t) => ({ id: t.id, name: t.name }))}
           selected={filter.tags}
           ontoggle={(ref: FilterRef) => apply({ ...filter, tags: toggleRef(filter.tags, ref) })}
-          placeholder="Search tags…"
-          ariaLabel="Search tags" />
+          placeholder={t('route.exploreAdult.searchTags')}
+          ariaLabel={t('route.exploreAdult.searchTags')} />
       {/snippet}
     </FilterPill>
 
@@ -318,11 +322,11 @@
          greyed pill invites somebody to go looking for the setting that would
          un-grey it, and there is none. -->
     {#if can.year}
-      <FilterPill label="Year" applied={filter.year > 0}>
+      <FilterPill label={t('route.exploreAdult.year')} applied={filter.year > 0}>
         {#snippet children()}
           <FilterRange
             minValue={filter.year}
-            minLabel="Released in"
+            minLabel={t('route.exploreAdult.releasedIn')}
             onmin={(value) => apply({ ...filter, year: value })}
             placeholder={String(sceneYearNow())} />
         {/snippet}
@@ -330,14 +334,14 @@
     {/if}
 
     {#if can.duration}
-      <FilterPill label="Duration" applied={filter.duration > 0}>
+      <FilterPill label={t('route.exploreAdult.duration')} applied={filter.duration > 0}>
         {#snippet children()}
           <FilterRange
             minValue={filter.duration}
-            minLabel="Minutes"
+            minLabel={t('route.exploreAdult.minutes')}
             onmin={(value) => apply({ ...filter, duration: value })}
             placeholder="30"
-            hint="The provider takes one duration with no comparison, so this is a single value rather than a range." />
+            hint={t('route.exploreAdult.durationHint')} />
         {/snippet}
       </FilterPill>
     {/if}
@@ -345,10 +349,10 @@
     <div class="ml-auto flex items-center gap-3">
       <Toggle
         checked={filter.hideOwned}
-        label="Hide in library"
+        label={t('route.exploreAdult.hideInLibrary')}
         onchange={(next) => apply({ ...filter, hideOwned: next })} />
       <Dropdown
-        label="Sort"
+        label={t('route.exploreAdult.sort')}
         options={sortOptions.map((option) => ({ id: option.key, name: option.label }))}
         value={filter.sort}
         onselect={(id) => apply({ ...filter, sort: id })} />
@@ -363,25 +367,33 @@
       {#if performerModeVisible}
         <button
           type="button"
-          aria-label={`Match performers: ${filter.performersAll ? 'all' : 'any'}`}
+          aria-label={t('route.exploreAdult.matchPerformers', {
+            mode: filter.performersAll ? t('route.exploreAdult.all') : t('route.exploreAdult.any'),
+          })}
           aria-pressed={filter.performersAll}
           onclick={() => apply({ ...filter, performersAll: !filter.performersAll })}
           class="inline-flex h-7 items-center rounded-full border border-border bg-surface px-3
                  font-mono text-xs text-ink-secondary transition-colors duration-150 ease-out
                  hover:border-border-strong hover:text-ink">
-          performers: {filter.performersAll ? 'all' : 'any'}
+          {t('route.exploreAdult.performersMode', {
+            mode: filter.performersAll ? t('route.exploreAdult.all') : t('route.exploreAdult.any'),
+          })}
         </button>
       {/if}
       {#if tagModeVisible}
         <button
           type="button"
-          aria-label={`Match tags: ${filter.tagsAll ? 'all' : 'any'}`}
+          aria-label={t('route.exploreAdult.matchTags', {
+            mode: filter.tagsAll ? t('route.exploreAdult.all') : t('route.exploreAdult.any'),
+          })}
           aria-pressed={filter.tagsAll}
           onclick={() => apply({ ...filter, tagsAll: !filter.tagsAll })}
           class="inline-flex h-7 items-center rounded-full border border-border bg-surface px-3
                  font-mono text-xs text-ink-secondary transition-colors duration-150 ease-out
                  hover:border-border-strong hover:text-ink">
-          tags: {filter.tagsAll ? 'all' : 'any'}
+          {t('route.exploreAdult.tagsMode', {
+            mode: filter.tagsAll ? t('route.exploreAdult.all') : t('route.exploreAdult.any'),
+          })}
         </button>
       {/if}
     {/snippet}
@@ -394,17 +406,17 @@
   {#if error && status === 503}
     <EmptyState
       icon="settings"
-      title="No metadata source configured"
-      message="Scenes come from a stash-box endpoint, so this needs an API key. Add one under Settings → Metadata and this screen fills in.">
+      title={t('route.exploreAdult.noSourceTitle')}
+      message={t('route.exploreAdult.noSourceMessage')}>
       {#snippet action()}
-        <Button variant="primary" href="/settings/metadata">Open metadata settings</Button>
+        <Button variant="primary" href="/settings/metadata">{t('route.exploreAdult.openMetadata')}</Button>
       {/snippet}
     </EmptyState>
   {:else if error && status === 400}
-    <EmptyState icon="warning" title="This endpoint cannot answer that" message={error}>
+    <EmptyState icon="warning" title={t('route.exploreAdult.endpointTitle')} message={error}>
       {#snippet action()}
         <Button variant="secondary" onclick={() => apply(cleared)}>
-          Clear filters
+          {t('route.exploreAdult.clearFilters')}
         </Button>
       {/snippet}
     </EmptyState>
@@ -424,7 +436,7 @@
          reaches the next page. -->
     <EmptyState
       icon="flame"
-      title="No scenes match"
+      title={t('route.exploreAdult.emptyTitle')}
       message={emptyMessage} />
   {:else}
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -444,7 +456,7 @@
   {#if hasMore && !error}
     <div class="flex justify-center">
       <Button variant="secondary" disabled={loadingMore} onclick={() => void load(nextPage)}>
-        {loadingMore ? 'Loading…' : 'Load more'}
+        {loadingMore ? t('route.exploreAdult.loading') : t('route.exploreAdult.loadMore')}
       </Button>
     </div>
   {/if}

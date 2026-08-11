@@ -18,6 +18,7 @@
    */
   import { api, errorText } from '../api/client';
   import type { Library, LibraryKind, Release, SearchGrabRequest } from '../api/types';
+  import { useI18n } from '../i18n.svelte';
   import { truncateMiddle } from '../format';
   import { createTypeahead } from '../typeahead.svelte';
   import { libraries } from '../state/libraries.svelte';
@@ -35,6 +36,7 @@
   }
 
   let { release, onclose, ongrabbed }: Props = $props();
+  const { t } = useI18n();
 
   /** One candidate for a tie: the three item kinds reduced to what a tie needs. */
   interface TieItem {
@@ -159,7 +161,7 @@
       return;
     }
     pushToast(
-      `Added ${item.title}, but it landed in another library. Switch this dialog to that library to tie the release to it.`,
+      t('component.grabTarget.addedElsewhere', { title: item.title }),
       'warning',
     );
   }
@@ -188,7 +190,7 @@
         };
       }
       await api.grabFromSearch(body);
-      pushToast(`Grabbed ${release.title}`, 'success');
+      pushToast(t('component.grabTarget.grabbed', { title: release.title }), 'success');
       ongrabbed?.();
       onclose();
     } catch (err) {
@@ -204,28 +206,28 @@
     return { ...(s !== undefined ? { season: s } : {}), ...(e !== undefined ? { episode: e } : {}) };
   }
 
-  let libraryName = $derived(library?.name ?? 'the chosen library');
+  let libraryName = $derived(library?.name ?? t('component.grabTarget.chosenLibrary'));
 </script>
 
-<Modal title="Grab into…" width="max-w-xl" {onclose}>
+<Modal title={t('component.grabTarget.title')} width="max-w-xl" {onclose}>
   <div class="flex flex-col gap-4 p-4">
     <p class="break-words font-mono text-sm text-ink-secondary" title={release.title}>
       {truncateMiddle(release.title, 72)}
     </p>
 
     <label class="flex items-center gap-3 rounded-md border border-border bg-raised px-3 py-2">
-      <span class="text-base text-ink">Library</span>
+      <span class="text-base text-ink">{t('component.grabTarget.library')}</span>
       <select
         bind:value={libraryID}
         class="h-8 flex-1 rounded-sm border border-border-strong bg-raised px-2 text-md text-ink focus:border-accent focus:outline-none"
-        aria-label="Target library">
+        aria-label={t('component.grabTarget.targetLibrary')}>
         {#each choices as choice (choice.id)}
           <option value={choice.id}>{choice.name}</option>
         {/each}
       </select>
     </label>
 
-    <div class="flex flex-col gap-2" role="radiogroup" aria-label="What to do with the download">
+    <div class="flex flex-col gap-2" role="radiogroup" aria-label={t('component.grabTarget.action')}>
       <label class="flex items-start gap-3 rounded-md border border-border bg-raised px-3 py-2">
         <input
           type="radio"
@@ -235,10 +237,9 @@
           onchange={() => (mode = 'park')}
           class="mt-1 size-4 accent-accent" />
         <span class="min-w-0">
-          <span class="block text-base text-ink">Download only</span>
+          <span class="block text-base text-ink">{t('component.grabTarget.downloadOnly')}</span>
           <span class="block text-sm text-ink-secondary">
-            The finished download lands in Scan Review, scoped to {libraryName}, for you to match
-            by hand.
+            {t('component.grabTarget.downloadOnlyHelp', { library: libraryName })}
           </span>
         </span>
       </label>
@@ -252,10 +253,9 @@
           onchange={() => (mode = 'tie')}
           class="mt-1 size-4 accent-accent" />
         <span class="min-w-0">
-          <span class="block text-base text-ink">Tie to an item</span>
+          <span class="block text-base text-ink">{t('component.grabTarget.tie')}</span>
           <span class="block text-sm text-ink-secondary">
-            The import knows what it is importing, so the file is renamed and filed like any
-            other grab.
+            {t('component.grabTarget.tieHelp')}
           </span>
         </span>
       </label>
@@ -268,19 +268,19 @@
             <span class="min-w-0 flex-1 truncate text-base text-accent-text" title={tied.title}>
               {tied.title}
             </span>
-            <Button variant="ghost" size="sm" onclick={() => (tied = null)}>Change</Button>
+            <Button variant="ghost" size="sm" onclick={() => (tied = null)}>{t('component.grabTarget.change')}</Button>
           </div>
         {:else}
           <TextInput
             bind:value={search.query}
             type="search"
-            placeholder="Find an item in {libraryName}…"
-            ariaLabel="Find an item to tie this release to" />
+            placeholder={t('component.grabTarget.findPlaceholder', { library: libraryName })}
+            ariaLabel={t('component.grabTarget.findAria')} />
           {#if itemsError}
             <p class="text-sm text-danger">{itemsError}</p>
           {:else if search.results.length === 0}
             <p class="text-sm text-ink-muted">
-              Nothing in {libraryName} matches. Add it from metadata, or download only.
+              {t('component.grabTarget.noMatch', { library: libraryName })}
             </p>
           {:else}
             <ul class="flex max-h-48 flex-col overflow-y-auto rounded-md border border-border">
@@ -301,7 +301,7 @@
             <!-- Adult sites are added by stash-box id, not a TMDB id, so the
                  metadata add this opens has nothing to offer that scope. -->
             <Button variant="secondary" onclick={() => (adding = true)}>
-              Add new from metadata…
+              {t('component.grabTarget.addFromMetadata')}
             </Button>
           {/if}
         {/if}
@@ -311,7 +311,7 @@
                series, which is what a season pack usually is. -->
           <div class="flex flex-wrap items-center gap-2">
             <label class="flex items-center gap-2 text-sm text-ink-secondary">
-              Season
+              {t('component.grabTarget.season')}
               <!-- Read as text, not `bind:value` on a number input: a blank
                    box means "the whole series", and a numeric binding turns
                    that into a value nobody typed. -->
@@ -320,20 +320,20 @@
                 min="0"
                 value={season}
                 oninput={(event) => (season = event.currentTarget.value)}
-                aria-label="Season number"
+                aria-label={t('component.grabTarget.seasonNumber')}
                 class="h-8 w-20 rounded-sm border border-border-strong bg-raised px-2 text-md text-ink focus:border-accent focus:outline-none" />
             </label>
             <label class="flex items-center gap-2 text-sm text-ink-secondary">
-              Episode
+              {t('component.grabTarget.episode')}
               <input
                 type="number"
                 min="0"
                 value={episode}
                 oninput={(event) => (episode = event.currentTarget.value)}
-                aria-label="Episode number"
+                aria-label={t('component.grabTarget.episodeNumber')}
                 class="h-8 w-20 rounded-sm border border-border-strong bg-raised px-2 text-md text-ink focus:border-accent focus:outline-none" />
             </label>
-            <span class="text-sm text-ink-muted">Leave blank for the whole series.</span>
+            <span class="text-sm text-ink-muted">{t('component.grabTarget.wholeSeries')}</span>
           </div>
         {/if}
       </div>
@@ -341,9 +341,9 @@
   </div>
 
   {#snippet footer()}
-    <Button variant="ghost" disabled={busy} onclick={onclose}>Cancel</Button>
+    <Button variant="ghost" disabled={busy} onclick={onclose}>{t('component.grabTarget.cancel')}</Button>
     <Button variant="primary" disabled={!canConfirm} onclick={confirm}>
-      {busy ? 'Grabbing…' : 'Grab'}
+      {busy ? t('component.grabTarget.grabbing') : t('component.grabTarget.grab')}
     </Button>
   {/snippet}
 </Modal>
@@ -354,7 +354,7 @@
        without it the add navigates to the new item's page and abandons the
        release they came in with. -->
   <AddItemModal
-    title="Add to library, then tie"
+    title={t('component.grabTarget.addThenTie')}
     kind={tieMediaType}
     onadded={onAdded}
     onclose={() => (adding = false)} />

@@ -37,6 +37,9 @@
   import { page } from '../state/page.svelte';
   import { pushToast } from '../state/toast.svelte';
   import { TONE_DOT } from '../status';
+  import { useI18n } from '../i18n.svelte';
+
+  const { t, tp } = useI18n();
 
   let busyID = $state<string | null>(null);
   let removing = $state<DownloadStatus | null>(null);
@@ -100,7 +103,7 @@
       removing = null;
       detailID = null;
       pushToast(
-        deleteData ? 'Removed, and its data deleted.' : 'Removed. The data is still on disk.',
+        deleteData ? t('route.queue.removedAndDeleted') : t('route.queue.removedKeptData'),
         'neutral',
       );
     } catch (err) {
@@ -125,9 +128,9 @@
   let rows = $derived(view === 'all' ? all : view === 'done' ? doneRows : activeRows);
 
   let views = $derived<{ key: QueueView; label: string; count: number }[]>([
-    { key: 'active', label: 'Active', count: activeRows.length },
-    { key: 'done', label: 'Done', count: doneRows.length },
-    { key: 'all', label: 'All', count: all.length },
+    { key: 'active', label: t('route.queue.active'), count: activeRows.length },
+    { key: 'done', label: t('route.queue.done'), count: doneRows.length },
+    { key: 'all', label: t('route.queue.all'), count: all.length },
   ]);
 
   // The shared TopBar renders the page's subtitle: what the queue is doing,
@@ -139,14 +142,17 @@
       return;
     }
     const failed = items.filter((item) => item.state === 'failed').length;
-    page.subtitle = `${downloads.activeCount} active${failed ? ` · ${failed} failed` : ''}`;
+    page.subtitle = t('route.queue.subtitle', {
+      active: downloads.activeCount,
+      failed: failed ? t('route.queue.failedSubtitle', { count: failed }) : '',
+    });
     return () => (page.subtitle = null);
   });
 </script>
 
 <div class="flex flex-col gap-6">
   <div class="flex flex-wrap items-center gap-3">
-    <div class="flex flex-wrap items-center gap-2" role="group" aria-label="Filter queue">
+    <div class="flex flex-wrap items-center gap-2" role="group" aria-label={t('route.queue.filter')}>
       {#each views as tab (tab.key)}
         {@const selected = view === tab.key}
         <button
@@ -165,7 +171,7 @@
     <div class="ml-auto flex items-center gap-2">
       <Button variant="secondary" onclick={() => downloads.refresh()}>
         <Icon name="refresh" size={14} />
-        Refresh
+        {t('route.queue.refresh')}
       </Button>
     </div>
   </div>
@@ -181,17 +187,17 @@
   {:else if all.length === 0}
     <EmptyState
       icon="download"
-      title="The queue is empty"
-      message="Nothing is downloading. Open a movie or episode and run an interactive search to grab a release." />
+      title={t('route.queue.emptyTitle')}
+      message={t('route.queue.emptyMessage')} />
   {:else if rows.length === 0}
     <EmptyState
       icon="download"
-      title={view === 'done' ? 'Nothing finished yet' : 'Nothing active'}
+      title={view === 'done' ? t('route.queue.emptyDoneTitle') : t('route.queue.emptyActiveTitle')}
       message={view === 'done'
-        ? 'No download has completed yet. Finished items land here once they import.'
-        : `Everything in the queue is finished. ${doneRows.length} item${doneRows.length === 1 ? '' : 's'} under Done.`}>
+        ? t('route.queue.emptyDoneMessage')
+        : tp('route.queue.emptyActiveMessage', doneRows.length)}>
       {#snippet action()}
-        <Button variant="secondary" onclick={() => (view = 'all')}>Show all</Button>
+        <Button variant="secondary" onclick={() => (view = 'all')}>{t('route.queue.showAll')}</Button>
       {/snippet}
     </EmptyState>
   {:else}
@@ -204,16 +210,16 @@
         {@const seedingContext = download.state === 'seeding' || (paused && download.progress >= 1)}
         {@const pauseLabel = paused
           ? seedingContext
-            ? 'Resume seeding'
-            : 'Resume download'
+            ? t('route.queue.resumeSeeding')
+            : t('route.queue.resumeDownload')
           : seedingContext
-            ? 'Pause seeding'
-            : 'Pause download'}
+            ? t('route.queue.pauseSeeding')
+            : t('route.queue.pauseDownload')}
         <li class="relative flex flex-col gap-3 rounded-md border border-border bg-surface px-3 py-3 transition-colors duration-150 hover:border-border-strong">
           <button
             type="button"
             class="absolute inset-0 rounded-md focus:outline-none focus:ring-2 focus:ring-accent"
-            aria-label="Open details for {download.name}"
+            aria-label={t('route.queue.openDetails', { name: download.name })}
             onclick={() => (detailID = download.id)}></button>
           <div class="relative z-10 flex pointer-events-none flex-wrap items-center gap-3">
             <span class="size-2 shrink-0 rounded-full {TONE_DOT[meta.tone]}" aria-hidden="true"></span>
@@ -222,11 +228,11 @@
             </span>
             <Badge tone={meta.tone}>{meta.label}</Badge>
             {#if phaseLabel}
-              <Badge tone="info" title="Which stage of the download this is">
+              <Badge tone="info" title={t('route.queue.downloadStage')}>
                 {phaseLabel}
               </Badge>
             {/if}
-            <Badge mono tone="neutral" title="Which backend holds this download">
+            <Badge mono tone="neutral" title={t('route.queue.downloadBackend')}>
               {engineLabel(download)}
             </Badge>
 
@@ -245,7 +251,7 @@
                         paused
                           ? api.resumeDownload(download.id)
                           : api.pauseDownload(download.id),
-                      paused ? 'Resumed.' : 'Paused.',
+                      paused ? t('route.queue.resumed') : t('route.queue.paused'),
                     );
                   }}>
                   <Icon name={paused ? 'play' : 'pause'} size={14} />
@@ -256,14 +262,14 @@
                 <Button
                   variant="secondary"
                   size="sm"
-                  title="Try the failed stage again"
+                  title={t('route.queue.retryFailedStage')}
                   disabled={busyID === download.id}
                   onclick={(event) => {
                     event.stopPropagation();
-                    void act(download, () => api.retryDownload(download.id), 'Retrying.');
+                    void act(download, () => api.retryDownload(download.id), t('route.queue.retrying'));
                   }}>
                   <Icon name="refresh" size={14} />
-                  <span class="sr-only">Retry {download.name}</span>
+                  <span class="sr-only">{t('route.queue.retry', { name: download.name })}</span>
                 </Button>
               {/if}
               <Button
@@ -275,7 +281,7 @@
                   openRemove(download);
                 }}>
                 <Icon name="trash" size={14} />
-                <span class="sr-only">Remove {download.name}</span>
+                <span class="sr-only">{t('route.queue.remove', { name: download.name })}</span>
               </Button>
             </div>
           </div>
@@ -283,7 +289,7 @@
           <ProgressBar
             value={download.progress}
             tone={meta.tone}
-            label="{download.name} progress" />
+            label={t('route.queue.progress', { name: download.name })} />
 
           <div class="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-xs text-ink-secondary">
             <span>
@@ -293,16 +299,18 @@
             </span>
             <span>{Math.round(Math.max(0, Math.min(1, download.progress)) * 100)}%</span>
             {#if finished}
-              <span title="Transfer finished">Download complete</span>
+              <span title={t('route.queue.transferFinished')}>{t('route.queue.complete')}</span>
             {:else}
-              <span title="Download rate">↓ {formatRate(download.down_rate)}</span>
-              <span title="Upload rate">↑ {formatRate(download.up_rate)}</span>
-              <span title="Estimated time remaining">
-                ETA {formatDuration(download.eta_seconds)}
+              <span title={t('route.queue.downloadRate')}>↓ {formatRate(download.down_rate)}</span>
+              <span title={t('route.queue.uploadRate')}>↑ {formatRate(download.up_rate)}</span>
+              <span title={t('route.queue.timeRemaining')}>
+                {t('route.queue.eta', { time: formatDuration(download.eta_seconds) })}
               </span>
             {/if}
             {#if download.state === 'seeding' || download.ratio > 0}
-              <span title="Share ratio">ratio {download.ratio.toFixed(2)}</span>
+              <span title={t('route.queue.shareRatio')}>
+                {t('route.queue.ratio', { ratio: download.ratio.toFixed(2) })}
+              </span>
             {/if}
           </div>
 
@@ -321,40 +329,36 @@
     download={open}
     busy={busyID === open.id}
     onclose={() => (detailID = null)}
-    onpause={() => void act(open, () => api.pauseDownload(open.id), 'Paused.')}
-    onresume={() => void act(open, () => api.resumeDownload(open.id), 'Resumed.')}
-    onretry={() => void act(open, () => api.retryDownload(open.id), 'Retrying.')}
+    onpause={() => void act(open, () => api.pauseDownload(open.id), t('route.queue.paused'))}
+    onresume={() => void act(open, () => api.resumeDownload(open.id), t('route.queue.resumed'))}
+    onretry={() => void act(open, () => api.retryDownload(open.id), t('route.queue.retrying'))}
     onremove={openRemoveFromDetail}
     onlimitsapplied={() => downloads.refresh()} />
 {/if}
 
 {#if removing}
   {@const target = removing}
-  <Modal title="Remove from the queue" width="max-w-lg" onclose={() => (removing = null)}>
+  <Modal title={t('route.queue.removeTitle')} width="max-w-lg" onclose={() => (removing = null)}>
     <div class="flex flex-col gap-4 p-4">
       <p class="font-mono text-sm text-ink" title={target.name || UNKNOWN}>{truncateMiddle(target.name || UNKNOWN, 72)}</p>
-      <p class="text-base text-ink-secondary">
-        Removing stops the download. Its data stays on disk unless you say otherwise - an
-        already-imported file is a hardlink away from this data, so deleting it can cost you
-        media.
-      </p>
+      <p class="text-base text-ink-secondary">{t('route.queue.removeWarning')}</p>
 
       <label class="flex items-center gap-3 rounded-md border border-border bg-raised px-3 py-2">
         <input
           type="checkbox"
           bind:checked={removeData}
           class="size-4 accent-danger" />
-        <span class="text-base text-ink">Also delete the downloaded data</span>
+        <span class="text-base text-ink">{t('route.queue.deleteData')}</span>
       </label>
     </div>
 
     {#snippet footer()}
-      <Button variant="ghost" onclick={() => (removing = null)}>Cancel</Button>
+      <Button variant="ghost" onclick={() => (removing = null)}>{t('route.queue.cancel')}</Button>
       <Button
         variant={removeData ? 'danger' : 'primary'}
         disabled={busyID === target.id}
         onclick={confirmRemove}>
-        {removeData ? 'Remove and delete data' : 'Remove'}
+        {removeData ? t('route.queue.removeAndDelete') : t('route.queue.removeButton')}
       </Button>
     {/snippet}
   </Modal>

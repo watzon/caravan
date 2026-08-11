@@ -92,8 +92,8 @@ describe('History', () => {
     app = mount(History, { target: host });
     await settle();
 
-    expect(host.textContent).toContain('No activity recorded');
-    expect(host.textContent).toContain('Current health appears in the system status panel.');
+    expect(host.textContent).toContain('No activity');
+    expect(host.textContent).toContain('Imports, searches, and scheduled work appear here.');
   });
 
   it('renders the jobs feed with job state, attempts and failure detail', async () => {

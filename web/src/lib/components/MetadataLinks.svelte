@@ -6,6 +6,7 @@
    * vocabulary.
    */
   import type { MetadataLink } from '../metadataLinks';
+  import { useI18n } from '../i18n.svelte';
   import Icon from './Icon.svelte';
 
   interface Props {
@@ -13,6 +14,7 @@
   }
 
   let { links }: Props = $props();
+  const { t } = useI18n();
 </script>
 
 {#if links.length > 0}
@@ -22,7 +24,7 @@
         href={link.href}
         target="_blank"
         rel="noopener noreferrer"
-        title={`Open on ${link.label}`}
+        title={t('component.metadataLinks.open', { label: link.label })}
         class="inline-flex h-6 items-center gap-1 rounded-full border border-border bg-surface px-2.5
                font-mono text-xs text-ink-secondary transition-colors duration-150 ease-out
                hover:border-accent hover:bg-accent-tint hover:text-accent-text">

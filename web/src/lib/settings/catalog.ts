@@ -1,12 +1,26 @@
+import {
+  translate,
+  type TranslationKey,
+  type Translator,
+} from '../i18n.svelte';
+
 export const SETTINGS_CATEGORIES = [
-  'Library and media',
-  'Search and downloads',
-  'Playback and sharing',
-  'Automation',
-  'System',
+  'libraryMedia',
+  'searchDownloads',
+  'playbackSharing',
+  'automation',
+  'system',
 ] as const;
 
 export type SettingsCategory = (typeof SETTINGS_CATEGORIES)[number];
+
+const CATEGORY_KEYS: Record<SettingsCategory, TranslationKey> = {
+  libraryMedia: 'settings.category.libraryMedia',
+  searchDownloads: 'settings.category.searchDownloads',
+  playbackSharing: 'settings.category.playbackSharing',
+  automation: 'settings.category.automation',
+  system: 'settings.category.system',
+};
 
 /**
  * One destination for the settings overview, search, and in-page navigation.
@@ -17,141 +31,136 @@ export type SettingsCategory = (typeof SETTINGS_CATEGORIES)[number];
  */
 export interface SettingsCatalogEntry {
   category: SettingsCategory;
-  label: string;
-  description: string;
+  labelKey: TranslationKey;
+  descriptionKey: TranslationKey;
+  searchKey: TranslationKey;
   route: string;
   anchor?: string;
-  aliases: readonly string[];
-  keywords: readonly string[];
   advanced?: boolean;
   narrow?: boolean;
 }
 
 export const SETTINGS_CATALOG = [
   {
-    category: 'Library and media',
-    label: 'Libraries',
-    description: 'Create and organise movie, series, and adult libraries.',
+    category: 'libraryMedia',
+    labelKey: 'settings.entry.libraries.label',
+    descriptionKey: 'settings.entry.libraries.description',
+    searchKey: 'settings.entry.libraries.search',
     route: '/settings/libraries',
     anchor: 'libraries',
-    aliases: ['library', 'media folders'],
-    // Who reaches a library is a library setting now, so the words somebody
-    // would have searched for on the retired Adult content page have to land
-    // here — including 'adult', which names a KIND of library rather than a
-    // module.
-    keywords: [
-      'movies',
-      'series',
-      'root folder',
-      'access',
-      'privacy',
-      'restricted',
-      'active',
-      'adult',
-    ],
   },
   {
-    category: 'Library and media',
-    label: 'Metadata',
-    description: 'Configure each metadata provider: TMDB, AniList, and more.',
+    category: 'libraryMedia',
+    labelKey: 'settings.entry.metadata.label',
+    descriptionKey: 'settings.entry.metadata.description',
+    searchKey: 'settings.entry.metadata.search',
     route: '/settings/metadata',
     anchor: 'metadata',
-    aliases: ['TMDB', 'AniList', 'API key', 'providers'],
-    keywords: ['metadata key', 'artwork', 'titles', 'discover', 'anime', 'thetvdb', 'tvdb', 'stash-box', 'stashdb', 'fansdb'],
   },
   {
-    category: 'Library and media',
-    label: 'Quality profiles',
-    description: 'Choose release quality and upgrade rules for each library.',
+    category: 'libraryMedia',
+    labelKey: 'settings.entry.qualityProfiles.label',
+    descriptionKey: 'settings.entry.qualityProfiles.description',
+    searchKey: 'settings.entry.qualityProfiles.search',
     route: '/settings/quality-profiles',
     anchor: 'quality-profiles',
-    aliases: ['profiles', 'profile', 'release profiles'],
-    keywords: ['quality', 'upgrade', 'release', 'source preference', 'proper', 'repack', 'seeders', 'size limit', 'custom format', 'TV compatibility', 'import', 'export'],
   },
   {
-    category: 'Library and media',
-    label: 'Storage',
-    description: 'Set the root that contains the library, downloads, and database.',
+    category: 'libraryMedia',
+    labelKey: 'settings.entry.storage.label',
+    descriptionKey: 'settings.entry.storage.description',
+    searchKey: 'settings.entry.storage.search',
     route: '/settings/storage',
     anchor: 'storage',
-    aliases: ['storage root', 'data directory', 'database'],
-    keywords: ['disk', 'files', 'migration', 'naming', 'recycle', 'retention', 'backup', 'restore'],
   },
   {
-    category: 'Search and downloads',
-    label: 'Indexers',
-    description: 'Add Torznab and Newznab search sources.',
+    category: 'searchDownloads',
+    labelKey: 'settings.entry.indexers.label',
+    descriptionKey: 'settings.entry.indexers.description',
+    searchKey: 'settings.entry.indexers.search',
     route: '/settings/indexers',
     anchor: 'indexers',
-    aliases: ['Prowlarr', 'search providers'],
-    keywords: ['torznab', 'newznab', 'RSS', 'priority'],
   },
   {
-    category: 'Search and downloads',
-    label: 'Downloads',
-    description: 'Set download concurrency, engine ports, Usenet servers, and external clients.',
+    category: 'searchDownloads',
+    labelKey: 'settings.entry.downloads.label',
+    descriptionKey: 'settings.entry.downloads.description',
+    searchKey: 'settings.entry.downloads.search',
     route: '/settings/downloads',
     anchor: 'downloads',
-    aliases: ['download client', 'torrent engine'],
-    keywords: ['port', 'Usenet', 'NZB', 'seeding', 'concurrency'],
     advanced: true,
   },
   {
-    category: 'Playback and sharing',
-    label: 'Playback',
-    description: 'Configure DLNA sharing, Jellyfin handoff, and TV compatibility.',
+    category: 'playbackSharing',
+    labelKey: 'settings.entry.playback.label',
+    descriptionKey: 'settings.entry.playback.description',
+    searchKey: 'settings.entry.playback.search',
     route: '/settings/playback',
     anchor: 'playback',
-    aliases: ['DLNA', 'Jellyfin', 'media server'],
-    keywords: ['sharing', 'streaming', 'TV profile', 'transcoding'],
   },
   {
-    category: 'Automation',
-    label: 'Notifications',
-    description: 'Send grabs, imports, and health problems to webhooks.',
+    category: 'automation',
+    labelKey: 'settings.entry.notifications.label',
+    descriptionKey: 'settings.entry.notifications.description',
+    searchKey: 'settings.entry.notifications.search',
     route: '/settings/notifications',
     anchor: 'notifications',
-    aliases: ['connect', 'webhooks'],
-    keywords: ['notification', 'grab', 'import', 'health', 'automation'],
   },
   {
-    category: 'Automation',
-    label: 'Tasks',
-    description: 'Review scheduled background work and its next run.',
+    category: 'automation',
+    labelKey: 'settings.entry.tasks.label',
+    descriptionKey: 'settings.entry.tasks.description',
+    searchKey: 'settings.entry.tasks.search',
     route: '/settings/tasks',
     anchor: 'tasks',
-    aliases: ['schedule', 'scheduled tasks'],
-    keywords: ['automation', 'timer', 'job', 'interval', 'cadence'],
   },
   {
-    category: 'System',
-    label: 'Users',
-    description: 'Manage who can sign in and what each person may do.',
+    category: 'system',
+    labelKey: 'settings.entry.users.label',
+    descriptionKey: 'settings.entry.users.description',
+    searchKey: 'settings.entry.users.search',
     route: '/settings/users',
     anchor: 'users',
-    aliases: ['accounts', 'members'],
-    keywords: ['login', 'roles', 'access'],
   },
   {
-    category: 'System',
-    label: 'Interface',
-    description: 'Choose this browser’s theme and motion preferences.',
+    category: 'system',
+    labelKey: 'settings.entry.interface.label',
+    descriptionKey: 'settings.entry.interface.description',
+    searchKey: 'settings.entry.interface.search',
     route: '/settings/interface',
     anchor: 'interface',
-    aliases: ['appearance', 'display'],
-    keywords: ['theme', 'dark', 'light', 'motion', 'accessibility'],
     narrow: true,
   },
   {
-    category: 'System',
-    label: 'Security',
-    description: 'Change your password and manage the API key for external tools.',
+    category: 'system',
+    labelKey: 'settings.entry.security.label',
+    descriptionKey: 'settings.entry.security.description',
+    searchKey: 'settings.entry.security.search',
     route: '/settings/security',
     anchor: 'security',
-    aliases: ['API token', 'API key'],
-    keywords: ['password', 'authentication', 'calendar'],
   },
 ] as const satisfies readonly SettingsCatalogEntry[];
+
+export function settingsCategoryLabel(
+  category: SettingsCategory,
+  t: Translator = translate,
+): string {
+  return t(CATEGORY_KEYS[category]);
+}
+
+export function settingsLabel(
+  entry: SettingsCatalogEntry,
+  t: Translator = translate,
+): string {
+  return t(entry.labelKey);
+}
+
+export function settingsDescription(
+  entry: SettingsCatalogEntry,
+  t: Translator = translate,
+): string {
+  return t(entry.descriptionKey);
+}
 
 export function settingsHref(entry: SettingsCatalogEntry): string {
   return entry.anchor ? `${entry.route}#${entry.anchor}` : entry.route;
@@ -184,11 +193,15 @@ export function settingsEntryForSection(section: string): SettingsCatalogEntry {
   );
 }
 
-export function settingsMatches(entry: SettingsCatalogEntry, query: string): boolean {
+export function settingsMatches(
+  entry: SettingsCatalogEntry,
+  query: string,
+  t: Translator = translate,
+): boolean {
   const term = query.trim().toLocaleLowerCase();
   if (!term) return true;
 
-  return [entry.label, entry.description, ...entry.aliases, ...entry.keywords]
+  return [settingsLabel(entry, t), settingsDescription(entry, t), t(entry.searchKey)]
     .join(' ')
     .toLocaleLowerCase()
     .includes(term);

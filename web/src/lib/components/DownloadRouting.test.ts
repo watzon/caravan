@@ -178,8 +178,8 @@ describe('DownloadRouting', () => {
       })),
     ).toEqual([
       { href: '/settings/downloads#download-clients', label: 'external client' },
-      { href: '/settings/libraries', label: 'Settings → Libraries' },
-      { href: '/settings/downloads#usenet-servers', label: 'Settings → Usenet servers' },
+      { href: '/settings/libraries', label: 'Settings > Libraries' },
+      { href: '/settings/downloads#usenet-servers', label: 'Settings > Usenet servers' },
     ]);
   });
 

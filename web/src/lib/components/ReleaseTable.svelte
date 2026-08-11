@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { useI18n } from '../i18n.svelte';
   /**
    * The release result table, its skeleton, and its empty state (plan part B7).
    *
@@ -19,6 +20,8 @@
   import EmptyState from './EmptyState.svelte';
   import Icon from './Icon.svelte';
   import Skeleton from './Skeleton.svelte';
+  const { t, tp } = useI18n();
+
 
   interface Props {
     /** Null before the first search; an empty array is "searched, found nothing". */
@@ -36,12 +39,13 @@
     releases,
     loading,
     busyGUID,
-    grabLabel = 'Grab',
+    grabLabel = t('component.releaseTable.grabDefault'),
     ongrab,
-    emptyMessage = 'No enabled indexer returned anything for this item. Check that at least one indexer is configured and passing its test, then search again.',
+    emptyMessage = t('component.releaseTable.emptyDefault'),
   }: Props = $props();
 
   let rows = $derived(sortReleases(releases ?? []));
+
 </script>
 
 {#if loading}
@@ -58,9 +62,9 @@
     {/each}
   </div>
 {:else if rows.length === 0}
-  <EmptyState icon="search" title="No releases found" message={emptyMessage}>
+  <EmptyState icon="search" title={t('component.releaseTable.noReleasesFound')} message={emptyMessage}>
     {#snippet action()}
-      <Button variant="secondary" href="/settings">Open indexer settings</Button>
+      <Button variant="secondary" href="/settings">{t('component.releaseTable.openIndexerSettings')}</Button>
     {/snippet}
   </EmptyState>
 {:else}
@@ -68,14 +72,14 @@
     <table class="w-full min-w-[1000px] border-collapse text-sm">
       <thead>
         <tr class="bg-surface text-left">
-          <th class="micro-label px-3 py-2 font-semibold">Source</th>
-          <th class="micro-label px-3 py-2 font-semibold">Release</th>
-          <th class="micro-label px-3 py-2 font-semibold">Age</th>
-          <th class="micro-label px-3 py-2 text-right font-semibold">Size</th>
-          <th class="micro-label px-3 py-2 text-right font-semibold">Peers</th>
-          <th class="micro-label px-3 py-2 font-semibold">Quality</th>
-          <th class="micro-label px-3 py-2 text-right font-semibold">Score</th>
-          <th class="micro-label px-3 py-2 text-right font-semibold">Grab</th>
+          <th class="micro-label px-3 py-2 font-semibold">{t('component.releaseTable.source')}</th>
+          <th class="micro-label px-3 py-2 font-semibold">{t('component.releaseTable.release')}</th>
+          <th class="micro-label px-3 py-2 font-semibold">{t('component.releaseTable.age')}</th>
+          <th class="micro-label px-3 py-2 text-right font-semibold">{t('component.releaseTable.size')}</th>
+          <th class="micro-label px-3 py-2 text-right font-semibold">{t('component.releaseTable.peers')}</th>
+          <th class="micro-label px-3 py-2 font-semibold">{t('component.releaseTable.quality')}</th>
+          <th class="micro-label px-3 py-2 text-right font-semibold">{t('component.releaseTable.score')}</th>
+          <th class="micro-label px-3 py-2 text-right font-semibold">{t('component.releaseTable.grab')}</th>
         </tr>
       </thead>
       <tbody>
@@ -91,7 +95,7 @@
               <span class="flex items-center gap-2">
                 {#if best}
                   <span class="h-4 w-0.5 shrink-0 rounded-full bg-accent" aria-hidden="true"></span>
-                  <span class="text-xs font-semibold uppercase tracking-wide text-accent-text">Best</span>
+                  <span class="text-xs font-semibold uppercase tracking-wide text-accent-text">{t('component.releaseTable.best')}</span>
                 {/if}
                 <span class="truncate text-ink-secondary" title={release.indexer}>
                   {release.indexer || UNKNOWN}
@@ -132,10 +136,10 @@
                   <Badge mono>{release.parsed.codec}</Badge>
                 {/if}
                 {#if release.parsed.proper}
-                  <Badge mono tone="success">PROPER</Badge>
+                  <Badge mono tone="success">{t('component.releaseTable.proper')}</Badge>
                 {/if}
                 {#if release.parsed.repack}
-                  <Badge mono tone="success">REPACK</Badge>
+                  <Badge mono tone="success">{t('component.releaseTable.repack')}</Badge>
                 {/if}
                 {#each flags as flag (flag.key)}
                   <Badge mono tone={flag.tone} title={flag.title}>{flag.label}</Badge>
@@ -159,7 +163,7 @@
                   title={flagged ? flags.map((f) => f.title).join(' ') : undefined}
                   onclick={() => ongrab(release)}>
                   <Icon name="download" size={14} />
-                  {busyGUID === release.guid ? 'Grabbing…' : grabLabel}
+                  {busyGUID === release.guid ? t('component.releaseTable.grabbing') : grabLabel}
                 </Button>
               </div>
             </td>

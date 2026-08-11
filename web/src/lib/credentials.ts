@@ -17,6 +17,7 @@
 
 import { ApiError, errorCode } from './api/client';
 import type { SystemStatus } from './api/types';
+import { translate } from './i18n.svelte';
 
 /**
  * TMDB's provider id (core.ProviderTMDB). It is named here because it is the
@@ -84,17 +85,21 @@ export interface CredentialCopy {
 export function metadataCopy(fault: CredentialFault, canFix = true): CredentialCopy {
   if (fault === 'invalid') {
     return {
-      title: 'TMDB rejected this API key',
-      message: canFix
-        ? 'The key on file was refused, so nothing can be looked up. Correct it in Settings → Metadata and this screen fills in.'
-        : 'The key on file was refused, so nothing can be looked up. Ask a Caravan admin to correct the TMDB API key.',
+      title: translate('credential.metadata.invalid.title'),
+      message: translate(
+        canFix
+          ? 'credential.metadata.invalid.admin'
+          : 'credential.metadata.invalid.member',
+      ),
     };
   }
   return {
-    title: 'No TMDB API key yet',
-    message: canFix
-      ? 'Caravan reads titles, artwork and episode data from TMDB. Add your TMDB API key in Settings → Metadata and this screen fills in.'
-      : 'Caravan reads titles, artwork and episode data from TMDB. Ask a Caravan admin to add a TMDB API key.',
+    title: translate('credential.metadata.absent.title'),
+    message: translate(
+      canFix
+        ? 'credential.metadata.absent.admin'
+        : 'credential.metadata.absent.member',
+    ),
   };
 }
 
@@ -120,8 +125,8 @@ export function metadataStateLabel(
   state: MetadataCredentialState,
   provider = 'TMDB',
 ): string | null {
-  if (state === 'absent') return `No ${provider} key`;
-  if (state === 'invalid') return `${provider} key rejected`;
+  if (state === 'absent') return translate('credential.state.absent', { provider });
+  if (state === 'invalid') return translate('credential.state.invalid', { provider });
   return null;
 }
 

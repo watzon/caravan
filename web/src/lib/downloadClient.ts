@@ -10,6 +10,7 @@
  */
 
 import type { DownloadClientTypeInfo, DownloadClientType } from './api/types';
+import { translate } from './i18n.svelte';
 
 /**
  * What the form offers before GET /download-clients/types answers. The server's
@@ -77,15 +78,15 @@ export function validateDownloadClient(input: {
   type: DownloadClientTypeInfo;
   hasStoredCredential: boolean;
 }): string | null {
-  if (input.name.trim() === '') return 'Give the download client a name.';
+  if (input.name.trim() === '') return translate('validation.downloadClient.name');
   const url = input.url.trim();
-  if (url === '') return 'The download client needs a base URL.';
-  if (!/^https?:\/\//i.test(url)) return 'The URL must start with http:// or https://.';
+  if (url === '') return translate('validation.downloadClient.urlRequired');
+  if (!/^https?:\/\//i.test(url)) return translate('validation.downloadClient.urlScheme');
   if (input.type.uses_login && input.username.trim() === '') {
-    return `${input.type.label} needs a username.`;
+    return translate('validation.downloadClient.username', { client: input.type.label });
   }
   if (input.type.uses_api_key && input.apiKey.trim() === '' && !input.hasStoredCredential) {
-    return `${input.type.label} needs an API key.`;
+    return translate('validation.downloadClient.apiKey', { client: input.type.label });
   }
   return null;
 }

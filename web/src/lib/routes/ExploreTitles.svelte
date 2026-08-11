@@ -47,6 +47,10 @@
   } from '../explore';
   import { navigate, router } from '../router.svelte';
   import { discover } from '../state/discover.svelte';
+  import { useI18n } from '../i18n.svelte';
+
+  const { t } = useI18n();
+
 
   interface Props {
     mediaType: MediaType;
@@ -203,22 +207,22 @@
        than none. -->
   <ExploreScopes
     active={mediaType === 'movie' ? 'movies' : 'series'}
-    note="The whole catalogue, filtered your way." />
+    note={t('route.exploreTitles.catalogNote')} />
 
   <div class="flex flex-wrap items-center gap-2">
-    <FilterPill label="Genre" applied={filter.genres.length > 0}>
+    <FilterPill label={t('route.exploreTitles.genre')} applied={filter.genres.length > 0}>
       {#snippet children()}
         <FilterOptions
           options={genres}
           selected={filter.genres.map((r) => r.id)}
           onselect={toggleGenre}
           loading={genresLoading}
-          emptyText="No genres — the provider did not answer." />
+          emptyText={t('route.exploreTitles.noGenres')} />
       {/snippet}
     </FilterPill>
 
     {#if mediaType === 'movie'}
-      <FilterPill label="Cast & crew" applied={filter.people.length > 0} width="w-72">
+      <FilterPill label={t('route.exploreTitles.castCrew')} applied={filter.people.length > 0} width="w-72">
         {#snippet children()}
           <FilterTypeahead
             search={async (q, signal) =>
@@ -229,8 +233,8 @@
               }))}
             selected={filter.people}
             ontoggle={(ref: FilterRef) => apply({ ...filter, people: toggleRef(filter.people, ref) })}
-            placeholder="Search people…"
-            ariaLabel="Search cast and crew" />
+            placeholder={t('route.exploreTitles.searchPeople')}
+            ariaLabel={t('route.exploreTitles.searchCastCrew')} />
         {/snippet}
       </FilterPill>
     {:else}
@@ -238,19 +242,19 @@
            /search/company, whose ids are company ids and would filter nothing),
            so the choices are the networks Caravan already curates on Featured.
            A typeahead here would be a search box that cannot search. -->
-      <FilterPill label="Network" applied={filter.networks.length > 0} width="w-56">
+      <FilterPill label={t('route.exploreTitles.network')} applied={filter.networks.length > 0} width="w-56">
         {#snippet children()}
           <FilterOptions
             options={networkOptions}
             selected={filter.networks.map((r) => r.id)}
             onselect={toggleNetwork}
             loading={discover.loading && networkOptions.length === 0}
-            emptyText="No networks — the provider did not answer." />
+            emptyText={t('route.exploreTitles.noNetworks')} />
         {/snippet}
       </FilterPill>
     {/if}
 
-    <FilterPill label="Studio" applied={filter.companies.length > 0} width="w-72">
+    <FilterPill label={t('route.exploreTitles.studio')} applied={filter.companies.length > 0} width="w-72">
       {#snippet children()}
         <FilterTypeahead
           search={async (q, signal) =>
@@ -262,12 +266,12 @@
           selected={filter.companies}
           ontoggle={(ref: FilterRef) =>
             apply({ ...filter, companies: toggleRef(filter.companies, ref) })}
-          placeholder="Search studios…"
-          ariaLabel="Search studios" />
+          placeholder={t('route.exploreTitles.searchStudios')}
+          ariaLabel={t('route.exploreTitles.searchStudios')} />
       {/snippet}
     </FilterPill>
 
-    <FilterPill label="Keyword" applied={filter.keywords.length > 0} width="w-72">
+    <FilterPill label={t('route.exploreTitles.keyword')} applied={filter.keywords.length > 0} width="w-72">
       {#snippet children()}
         <FilterTypeahead
           search={async (q, signal) =>
@@ -278,51 +282,51 @@
           selected={filter.keywords}
           ontoggle={(ref: FilterRef) =>
             apply({ ...filter, keywords: toggleRef(filter.keywords, ref) })}
-          placeholder="Search keywords…"
-          ariaLabel="Search keywords" />
+          placeholder={t('route.exploreTitles.searchKeywords')}
+          ariaLabel={t('route.exploreTitles.searchKeywords')} />
       {/snippet}
     </FilterPill>
 
-    <FilterPill label="Year" applied={filter.from !== '' || filter.to !== ''}>
+    <FilterPill label={t('route.exploreTitles.year')} applied={filter.from !== '' || filter.to !== ''}>
       {#snippet children()}
         <FilterRange
           minValue={yearOf(filter.from)}
-          minLabel="From"
+          minLabel={t('route.exploreTitles.from')}
           onmin={(value) => setYear('from', value)}
           maxValue={yearOf(filter.to)}
-          maxLabel="To"
+          maxLabel={t('route.exploreTitles.to')}
           onmax={(value) => setYear('to', value)}
           placeholder="2019" />
       {/snippet}
     </FilterPill>
 
-    <FilterPill label="Runtime" applied={filter.runtimeMin > 0 || filter.runtimeMax > 0}>
+    <FilterPill label={t('route.exploreTitles.runtime')} applied={filter.runtimeMin > 0 || filter.runtimeMax > 0}>
       {#snippet children()}
         <FilterRange
           minValue={filter.runtimeMin}
-          minLabel="Min"
+          minLabel={t('route.exploreTitles.min')}
           onmin={(value) => apply({ ...filter, runtimeMin: value })}
           maxValue={filter.runtimeMax}
-          maxLabel="Max"
+          maxLabel={t('route.exploreTitles.max')}
           onmax={(value) => apply({ ...filter, runtimeMax: value })}
           placeholder="90"
-          hint={mediaType === 'series' ? 'Minutes per episode.' : 'Minutes.'} />
+          hint={mediaType === 'series' ? t('route.exploreTitles.minutesEpisode') : t('route.exploreTitles.minutes')} />
       {/snippet}
     </FilterPill>
 
-    <FilterPill label="Rating" applied={filter.ratingMin > 0}>
+    <FilterPill label={t('route.exploreTitles.rating')} applied={filter.ratingMin > 0}>
       {#snippet children()}
         <FilterRange
           minValue={filter.ratingMin}
-          minLabel="At least"
+          minLabel={t('route.exploreTitles.atLeast')}
           onmin={(value) => apply({ ...filter, ratingMin: Math.min(10, value) })}
           placeholder="7"
           max={10}
-          hint="Out of 10 — halves count, so 7.5 is a filter." />
+          hint={t('route.exploreTitles.ratingHint')} />
       {/snippet}
     </FilterPill>
 
-    <FilterPill label="Language" applied={filter.language !== ''} width="w-56">
+    <FilterPill label={t('route.exploreTitles.language')} applied={filter.language !== ''} width="w-56">
       {#snippet children()}
         <FilterOptions
           options={languageOptions().map((l) => ({ id: l.code, name: l.label }))}
@@ -334,10 +338,10 @@
     <div class="ml-auto flex items-center gap-3">
       <Toggle
         checked={filter.hideOwned}
-        label="Hide in library"
+        label={t('route.exploreTitles.hideInLibrary')}
         onchange={(next) => apply({ ...filter, hideOwned: next })} />
       <Dropdown
-        label="Sort"
+        label={t('route.exploreTitles.sort')}
         options={SORT_CHOICES}
         value={sortKey}
         onselect={(id) => apply({ ...filter, sort: id })} />
@@ -356,10 +360,10 @@
   {:else if visible.length === 0}
     <EmptyState
       icon="compass"
-      title="Nothing matches"
+      title={t('route.exploreTitles.emptyTitle')}
       message={chips.length === 0
-        ? `The provider returned no ${noun} results.`
-        : 'No title matches every filter. Try removing one.'} />
+        ? t('route.exploreTitles.emptyAll', { noun })
+        : t('route.exploreTitles.emptyFiltered')} />
   {:else}
     <PosterGrid>
       {#each visible as item (itemKey(item))}
@@ -377,7 +381,7 @@
   {#if hasMore && !error}
     <div class="flex justify-center">
       <Button variant="secondary" disabled={loadingMore} onclick={() => void load(nextPage)}>
-        {loadingMore ? 'Loading…' : 'Load more'}
+        {loadingMore ? t('route.exploreTitles.loading') : t('route.exploreTitles.loadMore')}
       </Button>
     </div>
   {/if}

@@ -12,6 +12,7 @@
    */
   import type { IndexerCategory } from '../api/types';
   import { allCategoryIds, selectionState, toggleCategory, unknownCategoryIds } from '../indexer';
+  import { useI18n } from '../i18n.svelte';
   import Button from './Button.svelte';
   import Icon from './Icon.svelte';
 
@@ -27,14 +28,15 @@
   let advertised = $derived(allCategoryIds(tree));
   let unknown = $derived(unknownCategoryIds(picked, tree));
   let allSelected = $derived(advertised.length > 0 && advertised.every((id) => picked.has(id)));
+  const { t, tp } = useI18n();
 </script>
 
 <div class="flex flex-col gap-2 rounded-md border border-border-strong bg-raised p-3">
   <div class="flex flex-wrap items-center gap-2">
     <p class="text-sm text-ink-secondary">
       {selected.length === 0
-        ? 'Nothing selected — every category is searched.'
-        : `${selected.length} ${selected.length === 1 ? 'category' : 'categories'} selected.`}
+        ? t('component.categoryPicker.noneSelected')
+        : tp('component.categoryPicker.selected', selected.length)}
     </p>
     <div class="ml-auto flex gap-1">
       <Button
@@ -42,17 +44,17 @@
         size="sm"
         disabled={allSelected}
         onclick={() => onchange([...new Set([...advertised, ...unknown])])}>
-        Select all
+        {t('component.actions.selectAll')}
       </Button>
       <Button variant="ghost" size="sm" disabled={selected.length === 0} onclick={() => onchange([])}>
-        Clear
+        {t('component.actions.clear')}
       </Button>
     </div>
   </div>
 
   {#snippet row(node: IndexerCategory, depth: number)}
     {@const state = selectionState(node, picked)}
-    {@const label = node.name || `Category ${node.id}`}
+    {@const label = node.name || t('component.categoryPicker.categoryFallback', { id: node.id })}
     <li>
       <button
         type="button"
@@ -93,15 +95,15 @@
 
   {#if unknown.length > 0}
     <div class="flex flex-wrap items-center gap-1.5 border-t border-border pt-2">
-      <span class="text-xs text-ink-secondary">Selected but not advertised by this indexer:</span>
+      <span class="text-xs text-ink-secondary">{t('component.categoryPicker.unadvertised')}</span>
       {#each unknown as id (id)}
         <button
           type="button"
-          aria-label="Remove {id} from the selection"
+          aria-label={t('component.categoryPicker.removeSelection', { id })}
           onclick={() => onchange(selected.filter((x) => x !== id))}
           class="flex h-5 items-center gap-1 rounded-sm bg-warning-tint px-1.5 font-mono text-xs
                  text-warning hover:text-ink"
-          title="Remove {id} from the selection">
+          title={t('component.categoryPicker.removeSelection', { id })}>
           {id}
           <Icon name="close" size={10} />
         </button>

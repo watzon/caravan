@@ -101,7 +101,7 @@ describe('ConcurrencySettings', () => {
     expect(input('max-concurrent-downloads').value).toBe('0');
     expect(input('embedded-torrent-max-concurrent').value).toBe('0');
     expect(input('embedded-usenet-max-concurrent').value).toBe('0');
-    expect(host.textContent).toContain('0 is unlimited');
+    expect(host.textContent).toContain('Zero starts every download right away.');
   });
 
   it('blocks invalid text and fractions before they reach the API', () => {

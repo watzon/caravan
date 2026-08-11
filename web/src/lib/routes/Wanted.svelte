@@ -13,12 +13,15 @@
   import { pushToast } from '../state/toast.svelte';
   import { episodeCode, formatDate, titleWithYear } from '../format';
   import { createSelection } from '../selection.svelte';
+  import { useI18n } from '../i18n.svelte';
+
+  const { t, tp } = useI18n();
 
   type Tab = WantedReason;
 
   const TABS: { key: Tab; label: string }[] = [
-    { key: 'missing', label: 'Missing' },
-    { key: 'below_cutoff', label: 'Below quality cutoff' },
+    { key: 'missing', label: t('route.wanted.missing') },
+    { key: 'below_cutoff', label: t('route.wanted.belowCutoff') },
   ];
 
   let wanted = $state<WantedLists | null>(null);
@@ -62,11 +65,13 @@
 
   function detail(item: WantedMovie | WantedEpisode): string {
     if (item.reason === 'below_cutoff') {
-      return `${item.file_quality || 'Unknown quality'} on disk, cutoff 1080p`;
+      return t('route.wanted.belowCutoffDetail', {
+        quality: item.file_quality || t('route.wanted.unknownQuality'),
+      });
     }
-    if ('air_date' in item && item.air_date) return `Aired ${formatDate(item.air_date)}`;
-    if ('air_date' in item) return 'Air date unknown';
-    return 'No file in the library';
+    if ('air_date' in item && item.air_date) return t('route.wanted.aired', { date: formatDate(item.air_date) });
+    if ('air_date' in item) return t('route.wanted.unknownAirDate');
+    return t('route.wanted.noFile');
   }
 
   /**
@@ -78,7 +83,7 @@
     searching = true;
     try {
       const { queued } = await api.searchWanted();
-      pushToast(`Queued ${queued} search${queued === 1 ? '' : 'es'}`, queued > 0 ? 'success' : 'info');
+      pushToast(tp('route.wanted.queued', queued), queued > 0 ? 'success' : 'info');
     } catch (err) {
       pushToast(errorText(err), 'danger');
     } finally {
@@ -123,8 +128,8 @@
       for (const id of failedEpisodes) episodeSelection.toggle(id);
 
       const failed = failedMovies.length + failedEpisodes.length;
-      const message = `Queued ${queued} search${queued === 1 ? '' : 'es'}`;
-      if (failed > 0) pushToast(`${message}; ${failed} failed`, 'danger');
+      const message = tp('route.wanted.queued', queued);
+      if (failed > 0) pushToast(tp('route.wanted.queuedFailed', failed, { message }), 'danger');
       else pushToast(message, queued > 0 ? 'success' : 'info');
       await load();
     } finally {
@@ -156,13 +161,13 @@
       {tabs}
       active={tab}
       onchange={(key) => (tab = key)}
-      ariaLabel="Wanted filter" />
+      ariaLabel={t('route.wanted.filter')} />
     <div class="ml-auto">
       <!-- The whole list, both tabs: the sweep is not scoped to the filter the
            user happens to be looking at. -->
       <Button variant="primary" size="sm" disabled={searching} onclick={searchAll}>
         <Icon name="search" size={14} />
-        {searching ? 'Searching…' : 'Search all'}
+        {searching ? t('route.wanted.searching') : t('route.wanted.searchAll')}
       </Button>
     </div>
   </div>
@@ -178,15 +183,15 @@
   {:else if count === 0}
     <EmptyState
       icon="search"
-      title={tab === 'missing' ? 'Nothing is missing' : 'Everything meets the cutoff'}
+      title={tab === 'missing' ? t('route.wanted.emptyMissingTitle') : t('route.wanted.emptyCutoffTitle')}
       message={tab === 'missing'
-        ? 'Monitored movies and episodes without a file will appear here.'
-        : 'Files below their quality profile cutoff will appear here.'} />
+        ? t('route.wanted.emptyMissingMessage')
+        : t('route.wanted.emptyCutoffMessage')} />
   {:else}
     <div class="flex flex-col gap-6">
       {#if movies.length > 0}
         <section class="flex flex-col gap-2" aria-labelledby="wanted-movies">
-          <h2 id="wanted-movies" class="micro-label">Movies</h2>
+          <h2 id="wanted-movies" class="micro-label">{t('route.wanted.movies')}</h2>
           <ul class="overflow-hidden rounded-md border border-border bg-surface">
             {#each movies as movie (movie.id)}
               <li
@@ -196,7 +201,7 @@
                   <button
                     type="button"
                     class="absolute inset-0 z-10 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-accent"
-                    aria-label="{movieSelection.has(movie.id) ? 'Deselect' : 'Select'} {titleWithYear(movie.title, movie.year)}"
+                    aria-label={t(movieSelection.has(movie.id) ? 'route.wanted.deselect' : 'route.wanted.select', { title: titleWithYear(movie.title, movie.year) })}
                     aria-pressed={movieSelection.has(movie.id)}
                     onclick={() => movieSelection.toggle(movie.id)}></button>
                 {/if}
@@ -220,7 +225,7 @@
                              transition-opacity duration-150 ease-out hover:border-accent hover:text-accent
                              focus-visible:opacity-100 group-hover/row:opacity-100
                              group-focus-within/row:opacity-100 pointer-coarse:opacity-100"
-                      aria-label="Select {titleWithYear(movie.title, movie.year)}"
+                      aria-label={t('route.wanted.select', { title: titleWithYear(movie.title, movie.year) })}
                       aria-pressed="false"
                       onclick={() => movieSelection.toggle(movie.id)}>
                       <Icon name="check" size={12} />
@@ -235,9 +240,9 @@
                     <p class="truncate font-medium text-ink" title={titleWithYear(movie.title, movie.year)}>{titleWithYear(movie.title, movie.year)}</p>
                     <p class="mt-0.5 truncate text-sm text-ink-secondary" title={detail(movie)}>{detail(movie)}</p>
                   </div>
-                  <Badge tone={movie.reason === 'missing' ? 'danger' : 'warning'}>{movie.reason === 'missing' ? 'Missing' : 'Below quality cutoff'}</Badge>
+                  <Badge tone={movie.reason === 'missing' ? 'danger' : 'warning'}>{movie.reason === 'missing' ? t('route.wanted.missing') : t('route.wanted.belowCutoff')}</Badge>
                   {#if !selectionActive}
-                    <Button href={searchHref(movie)} size="sm">Search</Button>
+                    <Button href={searchHref(movie)} size="sm">{t('route.wanted.search')}</Button>
                   {/if}
                 </div>
               </li>
@@ -248,7 +253,7 @@
 
       {#if episodes.length > 0}
         <section class="flex flex-col gap-2" aria-labelledby="wanted-episodes">
-          <h2 id="wanted-episodes" class="micro-label">Episodes</h2>
+          <h2 id="wanted-episodes" class="micro-label">{t('route.wanted.episodes')}</h2>
           <ul class="overflow-hidden rounded-md border border-border bg-surface">
             {#each episodes as episode (episode.id)}
               <li
@@ -258,7 +263,7 @@
                   <button
                     type="button"
                     class="absolute inset-0 z-10 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-accent"
-                    aria-label="{episodeSelection.has(episode.id) ? 'Deselect' : 'Select'} {episode.series_title} {episodeCode(episode.season_number, episode.episode_number)}"
+                    aria-label={t(episodeSelection.has(episode.id) ? 'route.wanted.deselect' : 'route.wanted.select', { title: t('route.wanted.episodeSelection', { series: episode.series_title, episode: episodeCode(episode.season_number, episode.episode_number) }) })}
                     aria-pressed={episodeSelection.has(episode.id)}
                     onclick={() => episodeSelection.toggle(episode.id)}></button>
                 {/if}
@@ -282,7 +287,7 @@
                              transition-opacity duration-150 ease-out hover:border-accent hover:text-accent
                              focus-visible:opacity-100 group-hover/row:opacity-100
                              group-focus-within/row:opacity-100 pointer-coarse:opacity-100"
-                      aria-label="Select {episode.series_title} {episodeCode(episode.season_number, episode.episode_number)}"
+                      aria-label={t('route.wanted.select', { title: t('route.wanted.episodeSelection', { series: episode.series_title, episode: episodeCode(episode.season_number, episode.episode_number) }) })}
                       aria-pressed="false"
                       onclick={() => episodeSelection.toggle(episode.id)}>
                       <Icon name="check" size={12} />
@@ -298,14 +303,14 @@
                   <div class="min-w-0 basis-40 flex-1">
                     <p
                       class="truncate font-medium text-ink"
-                      title="{episode.series_title} - {episodeCode(episode.season_number, episode.episode_number)} - {episode.title}">
-                      {episode.series_title} - {episodeCode(episode.season_number, episode.episode_number)} - {episode.title}
+                      title={t('route.wanted.episodeTitle', { series: episode.series_title, episode: episodeCode(episode.season_number, episode.episode_number), title: episode.title })}>
+                      {t('route.wanted.episodeTitle', { series: episode.series_title, episode: episodeCode(episode.season_number, episode.episode_number), title: episode.title })}
                     </p>
                     <p class="mt-0.5 truncate text-sm text-ink-secondary" title={detail(episode)}>{detail(episode)}</p>
                   </div>
-                  <Badge tone={episode.reason === 'missing' ? 'danger' : 'warning'}>{episode.reason === 'missing' ? 'Missing' : 'Below quality cutoff'}</Badge>
+                  <Badge tone={episode.reason === 'missing' ? 'danger' : 'warning'}>{episode.reason === 'missing' ? t('route.wanted.missing') : t('route.wanted.belowCutoff')}</Badge>
                   {#if !selectionActive}
-                    <Button href={searchHref(episode)} size="sm">Search</Button>
+                    <Button href={searchHref(episode)} size="sm">{t('route.wanted.search')}</Button>
                   {/if}
                 </div>
               </li>
@@ -321,9 +326,9 @@
         class="pointer-events-auto flex items-center gap-1 rounded-lg border border-border-strong
                bg-overlay py-1.5 pl-4 pr-1.5 shadow-2xl"
         role="group"
-        aria-label="Selection actions">
+        aria-label={t('route.wanted.selectionActions')}>
         <span class="mr-2 whitespace-nowrap text-base font-medium text-ink">
-          {selectedCount} selected
+          {tp('route.wanted.selected', selectedCount)}
         </span>
         <Button
           variant="primary"
@@ -331,7 +336,7 @@
           disabled={bulkSearching}
           onclick={() => void searchSelected()}>
           <Icon name="search" size={14} />
-          {bulkSearching ? 'Searching…' : 'Search selected'}
+          {bulkSearching ? t('route.wanted.searching') : t('route.wanted.searchSelected')}
         </Button>
         <span class="mx-1 h-5 w-px bg-border" aria-hidden="true"></span>
         <Button
@@ -339,9 +344,9 @@
           size="sm"
           disabled={bulkSearching}
           onclick={clearSelection}
-          title="Clear selection">
+          title={t('route.wanted.clearSelection')}>
           <Icon name="close" size={14} />
-          <span class="sr-only">Clear selection</span>
+          <span class="sr-only">{t('route.wanted.clearSelection')}</span>
         </Button>
       </div>
     </div>

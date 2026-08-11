@@ -8,14 +8,17 @@
   import LoadError from '../components/LoadError.svelte';
   import PageTabs from '../components/PageTabs.svelte';
   import Skeleton from '../components/Skeleton.svelte';
+  import { useI18n } from '../i18n.svelte';
   import { formatAge } from '../format';
   import { TONE_DOT, type Tone } from '../status';
+
+  const { t, tp } = useI18n();
 
   type Tab = 'events' | 'jobs';
 
   const TABS: { key: Tab; label: string }[] = [
-    { key: 'events', label: 'Events' },
-    { key: 'jobs', label: 'Jobs' },
+    { key: 'events', label: t('route.history.eventsTab') },
+    { key: 'jobs', label: t('route.history.jobsTab') },
   ];
 
   const EVENT_TONE: Record<EventLevel, Tone> = {
@@ -24,16 +27,16 @@
     error: 'danger',
   };
   const JOB_META: Record<JobState, { label: string; tone: Tone }> = {
-    pending: { label: 'Pending', tone: 'neutral' },
-    running: { label: 'Running', tone: 'info' },
-    done: { label: 'Done', tone: 'success' },
-    failed: { label: 'Failed', tone: 'danger' },
+    pending: { label: t('route.history.jobPending'), tone: 'neutral' },
+    running: { label: t('route.history.jobRunning'), tone: 'info' },
+    done: { label: t('route.history.jobDone'), tone: 'success' },
+    failed: { label: t('route.history.jobFailed'), tone: 'danger' },
   };
   const JOB_KIND: Record<Job['kind'], string> = {
-    rss_sync: 'RSS sync',
-    backlog_sweep: 'Backlog sweep',
-    search_movie: 'Movie search',
-    search_episode: 'Episode search',
+    rss_sync: t('route.history.jobRssSync'),
+    backlog_sweep: t('route.history.jobBacklogSweep'),
+    search_movie: t('route.history.jobMovieSearch'),
+    search_episode: t('route.history.jobEpisodeSearch'),
   };
   const POLL_MS = 10_000;
   const RECOVERY_MESSAGE = 'Database verified after an unclean shutdown';
@@ -164,10 +167,10 @@
         tabs={TABS}
         active={tab}
         onchange={(key) => (tab = key)}
-        ariaLabel="Activity feed" />
+        ariaLabel={t('route.history.feedLabel')} />
     </div>
     <Button variant="secondary" size="sm" onclick={() => (tab === 'events' ? loadEvents() : loadJobs())}>
-      Refresh
+      {t('route.library.refresh')}
     </Button>
   </div>
 
@@ -179,10 +182,10 @@
     {:else if (events ?? []).length === 0}
       <EmptyState
         icon="pulse"
-        title="No activity recorded"
-        message="Current health appears in the system status panel. Imports, searches and scheduled work will appear here." />
+        title={t('route.history.emptyEventsTitle')}
+        message={t('route.history.emptyEventsMessage')} />
     {:else}
-      <ol class="flex flex-col gap-2" aria-label="Activity events">
+      <ol class="flex flex-col gap-2" aria-label={t('route.history.eventsLabel')}>
         {#each eventRows as event (event.id)}
           <li class="rounded-md border border-border bg-surface px-3 py-3">
             <div class="flex items-start gap-3">
@@ -193,13 +196,13 @@
                   <span class="font-mono text-xs uppercase text-ink-secondary">{event.level}</span>
                   <p class="text-base text-ink">{event.message}</p>
                   {#if event.repeatCount > 1}
-                    <Badge tone="neutral">{event.repeatCount} times</Badge>
+                    <Badge tone="neutral">{tp('route.history.repeatCount', event.repeatCount)}</Badge>
                   {/if}
-                  <time class="ml-auto text-sm text-ink-muted" datetime={event.created_at} title={event.created_at}>{formatAge(event.created_at)} ago</time>
+                  <time class="ml-auto text-sm text-ink-muted" datetime={event.created_at} title={event.created_at}>{t('route.history.ago', { time: formatAge(event.created_at) })}</time>
                 </div>
                 {#if event.detail}
                   <details class="mt-2 text-sm text-ink-secondary">
-                    <summary class="cursor-pointer text-ink-secondary hover:text-ink">Details</summary>
+                    <summary class="cursor-pointer text-ink-secondary hover:text-ink">{t('route.history.details')}</summary>
                     <p class="mt-2 whitespace-pre-wrap">{event.detail}</p>
                   </details>
                 {/if}
@@ -211,7 +214,7 @@
       {#if eventsNextCursor || eventsLoadingOlder}
         <div class="mt-3 flex justify-center">
           <Button size="sm" disabled={eventsLoadingOlder || !eventsNextCursor} onclick={() => loadEvents(true)}>
-            {eventsLoadingOlder ? 'Loading...' : 'Load older'}
+            {eventsLoadingOlder ? t('route.history.loading') : t('route.history.loadOlder')}
           </Button>
         </div>
       {/if}
@@ -221,9 +224,9 @@
   {:else if jobsLoading && jobs === null}
     <div class="flex flex-col gap-2">{#each Array.from({ length: 4 }) as _, i (i)}<Skeleton class="h-16 w-full rounded-md" />{/each}</div>
   {:else if (jobs ?? []).length === 0}
-    <EmptyState icon="pulse" title="No jobs yet" message="Scheduled acquisition work will appear here." />
+    <EmptyState icon="pulse" title={t('route.history.emptyJobsTitle')} message={t('route.history.emptyJobsMessage')} />
   {:else}
-    <ul class="overflow-hidden rounded-md border border-border bg-surface" aria-label="Acquisition jobs">
+    <ul class="overflow-hidden rounded-md border border-border bg-surface" aria-label={t('route.history.jobsLabel')}>
       {#each jobs ?? [] as job (job.id)}
         {@const meta = JOB_META[job.state]}
         <li class="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-3 py-3 last:border-b-0">
@@ -231,7 +234,7 @@
           <p class="min-w-36 font-medium text-ink">{JOB_KIND[job.kind]}</p>
           <Badge tone={meta.tone}>{meta.label}</Badge>
           <span class="font-mono text-xs text-ink-secondary">{job.attempts}/5</span>
-          <time class="ml-auto text-sm text-ink-muted" datetime={job.updated_at || job.created_at} title={job.updated_at || job.created_at}>{formatAge(job.updated_at || job.created_at)} ago</time>
+          <time class="ml-auto text-sm text-ink-muted" datetime={job.updated_at || job.created_at} title={job.updated_at || job.created_at}>{t('route.history.ago', { time: formatAge(job.updated_at || job.created_at) })}</time>
           {#if job.state === 'failed' && job.last_error}
             <p class="w-full pl-5 text-sm text-danger">{job.last_error}</p>
           {/if}
@@ -241,7 +244,7 @@
     {#if jobsNextCursor || jobsLoadingOlder}
       <div class="mt-3 flex justify-center">
         <Button size="sm" disabled={jobsLoadingOlder || !jobsNextCursor} onclick={() => loadJobs(true)}>
-          {jobsLoadingOlder ? 'Loading...' : 'Load older'}
+          {jobsLoadingOlder ? t('route.history.loading') : t('route.history.loadOlder')}
         </Button>
       </div>
     {/if}

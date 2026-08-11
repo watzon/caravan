@@ -25,6 +25,9 @@
   import { libraries } from '../state/libraries.svelte';
   import { pushToast } from '../state/toast.svelte';
   import { system } from '../state/system.svelte';
+  import { useI18n } from '../i18n.svelte';
+
+  const { t } = useI18n();
 
   let files = $state<UnmatchedFile[] | null>(null);
   let loading = $state(true);
@@ -58,7 +61,10 @@
       await api.rescan();
       const summary = await api.awaitScan();
       pushToast(
-        `Scan finished: ${summary.media_files} files in the library, ${summary.unmatched} unmatched.`,
+        t('route.scanReview.scanFinished', {
+          files: summary.media_files,
+          unmatched: summary.unmatched,
+        }),
         summary.unmatched > 0 ? 'warning' : 'success',
       );
       await load();
@@ -74,7 +80,7 @@
     try {
       await api.dismissUnmatched(file.id);
       files = (files ?? []).filter((f) => f.id !== file.id);
-      pushToast('Removed from the review queue.', 'neutral');
+      pushToast(t('route.scanReview.removed'), 'neutral');
     } catch (err) {
       pushToast(errorText(err), 'danger');
     } finally {
@@ -99,7 +105,7 @@
       });
       files = (files ?? []).filter((f) => f.id !== file.id);
       matching = null;
-      pushToast('Matched and queued for import.', 'success');
+      pushToast(t('route.scanReview.matched'), 'success');
     } catch (err) {
       pushToast(errorText(err), 'danger');
     }
@@ -151,7 +157,7 @@
    */
   function libraryPill(file: UnmatchedFile): string {
     if (!file.library_id) return '';
-    return libraryOf(file)?.name ?? `Library ${file.library_id}`;
+    return libraryOf(file)?.name ?? t('route.scanReview.library', { id: file.library_id });
   }
 
   /**
@@ -161,7 +167,7 @@
    * the raw token as one more scanner complaint would be wrong.
    */
   function reasonLabel(reason: string): string {
-    return reason === 'manual-grab' ? 'Grabbed manually' : reason || UNKNOWN;
+    return reason === 'manual-grab' ? t('route.scanReview.grabbedManually') : reason || UNKNOWN;
   }
 
   let queue = $derived(files ?? []);
@@ -177,17 +183,15 @@
 
 <div class="flex flex-col gap-6">
   <div class="flex flex-wrap items-center gap-3">
-    <p class="text-base text-ink-secondary">
-      Files the scanner could not confidently match. Resolve each one against TMDB.
-    </p>
+    <p class="text-base text-ink-secondary">{t('route.scanReview.description')}</p>
     <div class="ml-auto flex items-center gap-2">
       <Button variant="secondary" onclick={load}>
         <Icon name="refresh" size={14} />
-        Refresh
+        {t('route.scanReview.refresh')}
       </Button>
       <Button variant="primary" onclick={rescan} disabled={scanning}>
         <Icon name="folder" size={14} />
-        {scanning ? 'Scanning…' : 'Rescan library'}
+        {scanning ? t('route.scanReview.scanning') : t('route.scanReview.rescan')}
       </Button>
     </div>
   </div>
@@ -197,11 +201,11 @@
       tone="warning"
       icon="warning"
       title={credentialState === 'invalid'
-        ? 'Nothing can be matched: TMDB rejected your API key'
-        : 'Nothing can be matched: no TMDB API key'}
-      message="The scan still ran — every file was found, parsed and imported — but naming a title takes TMDB, so everything it found is parked here. Add a working key and rescan to match them in one pass.">
+        ? t('route.scanReview.invalidKeyTitle')
+        : t('route.scanReview.missingKeyTitle')}
+      message={t('route.scanReview.keyMessage')}>
       {#snippet action()}
-        <Button variant="primary" href="/settings/metadata">Open metadata settings</Button>
+        <Button variant="primary" href="/settings/metadata">{t('route.scanReview.openMetadata')}</Button>
       {/snippet}
     </Banner>
   {/if}
@@ -217,11 +221,11 @@
   {:else if queue.length === 0}
     <EmptyState
       icon="check"
-      title="Nothing to review"
-      message="Every file the scanner found was matched to a library item. Run a rescan after adding new media.">
+      title={t('route.scanReview.emptyTitle')}
+      message={t('route.scanReview.emptyMessage')}>
       {#snippet action()}
         <Button variant="primary" onclick={rescan} disabled={scanning}>
-          {scanning ? 'Scanning…' : 'Rescan library'}
+          {scanning ? t('route.scanReview.scanning') : t('route.scanReview.rescan')}
         </Button>
       {/snippet}
     </EmptyState>
@@ -230,13 +234,13 @@
       <table class="w-full min-w-[1000px] border-collapse text-sm">
         <thead>
           <tr class="bg-surface text-left">
-            <th class="micro-label px-3 py-2 font-semibold">File</th>
-            <th class="micro-label px-3 py-2 font-semibold">Parser guess</th>
-            <th class="micro-label px-3 py-2 font-semibold">Confidence</th>
-            <th class="micro-label px-3 py-2 font-semibold">Library</th>
-            <th class="micro-label px-3 py-2 font-semibold">Reason</th>
-            <th class="micro-label px-3 py-2 text-right font-semibold">Size</th>
-            <th class="micro-label px-3 py-2 text-right font-semibold">Actions</th>
+            <th class="micro-label px-3 py-2 font-semibold">{t('route.scanReview.file')}</th>
+            <th class="micro-label px-3 py-2 font-semibold">{t('route.scanReview.parserGuess')}</th>
+            <th class="micro-label px-3 py-2 font-semibold">{t('route.scanReview.confidence')}</th>
+            <th class="micro-label px-3 py-2 font-semibold">{t('route.scanReview.libraryHeader')}</th>
+            <th class="micro-label px-3 py-2 font-semibold">{t('route.scanReview.reason')}</th>
+            <th class="micro-label px-3 py-2 text-right font-semibold">{t('route.scanReview.size')}</th>
+            <th class="micro-label px-3 py-2 text-right font-semibold">{t('route.scanReview.actions')}</th>
           </tr>
         </thead>
         <tbody>
@@ -288,7 +292,7 @@
                      yet — that is what the match decides — and an em dash says
                      "not yet" where a blank cell would just look broken. -->
                 {#if libraryName}
-                  <Badge tone="info" title="This file is scoped to one library">
+                  <Badge tone="info" title={t('route.scanReview.scopedLibrary')}>
                     {libraryName}
                   </Badge>
                 {:else}
@@ -306,14 +310,14 @@
                     size="sm"
                     disabled={busyID === file.id}
                     onclick={() => (matching = file)}>
-                    Match
+                    {t('route.scanReview.match')}
                   </Button>
                   <Button
                     variant="ghost"
                     size="sm"
                     disabled={busyID === file.id}
                     onclick={() => dismiss(file)}>
-                    Ignore
+                    {t('route.scanReview.ignore')}
                   </Button>
                 </div>
               </td>
@@ -327,7 +331,7 @@
 
 {#if matching}
   <AddItemModal
-    title="Match “{matching.path}”"
+    title={t('route.scanReview.matchTitle', { path: matching.path })}
     kind={guessKind(matching)}
     initialQuery={matching.parsed.title}
     libraryID={matchLibraryID(matching)}

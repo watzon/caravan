@@ -30,6 +30,10 @@
   import { pushToast } from '../state/toast.svelte';
   import { TONE_DOT } from '../status';
   import { compatBadge } from '../tvcompat';
+  import { useI18n } from '../i18n.svelte';
+
+  const { t, tp } = useI18n();
+
 
   /** A conversion outlives a poll tick by minutes, so polling is unhurried. */
   const POLL_MS = 5000;
@@ -70,9 +74,9 @@
   });
 
   let tabs = $derived<{ key: ConvertTab; label: string; count: number }[]>([
-    { key: 'pending', label: 'Pending', count: pending?.length ?? 0 },
-    { key: 'active', label: 'Active', count: activeRows.length },
-    { key: 'finished', label: 'Finished', count: finishedRows.length },
+    { key: 'pending', label: t('route.convert.tabPending'), count: pending?.length ?? 0 },
+    { key: 'active', label: t('route.convert.tabActive'), count: activeRows.length },
+    { key: 'finished', label: t('route.convert.tabFinished'), count: finishedRows.length },
   ]);
 
   async function load() {
@@ -120,7 +124,9 @@
       selection.clear();
       for (const id of failed) selection.toggle(id);
       pushToast(
-        failed.length === 0 ? `Queued ${ids.length}` : `Queued ${handled} of ${ids.length}`,
+        failed.length === 0
+          ? tp('route.convert.queued', ids.length)
+          : t('route.convert.queuedPartial', { handled, count: ids.length }),
         failed.length === 0 ? 'neutral' : 'danger',
       );
       await load();
@@ -149,13 +155,13 @@
   function cancelDetail() {
     const row = detail;
     if (!row || row.status !== 'queued') return;
-    void act(row, () => api.cancelConversion(row.id), 'Cancelled.');
+    void act(row, () => api.cancelConversion(row.id), t('route.convert.cancelled'));
   }
 
   function retryDetail() {
     const row = detail;
     if (!row || (row.status !== 'failed' && row.status !== 'cancelled')) return;
-    void act(row, () => api.retryConversion(row.id), 'Queued again.');
+    void act(row, () => api.retryConversion(row.id), t('route.convert.queuedAgain'));
   }
 
   $effect(() => {
@@ -163,7 +169,7 @@
       page.subtitle = null;
       return;
     }
-    page.subtitle = `${pending.length} pending · ${activeRows.length} active`;
+    page.subtitle = t('route.convert.subtitle', { pending: pending.length, active: activeRows.length });
     return () => (page.subtitle = null);
   });
 </script>
@@ -176,26 +182,24 @@
         {tabs}
         active={tab}
         onchange={(key) => (tab = key)}
-        ariaLabel="Conversion work" />
+        ariaLabel={t('route.convert.workAria')} />
     </div>
     <Button variant="secondary" size="sm" onclick={() => void load()}>
       <Icon name="refresh" size={14} />
-      Refresh
+      {t('route.convert.refresh')}
     </Button>
   </div>
 
   <p class="max-w-3xl text-base text-ink-secondary">
-    Find files that need work, track active jobs, and review finished conversions. A conversion
-    can copy streams into a compatible container or re-encode them when needed. The original
-    stays in place until the new file passes verification.
+    {t('route.convert.description')}
   </p>
 
   {#if statusKnown && !ffmpeg}
     <Banner
       tone="info"
       icon="warning"
-      title="ffmpeg is not installed"
-      message="Caravan does not bundle ffmpeg. Install ffmpeg and ffprobe, then restart Caravan to convert files. Everything else keeps working. The TV-compatibility badges stay informational." />
+      title={t('route.convert.ffmpegMissingTitle')}
+      message={t('route.convert.ffmpegMissingMessage')} />
   {/if}
 
   {#if error && (pending === null || conversions === null)}
@@ -210,10 +214,10 @@
     {#if pending.length === 0}
       <EmptyState
         icon="refresh"
-        title="No files need conversion"
-        message="Every current library file either matches the active TV profile, has no known compatibility problem, or is already being converted." />
+        title={t('route.convert.emptyPendingTitle')}
+        message={t('route.convert.emptyPendingMessage')} />
     {:else}
-      <ul class="flex flex-col gap-2" aria-label="Files pending conversion">
+      <ul class="flex flex-col gap-2" aria-label={t('route.convert.pendingAria')}>
         {#each pending as file (file.id)}
           {@const meta = compatBadge(file.compatibility)}
           <li
@@ -224,7 +228,9 @@
               <button
                 type="button"
                 class="absolute inset-0 z-10 rounded-md focus:outline-none focus:ring-2 focus:ring-accent"
-                aria-label="{selection.has(file.id) ? 'Deselect' : 'Select'} {file.path.split('/').pop() || UNKNOWN}"
+                aria-label={t(selection.has(file.id) ? 'route.convert.deselect' : 'route.convert.select', {
+                  file: file.path.split('/').pop() || UNKNOWN,
+                })}
                 aria-pressed={selection.has(file.id)}
                 onclick={() => selection.toggle(file.id)}></button>
             {/if}
@@ -249,7 +255,7 @@
                            transition-opacity duration-150 ease-out hover:border-accent hover:text-accent
                            focus-visible:opacity-100 group-hover/row:opacity-100
                            group-focus-within/row:opacity-100 pointer-coarse:opacity-100"
-                    aria-label="Select {file.path.split('/').pop() || UNKNOWN}"
+                    aria-label={t('route.convert.select', { file: file.path.split('/').pop() || UNKNOWN })}
                     aria-pressed="false"
                     onclick={() => selection.toggle(file.id)}>
                     <Icon name="check" size={12} />
@@ -287,12 +293,10 @@
   {:else if jobRows.length === 0}
     <EmptyState
       icon="refresh"
-      title={tab === 'active' ? 'No active conversions' : 'No finished conversions'}
-      message={tab === 'active'
-        ? 'No conversions are queued or running. Files that need work are listed under Pending.'
-        : 'Completed, failed, and cancelled conversion jobs will appear here.'} />
+      title={tab === 'active' ? t('route.convert.emptyActiveTitle') : t('route.convert.emptyFinishedTitle')}
+      message={tab === 'active' ? t('route.convert.emptyActiveMessage') : t('route.convert.emptyFinishedMessage')} />
   {:else}
-    <ul class="flex flex-col gap-2" aria-label={tab === 'active' ? 'Active conversions' : 'Finished conversions'}>
+    <ul class="flex flex-col gap-2" aria-label={tab === 'active' ? t('route.convert.activeAria') : t('route.convert.finishedAria')}>
       {#each jobRows as row (row.id)}
         {@const meta = conversionStateMeta(row.status)}
         <li
@@ -301,7 +305,9 @@
           <button
             type="button"
             class="absolute inset-0 rounded-md focus:outline-none focus:ring-2 focus:ring-accent"
-            aria-label="Open conversion details for {row.source_path.split('/').pop() || UNKNOWN}"
+            aria-label={t('route.convert.openDetails', {
+              file: row.source_path.split('/').pop() || UNKNOWN,
+            })}
             onclick={() => (detailID = row.id)}></button>
           <div class="pointer-events-none relative z-10 flex flex-wrap items-center gap-3">
             <span class="size-2 shrink-0 rounded-full {TONE_DOT[meta.tone]}" aria-hidden="true"></span>
@@ -309,8 +315,8 @@
               {truncateMiddle(row.source_path || UNKNOWN, 64)}
             </span>
             <Badge tone={meta.tone}>{meta.label}</Badge>
-            <Badge mono tone="neutral" title="How this file is being converted">
-              {row.strategy === 'remux' ? 'Convert (stream copy)' : strategyLabel(row.strategy)}
+            <Badge mono tone="neutral" title={t('route.convert.strategyTitle')}>
+              {row.strategy === 'remux' ? t('route.convert.copyStrategy') : strategyLabel(row.strategy)}
             </Badge>
 
             <div class="pointer-events-auto flex shrink-0 items-center gap-2">
@@ -321,28 +327,28 @@
                   disabled={busyID === row.id}
                   onclick={(event) => {
                     event.stopPropagation();
-                    void act(row, () => api.cancelConversion(row.id), 'Cancelled.');
+                    void act(row, () => api.cancelConversion(row.id), t('route.convert.cancelled'));
                   }}>
-                  Cancel
+                  {t('route.convert.cancel')}
                 </Button>
               {:else if (row.status === 'failed' || row.status === 'cancelled') && ffmpeg}
                 <Button
                   variant="ghost"
                   size="sm"
                   disabled={busyID === row.id}
-                  title="Try this conversion again"
+                  title={t('route.convert.retryTitle')}
                   onclick={(event) => {
                     event.stopPropagation();
-                    void act(row, () => api.retryConversion(row.id), 'Queued again.');
+                    void act(row, () => api.retryConversion(row.id), t('route.convert.queuedAgain'));
                   }}>
-                  Retry
+                  {t('route.convert.retry')}
                 </Button>
               {/if}
             </div>
           </div>
 
           <div class="pointer-events-none relative z-10 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-xs text-ink-secondary">
-            <span title="TV profile this conversion targets">{row.profile_id || UNKNOWN}</span>
+            <span title={t('route.convert.profileTitle')}>{row.profile_id || UNKNOWN}</span>
             <span>{formatDate(row.updated_at)}</span>
             {#if row.output_path && row.output_path !== row.source_path}
               <span class="min-w-0 truncate" title={row.output_path}>
@@ -364,9 +370,9 @@
         class="pointer-events-auto flex items-center gap-1 rounded-lg border border-border-strong
                bg-overlay py-1.5 pl-4 pr-1.5 shadow-2xl"
         role="group"
-        aria-label="Selection actions">
+        aria-label={t('route.convert.selectionActions')}>
         <span class="mr-2 whitespace-nowrap text-base font-medium text-ink">
-          {selection.count} selected
+          {tp('route.convert.selected', selection.count)}
         </span>
         <Button
           variant="primary"
@@ -374,7 +380,7 @@
           disabled={bulkBusy}
           onclick={() => void convertSelected()}>
           <Icon name="refresh" size={14} />
-          Convert selected
+          {t('route.convert.convertSelected')}
         </Button>
         <span class="mx-1 h-5 w-px bg-border" aria-hidden="true"></span>
         <Button
@@ -382,9 +388,9 @@
           size="sm"
           disabled={bulkBusy}
           onclick={() => selection.clear()}
-          title="Clear selection">
+          title={t('route.convert.clearSelection')}>
           <Icon name="close" size={14} />
-          <span class="sr-only">Clear selection</span>
+          <span class="sr-only">{t('route.convert.clearSelection')}</span>
         </Button>
       </div>
     </div>

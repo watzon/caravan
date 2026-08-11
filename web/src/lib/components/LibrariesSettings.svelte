@@ -46,6 +46,7 @@
     type QualityProfile,
     type Settings,
   } from '../api/types';
+  import { useI18n } from '../i18n.svelte';
   import { describeType } from '../downloadClient';
   import { session } from '../state/session.svelte';
   import { pushToast } from '../state/toast.svelte';
@@ -58,11 +59,13 @@
   import Field from './Field.svelte';
   import Icon from './Icon.svelte';
   import LoadError from './LoadError.svelte';
+  import LocalizedText from './LocalizedText.svelte';
   import Modal from './Modal.svelte';
   import SettingsCard from './SettingsCard.svelte';
   import Skeleton from './Skeleton.svelte';
   import TextInput from './TextInput.svelte';
   import Toggle from './Toggle.svelte';
+  const { t, tp } = useI18n();
 
   const SELECT_CLASS =
     'h-9 w-full rounded-sm border bg-raised px-3 text-md text-ink ' +
@@ -209,6 +212,17 @@
     return providers.find((p) => p.id === id)?.name ?? id;
   }
 
+  function kindLabel(kind: LibraryKind): string {
+    switch (kind) {
+      case 'movie':
+        return t('component.libraries.kindMovie');
+      case 'tv':
+        return t('component.libraries.kindSeries');
+      case 'adult':
+        return t('component.libraries.kindAdult');
+    }
+  }
+
   /**
    * The chain editor writes the WHOLE list every time, never a delta.
    *
@@ -234,8 +248,8 @@
       lib,
       next,
       to === 0
-        ? `${providerName(moved)} identifies ${lib.name} first.`
-        : `${lib.name} asks ${providerName(moved)} ${to + 1}${to === 1 ? 'nd' : to === 2 ? 'rd' : 'th'}.`,
+        ? t('component.libraries.providerFirst', { provider: providerName(moved), library: lib.name })
+        : t('component.libraries.providerPosition', { library: lib.name, provider: providerName(moved), position: to + 1 }),
     );
   }
 
@@ -247,13 +261,13 @@
     saveChain(
       lib,
       lib.providers.filter((p) => p !== id),
-      `${lib.name} no longer asks ${providerName(id)}.`,
+      t('component.libraries.providerRemoved', { library: lib.name, provider: providerName(id) }),
     );
   }
 
   function addProvider(lib: Library, id: string) {
     if (id === '' || lib.providers.includes(id)) return;
-    saveChain(lib, [...lib.providers, id], `${lib.name} also asks ${providerName(id)}.`);
+    saveChain(lib, [...lib.providers, id], t('component.libraries.providerAdded', { library: lib.name, provider: providerName(id) }));
   }
 
   /** Providers eligible for this library's kind that its chain does not name yet. */
@@ -287,7 +301,7 @@
       nameDraft = lib.name;
       return;
     }
-    void patch({ name }, `Library renamed to ${name}.`, autosaveKey(lib, 'name'));
+    void patch({ name }, t('component.libraries.renamed', { library: name }), autosaveKey(lib, 'name'));
   }
 
   $effect(() => {
@@ -380,7 +394,7 @@
   async function setActive(lib: Library, next: boolean) {
     await patch(
       { active: next },
-      next ? `${lib.name} is active again.` : `${lib.name} is switched off.`,
+      next ? t('component.libraries.active', { library: lib.name }) : t('component.libraries.inactive', { library: lib.name }),
       autosaveKey(lib, 'active'),
     );
     await session.refresh();
@@ -392,8 +406,8 @@
       next,
       access ? grantedIDs(access) : [],
       next
-        ? `${lib.name} is limited to the accounts you name.`
-        : `${lib.name} is open to every account.`,
+        ? t('component.libraries.restricted', { library: lib.name })
+        : t('component.libraries.open', { library: lib.name }),
     );
   }
 
@@ -407,8 +421,8 @@
       current.restricted,
       ids,
       next
-        ? `${user.username} can see ${lib.name}.`
-        : `${user.username} can no longer see ${lib.name}.`,
+        ? t('component.libraries.memberGranted', { user: user.username, library: lib.name })
+        : t('component.libraries.memberRevoked', { user: user.username, library: lib.name }),
     );
   }
 
@@ -434,15 +448,15 @@
    * setting.
    */
   function routeLabel(value: string): string {
-    if (value === '' || value === ROUTE_EMBEDDED) return 'Built-in engine';
-    return clients.find((client) => String(client.id) === value)?.name ?? 'Unknown client';
+    if (value === '' || value === ROUTE_EMBEDDED) return t('component.libraries.builtInEngine');
+    return clients.find((client) => String(client.id) === value)?.name ?? t('component.libraries.unknownClient');
   }
 
   let globalTorrent = $derived(routeLabel(settings[SETTING_ROUTE_TORRENT] ?? ''));
   let globalUsenet = $derived(routeLabel(settings[SETTING_ROUTE_USENET] ?? ''));
 
   function profileName(id: number): string {
-    return profiles.find((profile) => profile.id === id)?.name ?? `profile ${id}`;
+    return profiles.find((profile) => profile.id === id)?.name ?? t('component.libraries.profileNumber', { id });
   }
 
   function autosaveKey(lib: Library, field: string): string {
@@ -466,8 +480,8 @@
     void patch(
       { quality_profile_id: value === '' ? 0 : Number(value) },
       value === ''
-        ? `${lib.name} follows the global default profile.`
-        : `${lib.name} defaults to ${profileName(Number(value))}.`,
+        ? t('component.libraries.globalProfile', { library: lib.name })
+        : t('component.libraries.profileChanged', { library: lib.name, profile: profileName(Number(value)) }),
       autosaveKey(lib, 'profile'),
     );
   }
@@ -480,8 +494,8 @@
       void patch(
         { route_torrent: value },
         value === ''
-          ? `${lib.name} follows the global torrent route.`
-          : `${lib.name} routes torrents to ${routeLabel(value)}.`,
+          ? t('component.libraries.globalTorrentRoute', { library: lib.name })
+          : t('component.libraries.torrentRoute', { library: lib.name, client: routeLabel(value) }),
         autosaveKey(lib, 'torrent-route'),
       );
       return;
@@ -490,8 +504,8 @@
     void patch(
       { route_usenet: value },
       value === ''
-        ? `${lib.name} follows the global usenet route.`
-        : `${lib.name} routes usenet to ${routeLabel(value)}.`,
+        ? t('component.libraries.globalUsenetRoute', { library: lib.name })
+        : t('component.libraries.usenetRoute', { library: lib.name, client: routeLabel(value) }),
       autosaveKey(lib, 'usenet-route'),
     );
   }
@@ -555,8 +569,8 @@
       next,
       row.categories_overridden ? row.categories : null,
       next
-        ? `${lib.name} searches ${row.name} again.`
-        : `${lib.name} no longer searches ${row.name}.`,
+        ? t('component.libraries.indexerEnabled', { library: lib.name, indexer: row.name })
+        : t('component.libraries.indexerDisabled', { library: lib.name, indexer: row.name }),
       autosaveKey(lib, `indexer-${row.indexer_id}`),
     );
   }
@@ -577,7 +591,7 @@
       row,
       row.enabled,
       editingCategories,
-      `Categories saved for ${row.name}.`,
+      t('component.libraries.categoriesSaved', { indexer: row.name }),
     );
     if (ok) editing = null;
   }
@@ -585,7 +599,7 @@
   async function clearCategories() {
     const row = editing;
     if (!row) return;
-    const ok = await writeIndexer(row, row.enabled, null, `${row.name} uses its own categories.`);
+    const ok = await writeIndexer(row, row.enabled, null, t('component.libraries.indexerCategories', { indexer: row.name }));
     if (ok) editing = null;
   }
 
@@ -638,7 +652,7 @@
       libraries = [...libraries, created];
       selectedID = created.id;
       adding = null;
-      pushToast(`Added the ${created.name} library.`, 'success');
+      pushToast(t('component.libraries.added', { library: created.name }), 'success');
     } catch (err) {
       pushToast(errorText(err), 'danger');
     } finally {
@@ -655,7 +669,7 @@
       libraries = libraries.filter((l) => l.id !== lib.id);
       selectedID = libraries[0]?.id ?? null;
       confirmingDelete = false;
-      pushToast(`Removed the ${lib.name} library.`, 'success');
+      pushToast(t('component.libraries.removed', { library: lib.name }), 'success');
     } catch (err) {
       pushToast(errorText(err), 'danger');
     } finally {
@@ -674,9 +688,10 @@
   let deleteBlocked = $derived.by(() => {
     const lib = selected;
     if (!lib) return null;
-    if (lib.is_default) return 'This is the default library for its kind. Make another library the default first.';
-    if (lib.item_count > 0)
-      return `The library still has ${lib.item_count} item${lib.item_count === 1 ? '' : 's'}. Move them to another library first.`;
+    if (lib.is_default) return t('component.libraries.defaultDeleteBlocked');
+    if (lib.item_count > 0) {
+      return tp('component.libraries.itemsDeleteBlocked', lib.item_count);
+    }
     return null;
   });
 
@@ -687,11 +702,14 @@
     try {
       await api.rescan();
       const summary = await api.awaitScan();
-      const message = `Scan finished: ${summary.media_files} files in the library, ${summary.unmatched} unmatched.`;
+      const message = t('component.libraries.scanFinished', {
+        files: summary.media_files,
+        unmatched: summary.unmatched,
+      });
       scanMessage = message;
       pushToast(message, summary.unmatched > 0 ? 'warning' : 'success');
     } catch (err) {
-      scanMessage = `Scan failed: ${errorText(err)}`;
+      scanMessage = t('component.libraries.scanFailed', { message: errorText(err) });
       pushToast(errorText(err), 'danger');
     } finally {
       scanning = false;
@@ -710,7 +728,7 @@
         : status === 'error'
           ? 'text-danger'
           : 'text-ink-muted'}">
-      {status === 'saving' ? 'Saving…' : status === 'saved' ? 'Saved' : 'Error'}
+      {t(status === 'saving' ? 'component.libraries.saving' : status === 'saved' ? 'component.libraries.saved' : 'component.libraries.error')}
     </span>
   {/if}
 {/snippet}
@@ -726,7 +744,7 @@
 {:else if selected}
   {@const lib = selected}
   <div class="flex flex-col gap-5">
-    <div class="flex flex-wrap items-center gap-2" role="group" aria-label="Library">
+    <div class="flex flex-wrap items-center gap-2" role="group" aria-label={t('component.libraries.library')}>
       {#each libraries as option (option.id)}
         {@const active = option.id === lib.id}
         <button
@@ -747,23 +765,23 @@
             size={14} />
           <span>{option.name}</span>
           {#if option.is_default}
-            <span class="micro-label" title="Default {option.kind} library">default</span>
+            <span class="micro-label" title={t('component.libraries.defaultKind', { kind: kindLabel(option.kind) })}>{t('component.libraries.default')}</span>
           {/if}
         </button>
       {/each}
       <Button variant="ghost" size="sm" onclick={openAddLibrary}>
         <Icon name="plus" size={14} />
-        Add library
+        {t('component.libraries.addLibrary')}
       </Button>
     </div>
 
     <SettingsCard
-      title="Library scan"
-      description="Find new media under the storage root and refresh the library counts.">
+      title={t('component.libraries.scanTitle')}
+      description={t('component.libraries.scanDescription')}>
       <div class="flex flex-wrap items-center gap-3">
         <Button variant="secondary" disabled={scanning} onclick={rescan}>
           <Icon name="refresh" size={14} />
-          {scanning ? 'Scanning…' : 'Rescan library'}
+          {scanning ? t('component.libraries.scanning') : t('component.libraries.rescan')}
         </Button>
         {#if scanMessage}
           <p class="text-sm text-ink-secondary" aria-live="polite">{scanMessage}</p>
@@ -773,10 +791,10 @@
 
     <SettingsCard
       title={lib.name}
-      description="Where this library lives, and what it grabs when an item names no profile of its own.">
+      description={t('component.libraries.detailsDescription')}>
       {#snippet action()}
         {#if !lib.active}
-          <Badge tone="warning">Inactive</Badge>
+          <Badge tone="warning">{t('component.libraries.inactiveBadge')}</Badge>
         {/if}
       {/snippet}
 
@@ -786,21 +804,19 @@
       <div class="flex flex-wrap items-center gap-3">
         <Toggle
           checked={lib.active}
-          label="Library active"
+          label={t('component.libraries.activeLabel')}
           disabled={busy}
           onchange={(next) => setActive(lib, next)} />
         {@render autosaveStatus(autosaveKey(lib, 'active'))}
       </div>
       <p class="text-sm text-ink-secondary">
-        Turning this off hides {lib.name} everywhere — the sidebar, Discover, requests, the calendar,
-        search and the DLNA tree — and stops its scans and automatic searches. It deletes nothing:
-        the items and the files stay exactly where they are, and turning it back on finds them.
+        {t('component.libraries.activeHelp', { library: lib.name })}
       </p>
 
       <Field
-        label="Name"
+        label={t('component.libraries.name')}
         for="library-name"
-        help="The label the pills and the add dialog show. Press Enter to save.">
+        help={t('component.libraries.nameHelp')}>
         {#snippet note()}
           {@render autosaveStatus(autosaveKey(lib, 'name'))}
         {/snippet}
@@ -813,9 +829,9 @@
       </Field>
 
       <Field
-        label="Root path"
+        label={t('component.libraries.rootPath')}
         for="library-root"
-        help="Relative to the storage root. Moving the whole library is Settings → Storage's job, so it is read-only here.">
+        help={t('component.libraries.rootPathHelp')}>
         <div title={lib.root_path}>
           <TextInput id="library-root" value={lib.root_path} readonly mono />
         </div>
@@ -826,12 +842,12 @@
            label pointing at an element that is not there names nothing. The
            list and the select carry their own accessible names instead. -->
       <Field
-        label="Metadata providers"
-        help="Asked in this order. The first that recognizes a title identifies it; the add dialog searches all of them.">
+        label={t('component.libraries.metadataProviders')}
+        help={t('component.libraries.metadataProvidersHelp')}>
         {#snippet note()}
           {@render autosaveStatus(autosaveKey(lib, 'provider'))}
         {/snippet}
-        <ol class="flex flex-col gap-2" aria-label="Provider chain for {lib.name}">
+        <ol class="flex flex-col gap-2" aria-label={t('component.libraries.providerChain', { library: lib.name })}>
           {#each lib.providers as id, index (id)}
             <li
               data-provider-row={id}
@@ -845,14 +861,14 @@
                 size="sm"
                 disabled={busy || index === 0}
                 onclick={() => moveProvider(lib, index, index - 1)}>
-                ↑<span class="sr-only">Move {providerName(id)} earlier</span>
+                ↑<span class="sr-only">{t('component.libraries.moveEarlier', { provider: providerName(id) })}</span>
               </Button>
               <Button
                 variant="ghost"
                 size="sm"
                 disabled={busy || index === lib.providers.length - 1}
                 onclick={() => moveProvider(lib, index, index + 1)}>
-                ↓<span class="sr-only">Move {providerName(id)} later</span>
+                ↓<span class="sr-only">{t('component.libraries.moveLater', { provider: providerName(id) })}</span>
               </Button>
               <!-- A library with an empty chain could identify nothing, so the
                    last provider is not removable. -->
@@ -861,7 +877,7 @@
                 size="sm"
                 disabled={busy || lib.providers.length <= 1}
                 onclick={() => removeProvider(lib, id)}>
-                Remove<span class="sr-only"> {providerName(id)} from the chain</span>
+                {t('component.libraries.remove')}<span class="sr-only"> {t('component.libraries.removeProvider', { provider: providerName(id) })}</span>
               </Button>
             </li>
           {/each}
@@ -870,7 +886,7 @@
           <select
             id="library-provider-add"
             value=""
-            aria-label="Add a provider to {lib.name}"
+            aria-label={t('component.libraries.addProviderTo', { library: lib.name })}
             disabled={busy}
             onchange={(event) => {
               addProvider(lib, event.currentTarget.value);
@@ -879,7 +895,7 @@
               event.currentTarget.value = '';
             }}
             class="{SELECT_CLASS} border-border-strong">
-            <option value="">Add provider…</option>
+            <option value="">{t('component.libraries.addProvider')}</option>
             {#each addableProviders(lib) as option (option.id)}
               <option value={option.id}>{option.name}</option>
             {/each}
@@ -889,7 +905,7 @@
 
       <div class="flex flex-wrap items-center gap-3">
         {#if lib.is_default}
-          <Badge tone="accent">Default {lib.kind} library</Badge>
+          <Badge tone="accent">{t('component.libraries.defaultKind', { kind: kindLabel(lib.kind) })}</Badge>
         {:else}
           <Button
             variant="secondary"
@@ -898,10 +914,10 @@
             onclick={() =>
               patch(
                 { is_default: true },
-                `${lib.name} is now the default ${lib.kind} library.`,
+                t('component.libraries.madeDefault', { library: lib.name, kind: kindLabel(lib.kind) }),
                 autosaveKey(lib, 'default'),
               )}>
-            Make default
+            {t('component.libraries.makeDefault')}
           </Button>
           {@render autosaveStatus(autosaveKey(lib, 'default'))}
         {/if}
@@ -912,7 +928,7 @@
             size="sm"
             disabled={busy || deleteBlocked !== null}
             onclick={() => (confirmingDelete = true)}>
-            Delete library
+            {t('component.libraries.deleteLibrary')}
           </Button>
         </div>
         {#if deleteBlocked}
@@ -921,9 +937,9 @@
       </div>
 
       <Field
-        label="Default quality profile"
+        label={t('component.libraries.defaultProfile')}
         for="library-profile"
-        help="Used for items in this library that name no profile. An item's own profile always wins.">
+        help={t('component.libraries.defaultProfileHelp')}>
         {#snippet note()}
           {@render autosaveStatus(autosaveKey(lib, 'profile'))}
         {/snippet}
@@ -933,7 +949,7 @@
           disabled={busy}
           onchange={(event) => saveProfile(event.currentTarget.value)}
           class="{SELECT_CLASS} {profileID === '' ? 'border-border-strong' : 'border-accent'}">
-          <option value="">Global default</option>
+          <option value="">{t('component.libraries.globalDefault')}</option>
           {#each profiles as profile (profile.id)}
             <option value={String(profile.id)}>{profile.name}</option>
           {/each}
@@ -941,10 +957,9 @@
       </Field>
 
       <p class="text-sm text-ink-secondary">
-        <a href="/settings/quality-profiles" class="text-accent-text hover:underline"
-          >Manage download profiles</a
-        >
-        to change the choices available here.
+        <LocalizedText
+          message="component.libraries.manageProfiles"
+          links={{ profilesLink: { href: '/settings/quality-profiles', label: 'component.libraries.manageProfilesLink' } }} />
       </p>
     </SettingsCard>
 
@@ -955,20 +970,18 @@
          BEFORE switching it back on is the order somebody would want. -->
     <div data-library-behaviour class="flex flex-col gap-5 {lib.active ? '' : 'opacity-60'}">
       <SettingsCard
-        title="Access"
-        description="Who reaches {lib.name}. Admins always do; every other account is one grant.">
+        title={t('component.libraries.accessTitle')}
+        description={t('component.libraries.accessDescription', { library: lib.name })}>
         <div class="flex flex-wrap items-center gap-3">
           <Toggle
             checked={lib.restricted}
-            label="Limit to named accounts"
+            label={t('component.libraries.limitAccounts')}
             disabled={busy || savingAccess}
             onchange={(next) => toggleRestricted(lib, next)} />
           {@render autosaveStatus(autosaveKey(lib, 'access'))}
         </div>
         <p class="text-sm text-ink-secondary">
-          While this is off, every account sees {lib.name}. Turning it on hides the library from
-          everyone but the admins and the accounts named below, and takes it off DLNA — that share
-          has no accounts to name, so it cannot express this at all.
+          {t('component.libraries.accessHelp', { library: lib.name })}
         </p>
 
         {#if lib.restricted}
@@ -983,8 +996,8 @@
           {:else if access.users.length === 0}
             <EmptyState
               icon="inbox"
-              title="No accounts yet"
-              message="This Caravan is open, so anyone who can reach it is an admin and already sees every library. Add accounts under Settings → Users to decide who does." />
+              title={t('component.libraries.noAccounts')}
+              message={t('component.libraries.noAccountsMessage')} />
           {:else}
             <ul class="flex flex-col gap-2">
               {#each access.users as user (user.id)}
@@ -997,7 +1010,7 @@
                         {user.username}
                       </span>
                       <Badge mono tone={user.role === 'admin' ? 'accent' : 'neutral'}>
-                        {user.role === 'admin' ? 'ADMIN' : 'MEMBER'}
+                        {t(user.role === 'admin' ? 'component.libraries.admin' : 'component.libraries.member')}
                       </Badge>
                     </p>
                   </div>
@@ -1005,13 +1018,13 @@
                     <!-- A checkbox that changes nothing is a lie about who can
                          see the shelf: an admin reaches it through the role. -->
                     {#if user.always_granted}
-                      <span class="text-sm text-ink-secondary">Always has access</span>
+                      <span class="text-sm text-ink-secondary">{t('component.libraries.alwaysAccess')}</span>
                     {:else}
                       <Toggle
                         checked={user.granted}
                         disabled={busy || savingAccess}
                         labelHidden
-                        label="{lib.name} for {user.username}"
+                        label={t('component.libraries.memberToggle', { library: lib.name, user: user.username })}
                         onchange={(next) => toggleMember(lib, user, next)} />
                     {/if}
                   </div>
@@ -1023,15 +1036,15 @@
       </SettingsCard>
 
       <SettingsCard
-        title="Indexers"
-        description="Which sources this library searches, and with which categories. A library can narrow an enabled indexer, but it cannot turn one back on.">
+        title={t('component.libraries.indexersTitle')}
+        description={t('component.libraries.indexersDescription')}>
         {#if lib.indexers.length === 0}
           <EmptyState
             icon="link"
-            title="No indexers yet"
-            message="Add a Torznab or Newznab source before assigning it to a library.">
+            title={t('component.libraries.noIndexers')}
+            message={t('component.libraries.noIndexersMessage')}>
             {#snippet action()}
-              <Button variant="secondary" href="/settings/indexers">Manage indexers</Button>
+              <Button variant="secondary" href="/settings/indexers">{t('component.libraries.manageIndexers')}</Button>
             {/snippet}
           </EmptyState>
         {:else}
@@ -1053,33 +1066,33 @@
                     <span class="truncate text-base font-medium text-ink" title={row.name}>{row.name}</span>
                     <Badge mono tone={row.type === 'torznab' ? 'accent' : 'info'}>{row.type}</Badge>
                     <Badge tone={row.indexer_enabled ? 'success' : 'neutral'}>
-                      {row.indexer_enabled ? 'Indexer enabled' : 'Indexer disabled'}
+                      {t(row.indexer_enabled ? 'component.libraries.indexerEnabledBadge' : 'component.libraries.indexerDisabledBadge')}
                     </Badge>
                     <Button
                       variant="secondary"
                       size="sm"
                       class="ml-auto"
                       onclick={() => openCategories(row)}>
-                      Edit categories
-                      <span class="sr-only"> for {row.name}</span>
+                      {t('component.libraries.editCategories')}
+                      <span class="sr-only"> {t('component.libraries.forIndexer', { indexer: row.name })}</span>
                     </Button>
                   </div>
 
                   <div class="flex flex-wrap items-start gap-2">
                     <div class="min-w-0 flex-1">
                       {#if row.categories.length === 0}
-                        <Badge mono tone="warning">every category</Badge>
+                        <Badge mono tone="warning">{t('component.libraries.everyCategory')}</Badge>
                       {:else if categoryState?.tree !== null && categoryState !== undefined}
                         <CategorySummary
                           tree={categoryState.tree}
                           selected={row.categories}
-                          label="Categories for {row.name}"
+                          label={t('component.libraries.categoriesFor', { indexer: row.name })}
                           tone={row.categories_overridden ? 'accent' : 'neutral'} />
                       {:else}
                         <span class="text-sm text-ink-muted">
-                          {categoryState?.loading
-                            ? 'Loading category names…'
-                            : 'Category names unavailable'}
+                          {t(categoryState?.loading
+                            ? 'component.libraries.loadingCategoryNames'
+                            : 'component.libraries.categoryNamesUnavailable')}
                         </span>
                       {/if}
                     </div>
@@ -1089,14 +1102,12 @@
                        that conflates them sends the user to the wrong screen. -->
                   {#if !row.indexer_enabled}
                     <p class="text-sm text-ink-muted">
-                      This indexer is disabled globally. <a
-                        href="/settings/indexers"
-                        class="text-accent-text hover:underline">Open Indexers</a
-                      >
-                      to enable it.
+                      <LocalizedText
+                        message="component.libraries.globallyDisabled"
+                        links={{ indexersLink: { href: '/settings/indexers', label: 'component.libraries.globallyDisabledLink' } }} />
                     </p>
                   {:else if !row.enabled}
-                    <p class="text-sm text-ink-muted">Not searched for this library.</p>
+                    <p class="text-sm text-ink-muted">{t('component.libraries.notSearched')}</p>
                   {/if}
                 </div>
 
@@ -1105,7 +1116,7 @@
                   <Toggle
                     checked={row.enabled}
                     labelHidden
-                    label="Search {row.name} for {lib.name}"
+                    label={t('component.libraries.searchIndexer', { indexer: row.name, library: lib.name })}
                     disabled={busy}
                     onchange={(next) => toggleIndexer(lib, row, next)} />
                 </div>
@@ -1116,21 +1127,20 @@
       </SettingsCard>
 
       <SettingsCard
-        title="Downloads"
-        description="Where this library's grabs land. A blank route follows the global default.">
+        title={t('component.libraries.downloadsTitle')}
+        description={t('component.libraries.downloadsDescription')}>
         <p class="text-sm text-ink-secondary">
-          <a href="/settings/downloads" class="text-accent-text hover:underline"
-            >Configure global download routing</a
-          >
-          for every library.
+          <LocalizedText
+            message="component.libraries.configureRouting"
+            links={{ downloadsLink: { href: '/settings/downloads', label: 'component.libraries.configureRoutingLink' } }} />
         </p>
         <Field
-          label="Torrent route"
+          label={t('component.libraries.torrentRouteLabel')}
           for="library-route-torrent"
-          help="Torznab results for this library go here.">
+          help={t('component.libraries.torrentRouteHelp')}>
           {#snippet note()}
             <span class="micro-label {routeTorrent === '' ? '' : 'text-accent-text'}">
-              {routeTorrent === '' ? 'Global default' : 'Override'}
+              {t(routeTorrent === '' ? 'component.libraries.globalDefault' : 'component.libraries.override')}
             </span>
           {/snippet}
           <select
@@ -1139,8 +1149,8 @@
             disabled={busy}
             onchange={(event) => saveRoute('torrent', event.currentTarget.value)}
             class="{SELECT_CLASS} {routeTorrent === '' ? 'border-border-strong' : 'border-accent'}">
-            <option value="">Global default — {globalTorrent}</option>
-            <option value={ROUTE_EMBEDDED}>Built-in engine</option>
+            <option value="">{t('component.libraries.globalDefaultValue', { value: globalTorrent })}</option>
+            <option value={ROUTE_EMBEDDED}>{t('component.libraries.builtInEngine')}</option>
             {#each torrentClients as client (client.id)}
               <option value={String(client.id)}>{client.name}</option>
             {/each}
@@ -1149,12 +1159,12 @@
         </Field>
 
         <Field
-          label="Usenet route"
+          label={t('component.libraries.usenetRouteLabel')}
           for="library-route-usenet"
-          help="Newznab results for this library go here. The built-in engine has no override of its own — it is what clearing this falls back to.">
+          help={t('component.libraries.usenetRouteHelp')}>
           {#snippet note()}
             <span class="micro-label {routeUsenet === '' ? '' : 'text-accent-text'}">
-              {routeUsenet === '' ? 'Global default' : 'Override'}
+              {t(routeUsenet === '' ? 'component.libraries.globalDefault' : 'component.libraries.override')}
             </span>
           {/snippet}
           <select
@@ -1163,7 +1173,7 @@
             disabled={busy}
             onchange={(event) => saveRoute('usenet', event.currentTarget.value)}
             class="{SELECT_CLASS} {routeUsenet === '' ? 'border-border-strong' : 'border-accent'}">
-            <option value="">Global default — {globalUsenet}</option>
+            <option value="">{t('component.libraries.globalDefaultValue', { value: globalUsenet })}</option>
             {#each usenetClients as client (client.id)}
               <option value={String(client.id)}>{client.name}</option>
             {/each}
@@ -1172,25 +1182,24 @@
         </Field>
       </SettingsCard>
 
-      <SettingsCard title="Reach" description="Where this library shows up outside Caravan.">
+      <SettingsCard title={t('component.libraries.reachTitle')} description={t('component.libraries.reachDescription')}>
         <div class="flex flex-wrap items-center gap-3">
           <Toggle
             checked={lib.dlna_visible}
-            label="Share over DLNA"
+            label={t('component.libraries.shareDlna')}
             disabled={busy}
             onchange={(next) =>
               patch(
                 { dlna_visible: next },
-                next ? `${lib.name} is shared over DLNA.` : `${lib.name} is hidden from DLNA.`,
+                next ? t('component.libraries.dlnaShared', { library: lib.name }) : t('component.libraries.dlnaHidden', { library: lib.name }),
                 autosaveKey(lib, 'dlna'),
               )} />
           {@render autosaveStatus(autosaveKey(lib, 'dlna'))}
         </div>
         <p class="text-sm text-ink-secondary">
-          Hiding a library drops its container from the DLNA tree; TVs pick the change up on their
-          next browse rather than needing a restart. DLNA has no accounts, so anything shared here is
-          open to everyone on the network. Configure screen compatibility and other destinations in
-          <a href="/settings/playback" class="text-accent-text hover:underline">Playback</a>.
+          <LocalizedText
+            message="component.libraries.dlnaHelp"
+            links={{ playbackLink: { href: '/settings/playback', label: 'component.libraries.dlnaHelpLink' } }} />
         </p>
 
         <!-- Restricting a library clears this share, so the two can only be
@@ -1201,15 +1210,13 @@
           <Banner
             tone="warning"
             icon="warning"
-            title="{lib.name} is on the network"
-            message="This library is limited to named accounts, and it is also shared over DLNA. DLNA has no accounts — every device on this network can browse it. Turn the share off above if that is not what you meant." />
+            title={t('component.libraries.networkWarningTitle', { library: lib.name })}
+            message={t('component.libraries.networkWarningMessage')} />
         {/if}
 
         {#if lib.kind === 'adult'}
           <p class="text-sm text-ink-secondary">
-            <code class="font-mono text-sm">caravan prepare</code> leaves adult libraries out of a
-            prepared drive. Passing <code class="font-mono text-sm">--include-adult</code> is the
-            only way {lib.name} goes along.
+            {t('component.libraries.adultDrive', { library: lib.name })}
           </p>
         {/if}
       </SettingsCard>
@@ -1220,10 +1227,10 @@
 {#if editing}
   {@const row = editing}
   {@const categoryState = categoryTrees.get(row.indexer_id)}
-  <Modal title="Categories: {row.name}" width="max-w-xl" onclose={() => (editing = null)}>
+  <Modal title={t('component.libraries.categoriesTitle', { indexer: row.name })} width="max-w-xl" onclose={() => (editing = null)}>
     <div class="flex flex-col gap-4 p-4">
       <p class="text-sm text-ink-secondary">
-        Choose the categories this library searches. Nothing selected searches every category.
+        {t('component.libraries.categoriesHelp')}
       </p>
 
       {#if categoryState?.tree !== null && categoryState !== undefined}
@@ -1232,10 +1239,10 @@
           selected={editingCategories}
           onchange={(ids) => (editingCategories = ids)} />
         {#if categoryState.tree.length === 0}
-          <p class="text-sm text-ink-muted">This indexer does not advertise any categories.</p>
+          <p class="text-sm text-ink-muted">{t('component.libraries.noAdvertisedCategories')}</p>
         {/if}
       {:else if categoryState?.loading}
-        <p class="py-6 text-center text-sm text-ink-secondary">Loading categories…</p>
+        <p class="py-6 text-center text-sm text-ink-secondary">{t('component.libraries.loadingCategories')}</p>
       {/if}
 
       {#if categoryState?.error}
@@ -1249,25 +1256,25 @@
           disabled={categoryState?.loading}
           onclick={() => loadCategoryTree(row.indexer_id)}>
           <Icon name="refresh" size={14} />
-          {categoryState?.loading
-            ? 'Loading…'
+          {t(categoryState?.loading
+            ? 'component.libraries.loading'
             : categoryState?.tree
-              ? 'Reload from indexer'
-              : 'Load from indexer'}
+              ? 'component.libraries.reloadFromIndexer'
+              : 'component.libraries.loadFromIndexer')}
         </Button>
       </div>
 
       <div class="flex flex-col gap-2 text-sm text-ink-secondary">
-        <span>The indexer's default:</span>
+        <span>{t('component.libraries.indexerDefault')}</span>
         {#if row.default_categories.length === 0}
-          <Badge tone="warning" class="self-start">every category</Badge>
+          <Badge tone="warning" class="self-start">{t('component.libraries.everyCategory')}</Badge>
         {:else if categoryState?.tree !== null && categoryState !== undefined}
           <CategorySummary
             tree={categoryState.tree}
             selected={row.default_categories}
-            label="Default categories for {row.name}" />
+            label={t('component.libraries.defaultCategoriesFor', { indexer: row.name })} />
         {:else}
-          <span>{row.default_categories.length} categories</span>
+          <span>{tp('component.libraries.categoryCount', row.default_categories.length)}</span>
         {/if}
       </div>
     </div>
@@ -1275,16 +1282,16 @@
     {#snippet footer()}
       <div class="flex w-full flex-wrap items-center justify-end gap-2">
         {#if row.categories_overridden}
-          <Button variant="ghost" disabled={busy} onclick={clearCategories}>Use indexer defaults</Button>
+          <Button variant="ghost" disabled={busy} onclick={clearCategories}>{t('component.libraries.useIndexerDefaults')}</Button>
           <span class="mx-1 hidden h-5 w-px shrink-0 bg-border sm:block"></span>
         {/if}
-        <Button variant="ghost" disabled={busy} onclick={() => (editing = null)}>Cancel</Button>
+        <Button variant="ghost" disabled={busy} onclick={() => (editing = null)}>{t('component.libraries.cancel')}</Button>
         <Button
           variant="primary"
           disabled={busy || categoryState === undefined || categoryState.tree === null}
           onclick={saveCategories}>
           <Icon name="check" size={14} />
-          Save
+          {t('component.libraries.save')}
         </Button>
       </div>
     {/snippet}
@@ -1293,40 +1300,40 @@
 
 {#if adding}
   {@const draft = adding}
-  <Modal title="Add library" width="max-w-lg" onclose={() => (adding = null)}>
+  <Modal title={t('component.libraries.addLibrary')} width="max-w-lg" onclose={() => (adding = null)}>
     <div class="flex flex-col gap-4 p-4">
-      <Field label="Kind" for="new-library-kind" help="What the library holds. This cannot change later.">
+      <Field label={t('component.libraries.kind')} for="new-library-kind" help={t('component.libraries.kindHelp')}>
         <select
           id="new-library-kind"
           value={draft.kind}
           onchange={(event) => stageKind(event.currentTarget.value as LibraryKind)}
           class="{SELECT_CLASS} border-border-strong">
           {#each creatableKinds as k (k)}
-            <option value={k}>{k === 'movie' ? 'Movies' : k === 'tv' ? 'Series' : 'Adult'}</option>
+            <option value={k}>{kindLabel(k)}</option>
           {/each}
         </select>
       </Field>
 
-      <Field label="Name" for="new-library-name" help="The label the app shows for this library.">
+      <Field label={t('component.libraries.name')} for="new-library-name" help={t('component.libraries.newNameHelp')}>
         <TextInput
           id="new-library-name"
           value={draft.name}
-          placeholder="Anime"
+          placeholder={t('component.libraries.namePlaceholder')}
           oninput={(event) => stageName((event.currentTarget as HTMLInputElement).value)} />
       </Field>
 
       <Field
-        label="Root path"
+        label={t('component.libraries.rootPath')}
         for="new-library-root"
-        help="Relative to the storage root, under library/. Created on the first import.">
-        <TextInput id="new-library-root" bind:value={draft.root} mono placeholder="library/Anime" />
+        help={t('component.libraries.newRootHelp')}>
+        <TextInput id="new-library-root" bind:value={draft.root} mono placeholder={t('component.libraries.rootPlaceholder')} />
       </Field>
 
       {#if providersFor(draft.kind).length > 1}
         <Field
-          label="Metadata provider"
+          label={t('component.libraries.metadataProvider')}
           for="new-library-provider"
-          help="Which provider identifies this library's items. Add more, and reorder them, from the library's own card afterwards.">
+          help={t('component.libraries.metadataProviderHelp')}>
           <select
             id="new-library-provider"
             value={draft.providers[0] ?? ''}
@@ -1347,34 +1354,33 @@
         <Banner
           tone="warning"
           icon="warning"
-          title="No stash-box endpoint yet"
-          message="Adult libraries get their sites and scenes from a stash-box endpoint. Add one under Settings → Metadata — scans wait until one answers.">
+          title={t('component.libraries.noStashBox')}
+          message={t('component.libraries.noStashBoxMessage')}>
           {#snippet action()}
             <a href="/settings/metadata" class="text-sm text-accent-text hover:underline">
-              Metadata
+              {t('component.libraries.metadata')}
             </a>
           {/snippet}
         </Banner>
       {/if}
 
-      <p class="text-sm text-ink-secondary">
-        New libraries start hidden from DLNA; share them from the library's Reach card.
+      <div class="flex flex-col gap-1 text-sm text-ink-secondary">
+        <p>{t('component.libraries.newLibraryDlna')}</p>
         {#if draft.kind === 'adult'}
-          An adult library also starts limited to the admins — name who else reaches it on its
-          Access card.
+          <p>{t('component.libraries.newAdultAccess')}</p>
         {/if}
-      </p>
+      </div>
     </div>
 
     {#snippet footer()}
       <div class="flex w-full flex-wrap items-center justify-end gap-2">
-        <Button variant="ghost" disabled={busy} onclick={() => (adding = null)}>Cancel</Button>
+        <Button variant="ghost" disabled={busy} onclick={() => (adding = null)}>{t('component.libraries.cancel')}</Button>
         <Button
           variant="primary"
           disabled={busy || draft.name.trim() === '' || draft.root.trim() === ''}
           onclick={createLibrary}>
           <Icon name="check" size={14} />
-          Add library
+          {t('component.libraries.addLibrary')}
         </Button>
       </div>
     {/snippet}
@@ -1383,19 +1389,18 @@
 
 {#if confirmingDelete && selected}
   {@const lib = selected}
-  <Modal title="Delete {lib.name}?" width="max-w-md" onclose={() => (confirmingDelete = false)}>
+  <Modal title={t('component.libraries.deleteTitle', { library: lib.name })} width="max-w-md" onclose={() => (confirmingDelete = false)}>
     <div class="flex flex-col gap-2 p-4">
       <p class="text-md text-ink">
-        The library is empty, so no files are touched. The row and its per-library settings are
-        removed; the folder on disk, if it exists, stays where it is.
+        {t('component.libraries.deleteMessage')}
       </p>
     </div>
     {#snippet footer()}
       <div class="flex w-full flex-wrap items-center justify-end gap-2">
         <Button variant="ghost" disabled={busy} onclick={() => (confirmingDelete = false)}>
-          Cancel
+          {t('component.libraries.cancel')}
         </Button>
-        <Button variant="danger" disabled={busy} onclick={deleteLibrary}>Delete library</Button>
+        <Button variant="danger" disabled={busy} onclick={deleteLibrary}>{t('component.libraries.deleteLibrary')}</Button>
       </div>
     {/snippet}
   </Modal>

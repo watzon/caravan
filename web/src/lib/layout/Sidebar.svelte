@@ -17,8 +17,10 @@
   import {
     SETTINGS_CATALOG,
     SETTINGS_CATEGORIES,
+    settingsCategoryLabel,
     settingsEntryForSection,
     settingsHref,
+    settingsLabel,
   } from '../settings/catalog';
   import { auth } from '../state/auth.svelte';
   import { session } from '../state/session.svelte';
@@ -36,6 +38,7 @@
   import Skeleton from '../components/Skeleton.svelte';
   import type { Tone } from '../status';
   import { TONE_DOT } from '../status';
+  import { useI18n, type TranslationKey } from '../i18n.svelte';
 
   interface Props {
     open: boolean;
@@ -45,6 +48,8 @@
   }
 
   let { open, onclose, settingsSection = undefined }: Props = $props();
+
+  const { t, tp } = useI18n();
 
   let narrow = $state(false);
   let closeButton = $state<HTMLButtonElement | undefined>(undefined);
@@ -72,7 +77,7 @@
 
   interface NavItem {
     href: string;
-    label: string;
+    label: TranslationKey;
     icon: IconName;
     /** Extra paths that also light this row up — Discover also owns `/`. */
     alsoActiveOn?: string[];
@@ -85,37 +90,37 @@
   }
 
   const EXPLORE: NavItem[] = [
-    { href: '/discover', label: 'Discover', icon: 'compass', alsoActiveOn: ['/'] },
-    { href: '/requests', label: 'Requests', icon: 'inbox' },
+    { href: '/discover', label: 'app.title.discover', icon: 'compass', alsoActiveOn: ['/'] },
+    { href: '/requests', label: 'app.title.requests', icon: 'inbox' },
   ];
 
   const LIBRARY: NavItem[] = [
-    { href: '/movies', label: 'Movies', icon: 'film' },
-    { href: '/series', label: 'Series', icon: 'tv' },
+    { href: '/movies', label: 'app.title.movies', icon: 'film' },
+    { href: '/series', label: 'app.title.series', icon: 'tv' },
     // Between Series and Wanted (the Paper design). It is a shelf, so it sits
     // with the shelves rather than in Explore, even for the granted member
     // whose Library group holds nothing else.
-    { href: '/adult', label: 'Adult', icon: 'flame', adult: true },
+    { href: '/adult', label: 'app.title.adult', icon: 'flame', adult: true },
     // Not the search icon any more: that belongs to the Activity group's
     // Search row, and two nav rows wearing one glyph is two rows you cannot
-    // tell apart at a glance. A bookmark is what Wanted is — a list of titles
+    // tell apart at a glance. A bookmark is what Wanted is: a list of titles
     // set aside to be found later.
-    { href: '/wanted', label: 'Wanted', icon: 'bookmark' },
-    { href: '/calendar', label: 'Calendar', icon: 'inbox' },
+    { href: '/wanted', label: 'app.title.wanted', icon: 'bookmark' },
+    { href: '/calendar', label: 'app.title.calendar', icon: 'inbox' },
   ];
 
   const ACTIVITY: NavItem[] = [
     // First: it is where a download starts. Queue, Convert and History are all
     // about a download that already exists.
-    { href: '/search', label: 'Search', icon: 'search' },
-    { href: '/queue', label: 'Queue', icon: 'download' },
-    { href: '/convert', label: 'Convert', icon: 'refresh' },
-    { href: '/history', label: 'History', icon: 'pulse' },
+    { href: '/search', label: 'app.title.search', icon: 'search' },
+    { href: '/queue', label: 'app.title.queue', icon: 'download' },
+    { href: '/convert', label: 'app.title.convert', icon: 'refresh' },
+    { href: '/history', label: 'app.title.history', icon: 'pulse' },
   ];
 
   const MANAGE: NavItem[] = [
-    { href: '/scan-review', label: 'Scan Review', icon: 'inbox' },
-    { href: '/settings', label: 'Settings', icon: 'settings' },
+    { href: '/scan-review', label: 'app.title.scanReview', icon: 'inbox' },
+    { href: '/settings', label: 'app.title.settings', icon: 'settings' },
   ];
 
   const SETTINGS_GROUPS = SETTINGS_CATEGORIES.map((category) => ({
@@ -171,47 +176,49 @@
       case '/requests': {
         const count = requests.pendingCount;
         return count
-          ? { count, tone: 'warning', title: `${count} pending ${count === 1 ? 'request' : 'requests'}` }
+          ? { count, tone: 'warning', title: tp('sidebar.badge.pendingRequest', count) }
           : null;
       }
       case '/movies': {
         const count = counts?.movies ?? 0;
         return count
-          ? { count, tone: 'neutral', title: `${count} ${count === 1 ? 'movie' : 'movies'} in library` }
+          ? { count, tone: 'neutral', title: tp('sidebar.badge.movie', count) }
           : null;
       }
       case '/series': {
         const count = counts?.series ?? 0;
-        return count ? { count, tone: 'neutral', title: `${count} series in library` } : null;
+        return count
+          ? { count, tone: 'neutral', title: tp('sidebar.badge.series', count) }
+          : null;
       }
       case '/adult': {
         const count = counts?.sites ?? 0;
         return count
-          ? { count, tone: 'neutral', title: `${count} adult ${count === 1 ? 'site' : 'sites'} in library` }
+          ? { count, tone: 'neutral', title: tp('sidebar.badge.adultSite', count) }
           : null;
       }
       case '/wanted': {
         const count = counts?.wanted ?? 0;
         return count
-          ? { count, tone: 'warning', title: `${count} movies and episodes waiting` }
+          ? { count, tone: 'warning', title: t('sidebar.badge.wanted', { count }) }
           : null;
       }
       case '/queue': {
         const count = downloads.activeCount;
         return count
-          ? { count, tone: 'accent', title: `${count} active ${count === 1 ? 'download' : 'downloads'}` }
+          ? { count, tone: 'accent', title: tp('sidebar.badge.download', count) }
           : null;
       }
       case '/convert': {
         const count = counts?.converting ?? 0;
         return count
-          ? { count, tone: 'neutral', title: `${count} open ${count === 1 ? 'conversion' : 'conversions'}` }
+          ? { count, tone: 'neutral', title: tp('sidebar.badge.conversion', count) }
           : null;
       }
       case '/scan-review': {
         const count = counts?.unmatched ?? 0;
         return count
-          ? { count, tone: 'warning', title: `${count} unmatched media ${count === 1 ? 'file' : 'files'}` }
+          ? { count, tone: 'warning', title: tp('sidebar.badge.unmatchedFile', count) }
           : null;
       }
       default:
@@ -235,15 +242,15 @@
   });
 
   let health = $derived.by((): { tone: Tone; label: string } => {
-    if (system.error) return { tone: 'danger', label: 'Server unreachable' };
+    if (system.error) return { tone: 'danger', label: t('sidebar.health.serverUnreachable') };
     const s = status;
-    if (!s) return { tone: 'neutral', label: 'Checking…' };
-    if (s.dirty) return { tone: 'danger', label: 'Dirty shutdown' };
-    if (s.engine_health === 'ok') return { tone: 'success', label: 'All systems healthy' };
-    if (s.engine_health === 'degraded') return { tone: 'warning', label: 'Engine degraded' };
-    if (s.engine_health === 'error') return { tone: 'danger', label: 'Engine error' };
-    // "unconfigured": no storage root yet, so no engine — a setup state, not a failure.
-    return { tone: 'neutral', label: 'Not set up' };
+    if (!s) return { tone: 'neutral', label: t('sidebar.health.checking') };
+    if (s.dirty) return { tone: 'danger', label: t('sidebar.health.dirtyShutdown') };
+    if (s.engine_health === 'ok') return { tone: 'success', label: t('sidebar.health.ready') };
+    if (s.engine_health === 'degraded') return { tone: 'warning', label: t('sidebar.health.engineDegraded') };
+    if (s.engine_health === 'error') return { tone: 'danger', label: t('sidebar.health.engineError') };
+    // "unconfigured": no storage root yet, so no engine. This is a setup state.
+    return { tone: 'neutral', label: t('sidebar.health.notSetUp') };
   });
 
   /**
@@ -277,7 +284,11 @@
       }))
       .filter((row): row is typeof row & { label: string } => row.label !== null),
   );
-  let signOutLabel = $derived(auth.busy ? 'Signing out…' : `Sign out ${session.username}`);
+  let signOutLabel = $derived(
+    auth.busy
+      ? t('sidebar.signOut.busy')
+      : t('sidebar.signOut.user', { username: session.username }),
+  );
 
   let settingsMode = $derived(settingsSection !== undefined);
   let activeSettingsEntry = $derived(
@@ -301,13 +312,13 @@
   id="primary-navigation-drawer"
   data-sidebar-mode={settingsMode ? 'settings' : 'primary'}
   class="fixed inset-y-0 left-0 z-50 flex w-60 shrink-0 {open ? 'translate-x-0' : '-translate-x-full'} flex-col border-r border-border bg-surface transition-transform duration-150 ease-out md:static md:z-auto md:translate-x-0 md:transition-none"
-  aria-label={settingsMode ? 'Settings navigation' : 'Primary navigation'}
+  aria-label={settingsMode ? t('sidebar.aria.settingsNavigation') : t('sidebar.aria.primaryNavigation')}
   aria-hidden={narrow && !open ? 'true' : undefined}
   inert={narrow && !open}>
   <button
     type="button"
     class="absolute right-3 top-4 flex size-9 items-center justify-center rounded-md text-ink-secondary transition-colors duration-150 ease-out hover:bg-raised hover:text-ink md:hidden"
-    aria-label="Close navigation"
+    aria-label={t('sidebar.aria.closeNavigation')}
     onclick={onclose}
     bind:this={closeButton}>
     <Icon name="close" size={18} />
@@ -347,7 +358,7 @@
           : 'border-l-transparent text-ink-secondary hover:bg-raised hover:text-ink'}"
         onclick={closeForNavigation}>
         <Icon name={item.icon} />
-        <span class="flex-1">{item.label}</span>
+        <span class="flex-1">{t(item.label)}</span>
         {#if badge}
           <Badge tone={badge.tone} title={badge.title} class="tabular-nums">
             {badge.count}
@@ -364,7 +375,7 @@
           class="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-ink-secondary transition-colors duration-150 ease-out hover:bg-raised hover:text-ink"
           onclick={closeForNavigation}>
           <Icon name="back" size={16} />
-          <span>Back to Caravan</span>
+          <span>{t('sidebar.settings.back')}</span>
         </a>
 
         <a
@@ -377,7 +388,7 @@
             : 'border-l-transparent text-ink-secondary hover:bg-raised hover:text-ink'}"
           onclick={closeForNavigation}>
           <Icon name="settings" />
-          <span>Overview</span>
+          <span>{t('sidebar.settings.overview')}</span>
         </a>
 
         {#each SETTINGS_GROUPS as group (group.category)}
@@ -387,7 +398,7 @@
             data-category-active={categoryActive || undefined}
             class="flex flex-col gap-1">
             <p class="micro-label px-2 pb-1 {categoryActive ? 'text-accent-text' : ''}">
-              {group.category}
+              {settingsCategoryLabel(group.category, t)}
             </p>
             {#each group.items as item (item.route)}
               {@const active = activeSettingsEntry?.route === item.route}
@@ -399,7 +410,7 @@
                   ? 'border-l-accent bg-accent-tint font-medium text-accent-text'
                   : 'border-l-transparent text-ink-secondary hover:bg-raised hover:text-ink'}"
                 onclick={closeForNavigation}>
-                {item.label}
+                {settingsLabel(item, t)}
               </a>
             {/each}
           </div>
@@ -407,7 +418,7 @@
       </div>
     {:else}
       <div class="flex flex-col gap-1">
-        <p class="micro-label px-2 pb-1">Explore</p>
+        <p class="micro-label px-2 pb-1">{t('sidebar.group.explore')}</p>
         {#each EXPLORE as item (item.href)}
           {@render navLink(item)}
         {/each}
@@ -415,7 +426,7 @@
 
       {#if libraryItems.length > 0}
         <div class="flex flex-col gap-1">
-          <p class="micro-label px-2 pb-1">Library</p>
+          <p class="micro-label px-2 pb-1">{t('sidebar.group.library')}</p>
           {#each libraryItems as item (item.href)}
             {@render navLink(item)}
           {/each}
@@ -424,14 +435,14 @@
 
       {#if session.isAdmin}
         <div class="flex flex-col gap-1">
-          <p class="micro-label px-2 pb-1">Activity</p>
+          <p class="micro-label px-2 pb-1">{t('sidebar.group.activity')}</p>
           {#each ACTIVITY as item (item.href)}
             {@render navLink(item)}
           {/each}
         </div>
 
         <div class="flex flex-col gap-1">
-          <p class="micro-label px-2 pb-1">Manage</p>
+          <p class="micro-label px-2 pb-1">{t('sidebar.group.manage')}</p>
           {#each MANAGE as item (item.href)}
             {@render navLink(item)}
           {/each}
@@ -472,10 +483,10 @@
         <span
           class="min-w-0 truncate font-mono text-xs text-ink-muted"
           title={status?.storage_root}>
-          {status?.storage_root || 'no storage root'}
+          {status?.storage_root || t('sidebar.storage.noRoot')}
         </span>
         <div class="flex items-baseline justify-between gap-2 text-xs">
-          <span class="text-ink-secondary">Disk</span>
+          <span class="text-ink-secondary">{t('sidebar.storage.disk')}</span>
           <!-- The free number is the one a reader acts on (DESIGN.md §5), so
                it gets the line to itself: one nowrap value, never a wrapped
                pair with a dangling "free". The full breakdown moves to the
@@ -483,15 +494,20 @@
           <span
             class="whitespace-nowrap font-mono text-ink"
             title={diskUsage
-              ? `${formatBytes(diskUsage.used)} used of ${formatBytes(diskUsage.used + diskUsage.free)}`
+              ? t('sidebar.storage.usedOf', {
+                  used: formatBytes(diskUsage.used),
+                  total: formatBytes(diskUsage.used + diskUsage.free),
+                })
               : undefined}>
-            {diskUsage ? `${formatBytes(diskUsage.free)} free` : 'Unknown'}
+            {diskUsage
+              ? t('sidebar.storage.free', { free: formatBytes(diskUsage.free) })
+              : t('sidebar.storage.unknown')}
           </span>
         </div>
         <ProgressBar
           value={usedFraction}
           tone={usedFraction > 0.9 ? 'danger' : usedFraction > 0.75 ? 'warning' : 'accent'}
-          label="Disk used" />
+          label={t('sidebar.storage.diskUsed')} />
       </div>
 
       <!-- Portable mode only: a drive that gets unplugged needs a way to be

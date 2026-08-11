@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { useI18n } from '../i18n.svelte';
   /**
    * The ⋯ menu at the end of a detail page's action row: the actions that are
    * real but rare, kept out of the row where a red trash button used to sit one
@@ -150,6 +151,8 @@
       window.removeEventListener('scroll', dismissOnScroll, true);
     };
   });
+
+  const { t, tp } = useI18n();
 </script>
 
 <svelte:window
@@ -164,8 +167,8 @@
     aria-haspopup="menu"
     aria-expanded={open}
     aria-controls={menuID}
-    aria-label="More actions for {subject}"
-    title="More actions for {subject}"
+    aria-label={t('component.overflowMenu.moreActionsFor', { subject })}
+    title={t('component.overflowMenu.moreActionsFor', { subject })}
     onkeydown={ontriggerkeydown}
     onclick={toggle}
     class="inline-flex size-8 shrink-0 items-center justify-center rounded-md border
@@ -181,7 +184,7 @@
       bind:this={menu}
       role="menu"
       tabindex="-1"
-      aria-label="More actions for {subject}"
+      aria-label={t('component.overflowMenu.moreActionsFor', { subject })}
       onkeydown={onmenukeydown}
       class="fixed z-30 min-w-44 max-w-[calc(100vw-2rem)] overflow-hidden rounded-lg border
              border-border-strong bg-overlay py-1 shadow-2xl"

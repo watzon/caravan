@@ -12,6 +12,7 @@
 
 import type { TVCompatibility } from './api/types';
 import type { Tone } from './status';
+import { translate } from './i18n.svelte';
 
 /** One compatibility badge, shaped like the picker's other flag badges. */
 export interface CompatBadge {
@@ -38,16 +39,16 @@ export function compatBadge(compat: TVCompatibility | undefined | null): CompatB
     case 'incompatible':
       return {
         key: 'tv-incompatible',
-        label: 'NEEDS CONVERT',
+        label: translate('tvCompatibility.badge'),
         tone: 'warning',
-        title: `Will not play natively on your TV profile — the video or audio has to be re-encoded.${reasons}`,
+        title: translate('tvCompatibility.incompatible', { reasons }),
       };
     case 'needs-remux':
       return {
         key: 'tv-remux',
-        label: 'NEEDS CONVERT',
+        label: translate('tvCompatibility.badge'),
         tone: 'warning',
-        title: `The streams are fine; only the container needs conversion, so no re-encoding is required.${reasons}`,
+        title: translate('tvCompatibility.remux', { reasons }),
       };
     default:
       return null;

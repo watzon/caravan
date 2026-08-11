@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { useI18n } from '../i18n.svelte';
   /**
    * Settings → Downloads → Remote path mappings.
    *
@@ -47,8 +48,8 @@
   }
 
   function validationIssue(): string | null {
-    if (!remotePath.trim()) return 'Remote path is required.';
-    if (!localPath.trim()) return 'Local path is required.';
+    if (!remotePath.trim()) return t('component.remotePathMappings.remotePathRequired');
+    if (!localPath.trim()) return t('component.remotePathMappings.localPathRequired');
     return null;
   }
 
@@ -112,11 +113,11 @@
       if (editingID === 0) {
         const added = await api.addRemotePathMapping(body);
         mappings = [...(mappings ?? []), added];
-        pushToast('Remote path mapping added.', 'success');
+        pushToast(t('component.remotePathMappings.added'), 'success');
       } else if (editingID !== null) {
         const updated = await api.updateRemotePathMapping(editingID, body);
         mappings = (mappings ?? []).map((mapping) => (mapping.id === updated.id ? updated : mapping));
-        pushToast('Remote path mapping saved.', 'success');
+        pushToast(t('component.remotePathMappings.saved'), 'success');
       }
       closeForm();
     } catch (err) {
@@ -135,24 +136,26 @@
       await api.deleteRemotePathMapping(mapping.id);
       mappings = (mappings ?? []).filter((row) => row.id !== mapping.id);
       confirmingRemove = null;
-      pushToast('Remote path mapping removed.', 'neutral');
+      pushToast(t('component.remotePathMappings.removed'), 'neutral');
     } catch (err) {
       pushToast(errorText(err), 'danger');
     } finally {
       deletingID = null;
     }
   }
+
+  const { t, tp } = useI18n();
 </script>
 
 <SettingsCard
-  title="Remote path mappings"
-  description="Translate paths reported by external download clients to paths on the host running Caravan.">
+  title={t('component.remotePathMappings.remotePathMappings')}
+  description={t('component.remotePathMappings.translatePathsReportedByExternalDownloadClientsToPathsOnTheHostRunningCaravan')}>
   {#snippet action()}
-    <Button variant="secondary" size="sm" onclick={load}>Refresh</Button>
-    <Button variant="primary" size="sm" onclick={openAdd}>Add mapping</Button>
+    <Button variant="secondary" size="sm" onclick={load}>{t('component.remotePathMappings.refresh')}</Button>
+    <Button variant="primary" size="sm" onclick={openAdd}>{t('component.remotePathMappings.addMapping')}</Button>
   {/snippet}
 
-  <p class="mb-4 text-sm text-ink-secondary">Caravan uses the longest matching remote prefix. Local paths are resolved on the host running Caravan, not on the download client.</p>
+  <p class="mb-4 text-sm text-ink-secondary">{t('component.remotePathMappings.caravanUsesTheLongestMatchingRemotePrefixLocalPathsAreResolvedOnTheHostRunningCaravanNotOnTheDownloadClient')}</p>
 
   {#if error}
     <LoadError message={error} onretry={load} />
@@ -165,10 +168,10 @@
   {:else if rows.length === 0}
     <EmptyState
       icon="link"
-      title="No remote path mappings"
-      message="Add one when a download client reports a filesystem path that differs from Caravan's host.">
+      title={t('component.remotePathMappings.noRemotePathMappings')}
+      message={t('component.remotePathMappings.addOneWhenADownloadClientReportsAFilesystemPathThatDiffersFromCaravanSHost')}>
       {#snippet action()}
-        <Button variant="primary" onclick={openAdd}>Add mapping</Button>
+        <Button variant="primary" onclick={openAdd}>{t('component.remotePathMappings.addMapping')}</Button>
       {/snippet}
     </EmptyState>
   {:else}
@@ -179,12 +182,12 @@
             <p class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 font-mono text-sm text-ink">
               <span class="break-all">{mapping.remote_path}</span>
               <span aria-hidden="true" class="text-ink-muted">→</span>
-              <span class="sr-only">maps to</span>
+              <span class="sr-only">{t('component.remotePathMappings.mapsTo')}</span>
               <span class="break-all">{mapping.local_path}</span>
             </p>
-            <p class="mt-1 text-sm text-ink-secondary">Remote client path to Caravan host path</p>
+            <p class="mt-1 text-sm text-ink-secondary">{t('component.remotePathMappings.remoteClientPathToCaravanHostPath')}</p>
             {#if mapping.match_count === 0}
-              <p class="mt-1 text-sm text-ink-muted">No imports or events have matched this mapping yet.</p>
+              <p class="mt-1 text-sm text-ink-muted">{t('component.remotePathMappings.noImportsOrEventsHaveMatchedThisMappingYet')}</p>
             {:else}
               <p class="mt-1 text-sm text-ink-muted">
                 {mapping.match_count} matched import{mapping.match_count === 1 ? '' : 's'} or event{mapping.match_count === 1 ? '' : 's'}.
@@ -195,14 +198,14 @@
             {/if}
           </div>
           <div class="flex shrink-0 items-center gap-2">
-            <Button variant="ghost" size="sm" onclick={() => openEdit(mapping)}>Edit</Button>
+            <Button variant="ghost" size="sm" onclick={() => openEdit(mapping)}>{t('component.remotePathMappings.edit')}</Button>
             <Button
               variant="ghost"
               size="sm"
               disabled={deletingID === mapping.id}
               onclick={() => (confirmingRemove = mapping)}>
-              <span class="sr-only">Remove {mapping.remote_path} mapping</span>
-              <span aria-hidden="true">Remove</span>
+              <span class="sr-only">{t('component.remotePathMappings.removeMapping', { path: mapping.remote_path })}</span>
+              <span aria-hidden="true">{t('component.remotePathMappings.remove')}</span>
             </Button>
           </div>
         </li>
@@ -213,7 +216,7 @@
 
 {#if editingID !== null}
   <Modal
-    title={editingID === 0 ? 'Add remote path mapping' : 'Edit remote path mapping'}
+    title={editingID === 0 ? t('component.remotePathMappings.addModal') : t('component.remotePathMappings.editModal')}
     width="max-w-xl"
     dirty={isDirty}
     onclose={closeForm}>
@@ -224,16 +227,16 @@
         void save();
       }}>
       <Field
-        label="Remote path"
+        label={t('component.remotePathMappings.remotePath')}
         for="remote-path"
-        help="The path reported by the download client, for example /downloads.">
-        <TextInput id="remote-path" bind:value={remotePath} mono autofocus placeholder="/downloads" />
+        help={t('component.remotePathMappings.thePathReportedByTheDownloadClientForExampleDownloads')}>
+        <TextInput id="remote-path" bind:value={remotePath} mono autofocus placeholder={t('component.remotePathMappings.downloads')} />
       </Field>
       <Field
-        label="Local path"
+        label={t('component.remotePathMappings.localPath')}
         for="local-path"
-        help="The matching path on the host running Caravan, for example /mnt/downloads.">
-        <TextInput id="local-path" bind:value={localPath} mono placeholder="/mnt/downloads" />
+        help={t('component.remotePathMappings.theMatchingPathOnTheHostRunningCaravanForExampleMntDownloads')}>
+        <TextInput id="local-path" bind:value={localPath} mono placeholder={t('component.remotePathMappings.mntDownloads')} />
       </Field>
 
       {#if formError || (isDirty && validationError)}
@@ -243,13 +246,13 @@
 
     {#snippet footer()}
       <div class="flex w-full flex-wrap justify-end gap-2">
-        <Button variant="ghost" onclick={closeForm} disabled={saving}>Cancel</Button>
+        <Button variant="ghost" onclick={closeForm} disabled={saving}>{t('component.remotePathMappings.cancel')}</Button>
         <Button
           variant="primary"
           disabled={saving || !isDirty || validationError !== null}
-          title={!isDirty ? 'No changes to save' : validationError ?? undefined}
+          title={!isDirty ? t('component.remotePathMappings.noChangesToSave') : validationError ?? undefined}
           onclick={save}>
-          {saving ? 'Saving…' : !isDirty ? 'No changes' : validationError ? 'Fix errors' : 'Save'}
+          {saving ? t('component.remotePathMappings.saving') : !isDirty ? t('component.remotePathMappings.noChanges') : validationError ? t('component.remotePathMappings.fixErrors') : t('component.remotePathMappings.save')}
         </Button>
       </div>
     {/snippet}
@@ -258,17 +261,17 @@
 
 {#if confirmingRemove}
   {@const target = confirmingRemove}
-  <Modal title="Remove remote path mapping" width="max-w-lg" onclose={() => (confirmingRemove = null)}>
+  <Modal title={t('component.remotePathMappings.removeRemotePathMapping')} width="max-w-lg" onclose={() => (confirmingRemove = null)}>
     <div class="flex flex-col gap-3 p-4">
       <p class="font-mono text-sm text-ink">{target.remote_path} → {target.local_path}</p>
       <p class="text-base text-ink-secondary">
-        Caravan will stop translating this remote path. Existing downloads and files are not changed.
+        {t('component.remotePathMappings.caravanWillStopTranslatingThisRemotePathExistingDownloadsAndFilesAreNotChanged')}
       </p>
     </div>
 
     {#snippet footer()}
       <div class="flex w-full flex-wrap justify-end gap-2">
-        <Button variant="ghost" onclick={() => (confirmingRemove = null)}>Cancel</Button>
+        <Button variant="ghost" onclick={() => (confirmingRemove = null)}>{t('component.remotePathMappings.cancel')}</Button>
         <Button variant="danger" disabled={deletingID === target.id} onclick={remove}>
           {deletingID === target.id ? 'Removing…' : 'Remove'}
         </Button>

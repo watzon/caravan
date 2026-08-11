@@ -1,6 +1,7 @@
 <script lang="ts">
   /** Library filter chips. Active chip uses the accent tint, same as active nav. */
   import { STATUS, TONE_DOT, type FilterChip, type StatusKey } from '../status';
+  import { useI18n } from '../i18n.svelte';
 
   interface Props {
     chips: FilterChip[];
@@ -9,9 +10,10 @@
   }
 
   let { chips, active, onselect }: Props = $props();
+  const { t } = useI18n();
 </script>
 
-<div class="flex flex-wrap items-center gap-2" role="group" aria-label="Filter library">
+<div class="flex flex-wrap items-center gap-2" role="group" aria-label={t('component.filters.library')}>
   {#each chips as chip (chip.key)}
     {@const selected = chip.key === active}
     <button

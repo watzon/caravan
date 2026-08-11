@@ -180,7 +180,9 @@ describe('StashboxSettings', () => {
     flushSync();
 
     expect(host.querySelector('#stashbox-endpoint')).toBeNull();
-    expect(host.textContent).toContain('The endpoint cannot be changed.');
+    expect(host.textContent).toContain(
+      'The endpoint cannot change because items use IDs from this stash-box. Add another instance for a different box.',
+    );
     // The value is still stated, because "which box is this" is the question
     // the name alone cannot answer.
     expect(host.textContent).toContain('https://theporndb.net/graphql');

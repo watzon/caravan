@@ -162,7 +162,9 @@ describe('GrabTargetModal', () => {
   it('opens on download-only and says where the file will wait', () => {
     mountModal();
     expect(host.querySelector<HTMLInputElement>('input[value="park"]')?.checked).toBe(true);
-    expect(host.textContent).toContain('lands in Scan Review, scoped to Movies');
+    expect(host.textContent).toContain(
+      'Send the finished download to Scan Review for Movies. You will match it there.',
+    );
     // The tie picker does not exist until the user asks for it.
     expect(host.querySelector('[data-tie-picker]')).toBeNull();
   });

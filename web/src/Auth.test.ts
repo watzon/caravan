@@ -121,7 +121,7 @@ describe('password gate', () => {
 
     // The 401 on /system/status put the login screen in front of the shell.
     expect(host.textContent).toContain('Sign in');
-    expect(host.textContent).toContain('password-protected');
+    expect(host.textContent).toContain('This Caravan needs a password');
     expect(host.querySelector('aside')).toBeNull();
 
     // A stack of "unauthorized" toasts on top of the login screen is noise: a
@@ -144,7 +144,7 @@ describe('password gate', () => {
     button('Sign in').click();
     await settle();
 
-    expect(host.textContent).not.toContain('This Caravan is password-protected');
+    expect(host.textContent).not.toContain('This Caravan needs a password');
     expect(host.querySelector('aside')).not.toBeNull();
     expect(host.querySelector('a[href="/movies"]')).not.toBeNull();
 
@@ -231,10 +231,10 @@ describe('password gate', () => {
     app = mount(App, { target: host });
     await settle();
 
-    expect(host.textContent).toContain('Listening on every interface without a password');
+    expect(host.textContent).toContain('Anyone on this network can open Caravan');
     button('Dismiss').click();
     flushSync();
-    expect(host.textContent).not.toContain('Listening on every interface without a password');
+    expect(host.textContent).not.toContain('Anyone on this network can open Caravan');
     expect(window.sessionStorage.getItem('caravan.public-bind-nag-dismissed')).toBe('1');
   });
 
@@ -256,7 +256,7 @@ describe('password gate', () => {
     app = mount(App, { target: host });
     await settle();
 
-    expect(host.textContent).not.toContain('Listening on every interface without a password');
+    expect(host.textContent).not.toContain('Anyone on this network can open Caravan');
   });
 });
 

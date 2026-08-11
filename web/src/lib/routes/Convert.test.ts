@@ -259,7 +259,7 @@ describe('Convert route', () => {
     flushSync();
     expect(tabWith('Active')?.getAttribute('aria-pressed')).toBe('true');
     expect(host.textContent).toContain('Blade Runner (1982).mkv');
-    expect(host.textContent).toContain('Deciding…');
+    expect(host.textContent).toContain('Deciding...');
   });
 
   it('queues two selected files sequentially, then reloads and toasts once', async () => {

@@ -24,6 +24,9 @@
   import ReleaseTable from '../components/ReleaseTable.svelte';
   import { navigate, router } from '../router.svelte';
   import { parseReleaseSearch, releaseSearchHref } from '../search';
+  import { useI18n } from '../i18n.svelte';
+
+  const { t } = useI18n();
 
   let query = $state('');
   let categories = $state<number[]>([]);
@@ -109,11 +112,8 @@
 
 <div class="flex flex-col gap-6">
   <div class="min-w-0">
-    <h2 class="font-display text-xl font-semibold tracking-tight text-ink">Search indexers</h2>
-    <p class="text-base text-ink-secondary">
-      Every enabled indexer, asked exactly what you type. A result does not have to be something
-      Caravan already tracks.
-    </p>
+    <h2 class="font-display text-xl font-semibold tracking-tight text-ink">{t('route.search.title')}</h2>
+    <p class="text-base text-ink-secondary">{t('route.search.description')}</p>
   </div>
 
   <ReleaseSearchControls
@@ -132,8 +132,8 @@
     <Banner
       tone="info"
       icon="warning"
-      title="Showing the highest-scoring results only"
-      message="That query matched more than this screen shows. Narrow it, or filter by category, to see the rest." />
+      title={t('route.search.truncatedTitle')}
+      message={t('route.search.truncatedMessage')} />
   {/if}
 
   {#if error}
@@ -141,15 +141,15 @@
   {:else if releases === null && !loading}
     <EmptyState
       icon="search"
-      title="Search every enabled indexer"
-      message="Nothing is grabbed until you say so — and when you do, you choose where it lands." />
+      title={t('route.search.emptyTitle')}
+      message={t('route.search.emptyMessage')} />
   {:else}
     <ReleaseTable
       {releases}
       {loading}
       busyGUID={null}
-      grabLabel="Grab into…"
-      emptyMessage="No enabled indexer returned anything for that query. Try a release name, drop the year, or widen the categories."
+      grabLabel={t('route.search.grabInto')}
+      emptyMessage={t('route.search.emptyResults')}
       ongrab={(release) => (grabbing = release)} />
   {/if}
 </div>

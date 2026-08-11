@@ -19,6 +19,12 @@
 
 import { languageName } from './discover';
 import type { MediaType } from './api/types';
+import {
+  currentLocale,
+  translate,
+  translatePlural,
+  type TranslationKey,
+} from './i18n.svelte';
 
 /* ---------------------------------------------------------------------------
  * The scope row.
@@ -32,10 +38,10 @@ export type ExploreScope = 'featured' | 'movies' | 'series' | 'adult';
  * filtered list rather than a conditional in every screen that draws the row.
  */
 export const EXPLORE_SCOPES: { key: ExploreScope; label: string; adult?: true }[] = [
-  { key: 'featured', label: 'Featured' },
-  { key: 'movies', label: 'Movies' },
-  { key: 'series', label: 'Series' },
-  { key: 'adult', label: 'Adult', adult: true },
+  { key: 'featured', get label() { return translate('explore.scope.featured'); } },
+  { key: 'movies', get label() { return translate('explore.scope.movies'); } },
+  { key: 'series', get label() { return translate('explore.scope.series'); } },
+  { key: 'adult', get label() { return translate('explore.scope.adult'); }, adult: true },
 ];
 
 /** Featured is /discover itself — the screen this row was added to. */
@@ -112,12 +118,12 @@ export interface SortChoice {
  * does nothing in the other is the exact failure this phase is built to avoid.
  */
 export const TITLE_SORTS: SortChoice[] = [
-  { key: 'popularity', label: 'Popularity', sort: 'popularity', order: 'desc' },
-  { key: 'newest', label: 'Newest', sort: 'release_date', order: 'desc' },
-  { key: 'oldest', label: 'Oldest', sort: 'release_date', order: 'asc' },
-  { key: 'rating', label: 'Highest rated', sort: 'rating', order: 'desc' },
-  { key: 'votes', label: 'Most voted', sort: 'votes', order: 'desc' },
-  { key: 'title', label: 'Title A–Z', sort: 'title', order: 'asc' },
+  { key: 'popularity', get label() { return translate('explore.sort.popularity'); }, sort: 'popularity', order: 'desc' },
+  { key: 'newest', get label() { return translate('explore.sort.newest'); }, sort: 'release_date', order: 'desc' },
+  { key: 'oldest', get label() { return translate('explore.sort.oldest'); }, sort: 'release_date', order: 'asc' },
+  { key: 'rating', get label() { return translate('explore.sort.highestRated'); }, sort: 'rating', order: 'desc' },
+  { key: 'votes', get label() { return translate('explore.sort.mostVoted'); }, sort: 'votes', order: 'desc' },
+  { key: 'title', get label() { return translate('explore.sort.titleAZ'); }, sort: 'title', order: 'asc' },
 ];
 
 /**
@@ -126,12 +132,12 @@ export const TITLE_SORTS: SortChoice[] = [
  * rather than offering a control that quietly does nothing.
  */
 export const SCENE_SORTS: SortChoice[] = [
-  { key: 'newest', label: 'Newest', sort: 'released', order: 'desc' },
-  { key: 'oldest', label: 'Oldest', sort: 'released', order: 'asc' },
-  { key: 'added', label: 'Recently added', sort: 'created', order: 'desc' },
-  { key: 'updated', label: 'Recently updated', sort: 'updated', order: 'desc' },
-  { key: 'duration', label: 'Longest', sort: 'duration', order: 'desc' },
-  { key: 'relevance', label: 'Relevance', sort: 'relevance', order: 'desc' },
+  { key: 'newest', get label() { return translate('explore.sort.newest'); }, sort: 'released', order: 'desc' },
+  { key: 'oldest', get label() { return translate('explore.sort.oldest'); }, sort: 'released', order: 'asc' },
+  { key: 'added', get label() { return translate('explore.sort.recentlyAdded'); }, sort: 'created', order: 'desc' },
+  { key: 'updated', get label() { return translate('explore.sort.recentlyUpdated'); }, sort: 'updated', order: 'desc' },
+  { key: 'duration', get label() { return translate('explore.sort.longest'); }, sort: 'duration', order: 'desc' },
+  { key: 'relevance', get label() { return translate('explore.sort.relevance'); }, sort: 'relevance', order: 'desc' },
 ];
 
 /** Read a (sort, order) pair back to its key; the default when it is neither. */
@@ -205,9 +211,21 @@ export const EMPTY_TITLE_FILTER: TitleFilter = {
 export type SceneSiteScope = 'site' | 'parent' | 'network';
 
 export const SCENE_SITE_SCOPES: { key: SceneSiteScope; label: string; hint: string }[] = [
-  { key: 'site', label: 'This site', hint: 'Only scenes released under this site.' },
-  { key: 'parent', label: 'Parent studio', hint: "The site's parent studio as well." },
-  { key: 'network', label: 'Whole network', hint: 'Every site on the same network.' },
+  {
+    key: 'site',
+    get label() { return translate('explore.siteScope.site.label'); },
+    get hint() { return translate('explore.siteScope.site.hint'); },
+  },
+  {
+    key: 'parent',
+    get label() { return translate('explore.siteScope.parent.label'); },
+    get hint() { return translate('explore.siteScope.parent.hint'); },
+  },
+  {
+    key: 'network',
+    get label() { return translate('explore.siteScope.network.label'); },
+    get hint() { return translate('explore.siteScope.network.hint'); },
+  },
 ];
 
 export interface SceneFilter {
@@ -491,47 +509,84 @@ export interface AppliedChip {
   label: string;
 }
 
-function refChips(prefix: string, noun: string, refs: readonly FilterRef[]): AppliedChip[] {
-  return refs.map((ref) => ({ key: `${prefix}:${ref.id}`, label: `${noun}: ${refLabel(ref)}` }));
+function refChips(
+  prefix: string,
+  nounKey: TranslationKey,
+  refs: readonly FilterRef[],
+): AppliedChip[] {
+  return refs.map((ref) => ({
+    key: `${prefix}:${ref.id}`,
+    label: translate('explore.chip.named', {
+      name: translate(nounKey),
+      value: refLabel(ref),
+    }),
+  }));
 }
 
-/** "60–120 min", "from 60 min", "under 120 min". */
 function rangeText(min: number, max: number, unit: string): string {
-  if (min > 0 && max > 0) return `${min}–${max} ${unit}`;
-  if (min > 0) return `from ${min} ${unit}`;
-  return `under ${max} ${unit}`;
+  if (min > 0 && max > 0) return translate('explore.range.between', { min, max, unit });
+  if (min > 0) return translate('explore.range.from', { min, unit });
+  return translate('explore.range.under', { max, unit });
 }
 
-/** "2019–2024", "from 2019", "until 2024" — a date window read as years. */
 function dateWindowText(from: string, to: string): string {
   const a = from.slice(0, 4);
   const b = to.slice(0, 4);
-  if (a && b) return a === b ? a : `${a}–${b}`;
-  return a ? `from ${a}` : `until ${b}`;
+  if (a && b) return a === b ? a : translate('explore.date.between', { from: a, to: b });
+  return a ? translate('explore.date.from', { from: a }) : translate('explore.date.until', { to: b });
 }
 
 export function titleChips(mediaType: MediaType, filter: TitleFilter): AppliedChip[] {
   const chips: AppliedChip[] = [
-    ...refChips('genres', 'Genre', filter.genres),
-    ...(mediaType === 'movie' ? refChips('people', 'Cast & crew', filter.people) : []),
-    ...(mediaType === 'series' ? refChips('networks', 'Network', filter.networks) : []),
-    ...refChips('companies', 'Studio', filter.companies),
-    ...refChips('keywords', 'Keyword', filter.keywords),
+    ...refChips('genres', 'explore.chip.genre', filter.genres),
+    ...(mediaType === 'movie'
+      ? refChips('people', 'explore.chip.castCrew', filter.people)
+      : []),
+    ...(mediaType === 'series'
+      ? refChips('networks', 'explore.chip.network', filter.networks)
+      : []),
+    ...refChips('companies', 'explore.chip.studio', filter.companies),
+    ...refChips('keywords', 'explore.chip.keyword', filter.keywords),
   ];
   if (filter.from || filter.to) {
-    chips.push({ key: 'dates', label: `Year: ${dateWindowText(filter.from, filter.to)}` });
+    chips.push({
+      key: 'dates',
+      label: translate('explore.chip.named', {
+        name: translate('explore.chip.year'),
+        value: dateWindowText(filter.from, filter.to),
+      }),
+    });
   }
   if (filter.runtimeMin > 0 || filter.runtimeMax > 0) {
     chips.push({
       key: 'runtime',
-      label: `Runtime: ${rangeText(filter.runtimeMin, filter.runtimeMax, 'min')}`,
+      label: translate('explore.chip.named', {
+        name: translate('explore.chip.runtime'),
+        value: rangeText(
+          filter.runtimeMin,
+          filter.runtimeMax,
+          translate('explore.unit.minute'),
+        ),
+      }),
     });
   }
   if (filter.ratingMin > 0) {
-    chips.push({ key: 'rating', label: `Rating: ${filter.ratingMin}+` });
+    chips.push({
+      key: 'rating',
+      label: translate('explore.chip.named', {
+        name: translate('explore.chip.rating'),
+        value: `${filter.ratingMin}+`,
+      }),
+    });
   }
   if (filter.language) {
-    chips.push({ key: 'language', label: `Language: ${languageName(filter.language)}` });
+    chips.push({
+      key: 'language',
+      label: translate('explore.chip.named', {
+        name: translate('explore.chip.language'),
+        value: languageName(filter.language),
+      }),
+    });
   }
   return chips;
 }
@@ -564,17 +619,48 @@ export function removeTitleChip(filter: TitleFilter, key: string): TitleFilter {
 
 export function sceneChips(filter: SceneFilter): AppliedChip[] {
   const chips: AppliedChip[] = [];
-  if (filter.text) chips.push({ key: 'q', label: `Search: ${filter.text}` });
+  if (filter.text) {
+    chips.push({
+      key: 'q',
+      label: translate('explore.chip.named', {
+        name: translate('explore.chip.search'),
+        value: filter.text,
+      }),
+    });
+  }
   if (filter.site) {
     const widened = SCENE_SITE_SCOPES.find((s) => s.key === filter.scope);
-    const suffix = filter.scope === 'site' ? '' : ` · ${(widened?.label ?? '').toLowerCase()}`;
-    chips.push({ key: 'site', label: `Site: ${refLabel(filter.site)}${suffix}` });
+    const label =
+      filter.scope === 'site'
+        ? translate('explore.chip.named', {
+            name: translate('explore.chip.site'),
+            value: refLabel(filter.site),
+          })
+        : translate('explore.chip.siteScoped', {
+            site: refLabel(filter.site),
+            scope: widened?.label ?? '',
+          });
+    chips.push({ key: 'site', label });
   }
-  chips.push(...refChips('performers', 'Performer', filter.performers));
-  chips.push(...refChips('tags', 'Tag', filter.tags));
-  if (filter.year > 0) chips.push({ key: 'year', label: `Year: ${filter.year}` });
+  chips.push(...refChips('performers', 'explore.chip.performer', filter.performers));
+  chips.push(...refChips('tags', 'explore.chip.tag', filter.tags));
+  if (filter.year > 0) {
+    chips.push({
+      key: 'year',
+      label: translate('explore.chip.named', {
+        name: translate('explore.chip.year'),
+        value: filter.year,
+      }),
+    });
+  }
   if (filter.duration > 0) {
-    chips.push({ key: 'duration', label: `Duration: ${filter.duration} min` });
+    chips.push({
+      key: 'duration',
+      label: translate('explore.chip.named', {
+        name: translate('explore.chip.duration'),
+        value: translatePlural('discover.runtime.minute', filter.duration),
+      }),
+    });
   }
   return chips;
 }
@@ -649,10 +735,11 @@ export function languageOptions(): { code: string; label: string }[] {
  * the noun, so the singular reads "1 scene matches" rather than the
  * ungrammatical "1 scene match".
  */
-export function matchCountLine(total: number, noun: string): string {
+export function matchCountLine(total: number, noun: 'movie' | 'series' | 'scene'): string {
   if (!Number.isFinite(total) || total <= 0) return '';
-  const one = total === 1;
-  return `${total.toLocaleString()} ${noun}${one ? '' : 's'} match${one ? 'es' : ''}`;
+  return translatePlural(`explore.match.${noun}`, total, {
+    count: new Intl.NumberFormat(currentLocale()).format(total),
+  });
 }
 
 /** The placeholder in the scene year box — this year, so the shape is obvious. */

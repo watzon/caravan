@@ -104,7 +104,7 @@ describe('JellyfinSettings', () => {
 
     expect(input('jellyfin-url').value).toBe('http://jellyfin.lan:8096');
     expect(input('jellyfin-api-key').value).toBe('');
-    expect(host.textContent).toContain('A key is stored. Leave blank to keep it.');
+    expect(host.textContent).toContain('A key is stored. Leave this blank to keep it.');
     expect(host.querySelector('[role="switch"]')?.getAttribute('aria-checked')).toBe('true');
   });
 

@@ -323,7 +323,7 @@ describe('LibrariesSettings — override vs global default', () => {
 
     holdWrites = true;
     pick(select('library-route-torrent'), 'embedded');
-    expect(autosaveStatus('1:torrent-route')).toBe('Saving…');
+    expect(autosaveStatus('1:torrent-route')).toBe('Saving...');
 
     finishWrite();
     await settle();
@@ -332,7 +332,7 @@ describe('LibrariesSettings — override vs global default', () => {
     holdWrites = true;
     pick(select('library-profile'), '7');
     expect(autosaveStatus('1:torrent-route')).toBeNull();
-    expect(autosaveStatus('1:profile')).toBe('Saving…');
+    expect(autosaveStatus('1:profile')).toBe('Saving...');
 
     finishWrite();
     await settle();
@@ -531,7 +531,7 @@ describe('LibrariesSettings — indexer rows', () => {
     await mountLoaded();
 
     expect(host.textContent).toContain('Not searched for this library');
-    expect(host.textContent).not.toContain('Disabled in Settings');
+    expect(host.textContent).not.toContain('This indexer is off globally.');
     expect(toggle('Search Prowlarr for Movies').getAttribute('aria-checked')).toBe('false');
     // The dot reports the indexer's own health, which is still green — the
     // library is what switched it off, not the indexer.
@@ -551,7 +551,7 @@ describe('LibrariesSettings — indexer rows', () => {
     ];
     await mountLoaded();
 
-    expect(host.textContent).toContain('This indexer is disabled globally');
+    expect(host.textContent).toContain('This indexer is off globally. Open Indexers to enable it.');
     expect(host.textContent).not.toContain('Not searched for this library');
     expect(host.querySelector('a[href="/settings/indexers"]')?.textContent?.trim()).toBe(
       'Open Indexers',
@@ -682,7 +682,7 @@ describe('LibrariesSettings - actionable setup links', () => {
     );
     expect(
       host.querySelector('a[href="/settings/quality-profiles"]')?.textContent?.trim(),
-    ).toBe('Manage download profiles');
+    ).toBe('Manage quality profiles');
     expect(host.querySelector('a[href="/settings/downloads"]')?.textContent?.trim()).toBe(
       'Configure global download routing',
     );
@@ -792,7 +792,7 @@ describe('LibrariesSettings — switcher and reach', () => {
     button('Adult').click();
     await settle();
 
-    const chain = host.querySelector('ol[aria-label="Provider chain for Adult"]');
+    const chain = host.querySelector('ol[aria-label="Provider order for Adult"]');
     expect(chain).not.toBeNull();
     expect(chain!.textContent).toContain('StashDB');
     expect(chain!.textContent).toContain('ThePornDB');
@@ -824,9 +824,7 @@ describe('LibrariesSettings - library scan', () => {
     expect(scanPosts).toBe(1);
     expect(scanStatusReads).toBe(1);
     expect(rescan.disabled).toBe(false);
-    expect(host.textContent).toContain(
-      'Scan finished: 12 files in the library, 2 unmatched.',
-    );
+    expect(host.textContent).toContain('Scan finished. Found 12 files, with 2 unmatched.');
   });
 });
 
@@ -896,7 +894,7 @@ describe('LibrariesSettings — multiple libraries', () => {
       b.textContent?.includes('Delete library'),
     ) as HTMLButtonElement;
     expect(del.disabled).toBe(true);
-    expect(host.textContent).toContain('still has 3 items');
+    expect(host.textContent).toContain('Move or delete 3 items before deleting this library.');
   });
 });
 
@@ -1012,7 +1010,9 @@ describe('LibrariesSettings — active and access', () => {
     await mountLoaded();
 
     expect(host.textContent).toContain('No accounts yet');
-    expect(host.textContent).toContain('anyone who can reach it is an admin');
+    expect(host.textContent).toContain(
+      'This Caravan has no member accounts. Add accounts under Settings, Users to control library access.',
+    );
   });
 
   it('keeps the roster off the screen while a library is open to everyone', async () => {
@@ -1033,7 +1033,7 @@ describe('LibrariesSettings — active and access', () => {
 
 describe('LibrariesSettings — the DLNA warning', () => {
   /** The banner's own words, so a passing test cannot be satisfied by prose. */
-  const WARNING = 'every device on this network can browse it';
+  const WARNING = 'Every device on this network can browse it';
 
   it('warns when a restricted library is also shared on the LAN', async () => {
     libraries = [library({ restricted: true, dlna_visible: true }), SERIES];
@@ -1064,11 +1064,13 @@ describe('LibrariesSettings — the DLNA warning', () => {
     ];
     await mountLoaded();
 
-    expect(host.textContent).not.toContain('--include-adult');
+    expect(host.textContent).not.toContain('The caravan prepare command excludes adult libraries.');
 
     button('Adult').click();
     await settle();
-    expect(host.textContent).toContain('--include-adult');
+    expect(host.textContent).toContain(
+      'The caravan prepare command excludes adult libraries. Use caravan prepare with the include adult option to copy Adult.',
+    );
   });
 });
 
@@ -1091,7 +1093,7 @@ describe('LibrariesSettings — the adult create flow', () => {
     await openAdd();
 
     expect([...select('new-library-kind').options].map((o) => o.value)).toContain('adult');
-    expect(host.textContent).toContain('No stash-box endpoint yet');
+    expect(host.textContent).toContain('No stash box endpoint');
     expect(
       [...host.querySelectorAll('a[href="/settings/metadata"]')].length,
       'a link to Metadata',
@@ -1101,7 +1103,7 @@ describe('LibrariesSettings — the adult create flow', () => {
   it('says nothing about endpoints once one is configured', async () => {
     await openAdd();
 
-    expect(host.textContent).not.toContain('No stash-box endpoint yet');
+    expect(host.textContent).not.toContain('No stash box endpoint');
   });
 
   it('creates the library without a chain the boxless install could not name', async () => {

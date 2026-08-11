@@ -115,7 +115,7 @@ describe('StashSettings', () => {
   it('says on the card that the handoff is scoped to the Adult library', async () => {
     await mountLoaded();
 
-    expect(host.textContent).toContain('Scans the Adult library only');
+    expect(host.textContent).toContain('Scans only library/Adult. Movies and Series are never sent to Stash.');
     expect(host.textContent).toContain('library/Adult');
   });
 

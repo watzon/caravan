@@ -12,6 +12,7 @@
    * once at the boundary rather than this knowing about four provider shapes.
    */
   import { moveResultFocus } from '../typeahead';
+  import { useI18n } from '../i18n.svelte';
   import Icon from './Icon.svelte';
 
   interface Option {
@@ -31,17 +32,17 @@
     loading?: boolean;
   }
 
-  let { options, selected, onselect, emptyText = 'Nothing to choose from', loading = false }: Props =
-    $props();
+  let { options, selected, onselect, emptyText, loading = false }: Props = $props();
+  const { t } = useI18n();
 
   let list = $state<HTMLElement | null>(null);
 </script>
 
 <div bind:this={list} class="flex flex-col gap-1">
   {#if loading}
-    <p class="px-2 py-1.5 text-sm text-ink-muted">Loading…</p>
+    <p class="px-2 py-1.5 text-sm text-ink-muted">{t('component.filters.loading')}</p>
   {:else if options.length === 0}
-    <p class="px-2 py-1.5 text-sm text-ink-muted">{emptyText}</p>
+    <p class="px-2 py-1.5 text-sm text-ink-muted">{emptyText ?? t('component.filters.noOptions')}</p>
   {:else}
     <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <ul

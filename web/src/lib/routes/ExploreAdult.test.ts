@@ -226,7 +226,7 @@ describe('a filtered scene scope', () => {
   it('restores the applied chips from the URL', async () => {
     await open('/discover/adult?site=84060:Vixen&scope=network&tags=70:Outdoor&year=2026');
 
-    expect(host.textContent).toContain('Site: Vixen · whole network');
+    expect(host.textContent).toContain('Site: Vixen (Whole network)');
     expect(host.textContent).toContain('Tag: Outdoor');
     expect(host.textContent).toContain('Year: 2026');
   });
@@ -274,7 +274,7 @@ describe('a filtered scene scope', () => {
     await open('/discover/adult?site=84060:Vixen&scope=network');
 
     host
-      .querySelector<HTMLButtonElement>('button[aria-label="Remove filter Site: Vixen · whole network"]')
+      .querySelector<HTMLButtonElement>('button[aria-label="Remove filter Site: Vixen (Whole network)"]')
       ?.click();
     await settle();
 

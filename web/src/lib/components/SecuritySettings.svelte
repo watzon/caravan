@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { useI18n } from '../i18n.svelte';
   /**
    * Security (SPEC §11): the calling account's own password, and the API key
    * external tools authenticate with.
@@ -47,7 +48,7 @@
       await api.setPassword(currentPassword, newPassword);
       currentPassword = '';
       newPassword = '';
-      pushToast('Password updated. Your other browsers are signed out.', 'success');
+      pushToast(t('component.securitySettings.passwordUpdated'), 'success');
     } catch (err) {
       pushToast(errorText(err), 'danger');
     } finally {
@@ -60,13 +61,15 @@
     try {
       const result = await api.regenerateAPIKey();
       regenerated = result.api_key;
-      pushToast('API key regenerated. The old key stopped working.', 'success');
+      pushToast(t('component.securitySettings.apiKeyRegenerated'), 'success');
     } catch (err) {
       pushToast(errorText(err), 'danger');
     } finally {
       busy = false;
     }
   }
+
+  const { t, tp } = useI18n();
 </script>
 
 <section class="flex flex-col gap-6">
@@ -74,25 +77,25 @@
     <Banner
       tone="warning"
       icon="warning"
-      title="Listening on every interface without a password"
-      message="Anyone on this network can reach Caravan and change its settings. Adding the first account under Users closes that." />
+      title={t('component.securitySettings.listeningOnEveryInterfaceWithoutAPassword')}
+      message={t('component.securitySettings.anyoneOnThisNetworkCanReachCaravanAndChangeItsSettingsAddingTheFirstAccountUnderUsersClosesThat')} />
   {/if}
 
   <div class="flex flex-col gap-4">
     <div>
-      <h2 class="font-display text-base font-semibold text-ink">Your password</h2>
+      <h2 class="font-display text-base font-semibold text-ink">{t('component.securitySettings.yourPassword')}</h2>
       <p class="mt-1 text-sm text-ink-secondary">
         {signedIn
-          ? 'Changes your own password and signs out every other browser you are signed in on. Nobody else is affected.'
-          : 'This browser is not signed in as an account, so there is no password of yours to change. Add the first account under Users.'}
+          ? t('component.securitySettings.signedInCopy')
+          : t('component.securitySettings.notSignedInCopy')}
       </p>
     </div>
 
     {#if signedIn}
       <Field
-        label="Current password"
+        label={t('component.securitySettings.currentPassword')}
         for="security-current-password"
-        help="Proves it is you and not somebody at your unlocked screen.">
+        help={t('component.securitySettings.provesItIsYouAndNotSomebodyAtYourUnlockedScreen')}>
         <TextInput
           id="security-current-password"
           bind:value={currentPassword}
@@ -101,9 +104,9 @@
       </Field>
 
       <Field
-        label="New password"
+        label={t('component.securitySettings.newPassword')}
         for="security-new-password"
-        help="At least {MIN_PASSWORD_LENGTH} characters. Stored as an argon2id hash and never returned by the API.">
+        help={t('component.securitySettings.newPasswordHelp', { count: MIN_PASSWORD_LENGTH })}>
         <TextInput
           id="security-new-password"
           bind:value={newPassword}
@@ -117,31 +120,28 @@
         disabled={busy || currentPassword === '' || newPassword.length < MIN_PASSWORD_LENGTH}
         onclick={savePassword}>
         <Icon name="check" size={14} />
-        {busy ? 'Saving…' : 'Change password'}
+        {busy ? t('component.securitySettings.saving') : t('component.securitySettings.changePassword')}
       </Button>
     {:else}
-      <Button variant="secondary" class="self-start" href="/settings/users">Open Users</Button>
+      <Button variant="secondary" class="self-start" href="/settings/users">{t('component.securitySettings.openUsers')}</Button>
     {/if}
   </div>
 
   <div class="flex flex-col gap-4 border-t border-border pt-6">
     <div>
-      <h2 class="font-display text-base font-semibold text-ink">API key</h2>
+      <h2 class="font-display text-base font-semibold text-ink">{t('component.securitySettings.apiKey')}</h2>
       <p class="mt-1 text-sm text-ink-secondary">
-        For external tools and the calendar feed. Send it as the
-        <code class="font-mono">X-Api-Key</code> header or an
-        <code class="font-mono">apikey</code> query parameter. Regenerating revokes the old one
-        immediately.
+        {t('component.securitySettings.apiKeyUsage', { header: 'X-Api-Key', parameter: 'apikey' })}
       </p>
     </div>
 
-    <Field label="Key" for="security-api-key">
-      <TextInput id="security-api-key" value={apiKey} mono readonly placeholder="No key yet" />
+    <Field label={t('component.securitySettings.key')} for="security-api-key">
+      <TextInput id="security-api-key" value={apiKey} mono readonly placeholder={t('component.securitySettings.noKeyYet')} />
     </Field>
 
     <Button variant="secondary" class="self-start" disabled={busy} onclick={regenerateKey}>
       <Icon name="refresh" size={14} />
-      {apiKey === '' ? 'Generate key' : 'Regenerate key'}
+      {apiKey === '' ? t('component.securitySettings.generateKey') : t('component.securitySettings.regenerateKey')}
     </Button>
   </div>
 </section>

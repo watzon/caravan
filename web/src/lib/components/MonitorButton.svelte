@@ -18,6 +18,7 @@
    * switch this replaces, and Button.svelte has no pressed state — so this is
    * the one, shared by all three detail pages so they cannot drift.
    */
+  import { useI18n } from '../i18n.svelte';
   import Icon from './Icon.svelte';
 
   interface Props {
@@ -29,13 +30,14 @@
   }
 
   let { monitored, subject, disabled = false, onchange }: Props = $props();
+  const { t } = useI18n();
 
   // What a click does, not merely what is true: a control whose name is its
   // state leaves a screen-reader user to guess what pressing it means.
   let label = $derived(
     monitored
-      ? `Monitored — click to stop monitoring ${subject}`
-      : `Unmonitored — click to monitor ${subject}`,
+      ? t('component.monitor.stop', { subject })
+      : t('component.monitor.start', { subject }),
   );
 </script>
 

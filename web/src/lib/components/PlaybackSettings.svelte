@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { useI18n } from '../i18n.svelte';
   /**
    * Settings → Playback: the ways the library reaches a screen. DLNA is built
    * in and comes first; Jellyfin is a handoff, and Stash is the same handoff
@@ -20,10 +21,12 @@
   }
 
   let { settings, saving = false, onsave }: Props = $props();
+
+  const { t, tp } = useI18n();
 </script>
 
 <div class="flex flex-col gap-5">
-  <DlnaSettings {settings} {saving} onsave={(patch) => onsave(patch, 'DLNA settings saved.')} />
+  <DlnaSettings {settings} {saving} onsave={(patch) => onsave(patch, t('component.playbackSettings.dlnaSaved'))} />
   <JellyfinSettings />
   <!-- The gate is on the render, not inside the card, and for the reason the
        adult routes are gated on render in App.svelte: an ungranted browser must
@@ -32,9 +35,9 @@
   {#if session.adult}
     <StashSettings />
   {/if}
-  <TVProfileSettings {settings} {saving} onsave={(patch) => onsave(patch, 'TV profile saved.')} />
+  <TVProfileSettings {settings} {saving} onsave={(patch) => onsave(patch, t('component.playbackSettings.tvProfileSaved'))} />
   <ConversionSettings
     {settings}
     {saving}
-    onsave={(patch) => onsave(patch, 'Conversion settings saved.')} />
+    onsave={(patch) => onsave(patch, t('component.playbackSettings.conversionSaved'))} />
 </div>

@@ -44,14 +44,14 @@ describe('MonitorButton', () => {
   it('names the action rather than only the state', () => {
     const on = mountButton({ monitored: true });
     // The word survives where a word helps, now that the label beside it is gone.
-    expect(on.getAttribute('aria-label')).toBe('Monitored — click to stop monitoring Dune');
+    expect(on.getAttribute('aria-label')).toBe('Monitored. Click to stop monitoring Dune.');
     expect(on.getAttribute('title')).toBe(on.getAttribute('aria-label'));
   });
 
   it('says the opposite when it is off', () => {
     const off = mountButton({ monitored: false });
     expect(off.getAttribute('aria-pressed')).toBe('false');
-    expect(off.getAttribute('aria-label')).toBe('Unmonitored — click to monitor Dune');
+    expect(off.getAttribute('aria-label')).toBe('Unmonitored. Click to monitor Dune.');
     expect(off.querySelector('svg')?.classList.contains('fill-current')).toBe(false);
   });
 

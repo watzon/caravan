@@ -15,6 +15,7 @@
   import { api, errorText } from '../api/client';
   import { system } from '../state/system.svelte';
   import { pushToast } from '../state/toast.svelte';
+  import { useI18n } from '../i18n.svelte';
   import Banner from './Banner.svelte';
   import Button from './Button.svelte';
   import Icon from './Icon.svelte';
@@ -33,6 +34,7 @@
   ];
 
   let busy = $state(false);
+  const { t } = useI18n();
 
   async function verify() {
     busy = true;
@@ -43,8 +45,8 @@
       await system.refresh();
       pushToast(
         result.scanning
-          ? 'Database verified. A library scan is running; downloads can be resumed.'
-          : 'Database verified. Downloads can be resumed.',
+          ? t('component.dirtyRecovery.verifiedScanning')
+          : t('component.dirtyRecovery.verified'),
         'success',
       );
     } catch (err) {
@@ -59,24 +61,22 @@
   <Banner
     tone="danger"
     icon="warning"
-    title="Last shutdown was not clean"
-    message="Caravan was stopped without releasing the drive. Downloads stay paused until the database is verified.">
+    title={t('component.dirtyRecovery.title')}
+    message={t('component.dirtyRecovery.message')}>
     {#snippet action()}
       <Button variant="primary" size="sm" disabled={busy} onclick={verify}>
         <Icon name="refresh" size={14} />
-        {busy ? 'Verifying…' : 'Verify & rescan'}
+        {busy ? t('component.dirtyRecovery.verifying') : t('component.dirtyRecovery.verify')}
       </Button>
     {/snippet}
   </Banner>
 
   <details class="rounded-md border border-border bg-surface px-3 py-2">
     <summary class="cursor-pointer text-sm text-ink-secondary">
-      Check the drive's filesystem first (recommended)
+      {t('component.dirtyRecovery.filesystemCheck')}
     </summary>
     <p class="mt-2 text-sm text-ink-secondary">
-      Caravan does not run these for you: the filesystem has to be unmounted, and
-      a repair tool run from the drive it is repairing is its own hazard. Quit
-      Caravan, eject the drive, then run the command for your system.
+      {t('component.dirtyRecovery.filesystemHelp')}
     </p>
     <ul class="mt-2 flex flex-col gap-1">
       {#each CHECKS as check (check.os)}

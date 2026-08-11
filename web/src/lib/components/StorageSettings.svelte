@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { useI18n } from '../i18n.svelte';
   /**
    * Storage settings (SPEC §10) — the two ways to change where the library
    * lives, kept visibly apart because only one of them touches media.
@@ -82,21 +83,21 @@
   function namingError() {
     const retention = Number(recycleRetentionDays);
     if (!Number.isInteger(retention) || retention < 0 || retention > 3650) {
-      return 'Recycle retention must be an integer between 0 and 3650.';
+      return t('component.storageSettings.retentionInvalid');
     }
     const formats: Array<[string, string, string[], string[]]> = [
-      ['Movie folder format', movieFolderFormat, ['title', 'year'], ['title']],
-      ['Movie file format', movieFileFormat, ['title', 'year', 'edition'], ['title']],
-      ['Series folder format', seriesFolderFormat, ['title', 'year'], ['title']],
-      ['Season folder format', seasonFolderFormat, ['season', 'season:02'], ['season']],
-      ['Episode file format', episodeFileFormat, ['series', 'year', 'episode', 'title'], ['series', 'episode']],
+      [t('component.storageSettings.movieFolderLabel'), movieFolderFormat, ['title', 'year'], ['title']],
+      [t('component.storageSettings.movieFileLabel'), movieFileFormat, ['title', 'year', 'edition'], ['title']],
+      [t('component.storageSettings.seriesFolderLabel'), seriesFolderFormat, ['title', 'year'], ['title']],
+      [t('component.storageSettings.seasonFolderLabel'), seasonFolderFormat, ['season', 'season:02'], ['season']],
+      [t('component.storageSettings.episodeFileLabel'), episodeFileFormat, ['series', 'year', 'episode', 'title'], ['series', 'episode']],
     ];
     for (const [label, format, allowed, required] of formats) {
       const tokens = [...format.matchAll(/\{([^}]+)\}/g)].map((match) => match[1]);
-      if (!format || tokens.some((token) => !allowed.includes(token))) return `${label} has an invalid token.`;
+      if (!format || tokens.some((token) => !allowed.includes(token))) return t('component.storageSettings.invalidToken', { label });
       if (required.some((token) => token === 'season'
         ? !tokens.includes('season') && !tokens.includes('season:02')
-        : !tokens.includes(token))) return `${label} is missing a required token.`;
+        : !tokens.includes(token))) return t('component.storageSettings.requiredToken', { label });
     }
     return '';
   }
@@ -143,7 +144,7 @@
           [namingKeys.seasonFolder]: seasonFolderFormat,
           [namingKeys.episodeFile]: episodeFileFormat,
         },
-        'Recycle retention and naming settings saved.',
+        t('component.storageSettings.namingSaved'),
       );
       if (saved) savedNaming = namingSnapshot();
     } finally {
@@ -216,7 +217,7 @@
       warnings = result.warnings;
       restartRequired = result.restart_required;
       await system.refresh();
-      pushToast('Storage root re-pointed. No files were moved.', 'success');
+      pushToast(t('component.storageSettings.repointed'), 'success');
     } catch (err) {
       pushToast(errorText(err), 'danger');
     } finally {
@@ -230,7 +231,7 @@
     try {
       migration = await api.migrateStorageRoot(newRoot.trim());
       warnings = [];
-      pushToast('Migration queued. Downloads are paused while the files move.', 'success');
+      pushToast(t('component.storageSettings.migrationQueued'), 'success');
     } catch (err) {
       pushToast(errorText(err), 'danger');
     } finally {
@@ -245,7 +246,10 @@
       const summary = await api.awaitScan();
       await system.refresh();
       pushToast(
-        `Scan finished: ${summary.media_files} files in the library, ${summary.unmatched} unmatched.`,
+        t('component.storageSettings.scanFinished', {
+          files: summary.media_files,
+          unmatched: summary.unmatched,
+        }),
         summary.unmatched > 0 ? 'warning' : 'success',
       );
     } catch (err) {
@@ -254,28 +258,29 @@
       scanning = false;
     }
   }
+
+  const { t, tp } = useI18n();
 </script>
 
 <section class="flex flex-col gap-6">
   <Field
-    label="Current storage root"
+    label={t('component.storageSettings.currentStorageRoot')}
     for="settings-storage-root-current"
 
-    help="Every path in the database is relative to this folder. That is what makes re-pointing instant and a rescan enough to rebuild the library.">
+    help={t('component.storageSettings.everyPathInTheDatabaseIsRelativeToThisFolderThatIsWhatMakesRePointingInstantAndARescanEnoughToRebuildTheLibrary')}>
     <TextInput id="settings-storage-root-current" value={currentRoot} mono readonly />
   </Field>
   <div class="flex flex-col gap-4 rounded-md border border-border bg-surface p-4">
     <div>
-      <h3 class="text-sm font-semibold">Recycle and library naming</h3>
+      <h3 class="text-sm font-semibold">{t('component.storageSettings.recycleAndLibraryNaming')}</h3>
       <p class="mt-1 text-sm text-muted">
-        Deleted Caravan files can be retained under <code>recycle/&lt;UTC batch&gt;/</code>.
-        Naming changes apply to new imports only.
+        {t('component.storageSettings.deletedCaravanFilesCanBeRetainedUnder')} <code>recycle/&lt;UTC batch&gt;/</code>{t('component.storageSettings.namingChangesApplyToNewImportsOnly')}
       </p>
     </div>
     <Field
-      label="Recycle retention (days)"
+      label={t('component.storageSettings.recycleRetentionDays')}
       for="settings-recycle-retention"
-      help="0 permanently deletes future Caravan-owned media, posters and NFO files. Use 1 to 3650 days to retain them."
+      help={t('component.storageSettings.0PermanentlyDeletesFutureCaravanOwnedMediaPostersAndNfoFilesUse1To3650DaysToRetainThem')}
     >
       <TextInput id="settings-recycle-retention" type="number" min="0" max="3650" bind:value={recycleRetentionDays} />
     </Field>
@@ -283,31 +288,31 @@
       <Banner
         tone="danger"
         icon="warning"
-        title="Permanent deletion"
-        message="With 0 days of retention, future Caravan deletions permanently remove Caravan-owned media, posters and NFO files instead of moving them to recycle." />
+        title={t('component.storageSettings.permanentDeletion')}
+        message={t('component.storageSettings.with0DaysOfRetentionFutureCaravanDeletionsPermanentlyRemoveCaravanOwnedMediaPostersAndNfoFilesInsteadOfMovingThemToRecycle')} />
     {/if}
-    <Field label="Movie folder format" for="settings-movie-folder-format" help={'Tokens: {title}, {year}.'}>
+    <Field label={t('component.storageSettings.movieFolderFormat')} for="settings-movie-folder-format" help={t('component.storageSettings.tokensMovie')}>
       <TextInput id="settings-movie-folder-format" bind:value={movieFolderFormat} mono />
     </Field>
-    <Field label="Movie file format" for="settings-movie-file-format" help={'Tokens: {title}, {year}, {edition}.'}>
+    <Field label={t('component.storageSettings.movieFileFormat')} for="settings-movie-file-format" help={t('component.storageSettings.tokensMovieFile')}>
       <TextInput id="settings-movie-file-format" bind:value={movieFileFormat} mono />
     </Field>
-    <Field label="Series folder format" for="settings-series-folder-format" help={'Tokens: {title}, {year}.'}>
+    <Field label={t('component.storageSettings.seriesFolderFormat')} for="settings-series-folder-format" help={t('component.storageSettings.tokensMovie')}>
       <TextInput id="settings-series-folder-format" bind:value={seriesFolderFormat} mono />
     </Field>
-    <Field label="Season folder format" for="settings-season-folder-format" help={'Tokens: {season}, {season:02}.'}>
+    <Field label={t('component.storageSettings.seasonFolderFormat')} for="settings-season-folder-format" help={t('component.storageSettings.tokensSeason')}>
       <TextInput id="settings-season-folder-format" bind:value={seasonFolderFormat} mono />
     </Field>
     <Field
-      label="Episode file format"
+      label={t('component.storageSettings.episodeFileFormat')}
       for="settings-episode-file-format"
-      help={'Tokens: {series}, {year}, {episode}, {title}.'}
+      help={t('component.storageSettings.tokensEpisode')}
     >
       <TextInput id="settings-episode-file-format" bind:value={episodeFileFormat} mono />
     </Field>
     <div class="rounded bg-base px-3 py-2 text-sm text-muted">
-      <p>Movie preview: <code>{preview(movieFolderFormat, { title: 'Big Buck Bunny', year: ' (2008)' })}/{moviePreview}</code></p>
-      <p>Episode preview: <code>{preview(seriesFolderFormat, { title: 'Planet Earth II', year: ' (2016)' })}/{preview(seasonFolderFormat, { season: '1', 'season:02': '01' })}/{episodePreview}</code></p>
+      <p>{t('component.storageSettings.moviePreview')} <code>{preview(movieFolderFormat, { title: 'Big Buck Bunny', year: ' (2008)' })}/{moviePreview}</code></p>
+      <p>{t('component.storageSettings.episodePreview')} <code>{preview(seriesFolderFormat, { title: 'Planet Earth II', year: ' (2016)' })}/{preview(seasonFolderFormat, { season: '1', 'season:02': '01' })}/{episodePreview}</code></p>
     </div>
     <div>
       <Button
@@ -315,7 +320,7 @@
         onclick={requestNamingSave}
         disabled={saving || namingBusy || !namingChanged || namingInvalid}
       >
-        {saving || namingBusy ? 'Saving…' : 'Save recycle and naming'}
+        {saving || namingBusy ? t('component.storageSettings.saving') : t('component.storageSettings.saveNaming')}
       </Button>
     </div>
   </div>
@@ -325,14 +330,14 @@
     <Banner
       tone="info"
       icon="warning"
-      title="This is a portable drive"
-      message={'Caravan stores everything relative to the drive itself, which is what lets it work on any computer you plug it into. Re-pointing or moving the root would replace that with one machine’s absolute path and the drive would stop working elsewhere. To move this library to a server, copy the drive’s library folder across and run a rescan there.'} />
+      title={t('component.storageSettings.thisIsAPortableDrive')}
+      message={t('component.storageSettings.portableDriveHelp')} />
   {:else}
     <Field
-      label="New storage root"
+      label={t('component.storageSettings.newStorageRoot')}
       for="settings-storage-root"
-      help="An absolute path that already exists on this machine.">
-      <TextInput id="settings-storage-root" bind:value={newRoot} mono placeholder="/data" />
+      help={t('component.storageSettings.anAbsolutePathThatAlreadyExistsOnThisMachine')}>
+      <TextInput id="settings-storage-root" bind:value={newRoot} mono placeholder={t('component.storageSettings.data')} />
     </Field>
   {/if}
 
@@ -340,40 +345,46 @@
     {#if !portable}
       <Button variant="primary" disabled={!canAct} onclick={() => (confirming = 'repoint')}>
         <Icon name="check" size={14} />
-        Re-point
+        {t('component.storageSettings.rePoint')}
       </Button>
       <Button variant="secondary" disabled={!canAct} onclick={() => (confirming = 'migrate')}>
         <Icon name="folder" size={14} />
-        Move files here
+        {t('component.storageSettings.moveFilesHere')}
       </Button>
     {/if}
     <Button variant="secondary" disabled={scanning || running} onclick={rescan}>
       <Icon name="refresh" size={14} />
-      {scanning ? 'Scanning…' : 'Rescan library'}
+      {scanning ? t('component.storageSettings.scanning') : t('component.storageSettings.rescanLibrary')}
     </Button>
   </div>
 
   {#each warnings as warning (warning)}
-    <Banner tone="warning" icon="warning" title="Re-pointed anyway" message={warning} />
+    <Banner tone="warning" icon="warning" title={t('component.storageSettings.rePointedAnyway')} message={warning} />
   {/each}
 
   {#if restartRequired}
     <Banner
       tone="warning"
       icon="warning"
-      title="Restart to move the download queue"
-      message="The library, artwork and media server are already using the new root. The download engine keeps writing under the old one until Caravan restarts." />
+      title={t('component.storageSettings.restartToMoveTheDownloadQueue')}
+      message={t('component.storageSettings.theLibraryArtworkAndMediaServerAreAlreadyUsingTheNewRootTheDownloadEngineKeepsWritingUnderTheOldOneUntilCaravanRestarts')} />
   {/if}
 
   {#if migration}
     <div class="flex flex-col gap-3 rounded-md border border-border bg-surface p-4">
       <div class="flex items-baseline justify-between gap-3">
         <p class="text-base font-semibold text-ink">
-          {running ? 'Moving files' : 'Last migration'}
+          {running ? t('component.storageSettings.movingFiles') : t('component.storageSettings.lastMigration')}
         </p>
         <p class="font-mono text-xs text-ink-secondary">
-          {migration.files_done} / {migration.files_total} files
-          · {formatBytes(migration.bytes_done)} of {formatBytes(migration.bytes_total)}
+          {t('component.storageSettings.migrationFileProgress', {
+            done: migration.files_done,
+            total: migration.files_total,
+          })}
+          · {t('component.storageSettings.migrationBytesProgress', {
+            done: formatBytes(migration.bytes_done),
+            total: formatBytes(migration.bytes_total),
+          })}
         </p>
       </div>
       <ProgressBar
@@ -383,102 +394,99 @@
           : migration.status === 'queued' || migration.status === 'running'
             ? 'accent'
             : 'danger'}
-        label="Storage migration progress" />
+        label={t('component.storageSettings.storageMigrationProgress')} />
       <p class="font-mono text-xs break-all text-ink-secondary">
         {migration.source_root} → {migration.target_root}
       </p>
 
       {#if migration.status === 'queued'}
-        <Banner tone="info" icon="warning" message="Queued. The move starts as soon as the worker picks it up." />
+        <Banner tone="info" icon="warning" message={t('component.storageSettings.queuedTheMoveStartsAsSoonAsTheWorkerPicksItUp')} />
       {:else if migration.status === 'running'}
         <Banner
           tone="info"
           icon="warning"
-          message="Downloads are paused while the files move. The storage root changes only once every file has arrived and been checked." />
+          message={t('component.storageSettings.downloadsArePausedWhileTheFilesMoveTheStorageRootChangesOnlyOnceEveryFileHasArrivedAndBeenChecked')} />
       {:else if migration.status === 'done'}
         <Banner
           tone="success"
           icon="check"
-          title="Migration finished"
-          message="Every file arrived at the new root and the storage root now points at it. Restart Caravan to resume downloads there." />
+          title={t('component.storageSettings.migrationFinished')}
+          message={t('component.storageSettings.everyFileArrivedAtTheNewRootAndTheStorageRootNowPointsAtItRestartCaravanToResumeDownloadsThere')} />
       {:else if migration.status === 'rolled_back'}
         <Banner
           tone="warning"
           icon="warning"
-          title="Migration rolled back"
-          message={`${migration.error} Every file was put back under ${migration.source_root} and the storage root never moved.`} />
+          title={t('component.storageSettings.migrationRolledBack')}
+          message={t('component.storageSettings.migrationRolledBackMessage', {
+            error: migration.error,
+            sourceRoot: migration.source_root,
+          })} />
       {:else}
         <Banner
           tone="danger"
           icon="warning"
-          title="Migration failed and could not be undone"
-          message={`${migration.error} Part of the library is under each root; move the remaining files back by hand before starting another migration.`} />
+          title={t('component.storageSettings.migrationFailedAndCouldNotBeUndone')}
+          message={t('component.storageSettings.migrationFailedMessage', { error: migration.error })} />
       {/if}
     </div>
   {/if}
 </section>
 
 {#if confirming === 'permanent-delete'}
-  <Modal title="Use permanent deletion?" width="max-w-md" onclose={() => (confirming = null)}>
+  <Modal title={t('component.storageSettings.usePermanentDeletion')} width="max-w-md" onclose={() => (confirming = null)}>
     <div class="flex flex-col gap-3 px-4 py-4">
       <p class="text-base text-ink-secondary">
-        Future Caravan deletions will permanently remove Caravan-owned media, posters and NFO files
-        instead of moving them to recycle. This cannot be undone.
+        {t('component.storageSettings.permanentDeletionMessage')}
       </p>
       <p class="text-base text-ink-secondary">
-        Saving this setting does not delete anything now or remove files already in recycle.
+        {t('component.storageSettings.savingThisSettingDoesNotDeleteAnythingNowOrRemoveFilesAlreadyInRecycle')}
       </p>
     </div>
     {#snippet footer()}
-      <Button variant="secondary" onclick={() => (confirming = null)}>Cancel</Button>
-      <Button variant="danger" onclick={saveNaming}>Save with permanent deletion</Button>
+      <Button variant="secondary" onclick={() => (confirming = null)}>{t('component.storageSettings.cancel')}</Button>
+      <Button variant="danger" onclick={saveNaming}>{t('component.storageSettings.saveWithPermanentDeletion')}</Button>
     {/snippet}
   </Modal>
 {/if}
 
 {#if confirming === 'repoint'}
-  <Modal title="Re-point the storage root?" width="max-w-md" onclose={() => (confirming = null)}>
+  <Modal title={t('component.storageSettings.rePointTheStorageRoot')} width="max-w-md" onclose={() => (confirming = null)}>
     <div class="flex flex-col gap-3 px-4 py-4">
       <p class="text-base text-ink-secondary">
-        Caravan will look for the library under <span class="font-mono break-all">{newRoot.trim()}</span>
-        from now on. No files are moved.
+        {t('component.storageSettings.caravanWillLookForTheLibraryUnder')} <span class="font-mono break-all">{newRoot.trim()}</span>
+        {t('component.storageSettings.fromNowOnNoFilesAreMoved')}
       </p>
       <p class="text-base text-ink-secondary">
-        If the media is not already there, the next rescan will report the whole
-        library as missing. Use "Move files here" instead when the files still
-        live under the old root.
+        {t('component.storageSettings.repointMissingMedia')}
       </p>
     </div>
     {#snippet footer()}
-      <Button variant="secondary" onclick={() => (confirming = null)}>Cancel</Button>
+      <Button variant="secondary" onclick={() => (confirming = null)}>{t('component.storageSettings.cancel')}</Button>
       <Button variant="primary" onclick={repoint}>
         <Icon name="check" size={14} />
-        Re-point
+        {t('component.storageSettings.rePoint')}
       </Button>
     {/snippet}
   </Modal>
 {/if}
 
 {#if confirming === 'migrate'}
-  <Modal title="Move the library?" width="max-w-md" onclose={() => (confirming = null)}>
+  <Modal title={t('component.storageSettings.moveTheLibrary')} width="max-w-md" onclose={() => (confirming = null)}>
     <div class="flex flex-col gap-3 px-4 py-4">
       <p class="text-base text-ink-secondary">
-        Caravan will move the library and incomplete folders from
-        <span class="font-mono break-all">{currentRoot}</span> to
-        <span class="font-mono break-all">{newRoot.trim()}</span>. This can take
-        hours; you can close this page and come back.
+        {t('component.storageSettings.caravanWillMoveTheLibraryAndIncompleteFoldersFrom')}
+        <span class="font-mono break-all">{currentRoot}</span> {t('component.storageSettings.to')}
+        <span class="font-mono break-all">{newRoot.trim()}</span>. {t('component.storageSettings.migrationDuration')}
       </p>
       <p class="text-base text-ink-secondary">
-        Downloads pause for the duration. Nothing is deleted until its copy has
-        been checked, and if anything goes wrong every file is put back and the
-        storage root stays where it is.
+        {t('component.storageSettings.migrationSafety')}
       </p>
     </div>
     {#snippet footer()}
-      <Button variant="secondary" onclick={() => (confirming = null)}>Cancel</Button>
+      <Button variant="secondary" onclick={() => (confirming = null)}>{t('component.storageSettings.cancel')}</Button>
       <Button variant="primary" onclick={migrate}>
         <Icon name="folder" size={14} />
-        Move files
+        {t('component.storageSettings.moveFiles')}
       </Button>
     {/snippet}
   </Modal>

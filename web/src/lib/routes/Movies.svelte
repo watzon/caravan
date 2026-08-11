@@ -14,6 +14,7 @@
   import PosterGridSkeleton from '../components/PosterGridSkeleton.svelte';
   import SelectActions from '../components/SelectActions.svelte';
   import TextInput from '../components/TextInput.svelte';
+  import { useI18n } from '../i18n.svelte';
   import { createSelection } from '../selection.svelte';
   import { navigate, router } from '../router.svelte';
   import {
@@ -29,13 +30,14 @@
   }
 
   let { onadd }: Props = $props();
+  const { t } = useI18n();
 
   type SortKey = 'title' | 'added' | 'status';
 
   const SORT_OPTIONS: { key: SortKey; label: string }[] = [
-    { key: 'title', label: 'Title' },
-    { key: 'added', label: 'Added' },
-    { key: 'status', label: 'Status' },
+    { key: 'title', label: t('route.library.sortTitle') },
+    { key: 'added', label: t('route.library.sortAdded') },
+    { key: 'status', label: t('route.library.sortStatus') },
   ];
 
   /** The dropdown takes {id, name}; the rail's order is the array's. */
@@ -122,17 +124,17 @@
   <div class="flex flex-wrap items-center gap-3">
     <FilterChips {chips} active={filter} onselect={(key) => (filter = key)} />
     <div class="ml-auto flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
-      <Dropdown label="Sort" options={SORT_CHOICES} value={sort} onselect={applySort} shape="box" />
+      <Dropdown label={t('route.library.sortLabel')} options={SORT_CHOICES} value={sort} onselect={applySort} shape="box" />
       <div class="w-full sm:w-56">
-        <TextInput bind:value={query} type="search" placeholder="Filter titles…" ariaLabel="Filter movies by title" />
+        <TextInput bind:value={query} type="search" placeholder={t('route.library.filterTitles')} ariaLabel={t('route.movies.filterByTitle')} />
       </div>
       <!-- No add button on the rail: the top bar's global add (and ⌘K)
            opens the same dialog, and the empty state carries the contextual
            one. Refresh goes ghost-icon for the same reason: it is a utility,
            not a destination. -->
-      <Button variant="ghost" onclick={load} title="Reload the library list" class="px-2">
+      <Button variant="ghost" onclick={load} title={t('route.library.reloadList')} class="px-2">
         <Icon name="refresh" size={14} />
-        <span class="sr-only">Refresh</span>
+        <span class="sr-only">{t('route.library.refresh')}</span>
       </Button>
     </div>
   </div>
@@ -144,20 +146,20 @@
   {:else if all.length === 0}
     <EmptyState
       icon="film"
-      title="No movies yet"
-      message="Add a movie from TMDB, or point Caravan at existing media and run a library scan.">
+      title={t('route.movies.emptyTitle')}
+      message={t('route.movies.emptyMessage')}>
       {#snippet action()}
         <Button variant="primary" onclick={onadd}>
           <Icon name="plus" size={14} />
-          Add movie
+          {t('route.movies.add')}
         </Button>
       {/snippet}
     </EmptyState>
   {:else if visible.length === 0}
     <EmptyState
       icon="search"
-      title="Nothing matches this filter"
-      message="No movie in the library matches the current filter and search.">
+      title={t('route.library.noFilterMatch')}
+      message={t('route.movies.noFilterMatchMessage')}>
       {#snippet action()}
         <Button
           variant="secondary"
@@ -165,7 +167,7 @@
             filter = 'all';
             query = '';
           }}>
-          Clear filters
+          {t('route.library.clearFilters')}
         </Button>
       {/snippet}
     </EmptyState>
@@ -191,8 +193,8 @@
 
   <SelectActions
     {selection}
-    noun="movie"
-    plural="movies"
+    noun={t('route.movies.noun')}
+    plural={t('route.movies.plural')}
     actions={{
       search: (id) => api.searchMovieNow(id),
       setMonitored: (id, monitored) => api.setMovieMonitored(id, monitored),

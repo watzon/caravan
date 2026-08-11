@@ -5,6 +5,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { DiscoverSeason } from './api/types';
+import { UNKNOWN } from './format';
 import {
   absorbNote,
   addSeasons,
@@ -104,7 +105,7 @@ describe('discover links and labels', () => {
 
   it('renders a runtime, and the unknown placeholder at zero', () => {
     expect(runtimeText(49)).toBe('49 min');
-    expect(runtimeText(0)).toBe('—');
+    expect(runtimeText(0)).toBe(UNKNOWN);
   });
 
   it('builds the mono season line from what is known', () => {
@@ -204,7 +205,7 @@ describe('language names', () => {
   it('names an ISO code, and degrades to the code or the placeholder', () => {
     expect(languageName('en')).toBe('English');
     expect(languageName('zz')).toBe('zz');
-    expect(languageName('')).toBe('—');
+    expect(languageName('')).toBe(UNKNOWN);
   });
 });
 
@@ -218,10 +219,10 @@ describe('absorb note', () => {
 
   it('warns once per checked season that has a pending request', () => {
     expect(absorbNote(seasons, [1, 3], 'add')).toBe(
-      'Adding Season 01 will absorb its pending request and mark it approved.',
+      'Adding Season 01 will approve its pending request.',
     );
     expect(absorbNote(seasons, [1, 2], 'add')).toBe(
-      'Adding Season 01 and Season 02 will absorb their pending requests and mark them approved.',
+      'Adding Season 01 and Season 02 will approve their pending requests.',
     );
   });
 

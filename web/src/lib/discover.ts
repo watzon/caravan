@@ -10,6 +10,7 @@
 
 import type { DiscoverItem, DiscoverSeason, MediaRequest, MediaType, MinAvailability } from './api/types';
 import { UNKNOWN, seasonLabel } from './format';
+import { currentLocale, translate, translatePlural } from './i18n.svelte';
 
 /** Which half of the modal the user is in: adding for real, or asking for it. */
 export type RequestMode = 'add' | 'request';
@@ -39,7 +40,7 @@ export function sourceHref(source: { type: string; id: number }): string {
 
 /** MOVIE / SERIES, for the mono chip on a mixed shelf. */
 export function mediaTypeChip(mediaType: MediaType): string {
-  return mediaType === 'movie' ? 'MOVIE' : 'SERIES';
+  return translate(mediaType === 'movie' ? 'discover.mediaType.movie' : 'discover.mediaType.series');
 }
 
 /**
@@ -71,7 +72,7 @@ export function ratingPresentation(
   const rating = ratingText(voteAverage, voteCount);
   const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(releaseDate);
   if (!rating || !dateMatch || !Number.isFinite(today.getTime())) {
-    return { text: null, title: 'Not yet rated' };
+    return { text: null, title: translate('discover.rating.none') };
   }
 
   const [, yearText, monthText, dayText] = dateMatch;
@@ -87,10 +88,10 @@ export function ratingPresentation(
     validReleaseDate &&
     release.getTime() <= new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
 
-  if (!released) return { text: null, title: 'Not yet rated' };
+  if (!released) return { text: null, title: translate('discover.rating.none') };
 
   const text = `${rating}/10`;
-  return { text, title: `Rated ${text}` };
+  return { text, title: translate('discover.rating.value', { rating: text }) };
 }
 
 /** Leading year of a provider date ("2008-01-20" → 2008); 0 when unknown. */
@@ -103,7 +104,8 @@ export function yearOf(date: string | null | undefined): number {
 /** Runtime in minutes as "49 min"; the unknown placeholder at zero. */
 export function runtimeText(minutes: number): string {
   if (!Number.isFinite(minutes) || minutes <= 0) return UNKNOWN;
-  return `${Math.round(minutes)} min`;
+  const count = Math.round(minutes);
+  return translatePlural('discover.runtime.minute', count);
 }
 
 /**
@@ -114,7 +116,7 @@ export function runtimeText(minutes: number): string {
 export function languageName(code: string): string {
   if (!code) return UNKNOWN;
   try {
-    return new Intl.DisplayNames(undefined, { type: 'language' }).of(code) ?? code;
+    return new Intl.DisplayNames(currentLocale(), { type: 'language' }).of(code) ?? code;
   } catch {
     return code;
   }
@@ -123,7 +125,9 @@ export function languageName(code: string): string {
 /** "12 EPS · 2022" — the mono line under a season row. */
 export function seasonMeta(season: Pick<DiscoverSeason, 'episode_count' | 'air_date'>): string {
   const parts: string[] = [];
-  if (season.episode_count > 0) parts.push(`${season.episode_count} EPS`);
+  if (season.episode_count > 0) {
+    parts.push(translatePlural('discover.seasonMeta.episode', season.episode_count));
+  }
   const year = yearOf(season.air_date);
   if (year > 0) parts.push(String(year));
   return parts.join(' · ');
@@ -224,10 +228,12 @@ export function canRequestSeason(
   return !titleInLibrary && !season.in_library && !season.requested;
 }
 
-/** "A", "A and B", "A, B and C". */
+/** A list formatted for the current locale. */
 function joinList(names: string[]): string {
-  if (names.length <= 1) return names[0] ?? '';
-  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  return new Intl.ListFormat(currentLocale(), {
+    style: 'long',
+    type: 'conjunction',
+  }).format(names);
 }
 
 /**
@@ -245,9 +251,9 @@ export function absorbNote(
     .filter((s) => !s.in_library && s.requested && selected.includes(s.season_number))
     .map((s) => seasonLabel(s.season_number));
   if (names.length === 0) return null;
-  return names.length === 1
-    ? `Adding ${names[0]} will absorb its pending request and mark it approved.`
-    : `Adding ${joinList(names)} will absorb their pending requests and mark them approved.`;
+  return translatePlural('discover.absorbRequest', names.length, {
+    names: joinList(names),
+  });
 }
 
 /** The modal's primary button. The count is checked seasons, never total. */
@@ -256,10 +262,20 @@ export function submitLabel(
   mediaType: MediaType,
   count: number,
 ): string {
-  const verb = mode === 'add' ? 'Add' : 'Request';
-  if (mediaType === 'movie') return `${verb} movie`;
-  if (count <= 0) return `${verb} series`;
-  return `${verb} ${count} season${count === 1 ? '' : 's'}`;
+  if (mediaType === 'movie') {
+    return translate(
+      mode === 'add' ? 'discover.submit.addMovie' : 'discover.submit.requestMovie',
+    );
+  }
+  if (count <= 0) {
+    return translate(
+      mode === 'add' ? 'discover.submit.addSeries' : 'discover.submit.requestSeries',
+    );
+  }
+  return translatePlural(
+    mode === 'add' ? 'discover.submit.addSeason' : 'discover.submit.requestSeason',
+    count,
+  );
 }
 
 /** "Breaking Bad · 5 seasons · 62 episodes"; movies get "Title · 1982". */
@@ -272,10 +288,10 @@ export function modalSubtitle(
   if (mediaType === 'movie') return year > 0 ? `${title} · ${year}` : title;
   const parts = [title];
   if (seasons.length > 0) {
-    parts.push(`${seasons.length} season${seasons.length === 1 ? '' : 's'}`);
+    parts.push(translatePlural('discover.count.season', seasons.length));
   }
   const episodes = seasons.reduce((sum, s) => sum + Math.max(0, s.episode_count), 0);
-  if (episodes > 0) parts.push(`${episodes} episode${episodes === 1 ? '' : 's'}`);
+  if (episodes > 0) parts.push(translatePlural('discover.count.episode', episodes));
   return parts.join(' · ');
 }
 
@@ -289,9 +305,21 @@ export const AVAILABILITY_OPTIONS: {
   label: string;
   hint: string;
 }[] = [
-  { value: 'announced', label: 'Announced', hint: 'Search as soon as it is added.' },
-  { value: 'in_cinemas', label: 'In cinemas', hint: 'Wait for the theatrical release.' },
-  { value: 'released', label: 'Released', hint: 'Wait for a home release — digital or disc.' },
+  {
+    value: 'announced',
+    get label() { return translate('discover.availability.announced.label'); },
+    get hint() { return translate('discover.availability.announced.hint'); },
+  },
+  {
+    value: 'in_cinemas',
+    get label() { return translate('discover.availability.inCinemas.label'); },
+    get hint() { return translate('discover.availability.inCinemas.hint'); },
+  },
+  {
+    value: 'released',
+    get label() { return translate('discover.availability.released.label'); },
+    get hint() { return translate('discover.availability.released.hint'); },
+  },
 ];
 
 /** The user-facing name of an availability stage; "" for the empty default. */

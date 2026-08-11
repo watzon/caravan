@@ -11,6 +11,7 @@
    * tiles on the discover screen are the browsable half.
    */
   import type { DiscoverItem } from '../api/types';
+  import { useI18n } from '../i18n.svelte';
   import DiscoverCard from './DiscoverCard.svelte';
   import Icon from './Icon.svelte';
 
@@ -21,6 +22,7 @@
   }
 
   let { title, items, showType = false }: Props = $props();
+  const { t } = useI18n();
 
   let scroller = $state<HTMLDivElement | null>(null);
   let canScrollLeft = $state(false);
@@ -93,7 +95,7 @@
         <div class="flex items-center gap-1">
           <button
             type="button"
-            aria-label="Scroll {title} left"
+            aria-label={t('component.discoverShelf.scrollLeft', { title })}
             disabled={!canScrollLeft}
             onclick={() => page(-1)}
             class="flex size-7 items-center justify-center rounded-md border border-border bg-surface
@@ -105,7 +107,7 @@
           </button>
           <button
             type="button"
-            aria-label="Scroll {title} right"
+            aria-label={t('component.discoverShelf.scrollRight', { title })}
             disabled={!canScrollRight}
             onclick={() => page(1)}
             class="flex size-7 items-center justify-center rounded-md border border-border bg-surface

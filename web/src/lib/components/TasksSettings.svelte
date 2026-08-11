@@ -1,6 +1,7 @@
 <script lang="ts" module>
   /** Fast enough that a task started from this screen visibly starts. */
   export const TASKS_POLL_MS = 5000;
+
 </script>
 
 <script lang="ts">
@@ -20,12 +21,15 @@
   import type { SystemTask, TaskIntervalUpdate } from '../api/types';
   import { UNKNOWN, formatAge, formatUntil } from '../format';
   import { pushToast } from '../state/toast.svelte';
+  import { useI18n } from '../i18n.svelte';
   import Badge from './Badge.svelte';
   import Button from './Button.svelte';
   import Icon from './Icon.svelte';
   import LoadError from './LoadError.svelte';
   import SettingsCard from './SettingsCard.svelte';
   import Skeleton from './Skeleton.svelte';
+
+  const { t, tp } = useI18n();
 
   let tasks = $state<SystemTask[] | null>(null);
   let error = $state<string | null>(null);
@@ -71,9 +75,9 @@
     try {
       const result = await api.runTask(task.kind);
       if (result?.already_running) {
-        pushToast(`${task.name} is already running.`, 'info');
+        pushToast(t('component.tasksSettings.alreadyRunning', { name: task.name }), 'info');
       } else {
-        pushToast(`${task.name} will start in a moment.`, 'success');
+        pushToast(t('component.tasksSettings.startingSoon', { name: task.name }), 'success');
       }
       // Refresh straight away rather than waiting out the poll: the button was
       // just pressed, so this is the one moment the screen must be current.
@@ -100,7 +104,7 @@
     const value = intervalValue(task).trim();
     const minutes = Number(value);
     if (!value || !Number.isInteger(minutes) || minutes < 5 || minutes > 43_200) {
-      return 'Enter a whole number from 5 to 43,200 minutes.';
+      return t('component.tasksSettings.intervalError');
     }
     return null;
   }
@@ -122,7 +126,7 @@
       const nextDrafts = { ...intervalDrafts };
       delete nextDrafts[task.kind];
       intervalDrafts = nextDrafts;
-      pushToast(`${task.name} interval saved.`, 'success');
+      pushToast(t('component.tasksSettings.intervalSaved', { name: task.name }), 'success');
       // Unlike ordinary polling, this request follows a user action: refresh
       // now so the scheduler state and displayed cadence agree immediately.
       await load(false, result);
@@ -135,24 +139,24 @@
 
   /** How long ago the last run finished. "Never" is a real answer here. */
   function lastRunText(task: SystemTask): string {
-    if (task.last_result === '') return 'Never';
+    if (task.last_result === '') return t('component.tasksSettings.never');
     const age = formatAge(task.last_run);
-    return age === UNKNOWN ? age : `${age} ago`;
+    return age === UNKNOWN ? age : t('component.tasksSettings.ago', { age });
   }
 
   /** When the next run is due, in the same words the queue would use. */
   function nextRunText(task: SystemTask): string {
-    if (task.running) return 'Running now';
-    if (!task.queued) return 'Not scheduled';
+    if (task.running) return t('component.tasksSettings.runningNow');
+    if (!task.queued) return t('component.tasksSettings.notScheduled');
     // An empty next run on a queued task means its run_after is already past —
     // it is waiting on the next poll, not on the clock.
-    return task.next_run ? formatUntil(task.next_run) : 'now';
+    return task.next_run ? formatUntil(task.next_run) : t('component.tasksSettings.now');
   }
 </script>
 
 <SettingsCard
-  title="Tasks"
-  description="The work Caravan does on a timer. Set each recurring interval in minutes, or run a task on demand.">
+  title={t('component.tasksSettings.tasks')}
+  description={t('component.tasksSettings.theWorkCaravanDoesOnATimerSetEachRecurringIntervalInMinutesOrRunATaskOnDemand')}>
   {#if error}
     <LoadError message={error} onretry={() => load(true)} />
   {:else if tasks === null}
@@ -169,7 +173,7 @@
             <div class="flex items-center gap-2">
               <span class="text-base font-medium text-ink">{task.name}</span>
               {#if task.running}
-                <Badge tone="accent">Running</Badge>
+                <Badge tone="accent">{t('component.tasksSettings.running')}</Badge>
               {/if}
             </div>
             <p class="text-sm text-ink-secondary">{task.description}</p>
@@ -183,7 +187,7 @@
           <dl class="grid shrink-0 grid-cols-1 gap-4 sm:grid-cols-3 lg:w-80">
             <div>
               <dt class="micro-label">
-                <label for={`task-${task.kind}-interval`}>Every (minutes)</label>
+                <label for={`task-${task.kind}-interval`}>{t('component.tasksSettings.everyMinutes')}</label>
               </dt>
               <dd class="mt-1">
                 <input
@@ -210,7 +214,7 @@
               </dd>
             </div>
             <div>
-              <dt class="micro-label">Last run</dt>
+              <dt class="micro-label">{t('component.tasksSettings.lastRun')}</dt>
               <dd class="mt-1 flex flex-wrap items-center gap-1.5 text-sm tabular-nums text-ink">
                 <span class={task.last_result === '' ? 'text-ink-secondary' : ''}>
                   {lastRunText(task)}
@@ -223,7 +227,7 @@
               </dd>
             </div>
             <div>
-              <dt class="micro-label">Next run</dt>
+              <dt class="micro-label">{t('component.tasksSettings.nextRun')}</dt>
               <dd class="mt-1 text-sm tabular-nums text-ink">{nextRunText(task)}</dd>
             </div>
           </dl>
@@ -233,16 +237,16 @@
               variant="secondary"
               disabled={updating[task.kind] || !intervalChanged(task)}
               title={!intervalChanged(task)
-                ? intervalIssue(task) ?? 'No changes to save'
+                ? intervalIssue(task) ?? t('component.tasksSettings.noChangesToSave')
                 : undefined}
               onclick={() => saveInterval(task)}>
-              {updating[task.kind] ? 'Saving…' : 'Save interval'}
+              {updating[task.kind] ? t('component.tasksSettings.saving') : t('component.tasksSettings.saveInterval')}
             </Button>
             <Button
               disabled={starting[task.kind]}
               onclick={() => run(task)}>
               <Icon name="refresh" size={14} />
-              {starting[task.kind] ? 'Starting…' : 'Run now'}
+              {starting[task.kind] ? t('component.tasksSettings.starting') : t('component.tasksSettings.runNow')}
             </Button>
           </div>
         </li>

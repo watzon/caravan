@@ -288,8 +288,8 @@ describe('FirstRun', () => {
 
     button('Skip for now').click();
     flushSync();
-    expect(host.textContent).toContain('nothing is matched');
-    expect(host.textContent).toContain('Settings → Metadata');
+    expect(host.textContent).toContain('cannot match media');
+    expect(host.textContent).toContain('Settings > Metadata');
 
     button('Start Caravan').click();
     await settle();

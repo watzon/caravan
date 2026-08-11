@@ -10,10 +10,12 @@
    * logs everyone out of a server that cannot be restarted from here.
    */
   import { shutdown } from '../state/shutdown.svelte';
+  import { useI18n } from '../i18n.svelte';
   import Button from './Button.svelte';
   import Icon from './Icon.svelte';
   import LoadError from './LoadError.svelte';
   import Modal from './Modal.svelte';
+  const { t } = useI18n();
 </script>
 
 <button
@@ -22,7 +24,7 @@
   disabled={shutdown.phase !== 'idle'}
   onclick={() => (shutdown.confirming = true)}>
   <Icon name="disk" size={14} />
-  <span>{shutdown.phase === 'stopping' ? 'Shutting down…' : 'Shut down safely'}</span>
+  <span>{shutdown.phase === 'stopping' ? t('component.shutdown.stopping') : t('component.shutdown.safe')}</span>
 </button>
 
 {#if shutdown.error}
@@ -30,22 +32,21 @@
 {/if}
 
 {#if shutdown.confirming}
-  <Modal title="Shut down Caravan?" width="max-w-md" onclose={() => (shutdown.confirming = false)}>
+  <Modal title={t('component.shutdown.confirmTitle')} width="max-w-md" onclose={() => (shutdown.confirming = false)}>
     <div class="flex flex-col gap-3 px-4 py-4">
       <p class="text-base text-ink-secondary">
-        Caravan will stop its downloads, flush the database and release the drive.
-        Once it has, this page can no longer reach it.
+        {t('component.shutdown.description')}
       </p>
       <p class="text-base text-ink-secondary">
-        Wait for the "safe to eject" screen before unplugging the drive.
+        {t('component.shutdown.ejectWarning')}
       </p>
     </div>
 
     {#snippet footer()}
-      <Button variant="secondary" onclick={() => (shutdown.confirming = false)}>Cancel</Button>
+      <Button variant="secondary" onclick={() => (shutdown.confirming = false)}>{t('component.actions.cancel')}</Button>
       <Button variant="danger" onclick={() => shutdown.run()}>
         <Icon name="disk" size={14} />
-        Shut down
+        {t('component.shutdown.action')}
       </Button>
     {/snippet}
   </Modal>

@@ -18,6 +18,7 @@
   import { moveResultFocus, MIN_QUERY } from '../typeahead';
   import type { FilterRef } from '../explore';
   import { hasRef } from '../explore';
+  import { useI18n } from '../i18n.svelte';
   import Icon from './Icon.svelte';
 
   interface Option {
@@ -38,6 +39,7 @@
   }
 
   let { search, selected, ontoggle, placeholder, ariaLabel }: Props = $props();
+  const { t } = useI18n();
 
   const typeahead = createTypeahead<Option[]>({
     run: (query, signal) => search(query, signal),
@@ -74,11 +76,11 @@
   {#if typeahead.error}
     <p class="px-1 text-sm text-danger">{typeahead.error}</p>
   {:else if typeahead.loading}
-    <p class="px-1 text-sm text-ink-muted">Searching…</p>
+    <p class="px-1 text-sm text-ink-muted">{t('component.typeahead.searching')}</p>
   {:else if typeahead.idle}
-    <p class="px-1 text-sm text-ink-muted">Type at least {MIN_QUERY} characters.</p>
+    <p class="px-1 text-sm text-ink-muted">{t('component.typeahead.minimumCharacters', { count: MIN_QUERY })}</p>
   {:else if typeahead.results.length === 0}
-    <p class="px-1 text-sm text-ink-muted">No matches for “{typeahead.trimmed}”.</p>
+    <p class="px-1 text-sm text-ink-muted">{t('component.typeahead.noMatches', { query: typeahead.trimmed })}</p>
   {/if}
 
   {#if typeahead.results.length > 0 || offscreen.length > 0}

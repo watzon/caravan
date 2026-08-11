@@ -28,6 +28,9 @@
   import { sceneNumber } from '../adult';
   import { navigate } from '../router.svelte';
   import { pushToast } from '../state/toast.svelte';
+  import { useI18n } from '../i18n.svelte';
+
+  const { t, tp } = useI18n();
 
   interface Props {
     /**
@@ -88,11 +91,9 @@
   });
 
   let heading = $derived.by((): string => {
-    if (kind === 'movie') return movie?.title ?? 'Movie';
-    const title = series?.title ?? (kind === 'site' ? 'Site' : 'Series');
+    if (kind === 'movie') return movie?.title ?? t('route.releaseSearch.movie');
+    const title = series?.title ?? (kind === 'site' ? t('route.releaseSearch.site') : t('route.releaseSearch.series'));
     if (season < 0) return title;
-    // A scene has no SxxEyy: it is numbered within its release year, which is
-    // exactly how the site's own page names it.
     if (kind === 'site') {
       return episode >= 0 ? `${title} · ${season} · ${sceneNumber(episode)}` : `${title} · ${season}`;
     }
@@ -100,9 +101,15 @@
     return `${title} · ${seasonLabel(season)}`;
   });
 
-  /** The chip that keeps the locked grab target visible above an edited query. */
   let contextLabel = $derived(
-    `${kind === 'movie' ? 'Movie' : kind === 'site' ? 'Site' : 'Series'} · ${heading}`,
+    t('route.releaseSearch.context', {
+      kind: kind === 'movie'
+        ? t('route.releaseSearch.movie')
+        : kind === 'site'
+          ? t('route.releaseSearch.site')
+          : t('route.releaseSearch.series'),
+      heading,
+    }),
   );
 
   /**
@@ -237,7 +244,7 @@
           ...(episodeIDs.length > 0 ? { episode_ids: episodeIDs } : {}),
         });
       }
-      pushToast(`Grabbed ${release.title}`, 'success');
+      pushToast(t('route.releaseSearch.grabbed', { title: release.title }), 'success');
       navigate('/queue');
     } catch (err) {
       pushToast(errorText(err), 'danger');
@@ -253,19 +260,17 @@
     href={itemHref}
     class="inline-flex w-fit items-center gap-2 text-base text-ink-secondary transition-colors duration-150 hover:text-ink">
     <Icon name="back" size={14} />
-    Back to item
+    {t('route.releaseSearch.back')}
   </a>
 
   <div class="flex flex-wrap items-center gap-3">
     <div class="min-w-0">
       <h2 class="font-display text-xl font-semibold tracking-tight text-ink">{heading}</h2>
-      <p class="text-base text-ink-secondary">
-        Every enabled indexer, searched now. Nothing is grabbed until you say so.
-      </p>
+      <p class="text-base text-ink-secondary">{t('route.releaseSearch.description')}</p>
     </div>
     {#if releases}
       <span class="ml-auto text-sm text-ink-secondary">
-        {releases.length} release{releases.length === 1 ? '' : 's'}
+        {tp('route.releaseSearch.resultCount', releases.length)}
       </span>
     {/if}
   </div>
