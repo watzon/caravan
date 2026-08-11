@@ -51,6 +51,7 @@ describe('endpoints', () => {
     expect(endpoints.indexers()).toBe('/api/v1/indexers');
     expect(endpoints.indexer(3)).toBe('/api/v1/indexers/3');
     expect(endpoints.indexerTest(3)).toBe('/api/v1/indexers/3/test');
+    expect(endpoints.indexerStoredCategories(3)).toBe('/api/v1/indexers/3/categories');
     expect(endpoints.movieReleases(7)).toBe('/api/v1/library/movies/7/releases');
     expect(endpoints.movieGrab(7)).toBe('/api/v1/library/movies/7/grab');
     expect(endpoints.seriesReleases(9)).toBe('/api/v1/library/series/9/releases');
@@ -304,6 +305,14 @@ describe('indexers', () => {
     stubFetch({ error: 'indexer returned 401' }, 502);
     await expect(api.testIndexer(4)).rejects.toThrow('indexer returned 401');
     await expect(api.testIndexer(4)).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it('GETs categories for a stored indexer and unwraps the tree', async () => {
+    stubFetch({ categories: [{ id: 2000, name: 'Movies', subcats: [] }] });
+    const categories = await api.indexerStoredCategories(4);
+
+    expect(categories).toEqual([{ id: 2000, name: 'Movies', subcats: [] }]);
+    expect(only()).toMatchObject({ method: 'GET', url: '/api/v1/indexers/4/categories' });
   });
 });
 

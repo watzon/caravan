@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Indexer, IndexerCategory } from './api/types';
 import {
   allCategoryIds,
+  categoryGroups,
   formatCategories,
   isAdultCategory,
   parseCategories,
@@ -93,6 +94,42 @@ describe('allCategoryIds', () => {
 
   it('reads an empty tree as no ids', () => {
     expect(allCategoryIds([])).toEqual([]);
+  });
+});
+
+describe('categoryGroups', () => {
+  it('groups selected descendants under their top-level parent', () => {
+    expect(categoryGroups([2000, 2040, 5070], TREE)).toEqual([
+      {
+        id: 2000,
+        name: 'Movies',
+        selected: true,
+        children: [{ id: 2040, name: 'HD' }],
+      },
+      { id: 5070, name: 'Anime', selected: true, children: [] },
+    ]);
+  });
+
+  it('keeps an unselected parent as context for selected descendants', () => {
+    expect(categoryGroups([2045], TREE)).toEqual([
+      {
+        id: 2000,
+        name: 'Movies',
+        selected: false,
+        children: [{ id: 2045, name: 'UHD' }],
+      },
+    ]);
+  });
+
+  it('keeps ids missing from the advertised tree in a separate group', () => {
+    expect(categoryGroups([9999], TREE)).toEqual([
+      {
+        id: -1,
+        name: 'Not advertised',
+        selected: false,
+        children: [{ id: 9999, name: 'Category 9999' }],
+      },
+    ]);
   });
 });
 

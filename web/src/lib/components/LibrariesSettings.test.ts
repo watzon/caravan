@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import LibrariesSettings from './LibrariesSettings.svelte';
-import type { Library, LibraryAccess, LibraryIndexer } from '../api/types';
+import type { IndexerCategory, Library, LibraryAccess, LibraryIndexer } from '../api/types';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -83,6 +83,22 @@ const PROFILES = [
   { id: 7, name: 'HD-1080p', cutoff: '1080p', items: ['1080p'], upgrade_allowed: true, created_at: '', updated_at: '' },
 ];
 
+const INDEXER_CATEGORIES: IndexerCategory[] = [
+  {
+    id: 2000,
+    name: 'Movies',
+    subcats: [
+      { id: 2010, name: 'Movies/Foreign', subcats: [] },
+      { id: 2020, name: 'Movies/Other', subcats: [] },
+    ],
+  },
+  {
+    id: 5000,
+    name: 'TV',
+    subcats: [{ id: 5010, name: 'TV/Foreign', subcats: [] }],
+  },
+];
+
 beforeEach(() => {
   writes = [];
   libraries = [MOVIES, SERIES];
@@ -154,6 +170,9 @@ beforeEach(() => {
       if (url.endsWith('/quality-profiles')) return jsonResponse({ profiles: PROFILES });
       if (url.endsWith('/download-clients/types')) return jsonResponse({ types: TYPES });
       if (url.endsWith('/download-clients')) return jsonResponse({ download_clients: CLIENTS });
+      if (/\/indexers\/\d+\/categories$/.test(url)) {
+        return jsonResponse({ categories: INDEXER_CATEGORIES });
+      }
       if (url.endsWith('/auth/me')) {
         meReads += 1;
         return jsonResponse({ username: 'root', role: 'admin', open: false, adult: false, libraries: [] });
@@ -193,6 +212,7 @@ async function settle() {
 
 async function mountLoaded() {
   app = mount(LibrariesSettings, { target: host, props: {} });
+  await settle();
   await settle();
 }
 
@@ -542,20 +562,31 @@ describe('LibrariesSettings — indexer rows', () => {
     expect(toggle('Search Prowlarr for Movies').getAttribute('aria-checked')).toBe('true');
   });
 
-  it('renders the resolved categories as chips and marks an overridden set', async () => {
+  it('groups resolved categories under their advertised parents', async () => {
     libraries = [
       library({
-        indexers: [indexerRow({ categories: [2000], categories_overridden: true })],
+        indexers: [
+          indexerRow({
+            categories: [2000, 2010, 2020, 5000, 5010],
+            categories_overridden: true,
+          }),
+        ],
       }),
       SERIES,
     ];
     await mountLoaded();
 
-    const chips = [...host.querySelectorAll('li span.font-mono')].map((c) => c.textContent?.trim());
-    expect(chips).toContain('2000');
-    expect(chips).not.toContain('5000');
-    // The indexer list, not the provider chain's ordered one above it.
-    expect(host.querySelector('ul li')?.className).toContain('border-accent');
+    const summary = host.querySelector('[aria-label="Categories for Prowlarr"]')!;
+    const movies = summary.querySelector('[data-category-group="2000"]')!;
+    const tv = summary.querySelector('[data-category-group="5000"]')!;
+    expect(movies.textContent).toContain('Movies');
+    expect(movies.textContent).toContain('Foreign');
+    expect(movies.textContent).toContain('Other');
+    expect(movies.textContent).not.toContain('Movies/Foreign');
+    expect(tv.textContent).toContain('TV');
+    expect(tv.textContent).toContain('Foreign');
+    expect(movies.getAttribute('data-parent-selected')).toBe('true');
+    expect(toggle('Search Prowlarr for Movies').closest('li')?.className).toContain('border-accent');
   });
 
   // The server rewrites the whole row, so a toggle that forgets the category
@@ -594,7 +625,13 @@ describe('LibrariesSettings — indexer rows', () => {
   it('edits categories to an explicit list and reverts to the indexer default', async () => {
     libraries = [
       library({
-        indexers: [indexerRow({ categories: [2000], categories_overridden: true })],
+        indexers: [
+          indexerRow({
+            categories: [2000],
+            default_categories: [2000, 2010, 2020, 5000, 5010],
+            categories_overridden: true,
+          }),
+        ],
       }),
       SERIES,
     ];
@@ -605,10 +642,20 @@ describe('LibrariesSettings — indexer rows', () => {
     expect(
       host.querySelector('[role="dialog"] footer > div')?.classList.contains('flex-wrap'),
     ).toBe(true);
-    const input = host.querySelector('#library-indexer-categories') as HTMLInputElement;
-    input.value = '2010, 2020';
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    flushSync();
+    expect(host.querySelector('#library-indexer-categories')).toBeNull();
+    expect(host.querySelector('[role="dialog"]')?.textContent).toContain('Movies/Foreign');
+    expect(host.querySelector('[role="dialog"]')?.textContent).toContain('Movies/Other');
+    const defaults = host.querySelector('[aria-label="Default categories for Prowlarr"]')!;
+    expect(defaults.querySelector('[data-category-group="2000"]')?.textContent).toContain(
+      'Foreign',
+    );
+    expect(defaults.querySelector('[data-category-group="5000"]')?.textContent).toContain(
+      'Foreign',
+    );
+
+    button('Clear').click();
+    button('Movies/Foreign').click();
+    button('Movies/Other').click();
     button('Save').click();
     await settle();
 
@@ -618,7 +665,7 @@ describe('LibrariesSettings — indexer rows', () => {
     flushSync();
     // null, not [] — [] is the override "search unfiltered", which is a
     // different answer from "use the indexer's own list".
-    button("Use the indexer's").click();
+    button('Use indexer defaults').click();
     await settle();
 
     expect(write(1).body).toEqual({ enabled: true, categories: null });

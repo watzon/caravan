@@ -35,6 +35,7 @@
     type DownloadClient,
     type DownloadClientTypeInfo,
     type Library,
+    type IndexerCategory,
     type LibraryAccess,
     type LibraryIndexer,
     type LibraryKind,
@@ -46,12 +47,13 @@
     type Settings,
   } from '../api/types';
   import { describeType } from '../downloadClient';
-  import { formatCategories, parseCategories } from '../indexer';
   import { session } from '../state/session.svelte';
   import { pushToast } from '../state/toast.svelte';
   import Badge from './Badge.svelte';
   import Banner from './Banner.svelte';
   import Button from './Button.svelte';
+  import CategoryPicker from './CategoryPicker.svelte';
+  import CategorySummary from './CategorySummary.svelte';
   import EmptyState from './EmptyState.svelte';
   import Field from './Field.svelte';
   import Icon from './Icon.svelte';
@@ -102,7 +104,13 @@
 
   /** The (library, indexer) pair whose categories the modal is editing. */
   let editing = $state<LibraryIndexer | null>(null);
-  let categoryText = $state('');
+  let editingCategories = $state<number[]>([]);
+  type CategoryTreeState = {
+    tree: IndexerCategory[] | null;
+    loading: boolean;
+    error: string | null;
+  };
+  let categoryTrees = $state(new Map<number, CategoryTreeState>());
 
   /** The Access card's roster, and which library it describes. */
   let access = $state<LibraryAccess | null>(null);
@@ -110,6 +118,35 @@
   let accessError = $state<string | null>(null);
   /** True while an access write is in flight, so only that card goes quiet. */
   let savingAccess = $state(false);
+
+  function setCategoryTreeState(indexerID: number, state: CategoryTreeState) {
+    categoryTrees = new Map(categoryTrees).set(indexerID, state);
+  }
+
+  async function loadCategoryTree(indexerID: number) {
+    const current = categoryTrees.get(indexerID);
+    setCategoryTreeState(indexerID, {
+      tree: current?.tree ?? null,
+      loading: true,
+      error: null,
+    });
+    try {
+      const tree = await api.indexerStoredCategories(indexerID);
+      setCategoryTreeState(indexerID, { tree, loading: false, error: null });
+    } catch (err) {
+      setCategoryTreeState(indexerID, {
+        tree: current?.tree ?? null,
+        loading: false,
+        error: errorText(err),
+      });
+    }
+  }
+
+  function loadCategoryTrees(rows: readonly Library[]) {
+    const ids = new Set(rows.flatMap((lib) => lib.indexers.map((row) => row.indexer_id)));
+    for (const id of ids) void loadCategoryTree(id);
+  }
+
 
   async function load() {
     loading = true;
@@ -130,6 +167,7 @@
         api.listMetadataProviders(),
       ]);
       libraries = loadedLibraries;
+      loadCategoryTrees(loadedLibraries);
       settings = loadedSettings;
       profiles = loadedProfiles;
       clients = loadedClients;
@@ -525,7 +563,11 @@
 
   function openCategories(row: LibraryIndexer) {
     editing = row;
-    categoryText = formatCategories(row.categories);
+    editingCategories = [...row.categories];
+    const state = categoryTrees.get(row.indexer_id);
+    if (!state || (state.tree === null && !state.loading)) {
+      void loadCategoryTree(row.indexer_id);
+    }
   }
 
   async function saveCategories() {
@@ -534,7 +576,7 @@
     const ok = await writeIndexer(
       row,
       row.enabled,
-      parseCategories(categoryText),
+      editingCategories,
       `Categories saved for ${row.name}.`,
     );
     if (ok) editing = null;
@@ -995,6 +1037,7 @@
         {:else}
           <ul class="flex flex-col gap-2">
             {#each lib.indexers as row (row.indexer_id)}
+              {@const categoryState = categoryTrees.get(row.indexer_id)}
               <li
                 class="flex flex-wrap items-center gap-3 rounded-md border bg-surface px-3 py-3
                        {row.categories_overridden ? 'border-accent' : 'border-border'}">
@@ -1006,28 +1049,40 @@
                 </span>
 
                 <div class="flex min-w-0 flex-1 flex-col gap-1">
-                  <p class="flex flex-wrap items-center gap-2">
+                  <div class="flex w-full flex-wrap items-center gap-2">
                     <span class="truncate text-base font-medium text-ink" title={row.name}>{row.name}</span>
                     <Badge mono tone={row.type === 'torznab' ? 'accent' : 'info'}>{row.type}</Badge>
                     <Badge tone={row.indexer_enabled ? 'success' : 'neutral'}>
                       {row.indexer_enabled ? 'Indexer enabled' : 'Indexer disabled'}
                     </Badge>
-                  </p>
-
-                  <div class="flex flex-wrap items-center gap-1.5">
-                    {#if row.categories.length === 0}
-                      <Badge mono tone="warning">every category</Badge>
-                    {:else}
-                      {#each row.categories as category (category)}
-                        <Badge mono tone={row.categories_overridden ? 'accent' : 'neutral'}>
-                          {category}
-                        </Badge>
-                      {/each}
-                    {/if}
-                    <Button variant="ghost" size="sm" onclick={() => openCategories(row)}>
-                      Edit
-                      <span class="sr-only">categories for {row.name}</span>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      class="ml-auto"
+                      onclick={() => openCategories(row)}>
+                      Edit categories
+                      <span class="sr-only"> for {row.name}</span>
                     </Button>
+                  </div>
+
+                  <div class="flex flex-wrap items-start gap-2">
+                    <div class="min-w-0 flex-1">
+                      {#if row.categories.length === 0}
+                        <Badge mono tone="warning">every category</Badge>
+                      {:else if categoryState?.tree !== null && categoryState !== undefined}
+                        <CategorySummary
+                          tree={categoryState.tree}
+                          selected={row.categories}
+                          label="Categories for {row.name}"
+                          tone={row.categories_overridden ? 'accent' : 'neutral'} />
+                      {:else}
+                        <span class="text-sm text-ink-muted">
+                          {categoryState?.loading
+                            ? 'Loading category names…'
+                            : 'Category names unavailable'}
+                        </span>
+                      {/if}
+                    </div>
                   </div>
 
                   <!-- Off-everywhere and off-here are different problems, and a row
@@ -1164,32 +1219,70 @@
 
 {#if editing}
   {@const row = editing}
-  <Modal title="Categories — {row.name}" width="max-w-lg" onclose={() => (editing = null)}>
+  {@const categoryState = categoryTrees.get(row.indexer_id)}
+  <Modal title="Categories: {row.name}" width="max-w-xl" onclose={() => (editing = null)}>
     <div class="flex flex-col gap-4 p-4">
-      <Field
-        label="Categories"
-        for="library-indexer-categories"
-        help="Only these ids are sent when this library searches {row.name}. Empty searches every category the indexer has.">
-        <TextInput id="library-indexer-categories" bind:value={categoryText} mono placeholder="2000, 5000" />
-      </Field>
       <p class="text-sm text-ink-secondary">
-        The indexer's own list is
-        <span class="font-mono text-ink">
-          {row.default_categories.length === 0
-            ? 'every category'
-            : formatCategories(row.default_categories)}
-        </span>.
+        Choose the categories this library searches. Nothing selected searches every category.
       </p>
+
+      {#if categoryState?.tree !== null && categoryState !== undefined}
+        <CategoryPicker
+          tree={categoryState.tree}
+          selected={editingCategories}
+          onchange={(ids) => (editingCategories = ids)} />
+        {#if categoryState.tree.length === 0}
+          <p class="text-sm text-ink-muted">This indexer does not advertise any categories.</p>
+        {/if}
+      {:else if categoryState?.loading}
+        <p class="py-6 text-center text-sm text-ink-secondary">Loading categories…</p>
+      {/if}
+
+      {#if categoryState?.error}
+        <p class="text-sm text-danger" role="alert">{categoryState.error}</p>
+      {/if}
+
+      <div>
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={categoryState?.loading}
+          onclick={() => loadCategoryTree(row.indexer_id)}>
+          <Icon name="refresh" size={14} />
+          {categoryState?.loading
+            ? 'Loading…'
+            : categoryState?.tree
+              ? 'Reload from indexer'
+              : 'Load from indexer'}
+        </Button>
+      </div>
+
+      <div class="flex flex-col gap-2 text-sm text-ink-secondary">
+        <span>The indexer's default:</span>
+        {#if row.default_categories.length === 0}
+          <Badge tone="warning" class="self-start">every category</Badge>
+        {:else if categoryState?.tree !== null && categoryState !== undefined}
+          <CategorySummary
+            tree={categoryState.tree}
+            selected={row.default_categories}
+            label="Default categories for {row.name}" />
+        {:else}
+          <span>{row.default_categories.length} categories</span>
+        {/if}
+      </div>
     </div>
 
     {#snippet footer()}
       <div class="flex w-full flex-wrap items-center justify-end gap-2">
         {#if row.categories_overridden}
-          <Button variant="ghost" disabled={busy} onclick={clearCategories}>Use the indexer's</Button>
+          <Button variant="ghost" disabled={busy} onclick={clearCategories}>Use indexer defaults</Button>
           <span class="mx-1 hidden h-5 w-px shrink-0 bg-border sm:block"></span>
         {/if}
         <Button variant="ghost" disabled={busy} onclick={() => (editing = null)}>Cancel</Button>
-        <Button variant="primary" disabled={busy} onclick={saveCategories}>
+        <Button
+          variant="primary"
+          disabled={busy || categoryState === undefined || categoryState.tree === null}
+          onclick={saveCategories}>
           <Icon name="check" size={14} />
           Save
         </Button>

@@ -224,6 +224,26 @@ func (s *server) handleTestIndexer(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// handleStoredIndexerCategories fetches the category tree an already stored
+// indexer advertises, including its write-only stored credentials.
+func (s *server) handleStoredIndexerCategories(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	newClient, ok := s.requireIndexerClients(w)
+	if !ok {
+		return
+	}
+
+	cfg, err := s.st.GetIndexer(r.Context(), id)
+	if err != nil {
+		s.writeStoreError(w, "get indexer", err)
+		return
+	}
+	s.writeIndexerCategories(w, r.Context(), newClient(*cfg))
+}
+
 // handleIndexerCategories fetches the category tree an indexer advertises.
 // The configuration comes from the body rather than a stored row because the
 // settings form needs the tree while the user is still typing — before the
@@ -252,7 +272,11 @@ func (s *server) handleIndexerCategories(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	categories, err := newClient(cfg).Categories(r.Context())
+	s.writeIndexerCategories(w, r.Context(), newClient(cfg))
+}
+
+func (s *server) writeIndexerCategories(w http.ResponseWriter, ctx context.Context, client IndexerClient) {
+	categories, err := client.Categories(ctx)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "fetch categories failed: "+err.Error())
 		return

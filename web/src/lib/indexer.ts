@@ -100,6 +100,60 @@ export function unknownCategoryIds(
   return [...selected].filter((id) => !known.has(id)).sort((a, b) => a - b);
 }
 
+export interface CategoryGroup {
+  id: number;
+  name: string;
+  selected: boolean;
+  children: { id: number; name: string }[];
+}
+
+/**
+ * Group selected category ids under their advertised top-level parent. A
+ * descendant keeps the path below that parent, so deeper trees stay readable
+ * without repeating the parent name on every item.
+ */
+export function categoryGroups(
+  categories: readonly number[],
+  tree: readonly IndexerCategory[],
+): CategoryGroup[] {
+  const selected = new Set(categories);
+  const known = new Set(allCategoryIds(tree));
+  const groups: CategoryGroup[] = [];
+
+  const collectChildren = (
+    nodes: readonly IndexerCategory[],
+    parentName: string,
+    path: readonly string[] = [],
+  ): { id: number; name: string }[] => {
+    const children: { id: number; name: string }[] = [];
+    for (const node of nodes) {
+      const fullName = node.name || `Category ${node.id}`;
+      const prefix = `${parentName}/`;
+      const segment = fullName.startsWith(prefix) ? fullName.slice(prefix.length) : fullName;
+      const childPath = [...path, segment];
+      if (selected.has(node.id)) children.push({ id: node.id, name: childPath.join(' / ') });
+      children.push(...collectChildren(node.subcats, fullName, childPath));
+    }
+    return children;
+  };
+
+  for (const node of tree) {
+    const name = node.name || `Category ${node.id}`;
+    const children = collectChildren(node.subcats, name);
+    if (selected.has(node.id) || children.length > 0) {
+      groups.push({ id: node.id, name, selected: selected.has(node.id), children });
+    }
+  }
+
+  const unknown = categories
+    .filter((id) => !known.has(id))
+    .map((id) => ({ id, name: `Category ${id}` }));
+  if (unknown.length > 0) {
+    groups.push({ id: -1, name: 'Not advertised', selected: false, children: unknown });
+  }
+  return groups;
+}
+
 /* ----------------------------------------------------------------------------
  * Category blocks for the free-text search rail. Unlike the picker above, this
  * is not one indexer's advertised tree: a universal search fans out over every

@@ -392,6 +392,7 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("PUT /indexers/{id}", s.handleUpdateIndexer)
 	api.HandleFunc("DELETE /indexers/{id}", s.handleDeleteIndexer)
 	api.HandleFunc("POST /indexers/{id}/test", s.handleTestIndexer)
+	api.HandleFunc("GET /indexers/{id}/categories", s.handleStoredIndexerCategories)
 	api.HandleFunc("POST /indexers/categories", s.handleIndexerCategories)
 
 	// External download clients (SPEC §5.1, PLAN phase 6 task 1). The type

@@ -155,6 +155,7 @@ export const endpoints = {
   indexer: (id: number) => `${API_BASE}/indexers/${id}`,
   indexerTest: (id: number) => `${API_BASE}/indexers/${id}/test`,
   indexerCategories: () => `${API_BASE}/indexers/categories`,
+  indexerStoredCategories: (id: number) => `${API_BASE}/indexers/${id}/categories`,
 
   // Phase 6 — external download clients (SPEC §5.1). downloadClientTestConfig
   // takes the form's current values, so Test works before a client is saved.
@@ -760,6 +761,12 @@ export const api = {
     request<{ categories: IndexerCategory[] }>(endpoints.indexerCategories(), {
       method: 'POST',
       body,
+      signal,
+    }).then((payload) => payload?.categories ?? []),
+
+  /** Fetch the category tree using an already stored indexer's credentials. */
+  indexerStoredCategories: (id: number, signal?: AbortSignal) =>
+    request<{ categories: IndexerCategory[] }>(endpoints.indexerStoredCategories(id), {
       signal,
     }).then((payload) => payload?.categories ?? []),
 

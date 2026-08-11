@@ -207,7 +207,9 @@ func TestIndexerEndpointsReportMissingRows(t *testing.T) {
 		{"update missing", http.MethodPut, "/api/v1/indexers/99", `{"name":"a","url":"https://a.example","type":"torznab"}`, http.StatusNotFound},
 		{"delete missing", http.MethodDelete, "/api/v1/indexers/99", "", http.StatusNotFound},
 		{"test missing", http.MethodPost, "/api/v1/indexers/99/test", "", http.StatusNotFound},
+		{"categories missing", http.MethodGet, "/api/v1/indexers/99/categories", "", http.StatusNotFound},
 		{"bad id", http.MethodDelete, "/api/v1/indexers/nope", "", http.StatusBadRequest},
+		{"categories bad id", http.MethodGet, "/api/v1/indexers/nope/categories", "", http.StatusBadRequest},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -292,6 +294,55 @@ func TestIndexerCategories(t *testing.T) {
 	rec = do(t, h, http.MethodPost, "/api/v1/indexers/categories", `{"url":"","type":"torznab"}`)
 	wantStatus(t, rec, http.StatusBadRequest)
 	wantErrorBody(t, rec)
+}
+
+func TestStoredIndexerCategoriesUsesStoredAPIKey(t *testing.T) {
+	const apiKey = "stored-indexer-key"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("t") != "caps" {
+			http.Error(w, "expected caps request", http.StatusBadRequest)
+			return
+		}
+		if r.URL.Query().Get("apikey") != apiKey {
+			http.Error(w, "bad api key", http.StatusUnauthorized)
+			return
+		}
+		w.Header().Set("Content-Type", "application/xml")
+		_, _ = w.Write([]byte(`<caps><searching><search available="yes"/></searching><categories><category id="5000" name="TV"><subcat id="5030" name="TV/SD"/><subcat id="5040" name="TV/HD"/></category></categories></caps>`))
+	}))
+	t.Cleanup(upstream.Close)
+
+	h, st, _ := newTestServer(t, WithIndexerClients(func(cfg core.IndexerConfig) IndexerClient {
+		return indexer.New(cfg, upstream.Client())
+	}))
+	cfg := core.IndexerConfig{
+		Name:    "protected",
+		URL:     upstream.URL,
+		APIKey:  apiKey,
+		Type:    core.IndexerTypeTorznab,
+		Enabled: true,
+	}
+	if err := st.UpsertIndexer(context.Background(), &cfg); err != nil {
+		t.Fatalf("UpsertIndexer: %v", err)
+	}
+
+	rec := do(t, h, http.MethodGet, "/api/v1/indexers/"+itoa(cfg.ID)+"/categories", "")
+	wantStatus(t, rec, http.StatusOK)
+
+	var body struct {
+		Categories []core.IndexerCategory `json:"categories"`
+	}
+	decodeBody(t, rec, &body)
+	if len(body.Categories) != 1 ||
+		body.Categories[0].ID != 5000 ||
+		body.Categories[0].Name != "TV" ||
+		len(body.Categories[0].Subcats) != 2 ||
+		body.Categories[0].Subcats[0].ID != 5030 ||
+		body.Categories[0].Subcats[0].Name != "TV/SD" ||
+		body.Categories[0].Subcats[1].ID != 5040 ||
+		body.Categories[0].Subcats[1].Name != "TV/HD" {
+		t.Fatalf("categories = %+v, want the protected indexer's advertised tree", body.Categories)
+	}
 }
 
 func TestIndexerCategoriesUsesSuppliedAPIKey(t *testing.T) {
