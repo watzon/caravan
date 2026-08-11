@@ -991,3 +991,120 @@ func TestRequestMinAvailabilityValidation(t *testing.T) {
 		`{"min_availability":"released"}`)
 	wantStatus(t, rec, http.StatusBadRequest)
 }
+
+// Request-and-approve (Overseerr's admin flow): one call records the wish and
+// grants it, with the ask's own seasons and availability and server defaults
+// for everything the approve endpoint would let the approver choose.
+func TestCreateRequestWithApproveGrantsAMovieImmediately(t *testing.T) {
+	ctx := context.Background()
+	h, st := discoverServer(t, &stubDiscoverProvider{})
+
+	rec := do(t, h, http.MethodPost, "/api/v1/requests",
+		`{"media_type":"movie","tmdb_id":78,"title":"Blade Runner","year":1982,"min_availability":"announced","approve":true}`)
+	wantStatus(t, rec, http.StatusCreated)
+
+	var body approveBody
+	decodeBody(t, rec, &body)
+	if body.Movie == nil || body.Movie.TMDBID != 78 {
+		t.Fatalf("movie = %+v, want the added movie 78", body.Movie)
+	}
+	if body.Request.Status != core.RequestApproved {
+		t.Errorf("request status = %q, want %q", body.Request.Status, core.RequestApproved)
+	}
+	m, err := st.GetMovieByTMDBID(ctx, 78)
+	if err != nil {
+		t.Fatalf("GetMovieByTMDBID: %v", err)
+	}
+	// The ask's own availability came with the grant; nothing about the add
+	// was the server's to choose instead.
+	if m.MinAvailability != core.AvailabilityAnnounced {
+		t.Errorf("min_availability = %q, want the ask's %q", m.MinAvailability, core.AvailabilityAnnounced)
+	}
+}
+
+// The series shape of the same: the ask's season list is the grant's season
+// list, so a request for season 2 approves into exactly season 2 — not the
+// whole title an empty approval body would mean.
+func TestCreateRequestWithApproveGrantsTheAskedSeasons(t *testing.T) {
+	ctx := context.Background()
+	h, st := discoverServer(t, &stubDiscoverProvider{})
+
+	rec := do(t, h, http.MethodPost, "/api/v1/requests",
+		`{"media_type":"series","tmdb_id":1396,"title":"Breaking Bad","year":2008,"seasons":[2],"approve":true}`)
+	wantStatus(t, rec, http.StatusCreated)
+
+	var body approveBody
+	decodeBody(t, rec, &body)
+	if body.Series == nil || body.Series.TMDBID != 1396 {
+		t.Fatalf("series = %+v, want the added series 1396", body.Series)
+	}
+	if body.Request.Status != core.RequestApproved {
+		t.Errorf("request status = %q, want %q", body.Request.Status, core.RequestApproved)
+	}
+	if _, err := st.GetSeriesByTMDBID(ctx, 1396); err != nil {
+		t.Fatalf("GetSeriesByTMDBID: %v", err)
+	}
+}
+
+// Approving is the admin's decision on every door: a member who asks with
+// approve set gets the approve route's answer, and no row is recorded — a
+// refused create must not leave the wish behind as if it had been plain.
+func TestCreateRequestWithApproveIsAdminOnly(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	ctx := context.Background()
+
+	createUser(t, st, testAdmin, testPassword, core.RoleAdmin)
+	createUser(t, st, testMember, testPassword, core.RoleMember)
+	cookie := login(t, h, testMember, testPassword)
+
+	rec := doAuth(t, h, http.MethodPost, "/api/v1/requests",
+		`{"media_type":"movie","tmdb_id":78,"title":"Blade Runner","approve":true}`, withCookie(cookie))
+	wantStatus(t, rec, http.StatusForbidden)
+
+	rows, err := st.ListRequests(ctx, "")
+	if err != nil {
+		t.Fatalf("ListRequests: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("requests = %+v, want nothing recorded by the refused create", rows)
+	}
+}
+
+// A request-and-approve that lands on a title already asked for grants the
+// EXISTING row — the merge rule does not change because the admin's call
+// carries a grant — so the asker's name and the household's one row survive.
+func TestCreateRequestWithApproveMergesThenGrants(t *testing.T) {
+	ctx := context.Background()
+	h, st := discoverServer(t, &stubDiscoverProvider{})
+
+	createUser(t, st, testAdmin, testPassword, core.RoleAdmin)
+	member := createUser(t, st, testMember, testPassword, core.RoleMember)
+	adminCookie := login(t, h, testAdmin, testPassword)
+	memberCookie := login(t, h, testMember, testPassword)
+
+	rec := doAuth(t, h, http.MethodPost, "/api/v1/requests",
+		`{"media_type":"movie","tmdb_id":78,"title":"Blade Runner","year":1982}`, withCookie(memberCookie))
+	wantStatus(t, rec, http.StatusCreated)
+	var theirs requestJSON
+	decodeBody(t, rec, &theirs)
+
+	rec = doAuth(t, h, http.MethodPost, "/api/v1/requests",
+		`{"media_type":"movie","tmdb_id":78,"title":"Blade Runner","year":1982,"approve":true}`, withCookie(adminCookie))
+	wantStatus(t, rec, http.StatusCreated)
+
+	var body approveBody
+	decodeBody(t, rec, &body)
+	if body.Request.ID != theirs.ID {
+		t.Errorf("approved request id = %d, want the member's row %d", body.Request.ID, theirs.ID)
+	}
+	if body.Request.Status != core.RequestApproved {
+		t.Errorf("request status = %q, want %q", body.Request.Status, core.RequestApproved)
+	}
+	rows, err := st.ListRequests(ctx, "")
+	if err != nil {
+		t.Fatalf("ListRequests: %v", err)
+	}
+	if len(rows) != 1 || rows[0].RequestedBy != member.ID {
+		t.Errorf("requests = %+v, want the member's one row", rows)
+	}
+}

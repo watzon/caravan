@@ -61,11 +61,23 @@ type requestCreateRequest struct {
 	// MinAvailability is movie-only, the way Seasons is series-only: the
 	// release stage the asker wants the movie held for. Optional.
 	MinAvailability string `json:"min_availability"`
+	// Approve is admin-only: the request is recorded and granted in the one
+	// call, so an admin asking for something themselves never visits the
+	// requests queue for their own wish. The answer is the approve endpoint's
+	// shape, and the grant uses the request's own seasons and availability
+	// with server defaults — no profile override, no immediate search.
+	Approve bool `json:"approve"`
 }
 
 // approveRequestRequest is the body of POST /requests/{id}/approve. It mirrors
 // the direct add endpoints: zero quality_profile_id leaves the item to inherit
 // its library or system default.
+//
+// Monitored and SearchNow mean something for every kind. On a scene they are
+// the only knobs there are: monitored defaults FALSE there (the site lands
+// unmonitored and only the asked-for scene is monitored — see approveScene),
+// against the movies/series default of true, and search_now queues a search
+// for the scene's episode rather than for a title.
 type approveRequestRequest struct {
 	SearchNow        bool  `json:"search_now"`
 	Monitored        *bool `json:"monitored"`
@@ -85,6 +97,13 @@ type approveRequestRequest struct {
 // the library is refused rather than merged: nothing would ever absorb the row,
 // and it would sit pending forever.
 //
+// `approve` turns the call into request-and-approve (Overseerr's admin flow):
+// the row is recorded and then granted in the same breath, with the ask's own
+// seasons and availability and server defaults for everything the approve
+// endpoint would let the approver choose. It is refused to a member for the
+// reason the approve route is: approving is the admin's decision, and a create
+// that carries it is the same decision through a different door.
+//
 // The row records the calling account, which is zero on an open server or for
 // the API key. A merge keeps the first asker, so the row the answer describes
 // can be somebody else's — which is why the name on it is filtered by
@@ -92,6 +111,10 @@ type approveRequestRequest struct {
 func (s *server) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 	var body requestCreateRequest
 	if !decodeJSON(w, r, &body) {
+		return
+	}
+	if body.Approve && currentUser(r).Role != core.RoleAdmin {
+		writeError(w, http.StatusForbidden, "admins only")
 		return
 	}
 
@@ -187,6 +210,21 @@ func (s *server) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 	stored, err := s.st.GetRequest(ctx, req.ID)
 	if err != nil {
 		s.writeStoreError(w, "get request", err)
+		return
+	}
+	if body.Approve {
+		// The grant takes the ask verbatim: the (possibly merged) season list
+		// and availability on the row, and no opinion on anything else — the
+		// admin choosing a profile or an immediate search is what the approve
+		// endpoint and the add modal are for.
+		out, ok := s.approveRequest(ctx, w, r, stored, approveRequestRequest{
+			Seasons:         stored.Seasons,
+			MinAvailability: stored.MinAvailability,
+		})
+		if !ok {
+			return
+		}
+		writeJSON(w, http.StatusCreated, out)
 		return
 	}
 	names, err := s.requesterNames(ctx, []core.Request{*stored})
@@ -317,14 +355,33 @@ func (s *server) handleApproveRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	out, ok := s.approveRequest(ctx, w, r, req, body)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// approveRequest grants a pending request: the title enters the library
+// through the same path the add endpoints take, so an approved title is
+// indistinguishable from a directly added one, and the add absorbs the row —
+// except a scene, which has no tmdb id for the absorber to key on and is
+// closed explicitly in approveScene. It writes its own failures; ok is false
+// once it has, and the caller stops.
+//
+// Both doors to a grant come here: the approve route, and request-and-approve
+// off the create route. Validation against the row's media type is the
+// caller's, because the create route's row is valid by construction.
+func (s *server) approveRequest(ctx context.Context, w http.ResponseWriter, r *http.Request, req *core.Request, body approveRequestRequest) (map[string]any, bool) {
 	out := map[string]any{}
 	switch {
 	case req.MediaType == MediaTypeScene:
-		sr, err := s.approveScene(ctx, w, r, req)
+		sr, queued, err := s.approveScene(ctx, w, r, req, body)
 		if err != nil {
-			return
+			return nil, false
 		}
 		out["site"] = siteDTO(*sr)
+		out["search_queued"] = queued
 	case req.MediaType == MediaTypeMovie:
 		// The approver's explicit choice beats the asker's, which beats the
 		// default the add path fills in.
@@ -338,33 +395,33 @@ func (s *server) handleApproveRequest(w http.ResponseWriter, r *http.Request) {
 		m, err := s.addMovieToLibrary(ctx, core.TMDBRef(req.TMDBID), body.SearchNow, minAvailability, body.Monitored, body.QualityProfileID, 0)
 		if err != nil {
 			s.writeManagerError(w, core.ProviderTMDB, "add movie", err)
-			return
+			return nil, false
 		}
 		out["movie"] = movieDTO(*m)
 	default:
 		sr, err := s.addSeriesToLibrary(ctx, core.TMDBRef(req.TMDBID), body.SearchNow, body.Seasons, body.Monitored, body.QualityProfileID, 0)
 		if err != nil {
 			s.writeManagerError(w, core.ProviderTMDB, "add series", err)
-			return
+			return nil, false
 		}
 		out["series"] = seriesDTO(*sr)
 	}
 
-	approved, err := s.st.GetRequest(ctx, id)
+	approved, err := s.st.GetRequest(ctx, req.ID)
 	if err != nil {
 		s.writeStoreError(w, "get request", err)
-		return
+		return nil, false
 	}
 	names, err := s.requesterNames(ctx, []core.Request{*approved})
 	if err != nil {
 		s.writeStoreError(w, "read usernames", err)
-		return
+		return nil, false
 	}
 	// Admin-only at the gate, so visibleRequester never withholds anything here
 	// — it is used so that every single-row answer goes through one rule rather
 	// than two that have to be kept in step.
 	out["request"] = s.requestDTO(*approved, s.visibleRequester(r, *approved, names))
-	writeJSON(w, http.StatusOK, out)
+	return out, true
 }
 
 // handleDismissRequest turns a request down. The row stays as history with a
@@ -437,9 +494,12 @@ func (s *server) loadRequest(w http.ResponseWriter, r *http.Request, id int64) (
 // site's catalogue is what numbers the scene (release year to season, sequence
 // within the year to episode number), so there is no way to add one scene on
 // its own. Adding the site is therefore not an over-delivery, it is the only
-// shape the request has — and the site arrives monitored, so the wanted list
-// picks the asked-for scene up on the next sweep exactly as an approved series
-// does.
+// shape the request has. What WOULD be an over-delivery is monitoring it: one
+// granted scene is not a standing order for everything the studio releases, so
+// the site lands UNMONITORED and only the asked-for scene's episode is
+// monitored — the wanted list reads the EPISODE flag (library writeScenes), so
+// that one flip is what turns "approved" into "hunted for". An explicit
+// monitored:true on the body keeps the old whole-site behaviour.
 //
 // The site is looked up through the scene rather than stored on the request:
 // the row records what the asker chose, which is a scene, and deriving the site
@@ -447,7 +507,9 @@ func (s *server) loadRequest(w http.ResponseWriter, r *http.Request, id int64) (
 // lands under the studio it actually belongs to now.
 //
 // It writes its own failures and returns the error only so the caller can stop.
-func (s *server) approveScene(ctx context.Context, w http.ResponseWriter, r *http.Request, req *core.Request) (*core.Series, error) {
+// The bool reports whether a search was queued for the scene, so the answer
+// can say rather than have the approver guess.
+func (s *server) approveScene(ctx context.Context, w http.ResponseWriter, r *http.Request, req *core.Request, body approveRequestRequest) (*core.Series, bool, error) {
 	// The DEFAULT instance: a request row carries no provider column, so there
 	// is no instance on it to honour. Scene requests made before instances
 	// existed are the reason it cannot simply grow one — the field would be
@@ -462,18 +524,18 @@ func (s *server) approveScene(ctx context.Context, w http.ResponseWriter, r *htt
 		// the wrong settings screen to fix the wrong credential.
 		writeCodedError(w, http.StatusServiceUnavailable, CodeAdultCredentialAbsent,
 			"no adult metadata provider configured")
-		return nil, core.ErrNoAdultProvider
+		return nil, false, core.ErrNoAdultProvider
 	}
 	scene, err := provider.GetScene(ctx, req.StashID)
 	if err != nil {
 		s.writeAdultProviderError(w, r, "get scene", err)
-		return nil, err
+		return nil, false, err
 	}
 	if scene == nil || scene.SiteStashID == "" {
 		// The provider answered, but with a scene it cannot name a studio for.
 		// Approving would have nowhere to put it.
 		s.writeAdultProviderError(w, r, "get scene", errNoSceneSite)
-		return nil, errNoSceneSite
+		return nil, false, errNoSceneSite
 	}
 
 	// AddSiteAndWait, not AddSite: the scenes have to exist by the time this
@@ -484,21 +546,70 @@ func (s *server) approveScene(ctx context.Context, w http.ResponseWriter, r *htt
 	//
 	// The site is pinned to the instance that answered GetScene above, which is
 	// the only box whose catalogue this SiteStashID was read from.
+	siteMonitored := body.Monitored != nil && *body.Monitored
 	sr, err := s.mgr.AddSiteAndWait(ctx,
-		core.ItemRef{Provider: providerID, Ref: scene.SiteStashID}, nil, 0)
+		core.ItemRef{Provider: providerID, Ref: scene.SiteStashID}, &siteMonitored, 0)
 	if err != nil {
 		s.writeManagerError(w, "", "add site", err)
-		return nil, err
+		return nil, false, err
 	}
+
+	// The asked-for scene is the one thing monitored on the site the approval
+	// just added. A walk that has no row for it — the provider never gave the
+	// scene a release date, which is the only way a scene fails to file —
+	// means the approval would close the request against nothing, and that is
+	// a provider answer to refuse over, not absorb: the site add itself keeps
+	// no state the next approval attempt would not refresh.
+	filed, err := s.st.EpisodeIDsByStashID(ctx, []string{req.StashID})
+	if err != nil {
+		s.writeStoreError(w, "find scene episode", err)
+		return nil, false, err
+	}
+	episodeID := filed[req.StashID]
+	if episodeID == 0 {
+		s.writeAdultProviderError(w, r, "get scene", errSceneNotFiled)
+		return nil, false, errSceneNotFiled
+	}
+	episode, err := s.st.GetEpisode(ctx, episodeID)
+	if err != nil {
+		s.writeStoreError(w, "get scene episode", err)
+		return nil, false, err
+	}
+	if !episode.Monitored {
+		episode.Monitored = true
+		if err := s.st.UpsertEpisode(ctx, episode); err != nil {
+			s.writeStoreError(w, "monitor scene", err)
+			return nil, false, err
+		}
+	}
+
+	// A search the approver asked for is queued now; the wanted sweep finds
+	// the scene either way, so a queue failure costs the approval nothing and
+	// is logged rather than answered.
+	queued := false
+	if body.SearchNow {
+		added, err := s.enqueueEpisodeSearch(ctx, episodeID)
+		if err != nil {
+			s.log.Error("queue scene search", "episode_id", episodeID, "error", err)
+		} else {
+			queued = added
+		}
+	}
+
 	// The add absorbs a matching pending request the way every other add path
 	// does — but that machinery keys on a TMDB id, and a scene request has
 	// none, so this closes it explicitly.
 	if err := s.st.SetRequestStatus(ctx, req.ID, core.RequestApproved); err != nil {
 		s.writeStoreError(w, "approve request", err)
-		return nil, err
+		return nil, false, err
 	}
-	return sr, nil
+	return sr, queued, nil
 }
+
+// errSceneNotFiled is a walked catalogue with no row for the asked-for scene:
+// the provider never gave it a release date, which is what a scene's season
+// and number are computed from, so there is nothing to monitor or hunt for.
+var errSceneNotFiled = errors.New("api: the provider's catalogue does not file this scene")
 
 // errNoSceneSite is a provider record with no studio on it: a scene Caravan
 // cannot file, because the site is what it would be filed under.

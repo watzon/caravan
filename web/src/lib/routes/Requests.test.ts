@@ -180,6 +180,41 @@ describe('Requests', () => {
     expect(requests.pendingCount).toBe(2);
   });
 
+
+  it('gives an admin awaiting-approval and approved tabs with their counts', async () => {
+    app = mount(Requests, { target: host }) as Record<string, unknown>;
+    await settle();
+
+    const tabs = host.querySelector<HTMLElement>('[aria-label="Requests filter"]');
+    expect(tabs).not.toBeNull();
+    expect(tabs?.textContent).toContain('Awaiting approval');
+    expect(tabs?.textContent).toContain('2');
+    expect(tabs?.textContent).toContain('Approved');
+    expect(tabs?.textContent).toContain('0');
+  });
+
+  it('shows approved rows only on the approved tab, without decision actions', async () => {
+    served = [
+      ...ROWS,
+      { ...ROWS[0]!, id: 15, title: 'Approved Series', status: 'approved' },
+    ];
+    app = mount(Requests, { target: host }) as Record<string, unknown>;
+    await settle();
+
+    expect(host.textContent).not.toContain('Approved Series');
+    const approvedTab = [...host.querySelectorAll<HTMLButtonElement>(
+      '[aria-label="Requests filter"] button',
+    )].find((button) => button.textContent?.includes('Approved'));
+    approvedTab!.click();
+    flushSync();
+
+    const approvedRow = [...host.querySelectorAll('li')].find((row) =>
+      row.textContent?.includes('Approved Series'),
+    );
+    expect(approvedRow).toBeDefined();
+    expect(approvedRow?.querySelectorAll('button')).toHaveLength(0);
+    expect(host.textContent).not.toContain('Blade Runner (1982)');
+  });
   it('links each row at the discover screen, keyed by TMDB id', async () => {
     app = mount(Requests, { target: host }) as Record<string, unknown>;
     await settle();
@@ -344,7 +379,32 @@ describe('Requests — a scene row', () => {
    * server resolves on its own. There is nothing for the TMDB-shaped modal to
    * ask, so it must not open — it would fetch seasons for tmdb id 0.
    */
-  it('approves straight through the API instead of opening the add modal', async () => {
+  it('approves straight through the API, queues a scene search, and removes the row immediately', async () => {
+    let approvalComplete = false;
+    let resolveRefresh: ((response: Response) => void) | null = null;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? 'GET';
+        const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
+        calls.push({ url, method, ...(body === null ? {} : { body }) });
+        if (url.endsWith('/requests') && method === 'GET') {
+          return approvalComplete
+            ? new Promise<Response>((resolve) => (resolveRefresh = resolve))
+            : json({ requests: served });
+        }
+        if (url.endsWith('/approve')) {
+          approvalComplete = true;
+          return json({
+            request: { id: 14, status: 'approved' },
+            site: { id: 44, title: 'Example Site' },
+            search_queued: true,
+          });
+        }
+        return json(null, 204);
+      }),
+    );
     app = mount(Requests, { target: host }) as Record<string, unknown>;
     await settle();
 
@@ -361,9 +421,12 @@ describe('Requests — a scene row', () => {
     expect(calls).toContainEqual({
       url: '/api/v1/requests/14/approve',
       method: 'POST',
-      body: { search_now: false },
+      body: { search_now: true },
     });
-    expect(toasts.items.map((t) => t.message)).toContain('Approved Deep Impact');
+    expect(host.textContent).not.toContain('Deep Impact');
+    expect(toasts.items.map((t) => t.message)).toContain('Approved Deep Impact — search queued');
+    resolveRefresh!(json({ requests: served.filter((request) => request.id !== SCENE_ROW.id) }));
+    await settle();
   });
 });
 

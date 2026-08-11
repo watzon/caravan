@@ -1260,6 +1260,17 @@ export const api = {
     request<MediaRequest>(endpoints.requests(), { method: 'POST', body }),
 
   /**
+   * Record and immediately grant an administrator's own request. This is
+   * separate from createRequest because the server's 201 body is the approval
+   * envelope, not the pending MediaRequest that an ordinary request creates.
+   */
+  requestAndApprove: (body: CreateRequestBody) =>
+    request<ApproveRequestResult>(endpoints.requests(), {
+      method: 'POST',
+      body: { ...body, approve: true },
+    }),
+
+  /**
    * Grant a request by adding its title, the same path the add button takes.
    * An explicit profile is persisted by this add, before any series search is
    * queued by the caller.

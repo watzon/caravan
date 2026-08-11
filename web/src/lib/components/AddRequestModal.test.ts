@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount, type ComponentProps } from 'svelte';
 import AddRequestModal from './AddRequestModal.svelte';
 import type { DiscoverSeason } from '../api/types';
+import type { AddRequestResult } from '../discover';
 import { session } from '../state/session.svelte';
 import { system } from '../state/system.svelte';
 import { clearToasts, toasts } from '../state/toast.svelte';
@@ -37,16 +38,20 @@ function stubFetch() {
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const method = init?.method ?? 'GET';
-      calls.push({
-        url,
-        method,
-        body: typeof init?.body === 'string' ? JSON.parse(init.body) : null,
-      });
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
+      calls.push({ url, method, body });
 
       if (url.endsWith('/quality-profiles')) {
         return json({ profiles: [{ id: 4, name: 'HD-1080p' }] });
       }
       if (url.endsWith('/requests') && method === 'POST') {
+        if (body?.approve === true) {
+          return json({
+            request: { id: 11, status: 'approved' },
+            series: { id: 42, title: 'Severance' },
+            movie: { id: 7, title: 'Blade Runner' },
+          }, 201);
+        }
         return json({ id: 11, media_type: 'series', tmdb_id: 1396, seasons: [3], status: 'pending' }, 201);
       }
       if (url.includes('/requests/') && url.endsWith('/approve')) {
@@ -525,7 +530,54 @@ describe('AddRequestModal — submitting', () => {
     expect(post?.body).not.toHaveProperty('quality_profile_id');
     expect(calls.filter((call) => call.method === 'PATCH')).toEqual([]);
   });
+  it('lets an admin request and approve a title with the server defaults', async () => {
+    session.user = { username: 'admin', role: 'admin', open: false, adult: false };
+    let closed = 0;
+    let completed: unknown;
+    mountModal({
+      mode: 'request',
+      mediaType: 'movie',
+      tmdbID: 78,
+      title: 'Blade Runner',
+      year: 1982,
+      seasons: null,
+      onclose: () => (closed += 1),
+      ondone: (result: AddRequestResult) => (completed = result),
+    });
+    await settle();
+
+    clickText('Request and approve');
+    await settle();
+
+    expect(calls).toContainEqual({
+      url: '/api/v1/requests',
+      method: 'POST',
+      body: {
+        media_type: 'movie',
+        tmdb_id: 78,
+        title: 'Blade Runner',
+        year: 1982,
+        poster_path: '/p.jpg',
+        min_availability: 'released',
+        approve: true,
+      },
+    });
+    expect(toasts.items.map((toast) => toast.message)).toContain('Added Blade Runner');
+    expect(completed).toEqual({ kind: 'added', mediaType: 'movie', libraryID: 7 });
+    expect(closed).toBe(1);
+    expect(window.location.pathname).toBe('/movies/7');
+  });
+
+  it('never offers request and approve to a member', () => {
+    session.user = { username: 'housemate', role: 'member', open: false, adult: false };
+    mountModal({ mode: 'request' });
+
+    expect([...host.querySelectorAll('button')].some(
+      (button) => button.textContent?.trim() === 'Request and approve',
+    )).toBe(false);
+  });
 });
+
 
 describe('AddRequestModal — minimum availability', () => {
   function availabilitySelect(): HTMLSelectElement | null {

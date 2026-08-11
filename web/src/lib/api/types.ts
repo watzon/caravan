@@ -1771,6 +1771,11 @@ export interface CreateRequestBody {
   seasons?: number[];
   /** Movies only: the release stage the asker wants the movie held for. */
   min_availability?: MinAvailability;
+  /**
+   * Admin-only: create (or merge) the request and approve it in one decision.
+   * The server answers 201 with the same shape as ApproveRequestResult.
+   */
+  approve?: boolean;
 }
 
 /** Body for POST /requests/{id}/approve. */
@@ -1792,6 +1797,10 @@ export interface ApproveRequestResult {
   request: MediaRequest;
   movie?: Movie;
   series?: Series;
+  /** Scene approvals add the resolved site rather than a TMDB series. */
+  site?: Series;
+  /** True only when this approval actually queued a scene search. */
+  search_queued?: boolean;
 }
 
 /* ---------------------------------------------------------------------------

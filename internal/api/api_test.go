@@ -321,8 +321,12 @@ func (m *stubManager) AddSiteAndWait(ctx context.Context, ref core.ItemRef, moni
 	episode := &core.Episode{
 		SeriesID: sr.ID, SeasonNumber: 2022, EpisodeNumber: 1,
 		StashID: m.addSiteSceneStashID, Title: "Stub Scene",
-		AirDate:   time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC),
-		Monitored: true,
+		AirDate: time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC),
+		// New scenes follow the site flag, exactly as writeScenes files them —
+		// which is what makes the approval's scene-only monitoring observable:
+		// an unmonitored site files this unmonitored, and the approval has to
+		// be what flips it.
+		Monitored: sr.Monitored,
 	}
 	if episode.StashID == "" {
 		episode.StashID = "stub-scene-" + stashID

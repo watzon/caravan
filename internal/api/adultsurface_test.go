@@ -420,6 +420,9 @@ func TestGrantedMemberCanDiscoverAndRequestAScene(t *testing.T) {
 		scenes: fakeScenes(),
 	}
 	mgr.adult = provider
+	// The walk files the scene the request asks for, so the approval has an
+	// episode row to monitor.
+	mgr.addSiteSceneStashID = "scene-1"
 	lib := enableAdult(t, st)
 
 	createUser(t, st, testAdmin, testPassword, core.RoleAdmin)
@@ -1943,6 +1946,149 @@ func TestApproveSceneLandsTheEpisodeSynchronously(t *testing.T) {
 	// And it did not lean on the queue to get there.
 	if queued := jobsOfKind(t, st, core.JobSyncSite); len(queued) != 0 {
 		t.Errorf("the approval queued %d catalogue walks, want the walk done inline", len(queued))
+	}
+}
+
+// The monitoring contract of a scene approval.
+//
+// Granting one scene is not a standing order for everything the studio
+// releases, so the site lands UNMONITORED and only the asked-for scene's
+// episode is monitored — the wanted list reads the EPISODE flag, and that one
+// flip is the whole grant. monitored:true is how an approver says the studio
+// itself is wanted, and search_now queues the hunt for the scene instead of
+// leaving it to the next sweep.
+func TestApproveSceneMonitorsOnlyTheAskedForScene(t *testing.T) {
+	newSceneRequest := func(t *testing.T) (http.Handler, *store.Store, *http.Cookie, int64) {
+		t.Helper()
+		h, st, mgr := newTestServer(t)
+		mgr.adult = &fakeAdultProvider{
+			sites:  []core.SiteMeta{{StashID: "site-1", Name: "Brazzers"}},
+			scenes: fakeScenes(),
+		}
+		mgr.addSiteSceneStashID = "scene-1"
+		enableAdult(t, st)
+
+		createUser(t, st, testAdmin, testPassword, core.RoleAdmin)
+		cookie := login(t, h, testAdmin, testPassword)
+
+		rec := doAuth(t, h, http.MethodPost, "/api/v1/requests",
+			`{"media_type":"scene","stash_id":"scene-1","title":"Deep Impact"}`, withCookie(cookie))
+		wantStatus(t, rec, http.StatusCreated)
+		var created requestJSON
+		decodeBody(t, rec, &created)
+		return h, st, cookie, created.ID
+	}
+	siteAndScene := func(t *testing.T, st *store.Store) (*core.Series, *core.Episode) {
+		t.Helper()
+		ctx := context.Background()
+		site, err := st.GetSeriesByStashID(ctx, "site-1")
+		if err != nil {
+			t.Fatalf("GetSeriesByStashID: %v", err)
+		}
+		filed, err := st.EpisodeIDsByStashID(ctx, []string{"scene-1"})
+		if err != nil {
+			t.Fatalf("EpisodeIDsByStashID: %v", err)
+		}
+		episode, err := st.GetEpisode(ctx, filed["scene-1"])
+		if err != nil {
+			t.Fatalf("GetEpisode: %v", err)
+		}
+		return site, episode
+	}
+
+	t.Run("the site lands unmonitored and only the scene is monitored", func(t *testing.T) {
+		h, st, cookie, id := newSceneRequest(t)
+		rec := doAuth(t, h, http.MethodPost, "/api/v1/requests/"+itoa(id)+"/approve", `{}`, withCookie(cookie))
+		wantStatus(t, rec, http.StatusOK)
+
+		site, episode := siteAndScene(t, st)
+		if site.Monitored {
+			t.Error("approving one scene monitored the whole site")
+		}
+		if !episode.Monitored {
+			t.Error("the granted scene is not monitored: nothing would ever be searched for it")
+		}
+		if queued := jobsOfKind(t, st, core.JobSearchEpisode); len(queued) != 0 {
+			t.Errorf("the approval queued %d searches nobody asked for", len(queued))
+		}
+	})
+
+	t.Run("an explicit monitored true keeps the whole site monitored", func(t *testing.T) {
+		h, st, cookie, id := newSceneRequest(t)
+		rec := doAuth(t, h, http.MethodPost, "/api/v1/requests/"+itoa(id)+"/approve",
+			`{"monitored":true}`, withCookie(cookie))
+		wantStatus(t, rec, http.StatusOK)
+
+		site, episode := siteAndScene(t, st)
+		if !site.Monitored || !episode.Monitored {
+			t.Errorf("monitored:true landed site=%v episode=%v, want both monitored",
+				site.Monitored, episode.Monitored)
+		}
+	})
+
+	t.Run("search now queues the hunt for the granted scene", func(t *testing.T) {
+		h, st, cookie, id := newSceneRequest(t)
+		rec := doAuth(t, h, http.MethodPost, "/api/v1/requests/"+itoa(id)+"/approve",
+			`{"search_now":true}`, withCookie(cookie))
+		wantStatus(t, rec, http.StatusOK)
+
+		_, episode := siteAndScene(t, st)
+		queued := jobsOfKind(t, st, core.JobSearchEpisode)
+		if len(queued) != 1 || !strings.Contains(queued[0].Payload, itoa(episode.ID)) {
+			t.Errorf("search jobs = %v, want exactly one, for episode %d", queued, episode.ID)
+		}
+		// The answer says the search was queued, so the approver is not left
+		// guessing whether anything kicked off.
+		if !strings.Contains(rec.Body.String(), `"search_queued":true`) {
+			t.Errorf("response = %s, want search_queued true", rec.Body.String())
+		}
+	})
+}
+
+// Request-and-approve, in the scene shape: the one call records the wish and
+// grants it, and the grant is the same one the approve endpoint would make —
+// site added unmonitored, the asked-for scene monitored.
+func TestCreateSceneRequestWithApproveGrantsItImmediately(t *testing.T) {
+	h, st, mgr := newTestServer(t)
+	mgr.adult = &fakeAdultProvider{
+		sites:  []core.SiteMeta{{StashID: "site-1", Name: "Brazzers"}},
+		scenes: fakeScenes(),
+	}
+	mgr.addSiteSceneStashID = "scene-1"
+	enableAdult(t, st)
+	ctx := context.Background()
+
+	createUser(t, st, testAdmin, testPassword, core.RoleAdmin)
+	cookie := login(t, h, testAdmin, testPassword)
+
+	rec := doAuth(t, h, http.MethodPost, "/api/v1/requests",
+		`{"media_type":"scene","stash_id":"scene-1","title":"Deep Impact","approve":true}`, withCookie(cookie))
+	wantStatus(t, rec, http.StatusCreated)
+
+	rows, err := st.ListRequests(ctx, "")
+	if err != nil {
+		t.Fatalf("ListRequests: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Status != core.RequestApproved {
+		t.Fatalf("requests = %+v, want the one row approved", rows)
+	}
+	site, err := st.GetSeriesByStashID(ctx, "site-1")
+	if err != nil {
+		t.Fatalf("GetSeriesByStashID: %v", err)
+	}
+	if site.Monitored {
+		t.Error("request-and-approve monitored the whole site")
+	}
+	filed, err := st.EpisodeIDsByStashID(ctx, []string{"scene-1"})
+	if err != nil {
+		t.Fatalf("EpisodeIDsByStashID: %v", err)
+	}
+	episode, err := st.GetEpisode(ctx, filed["scene-1"])
+	if err != nil {
+		t.Fatalf("GetEpisode: %v", err)
+	}
+	if !episode.Monitored {
+		t.Error("the granted scene is not monitored")
 	}
 }
 

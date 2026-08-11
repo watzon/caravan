@@ -26,6 +26,7 @@
   import { api, errorText } from '../api/client';
   import { metadataToast } from '../credentials';
   import type {
+    CreateRequestBody,
     DiscoverSeason,
     MediaType,
     MinAvailability,
@@ -228,12 +229,16 @@
     writeSearchOnAdd(next);
   }
 
-  async function submit() {
+  async function submit(andApprove = false) {
     if (!canSubmit) return;
     busy = true;
     try {
       if (mode === 'request') {
-        await sendRequest();
+        if (andApprove) {
+          await requestAndApprove();
+        } else {
+          await sendRequest();
+        }
       } else {
         await addToLibrary();
       }
@@ -249,8 +254,8 @@
     }
   }
 
-  async function sendRequest() {
-    const created = await api.createRequest({
+  function requestBody(): CreateRequestBody {
+    return {
       media_type: mediaType,
       tmdb_id: tmdbID,
       title,
@@ -259,10 +264,30 @@
       ...(mediaType === 'series'
         ? { seasons: requestSeasons(seasonList, selected) }
         : { min_availability: minAvailability }),
-    });
+    };
+  }
+
+  async function sendRequest() {
+    const created = await api.createRequest(requestBody());
     pushToast(`Requested ${title}`, 'success');
     ondone?.({ kind: 'requested', request: created });
     onclose();
+  }
+
+  /**
+   * An admin may decide on their own request on the spot, Overseerr-style;
+   * members only ask. This remains request mode rather than borrowing add mode
+   * because the approval intentionally takes server defaults — no profile,
+   * folder, monitoring, or search choice belongs in that one-click decision.
+   */
+  async function requestAndApprove() {
+    const result = await api.requestAndApprove(requestBody());
+    const added = mediaType === 'movie' ? result.movie : result.series;
+    if (!added) throw new Error('the approval did not return the added title');
+    pushToast(`Added ${added.title}`, 'success');
+    ondone?.({ kind: 'added', mediaType, libraryID: added.id });
+    onclose();
+    navigate(mediaType === 'movie' ? `/movies/${added.id}` : `/series/${added.id}`);
   }
 
   async function addToLibrary() {
@@ -458,7 +483,12 @@
 
   {#snippet footer()}
     <Button variant="secondary" disabled={busy} onclick={onclose}>Cancel</Button>
-    <Button variant="primary" disabled={!canSubmit} onclick={submit}>
+    {#if mode === 'request' && session.isAdmin}
+      <Button variant="secondary" disabled={!canSubmit} onclick={() => void submit(true)}>
+        {busy ? 'Working…' : 'Request and approve'}
+      </Button>
+    {/if}
+    <Button variant="primary" disabled={!canSubmit} onclick={() => void submit()}>
       {busy ? 'Working…' : primaryLabel}
     </Button>
   {/snippet}

@@ -2,12 +2,13 @@
   /**
    * Explore → Requests, which is two screens sharing one list (SPEC §11).
    *
-   * An admin sees everyone's pending wishes and the two things that can happen
-   * to one. Approve reopens the shared add/request modal in add mode prefilled
-   * with the requested seasons, and submits through POST /requests/{id}/approve
-   * — the add is what marks the row approved, so there is no second write to
-   * get out of step with. Dismiss answers no; the row survives as history, and
-   * the title can be requested again later.
+   * An admin sees a decision screen split into awaiting approval and approved
+   * history. Pending wishes keep the two decisions they can receive: Approve
+   * reopens the shared add/request modal in add mode prefilled with the
+   * requested seasons, and submits through POST /requests/{id}/approve — the
+   * add is what marks the row approved, so there is no second write to get out
+   * of step with. Dismiss answers no; the row survives as history, and the
+   * title can be requested again later.
    *
    * A scene row is the one exception on both counts, and the reason the row
    * helpers live in lib/requests.ts rather than inline here: it has no tmdb id
@@ -30,6 +31,7 @@
   import Button from '../components/Button.svelte';
   import EmptyState from '../components/EmptyState.svelte';
   import LoadError from '../components/LoadError.svelte';
+  import PageTabs from '../components/PageTabs.svelte';
   import Poster from '../components/Poster.svelte';
   import Skeleton from '../components/Skeleton.svelte';
   import { availabilityLabel } from '../discover';
@@ -46,38 +48,61 @@
   import { pushToast } from '../state/toast.svelte';
   import { REQUESTS_POLL_MS, requests } from '../state/requests.svelte';
 
+  type Tab = 'pending' | 'approved';
+
+  const TABS: { key: Tab; label: string }[] = [
+    { key: 'pending', label: 'Awaiting approval' },
+    { key: 'approved', label: 'Approved' },
+  ];
+
   let approving = $state<MediaRequest | null>(null);
   let dismissing = $state<number | null>(null);
   /** The scene row whose approve call is in flight. */
   let approvingScene = $state<number | null>(null);
+  let tab = $state<Tab>('pending');
 
   $effect(() => requests.subscribe(REQUESTS_POLL_MS));
 
   let isAdmin = $derived(session.isAdmin);
+  let pending = $derived(pendingRequests(requests.items));
+  let approved = $derived((requests.items ?? []).filter((request) => request.status === 'approved'));
+  let tabs = $derived(
+    TABS.map((item) => ({
+      ...item,
+      count: requests.items === null ? null : item.key === 'pending' ? pending.length : approved.length,
+    })),
+  );
 
   /**
-   * An admin's list is a decision queue, so it holds only what is undecided. A
-   * member's is the record of what they asked for, so it holds everything the
-   * server gave them — which is already only their own rows.
+   * An admin's screen separates the decision queue from decisions already
+   * made. A member's is the record of what they asked for, so it holds
+   * everything the server gave them — which is already only their own rows.
    */
-  let rows = $derived(isAdmin ? pendingRequests(requests.items) : (requests.items ?? []));
+  let rows = $derived(
+    isAdmin ? (tab === 'pending' ? pending : approved) : (requests.items ?? []),
+  );
 
   /**
    * Approving a scene is a direct POST, not the add modal.
    *
    * The modal is TMDB-shaped all the way down — it fetches seasons for a tmdb
    * id and offers a quality profile and a root folder — and a scene has no tmdb
-   * id and no seasons. The server wants nothing from the approver either: it
-   * resolves the scene's SITE through the provider and adds that, so the only
-   * thing to send is the approval. That also means the row does not simply
-   * vanish on success — the site arrives holding the whole catalogue — so the
-   * list is refetched rather than patched.
+   * id and no seasons. The server resolves its site through the provider, so
+   * there is nothing for the approver to choose. Unlike the modal path, this
+   * approval cannot partially grant a scene request; drop it immediately while
+   * the refresh verifies the server's final list.
    */
   async function approveScene(request: MediaRequest) {
     approvingScene = request.id;
     try {
-      await api.approveRequest(request.id, false);
-      pushToast(`Approved ${request.title}`, 'success');
+      const result = await api.approveRequest(request.id, true);
+      requests.forget(request.id);
+      pushToast(
+        result.search_queued
+          ? `Approved ${request.title} — search queued`
+          : `Approved ${request.title}`,
+        'success',
+      );
     } catch (err) {
       pushToast(metadataToast(err, isAdmin) ?? errorText(err), 'danger');
     } finally {
@@ -110,6 +135,14 @@
 </script>
 
 <div class="flex flex-col gap-6">
+  {#if isAdmin}
+    <PageTabs
+      {tabs}
+      active={tab}
+      onchange={(key) => (tab = key)}
+      ariaLabel="Requests filter" />
+  {/if}
+
   {#if requests.error && requests.items === null}
     <LoadError message={requests.error} onretry={() => void requests.refresh()} />
   {:else if requests.loading && requests.items === null}
@@ -121,9 +154,15 @@
   {:else if rows.length === 0}
     <EmptyState
       icon="inbox"
-      title={isAdmin ? 'No pending requests' : 'No requests yet'}
+      title={isAdmin
+        ? tab === 'pending'
+          ? 'No pending requests'
+          : 'Nothing approved yet'
+        : 'No requests yet'}
       message={isAdmin
-        ? 'Nothing is waiting on a decision. Requests made from Discover show up here until they are approved or dismissed.'
+        ? tab === 'pending'
+          ? 'Nothing is waiting on a decision. Requests made from Discover show up here until they are approved or dismissed.'
+          : 'Approved requests become library items and land here.'
         : 'Anything you ask for from Discover shows up here, and stays until it is approved or turned down.'}>
       {#snippet action()}
         <Button variant="primary" href="/discover">Open Discover</Button>
@@ -162,8 +201,8 @@
             {/if}
             <p class="flex flex-wrap items-center gap-2 text-sm text-ink-secondary">
               <Badge mono tone="neutral">{requestMediaChip(request.media_type)}</Badge>
-              <!-- Only on a member's list: an admin's holds pending rows only,
-                   so the badge would say the same word on every one of them. -->
+              <!-- Only on a member's list: the admin tabs carry decisions at
+                   either stage, so a status badge would repeat the tab. -->
               {#if !isAdmin}
                 <Badge tone={statusChip.tone}>{statusChip.label}</Badge>
               {/if}
@@ -185,7 +224,7 @@
           </div>
 
           <div class="flex shrink-0 items-center gap-2">
-            {#if isAdmin}
+            {#if isAdmin && tab === 'pending'}
               {#if request.media_type === 'scene'}
                 <Button
                   variant="primary"
