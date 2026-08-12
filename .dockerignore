@@ -13,6 +13,22 @@ caravan.db-shm
 caravan.db-wal
 caravan.state
 caravan.yaml
+/config/
+/data/
+
+# Dotenv files and private keys must never enter a local or remote builder.
+.env
+.env.*
+**/.env
+**/.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+**/id_rsa
+**/id_ed25519
 
 # Air's build directory, which also holds the dev storage root (tmp/media).
 tmp/

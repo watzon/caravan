@@ -3,7 +3,7 @@
 # Quickstart:
 #   mkdir -p config data
 #   docker compose up -d
-#   open http://localhost:8677  → pick /data as the storage root, set a password
+#   open http://localhost:8677  → create the administrator account
 #
 # Read docs/docker.md before changing the volumes. The single /data mount is
 # load-bearing, not a simplification.
@@ -15,7 +15,6 @@ services:
     # published tag once you are pulling images instead of building them.
     build:
       context: .
-    container_name: caravan
     restart: unless-stopped
 
     ports:
@@ -43,12 +42,12 @@ services:
       # file, or to Caravan's own default.
       # CARAVAN_LISTEN: 0.0.0.0:8677
       #
-      # The image seeds /data as the storage root, so there is no first-run
-      # screen to pick one on. The first start that seeds it also queues a
-      # library scan, so media already sitting under the mount is picked up
-      # without anybody having to find Settings -> Storage -> Rescan.
+      # The image seeds /data as the storage root. First run still asks you to
+      # create the administrator account, but the storage step is already
+      # satisfied. The first start that seeds /data also queues a library scan,
+      # so media already under the mount is picked up automatically.
       #
-      # Blank this to get the first-run screen instead.
+      # Blank this to choose the storage root during first-run setup instead.
       # CARAVAN_STORAGE_ROOT: ""
 
     # Caravan runs as uid/gid 1000 in the image. If your media directory is

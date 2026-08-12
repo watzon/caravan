@@ -16,21 +16,25 @@ mkdir -p config data
 docker compose up -d
 ```
 
+> **Secure the first boot.** Compose publishes port 8677 on every host
+> interface, while the initial administrator setup is intentionally available
+> before an account exists. Start on a trusted LAN and claim the administrator
+> account immediately. On an untrusted network, change the published port to
+> `127.0.0.1:8677:8677` or place Caravan behind an access-controlled reverse
+> proxy before running `docker compose up`.
+
 Open <http://localhost:8677>.
 
-The container already knows its storage root is `/data`, so it skips the
-first-run screen and lands on the library. Two things to do:
+The container already knows its storage root is `/data`, but a new install still
+opens the setup flow so you can create the administrator account. The storage
+step is already satisfied. If `/data` contains media, Caravan queues an initial
+library scan when it seeds the root; **Rescan library** under **Settings →
+Storage** is available if you add or move files outside Caravan later.
 
-1. **Set a password**, under **Settings → Security** — the banner at the top of
-   the page is telling you why.
-2. If `/data` already contains media, hit **Rescan library** under
-   **Settings → Storage**. Caravan does not scan an existing library
-   uninvited.
-
-(If you would rather choose the root yourself, blank the variable —
+If you would rather choose the root in setup, blank the variable —
 `CARAVAN_STORAGE_ROOT: ""` under `environment:` in `compose.yaml`. An empty
-value reads as unset, so Caravan shows the first-run screen, which offers to
-scan immediately.)
+value reads as unset, so the storage step remains open and offers to scan the
+selected root immediately.
 
 `compose.yaml` builds the image from the checkout on first `up`. To point at
 your real media instead of `./data`, change one line:
@@ -78,21 +82,18 @@ If your library really does live on a different disk than your downloads, that
 is a storage-root decision, not a volume decision — put both under one root, or
 accept copies.
 
-## Ports, binding, and the password nag
+## Ports, binding, and first boot
 
 The image binds `0.0.0.0:8677` (`CARAVAN_LISTEN`), because a container that
 bound loopback would be unreachable from outside its own network namespace.
 That is the opposite of portable mode, which binds `127.0.0.1` by default
 (SPEC §11).
 
-Binding every interface without a password means anyone who can reach the host
-can manage the library. Caravan therefore **nags until a password is set**:
-`GET /api/v1/system/status` reports `listening_publicly: true` and
-`password_set: false`, and the UI shows a banner pointing at
-**Settings → Security**. Dismissing it silences it for that browser session
-only; it is back on the next load and stays back until a password exists. The
-nag is a warning, not a lock — Caravan still works, on the theory that a
-warning you can act on beats a wall on first run.
+Binding every interface before the administrator account exists creates a
+first-boot race: anyone who can reach the host may be able to claim that first
+account. Complete setup immediately on a trusted network, or use the loopback
+publishing example below. This trusted-LAN bootstrap model is a release decision,
+not a protection supplied by the later password warning.
 
 Once a password exists, the API is session-cookie gated. External tools use the
 API key instead (**Settings → Security**), and the calendar feed
@@ -218,20 +219,23 @@ the process is listening and its handler tree is built.
 
 ## Verification status
 
-**Not yet verified end to end.** The image, `compose.yaml` and this document
-were written and reviewed without a Docker daemon available, so the acceptance
-criterion — *"`docker compose up` on a clean host yields a working instance
-with hardlink imports"* — is still open.
+**Partially verified on a real Docker daemon.** On 2026-08-12, a local macOS
+Docker run built the image, reached Compose's healthy state, served the SPA with
+HTTP 200, denied unauthenticated system status with HTTP 401, stopped with
+`caravan.db` and `caravan.state` present, and restarted without a dirty-shutdown
+warning. Removing the fixed `container_name` was also checked with two isolated
+Compose project names so separate checkouts receive project-scoped containers.
 
-What *has* been verified: `internal/config`'s environment-override precedence
-(`go test ./internal/config/`, including regressions that fail without it), and
-that `0.0.0.0:8677` is classified as a public bind by the nag signal
-(`internal/api`'s `TestListeningPublicly`).
+The full acceptance criterion — *"`docker compose up` on a clean host yields a
+working instance with hardlink imports"* — remains open. The completed smoke
+run does not prove hardlink imports, bind-mount ownership under a non-desktop
+Linux host, or behavior against a real media filesystem.
 
-What CI verifies from the next push onward: the image builds from a clean
-checkout and the binary inside it runs (the `Docker image` job in
-`.github/workflows/ci.yml`). That covers the Dockerfile; it does not cover the
-volume layout, hardlink imports, or ownership, which need a real host.
+Automated coverage also verifies `internal/config`'s environment-override
+precedence (`go test ./internal/config/`), public-bind classification
+(`internal/api`'s `TestListeningPublicly`), clean image construction, and that
+the binary inside the image runs. Those checks cover the Dockerfile and startup
+contract; the remaining storage checks require the real-host procedure below.
 
 Run this on a real host to close it out:
 

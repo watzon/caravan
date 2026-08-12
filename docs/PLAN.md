@@ -149,7 +149,7 @@ A standing principle sharpened after phase 6: **Caravan is completely standalone
 ### Tasks
 
 1. **Engine implementations:** qBittorrent, SABnzbd, NZBGet APIs behind the existing `Engine` interface; `download_clients` config + test UI.
-2. **Completion tracking + import:** poll client state, locate completed data, feed the same import pipeline. v1 requires the client's download path to be visible on Caravan's filesystem (documented constraint; no remote path-mapping matrix).
+2. **Completion tracking + import:** poll client state, locate completed data, feed the same import pipeline. The client's download path must be visible on Caravan's filesystem; remote path mappings translate client-reported prefixes when Caravan mounts the same files elsewhere.
 3. **Routing rules:** default engine per protocol (torrent → embedded or qBit, nzb → SAB/NZBGet); category assignment.
 4. **Health model:** unreachable client pauses its queue with a banner; embedded engine unaffected.
 

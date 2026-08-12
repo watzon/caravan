@@ -14,6 +14,14 @@ caravan.state
 web/node_modules/
 web/dist/
 
+# Compose/runtime directories and local environment files
+/config/
+/data/
+.env
+.env.*
+**/.env
+**/.env.*
+
 # macOS
 .DS_Store
 

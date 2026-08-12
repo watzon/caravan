@@ -1,8 +1,18 @@
 # Caravan
 
 Caravan is a self-hosted media acquisition and library manager. It keeps one
-library, one database, and one storage root while supporting embedded torrent
-and Usenet downloads, optional external clients, metadata, and playback handoff.
+service, one database, and one storage root while supporting multiple libraries,
+embedded torrent and Usenet downloads, optional external clients, metadata, and
+playback handoff.
+
+> [!IMPORTANT]
+> Caravan is pre-1.0 software for experienced self-hosters. Back up the config
+> directory, review the deployment guides, and expect compatibility gaps while
+> the first public release is validated on real hardware and external clients.
+>
+> Docker publishes port 8677 to the LAN by default. Complete administrator setup
+> immediately on a trusted network. On an untrusted network, bind the published
+> port to `127.0.0.1` or use an access-controlled reverse proxy before starting.
 
 ## Prerequisites
 
@@ -73,3 +83,11 @@ the SPA once and passes that artifact to Go, cross-compile, and race jobs.
 - [Development plan](docs/PLAN.md)
 - [Docker deployment guide](docs/docker.md)
 - [Portable drive guide](docs/portable.md)
+- [Changelog](CHANGELOG.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security policy](SECURITY.md)
+- [Initial release checklist](docs/RELEASE_CHECKLIST.md)
+
+## License
+
+Caravan is released under the [MIT License](LICENSE).

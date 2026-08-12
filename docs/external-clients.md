@@ -15,19 +15,16 @@ the client has the download.
 
 ---
 
-## The v1 constraint: same path, same machine
+## Path visibility and remote path mappings
 
-**The client's download directory must be readable by Caravan at the same
-absolute path the client reports.**
+**The client's download directory must be readable by Caravan.** If both
+processes see it at the same absolute path, no mapping is needed. If the client
+reports `/downloads` while Caravan sees `/mnt/nas/dl`, add that mapping under
+**Settings → Downloads → Remote path mappings**.
 
-There is no remote path-mapping matrix in v1 — no "the client says
-`/downloads`, Caravan should look in `/mnt/nas/dl`" table. Whatever directory
-the client says it wrote into is the directory Caravan opens.
-
-That is a deliberate limit, not an oversight. A path-mapping table is a second
-source of truth about where media lives, and the failure mode when it drifts is
-an import that reads the wrong file. One rule that is either true or visibly
-false beats a mapping that is quietly wrong.
+Mappings replace the longest matching remote prefix and preserve the remaining
+suffix. Keep them narrow and test imports after changing either client's mount
+layout; a stale mapping can point Caravan at the wrong local directory.
 
 In practice this means:
 
@@ -35,8 +32,8 @@ In practice this means:
 | --- | --- |
 | Client and Caravan on the same host | Yes, nothing to do |
 | Both in Docker, same `/data` volume mounted at the same path in both | Yes |
-| Both in Docker, client mounts `/downloads`, Caravan mounts `/media` | **No** — mount the client's directory at `/downloads` in Caravan too |
-| Client on another machine, its directory exported over NFS/SMB and mounted at the same path | Yes |
+| Both in Docker, client mounts `/downloads`, Caravan mounts `/media` | Yes, if `/downloads` maps to `/media` and both mounts contain the same files |
+| Client on another machine, its directory exported over NFS/SMB at another local path | Yes, with a remote path mapping |
 | Client on another machine, nothing shared | **No** |
 
 When the path is not readable, the import does not retry forever. It records

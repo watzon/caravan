@@ -227,9 +227,10 @@ They live in the client configuration and the in-memory download state and
 never reach `media_files` or anything else the library owns, which stays
 root-relative (SPEC §1.2 pillar 3).
 
-v1 requires the client's completed-download path to be visible on Caravan's own
-filesystem, at the same absolute path the client reports. There is no remote
-path-mapping matrix.
+The client's completed-download path must be visible on Caravan's filesystem.
+When Caravan and the client see it at different absolute paths, configure a
+remote path mapping under **Settings → Downloads**. Caravan applies the longest
+matching client-path prefix and opens the mapped local path.
 
 What that means in practice — how a finished download becomes a library file,
 which directory layout to use, and what happens when a client stops answering —
