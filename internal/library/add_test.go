@@ -29,8 +29,8 @@ func TestAddMovieCreatesTheRowWithoutTouchingDisk(t *testing.T) {
 	if mv.ID == 0 || mv.TMDBID != 10378 || mv.Title != "Big Buck Bunny" {
 		t.Fatalf("movie = %+v, want the provider's metadata with an id", mv)
 	}
-	if !mv.Monitored {
-		t.Fatal("a newly added movie is not monitored, want monitored")
+	if mv.Monitored {
+		t.Fatal("a newly added movie is monitored without an explicit opt-in")
 	}
 	// The folder is recorded so a later import knows where the file goes...
 	if want := "library/Movies/Big Buck Bunny (2008)"; mv.Path != want {
@@ -175,7 +175,7 @@ func TestAddSeriesLeavesSpecialsUnmonitored(t *testing.T) {
 	}
 	h.provider.seriesByID[meta.TMDBID] = meta
 
-	sr, err := h.mgr.AddSeries(ctx, core.TMDBRef(meta.TMDBID), nil, 0)
+	sr, err := h.mgr.AddSeries(ctx, core.TMDBRef(meta.TMDBID), ptr(true), 0)
 	if err != nil {
 		t.Fatalf("AddSeries: %v", err)
 	}
@@ -309,9 +309,8 @@ func TestAddMovieDefaultsToReleased(t *testing.T) {
 // parameter is a pointer precisely so that absent and false differ.
 func ptr[T any](v T) *T { return &v }
 
-// An explicit false lands the row unmonitored; absent still means monitored,
-// which is what every caller that predates the checkbox — and request approval
-// — relies on.
+// A missing choice is the safe default: adding something must not start
+// automation unless the caller explicitly opts in.
 func TestAddMovieHonoursTheMonitoredChoice(t *testing.T) {
 	ctx := context.Background()
 
@@ -320,7 +319,7 @@ func TestAddMovieHonoursTheMonitoredChoice(t *testing.T) {
 		monitored *bool
 		want      bool
 	}{
-		{name: "no opinion is monitored", monitored: nil, want: true},
+		{name: "no opinion is unmonitored", monitored: nil, want: false},
 		{name: "an explicit yes", monitored: ptr(true), want: true},
 		{name: "an explicit no", monitored: ptr(false), want: false},
 	} {
@@ -407,9 +406,8 @@ func TestAddSeriesUnmonitoredLeavesTheWholeTreeUnmonitored(t *testing.T) {
 	}
 }
 
-// The default add is unchanged: monitored series, monitored tree, specials
-// still opted out of.
-func TestAddSeriesWithNoOpinionStillMonitorsTheTree(t *testing.T) {
+// No choice leaves the series and its full tree unmonitored.
+func TestAddSeriesWithNoOpinionLeavesTheTreeUnmonitored(t *testing.T) {
 	h := newHarness(t)
 	ctx := context.Background()
 	h.provider.seriesByID[66732] = core.SeriesMeta{
@@ -424,17 +422,16 @@ func TestAddSeriesWithNoOpinionStillMonitorsTheTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddSeries: %v", err)
 	}
-	if !sr.Monitored {
-		t.Fatal("an add with no opinion left the series unmonitored")
+	if sr.Monitored {
+		t.Fatal("an add with no opinion monitored the series")
 	}
 	episodes, err := h.st.ListEpisodes(ctx, sr.ID)
 	if err != nil {
 		t.Fatalf("ListEpisodes: %v", err)
 	}
 	for _, e := range episodes {
-		want := e.SeasonNumber != 0
-		if e.Monitored != want {
-			t.Errorf("S%02dE%02d monitored = %v, want %v", e.SeasonNumber, e.EpisodeNumber, e.Monitored, want)
+		if e.Monitored {
+			t.Errorf("S%02dE%02d is monitored without an explicit opt-in", e.SeasonNumber, e.EpisodeNumber)
 		}
 	}
 }

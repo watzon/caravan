@@ -160,12 +160,10 @@ func (m *stubManager) AddMovie(ctx context.Context, ref core.ItemRef, minAvailab
 		return nil, m.addErr
 	}
 	tmdbID := ref.TMDBID()
-	// The stub persists minAvailability and the monitored choice verbatim (the
-	// store defaults an empty availability), so handler tests can read the row
-	// back to prove the plumbing. It follows the real manager's rule for an
-	// absent choice: nil is monitored.
+	// The stub persists minAvailability and follows the real manager's
+	// monitored default so handler tests can prove the complete wire contract.
 	mv := &core.Movie{TMDBID: tmdbID, Title: "Stub Movie", SortTitle: "stub movie", Year: 2008,
-		Monitored: monitored == nil || *monitored, MinAvailability: minAvailability}
+		Monitored: monitored != nil && *monitored, MinAvailability: minAvailability}
 	if err := m.st.UpsertMovie(ctx, mv); err != nil {
 		return nil, err
 	}
@@ -181,12 +179,12 @@ func (m *stubManager) AddSeries(ctx context.Context, ref core.ItemRef, monitored
 	}
 	tmdbID := ref.TMDBID()
 	sr := &core.Series{TMDBID: tmdbID, Title: "Stub Series", SortTitle: "stub series", Year: 2016,
-		Monitored: monitored == nil || *monitored}
+		Monitored: monitored != nil && *monitored}
 	if err := m.st.UpsertSeries(ctx, sr); err != nil {
 		return nil, err
 	}
 	for i := 1; i <= m.addSeriesSeasons; i++ {
-		se := &core.Season{SeriesID: sr.ID, Number: i, Title: "Stub Season", Monitored: true}
+		se := &core.Season{SeriesID: sr.ID, Number: i, Title: "Stub Season", Monitored: sr.Monitored}
 		if err := m.st.UpsertSeason(ctx, se); err != nil {
 			return nil, err
 		}
@@ -198,7 +196,7 @@ func (m *stubManager) AddSeries(ctx context.Context, ref core.ItemRef, monitored
 			EpisodeNumber: i,
 			Title:         "Stub Episode",
 			AirDate:       time.Now().UTC().AddDate(0, 0, -7),
-			Monitored:     true,
+			Monitored:     sr.Monitored,
 		}
 		if err := m.st.UpsertEpisode(ctx, e); err != nil {
 			return nil, err
@@ -297,7 +295,7 @@ func (m *stubManager) AddSite(ctx context.Context, ref core.ItemRef, monitored *
 	sr := &core.Series{
 		Provider: ref.Provider, ProviderRef: stashID,
 		StashID: stashID, Title: "Stub Site", SortTitle: "stub site",
-		Kind: core.SeriesKindAdult, Monitored: monitored == nil || *monitored,
+		Kind: core.SeriesKindAdult, Monitored: monitored != nil && *monitored,
 		Path: store.AdultLibraryRoot + "/Stub Site",
 	}
 	if err := m.st.UpsertSeries(ctx, sr); err != nil {

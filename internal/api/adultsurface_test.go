@@ -26,6 +26,7 @@ var adultRoutes = []struct{ method, path string }{
 	{http.MethodGet, "/api/v1/adult/sites/1"},
 	{http.MethodGet, "/api/v1/adult/search?q=brazzers"},
 	{http.MethodGet, "/api/v1/adult/discover"},
+	{http.MethodGet, "/api/v1/adult/scenes/scene-1"},
 	{http.MethodGet, "/api/v1/adult/performers?q=mia"},
 	{http.MethodGet, "/api/v1/adult/tags?q=anal"},
 	{http.MethodGet, "/api/v1/adult/stash"},
@@ -185,7 +186,27 @@ func seedSiteOn(t *testing.T, st *store.Store, providerID, siteID, sceneID, titl
 	}); err != nil {
 		t.Fatalf("UpsertEpisode: %v", err)
 	}
+
 	return sr
+}
+func linkSceneFile(t *testing.T, st *store.Store, stashID string) int64 {
+	t.Helper()
+	ctx := context.Background()
+	scene, err := st.GetEpisodeByStashID(ctx, stashID)
+	if err != nil {
+		t.Fatalf("GetEpisodeByStashID: %v", err)
+	}
+	file := &core.MediaFile{
+		Path: store.AdultLibraryRoot + "/Brazzers/" + stashID + ".mkv",
+		Size: 42,
+	}
+	if err := st.UpsertMediaFile(ctx, file); err != nil {
+		t.Fatalf("UpsertMediaFile: %v", err)
+	}
+	if err := st.LinkEpisodeFile(ctx, scene.ID, file.ID); err != nil {
+		t.Fatalf("LinkEpisodeFile: %v", err)
+	}
+	return scene.ID
 }
 
 // ---------------------------------------------------------------------------
@@ -913,6 +934,7 @@ func TestMemberAllowlistNamesExactlyTheAdultReadRoutes(t *testing.T) {
 		http.MethodGet + " /adult/sites",
 		http.MethodGet + " /adult/sites/7",
 		http.MethodGet + " /adult/discover",
+		http.MethodGet + " /adult/scenes/scene-1",
 		// The filter rail's three typeaheads. Site search is a provider read
 		// like the other two: without it the Site pill 403s for exactly the
 		// granted members the rail exists for.
@@ -949,7 +971,7 @@ func TestMemberAllowlistNamesExactlyTheAdultReadRoutes(t *testing.T) {
 // the allowlist is naming something that will answer 404 forever.
 func TestEveryMemberAllowedAdultRouteIsRegistered(t *testing.T) {
 	h, st, mgr := newTestServer(t)
-	mgr.adult = &fakeAdultProvider{}
+	mgr.adult = &fakeAdultProvider{scenes: fakeScenes()}
 	enableAdult(t, st)
 	site := seedSite(t, st)
 
@@ -957,6 +979,7 @@ func TestEveryMemberAllowedAdultRouteIsRegistered(t *testing.T) {
 		"/api/v1/adult/sites",
 		"/api/v1/adult/sites/" + itoa(site.ID),
 		"/api/v1/adult/discover",
+		"/api/v1/adult/scenes/scene-1",
 		"/api/v1/adult/search?q=brazzers",
 		"/api/v1/adult/performers?q=mia",
 		"/api/v1/adult/tags?q=anal",
@@ -1022,9 +1045,7 @@ func TestSceneAndTitleRequestsCannotMixTheirIDs(t *testing.T) {
 	}
 }
 
-// A scene already in the library cannot be requested again, the same way a
-// title cannot: nothing would ever absorb the row.
-func TestRequestingASceneAlreadyInTheLibraryIsRefused(t *testing.T) {
+func TestRequestingACataloguedSceneWithoutAFileIsAllowed(t *testing.T) {
 	h, st, mgr := newTestServer(t)
 	mgr.adult = &fakeAdultProvider{scenes: fakeScenes()}
 	enableAdult(t, st)
@@ -1032,26 +1053,105 @@ func TestRequestingASceneAlreadyInTheLibraryIsRefused(t *testing.T) {
 
 	rec := do(t, h, http.MethodPost, "/api/v1/requests",
 		`{"media_type":"scene","stash_id":"scene-1","title":"Deep Impact"}`)
-	wantStatus(t, rec, http.StatusConflict)
+	wantStatus(t, rec, http.StatusCreated)
 }
 
-// The discover decoration is read from the library, so a scene already held
-// reads as held.
-func TestAdultDiscoverMarksScenesAlreadyInTheLibrary(t *testing.T) {
+// A scene whose file is already in the library cannot be requested again:
+// nothing would ever absorb the row.
+func TestRequestingASceneAlreadyInTheLibraryIsRefused(t *testing.T) {
 	h, st, mgr := newTestServer(t)
 	mgr.adult = &fakeAdultProvider{scenes: fakeScenes()}
 	enableAdult(t, st)
 	seedSite(t, st)
+	linkSceneFile(t, st, "scene-1")
 
-	rec := do(t, h, http.MethodGet, "/api/v1/adult/discover", "")
+	rec := do(t, h, http.MethodPost, "/api/v1/requests",
+		`{"media_type":"scene","stash_id":"scene-1","title":"Deep Impact"}`)
+	wantStatus(t, rec, http.StatusConflict)
+}
+
+// Adding a site catalogues every scene as an episode placeholder. Only the
+// scene with an attached media file is owned; its neighbours stay requestable.
+func TestAdultDiscoverMarksOnlyScenesWithFilesInTheLibrary(t *testing.T) {
+	h, st, mgr := newTestServer(t)
+	scenes := append(fakeScenes(), core.SceneMeta{
+		StashID: "scene-2", SiteStashID: "site-1", SiteName: "Brazzers",
+		Title: "Shallow Impact", Date: time.Date(2022, time.April, 18, 0, 0, 0, 0, time.UTC),
+	})
+	mgr.adult = &fakeAdultProvider{scenes: scenes}
+	enableAdult(t, st)
+	site := seedSite(t, st)
+	siteScene(t, st, site.ID)
+
+	read := func() map[string]sceneMetaJSON {
+		t.Helper()
+		rec := do(t, h, http.MethodGet, "/api/v1/adult/discover", "")
+		wantStatus(t, rec, http.StatusOK)
+		var body struct {
+			Scenes []sceneMetaJSON `json:"scenes"`
+		}
+		decodeBody(t, rec, &body)
+		out := make(map[string]sceneMetaJSON, len(body.Scenes))
+		for _, scene := range body.Scenes {
+			out[scene.StashID] = scene
+		}
+		return out
+	}
+
+	before := read()
+	if before["scene-1"].InLibrary || before["scene-2"].InLibrary {
+		t.Fatalf("catalogue placeholders read as owned: %+v", before)
+	}
+
+	episodeID := linkSceneFile(t, st, "scene-1")
+	after := read()
+	if !after["scene-1"].InLibrary || after["scene-1"].LibraryID != episodeID {
+		t.Fatalf("scene with file = %+v, want owned episode %d", after["scene-1"], episodeID)
+	}
+	if after["scene-2"].InLibrary || after["scene-2"].LibraryID != 0 {
+		t.Fatalf("neighbouring placeholder scene = %+v, want unowned", after["scene-2"])
+	}
+}
+
+func TestAdultSceneDetailReadsProviderMetadataAndState(t *testing.T) {
+	h, st, mgr := newTestServer(t)
+	scenes := fakeScenes()
+	scenes[0].Code = "BRZ-220314"
+	provider := &fakeAdultProvider{scenes: scenes}
+	mgr.adult = provider
+	enableAdult(t, st)
+	seedStashboxInstance(t, st, core.ProviderStashbox, "StashDB", "https://stashdb.org/graphql")
+	seedSite(t, st)
+
+	rec := do(t, h, http.MethodGet,
+		"/api/v1/adult/scenes/scene-1?provider="+core.ProviderStashbox, "")
 	wantStatus(t, rec, http.StatusOK)
-	var body struct {
-		Scenes []sceneMetaJSON `json:"scenes"`
+	var scene sceneMetaJSON
+	decodeBody(t, rec, &scene)
+	if scene.Provider != core.ProviderStashbox || scene.StashID != "scene-1" ||
+		scene.Code != "BRZ-220314" || scene.InLibrary || scene.LibraryID != 0 {
+		t.Fatalf("scene detail = %+v, want provider metadata and an unowned placeholder", scene)
 	}
-	decodeBody(t, rec, &body)
-	if len(body.Scenes) != 1 || !body.Scenes[0].InLibrary || body.Scenes[0].LibraryID == 0 {
-		t.Fatalf("scenes = %+v, want the held scene marked", body.Scenes)
+	if !containsCall(provider.callLog(), "GetScene scene-1") {
+		t.Fatalf("provider calls = %v, want exact scene lookup", provider.callLog())
 	}
+
+	linkSceneFile(t, st, "scene-1")
+	rec = do(t, h, http.MethodGet,
+		"/api/v1/adult/scenes/scene-1?provider="+core.ProviderStashbox, "")
+	decodeBody(t, rec, &scene)
+	if !scene.InLibrary || scene.LibraryID == 0 {
+		t.Fatalf("scene detail after file = %+v, want owned", scene)
+	}
+}
+
+func TestAdultSceneDetailReturnsNotFoundForUnknownScene(t *testing.T) {
+	h, st, mgr := newTestServer(t)
+	mgr.adult = &fakeAdultProvider{scenes: fakeScenes()}
+	enableAdult(t, st)
+
+	rec := do(t, h, http.MethodGet, "/api/v1/adult/scenes/missing", "")
+	wantStatus(t, rec, http.StatusNotFound)
 }
 
 // Without a stash-box credential the adult screens say so rather than pretending
@@ -1876,14 +1976,14 @@ func TestAddSiteCarriesSearchNowOnTheSyncJob(t *testing.T) {
 	}
 }
 
-// "Add and monitor", off. The row lands unmonitored; omitting the field is the
-// historical monitored answer, which is what request approval relies on.
+// "Add and monitor" is opt-in. Omission and explicit false both leave the site
+// unmonitored.
 func TestAddSiteHonoursTheMonitoredChoice(t *testing.T) {
 	for _, tt := range []struct {
 		name, body string
 		want       bool
 	}{
-		{name: "omitted is monitored", body: `{"stash_id":"site-9"}`, want: true},
+		{name: "omitted is unmonitored", body: `{"stash_id":"site-9"}`, want: false},
 		{name: "explicit true", body: `{"stash_id":"site-9","monitored":true}`, want: true},
 		{name: "explicit false", body: `{"stash_id":"site-9","monitored":false}`, want: false},
 	} {

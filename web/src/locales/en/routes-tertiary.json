@@ -58,6 +58,18 @@
   "route.adultSite.removedFiles": "Removed {title} and its files",
   "route.adultSite.removedLibrary": "Removed {title} from the library",
 
+  "route.adultScene.back": "Explore Adult",
+  "route.adultScene.site": "Site",
+  "route.adultScene.released": "Released",
+  "route.adultScene.duration": "Duration",
+  "route.adultScene.code": "Code",
+  "route.adultScene.performers": "Performers",
+  "route.adultScene.noPerformers": "No performers listed.",
+  "route.adultScene.noOverview": "No overview available.",
+  "route.adultScene.request": "Request",
+  "route.adultScene.requesting": "Requesting...",
+  "route.adultScene.requested": "Request submitted for {title}",
+
   "route.calendar.daySun": "Sun",
   "route.calendar.dayMon": "Mon",
   "route.calendar.dayTue": "Tue",

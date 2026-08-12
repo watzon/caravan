@@ -107,7 +107,7 @@ func (m *Manager) importEpisode(ctx context.Context, meta *core.SeriesMeta, rel 
 	if created && meta.TMDBID != 0 {
 		m.absorbRequests(ctx, core.MediaTypeSeries, meta.TMDBID, warn)
 	}
-	episodeIDs, err := m.ensureEpisodes(ctx, sr.ID, p.Season, p.Episodes)
+	episodeIDs, err := m.ensureEpisodes(ctx, sr.ID, p.Season, p.Episodes, sr.Monitored)
 	if err != nil {
 		return "", 0, err
 	}
@@ -214,19 +214,15 @@ func (m *Manager) absorbRequests(ctx context.Context, mediaType string, tmdbID i
 
 // monitoredOrDefault renders an add's monitored choice.
 //
-// nil is "no opinion", which is monitored — that is what every caller that
-// predates the "Add and monitor" checkbox means, and what the request-approval
-// path still means: a title somebody asked for is not granted by adding it
-// unmonitored. A non-nil pointer is an explicit choice and applies verbatim.
+// Nil is "no opinion", which is unmonitored. Starting automation requires an
+// explicit opt-in; scans, imports, old clients, and omitted JSON fields must
+// not invent that intent. A non-nil pointer applies verbatim.
 //
 // It only ever decides a NEW row. Both upserts below overwrite it from the
 // existing row when there is one, because a re-add is a metadata refresh and
-// the monitored flag is the owner's, not the request's.
+// the monitored flag is the owner's, not the new caller's.
 func monitoredOrDefault(monitored *bool) bool {
-	if monitored == nil {
-		return true
-	}
-	return *monitored
+	return monitored != nil && *monitored
 }
 
 // existingMovieRow finds the row a provider answer is an update of, or nil
@@ -477,8 +473,9 @@ func (m *Manager) upsertSeriesTree(ctx context.Context, sr *core.Series, meta *c
 
 // ensureEpisodes returns the row ids for the given episode numbers, creating
 // placeholder rows for any the provider did not list. A file on disk is
-// evidence the episode exists, whatever the provider thinks.
-func (m *Manager) ensureEpisodes(ctx context.Context, seriesID int64, season int, numbers []int) ([]int64, error) {
+// evidence the episode exists, whatever the provider thinks. New placeholders
+// inherit the parent series' explicit monitoring state.
+func (m *Manager) ensureEpisodes(ctx context.Context, seriesID int64, season int, numbers []int, monitored bool) ([]int64, error) {
 	ids := make([]int64, 0, len(numbers))
 	for _, n := range numbers {
 		existing, err := m.store.GetEpisodeByNumber(ctx, seriesID, season, n)
@@ -494,7 +491,7 @@ func (m *Manager) ensureEpisodes(ctx context.Context, seriesID int64, season int
 			SeriesID:      seriesID,
 			SeasonNumber:  season,
 			EpisodeNumber: n,
-			Monitored:     true,
+			Monitored:     monitored,
 		}
 		if err := m.store.UpsertEpisode(ctx, episode); err != nil {
 			return nil, err

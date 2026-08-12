@@ -410,7 +410,7 @@ func TestAddSeriesSearchesMissingOnlyWhenAsked(t *testing.T) {
 	}{
 		{"without the flag", `{"tmdb_id":1396}`, 0},
 		{"with search_missing false", `{"tmdb_id":1396,"search_missing":false}`, 0},
-		{"with search_missing true", `{"tmdb_id":1396,"search_missing":true}`, 3},
+		{"with search_missing true", `{"tmdb_id":1396,"monitored":true,"search_missing":true}`, 3},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

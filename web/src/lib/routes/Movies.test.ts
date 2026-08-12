@@ -186,7 +186,7 @@ describe('Movies grid', () => {
   it('labels the sort and title filter and keeps card status textual', async () => {
     await open();
 
-    expect(sortValue()).toBe('Title');
+    expect(sortValue()).toBe('Added');
     expect(
       host.querySelector<HTMLInputElement>('input[type="search"]')?.getAttribute('aria-label'),
     ).toBe('Filter movies by title');
@@ -217,7 +217,7 @@ describe('Movies grid', () => {
   it('monitors every selected movie and summarizes the result', async () => {
     await open();
     await select('Arrival');
-    cards()[2]!.click();
+    cards().find((card) => card.getAttribute('aria-label')?.startsWith('Sicario '))!.click();
     await settle();
     expect(host.textContent).toContain('2 selected');
 
@@ -318,19 +318,19 @@ describe('Movies grid', () => {
     expect(host.textContent).not.toContain('selected');
     expect(host.querySelector('a[href="/movies/2"]')).toBeTruthy();
   });
-  it('derives added sort from a reload URL and sorts newest first', async () => {
-    await open('/movies?sort=added&layout=posters');
+  it('uses added time as the default sort and keeps unrelated URL state', async () => {
+    await open('/movies?layout=posters');
 
     expect(sortValue()).toBe('Added');
     expect(cardIDs()).toEqual([3, 2, 1]);
     expect(router.params.get('layout')).toBe('posters');
   });
 
-  it('falls back to stable title and id order without rewriting an invalid URL', async () => {
+  it('falls back to added order without rewriting an invalid URL', async () => {
     servedMovies = [movie(9, 'Zulu'), movie(7, 'Alpha'), movie(4, 'Alpha')];
     await open('/movies?sort=sideways&layout=compact');
 
-    expect(sortValue()).toBe('Title');
+    expect(sortValue()).toBe('Added');
     expect(cardIDs()).toEqual([4, 7, 9]);
     expect(router.params.get('sort')).toBe('sideways');
     expect(router.params.get('layout')).toBe('compact');
@@ -345,11 +345,11 @@ describe('Movies grid', () => {
     expect(router.params.get('layout')).toBe('compact');
     expect(cardIDs()).toEqual([1, 3, 2]);
 
-    await chooseSort('Title');
+    await chooseSort('Added');
     expect(router.path).toBe('/movies');
     expect(router.params.has('sort')).toBe(false);
     expect(router.params.get('layout')).toBe('compact');
-    expect(cardIDs()).toEqual([1, 2, 3]);
+    expect(cardIDs()).toEqual([3, 2, 1]);
   });
 
   it('filters before sorting and preserves the filter and selection across sort changes', async () => {
@@ -359,17 +359,17 @@ describe('Movies grid', () => {
     input!.value = 'i';
     input!.dispatchEvent(new Event('input', { bubbles: true }));
     await settle();
-    expect(cardIDs()).toEqual([1, 3]);
+    expect(cardIDs()).toEqual([3, 1]);
 
     await select('Arrival');
-    await chooseSort('Added');
+    await chooseSort('Title');
 
     expect(input!.value).toBe('i');
     expect(router.params.get('layout')).toBe('posters');
-    expect(router.params.get('sort')).toBe('added');
+    expect(router.params.get('sort')).toBe('title');
     expect(cards().map((card) => card.getAttribute('aria-label'))).toEqual([
-      'Sicario (2021), Wanted',
       'Arrival (2021), Downloaded',
+      'Sicario (2021), Wanted',
     ]);
     expect(
       cards()

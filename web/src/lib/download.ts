@@ -158,27 +158,10 @@ export function unreachableClientBanner(
 
 
 /**
- * Queue order: active work first, then failures (they need attention), then the
- * finished pile, alphabetically inside each group so rows stop jumping between
- * polls.
+ * Queue order: most recently added first. State changes do not move a row
+ * between polls; an engine-only row with no persisted creation time stays
+ * behind the persisted queue in the order the server supplied it.
  */
-const STATE_ORDER: DownloadState[] = [
-  'downloading',
-  'queued',
-  'seeding',
-  'paused',
-  'failed',
-  'completed',
-];
-
 export function sortDownloads(downloads: readonly DownloadStatus[]): DownloadStatus[] {
-  const weight = (s: string) => {
-    const i = STATE_ORDER.indexOf(s as DownloadState);
-    return i === -1 ? STATE_ORDER.length : i;
-  };
-  return [...downloads].sort((a, b) => {
-    const byState = weight(a.state) - weight(b.state);
-    if (byState !== 0) return byState;
-    return a.name.localeCompare(b.name);
-  });
+  return [...downloads].sort((a, b) => b.created_at.localeCompare(a.created_at));
 }

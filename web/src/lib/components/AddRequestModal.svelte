@@ -120,7 +120,7 @@
   let profileID = $state(0);
   let searchNow = $state(untrack(readSearchOnAdd));
   /** Whether a direct add should continue searching for missing releases. */
-  let monitored = $state(true);
+  let monitored = $state(false);
   /**
    * Movies only: the release stage the automatic search waits for. Requesters
    * choose it too - it is part of the ask, not part of the approval - and the
@@ -168,7 +168,7 @@
     loadingSeasons = false;
     profileID = 0;
     searchNow = readSearchOnAdd();
-    monitored = initialMonitored ?? true;
+    monitored = initialMonitored ?? false;
     minAvailability = initialAvailability || 'released';
     profiles = null;
     loadingProfiles = false;
@@ -280,10 +280,10 @@
   }
 
   /**
-   * An admin may decide on their own request on the spot, Overseerr-style;
-   * members only ask. This remains request mode rather than borrowing add mode
-   * because the approval intentionally takes server defaults — no profile,
-   * folder, monitoring, or search choice belongs in that one-click decision.
+   * An admin may decide on their own request on the spot; members only ask.
+   * This remains request mode rather than borrowing add mode because the
+   * approval intentionally takes safe server defaults — no profile, folder,
+   * monitoring, or search choice belongs in that one-click decision.
    */
   async function requestAndApprove() {
     const result = await api.requestAndApprove(requestBody());
@@ -336,7 +336,7 @@
       mediaType === 'series' ? addSeasons(seasonList, selected) : undefined,
       mediaType === 'movie' ? minAvailability : undefined,
       profileID > 0 ? profileID : undefined,
-      initialMonitored === null ? undefined : monitored,
+      monitored,
     );
     const added = mediaType === 'movie' ? result.movie : result.series;
     if (!added) throw new Error('the approval did not return the added title');

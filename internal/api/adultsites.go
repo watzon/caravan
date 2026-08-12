@@ -158,6 +158,7 @@ type sceneMetaJSON struct {
 	Title       string   `json:"title"`
 	Overview    string   `json:"overview"`
 	Date        string   `json:"date"`
+	Code        string   `json:"code"`
 	Duration    int      `json:"duration"`
 	Performers  []string `json:"performers"`
 	URL         string   `json:"url"`
@@ -392,7 +393,7 @@ type addSiteRequest struct {
 	// sends and what a single-box install always resolves to anyway.
 	Provider string `json:"provider"`
 	// Monitored is the dialog's "Add and monitor" checkbox, and reads exactly
-	// as addRequest.Monitored does — absent means monitored.
+	// as addRequest.Monitored does — absent means unmonitored.
 	Monitored *bool `json:"monitored"`
 	// SearchNow queues a search for every wanted scene once the catalogue is
 	// filed. It rides on the sync job rather than happening here (see
@@ -525,6 +526,32 @@ func (s *server) handleSearchSites(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"sites": out})
 }
 
+// handleGetAdultScene answers one addressable provider scene. Unlike a site
+// detail, the scene need not have a library row: the provider id and stash id
+// in the request are enough to render its information page.
+func (s *server) handleGetAdultScene(w http.ResponseWriter, r *http.Request) {
+	provider, providerID, ok := s.adultProvider(w, r)
+	if !ok {
+		return
+	}
+	scene, err := provider.GetScene(r.Context(), r.PathValue("stashID"))
+	if errors.Is(err, store.ErrNotFound) || errors.Is(err, stashbox.ErrNotFound) ||
+		(err == nil && scene == nil) {
+		writeError(w, http.StatusNotFound, "not found")
+		return
+	}
+	if err != nil {
+		s.writeAdultProviderError(w, r, "get scene", err)
+		return
+	}
+	state, err := s.sceneState(r.Context(), providerID, []core.SceneMeta{*scene})
+	if err != nil {
+		s.writeStoreError(w, "read library state", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, state.decorate(*scene, providerID))
+}
+
 // handleAdultDiscover is the discover screen for scenes: the provider's own
 // results, decorated with what the library holds and what has been asked for.
 //
@@ -567,7 +594,7 @@ func (s *server) handleAdultDiscover(w http.ResponseWriter, r *http.Request) {
 		result = &core.ScenePage{Page: 1}
 	}
 
-	state, err := s.sceneState(ctx, result.Scenes)
+	state, err := s.sceneState(ctx, providerID, result.Scenes)
 	if err != nil {
 		s.writeStoreError(w, "read library state", err)
 		return
@@ -593,12 +620,12 @@ type sceneLibraryState struct {
 	pending  map[string]bool
 }
 
-func (s *server) sceneState(ctx context.Context, scenes []core.SceneMeta) (*sceneLibraryState, error) {
+func (s *server) sceneState(ctx context.Context, providerID string, scenes []core.SceneMeta) (*sceneLibraryState, error) {
 	ids := make([]string, 0, len(scenes))
 	for _, scene := range scenes {
 		ids = append(ids, scene.StashID)
 	}
-	episodes, err := s.st.EpisodeIDsByStashID(ctx, ids)
+	episodes, err := s.st.EpisodeFileIDsByStashIDForProvider(ctx, providerID, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -634,6 +661,7 @@ func (st *sceneLibraryState) decorate(scene core.SceneMeta, providerID string) s
 		Title:       scene.Title,
 		Overview:    scene.Overview,
 		Date:        jsonDate(scene.Date),
+		Code:        scene.Code,
 		Duration:    scene.Duration,
 		Performers:  performers,
 		URL:         scene.URL,

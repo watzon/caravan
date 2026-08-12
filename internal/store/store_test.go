@@ -941,6 +941,57 @@ func TestUnmatchedFileCRUD(t *testing.T) {
 	}
 }
 
+// An unmatched row retains its original insertion position when a rescan
+// refreshes seen_at: scan activity is not queue arrival time.
+func TestListUnmatchedFilesOrdersByOriginalInsertion(t *testing.T) {
+	ctx := context.Background()
+	st, _ := openTemp(t)
+	seenAt := time.Date(2025, time.January, 1, 12, 0, 0, 0, time.UTC)
+
+	older := &core.UnmatchedFile{Path: "incoming/a-older.mkv", SeenAt: seenAt}
+	newer := &core.UnmatchedFile{Path: "incoming/z-newer.mkv", SeenAt: seenAt.Add(time.Minute)}
+	for _, file := range []*core.UnmatchedFile{older, newer} {
+		if err := st.UpsertUnmatchedFile(ctx, file); err != nil {
+			t.Fatalf("UpsertUnmatchedFile(%q): %v", file.Path, err)
+		}
+	}
+
+	refreshedAt := seenAt.Add(2 * time.Hour)
+	refreshedOlder := &core.UnmatchedFile{
+		Path: older.Path, SeenAt: refreshedAt,
+	}
+	if err := st.UpsertUnmatchedFile(ctx, refreshedOlder); err != nil {
+		t.Fatalf("UpsertUnmatchedFile refresh: %v", err)
+	}
+	if refreshedOlder.ID != older.ID {
+		t.Fatalf("refreshed file id = %d, want original id %d", refreshedOlder.ID, older.ID)
+	}
+
+	got, err := st.ListUnmatchedFiles(ctx)
+	if err != nil {
+		t.Fatalf("ListUnmatchedFiles: %v", err)
+	}
+	want := []struct {
+		id   int64
+		path string
+	}{
+		{id: newer.ID, path: newer.Path},
+		{id: older.ID, path: older.Path},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("ListUnmatchedFiles returned %d files, want %d: %+v", len(got), len(want), got)
+	}
+	for i, file := range got {
+		if file.ID != want[i].id || file.Path != want[i].path {
+			t.Fatalf("file %d = id %d path %q, want id %d path %q",
+				i, file.ID, file.Path, want[i].id, want[i].path)
+		}
+	}
+	if !got[1].SeenAt.Equal(refreshedAt) {
+		t.Fatalf("refreshed older file seen_at = %s, want %s", got[1].SeenAt, refreshedAt)
+	}
+}
+
 // Multi-episode parses go through the same JSON column; a slice field is the
 // one shape a naive round trip can lose.
 func TestUnmatchedFileParsedEpisodesRoundTrip(t *testing.T) {

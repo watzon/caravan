@@ -196,8 +196,9 @@ type ConversionCandidate struct {
 }
 
 // ListConversionCandidates returns owned media files that are free to queue,
-// ordered by path. Compatibility is profile-dependent and belongs to the API;
-// this query only resolves ownership and excludes open conversion rows.
+// ordered by mf.added_at DESC, mf.id DESC. Compatibility is profile-dependent
+// and belongs to the API; this query only resolves ownership and excludes open
+// conversion rows.
 //
 // Ownership fails closed, matching GetMediaFileLibrary: unowned files,
 // files attached to both a movie and an episode, and files attached across TV
@@ -220,7 +221,7 @@ func (s *Store) ListConversionCandidates(ctx context.Context) ([]ConversionCandi
 			WHERE c.media_file_id = mf.id AND c.status IN (?, ?)
 		)
 		GROUP BY mf.id
-		ORDER BY mf.path`,
+		ORDER BY mf.added_at DESC, mf.id DESC`,
 		core.SeriesKindAdult, core.LibraryKindAdult, core.LibraryKindTV,
 		core.SeriesKindAdult, core.ConversionQueued, core.ConversionRunning)
 	if err != nil {

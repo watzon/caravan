@@ -18,6 +18,7 @@ import {
   sceneFiltersOf,
   sceneLine,
   sceneMetaLine,
+  sceneMatchQuery,
   sceneNumber,
   scenePerformers,
   sceneTitleLine,
@@ -72,6 +73,23 @@ describe('adultVisible', () => {
   it('reads a missing field as not granted', () => {
     const legacy = { username: 'ada', role: 'admin', open: false } as unknown as SessionUser;
     expect(adultVisible(legacy)).toBe(false);
+  });
+});
+
+describe('sceneMatchQuery', () => {
+  it('searches the human part after the scene date and before release tags', () => {
+    expect(sceneMatchQuery(
+      'incomplete/AfricanCasting.20.01.26.Scarlet.XXX.1080p.MP4-WRB/006ae62d.mp4',
+      'AfricanCasting',
+    )).toBe('Scarlet');
+    expect(sceneMatchQuery(
+      'incomplete/Brazzers.2022.03.14.Abella.Danger.Deep.Impact.XXX.1080p.MP4-KTR/file.mp4',
+      'Brazzers',
+    )).toBe('Abella Danger Deep Impact');
+  });
+
+  it('falls back when the enclosing directory carries no scene date', () => {
+    expect(sceneMatchQuery('incomplete/hash/file.mp4', '  Brazzers  ')).toBe('Brazzers');
   });
 });
 

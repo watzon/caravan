@@ -12,13 +12,14 @@
    * release.ts and tvcompat.ts, called from the row.
    */
   import type { Release } from '../api/types';
-  import { UNKNOWN, formatAge, formatBytes, truncateMiddle } from '../format';
+  import { UNKNOWN, formatAge, formatBytes } from '../format';
   import { isFlagged, releaseFlags, releaseScore, sortReleases } from '../release';
   import { compatBadge } from '../tvcompat';
   import Badge from './Badge.svelte';
   import Button from './Button.svelte';
   import EmptyState from './EmptyState.svelte';
   import Icon from './Icon.svelte';
+  import MiddleEllipsis from './MiddleEllipsis.svelte';
   import Skeleton from './Skeleton.svelte';
   const { t, tp } = useI18n();
 
@@ -103,8 +104,8 @@
               </span>
             </td>
 
-            <td class="px-3 py-3 font-mono text-ink" title={release.title}>
-              {truncateMiddle(release.title, 58)}
+            <td class="w-full max-w-0 px-3 py-3 font-mono text-ink" title={release.title}>
+              <MiddleEllipsis text={release.title} />
             </td>
 
             <td class="px-3 py-3 text-ink-secondary">{formatAge(release.published_at)}</td>

@@ -23,8 +23,8 @@ import (
 // (a core.Availability* constant). Empty means "no opinion": a new row gets
 // the released default, an existing row keeps whatever it has.
 //
-// monitored is the "Add and monitor" choice and follows the same rule
-// (monitoredOrDefault): nil means monitored, and it decides a new row only.
+// monitored is the "Add and monitor" choice and follows monitoredOrDefault:
+// nil means unmonitored, and it decides a new row only.
 //
 // libraryID is the add's target library; 0 means the default movie library.
 // It decides a NEW row only — re-adding a movie refreshes its metadata in the

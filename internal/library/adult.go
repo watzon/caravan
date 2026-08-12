@@ -120,8 +120,8 @@ func (m *Manager) adultReadyIn(lib *core.Library) error {
 // the member-request approval, whose whole point is that the asked-for scene
 // becomes a wanted episode — wants AddSiteAndWait instead.
 //
-// monitored follows monitoredOrDefault: nil means monitored, and it decides a
-// new row only.
+// monitored follows monitoredOrDefault: nil means unmonitored, and it decides
+// a new row only.
 //
 // ref names the stash-box INSTANCE the id was read from as well as the id, for
 // AddMovie's reason: a UUID means nothing without the box that minted it, and
@@ -802,7 +802,7 @@ func (m *Manager) importScene(ctx context.Context, sr *core.Series, rel string, 
 		*sr = row
 	}
 
-	episodeIDs, err := m.ensureEpisodes(ctx, sr.ID, p.Season, p.Episodes)
+	episodeIDs, err := m.ensureEpisodes(ctx, sr.ID, p.Season, p.Episodes, sr.Monitored)
 	if err != nil {
 		return "", 0, err
 	}
@@ -896,6 +896,11 @@ func (m *Manager) importDownloadedScenes(ctx context.Context, files []downloaded
 		if reason != "" && p.SceneDate.IsZero() && file.rel == largest.rel {
 			if title := strings.TrimSpace(grab.ReleaseTitle); title != "" {
 				rp := m.parseScene(title)
+				// Even when the title cannot be imported automatically, keep its
+				// stronger parse for Scan Review instead of the obfuscated payload name.
+				if rp.Confidence > p.Confidence {
+					p = rp
+				}
 				rescued, rresolved, rreason, rerr := m.resolveScene(ctx, sr.ID, rp)
 				if rerr != nil {
 					return imported, parked, rerr

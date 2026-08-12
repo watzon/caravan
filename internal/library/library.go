@@ -44,6 +44,7 @@ const (
 const (
 	MediaTypeMovie  = "movie"
 	MediaTypeSeries = "series"
+	MediaTypeScene  = "scene"
 )
 
 // defaultMinConfidence is the parser confidence below which a file parks in

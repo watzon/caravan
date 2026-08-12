@@ -35,8 +35,8 @@
   type SortKey = 'title' | 'added' | 'status';
 
   const SORT_OPTIONS: { key: SortKey; label: string }[] = [
-    { key: 'title', label: t('route.library.sortTitle') },
     { key: 'added', label: t('route.library.sortAdded') },
+    { key: 'title', label: t('route.library.sortTitle') },
     { key: 'status', label: t('route.library.sortStatus') },
   ];
 
@@ -65,7 +65,7 @@
   onMount(load);
 
   function readSort(value: string | null): SortKey {
-    return value === 'added' || value === 'status' ? value : 'title';
+    return value === 'title' || value === 'status' ? value : 'added';
   }
 
   function compareTitle(a: Movie, b: Movie): number {
@@ -79,7 +79,7 @@
   function applySort(value: string) {
     const next = readSort(value);
     const params = router.params;
-    if (next === 'title') params.delete('sort');
+    if (next === 'added') params.delete('sort');
     else params.set('sort', next);
     const search = params.toString();
     navigate(`${router.path}${search ? `?${search}` : ''}${router.hash}`);

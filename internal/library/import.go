@@ -33,18 +33,48 @@ func dispositionFor(rel string) sourceDisposition {
 	return keepSource
 }
 
+// sceneMatchLibrary resolves the parked file's adult shelf before any provider
+// call. A library-scoped download must stay on that shelf; an old unscoped scan
+// entry uses the default adult library.
+func (m *Manager) sceneMatchLibrary(ctx context.Context, libraryID int64) (*core.Library, error) {
+	var (
+		lib *core.Library
+		err error
+	)
+	if libraryID == 0 {
+		lib, err = m.store.GetDefaultLibrary(ctx, core.LibraryKindAdult)
+	} else {
+		lib, err = m.store.GetLibrary(ctx, libraryID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if lib.Kind != core.LibraryKindAdult {
+		return nil, fmt.Errorf("library: library %d is %s, not adult", lib.ID, lib.Kind)
+	}
+	if err := m.adultReadyIn(lib); err != nil {
+		return nil, err
+	}
+	return lib, nil
+}
+
 // ImportUnmatched resolves a parked file into the library against a
 // user-chosen provider id (SPEC §10.1, §13: the scan-review screen's "this is
 // actually X" action, and the stuck-import queue's).
 //
-// mediaType is MediaTypeMovie or MediaTypeSeries. The parked file's parsed
-// season and episode numbers are reused as-is — the user is correcting *what*
-// the file is, not which episode of it — so a series import needs a filename
-// the parser found an episode number in. A filename carrying only an absolute
-// number counts: the number is the file's own claim, and the series the user
-// just named is what places it (resolveAbsolute). That is the door out of a
-// reasonNoAbsoluteMatch park, and without it a file parked for numbering could
-// only ever be re-parked.
+// mediaType is MediaTypeMovie, MediaTypeSeries, or MediaTypeScene. Movie and
+// series matches resolve a title through its metadata provider. A scene match
+// resolves the exact provider scene the user selected, adds and walks its site,
+// and imports against that scene row. This explicit scene id is the door out of
+// same-day ambiguity: a date alone cannot choose between two releases.
+//
+// A series match reuses the parked file's parsed season and episode numbers
+// as-is — the user is correcting *what* the file is, not which episode of it —
+// so it needs a filename the parser found an episode number in. A filename
+// carrying only an absolute number counts: the number is the file's own claim,
+// and the series the user just named is what places it (resolveAbsolute). That
+// is the door out of a reasonNoAbsoluteMatch park, and without it a file parked
+// for numbering could only ever be re-parked.
 //
 // On success the file is organized, its metadata rows are written, and the
 // unmatched entry is cleared.
@@ -54,13 +84,17 @@ func dispositionFor(rel string) sourceDisposition {
 // There is deliberately no Manager-level provider gate in front of that: an
 // install whose libraries identify through some other provider entirely has no
 // TMDB client, and must still be able to match a parked file.
+
 func (m *Manager) ImportUnmatched(ctx context.Context, unmatchedID int64, ref core.ItemRef, mediaType string) (*ImportResult, error) {
 	if !ref.Valid() {
 		return nil, fmt.Errorf("library: invalid provider ref %q/%q", ref.Provider, ref.Ref)
 	}
-	provider := m.providerByID(ctx, ref.Provider)
-	if provider == nil {
-		return nil, core.ErrNoMetadataProvider
+	var provider core.MetadataProvider
+	if mediaType != MediaTypeScene {
+		provider = m.providerByID(ctx, ref.Provider)
+		if provider == nil {
+			return nil, core.ErrNoMetadataProvider
+		}
 	}
 
 	u, err := m.store.GetUnmatchedFile(ctx, unmatchedID)
@@ -76,6 +110,7 @@ func (m *Manager) ImportUnmatched(ctx context.Context, unmatchedID int64, ref co
 	warn := func(format string, args ...any) {
 		res.Warnings = append(res.Warnings, fmt.Sprintf(format, args...))
 	}
+	var adultEpisodeID int64
 
 	switch mediaType {
 	case MediaTypeMovie:
@@ -115,10 +150,58 @@ func (m *Manager) ImportUnmatched(ctx context.Context, unmatchedID int64, ref co
 			return nil, err
 		}
 
+	case MediaTypeScene:
+		lib, err := m.sceneMatchLibrary(ctx, u.LibraryID)
+		if err != nil {
+			return nil, err
+		}
+		provider := m.adultByID(ctx, ref.Provider)
+		if provider == nil {
+			return nil, core.ErrNoAdultProvider
+		}
+		scene, err := provider.GetScene(ctx, ref.Ref)
+		if err != nil {
+			return nil, fmt.Errorf("library: get scene %s/%s: %w", ref.Provider, ref.Ref, err)
+		}
+		if scene == nil || scene.SiteStashID == "" {
+			return nil, fmt.Errorf("library: scene %s/%s not found", ref.Provider, ref.Ref)
+		}
+		site, err := m.AddSiteAndWait(ctx,
+			core.ItemRef{Provider: ref.Provider, Ref: scene.SiteStashID}, nil, lib.ID)
+		if err != nil {
+			return nil, err
+		}
+		episodes, err := m.store.ListEpisodes(ctx, site.ID)
+		if err != nil {
+			return nil, err
+		}
+		var episode *core.Episode
+		for i := range episodes {
+			if episodes[i].StashID == scene.StashID {
+				episode = &episodes[i]
+				break
+			}
+		}
+		if episode == nil {
+			return nil, fmt.Errorf("library: selected scene %s/%s is not in site %q",
+				ref.Provider, ref.Ref, site.Title)
+		}
+		p := u.Parsed
+		p.Season, p.Episodes = episode.SeasonNumber, []int{episode.EpisodeNumber}
+		res.Path, res.SeriesID, err = m.importScene(ctx, site, u.Path, info.Size(), p,
+			episode.AirDate, episode.Title, warn, dispositionFor(u.Path))
+		if err != nil {
+			return nil, err
+		}
+		adultEpisodeID = episode.ID
+
 	default:
 		return nil, fmt.Errorf("library: unknown media type %q", mediaType)
 	}
 
 	m.libraryChanged(ctx)
+	if adultEpisodeID != 0 {
+		m.adultLibraryChanged(ctx, []int64{adultEpisodeID})
+	}
 	return res, nil
 }

@@ -40,8 +40,8 @@
   type SortKey = 'title' | 'added' | 'status';
 
   const SORT_OPTIONS: { key: SortKey; label: string }[] = [
-    { key: 'title', label: t('route.adult.sortTitle') },
     { key: 'added', label: t('route.adult.sortAdded') },
+    { key: 'title', label: t('route.adult.sortTitle') },
     { key: 'status', label: t('route.adult.sortStatus') },
   ];
 
@@ -49,7 +49,7 @@
   const SORT_CHOICES = SORT_OPTIONS.map((option) => ({ id: option.key, name: option.label }));
 
   function readSort(value: string | null): SortKey {
-    return value === 'added' || value === 'status' ? value : 'title';
+    return value === 'title' || value === 'status' ? value : 'added';
   }
 
   let sites = $state<Site[] | null>(null);
@@ -120,7 +120,7 @@
   function applySort(value: string) {
     const next = readSort(value);
     const params = router.params;
-    if (next === 'title') params.delete('sort');
+    if (next === 'added') params.delete('sort');
     else params.set('sort', next);
     const search = params.toString();
     navigate(`${router.path}${search ? `?${search}` : ''}${router.hash}`);

@@ -27,6 +27,7 @@ function scene(id: string, extra: Partial<SceneMeta> = {}): SceneMeta {
   return {
     media_type: 'scene',
     stash_id: id,
+    provider: 'stashbox',
     site_stash_id: 'site-1',
     site_name: 'Vixen',
     title: `Scene ${id}`,
@@ -35,6 +36,7 @@ function scene(id: string, extra: Partial<SceneMeta> = {}): SceneMeta {
     duration: 2472,
     performers: ['Sienna Vale', 'Mara Solis'],
     url: '',
+    code: '',
     image_url: '/img.jpg',
     in_library: false,
     library_id: 0,
@@ -314,15 +316,23 @@ describe('a scene card', () => {
     ).toHaveLength(1);
   });
 
+  it('links artwork and title to the provider-qualified detail URL', async () => {
+    served = [scene('a/b', { provider: 'stashbox:tpdb' })];
+    await open('/discover/adult');
+
+    const href = '/adult/scenes/stashbox%3Atpdb/a%2Fb';
+    expect(host.querySelectorAll(`a[href="${href}"]`)).toHaveLength(2);
+    expect(host.querySelector(`a[href="${href}"] button`)).toBeNull();
+  });
+
   it('badges the run time as a run time', async () => {
     await open('/discover/adult');
     expect(host.textContent).toContain('41:12');
   });
 
   /**
-   * The retired Scenes tab's request body, unchanged: a scene is named by its
-   * stash-box id and nothing else, and the server refuses one that also carries
-   * a tmdb id.
+   * A scene request is pinned to both the provider identity and its stash id:
+   * a stash id alone is not globally unique across configured instances.
    */
   it('asks for a scene by stash id and no tmdb id', async () => {
     await open('/discover/adult');
@@ -338,6 +348,7 @@ describe('a scene card', () => {
       title: 'Scene a',
       year: 2026,
       poster_path: '/img.jpg',
+      provider: 'stashbox',
     });
   });
 

@@ -76,6 +76,8 @@ const DOWNLOADS: DownloadStatus[] = [
     ratio: 0,
     save_path: 'incomplete/bbb',
     error: '',
+    created_at: '2026-07-31T00:00:00Z',
+    updated_at: '2026-07-31T00:00:00Z',
   },
   {
     id: 'hash-b',
@@ -90,6 +92,8 @@ const DOWNLOADS: DownloadStatus[] = [
     ratio: 0,
     save_path: 'incomplete/else',
     error: '',
+    created_at: '2026-07-30T00:00:00Z',
+    updated_at: '2026-07-30T00:00:00Z',
   },
 ];
 

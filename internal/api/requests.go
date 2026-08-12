@@ -73,11 +73,10 @@ type requestCreateRequest struct {
 // the direct add endpoints: zero quality_profile_id leaves the item to inherit
 // its library or system default.
 //
-// Monitored and SearchNow mean something for every kind. On a scene they are
-// the only knobs there are: monitored defaults FALSE there (the site lands
-// unmonitored and only the asked-for scene is monitored — see approveScene),
-// against the movies/series default of true, and search_now queues a search
-// for the scene's episode rather than for a title.
+// Monitored and SearchNow mean something for every kind. Monitoring defaults
+// false for all additions. A scene approval still monitors the one asked-for
+// episode while its new parent site stays unmonitored (see approveScene);
+// search_now queues a search for that episode rather than for a whole title.
 type approveRequestRequest struct {
 	SearchNow        bool  `json:"search_now"`
 	Monitored        *bool `json:"monitored"`
@@ -179,7 +178,9 @@ func (s *server) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	inLibrary, err := s.inLibrary(ctx, body.MediaType, body.TMDBID, body.StashID)
+	inLibrary, err := s.inLibrary(
+		ctx, body.MediaType, body.TMDBID, body.StashID, strings.TrimSpace(body.Provider),
+	)
 	if err != nil {
 		s.writeStoreError(w, "read library state", err)
 		return
@@ -383,15 +384,13 @@ func (s *server) approveRequest(ctx context.Context, w http.ResponseWriter, r *h
 		out["site"] = siteDTO(*sr)
 		out["search_queued"] = queued
 	case req.MediaType == MediaTypeMovie:
-		// The approver's explicit choice beats the asker's, which beats the
-		// default the add path fills in.
+		// The approver's explicit choices beat the asker's stored availability.
+		// Monitoring is safe by default: an omitted choice leaves the new title
+		// unmonitored, while an explicit true starts automation.
 		minAvailability := body.MinAvailability
 		if minAvailability == "" {
 			minAvailability = req.MinAvailability
 		}
-		// Omission keeps the historical monitored default. An explicit false is
-		// useful when an admin approves a request but does not want automatic
-		// searches for future releases.
 		m, err := s.addMovieToLibrary(ctx, core.TMDBRef(req.TMDBID), body.SearchNow, minAvailability, body.Monitored, body.QualityProfileID, 0)
 		if err != nil {
 			s.writeManagerError(w, core.ProviderTMDB, "add movie", err)
@@ -641,11 +640,23 @@ func validSeasonNumbers(w http.ResponseWriter, seasons []int) bool {
 // inLibrary reports whether a provider id is already tracked. Exactly one of
 // tmdbID and stashID is meaningful, chosen by mediaType, exactly as on the row
 // the request would become.
-func (s *server) inLibrary(ctx context.Context, mediaType string, tmdbID int64, stashID string) (bool, error) {
+func (s *server) inLibrary(
+	ctx context.Context,
+	mediaType string,
+	tmdbID int64,
+	stashID string,
+	provider string,
+) (bool, error) {
 	if mediaType == MediaTypeScene {
-		// A scene is an episode row under its site, so "already in the library"
-		// is the same question the discover screen's in_library badge asks.
-		found, err := s.st.EpisodeIDsByStashID(ctx, []string{stashID})
+		var (
+			found map[string]int64
+			err   error
+		)
+		if provider == "" {
+			found, err = s.st.EpisodeFileIDsByStashID(ctx, []string{stashID})
+		} else {
+			found, err = s.st.EpisodeFileIDsByStashIDForProvider(ctx, provider, []string{stashID})
+		}
 		if err != nil {
 			return false, err
 		}

@@ -58,9 +58,9 @@ func (s *Store) GetUnmatchedFile(ctx context.Context, id int64) (*core.Unmatched
 	return u, nil
 }
 
-// ListUnmatchedFiles returns the scan-review queue ordered by path.
+// ListUnmatchedFiles returns the scan-review queue ordered by id DESC.
 func (s *Store) ListUnmatchedFiles(ctx context.Context) ([]core.UnmatchedFile, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT "+unmatchedColumns+" FROM unmatched_files ORDER BY path")
+	rows, err := s.db.QueryContext(ctx, "SELECT "+unmatchedColumns+" FROM unmatched_files ORDER BY id DESC")
 	if err != nil {
 		return nil, fmt.Errorf("store: list unmatched files: %w", err)
 	}

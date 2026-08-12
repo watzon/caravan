@@ -182,7 +182,7 @@ describe('Series grid selection', () => {
   it('labels the sort and title filter controls', async () => {
     await open();
 
-    expect(sortValue()).toBe('Title');
+    expect(sortValue()).toBe('Added');
     expect(
       host.querySelector<HTMLInputElement>('input[type="search"]')?.getAttribute('aria-label'),
     ).toBe('Filter series by title');
@@ -192,7 +192,7 @@ describe('Series grid selection', () => {
     await open();
 
     await select('Andor');
-    cards()[1]!.click();
+    cards().find((card) => card.getAttribute('aria-label')?.startsWith('Severance '))!.click();
     await settle();
 
     button('Unmonitor').click();
@@ -223,19 +223,19 @@ describe('Series grid selection', () => {
     expect(toasts.items.map((t) => t.message)).toEqual(['Removed 1']);
   });
 
-  it('derives added sort from the URL on reload', async () => {
-    await open('/series?sort=added&layout=posters');
+  it('uses added time as the default sort and keeps unrelated URL state', async () => {
+    await open('/series?layout=posters');
 
     expect(sortValue()).toBe('Added');
     expect(cardIDs()).toEqual([2, 1]);
     expect(router.params.get('layout')).toBe('posters');
   });
 
-  it('keeps invalid sort in the URL while falling back to stable title and id order', async () => {
+  it('keeps invalid sort in the URL while falling back to added order', async () => {
     servedSeries = [series(8, 'Zulu'), series(6, 'Alpha'), series(3, 'Alpha')];
     await open('/series?sort=oldest&layout=compact');
 
-    expect(sortValue()).toBe('Title');
+    expect(sortValue()).toBe('Added');
     expect(cardIDs()).toEqual([3, 6, 8]);
     expect(router.params.get('sort')).toBe('oldest');
     expect(router.params.get('layout')).toBe('compact');
@@ -259,7 +259,7 @@ describe('Series grid selection', () => {
     ]);
     expect(cards()[0]?.getAttribute('aria-pressed')).toBe('true');
 
-    await chooseSort('Title');
+    await chooseSort('Added');
     expect(router.params.has('sort')).toBe(false);
     expect(router.params.get('layout')).toBe('compact');
     expect(filterChip('Unmonitored').getAttribute('aria-pressed')).toBe('true');

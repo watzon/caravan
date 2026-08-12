@@ -6,13 +6,16 @@
    */
   import { onMount } from 'svelte';
   import { api, errorText } from '../api/client';
-  import type { MovieMeta, SeriesMeta, UnmatchedFile } from '../api/types';
+  import type { MovieMeta, SceneMeta, SeriesMeta, UnmatchedFile } from '../api/types';
+  import { unmatchedMatchStrategy, type UnmatchedMatchStrategy } from '../match';
   import AddItemModal from '../components/AddItemModal.svelte';
+  import ScenePickerModal from '../components/ScenePickerModal.svelte';
   import Badge from '../components/Badge.svelte';
   import Banner from '../components/Banner.svelte';
   import Button from '../components/Button.svelte';
   import EmptyState from '../components/EmptyState.svelte';
   import Icon from '../components/Icon.svelte';
+  import MiddleEllipsis from '../components/MiddleEllipsis.svelte';
   import LoadError from '../components/LoadError.svelte';
   import Skeleton from '../components/Skeleton.svelte';
   import {
@@ -20,7 +23,6 @@
     episodeCode,
     formatBytes,
     formatConfidence,
-    truncateMiddle,
   } from '../format';
   import { libraries } from '../state/libraries.svelte';
   import { pushToast } from '../state/toast.svelte';
@@ -35,6 +37,7 @@
   let scanning = $state(false);
   let busyID = $state<number | null>(null);
   let matching = $state<UnmatchedFile | null>(null);
+  let matchStrategy = $state<UnmatchedMatchStrategy | null>(null);
 
   async function load() {
     loading = true;
@@ -104,50 +107,48 @@
           : {}),
       });
       files = (files ?? []).filter((f) => f.id !== file.id);
-      matching = null;
+      closeMatch();
       pushToast(t('route.scanReview.matched'), 'success');
     } catch (err) {
       pushToast(errorText(err), 'danger');
     }
   }
 
-  /**
-   * What the manual match searches for.
-   *
-   * A file the scanner parked is only ever what its name looks like. A file an
-   * untied universal-search grab parked knows better than that: the user
-   * already said which library it belongs to, and a library has exactly one
-   * kind — so that answer beats the parser's guess. An adult library is the
-   * one case it cannot answer, because a site is named by a stash-box id and
-   * the match dialog resolves movie and series refs; there the parse still
-   * decides.
-   */
-  function guessKind(file: UnmatchedFile): 'movie' | 'series' {
-    const kind = libraryOf(file)?.kind;
-    if (kind === 'movie') return 'movie';
-    if (kind === 'tv') return 'series';
-    return (file.parsed.episodes?.length ?? 0) > 0 ? 'series' : 'movie';
+  async function confirmSceneMatch(scene: SceneMeta) {
+    const file = matching;
+    if (!file) return;
+    try {
+      await api.matchUnmatched(file.id, {
+        type: 'scene',
+        provider: scene.provider,
+        provider_ref: scene.stash_id,
+      });
+      files = (files ?? []).filter((f) => f.id !== file.id);
+      closeMatch();
+      pushToast(t('route.scanReview.matched'), 'success');
+    } catch (err) {
+      pushToast(errorText(err), 'danger');
+    }
   }
 
   function libraryOf(file: UnmatchedFile) {
     if (!file.library_id) return undefined;
-    return libraries.all.find((l) => l.id === file.library_id);
+    return libraries.all.find((library) => library.id === file.library_id);
   }
 
-  /**
-   * The library whose provider chain the match dialog should search — the one
-   * that will identify the file, so the hand match sees what the automatic
-   * one would have.
-   *
-   * It is 0 for a row with no library, for one whose library the store has not
-   * loaded, and deliberately for an adult one: GET /search refuses an adult
-   * library id, exactly as `guessKind` cannot answer for one. Zero there means
-   * "the kind's default", which is what this dialog searched before libraries
-   * were plural.
-   */
-  function matchLibraryID(file: UnmatchedFile): number {
-    const kind = libraryOf(file)?.kind;
-    return kind === 'movie' || kind === 'tv' ? file.library_id : 0;
+  function openMatch(file: UnmatchedFile) {
+    const strategy = unmatchedMatchStrategy(file, libraries.all);
+    if (!strategy) {
+      pushToast(t('route.scanReview.libraryUnavailable'), 'danger');
+      return;
+    }
+    matching = file;
+    matchStrategy = strategy;
+  }
+
+  function closeMatch() {
+    matching = null;
+    matchStrategy = null;
   }
 
   /**
@@ -248,8 +249,8 @@
             {@const parsed = file.parsed}
             {@const libraryName = libraryPill(file)}
             <tr class="border-t border-border align-top transition-colors duration-150 hover:bg-raised">
-              <td class="px-3 py-3 font-mono text-ink" title={file.path}>
-                {truncateMiddle(file.path, 56)}
+              <td class="w-full max-w-0 px-3 py-3 font-mono text-ink" title={file.path}>
+                <MiddleEllipsis text={file.path} />
               </td>
               <td class="px-3 py-3">
                 <div class="flex flex-wrap items-center gap-2">
@@ -309,7 +310,7 @@
                     variant="primary"
                     size="sm"
                     disabled={busyID === file.id}
-                    onclick={() => (matching = file)}>
+                    onclick={() => openMatch(file)}>
                     {t('route.scanReview.match')}
                   </Button>
                   <Button
@@ -329,12 +330,23 @@
   {/if}
 </div>
 
-{#if matching}
-  <AddItemModal
-    title={t('route.scanReview.matchTitle', { path: matching.path })}
-    kind={guessKind(matching)}
-    initialQuery={matching.parsed.title}
-    libraryID={matchLibraryID(matching)}
-    onpick={confirmMatch}
-    onclose={() => (matching = null)} />
+{#if matching && matchStrategy}
+  {#if matchStrategy.kind === 'scene'}
+    <ScenePickerModal
+      title={t('route.scanReview.matchTitle', { path: matching.path })}
+      siteQuery={matchStrategy.siteQuery}
+      sceneDate={matchStrategy.sceneDate}
+      fallbackQuery={matchStrategy.fallbackQuery}
+      providers={matchStrategy.providers}
+      onpick={confirmSceneMatch}
+      onclose={closeMatch} />
+  {:else}
+    <AddItemModal
+      title={t('route.scanReview.matchTitle', { path: matching.path })}
+      kind={matchStrategy.mediaType}
+      initialQuery={matchStrategy.query}
+      libraryID={matchStrategy.libraryID}
+      onpick={confirmMatch}
+      onclose={closeMatch} />
+  {/if}
 {/if}

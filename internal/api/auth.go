@@ -768,15 +768,10 @@ type sceneFiltersJSON struct {
 // sceneFilters reports what the adult provider can serve, or nil when there is
 // nothing to report: an ungranted caller, or no credential.
 //
-// KNOWN FOLLOW-UP (PLAN Part 2, deliberate seam for Part 3): it reports the
-// DEFAULT instance's capabilities, because /auth/me is read before any scene
-// request and has no library to key on. On a server whose boxes differ — TPDB
-// serves a release year and a runtime, a StashDB or FansDB install refuses both
-// — the rail is drawn from the default box's dialect and a filter it offers can
-// still be refused by another one. The refusal is already handled (see
-// handleAdultDiscover's SceneFilterUnsupportedError branch); what is missing is
-// the rail narrowing itself per instance, which needs the per-library scope
-// Part 3 introduces.
+// /auth/me describes the default endpoint because the Adult Explore route also
+// searches the default endpoint. A provider-switching surface reads the
+// per-instance copy on stashboxInstanceJSON instead, so it can narrow its
+// controls before it sends a query to the selected catalogue.
 func (s *server) sceneFilters(ctx context.Context, adult bool) *sceneFiltersJSON {
 	if !adult {
 		return nil
@@ -785,8 +780,12 @@ func (s *server) sceneFilters(ctx context.Context, adult bool) *sceneFiltersJSON
 	if provider == nil {
 		return nil
 	}
-	f := core.SceneFiltersOf(provider)
-	return &sceneFiltersJSON{
+	f := sceneFiltersDTO(core.SceneFiltersOf(provider))
+	return &f
+}
+
+func sceneFiltersDTO(f core.SceneFilterSupport) sceneFiltersJSON {
+	return sceneFiltersJSON{
 		Year:          f.Year,
 		Duration:      f.Duration,
 		SiteScope:     f.SiteScope,

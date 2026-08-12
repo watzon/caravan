@@ -220,12 +220,10 @@ type addRequest struct {
 	QualityProfileID int64 `json:"quality_profile_id"`
 	// Monitored is the dialog's "Add and monitor" checkbox.
 	//
-	// It is a pointer so that ABSENT and false are different answers. Absent is
-	// what every caller that predates the checkbox sends — and what request
-	// approval still sends — and it means monitored, which is the behaviour
-	// this endpoint has always had. An explicit false lands the new row
-	// unmonitored. Either way a title already in the library keeps the flag its
-	// owner set: a re-add is a metadata refresh, not a chance to overrule them.
+	// It is a pointer so an explicit opt-in can be distinguished from an
+	// omitted field. Absent means unmonitored: old clients and implicit add
+	// paths must not start automation. A title already in the library keeps
+	// the flag its owner set because a re-add is a metadata refresh.
 	Monitored *bool `json:"monitored"`
 	// SearchNow queues the new movie's automatic search straight after the
 	// add. A movie that was just added has no file, so there is nothing to

@@ -572,7 +572,7 @@ func TestAddSeriesQualityProfileBeforeSearch(t *testing.T) {
 		p := seedSearchQualityProfile(t, st)
 
 		rec := do(t, h, http.MethodPost, "/api/v1/library/series",
-			`{"tmdb_id":66732,"search_missing":true,"quality_profile_id":`+itoa(p.ID)+`}`)
+			`{"tmdb_id":66732,"monitored":true,"search_missing":true,"quality_profile_id":`+itoa(p.ID)+`}`)
 		wantStatus(t, rec, http.StatusCreated)
 		var created seriesJSON
 		decodeBody(t, rec, &created)
@@ -604,7 +604,7 @@ func TestAddSeriesQualityProfileBeforeSearch(t *testing.T) {
 		}
 
 		rec := do(t, h, http.MethodPost, "/api/v1/library/series",
-			`{"tmdb_id":66733,"search_missing":true}`)
+			`{"tmdb_id":66733,"monitored":true,"search_missing":true}`)
 		wantStatus(t, rec, http.StatusCreated)
 		var created seriesJSON
 		decodeBody(t, rec, &created)
@@ -1107,19 +1107,17 @@ func TestPatchMovieMinAvailability(t *testing.T) {
 
 // ---- "Add and monitor" -----------------------------------------------------
 
-// The checkbox's contract on the wire: absent means monitored (which is what
-// every caller before it sent, and what request approval still sends), and an
-// explicit false lands the row unmonitored. It is a POINTER on the request
-// struct precisely so those two are different answers rather than the same one.
+// The checkbox's wire contract: absent and explicit false are unmonitored.
+// Only an explicit true opts a new item into automation.
 func TestAddMonitoredContract(t *testing.T) {
 	for _, tt := range []struct {
 		name, path, body string
 		want             bool
 	}{
-		{name: "movie, omitted", path: "/api/v1/library/movies", body: `{"tmdb_id":78}`, want: true},
+		{name: "movie, omitted", path: "/api/v1/library/movies", body: `{"tmdb_id":78}`, want: false},
 		{name: "movie, true", path: "/api/v1/library/movies", body: `{"tmdb_id":78,"monitored":true}`, want: true},
 		{name: "movie, false", path: "/api/v1/library/movies", body: `{"tmdb_id":78,"monitored":false}`, want: false},
-		{name: "series, omitted", path: "/api/v1/library/series", body: `{"tmdb_id":1396}`, want: true},
+		{name: "series, omitted", path: "/api/v1/library/series", body: `{"tmdb_id":1396}`, want: false},
 		{name: "series, true", path: "/api/v1/library/series", body: `{"tmdb_id":1396,"monitored":true}`, want: true},
 		{name: "series, false", path: "/api/v1/library/series", body: `{"tmdb_id":1396,"monitored":false}`, want: false},
 	} {
@@ -1138,10 +1136,9 @@ func TestAddMonitoredContract(t *testing.T) {
 	}
 }
 
-// Approving a request sends no monitored choice, so the title it grants stays
-// monitored. Granting somebody's ask and then not following the title would be
-// a strange thing to mean, and it is the compatibility this endpoint keeps.
-func TestApprovedRequestsStayMonitored(t *testing.T) {
+// Approval without a monitored choice uses the same safe default as a direct
+// add. An approver can still opt in with monitored:true.
+func TestApprovedRequestsDefaultToUnmonitored(t *testing.T) {
 	h, st, _ := newTestServer(t)
 	ctx := context.Background()
 
@@ -1158,7 +1155,7 @@ func TestApprovedRequestsStayMonitored(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetMovieByTMDBID: %v", err)
 	}
-	if !m.Monitored {
-		t.Error("an approved request landed an unmonitored movie")
+	if m.Monitored {
+		t.Error("an approved request was monitored without an explicit opt-in")
 	}
 }

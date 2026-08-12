@@ -329,6 +329,14 @@ describe('the adult module — not visible', () => {
       expect(requested.some((url) => url.includes('/adult'))).toBe(false);
     });
 
+    it(`sends ${who} away from a provider scene detail without fetching it`, async () => {
+      me = identity;
+      await open('/adult/scenes/stashbox%3Atpdb/scene-1');
+
+      expect(router.path).toBe(identity.role === 'admin' ? '/movies' : '/discover');
+      expect(requested.some((url) => url.includes('/adult/scenes/scene-1'))).toBe(false);
+    });
+
     it(`sends ${who} away from the scene picker, without searching anything`, async () => {
       me = identity;
       await open('/adult/sites/7/search/2022/3');

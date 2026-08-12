@@ -76,6 +76,12 @@ describe('endpoints', () => {
     expect(endpoints.downloadPause('a/b')).toBe('/api/v1/downloads/a%2Fb/pause');
     expect(endpoints.downloadResume('a/b')).toBe('/api/v1/downloads/a%2Fb/resume');
   });
+
+  it('builds a provider scene URL with an encoded id and provider query', () => {
+    expect(endpoints.adultScene('stashbox:tpdb', 'scene/a')).toBe(
+      '/api/v1/adult/scenes/scene%2Fa?provider=stashbox%3Atpdb',
+    );
+  });
 });
 
 describe('tv profiles', () => {
@@ -93,6 +99,19 @@ describe('tv profiles', () => {
       method: 'PUT',
       url: '/api/v1/settings',
       body: { tv_profile: 'capable' },
+    });
+  });
+});
+
+describe('adult provider scenes', () => {
+  it('reads one scene through the provider-qualified wire contract', async () => {
+    stubFetch({ stash_id: 'scene/a', provider: 'stashbox:tpdb', code: 'ABC-123' });
+    const scene = await api.adultScene('stashbox:tpdb', 'scene/a');
+
+    expect(scene.code).toBe('ABC-123');
+    expect(only()).toMatchObject({
+      method: 'GET',
+      url: '/api/v1/adult/scenes/scene%2Fa?provider=stashbox%3Atpdb',
     });
   });
 });

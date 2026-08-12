@@ -26,16 +26,43 @@ function download(overrides: Partial<DownloadStatus>): DownloadStatus {
     error: '',
     max_down_rate: 0,
     max_up_rate: 0,
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
     ...overrides,
   };
 }
 
 const QUEUE: DownloadStatus[] = [
-  download({ name: 'still-downloading', state: 'downloading', progress: 0.4 }),
-  download({ name: 'paused-mid-download', state: 'paused', progress: 0.6 }),
-  download({ name: 'seeding-away', state: 'seeding', progress: 1 }),
-  download({ name: 'imported-and-done', state: 'completed', progress: 1 }),
-  download({ name: 'finished-parked-torrent', state: 'paused', progress: 1 }),
+  download({
+    name: 'still-downloading',
+    state: 'downloading',
+    progress: 0.4,
+    created_at: '2026-01-02T00:00:00Z',
+  }),
+  download({
+    name: 'paused-mid-download',
+    state: 'paused',
+    progress: 0.6,
+    created_at: '2026-01-05T00:00:00Z',
+  }),
+  download({
+    name: 'seeding-away',
+    state: 'seeding',
+    progress: 1,
+    created_at: '2026-01-03T00:00:00Z',
+  }),
+  download({
+    name: 'imported-and-done',
+    state: 'completed',
+    progress: 1,
+    created_at: '2026-01-01T00:00:00Z',
+  }),
+  download({
+    name: 'finished-parked-torrent',
+    state: 'paused',
+    progress: 1,
+    created_at: '2026-01-04T00:00:00Z',
+  }),
 ];
 
 let host: HTMLElement;
@@ -112,7 +139,7 @@ function pill(label: string): HTMLButtonElement {
 describe('Queue filtering', () => {
   it('hides finished items by default, including paused finished torrents', async () => {
     await mountQueue();
-    expect(rowNames()).toEqual(['still-downloading', 'seeding-away', 'paused-mid-download']);
+    expect(rowNames()).toEqual(['paused-mid-download', 'seeding-away', 'still-downloading']);
   });
 
   it('shows the finished bucket under Done', async () => {
@@ -139,7 +166,13 @@ describe('Queue filtering', () => {
     await mountQueue();
     pill('All').click();
     flushSync();
-    expect(rowNames()).toHaveLength(QUEUE.length);
+    expect(rowNames()).toEqual([
+      'paused-mid-download',
+      'finished-parked-torrent',
+      'seeding-away',
+      'still-downloading',
+      'imported-and-done',
+    ]);
   });
 
   it('labels the delete-data option and preserves the full name in the removal dialog', async () => {

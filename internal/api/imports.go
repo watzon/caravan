@@ -1,9 +1,15 @@
 package api
 
 import (
+	"context"
+	"errors"
 	"net/http"
+	"path"
 
 	"github.com/watzon/caravan/internal/core"
+	"github.com/watzon/caravan/internal/library"
+	"github.com/watzon/caravan/internal/parse"
+	"github.com/watzon/caravan/internal/store"
 )
 
 // unmatchedJSON is one file parked in the scan-review queue (SPEC §10.1,
@@ -27,6 +33,7 @@ type parsedJSON struct {
 	Year       int     `json:"year"`
 	Season     int     `json:"season"`
 	Episodes   []int   `json:"episodes"`
+	SceneDate  string  `json:"scene_date"`
 	Quality    string  `json:"quality"`
 	Source     string  `json:"source"`
 	Codec      string  `json:"codec"`
@@ -49,6 +56,7 @@ func parsedDTO(p core.ParsedRelease) parsedJSON {
 		Year:       p.Year,
 		Season:     p.Season,
 		Episodes:   episodes,
+		SceneDate:  jsonTime(p.SceneDate),
 		Quality:    p.Quality,
 		Source:     p.Source,
 		Codec:      p.Codec,
@@ -60,6 +68,36 @@ func parsedDTO(p core.ParsedRelease) parsedJSON {
 		Edition:    p.Edition,
 		Confidence: p.Confidence,
 	}
+}
+
+// improveUnmatchedParse repairs download rows created before the importer kept
+// the release-title parse. Obfuscated payload names are common for Usenet; the
+// enclosing release directory is better evidence only when it scores higher.
+func (s *server) improveUnmatchedParse(ctx context.Context, f *core.UnmatchedFile) error {
+	if f.LibraryID == 0 ||
+		(f.Reason != library.ReasonImport && f.Reason != library.ReasonManualGrab) {
+		return nil
+	}
+
+	lib, err := s.st.GetLibrary(ctx, f.LibraryID)
+	if errors.Is(err, store.ErrNotFound) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+
+	parseName := parse.Parse
+	if lib.Kind == core.LibraryKindAdult {
+		parseName = parse.Scene
+	}
+	candidate := parseName(path.Base(path.Dir(f.Path)))
+	if candidate.Confidence <= f.Parsed.Confidence {
+		return nil
+	}
+
+	f.Parsed = candidate
+	return s.st.UpsertUnmatchedFile(ctx, f)
 }
 
 // matchRequest is the body of POST /import/queue/{id}/match: the user has told
@@ -89,6 +127,10 @@ func (s *server) handleImportQueue(w http.ResponseWriter, r *http.Request) {
 		} else if !visible {
 			continue
 		}
+		if err := s.improveUnmatchedParse(r.Context(), &f); err != nil {
+			s.writeStoreError(w, "repair unmatched parser guess", err)
+			return
+		}
 		out = append(out, unmatchedJSON{
 			ID:        f.ID,
 			Path:      f.Path,
@@ -114,16 +156,25 @@ func (s *server) handleImportMatch(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	if body.Type != MediaTypeMovie && body.Type != MediaTypeSeries {
-		writeError(w, http.StatusBadRequest, "type must be movie or series")
-		return
-	}
-	// The endpoint's kind is the media type the caller just named, so a match
-	// that says "series" may only be pinned to a provider that serves
-	// television.
 	kind := core.LibraryKindMovie
-	if body.Type == MediaTypeSeries {
+	switch body.Type {
+	case MediaTypeMovie:
+	case MediaTypeSeries:
 		kind = core.LibraryKindTV
+	case MediaTypeScene:
+		adult, err := s.gate(r).seesAdult(r.Context())
+		if err != nil {
+			s.writeStoreError(w, "read library access", err)
+			return
+		}
+		if !adult {
+			writeError(w, http.StatusNotFound, "not found")
+			return
+		}
+		kind = core.LibraryKindAdult
+	default:
+		writeError(w, http.StatusBadRequest, "type must be movie, series, or scene")
+		return
 	}
 	ref, ok := s.itemRefFrom(r.Context(), w, body.Provider, body.ProviderRef, body.TMDBID, kind)
 	if !ok {

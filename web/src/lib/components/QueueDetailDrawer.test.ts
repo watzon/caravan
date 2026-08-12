@@ -23,6 +23,8 @@ function download(overrides: Partial<DownloadStatus> = {}): DownloadStatus {
     error: '',
     max_down_rate: 2 * 1024,
     max_up_rate: 4 * 1024,
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
     ...overrides,
   };
 }

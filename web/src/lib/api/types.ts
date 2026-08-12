@@ -13,6 +13,8 @@ export interface ParsedRelease {
   year: number;
   season: number;
   episodes: number[];
+  /** Scene release date from the adult filename parser; empty outside adult imports. */
+  scene_date?: string;
   quality: string;
   source: string;
   codec: string;
@@ -770,8 +772,8 @@ export interface AddItemRequest {
   provider?: string;
   provider_ref?: string;
   /**
-   * Whether Caravan should keep searching for missing releases after the add.
-   * Omitting it preserves the endpoint's historical monitored default.
+   * Whether Caravan should monitor the item after the add. Omission is the
+   * safe unmonitored default; only an explicit true starts automation.
    */
   monitored?: boolean;
   /** Optional explicit profile; omitting it (or sending 0) uses the library default. */
@@ -828,9 +830,9 @@ export interface SearchQueued {
 
 /** Body for POST /import/queue/{id}/match. */
 export interface MatchRequest {
-  type: 'movie' | 'series';
-  /** Reads exactly as AddItemRequest.tmdb_id does. */
-  tmdb_id: number;
+  type: 'movie' | 'series' | 'scene';
+  /** Reads exactly as AddItemRequest.tmdb_id does; scenes use provider_ref. */
+  tmdb_id?: number;
   /** Reads exactly as AddItemRequest's pair does; both or neither. */
   provider?: string;
   provider_ref?: string;
@@ -1148,7 +1150,7 @@ export type DownloadPhase = 'downloading' | 'repairing' | 'extracting';
  */
 export type DownloadProtocol = 'torrent' | 'usenet';
 
-/** internal/core.DownloadStatus — a live snapshot, not a persisted row. */
+/** One queue row: persisted metadata merged with the engine's live snapshot. */
 export interface DownloadStatus {
   /** Engine-native handle (an info hash for the embedded engine). */
   id: string;
@@ -1177,6 +1179,10 @@ export interface DownloadStatus {
   ratio: number;
   save_path: string;
   error: string;
+  /** Original queue insertion time; empty only for an engine-only row. */
+  created_at: string;
+  /** Last persisted status update time; not the queue's default sort key. */
+  updated_at: string;
   max_down_rate?: number;
   max_up_rate?: number;
   /**
@@ -1764,6 +1770,8 @@ export interface CreateRequestBody {
   tmdb_id: number;
   /** Scene only, and required there. The server refuses the two mixed. */
   stash_id?: string;
+  /** Scene only: the configured provider that minted `stash_id`. */
+  provider?: string;
   title: string;
   year: number;
   poster_path?: string;
@@ -2078,6 +2086,8 @@ export interface SiteDetail extends Site {
 
 /** internal/api.siteMetaJSON — a provider search hit, decorated. */
 export interface SiteMeta {
+  /** Configured stash-box instance that answered this search. */
+  provider: string;
   stash_id: string;
   name: string;
   /** The other names the provider knows this site by; [] when it knows none. */
@@ -2097,9 +2107,13 @@ export interface SiteMeta {
 export interface SceneMeta {
   media_type: 'scene';
   stash_id: string;
+  /** Configured stash-box instance that minted stash_id. */
+  provider: string;
   site_stash_id: string;
   site_name: string;
   title: string;
+  /** The provider's scene code, or "" when it did not publish one. */
+  code: string;
   overview: string;
   /** The release date, "YYYY-MM-DD"; "" when the provider has none. */
   date: string;
@@ -2166,6 +2180,8 @@ export interface StashboxInstance {
   name: string;
   endpoint: string;
   has_api_key: boolean;
+  /** Filter capabilities for this exact endpoint, used when a picker switches providers. */
+  scene_filters?: SceneFilterSupport;
   /** What the delete guard would report, carried on every row. */
   library_count: number;
   item_count: number;

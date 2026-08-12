@@ -31,10 +31,10 @@ type Manager interface {
 	// HTTP bodies are still TMDB-shaped and the handlers build a TMDB ref from
 	// them; a ref-accepting body is a later phase.
 	//
-	// monitored is the add dialog's "Add and monitor" checkbox. Nil is the
-	// historical behaviour — monitored — and is what every caller that has no
-	// opinion passes, including request approval. It applies to a NEW row only;
-	// re-adding something already in the library keeps the owner's flag.
+	// monitored is the add dialog's "Add and monitor" checkbox. Nil means
+	// unmonitored, so a new row starts automation only after an explicit opt-in.
+	// It applies to a NEW row only; re-adding something already in the library
+	// keeps the owner's flag.
 	AddMovie(ctx context.Context, ref core.ItemRef, minAvailability string, monitored *bool, libraryID int64) (*core.Movie, error)
 
 	// AddSeries adds a series (with its seasons and episodes) by provider ref.
@@ -52,9 +52,9 @@ type Manager interface {
 	RemoveSeries(ctx context.Context, id int64, deleteFiles bool) error
 
 	// MatchUnmatched resolves a file parked in the scan-review queue against a
-	// provider ref and imports it. mediaType is MediaTypeMovie or
-	// MediaTypeSeries; for a series, the season and episode numbers come from
-	// the parked file's parsed guess.
+	// provider ref and imports it. mediaType is MediaTypeMovie,
+	// MediaTypeSeries, or MediaTypeScene. Series numbering comes from the
+	// parked parse; a scene ref names the exact provider scene.
 	MatchUnmatched(ctx context.Context, unmatchedID int64, mediaType string, ref core.ItemRef) error
 
 	// AddSite adds an adult site by stash-box id, as a series of kind adult

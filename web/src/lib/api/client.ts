@@ -74,6 +74,7 @@ import type {
   SearchQueued,
   SearchResults,
   SceneFilterRef,
+  SceneMeta,
   ScenePerformerMeta,
   Series,
   SessionUser,
@@ -290,6 +291,8 @@ export const endpoints = {
   adultSite: (id: number) => `${API_BASE}/adult/sites/${id}`,
   adultSearch: () => `${API_BASE}/adult/search`,
   adultDiscover: () => `${API_BASE}/adult/discover`,
+  adultScene: (provider: string, stashID: string) =>
+    `${API_BASE}/adult/scenes/${encodeURIComponent(stashID)}?provider=${encodeURIComponent(provider)}`,
   adultPerformers: () => `${API_BASE}/adult/performers`,
   adultTags: () => `${API_BASE}/adult/tags`,
   // Phase 11 — the Stash handoff. Inside the gated subtree with the rest of
@@ -1402,9 +1405,13 @@ export const api = {
   addSite: (body: AddSiteRequest) =>
     request<Site>(endpoints.adultSites(), { method: 'POST', body }),
 
-  /** Ask the provider for sites to add — the adult twin of GET /search. */
-  searchSites: (query: string, signal?: AbortSignal) =>
-    listOf<SiteMeta>(withQuery(endpoints.adultSearch(), { q: query }), 'sites', signal),
+  /** Ask one adult provider for sites to add or match. */
+  searchSites: (query: string, signal?: AbortSignal, provider?: string) =>
+    listOf<SiteMeta>(
+      withQuery(endpoints.adultSearch(), { q: query, provider }),
+      'sites',
+      signal,
+    ),
 
   /**
    * One page of provider scenes, decorated with owned/requested state.
@@ -1420,16 +1427,24 @@ export const api = {
     signal?: AbortSignal,
   ) => request<AdultDiscoverPage>(endpoints.adultDiscover(), { query, signal }),
 
+  /** One provider scene, named by the configured provider and its opaque id. */
+  adultScene: (provider: string, stashID: string, signal?: AbortSignal) =>
+    request<SceneMeta>(endpoints.adultScene(provider, stashID), { signal }),
+
   /** The scene rail's typeaheads. Ids are opaque strings — echo them back. */
-  adultPerformers: (query: string, signal?: AbortSignal) =>
+  adultPerformers: (query: string, signal?: AbortSignal, provider?: string) =>
     listOf<ScenePerformerMeta>(
-      withQuery(endpoints.adultPerformers(), { q: query }),
+      withQuery(endpoints.adultPerformers(), { q: query, provider }),
       'performers',
       signal,
     ),
 
-  adultTags: (query: string, signal?: AbortSignal) =>
-    listOf<SceneFilterRef>(withQuery(endpoints.adultTags(), { q: query }), 'tags', signal),
+  adultTags: (query: string, signal?: AbortSignal, provider?: string) =>
+    listOf<SceneFilterRef>(
+      withQuery(endpoints.adultTags(), { q: query, provider }),
+      'tags',
+      signal,
+    ),
 
   /* ------------------------------------------------------------------------
    * Phase 11 — the Stash handoff (SPEC §5.2's adult twin). Like Jellyfin's,

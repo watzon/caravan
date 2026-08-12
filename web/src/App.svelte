@@ -22,6 +22,7 @@
   } from './lib/router';
   import { navigate, router, startRouter } from './lib/router.svelte';
   import Adult from './lib/routes/Adult.svelte';
+  import AdultScene from './lib/routes/AdultScene.svelte';
   import AdultSite from './lib/routes/AdultSite.svelte';
   import Calendar from './lib/routes/Calendar.svelte';
   import Convert from './lib/routes/Convert.svelte';
@@ -79,6 +80,7 @@ import Search from './lib/routes/Search.svelte';
     '/series/:id/search/:season/:episode': 'app.title.interactiveSearch',
     '/adult': 'app.title.adult',
     '/adult/scenes': 'app.title.adult',
+    '/adult/scenes/:provider/:stashId': 'app.title.adult',
     '/adult/sites/:id': 'app.title.adult',
     '/adult/sites/:id/search': 'app.title.interactiveSearch',
     '/adult/sites/:id/search/:year': 'app.title.interactiveSearch',
@@ -461,6 +463,10 @@ import Search from './lib/routes/Search.svelte';
         {:else if session.adult && match.pattern === '/adult/sites/:id'}
           {#key match.params.id}
             <AdultSite id={numericParam(match.params, 'id')} />
+          {/key}
+        {:else if session.adult && match.pattern === '/adult/scenes/:provider/:stashId'}
+          {#key router.path}
+            <AdultScene provider={match.params.provider} stashID={match.params.stashId} />
           {/key}
           <!-- The picker is gated on isAdmin as well as on `session.adult`, and
                for the same reason the adult routes are gated on render at all:

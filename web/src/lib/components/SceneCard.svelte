@@ -4,16 +4,13 @@
    * A scene on the adult explore grid: a 16:9 still with a duration badge, the
    * site and date under it, and the performers under that.
    *
-   * It is 16:9 rather than the 2:3 of DiscoverCard because a scene's artwork IS
-   * a video still — a poster crop of one is a poster of nothing. It is also not
-   * a link: there is no scene detail screen (a scene is not addressable on its
-   * own; its number is its position in its site's release year), so the card's
-   * only verb is the one on it.
+   * A provider scene is addressable by its provider and opaque stash id. The
+   * artwork and title are real links to that durable detail URL; Request stays
+   * separate so the card never nests a button inside an anchor.
    *
-   * That verb is Request for EVERYBODY, admins included, and this is the same
-   * rule the retired Scenes tab kept: approving a scene request adds the SITE,
-   * so a one-click "add" here would be a button whose real effect is several
-   * hundred scenes. Adding a site outright is the Sites shelf's Add button.
+   * That verb is Request for EVERYBODY, admins included: approving a scene
+   * request adds the SITE, so a one-click "add" here would add several hundred
+   * scenes. Adding a site outright is the Sites shelf's Add button.
    */
   import type { SceneMeta } from '../api/types';
   import { durationBadge } from '../explore';
@@ -33,6 +30,9 @@
   }
 
   let { scene, requesting = false, busy = false, onrequest }: Props = $props();
+  let href = $derived(
+    `/adult/scenes/${encodeURIComponent(scene.provider)}/${encodeURIComponent(scene.stash_id)}`,
+  );
 
   let duration = $derived(durationBadge(scene.duration));
   let performers = $derived(scenePerformers(scene));
@@ -43,24 +43,29 @@
 
 <div class="flex w-full flex-col gap-2">
   <div class="relative overflow-hidden rounded-md border border-border bg-surface">
-    <Poster path={scene.image_url} alt="" fallbackIcon="flame" aspect="video" />
+    <a
+      {href}
+      aria-label={scene.title}
+      class="group/card block rounded-md focus:outline-none focus-visible:ring-2 focus-visible:ring-accent">
+      <Poster path={scene.image_url} alt="" fallbackIcon="flame" aspect="video" />
+    </a>
 
     <!-- Owned beats requested, as everywhere else: once the library holds the
          scene the request is moot. -->
     {#if scene.in_library}
-      <span class="absolute bottom-2 left-2">
+      <span class="pointer-events-none absolute bottom-2 left-2">
         <Badge tone="success">
           <span class="inline-flex items-center gap-1"><Icon name="check" size={10} />{t('component.sceneCard.inLibrary')}</span>
         </Badge>
       </span>
     {:else if scene.requested}
-      <span class="absolute bottom-2 left-2">
+      <span class="pointer-events-none absolute bottom-2 left-2">
         <Badge tone="warning">
           <span class="inline-flex items-center gap-1"><Icon name="clock" size={10} />{t('component.sceneCard.requested')}</span>
         </Badge>
       </span>
     {:else}
-      <span class="absolute bottom-2 left-2">
+      <span class="absolute bottom-2 left-2 z-10">
         <Button
           variant="primary"
           size="sm"
@@ -72,14 +77,19 @@
     {/if}
 
     {#if duration}
-      <span class="absolute bottom-2 right-2">
+      <span class="pointer-events-none absolute bottom-2 right-2">
         <Badge mono tone="neutral">{duration}</Badge>
       </span>
     {/if}
   </div>
 
   <div class="min-w-0">
-    <p class="truncate text-base font-medium text-ink" title={scene.title}>{scene.title}</p>
+    <a
+      {href}
+      class="block truncate text-base font-medium text-ink hover:text-accent-text focus:outline-none focus-visible:rounded focus-visible:ring-2 focus-visible:ring-accent"
+      title={scene.title}>
+      {scene.title}
+    </a>
     {#if meta}
       <p class="truncate text-sm text-ink-secondary" title={meta}>{meta}</p>
     {/if}

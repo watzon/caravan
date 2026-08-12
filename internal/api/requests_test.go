@@ -154,8 +154,8 @@ func TestApproveRequestAddsMovieAndMarksApproved(t *testing.T) {
 	if body.Movie == nil || body.Movie.TMDBID != 78 {
 		t.Fatalf("movie = %+v, want the added movie 78", body.Movie)
 	}
-	if !body.Movie.Monitored {
-		t.Error("omitted monitored value should keep the default monitored state")
+	if body.Movie.Monitored {
+		t.Error("omitted monitored value should leave the approved movie unmonitored")
 	}
 	if body.Request.Status != core.RequestApproved {
 		t.Errorf("request status = %q, want %q", body.Request.Status, core.RequestApproved)
@@ -285,7 +285,7 @@ func TestApproveSeriesQualityProfileBeforeSearch(t *testing.T) {
 		}
 
 		rec := do(t, h, http.MethodPost, "/api/v1/requests/"+itoa(req.ID)+"/approve",
-			`{"search_now":true,"quality_profile_id":`+itoa(p.ID)+`}`)
+			`{"monitored":true,"search_now":true,"quality_profile_id":`+itoa(p.ID)+`}`)
 		wantStatus(t, rec, http.StatusOK)
 		series, err := st.GetSeriesByTMDBID(ctx, req.TMDBID)
 		if err != nil {
@@ -814,7 +814,7 @@ func TestPartialSeriesAddNarrowsPendingRequestInsteadOfApprovingIt(t *testing.T)
 	var created requestJSON
 	decodeBody(t, create, &created)
 
-	add := do(t, h, http.MethodPost, "/api/v1/library/series", `{"tmdb_id":1396,"seasons":[1]}`)
+	add := do(t, h, http.MethodPost, "/api/v1/library/series", `{"tmdb_id":1396,"monitored":true,"seasons":[1]}`)
 	wantStatus(t, add, http.StatusCreated)
 	var added seriesJSON
 	decodeBody(t, add, &added)

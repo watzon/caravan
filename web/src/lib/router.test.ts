@@ -90,6 +90,13 @@ describe('matchRoutes', () => {
     });
   });
 
+  it('decodes a provider-qualified adult scene detail URL', () => {
+    expect(matchRoutes(ROUTES, '/adult/scenes/stashbox%3Atpdb/a%2Fb')).toEqual({
+      pattern: '/adult/scenes/:provider/:stashId',
+      params: { provider: 'stashbox:tpdb', stashId: 'a/b' },
+    });
+  });
+
   it('resolves the queue', () => {
     expect(matchRoutes(ROUTES, '/queue')?.pattern).toBe('/queue');
   });
@@ -178,6 +185,7 @@ describe('isAdultRoute', () => {
     for (const pattern of [
       '/adult',
       '/adult/scenes',
+      '/adult/scenes/:provider/:stashId',
       '/adult/sites/:id',
       // Phase 12: scene browsing moved next to the other two catalogues, so an
       // adult screen now lives outside /adult for the first time.
@@ -199,6 +207,7 @@ describe('isAdultRoute', () => {
       '/discover/adult',
       '/adult',
       '/adult/scenes',
+      '/adult/scenes/:provider/:stashId',
       '/adult/sites/:id',
       '/adult/sites/:id/search',
       '/adult/sites/:id/search/:year',
@@ -236,6 +245,7 @@ describe('isAdultRoute', () => {
     for (const pattern of [
       '/adult',
       '/adult/scenes',
+      '/adult/scenes/:provider/:stashId',
       '/adult/sites/:id',
       '/discover/adult',
     ] as const) {

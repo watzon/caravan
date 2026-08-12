@@ -35,6 +35,7 @@ func seedConvertibleFile(t *testing.T, st *store.Store, path string) *core.Media
 	f := core.MediaFile{
 		Path: path, Size: 1234, MovieID: movie.ID,
 		Codec: "x265", Audio: "DTS", Quality: core.Quality2160p,
+		AddedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 	}
 	if err := st.UpsertMediaFile(context.Background(), &f); err != nil {
 		t.Fatalf("UpsertMediaFile: %v", err)
@@ -48,6 +49,7 @@ func TestConvertQueueRoundTrip(t *testing.T) {
 	remux := core.MediaFile{
 		Path: "library/Movies/B (2002)/B (2002).mkv", Size: 2345, MovieID: file.MovieID,
 		Codec: "x264", Audio: "AAC", Quality: core.Quality1080p,
+		AddedAt: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC),
 	}
 	compatible := core.MediaFile{
 		Path: "library/Movies/C (2003)/C (2003).mp4", Size: 3456, MovieID: file.MovieID,
@@ -59,8 +61,8 @@ func TestConvertQueueRoundTrip(t *testing.T) {
 		}
 	}
 
-	// The page starts with every current file that needs work, but not a file
-	// that already matches the active profile.
+	// The page starts with every current file that needs work, newest added
+	// first, but not a file that already matches the active profile.
 	rec := do(t, h, "GET", "/api/v1/convert", "")
 	wantStatus(t, rec, http.StatusOK)
 	var empty struct {
@@ -74,13 +76,13 @@ func TestConvertQueueRoundTrip(t *testing.T) {
 	if len(empty.Pending) != 2 {
 		t.Fatalf("pending = %+v, want incompatible and remux files", empty.Pending)
 	}
-	if empty.Pending[0].ID != file.ID ||
-		empty.Pending[0].Compatibility.Verdict != core.TVCompatIncompatible {
-		t.Fatalf("pending[0] = %+v, want incompatible file %d", empty.Pending[0], file.ID)
+	if empty.Pending[0].ID != remux.ID ||
+		empty.Pending[0].Compatibility.Verdict != core.TVCompatNeedsRemux {
+		t.Fatalf("pending[0] = %+v, want newer remux file %d", empty.Pending[0], remux.ID)
 	}
-	if empty.Pending[1].ID != remux.ID ||
-		empty.Pending[1].Compatibility.Verdict != core.TVCompatNeedsRemux {
-		t.Fatalf("pending[1] = %+v, want remux file %d", empty.Pending[1], remux.ID)
+	if empty.Pending[1].ID != file.ID ||
+		empty.Pending[1].Compatibility.Verdict != core.TVCompatIncompatible {
+		t.Fatalf("pending[1] = %+v, want older incompatible file %d", empty.Pending[1], file.ID)
 	}
 
 	rec = do(t, h, "POST", "/api/v1/convert", `{"media_file_id":`+itoa(file.ID)+`}`)

@@ -144,6 +144,34 @@ export function sceneNumber(number: number): string {
 }
 
 /**
+ * A useful first scene-search query from an unmatched download path.
+ *
+ * Scene release directories start with a site and a release date, followed by
+ * the part a person can search for: a title or performer names. Stop before
+ * packaging tags. The parser's title is the site, which is useful for filing
+ * but usually useless for finding one scene.
+ */
+export function sceneMatchQuery(path: string, fallback = ''): string {
+  const parts = path.split('/').filter(Boolean);
+  const directory = parts.length > 1 ? parts.at(-2) ?? '' : '';
+  const tokens = directory.split(/[._\s-]+/).filter(Boolean);
+  const dateStart = tokens.findIndex((token, index) =>
+    /^(?:\d{2}|\d{4})$/.test(token) &&
+    /^\d{2}$/.test(tokens[index + 1] ?? '') &&
+    /^\d{2}$/.test(tokens[index + 2] ?? ''),
+  );
+  if (dateStart < 0) return fallback.trim();
+
+  const technical = /^(?:xxx|\d{3,4}p|2160|1080|720|480|mp4|mkv|avi|web|webdl|bluray|bdrip|webrip|x26[45]|h26[45]|hevc|av1|aac|dts|ddp|flac)$/i;
+  const words: string[] = [];
+  for (const token of tokens.slice(dateStart + 3)) {
+    if (technical.test(token)) break;
+    words.push(token);
+  }
+  return words.join(' ').trim() || fallback.trim();
+}
+
+/**
  * "Deep Impact · Ava Wells, Ivy Rain" — a scene named in one string.
  *
  * The site page gives performers a column of their own, so this is no longer

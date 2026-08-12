@@ -102,6 +102,16 @@ describe('ReleaseTable', () => {
     expect(host!.textContent).toContain('Nothing matched that query.');
   });
 
+  it('keeps the full release title in the row for responsive overflow', () => {
+    const title =
+      'A.Very.Long.Release.Title.2026.2160p.WEB-DL.DDP5.1.DV.HDR.HEVC-RELEASEGROUP';
+    mountTable({ releases: [release({ title })] });
+
+    const cell = host!.querySelector<HTMLTableCellElement>('tbody td[title]');
+    expect(cell?.textContent?.trim()).toBe(title);
+    expect(cell?.title).toBe(title);
+  });
+
   it('marks the top-ranked row as best, whatever order it arrived in', () => {
     mountTable({
       releases: [

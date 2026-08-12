@@ -16,7 +16,7 @@ func TestRefreshLibraryUpdatesMovieAndPreservesIntent(t *testing.T) {
 	ctx := context.Background()
 	h.provider.movieByID[10378] = core.MovieMeta{TMDBID: 10378, Title: "Big Buck Bunny", Year: 2008}
 
-	mv, err := h.mgr.AddMovie(ctx, core.TMDBRef(10378), core.AvailabilityAnnounced, nil, 0)
+	mv, err := h.mgr.AddMovie(ctx, core.TMDBRef(10378), core.AvailabilityAnnounced, ptr(true), 0)
 	if err != nil {
 		t.Fatalf("AddMovie: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestRefreshLibrarySkipsUnmonitoredAndUnmatched(t *testing.T) {
 	ctx := context.Background()
 	h.provider.movieByID[10378] = core.MovieMeta{TMDBID: 10378, Title: "Big Buck Bunny", Year: 2008}
 
-	if _, err := h.mgr.AddMovie(ctx, core.TMDBRef(10378), "", nil, 0); err != nil {
+	if _, err := h.mgr.AddMovie(ctx, core.TMDBRef(10378), "", ptr(true), 0); err != nil {
 		t.Fatalf("AddMovie: %v", err)
 	}
 	unmonitored := &core.Movie{TMDBID: 99, Title: "Sleeping", Monitored: false}
@@ -94,10 +94,10 @@ func TestRefreshLibraryContinuesPastProviderFailures(t *testing.T) {
 	h.provider.movieByID[1] = core.MovieMeta{TMDBID: 1, Title: "Answered", Year: 2008}
 	h.provider.movieByID[2] = core.MovieMeta{TMDBID: 2, Title: "Missing", Year: 2008}
 
-	if _, err := h.mgr.AddMovie(ctx, core.TMDBRef(2), "", nil, 0); err != nil {
+	if _, err := h.mgr.AddMovie(ctx, core.TMDBRef(2), "", ptr(true), 0); err != nil {
 		t.Fatalf("AddMovie: %v", err)
 	}
-	answered, err := h.mgr.AddMovie(ctx, core.TMDBRef(1), "", nil, 0)
+	answered, err := h.mgr.AddMovie(ctx, core.TMDBRef(1), "", ptr(true), 0)
 	if err != nil {
 		t.Fatalf("AddMovie: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestRefreshLibraryImportsNewSeasonsAndKeepsSelections(t *testing.T) {
 		}},
 	}
 
-	sr, err := h.mgr.AddSeries(ctx, core.TMDBRef(1396), nil, 0)
+	sr, err := h.mgr.AddSeries(ctx, core.TMDBRef(1396), ptr(true), 0)
 	if err != nil {
 		t.Fatalf("AddSeries: %v", err)
 	}

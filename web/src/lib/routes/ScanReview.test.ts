@@ -11,7 +11,8 @@ import { flushSync, mount, unmount } from 'svelte';
 import ScanReview from './ScanReview.svelte';
 import { system } from '../state/system.svelte';
 import { libraries } from '../state/libraries.svelte';
-import type { Library, SystemStatus, UnmatchedFile } from '../api/types';
+import { session } from '../state/session.svelte';
+import type { Library, SceneMeta, SystemStatus, UnmatchedFile } from '../api/types';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -36,16 +37,148 @@ const STATUS = {
 let host: HTMLElement;
 let app: Record<string, unknown> | undefined;
 let unmatched: UnmatchedFile[];
+let scenes: SceneMeta[];
+let failAdultDiscover: ((provider: string, page: number) => boolean) | null;
+let scenePageSize: number | null;
+let sceneSearchURLs: string[];
+let siteSearchURLs: string[];
+let performerSearchURLs: string[];
+let holdThinPerformerSearch: boolean;
+let thinPerformerSearchAborted: boolean;
+let matchBodies: unknown[];
 
 beforeEach(() => {
   unmatched = [];
+  failAdultDiscover = null;
+  scenePageSize = null;
+  scenes = [];
+  sceneSearchURLs = [];
+  siteSearchURLs = [];
+  performerSearchURLs = [];
+  holdThinPerformerSearch = false;
+  thinPerformerSearchAborted = false;
+  matchBodies = [];
   host = document.createElement('div');
   document.body.appendChild(host);
   system.status = null;
+  session.user = null;
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (input: RequestInfo | URL) => {
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      const method = init?.method ?? 'GET';
+      if (url.includes('/import/queue/') && url.endsWith('/match') && method === 'POST') {
+        matchBodies.push(JSON.parse(String(init?.body ?? '{}')));
+        return jsonResponse({ status: 'matched' });
+      }
+      if (url.includes('/adult/stashbox-instances')) {
+        const thin = {
+          year: false,
+          duration: false,
+          site_scope: false,
+          date_op: false,
+          sort_duration: false,
+          sort_relevance: false,
+          any_of: false,
+        };
+        const full = {
+          year: true,
+          duration: true,
+          site_scope: true,
+          date_op: true,
+          sort_duration: true,
+          sort_relevance: true,
+          any_of: true,
+        };
+        return jsonResponse({
+          instances: [
+            {
+              id: 1,
+              provider_id: 'stashbox',
+              name: 'StashDB',
+              endpoint: 'https://stashdb.org/graphql',
+              has_api_key: true,
+              scene_filters: thin,
+              library_count: 1,
+              item_count: 0,
+            },
+            {
+              id: 2,
+              provider_id: 'stashbox:theporndb',
+              name: 'ThePornDB',
+              endpoint: 'https://theporndb.net/graphql',
+              has_api_key: true,
+              scene_filters: full,
+              library_count: 1,
+              item_count: 0,
+            },
+          ],
+        });
+      }
+      if (url.includes('/adult/search')) {
+        siteSearchURLs.push(url);
+        const provider = new URL(url, 'http://caravan.test').searchParams.get('provider')
+          ?? 'stashbox';
+        return jsonResponse({
+          sites: [{
+            provider,
+            stash_id: 'site-african-casting',
+            name: 'African Casting',
+            aliases: ['AfricanCasting'],
+            parent_name: '',
+            url: '',
+            image_url: '',
+            in_library: true,
+            library_id: 3,
+          }],
+        });
+      }
+      if (url.includes('/adult/performers')) {
+        performerSearchURLs.push(url);
+        const provider = new URL(url, 'http://caravan.test').searchParams.get('provider')
+          ?? 'stashbox';
+        if (holdThinPerformerSearch && provider === 'stashbox') {
+          return new Promise<Response>((_resolve, reject) => {
+            const abort = () => {
+              thinPerformerSearchAborted = true;
+              reject(new DOMException('Aborted', 'AbortError'));
+            };
+            if (init?.signal?.aborted) abort();
+            else init?.signal?.addEventListener('abort', abort, { once: true });
+          });
+        }
+        return jsonResponse({
+          performers: [{
+            id: provider === 'stashbox:theporndb' ? 'performer-tpdb' : 'performer-stashdb',
+            name: provider === 'stashbox:theporndb' ? 'TPDB Performer' : 'StashDB Performer',
+            image_url: '',
+          }],
+        });
+      }
+      if (url.includes('/adult/tags')) return jsonResponse({ tags: [] });
+      if (url.includes('/adult/discover')) {
+        sceneSearchURLs.push(url);
+        const query = new URL(url, 'http://caravan.test').searchParams;
+        const provider = query.get('provider') ?? 'stashbox';
+        const date = query.get('date');
+        const providerScenes = scenes
+          .filter((scene) => !date || scene.date === date)
+          .map((scene) => ({ ...scene, provider }));
+        const page = Number(query.get('page') ?? 1);
+        if (failAdultDiscover?.(provider, page)) {
+          return jsonResponse({ error: 'provider page failed' }, 502);
+        }
+        const perPage = scenePageSize ?? providerScenes.length;
+        const pageScenes = scenePageSize === null
+          ? providerScenes
+          : providerScenes.slice((page - 1) * perPage, page * perPage);
+        return jsonResponse({
+          page,
+          per_page: perPage,
+          total: providerScenes.length,
+          scenes: pageScenes,
+        });
+      }
       if (url.includes('/import/queue')) return jsonResponse({ items: unmatched });
       throw new Error(`unexpected fetch: ${url}`);
     }),
@@ -57,6 +190,8 @@ afterEach(() => {
   app = undefined;
   host.remove();
   system.status = null;
+  session.user = null;
+  vi.useRealTimers();
   libraries.all = [];
   libraries.loaded = false;
   vi.unstubAllGlobals();
@@ -145,7 +280,7 @@ describe('ScanReview', () => {
     expect(host.textContent).toContain('Nothing to review');
   });
 
-  it('exposes a full unmatched path when the table shortens it', async () => {
+  it('keeps the full unmatched path available for responsive overflow', async () => {
     const path = 'library/Movies/A Very Long Movie Name (2026)/A.Very.Long.Movie.Name.2026.2160p.BluRay.x265-GROUP.mkv';
     unmatched = [{
       id: 1,
@@ -177,7 +312,7 @@ describe('ScanReview', () => {
 
     const pathCell = host.querySelector<HTMLElement>('td.font-mono[title]');
     expect(pathCell).not.toBeNull();
-    expect(pathCell?.textContent?.trim()).not.toBe(path);
+    expect(pathCell?.textContent?.trim()).toBe(path);
     expect(pathCell?.getAttribute('title')).toBe(path);
   });
 
@@ -239,5 +374,161 @@ describe('ScanReview', () => {
     expect(document.querySelector('input[type="search"]')?.getAttribute('placeholder')).toBe(
       'Search TMDB for a series...',
     );
+  });
+
+  it('lets an adult match correct provider filters before selecting the exact scene', async () => {
+    libraries.all = [library({
+      id: 3,
+      kind: 'adult',
+      name: 'Adult',
+      root_path: 'library/Adult',
+      provider: 'stashbox',
+      providers: ['stashbox', 'stashbox:theporndb'],
+      restricted: true,
+    })];
+    libraries.loaded = true;
+    session.user = {
+      username: 'admin',
+      role: 'admin',
+      open: false,
+      adult: true,
+      scene_filters: {
+        year: false,
+        duration: false,
+        site_scope: false,
+        date_op: false,
+        sort_duration: false,
+        sort_relevance: false,
+        any_of: false,
+      },
+    };
+    unmatched = [parkedFile({
+      path: 'incomplete/AfricanCasting.20.01.26.Scarlet.XXX.1080p.MP4-WRB/hash.mp4',
+      library_id: 3,
+      parsed: {
+        ...parkedFile().parsed,
+        title: 'AfricanCasting',
+        year: 2020,
+        scene_date: '2020-01-26T00:00:00Z',
+      },
+    })];
+    scenes = [{
+      media_type: 'scene',
+      provider: 'stashbox:theporndb',
+      stash_id: 'scene-scarlet',
+      site_stash_id: 'site-african-casting',
+      site_name: 'African Casting',
+      title: 'Scarlet Came Back for More',
+      code: '',
+      overview: '',
+      date: '2020-09-16',
+      duration: 1800,
+      performers: ['Scarlet'],
+      url: '',
+      image_url: '',
+      in_library: false,
+      library_id: 0,
+      requested: false,
+    }];
+    system.status = { ...STATUS, metadata_credential: 'ok' };
+    app = mount(ScanReview, { target: host });
+    await settle();
+
+    vi.useFakeTimers();
+    [...host.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.trim() === 'Match')!
+      .click();
+    flushSync();
+    await vi.advanceTimersByTimeAsync(500);
+    flushSync();
+    vi.useRealTimers();
+    await settle();
+
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!;
+    const queryInput = dialog.querySelector<HTMLInputElement>('#scene-picker-query')!;
+    const siteInput = dialog.querySelector<HTMLInputElement>('#scene-picker-site')!;
+    const dateInput = dialog.querySelector<HTMLInputElement>('#scene-picker-date')!;
+    const providerSelect = dialog.querySelector<HTMLSelectElement>('#scene-picker-provider')!;
+    expect(queryInput.value).toBe('Scarlet');
+    expect(siteInput.value).toBe('AfricanCasting');
+    expect(dateInput.value).toBe('2020-01-26');
+    expect(providerSelect.value).toBe('stashbox');
+    expect(dialog.querySelector('#scene-picker-year')).toBeNull();
+    expect(dialog.textContent).not.toContain('Scarlet Came Back for More');
+
+    const initialSiteQuery = new URL(siteSearchURLs.at(-1)!, 'http://caravan.test').searchParams;
+    expect(initialSiteQuery.get('provider')).toBe('stashbox');
+    expect(initialSiteQuery.get('q')).toBe('AfricanCasting');
+    const initialSceneQuery = new URL(sceneSearchURLs.at(-1)!, 'http://caravan.test').searchParams;
+    expect(initialSceneQuery.get('provider')).toBe('stashbox');
+    expect(initialSceneQuery.get('site')).toBe('site-african-casting');
+    expect(initialSceneQuery.get('date')).toBe('2020-01-26');
+    expect(initialSceneQuery.get('date_op')).toBe('on');
+    expect(initialSceneQuery.has('year')).toBe(false);
+
+    holdThinPerformerSearch = true;
+    vi.useFakeTimers();
+    const thinPerformerInput = dialog.querySelector<HTMLInputElement>(
+      'input[aria-label="Search performers on the selected provider"]',
+    )!;
+    thinPerformerInput.value = 'Scar';
+    thinPerformerInput.dispatchEvent(new Event('input', { bubbles: true }));
+    await vi.advanceTimersByTimeAsync(250);
+    flushSync();
+    expect(
+      new URL(performerSearchURLs.at(-1)!, 'http://caravan.test').searchParams.get('provider'),
+    ).toBe('stashbox');
+
+    providerSelect.value = 'stashbox:theporndb';
+    providerSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    dateInput.value = '2020-09-16';
+    dateInput.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+    expect(thinPerformerSearchAborted).toBe(true);
+    expect(dialog.querySelector('#scene-picker-year')).not.toBeNull();
+    expect(dialog.querySelector('#scene-picker-date-op')).not.toBeNull();
+
+    const tpdbPerformerInput = dialog.querySelector<HTMLInputElement>(
+      'input[aria-label="Search performers on the selected provider"]',
+    )!;
+    expect(tpdbPerformerInput).not.toBe(thinPerformerInput);
+    expect(tpdbPerformerInput.value).toBe('');
+    tpdbPerformerInput.value = 'Scar';
+    tpdbPerformerInput.dispatchEvent(new Event('input', { bubbles: true }));
+    await vi.advanceTimersByTimeAsync(500);
+    flushSync();
+    [...dialog.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.trim() === 'TPDB Performer')!
+      .click();
+    flushSync();
+    await vi.advanceTimersByTimeAsync(250);
+    flushSync();
+    vi.useRealTimers();
+    await settle();
+
+    expect(
+      new URL(performerSearchURLs.at(-1)!, 'http://caravan.test').searchParams.get('provider'),
+    ).toBe('stashbox:theporndb');
+    const correctedSceneQuery = new URL(sceneSearchURLs.at(-1)!, 'http://caravan.test').searchParams;
+    expect(correctedSceneQuery.get('provider')).toBe('stashbox:theporndb');
+    expect(correctedSceneQuery.get('q')).toBe('Scarlet');
+    expect(correctedSceneQuery.get('site')).toBe('site-african-casting');
+    expect(correctedSceneQuery.get('date')).toBe('2020-09-16');
+    expect(correctedSceneQuery.get('date_op')).toBe('on');
+    expect(correctedSceneQuery.get('performers')).toBe('performer-tpdb:TPDB Performer');
+    expect(correctedSceneQuery.get('performers_all')).toBe('true');
+    expect(dialog.textContent).toContain('Scarlet Came Back for More');
+
+    [...dialog.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.trim() === 'Match')!
+      .click();
+    await settle();
+
+    expect(matchBodies).toEqual([{
+      type: 'scene',
+      provider: 'stashbox:theporndb',
+      provider_ref: 'scene-scarlet',
+    }]);
+    expect(host.textContent).toContain('Nothing to review');
   });
 });

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -102,6 +103,51 @@ func TestStashboxInstanceResponsesNeverCarryTheKey(t *testing.T) {
 		rec := doAuth(t, h, probe.method, probe.path, probe.body, withCookie(cookie))
 		if strings.Contains(rec.Body.String(), "sk-secret") || strings.Contains(rec.Body.String(), `"api_key"`) {
 			t.Errorf("%s %s leaked the credential: %s", probe.method, probe.path, rec.Body.String())
+		}
+	}
+}
+
+// The manual-match picker switches between the target library's configured
+// instances. Each row therefore carries that exact endpoint's dialect rather
+// than repeating the default instance's /auth/me answer.
+func TestStashboxInstanceListReportsEachSceneFilterDialect(t *testing.T) {
+	h, st, mgr, cookie := adultAdmin(t)
+	first := seedStashboxInstance(t, st, core.ProviderStashbox, "StashDB", "https://stashdb.org/graphql")
+	second := seedStashboxInstance(t, st, core.ProviderStashbox+":fansdb", "FansDB", "https://fansdb.cc/graphql")
+	mgr.adult = &thinAdultProvider{}
+
+	rec := doAuth(t, h, http.MethodGet, "/api/v1/adult/stashbox-instances", "", withCookie(cookie))
+	wantStatus(t, rec, http.StatusOK)
+	var body struct {
+		Instances []stashboxInstanceJSON `json:"instances"`
+	}
+	decodeBody(t, rec, &body)
+	if len(body.Instances) != 2 {
+		t.Fatalf("instances = %+v, want both configured endpoints", body.Instances)
+	}
+	for _, instance := range body.Instances {
+		if instance.SceneFilters == nil {
+			t.Fatalf("%s scene_filters = nil", instance.ProviderID)
+		}
+		if *instance.SceneFilters != (sceneFiltersJSON{}) {
+			t.Fatalf("%s scene_filters = %+v, want the thin endpoint dialect", instance.ProviderID, *instance.SceneFilters)
+		}
+	}
+	if got, want := mgr.adultProviders(), []string{first.ProviderID, second.ProviderID}; !slices.Equal(got, want) {
+		t.Fatalf("provider capability lookups = %v, want %v", got, want)
+	}
+
+	// A configured row whose client cannot be built is explicitly "no optional
+	// filters", not an omitted block the browser could mistake for an old API.
+	mgr.adult = nil
+	rec = doAuth(t, h, http.MethodGet, "/api/v1/adult/stashbox-instances", "", withCookie(cookie))
+	wantStatus(t, rec, http.StatusOK)
+	body.Instances = nil
+	decodeBody(t, rec, &body)
+	for _, instance := range body.Instances {
+		if instance.SceneFilters == nil || *instance.SceneFilters != (sceneFiltersJSON{}) {
+			t.Fatalf("%s scene_filters without a client = %+v, want explicit zero capabilities",
+				instance.ProviderID, instance.SceneFilters)
 		}
 	}
 }
@@ -542,9 +588,8 @@ func TestAdultBodiesValidateTheInstanceTheyName(t *testing.T) {
 	}
 }
 
-// /auth/me reports the DEFAULT instance's filter dialect. It is read before the
-// first scene request and has no library to key on, which is the known follow-up
-// sceneFilters documents.
+// /auth/me reports the DEFAULT instance's filter dialect for Adult Explore.
+// Provider-switching match screens use the per-instance dialect tested above.
 func TestSceneFiltersReportTheDefaultInstance(t *testing.T) {
 	h, _, mgr, cookie := adultAdminWithProvider(t)
 

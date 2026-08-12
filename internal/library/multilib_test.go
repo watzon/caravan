@@ -200,7 +200,7 @@ func TestRefreshFetchesThroughThePinnedProvider(t *testing.T) {
 	// call count.
 	h.provider.seriesByID[99] = core.SeriesMeta{TMDBID: 99, Title: "Some Live-Action Show", Year: 2011}
 
-	sr, err := h.mgr.AddSeries(ctx, core.ItemRef{Provider: "other", Ref: "99"}, nil, 0)
+	sr, err := h.mgr.AddSeries(ctx, core.ItemRef{Provider: "other", Ref: "99"}, ptr(true), 0)
 	if err != nil {
 		t.Fatalf("AddSeries: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestRefreshRecordsAnUnconfiguredProviderAndContinues(t *testing.T) {
 	if err := h.st.UpsertSeries(ctx, orphan); err != nil {
 		t.Fatalf("UpsertSeries: %v", err)
 	}
-	if _, err := h.mgr.AddSeries(ctx, core.TMDBRef(1396), nil, 0); err != nil {
+	if _, err := h.mgr.AddSeries(ctx, core.TMDBRef(1396), ptr(true), 0); err != nil {
 		t.Fatalf("AddSeries: %v", err)
 	}
 

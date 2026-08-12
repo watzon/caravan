@@ -37,6 +37,10 @@ type stashboxInstanceJSON struct {
 	Name       string `json:"name"`
 	Endpoint   string `json:"endpoint"`
 	HasAPIKey  bool   `json:"has_api_key"`
+	// SceneFilters is this instance's dialect, not the default instance's. A
+	// manual match can switch providers, so the picker needs the answer before
+	// it draws controls the selected endpoint would refuse.
+	SceneFilters *sceneFiltersJSON `json:"scene_filters,omitempty"`
 	// LibraryCount and ItemCount are what the delete guard reports, carried on
 	// every row so the screen can explain a refusal before the user reaches it.
 	LibraryCount int `json:"library_count"`
@@ -429,12 +433,18 @@ func (s *server) stashboxInstanceDTO(ctx context.Context, in core.StashboxInstan
 	if err != nil {
 		return stashboxInstanceJSON{}, err
 	}
+	provider := s.mgr.AdultMetadataFor(ctx, in.ProviderID)
+	filters := sceneFiltersJSON{}
+	if provider != nil {
+		filters = sceneFiltersDTO(core.SceneFiltersOf(provider))
+	}
 	return stashboxInstanceJSON{
 		ID:           in.ID,
 		ProviderID:   in.ProviderID,
 		Name:         in.Name,
 		Endpoint:     in.Endpoint,
 		HasAPIKey:    in.APIKey != "",
+		SceneFilters: &filters,
 		LibraryCount: libraries,
 		ItemCount:    items,
 	}, nil

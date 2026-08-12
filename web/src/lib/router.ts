@@ -58,6 +58,9 @@ export const ROUTES = [
   // it — and it stays an ADULT route while it does, so an ungranted caller is
   // still sent away from it rather than through it.
   '/adult/scenes',
+  // A provider scene has no local id until it is imported, so its durable detail
+  // URL carries the provider instance and provider-native stash id.
+  '/adult/scenes/:provider/:stashId',
   '/adult/sites/:id',
   // The scene picker, under /adult on purpose: isAdultRoute is derived from the
   // path, so a picker filed here is gated by having been added rather than by
@@ -112,6 +115,7 @@ export const MEMBER_ROUTES: readonly RoutePattern[] = [
   // internal/api/auth.go memberAllowed, which names the same three reads.
   '/adult',
   '/adult/scenes',
+  '/adult/scenes/:provider/:stashId',
   '/adult/sites/:id',
   // The scene picker is deliberately absent: grabbing is an admin write, and
   // the server answers a member's release search the same way it answers every

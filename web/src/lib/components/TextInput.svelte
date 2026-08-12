@@ -9,7 +9,7 @@
   interface Props {
     value: string;
     id?: string;
-    type?: 'text' | 'password' | 'search';
+    type?: 'text' | 'password' | 'search' | 'date';
     placeholder?: string;
     autofocus?: boolean;
     disabled?: boolean;

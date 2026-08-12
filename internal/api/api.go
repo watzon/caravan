@@ -350,6 +350,7 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	adult.HandleFunc("GET /adult/sites/{id}", s.handleGetSite)
 	adult.HandleFunc("GET /adult/search", s.handleSearchSites)
 	adult.HandleFunc("GET /adult/discover", s.handleAdultDiscover)
+	adult.HandleFunc("GET /adult/scenes/{stashID}", s.handleGetAdultScene)
 	// The scene filter rail's typeaheads (PLAN phase 12 task 3). They are on
 	// this mux and member-allowed for the same reason /adult/discover is: the
 	// rail is part of the browse screen a granted member reads, and a control

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/watzon/caravan/internal/core"
 )
@@ -59,15 +60,16 @@ func TestMediaFileLibraryKind(t *testing.T) {
 		}
 	}
 
-	movieFile := &core.MediaFile{Path: "Movies/movie.mkv", MovieID: movie.ID}
-	tvFile := &core.MediaFile{Path: "TV/show.mkv"}
-	animeFile := &core.MediaFile{Path: "Anime/frieren.mkv"}
-	adultFile := &core.MediaFile{Path: "Adult/scene.mkv"}
-	multiAdultFile := &core.MediaFile{Path: "Adult/double-scene.mkv"}
-	unownedFile := &core.MediaFile{Path: "unowned.mkv"}
-	mixedKindFile := &core.MediaFile{Path: "mixed-kind.mkv"}
-	mixedLibraryFile := &core.MediaFile{Path: "mixed-library.mkv"}
-	movieEpisodeFile := &core.MediaFile{Path: "movie-episode.mkv", MovieID: movie.ID}
+	addedAt := time.Date(2025, time.January, 1, 12, 0, 0, 0, time.UTC)
+	movieFile := &core.MediaFile{Path: "Movies/movie.mkv", MovieID: movie.ID, AddedAt: addedAt.Add(5 * time.Minute)}
+	tvFile := &core.MediaFile{Path: "TV/show.mkv", AddedAt: addedAt.Add(6 * time.Minute)}
+	animeFile := &core.MediaFile{Path: "Anime/frieren.mkv", AddedAt: addedAt.Add(3 * time.Minute)}
+	adultFile := &core.MediaFile{Path: "Adult/scene.mkv", AddedAt: addedAt.Add(time.Minute)}
+	multiAdultFile := &core.MediaFile{Path: "Adult/double-scene.mkv", AddedAt: addedAt.Add(time.Minute)}
+	unownedFile := &core.MediaFile{Path: "unowned.mkv", AddedAt: addedAt}
+	mixedKindFile := &core.MediaFile{Path: "mixed-kind.mkv", AddedAt: addedAt}
+	mixedLibraryFile := &core.MediaFile{Path: "mixed-library.mkv", AddedAt: addedAt.Add(4 * time.Minute)}
+	movieEpisodeFile := &core.MediaFile{Path: "movie-episode.mkv", MovieID: movie.ID, AddedAt: addedAt}
 	for _, file := range []*core.MediaFile{
 		movieFile, tvFile, animeFile, adultFile, multiAdultFile, unownedFile,
 		mixedKindFile, mixedLibraryFile, movieEpisodeFile,
@@ -158,12 +160,12 @@ func TestMediaFileLibraryKind(t *testing.T) {
 	// file to convert, even though GetMediaFileLibrary refuses to name an owner
 	// for it.
 	allCandidates := []struct{ path, kind string }{
+		{"TV/show.mkv", core.LibraryKindTV},
+		{"Movies/movie.mkv", core.LibraryKindMovie},
+		{"mixed-library.mkv", core.LibraryKindTV},
+		{"Anime/frieren.mkv", core.LibraryKindTV},
 		{"Adult/double-scene.mkv", core.LibraryKindAdult},
 		{"Adult/scene.mkv", core.LibraryKindAdult},
-		{"Anime/frieren.mkv", core.LibraryKindTV},
-		{"Movies/movie.mkv", core.LibraryKindMovie},
-		{"TV/show.mkv", core.LibraryKindTV},
-		{"mixed-library.mkv", core.LibraryKindTV},
 	}
 	assertCandidates(allCandidates)
 
@@ -173,7 +175,7 @@ func TestMediaFileLibraryKind(t *testing.T) {
 	if err := st.CreateConversion(ctx, conversion); err != nil {
 		t.Fatalf("CreateConversion: %v", err)
 	}
-	withoutShow := append(append([]struct{ path, kind string }{}, allCandidates[:4]...), allCandidates[5:]...)
+	withoutShow := append([]struct{ path, kind string }{}, allCandidates[1:]...)
 	assertCandidates(withoutShow)
 
 	// Terminal history does not hide a file that still needs work.

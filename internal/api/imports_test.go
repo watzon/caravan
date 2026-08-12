@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/watzon/caravan/internal/core"
+	"github.com/watzon/caravan/internal/library"
 	"github.com/watzon/caravan/internal/store"
 )
 
@@ -65,6 +66,58 @@ func TestImportQueueListsParsedGuess(t *testing.T) {
 	}
 }
 
+func TestImportQueueRepairsObfuscatedAdultParserGuess(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	ctx := context.Background()
+	adult := &core.Library{
+		Kind:       core.LibraryKindAdult,
+		Name:       store.AdultLibraryName,
+		RootPath:   store.AdultLibraryRoot,
+		IsDefault:  true,
+		Restricted: true,
+		Active:     true,
+	}
+	if err := st.CreateLibrary(ctx, adult); err != nil {
+		t.Fatalf("CreateLibrary(adult): %v", err)
+	}
+
+	const release = "AfricanCasting.20.01.26.Scarlet.XXX.1080p.MP4-WRB"
+	u := &core.UnmatchedFile{
+		Path:      "incomplete/" + release + "/006ae62d1d9d452cab14e9c02e932a6a.mp4",
+		Size:      1234,
+		Parsed:    core.ParsedRelease{Title: "006ae62d1d9d452cab14e9c02e932a6a", Confidence: 0.25},
+		Reason:    library.ReasonImport,
+		LibraryID: adult.ID,
+	}
+	if err := st.UpsertUnmatchedFile(ctx, u); err != nil {
+		t.Fatalf("UpsertUnmatchedFile: %v", err)
+	}
+
+	rec := do(t, h, http.MethodGet, "/api/v1/import/queue", "")
+	wantStatus(t, rec, http.StatusOK)
+	var body struct {
+		Items []unmatchedJSON `json:"items"`
+	}
+	decodeBody(t, rec, &body)
+	if len(body.Items) != 1 {
+		t.Fatalf("items = %+v, want repaired row", body.Items)
+	}
+	got := body.Items[0].Parsed
+	if got.Title != "AfricanCasting" || got.Year != 2020 ||
+		got.SceneDate != "2020-01-26T00:00:00Z" ||
+		got.Quality != core.Quality1080p || got.Group != "WRB" {
+		t.Errorf("parser guess = %+v, want release directory metadata and scene date", got)
+	}
+
+	stored, err := st.GetUnmatchedFile(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("GetUnmatchedFile: %v", err)
+	}
+	if stored.Parsed.Title != "AfricanCasting" || stored.Parsed.SceneDate.IsZero() {
+		t.Errorf("stored parser guess = %+v, want repaired parse persisted", stored.Parsed)
+	}
+}
+
 func TestImportQueueEmpty(t *testing.T) {
 	h, _, _ := newTestServer(t)
 
@@ -93,6 +146,26 @@ func TestImportMatch(t *testing.T) {
 	want := matchCall{id: u.ID, mediaType: MediaTypeMovie, tmdbID: 603, ref: core.TMDBRef(603)}
 	if calls[0] != want {
 		t.Fatalf("match call = %+v, want %+v", calls[0], want)
+	}
+}
+
+func TestImportMatchScene(t *testing.T) {
+	h, st, mgr := newTestServer(t)
+	enableAdult(t, st)
+	seedStashboxInstance(t, st, core.ProviderStashbox, "StashDB", "https://stashdb.org/graphql")
+	u := parkFile(t, st, "incomplete/release/hash.mp4", core.ParsedRelease{Title: "Site"})
+
+	rec := do(t, h, http.MethodPost, "/api/v1/import/queue/"+itoa(u.ID)+"/match",
+		`{"type":"scene","provider":"stashbox","provider_ref":"scene-1"}`)
+	wantStatus(t, rec, http.StatusOK)
+
+	calls := mgr.matchCalls()
+	want := matchCall{
+		id: u.ID, mediaType: MediaTypeScene,
+		ref: core.ItemRef{Provider: core.ProviderStashbox, Ref: "scene-1"},
+	}
+	if len(calls) != 1 || calls[0] != want {
+		t.Fatalf("match calls = %+v, want %+v", calls, want)
 	}
 }
 

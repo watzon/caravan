@@ -213,12 +213,15 @@ describe('AddRequestModal — modes', () => {
     expect(calls).toEqual([]);
   });
 
-  it('offers a profile, the storage root and the search switch in add mode', async () => {
+  it('offers add options and reveals search only after monitoring is enabled', async () => {
     mountModal({ mode: 'add' });
     await settle();
 
     expect(host.querySelector('#add-profile')).not.toBeNull();
     expect(host.querySelector('#add-root')).not.toBeNull();
+    expect(host.textContent).not.toContain('Search for selected seasons right away');
+    host.querySelector<HTMLInputElement>('#add-monitored')!.click();
+    flushSync();
     expect(host.textContent).toContain('Search for selected seasons right away');
     expect(calls.map((c) => c.url)).toContain('/api/v1/quality-profiles');
   });
@@ -263,6 +266,8 @@ describe('AddRequestModal — modes', () => {
   it('sends the selected profile with an approval before the series search', async () => {
     mountModal({ mode: 'add', requestID: 11 });
     await settle();
+    host.querySelector<HTMLInputElement>('#add-monitored')!.click();
+    flushSync();
 
     const select = host.querySelector<HTMLSelectElement>('#add-profile');
     expect(select).not.toBeNull();
@@ -279,7 +284,7 @@ describe('AddRequestModal — modes', () => {
       'POST /api/v1/requests/11/approve',
       'POST /api/v1/library/series/42/search',
     ]);
-    expect(writes[0]?.body).toEqual({ search_now: false, quality_profile_id: 4 });
+    expect(writes[0]?.body).toEqual({ search_now: false, monitored: true, quality_profile_id: 4 });
     expect(calls.filter((call) => call.method === 'PATCH')).toEqual([]);
   });
 
@@ -342,7 +347,7 @@ describe('AddRequestModal — modes', () => {
     (host.querySelector<HTMLInputElement>('#add-monitored')!).click();
     flushSync();
     expect(firstProfile.value).toBe('4');
-    expect((host.querySelector<HTMLInputElement>('#add-monitored')!).checked).toBe(false);
+    expect((host.querySelector<HTMLInputElement>('#add-monitored')!).checked).toBe(true);
 
     unmount(app!);
     app = undefined;
@@ -352,7 +357,7 @@ describe('AddRequestModal — modes', () => {
     await settle();
 
     expect(host.querySelector<HTMLSelectElement>('#add-profile')!.value).toBe('0');
-    expect((host.querySelector<HTMLInputElement>('#add-monitored')!).checked).toBe(true);
+    expect((host.querySelector<HTMLInputElement>('#add-monitored')!).checked).toBe(false);
     expect(host.querySelector('#add-availability')).not.toBeNull();
   });
 });
@@ -433,6 +438,8 @@ describe('AddRequestModal — submitting', () => {
   it('adds the series with the seasons it is going after, then searches', async () => {
     mountModal({ mode: 'add' });
     await settle();
+    host.querySelector<HTMLInputElement>('#add-monitored')!.click();
+    flushSync();
     checkboxes()[1]!.click(); // drop season 2
     flushSync();
     expect(primary().textContent?.trim()).toBe('Add 1 season');
@@ -469,6 +476,8 @@ describe('AddRequestModal — submitting', () => {
   it('routes an approval through the approve endpoint', async () => {
     mountModal({ mode: 'add', requestID: 11, preselect: [2, 3] });
     await settle();
+    host.querySelector<HTMLInputElement>('#add-monitored')!.click();
+    flushSync();
 
     primary().click();
     await settle();
@@ -478,7 +487,7 @@ describe('AddRequestModal — submitting', () => {
     // Season 1 is owned and 2 and 3 were preselected, so the approval grants
     // the whole series and names no seasons. The series search is queued
     // separately after the add, so the approve call never carries it either.
-    expect(writes[0]?.body).toEqual({ search_now: false });
+    expect(writes[0]?.body).toEqual({ search_now: false, monitored: true });
     expect(writes.map((c) => c.url)).toContain('/api/v1/library/series/42/search');
   });
 
@@ -492,12 +501,14 @@ describe('AddRequestModal — submitting', () => {
     await settle();
 
     const approve = calls.find((c) => c.url.endsWith('/approve'));
-    expect(approve?.body).toEqual({ search_now: false, seasons: [1, 2] });
+    expect(approve?.body).toEqual({ search_now: false, seasons: [1, 2], monitored: false });
   });
 
   it('sends a chosen quality profile in the first direct add request', async () => {
     mountModal({ mode: 'add', mediaType: 'movie', tmdbID: 78, title: 'Blade Runner', year: 1982, seasons: null });
     await settle();
+    host.querySelector<HTMLInputElement>('#add-monitored')!.click();
+    flushSync();
 
     const select = host.querySelector<HTMLSelectElement>('#add-profile')!;
     select.value = '4';

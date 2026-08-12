@@ -212,7 +212,7 @@ describe('the Adult shelf controls', () => {
     stubFetch();
     await mountShelf('admin');
 
-    expect(sortTrigger().textContent?.trim()).toBe('Sort: Title');
+    expect(sortTrigger().textContent?.trim()).toBe('Sort: Added');
     expect(
       host!.querySelector<HTMLInputElement>('input[type="search"]')?.getAttribute('aria-label'),
     ).toBe('Filter sites by name');
@@ -231,19 +231,19 @@ describe('the Adult shelf sort', () => {
     expect(sortTrigger().textContent?.trim()).toBe(
       `Sort: ${{ title: 'Title', added: 'Added', status: 'Status' }[sort]}`,
     );
-    expect(sortLabels()).toEqual(['Title', 'Added', 'Status']);
+    expect(sortLabels()).toEqual(['Added', 'Title', 'Status']);
     expect(cardTitles()).toEqual(expected);
     expect(calls).toEqual([{ url: '/api/v1/adult/sites', method: 'GET' }]);
   });
 
-  it('falls back to title for an invalid URL value and removes it as the default', async () => {
+  it('falls back to added order for an invalid URL value and removes it as the default', async () => {
     stubFetch();
     await mountShelf('admin', '/adult?view=grid&sort=recent#sites');
 
-    expect(sortTrigger().textContent?.trim()).toBe('Sort: Title');
-    expect(cardTitles()).toEqual(['Alpha Club', 'Bravo Studio', 'Delta House', 'Zulu Club']);
+    expect(sortTrigger().textContent?.trim()).toBe('Sort: Added');
+    expect(cardTitles()).toEqual(['Zulu Club', 'Bravo Studio', 'Alpha Club', 'Delta House']);
 
-    pickSort('Title');
+    pickSort('Added');
     expect(`${window.location.pathname}${window.location.search}${window.location.hash}`).toBe(
       '/adult?view=grid#sites',
     );
@@ -256,12 +256,12 @@ describe('the Adult shelf sort', () => {
 
     pickSort('Added');
     expect(`${window.location.pathname}${window.location.search}${window.location.hash}`).toBe(
-      '/adult?view=grid&sort=added#sites',
+      '/adult?view=grid#sites',
     );
 
     pickSort('Title');
     expect(`${window.location.pathname}${window.location.search}${window.location.hash}`).toBe(
-      '/adult?view=grid#sites',
+      '/adult?view=grid&sort=title#sites',
     );
     expect(calls).toEqual([{ url: '/api/v1/adult/sites', method: 'GET' }]);
   });

@@ -474,7 +474,10 @@ func TestRefreshMakesNoAdultRequestWhenDisabled(t *testing.T) {
 func TestRefreshSitesRewalksTheCatalogue(t *testing.T) {
 	h := newAdultHarness(t, true)
 	h.seedBrazzers()
-	sr := h.addSite("site-1")
+	sr, err := h.mgr.AddSiteAndWait(context.Background(), siteRef("site-1"), ptr(true), 0)
+	if err != nil {
+		t.Fatalf("AddSiteAndWait: %v", err)
+	}
 
 	h.adult.scenes["site-1"] = append(h.adult.scenes["site-1"], core.SceneMeta{
 		StashID: "scene-new", SiteStashID: "site-1", SiteName: "Brazzers",
@@ -496,7 +499,9 @@ func TestRefreshSitesRewalksTheCatalogue(t *testing.T) {
 func TestRefreshLibraryDoesNotSendSitesToTMDB(t *testing.T) {
 	h := newAdultHarness(t, true)
 	h.seedBrazzers()
-	h.addSite("site-1")
+	if _, err := h.mgr.AddSiteAndWait(context.Background(), siteRef("site-1"), ptr(true), 0); err != nil {
+		t.Fatalf("AddSiteAndWait: %v", err)
+	}
 
 	// The stub answers no TMDB id, so a site reaching GetSeries would surface
 	// as a refresh error rather than as silence.
@@ -911,6 +916,59 @@ func TestRefreshKeepsASiteOwnScenesWhenAnotherSiteAlsoListsThem(t *testing.T) {
 	}
 }
 
+func TestImportUnmatchedSceneAddsItsSiteUnmonitored(t *testing.T) {
+	h := newAdultHarness(t, true)
+	h.adult.sites = []core.SiteMeta{{StashID: "site-1", Name: "Brazzers"}}
+	released := date(2022, time.March, 14)
+	h.adult.scenes["site-1"] = []core.SceneMeta{
+		{StashID: "scene-other", SiteStashID: "site-1", SiteName: "Brazzers",
+			Title: "Other Scene", Date: released},
+		{StashID: "scene-chosen", SiteStashID: "site-1", SiteName: "Brazzers",
+			Title: "Chosen Scene", Date: released},
+	}
+	lib, err := h.st.GetDefaultLibrary(context.Background(), core.LibraryKindAdult)
+	if err != nil {
+		t.Fatalf("GetDefaultLibrary(adult): %v", err)
+	}
+	const source = "incomplete/release/hash.mp4"
+	h.writeVideo(source, "scene")
+	parked := &core.UnmatchedFile{
+		Path: source, Size: 5, LibraryID: lib.ID, Reason: reasonAmbiguousScene,
+		Parsed: core.ParsedRelease{
+			Title: "Brazzers", SceneDate: released, Quality: core.Quality1080p,
+		},
+	}
+	if err := h.st.UpsertUnmatchedFile(context.Background(), parked); err != nil {
+		t.Fatalf("UpsertUnmatchedFile: %v", err)
+	}
+
+	result, err := h.mgr.ImportUnmatched(context.Background(), parked.ID,
+		core.ItemRef{Provider: core.ProviderStashbox, Ref: "scene-chosen"}, MediaTypeScene)
+	if err != nil {
+		t.Fatalf("ImportUnmatched(scene): %v", err)
+	}
+	const organized = "library/Adult/Brazzers/Season 2022/Brazzers - 2022-03-14 - Chosen Scene.mp4"
+	if result.Path != organized || result.SeriesID == 0 {
+		t.Errorf("result = %+v, want chosen scene at %q", result, organized)
+	}
+	site, err := h.st.GetSeries(context.Background(), result.SeriesID)
+	if err != nil {
+		t.Fatalf("GetSeries(matched site): %v", err)
+	}
+	if site.Monitored {
+		t.Fatal("matching one scene added its new site as monitored")
+	}
+	if !h.exists(organized) {
+		t.Errorf("chosen scene was not organized")
+	}
+	if h.exists("library/Adult/Brazzers/Season 2022/Brazzers - 2022-03-14 - Other Scene.mp4") {
+		t.Errorf("same-day scene was chosen by date instead of explicit id")
+	}
+	if _, err := h.st.GetUnmatchedFile(context.Background(), parked.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("parked row survived successful scene match: %v", err)
+	}
+}
+
 // TestImportDownloadImportsObfuscatedSceneByReleaseTitle is the adult twin of
 // TestImportDownloadImportsObfuscatedEpisodeByReleaseTitle: usenet posts
 // obfuscate the payload's file name, the scene parser finds no date in the
@@ -998,8 +1056,16 @@ func TestObfuscatedSceneStaysParkedWhenTheTitleNamesAnotherScene(t *testing.T) {
 	if err := h.mgr.ImportDownload(context.Background(), dl, grab); err != nil {
 		t.Fatalf("ImportDownload: %v", err)
 	}
-	if parked := h.unmatched(); len(parked) != 1 {
+	parked := h.unmatched()
+	if len(parked) != 1 {
 		t.Fatalf("unmatched = %+v, want the payload parked", parked)
+	}
+	parsed := parked[0].Parsed
+	if parsed.Title != "Brazzers" ||
+		!parsed.SceneDate.Equal(date(2022, time.March, 14)) ||
+		parsed.Quality != core.Quality1080p ||
+		parsed.Group != "KTR" {
+		t.Errorf("parked parser guess = %+v, want the grabbed release title parsed", parsed)
 	}
 	if got := h.grabStatus(grab.GrabID); got != core.GrabStatusFailed {
 		t.Errorf("grab status = %q, want %q", got, core.GrabStatusFailed)
@@ -1166,17 +1232,17 @@ func TestAddSiteUnmonitoredLeavesItsScenesUnmonitored(t *testing.T) {
 		}
 	}
 
-	// And the default is unchanged: no opinion is a monitored site with
-	// monitored scenes.
+	// Omission is also unmonitored: matching and other implicit additions do
+	// not opt the user into automation.
 	b := newAdultHarness(t, true)
 	b.seedBrazzers()
 	kept := b.addSite("site-1")
-	if !kept.Monitored {
-		t.Fatal("an add with no opinion left the site unmonitored")
+	if kept.Monitored {
+		t.Fatal("an add with no opinion monitored the site")
 	}
 	for _, e := range b.episodes(kept.ID) {
-		if !e.Monitored {
-			t.Errorf("scene %q is unmonitored under a monitored site", e.StashID)
+		if e.Monitored {
+			t.Errorf("scene %q is monitored without an explicit opt-in", e.StashID)
 		}
 	}
 }

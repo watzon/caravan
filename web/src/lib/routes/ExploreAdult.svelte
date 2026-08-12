@@ -141,6 +141,7 @@
         title: scene.title,
         year: sceneYear(scene.date),
         poster_path: scene.image_url,
+        provider: scene.provider,
       });
       // Patch in place rather than refetch: one flag on one card changed, and a
       // refetch is another round trip to the provider.

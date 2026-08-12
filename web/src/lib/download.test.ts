@@ -26,6 +26,8 @@ function download(overrides: Partial<DownloadStatus> = {}): DownloadStatus {
     ratio: 0,
     save_path: 'incomplete/big-buck-bunny',
     error: '',
+    created_at: '2026-01-01T00:00:00Z',
+    updated_at: '2026-01-01T00:00:00Z',
     ...overrides,
   };
 }
@@ -156,27 +158,22 @@ describe('unreachableClientBanner', () => {
 });
 
 describe('sortDownloads', () => {
-  it('puts live work first and finished work last', () => {
+  it('orders every state by when the item was added, newest first', () => {
     const sorted = sortDownloads([
-      download({ id: '1', state: 'completed', name: 'a' }),
-      download({ id: '2', state: 'failed', name: 'b' }),
-      download({ id: '3', state: 'downloading', name: 'c' }),
-      download({ id: '4', state: 'queued', name: 'd' }),
+      download({ id: '1', state: 'completed', created_at: '2026-01-01T00:00:00Z' }),
+      download({ id: '2', state: 'failed', created_at: '2026-04-01T00:00:00Z' }),
+      download({ id: '3', state: 'downloading', created_at: '2026-02-01T00:00:00Z' }),
+      download({ id: '4', state: 'queued', created_at: '2026-03-01T00:00:00Z' }),
     ]);
-    expect(sorted.map((d) => d.state)).toEqual([
-      'downloading',
-      'queued',
-      'failed',
-      'completed',
-    ]);
+    expect(sorted.map((d) => d.id)).toEqual(['2', '4', '3', '1']);
   });
 
-  it('orders within a state by name, so rows do not jump between polls', () => {
+  it('preserves server order when creation times are equal or unavailable', () => {
     const sorted = sortDownloads([
-      download({ id: '1', state: 'downloading', name: 'Zebra' }),
-      download({ id: '2', state: 'downloading', name: 'Aardvark' }),
+      download({ id: '1', created_at: '' }),
+      download({ id: '2', created_at: '' }),
     ]);
-    expect(sorted.map((d) => d.name)).toEqual(['Aardvark', 'Zebra']);
+    expect(sorted.map((d) => d.id)).toEqual(['1', '2']);
   });
 
   it('does not mutate its input', () => {

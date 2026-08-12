@@ -656,6 +656,7 @@ func TestStashIDLookupsIgnoreTheBlankID(t *testing.T) {
 
 	// A site with one scene, and a pending scene request.
 	site := &core.Series{
+		Provider: core.ProviderStashbox, ProviderRef: "site-1",
 		StashID: "site-1", Title: "Brazzers", SortTitle: "brazzers",
 		Kind: core.SeriesKindAdult, Monitored: true,
 	}
@@ -691,6 +692,43 @@ func TestStashIDLookupsIgnoreTheBlankID(t *testing.T) {
 		}
 		if got, err := st.EpisodeIDsByStashID(ctx, nil); err != nil || got == nil {
 			t.Fatalf("EpisodeIDsByStashID(nil) = %v, %v, want an empty map", got, err)
+		}
+	})
+
+	t.Run("EpisodeFileIDsByStashID", func(t *testing.T) {
+		got, err := st.EpisodeFileIDsByStashID(ctx, []string{"", "scene-1"})
+		if err != nil {
+			t.Fatalf("EpisodeFileIDsByStashID before file: %v", err)
+		}
+		if len(got) != 0 {
+			t.Fatalf("placeholder scene reported as held: %v", got)
+		}
+
+		file := &core.MediaFile{Path: "library/Adult/Brazzers/scene-1.mkv", Size: 42}
+		if err := st.UpsertMediaFile(ctx, file); err != nil {
+			t.Fatalf("UpsertMediaFile: %v", err)
+		}
+		if err := st.LinkEpisodeFile(ctx, scene.ID, file.ID); err != nil {
+			t.Fatalf("LinkEpisodeFile: %v", err)
+		}
+		got, err = st.EpisodeFileIDsByStashID(ctx, []string{"scene-1", "scene-missing"})
+		if err != nil {
+			t.Fatalf("EpisodeFileIDsByStashID after file: %v", err)
+		}
+		if len(got) != 1 || got["scene-1"] != scene.ID {
+			t.Fatalf("got = %v, want exactly the scene with a file", got)
+		}
+		scoped, err := st.EpisodeFileIDsByStashIDForProvider(
+			ctx, core.ProviderStashbox, []string{"scene-1"},
+		)
+		if err != nil || scoped["scene-1"] != scene.ID {
+			t.Fatalf("legacy provider lookup = %v, %v, want scene %d", scoped, err, scene.ID)
+		}
+		scoped, err = st.EpisodeFileIDsByStashIDForProvider(
+			ctx, core.ProviderStashbox+":other", []string{"scene-1"},
+		)
+		if err != nil || len(scoped) != 0 {
+			t.Fatalf("other provider lookup = %v, %v, want empty", scoped, err)
 		}
 	})
 
