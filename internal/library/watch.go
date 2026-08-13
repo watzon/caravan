@@ -186,10 +186,12 @@ func (w *watcher) queueImport(ctx context.Context, s core.DownloadStatus) error 
 	if err != nil {
 		return err
 	}
-	if grab.Status == core.GrabStatusImported {
+	if grabImportSettled(grab.Status) {
 		// The durable half of "exactly once": after a restart the queued set is
-		// empty, and this is what stops an already-imported seeding torrent from
-		// being handed to the queue again on every start.
+		// empty, and this is what stops an already-handled seeding torrent from
+		// being handed to the queue again on every start. Failed is included
+		// because parking for Scan Review is a finished decision, not a job
+		// that should run again.
 		w.queued[s.ID] = true
 		return nil
 	}

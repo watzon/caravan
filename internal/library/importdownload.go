@@ -126,9 +126,14 @@ func (m *Manager) ImportDownload(ctx context.Context, dl core.DownloadStatus, gr
 	return nil
 }
 
-// alreadyImported reports whether this grab has already been imported. It is
+// alreadyImported reports whether this grab has already been handled. It is
 // the cheap half of ImportDownload's idempotency: a redelivered job costs one
 // query rather than a filesystem walk.
+//
+// Imported is the success path. Failed, cancelled, and rejected are finished
+// decisions too: parking for a manual match is a successful import outcome,
+// and retrying it after a process restart is how Scan Review grew items the
+// user had already matched.
 func (m *Manager) alreadyImported(ctx context.Context, grab core.GrabInfo) (bool, error) {
 	if grab.GrabID == 0 {
 		return false, nil
@@ -140,7 +145,18 @@ func (m *Manager) alreadyImported(ctx context.Context, grab core.GrabInfo) (bool
 	if err != nil {
 		return false, err
 	}
-	return g.Status == core.GrabStatusImported, nil
+	return grabImportSettled(g.Status), nil
+}
+
+// grabImportSettled reports whether the watcher and ImportDownload should
+// leave this grab alone. Grabbed is the only status that still needs work.
+func grabImportSettled(status string) bool {
+	switch status {
+	case core.GrabStatusImported, core.GrabStatusFailed, core.GrabStatusCancelled, core.GrabStatusRejected:
+		return true
+	default:
+		return false
+	}
 }
 
 // recordGrabOutcome closes the grab out in the history. A grab that imported

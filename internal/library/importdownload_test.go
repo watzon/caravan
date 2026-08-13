@@ -419,6 +419,47 @@ func TestImportDownloadParksAMismatch(t *testing.T) {
 	}
 }
 
+// A parked grab is a finished decision, not a failed job. After the user
+// matches the file from Scan Review, a restart must not re-park the still-
+// seeding incomplete copy — that is how matched items came back on every
+// Air rebuild.
+func TestImportDownloadDoesNotReparkAfterManualMatch(t *testing.T) {
+	h := newHarness(t)
+	mv := addMovieItem(h)
+
+	const (
+		dir  = "incomplete/Some.Other.Movie.2019.1080p"
+		file = dir + "/Some.Other.Movie.2019.1080p.mkv"
+	)
+	h.parser[filepath.Base(file)] = movieParse("Some Other Movie", 2019)
+	h.writeVideo(file, "not the movie we asked for")
+	dl := core.DownloadStatus{ID: "infohash-other", State: core.DownloadCompleted, SavePath: dir}
+	grab := h.grabFor(core.GrabInfo{MovieID: mv.ID, ReleaseTitle: "Big.Buck.Bunny.2008"})
+
+	ctx := context.Background()
+	if err := h.mgr.ImportDownload(ctx, dl, grab); err != nil {
+		t.Fatalf("ImportDownload: %v", err)
+	}
+	parked := h.unmatched()
+	if len(parked) != 1 {
+		t.Fatalf("unmatched queue = %+v, want the parked file", parked)
+	}
+
+	if _, err := h.mgr.ImportUnmatched(ctx, parked[0].ID, core.TMDBRef(10378), MediaTypeMovie); err != nil {
+		t.Fatalf("ImportUnmatched: %v", err)
+	}
+	if got := h.unmatched(); len(got) != 0 {
+		t.Fatalf("unmatched after manual match = %+v, want empty", got)
+	}
+
+	if err := h.mgr.ImportDownload(ctx, dl, grab); err != nil {
+		t.Fatalf("ImportDownload after match: %v", err)
+	}
+	if got := h.unmatched(); len(got) != 0 {
+		t.Fatalf("unmatched after re-import = %+v, want empty: a matched file must not come back", got)
+	}
+}
+
 // TestImportDownloadParksAnEpisodeUnderAMovieGrab covers the other direction
 // of the sanity check: the file is not even the right *kind* of thing.
 func TestImportDownloadParksAnEpisodeUnderAMovieGrab(t *testing.T) {

@@ -17,6 +17,8 @@ and Caravan uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Session cookies survive a process restart (Air, Docker, portable remount)
   instead of forcing a new login.
+- Scan Review no longer re-lists a file the user already matched: a parked
+  grab is a finished decision, so a restart does not import it again.
 
 ## [0.1.0] - TBD
 

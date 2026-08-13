@@ -378,6 +378,45 @@ func TestWatcherPersistsExternalDownloadsWithoutTheirForeignPath(t *testing.T) {
 	}
 }
 
+// Parking for a manual match is a finished import decision. A process restart
+// empties the in-memory queued set; the durable grab status must still stop
+// the watcher from putting the incomplete file back on Scan Review.
+func TestWatcherDoesNotReparkAMatchedGrabAfterRestart(t *testing.T) {
+	h := newHarness(t)
+	mv := addMovieItem(h)
+
+	const (
+		dir  = "incomplete/Some.Other.Movie.2019.1080p"
+		file = dir + "/Some.Other.Movie.2019.1080p.mkv"
+	)
+	h.parser["Some.Other.Movie.2019.1080p.mkv"] = movieParse("Some Other Movie", 2019)
+	h.writeVideo(file, "not the movie we asked for")
+	dl := core.DownloadStatus{ID: "infohash-other", State: core.DownloadCompleted, SavePath: dir}
+	grab := h.grabFor(core.GrabInfo{MovieID: mv.ID, ReleaseTitle: "Big.Buck.Bunny.2008"})
+	linkDownloadToGrab(h, dl.ID, grab)
+
+	ctx := context.Background()
+	first := newWatcher(h, &fakeEngine{statuses: []core.DownloadStatus{dl}})
+	if err := first.tick(ctx); err != nil {
+		t.Fatalf("first tick: %v", err)
+	}
+	parked := h.unmatched()
+	if len(parked) != 1 {
+		t.Fatalf("unmatched after first tick = %+v, want the parked file", parked)
+	}
+	if _, err := h.mgr.ImportUnmatched(ctx, parked[0].ID, core.TMDBRef(10378), MediaTypeMovie); err != nil {
+		t.Fatalf("ImportUnmatched: %v", err)
+	}
+
+	restarted := newWatcher(h, &fakeEngine{statuses: []core.DownloadStatus{dl}})
+	if err := restarted.tick(ctx); err != nil {
+		t.Fatalf("tick after restart: %v", err)
+	}
+	if got := h.unmatched(); len(got) != 0 {
+		t.Fatalf("unmatched after restart = %+v, want empty", got)
+	}
+}
+
 // A router names the backend that answered, and that name heals a row the
 // grab endpoint never got to fill in.
 func TestWatcherRecordsTheEngineTheStatusNames(t *testing.T) {
