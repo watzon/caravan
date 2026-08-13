@@ -532,7 +532,7 @@ func (s *server) resolveUser(r *http.Request) (requestUser, bool, error) {
 			// in `library_access` and the gate reads them there per request, so a
 			// grant revoked on the access card takes effect on the next one with
 			// nothing stale riding along. The account row has no permission
-			// column left to be tempted by since migration 0028.
+			// column left to be tempted by in the baseline schema.
 			return requestUser{ID: user.ID, Role: user.Role}, true, nil
 		}
 	}

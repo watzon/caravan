@@ -19,18 +19,11 @@ func (s *Store) InsertEvent(ctx context.Context, e *core.Event) error {
 		e.CreatedAt = now()
 	}
 
-	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO events (level, category, message, detail, movie_id, series_id, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		e.Level, e.Category, e.Message, e.Detail, e.MovieID, e.SeriesID, formatTime(e.CreatedAt))
-	if err != nil {
+	model := eventModelFromCore(e)
+	if err := s.db.NewInsert().Model(&model).Returning("id").Scan(ctx); err != nil {
 		return fmt.Errorf("store: insert event: %w", err)
 	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("store: insert event: %w", err)
-	}
-	e.ID = id
+	e.ID = model.ID
 	return nil
 }
 
@@ -40,34 +33,17 @@ func (s *Store) InsertEvent(ctx context.Context, e *core.Event) error {
 // Ordering is by id rather than created_at: ids are monotonic, so two events
 // written in the same clock tick still come back in the order they happened.
 func (s *Store) ListEvents(ctx context.Context, limit int) ([]core.Event, error) {
-	query := "SELECT " + eventColumns + " FROM events ORDER BY id DESC"
-	args := []any{}
+	query := s.db.NewSelect().Model((*eventModel)(nil)).OrderExpr("id DESC")
 	if limit > 0 {
-		query += " LIMIT ?"
-		args = append(args, limit)
+		query.Limit(limit)
 	}
-
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
+	models := []eventModel{}
+	if err := query.Scan(ctx, &models); err != nil {
 		return nil, fmt.Errorf("store: list events: %w", err)
 	}
-	defer rows.Close()
-
-	out := []core.Event{}
-	for rows.Next() {
-		var (
-			e         core.Event
-			createdAt string
-		)
-		if err := rows.Scan(&e.ID, &e.Level, &e.Category, &e.Message, &e.Detail,
-			&e.MovieID, &e.SeriesID, &createdAt); err != nil {
-			return nil, fmt.Errorf("store: scan event: %w", err)
-		}
-		e.CreatedAt = parseTime(createdAt)
-		out = append(out, e)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: list events: %w", err)
+	out := make([]core.Event, len(models))
+	for i := range models {
+		out[i] = models[i].core()
 	}
 	return out, nil
 }
@@ -79,40 +55,25 @@ func (s *Store) ListEventsPage(ctx context.Context, limit, beforeID int64) ([]co
 	if limit <= 0 {
 		return []core.Event{}, 0, nil
 	}
-	query := "SELECT " + eventColumns + " FROM events"
-	args := []any{}
+	models := []eventModel{}
+	query := s.db.NewSelect().Model(&models).OrderExpr("id DESC").Limit(int(limit + 1))
 	if beforeID > 0 {
-		query += " WHERE id < ?"
-		args = append(args, beforeID)
+		query.Where("id < ?", beforeID)
 	}
-	query += " ORDER BY id DESC LIMIT ?"
-	args = append(args, limit+1)
-
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
+	if err := query.Scan(ctx); err != nil {
 		return nil, 0, fmt.Errorf("store: list event page: %w", err)
 	}
-	defer rows.Close()
 
-	out := make([]core.Event, 0, limit)
-	for rows.Next() {
-		var (
-			e         core.Event
-			createdAt string
-		)
-		if err := rows.Scan(&e.ID, &e.Level, &e.Category, &e.Message, &e.Detail,
-			&e.MovieID, &e.SeriesID, &createdAt); err != nil {
-			return nil, 0, fmt.Errorf("store: scan event page: %w", err)
-		}
-		if len(out) < int(limit) {
-			e.CreatedAt = parseTime(createdAt)
-			out = append(out, e)
-			continue
-		}
+	more := len(models) > int(limit)
+	if more {
+		models = models[:limit]
+	}
+	out := make([]core.Event, len(models))
+	for i := range models {
+		out[i] = models[i].core()
+	}
+	if more {
 		return out, out[len(out)-1].ID, nil
-	}
-	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("store: list event page: %w", err)
 	}
 	return out, 0, nil
 }

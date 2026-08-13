@@ -208,23 +208,25 @@ const RouteEmbedded = "embedded"
 // GetSetting returns the value for key, or ErrNotFound when the key has never
 // been set.
 func (s *Store) GetSetting(ctx context.Context, key string) (string, error) {
-	var value string
-	err := s.db.QueryRowContext(ctx, "SELECT value FROM settings WHERE key = ?", key).Scan(&value)
+	var setting settingModel
+	err := s.db.NewSelect().Model(&setting).Column("value").Where("key = ?", key).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", fmt.Errorf("store: setting %q: %w", key, ErrNotFound)
 	}
 	if err != nil {
 		return "", fmt.Errorf("store: get setting %q: %w", key, err)
 	}
-	return value, nil
+	return setting.Value, nil
 }
 
 // SetSetting writes key, overwriting any previous value.
 func (s *Store) SetSetting(ctx context.Context, key, value string) error {
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
-		ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-		key, value, formatTime(now()))
+	setting := &settingModel{Key: key, Value: value, UpdatedAt: formatTime(now())}
+	_, err := s.db.NewInsert().Model(setting).
+		On("CONFLICT (key) DO UPDATE").
+		Set("value = EXCLUDED.value").
+		Set("updated_at = EXCLUDED.updated_at").
+		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("store: set setting %q: %w", key, err)
 	}
@@ -274,7 +276,7 @@ func (s *Store) SetSettings(ctx context.Context, values map[string]string) error
 
 // DeleteSetting removes key. Deleting an absent key is not an error.
 func (s *Store) DeleteSetting(ctx context.Context, key string) error {
-	if _, err := s.db.ExecContext(ctx, "DELETE FROM settings WHERE key = ?", key); err != nil {
+	if _, err := s.db.NewDelete().Model((*settingModel)(nil)).Where("key = ?", key).Exec(ctx); err != nil {
 		return fmt.Errorf("store: delete setting %q: %w", key, err)
 	}
 	return nil
@@ -283,22 +285,15 @@ func (s *Store) DeleteSetting(ctx context.Context, key string) error {
 // AllSettings returns every setting. The map is empty, never nil, on a fresh
 // database.
 func (s *Store) AllSettings(ctx context.Context) (map[string]string, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT key, value FROM settings ORDER BY key")
+	var settings []settingModel
+	err := s.db.NewSelect().Model(&settings).Column("key", "value").Order("key ASC").Scan(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: list settings: %w", err)
 	}
-	defer rows.Close()
 
-	out := make(map[string]string)
-	for rows.Next() {
-		var key, value string
-		if err := rows.Scan(&key, &value); err != nil {
-			return nil, fmt.Errorf("store: scan setting: %w", err)
-		}
-		out[key] = value
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: list settings: %w", err)
+	out := make(map[string]string, len(settings))
+	for _, setting := range settings {
+		out[setting.Key] = setting.Value
 	}
 	return out, nil
 }

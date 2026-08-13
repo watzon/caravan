@@ -3,7 +3,7 @@ package core
 import "time"
 
 // User roles. They are stored verbatim in users.role and constrained by a
-// CHECK in migration 0011.
+// CHECK on users.role.
 const (
 	// RoleAdmin is whoever runs the box: the whole API, including settings,
 	// the library, the queue and other people's accounts.
@@ -37,7 +37,7 @@ type User struct {
 	// Role is RoleAdmin or RoleMember.
 	Role string
 	// There is deliberately no permission flag here, not even a narrowing one.
-	// `adult_access` was the single exception until migration 0028 dropped it:
+	// A legacy `adult_access` flag was the single exception before per-library access:
 	// a per-account grant on the row, checked in addition to the allowlist. What
 	// replaced it lives in `library_access`, keyed by the library it grants — a
 	// grant names a thing, and a boolean on a person can only name a category

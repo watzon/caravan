@@ -3,7 +3,7 @@ package core
 import "time"
 
 // Request statuses. They are stored verbatim in requests.status and constrained
-// by a CHECK in migration 0009.
+// by a CHECK on requests.status.
 const (
 	// RequestPending is a wish nobody has acted on yet. At most one pending
 	// request exists per (MediaType, TMDBID) — a second one merges into it.

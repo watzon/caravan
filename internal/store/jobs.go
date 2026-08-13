@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/uptrace/bun"
 	"github.com/watzon/caravan/internal/core"
 )
 
@@ -34,20 +35,11 @@ func (s *Store) EnqueueJob(ctx context.Context, j *core.Job) error {
 	j.UpdatedAt = ts
 	j.State = core.JobStatePending
 
-	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO jobs (kind, payload, state, attempts, run_after, lease_expires_at,
-			last_error, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, '', '', ?, ?)`,
-		j.Kind, j.Payload, j.State, j.Attempts, formatTime(j.RunAfter),
-		formatTime(j.CreatedAt), formatTime(j.UpdatedAt))
-	if err != nil {
+	model := jobModelFromCore(j)
+	if err := s.db.NewInsert().Model(&model).Returning("id").Scan(ctx); err != nil {
 		return fmt.Errorf("store: enqueue %s job: %w", j.Kind, err)
 	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("store: enqueue %s job: %w", j.Kind, err)
-	}
-	j.ID = id
+	j.ID = model.ID
 	return nil
 }
 
@@ -161,9 +153,10 @@ func (s *Store) claimJob(ctx context.Context, op string, kinds []string, lease t
 // CompleteJob marks a claimed job done and drops its lease. Completing an
 // absent job is ErrNotFound.
 func (s *Store) CompleteJob(ctx context.Context, id int64) error {
-	res, err := s.db.ExecContext(ctx, `
-		UPDATE jobs SET state = ?, lease_expires_at = '', last_error = '', updated_at = ?
-		WHERE id = ?`, core.JobStateDone, formatTime(now()), id)
+	res, err := s.db.NewUpdate().Model((*jobModel)(nil)).
+		Set("state = ?", core.JobStateDone).
+		Set("lease_expires_at = ''").Set("last_error = ''").
+		Set("updated_at = ?", formatTime(now())).Where("id = ?", id).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("store: complete job %d: %w", id, err)
 	}
@@ -307,26 +300,17 @@ func (s *Store) ReclaimRunning(ctx context.Context) (int, error) {
 // ListJobs returns the most recent jobs, newest first, for the activity
 // feed (PLAN phase 3, task 8). A limit of zero or less returns every job.
 func (s *Store) ListJobs(ctx context.Context, limit int) ([]core.Job, error) {
-	query := "SELECT " + jobColumns + " FROM jobs ORDER BY id DESC"
+	models := []jobModel{}
+	query := s.db.NewSelect().Model(&models).Order("id DESC")
 	if limit > 0 {
-		query += fmt.Sprintf(" LIMIT %d", limit)
+		query.Limit(limit)
 	}
-	rows, err := s.db.QueryContext(ctx, query)
-	if err != nil {
+	if err := query.Scan(ctx); err != nil {
 		return nil, fmt.Errorf("store: list jobs: %w", err)
 	}
-	defer rows.Close()
-
-	out := []core.Job{}
-	for rows.Next() {
-		j, err := scanJob(rows)
-		if err != nil {
-			return nil, fmt.Errorf("store: scan job: %w", err)
-		}
-		out = append(out, *j)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: list jobs: %w", err)
+	out := make([]core.Job, len(models))
+	for i := range models {
+		out[i] = models[i].core()
 	}
 	return out, nil
 }
@@ -337,35 +321,24 @@ func (s *Store) ListJobsPage(ctx context.Context, limit int, beforeID int64) ([]
 	if limit <= 0 {
 		return []core.Job{}, 0, nil
 	}
-	query := "SELECT " + jobColumns + " FROM jobs"
-	args := []any{}
+	models := []jobModel{}
+	query := s.db.NewSelect().Model(&models).Order("id DESC").Limit(limit + 1)
 	if beforeID > 0 {
-		query += " WHERE id < ?"
-		args = append(args, beforeID)
+		query.Where("id < ?", beforeID)
 	}
-	query += " ORDER BY id DESC LIMIT ?"
-	args = append(args, limit+1)
-
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
+	if err := query.Scan(ctx); err != nil {
 		return nil, 0, fmt.Errorf("store: list job page: %w", err)
 	}
-	defer rows.Close()
-
-	out := make([]core.Job, 0, limit)
-	for rows.Next() {
-		j, err := scanJob(rows)
-		if err != nil {
-			return nil, 0, fmt.Errorf("store: scan job page: %w", err)
-		}
-		if len(out) < limit {
-			out = append(out, *j)
-			continue
-		}
+	more := len(models) > limit
+	if more {
+		models = models[:limit]
+	}
+	out := make([]core.Job, len(models))
+	for i := range models {
+		out[i] = models[i].core()
+	}
+	if more {
 		return out, out[len(out)-1].ID, nil
-	}
-	if err := rows.Err(); err != nil {
-		return nil, 0, fmt.Errorf("store: list job page: %w", err)
 	}
 	return out, 0, nil
 }
@@ -376,11 +349,10 @@ func (s *Store) ListJobsPage(ctx context.Context, limit int, beforeID int64) ([]
 // already queued, which is what keeps a restart from stacking duplicates
 // (PLAN phase 3, task 5).
 func (s *Store) HasOpenJob(ctx context.Context, kind, payload string) (bool, error) {
-	var n int
-	err := s.db.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM jobs
-		WHERE kind = ? AND payload = ? AND state IN (?, ?)`,
-		kind, payload, core.JobStatePending, core.JobStateRunning).Scan(&n)
+	n, err := s.db.NewSelect().Model((*jobModel)(nil)).
+		Where("kind = ?", kind).Where("payload = ?", payload).
+		Where("state IN (?)", bun.In([]string{core.JobStatePending, core.JobStateRunning})).
+		Count(ctx)
 	if err != nil {
 		return false, fmt.Errorf("store: has open %s job: %w", kind, err)
 	}
@@ -402,39 +374,31 @@ func (s *Store) HasOpenJob(ctx context.Context, kind, payload string) (bool, err
 // does not learn the shape of any one kind's arguments, and a kind that grows a
 // field does not come back here.
 func (s *Store) OpenJobsByKind(ctx context.Context, kind string) ([]core.Job, error) {
-	rows, err := s.db.QueryContext(ctx,
-		"SELECT "+jobColumns+" FROM jobs WHERE kind = ? AND state IN (?, ?) ORDER BY id",
-		kind, core.JobStatePending, core.JobStateRunning)
-	if err != nil {
+	models := []jobModel{}
+	if err := s.db.NewSelect().Model(&models).Where("kind = ?", kind).
+		Where("state IN (?)", bun.In([]string{core.JobStatePending, core.JobStateRunning})).
+		Order("id ASC").Scan(ctx); err != nil {
 		return nil, fmt.Errorf("store: open %s jobs: %w", kind, err)
 	}
-	defer rows.Close()
-
-	out := []core.Job{}
-	for rows.Next() {
-		j, err := scanJob(rows)
-		if err != nil {
-			return nil, fmt.Errorf("store: scan open %s job: %w", kind, err)
-		}
-		out = append(out, *j)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: open %s jobs: %w", kind, err)
+	out := make([]core.Job, len(models))
+	for i := range models {
+		out[i] = models[i].core()
 	}
 	return out, nil
 }
 
 // GetJob returns the job with the given id, or ErrNotFound.
 func (s *Store) GetJob(ctx context.Context, id int64) (*core.Job, error) {
-	row := s.db.QueryRowContext(ctx, "SELECT "+jobColumns+" FROM jobs WHERE id = ?", id)
-	j, err := scanJob(row)
+	var model jobModel
+	err := s.db.NewSelect().Model(&model).Where("id = ?", id).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("store: job %d: %w", id, ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("store: get job %d: %w", id, err)
 	}
-	return j, nil
+	out := model.core()
+	return &out, nil
 }
 
 // RetryDelay is the backoff before attempt number n (1-based) is retried:

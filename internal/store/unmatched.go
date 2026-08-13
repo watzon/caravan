@@ -10,11 +10,8 @@ import (
 	"github.com/watzon/caravan/internal/core"
 )
 
-const unmatchedColumns = `id, path, size, parsed, reason, seen_at, library_id`
-
 // UpsertUnmatchedFile parks a file in the scan-review queue, or refreshes the
-// entry if it is already parked. Identity is the storage-root-relative Path,
-// so rescanning the same messy folder does not multiply the queue.
+// entry if it is already parked.
 func (s *Store) UpsertUnmatchedFile(ctx context.Context, u *core.UnmatchedFile) error {
 	parsed, err := json.Marshal(u.Parsed)
 	if err != nil {
@@ -23,88 +20,58 @@ func (s *Store) UpsertUnmatchedFile(ctx context.Context, u *core.UnmatchedFile) 
 	if u.SeenAt.IsZero() {
 		u.SeenAt = now()
 	}
-
-	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO unmatched_files (path, size, parsed, reason, seen_at, library_id)
-		VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT (path) DO UPDATE SET
-			size = excluded.size, parsed = excluded.parsed,
-			reason = excluded.reason, seen_at = excluded.seen_at,
-			library_id = excluded.library_id`,
-		u.Path, u.Size, string(parsed), u.Reason, formatTime(u.SeenAt), nullInt64(u.LibraryID))
+	model := unmatchedFileModelFromCore(u, string(parsed))
+	_, err = s.db.NewInsert().Model(&model).
+		On("CONFLICT (path) DO UPDATE").
+		Set("size = EXCLUDED.size").
+		Set("parsed = EXCLUDED.parsed").
+		Set("reason = EXCLUDED.reason").
+		Set("seen_at = EXCLUDED.seen_at").
+		Set("library_id = EXCLUDED.library_id").
+		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("store: upsert unmatched file %q: %w", u.Path, err)
 	}
-	if u.ID != 0 {
-		return nil
-	}
-	if err := s.db.QueryRowContext(ctx, "SELECT id FROM unmatched_files WHERE path = ?", u.Path).Scan(&u.ID); err != nil {
-		return fmt.Errorf("store: upsert unmatched file %q: %w", u.Path, err)
+	if u.ID == 0 {
+		if err := s.db.NewSelect().Model(&model).Column("id").Where("path = ?", u.Path).Scan(ctx); err != nil {
+			return fmt.Errorf("store: upsert unmatched file %q: %w", u.Path, err)
+		}
+		u.ID = model.ID
 	}
 	return nil
 }
 
 // GetUnmatchedFile returns the parked file with the given id, or ErrNotFound.
-// This is the lookup behind manual-match import.
 func (s *Store) GetUnmatchedFile(ctx context.Context, id int64) (*core.UnmatchedFile, error) {
-	row := s.db.QueryRowContext(ctx, "SELECT "+unmatchedColumns+" FROM unmatched_files WHERE id = ?", id)
-	u, err := scanUnmatchedFile(row)
+	var model unmatchedFileModel
+	err := s.db.NewSelect().Model(&model).Where("id = ?", id).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("store: unmatched file %d: %w", id, ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("store: get unmatched file %d: %w", id, err)
 	}
-	return u, nil
+	out := model.core()
+	return &out, nil
 }
 
 // ListUnmatchedFiles returns the scan-review queue ordered by id DESC.
 func (s *Store) ListUnmatchedFiles(ctx context.Context) ([]core.UnmatchedFile, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT "+unmatchedColumns+" FROM unmatched_files ORDER BY id DESC")
-	if err != nil {
+	models := []unmatchedFileModel{}
+	if err := s.db.NewSelect().Model(&models).OrderExpr("id DESC").Scan(ctx); err != nil {
 		return nil, fmt.Errorf("store: list unmatched files: %w", err)
 	}
-	defer rows.Close()
-
-	out := []core.UnmatchedFile{}
-	for rows.Next() {
-		u, err := scanUnmatchedFile(rows)
-		if err != nil {
-			return nil, fmt.Errorf("store: scan unmatched file: %w", err)
-		}
-		out = append(out, *u)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: list unmatched files: %w", err)
+	out := make([]core.UnmatchedFile, len(models))
+	for i := range models {
+		out[i] = models[i].core()
 	}
 	return out, nil
 }
 
-// DeleteUnmatchedFileByPath clears a file from the review queue, which is what
-// a successful manual match does. Deleting an absent path is not an error.
+// DeleteUnmatchedFileByPath clears a file from the review queue.
 func (s *Store) DeleteUnmatchedFileByPath(ctx context.Context, path string) error {
-	if _, err := s.db.ExecContext(ctx, "DELETE FROM unmatched_files WHERE path = ?", path); err != nil {
+	if _, err := s.db.NewDelete().Model((*unmatchedFileModel)(nil)).Where("path = ?", path).Exec(ctx); err != nil {
 		return fmt.Errorf("store: delete unmatched file %q: %w", path, err)
 	}
 	return nil
-}
-
-func scanUnmatchedFile(sc scanner) (*core.UnmatchedFile, error) {
-	var (
-		u         core.UnmatchedFile
-		parsed    string
-		seenAt    string
-		libraryID sql.NullInt64
-	)
-	if err := sc.Scan(&u.ID, &u.Path, &u.Size, &parsed, &u.Reason, &seenAt, &libraryID); err != nil {
-		return nil, err
-	}
-	u.LibraryID = libraryID.Int64
-	if parsed != "" {
-		// A row whose JSON no longer decodes must still list: the point of
-		// this queue is visibility, and the user can re-parse from the UI.
-		_ = json.Unmarshal([]byte(parsed), &u.Parsed)
-	}
-	u.SeenAt = parseTime(seenAt)
-	return &u, nil
 }

@@ -8,99 +8,47 @@ import (
 	"fmt"
 	"strconv"
 
+	"github.com/uptrace/bun"
 	"github.com/watzon/caravan/internal/core"
 )
 
-// DefaultQualityProfileName is the profile seeded by migration 0001, so a
+// DefaultQualityProfileName is the profile seeded by the baseline schema, so a
 // first run always has something to assign to a new library item.
 const DefaultQualityProfileName = "Standard"
-
-const qualityProfileColumns = `id, name, cutoff, items, upgrade_allowed, preferred_sources, proper_repack_preference, min_seeders, min_size_mb, max_size_mb, custom_formats, tv_profile, tv_compatibility_policy, created_at, updated_at`
 
 // CreateQualityProfile inserts p and writes back the assigned ID. The name
 // must be unique; a duplicate is a store error the API layer turns into a 409.
 func (s *Store) CreateQualityProfile(ctx context.Context, p *core.QualityProfile) error {
-	items, err := json.Marshal(p.Items)
+	items, preferredSources, customFormats, err := qualityProfileJSONValues(p)
 	if err != nil {
-		return fmt.Errorf("store: encode items of profile %q: %w", p.Name, err)
+		return err
 	}
-	preferredSources := p.PreferredSources
-	if preferredSources == nil {
-		preferredSources = []string{}
-	}
-	customFormatsValue := p.CustomFormats
-	if customFormatsValue == nil {
-		customFormatsValue = []core.CustomFormat{}
-	}
-	preferredSourcesJSON, err := json.Marshal(preferredSources)
-	if err != nil {
-		return fmt.Errorf("store: encode preferred sources of profile %q: %w", p.Name, err)
-	}
-	customFormats, err := json.Marshal(customFormatsValue)
-	if err != nil {
-		return fmt.Errorf("store: encode custom formats of profile %q: %w", p.Name, err)
-	}
-	p.ProperRepackPreference = effectiveProperRepackPreference(p.ProperRepackPreference)
-	p.TVProfile = effectiveTVProfile(p.TVProfile)
-	p.TVCompatibilityPolicy = effectiveTVCompatibilityPolicy(p.TVCompatibilityPolicy)
 	ts := formatTime(now())
-	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO quality_profiles (
-			name, cutoff, items, upgrade_allowed, preferred_sources,
-			proper_repack_preference, min_seeders, min_size_mb, max_size_mb,
-			custom_formats, tv_profile, tv_compatibility_policy, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.Name, p.Cutoff, string(items), p.UpgradeAllowed, string(preferredSourcesJSON),
-		p.ProperRepackPreference, p.MinSeeders, p.MinSizeMB, p.MaxSizeMB,
-		string(customFormats), p.TVProfile, p.TVCompatibilityPolicy, ts, ts)
-	if err != nil {
+	model := qualityProfileStoreModelFromCore(p, items, preferredSources, customFormats)
+	model.CreatedAt = ts
+	model.UpdatedAt = ts
+	if err := s.db.NewInsert().Model(model).Returning("id").Scan(ctx); err != nil {
 		return fmt.Errorf("store: create quality profile %q: %w", p.Name, err)
 	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("store: create quality profile %q: %w", p.Name, err)
-	}
-	p.ID = id
+	p.ID = model.ID
 	return nil
 }
 
 // UpdateQualityProfile rewrites the mutable fields of an existing profile.
 // Updating an absent profile is ErrNotFound.
 func (s *Store) UpdateQualityProfile(ctx context.Context, p *core.QualityProfile) error {
-	items, err := json.Marshal(p.Items)
+	items, preferredSources, customFormats, err := qualityProfileJSONValues(p)
 	if err != nil {
-		return fmt.Errorf("store: encode items of profile %q: %w", p.Name, err)
+		return err
 	}
-	preferredSources := p.PreferredSources
-	if preferredSources == nil {
-		preferredSources = []string{}
-	}
-	customFormatsValue := p.CustomFormats
-	if customFormatsValue == nil {
-		customFormatsValue = []core.CustomFormat{}
-	}
-	preferredSourcesJSON, err := json.Marshal(preferredSources)
-	if err != nil {
-		return fmt.Errorf("store: encode preferred sources of profile %q: %w", p.Name, err)
-	}
-	customFormats, err := json.Marshal(customFormatsValue)
-	if err != nil {
-		return fmt.Errorf("store: encode custom formats of profile %q: %w", p.Name, err)
-	}
-	p.ProperRepackPreference = effectiveProperRepackPreference(p.ProperRepackPreference)
-	p.TVProfile = effectiveTVProfile(p.TVProfile)
-	p.TVCompatibilityPolicy = effectiveTVCompatibilityPolicy(p.TVCompatibilityPolicy)
-	res, err := s.db.ExecContext(ctx, `
-		UPDATE quality_profiles SET
-			name = ?, cutoff = ?, items = ?, upgrade_allowed = ?,
-			preferred_sources = ?, proper_repack_preference = ?,
-			min_seeders = ?, min_size_mb = ?, max_size_mb = ?,
-			custom_formats = ?, tv_profile = ?, tv_compatibility_policy = ?,
-			updated_at = ?
-		WHERE id = ?`,
-		p.Name, p.Cutoff, string(items), p.UpgradeAllowed, string(preferredSourcesJSON),
-		p.ProperRepackPreference, p.MinSeeders, p.MinSizeMB, p.MaxSizeMB,
-		string(customFormats), p.TVProfile, p.TVCompatibilityPolicy, formatTime(now()), p.ID)
+	model := qualityProfileStoreModelFromCore(p, items, preferredSources, customFormats)
+	model.UpdatedAt = formatTime(now())
+	res, err := s.db.NewUpdate().Model(model).
+		Column("name", "cutoff", "items", "upgrade_allowed", "preferred_sources",
+			"proper_repack_preference", "min_seeders", "min_size_mb", "max_size_mb",
+			"custom_formats", "tv_profile", "tv_compatibility_policy", "updated_at").
+		WherePK().
+		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("store: update quality profile %d: %w", p.ID, err)
 	}
@@ -123,50 +71,39 @@ func (s *Store) ImportQualityProfiles(ctx context.Context, profiles []core.Quali
 		if err != nil {
 			return err
 		}
-		var id int64
-		err = tx.QueryRowContext(ctx, "SELECT id FROM quality_profiles WHERE name = ?", p.Name).Scan(&id)
+		model := qualityProfileStoreModelFromCore(p, items, preferredSources, customFormats)
+		var existing qualityProfileStoreModel
+		err = tx.NewSelect().Model(&existing).Column("id").Where("name = ?", p.Name).Scan(ctx)
 		switch {
 		case err == nil:
-			if _, err := tx.ExecContext(ctx, `
-				UPDATE quality_profiles SET
-					cutoff = ?, items = ?, upgrade_allowed = ?, preferred_sources = ?,
-					proper_repack_preference = ?, min_seeders = ?, min_size_mb = ?,
-					max_size_mb = ?, custom_formats = ?, tv_profile = ?,
-					tv_compatibility_policy = ?, updated_at = ?
-				WHERE id = ?`,
-				p.Cutoff, items, p.UpgradeAllowed, preferredSources,
-				p.ProperRepackPreference, p.MinSeeders, p.MinSizeMB, p.MaxSizeMB,
-				customFormats, p.TVProfile, p.TVCompatibilityPolicy, formatTime(now()), id); err != nil {
+			model.ID = existing.ID
+			model.UpdatedAt = formatTime(now())
+			if _, err := tx.NewUpdate().Model(model).
+				Column("cutoff", "items", "upgrade_allowed", "preferred_sources", "proper_repack_preference",
+					"min_seeders", "min_size_mb", "max_size_mb", "custom_formats", "tv_profile",
+					"tv_compatibility_policy", "updated_at").
+				WherePK().Exec(ctx); err != nil {
 				return fmt.Errorf("store: import quality profile %q: %w", p.Name, err)
 			}
-			p.ID = id
+			p.ID = existing.ID
 		case errors.Is(err, sql.ErrNoRows):
-			res, err := tx.ExecContext(ctx, `
-				INSERT INTO quality_profiles (
-					name, cutoff, items, upgrade_allowed, preferred_sources,
-					proper_repack_preference, min_seeders, min_size_mb, max_size_mb,
-					custom_formats, tv_profile, tv_compatibility_policy, created_at, updated_at
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				p.Name, p.Cutoff, items, p.UpgradeAllowed, preferredSources,
-				p.ProperRepackPreference, p.MinSeeders, p.MinSizeMB, p.MaxSizeMB,
-				customFormats, p.TVProfile, p.TVCompatibilityPolicy, formatTime(now()), formatTime(now()))
-			if err != nil {
+			ts := formatTime(now())
+			model.CreatedAt = ts
+			model.UpdatedAt = ts
+			if err := tx.NewInsert().Model(model).Returning("id").Scan(ctx); err != nil {
 				return fmt.Errorf("store: import quality profile %q: %w", p.Name, err)
 			}
-			p.ID, err = res.LastInsertId()
-			if err != nil {
-				return fmt.Errorf("store: import quality profile %q: %w", p.Name, err)
-			}
+			p.ID = model.ID
 		default:
 			return fmt.Errorf("store: find imported quality profile %q: %w", p.Name, err)
 		}
 	}
 
-	var defaultID int64
-	if err := tx.QueryRowContext(ctx, "SELECT id FROM quality_profiles WHERE name = ?", defaultName).Scan(&defaultID); err != nil {
+	var defaultProfile qualityProfileStoreModel
+	if err := tx.NewSelect().Model(&defaultProfile).Column("id").Where("name = ?", defaultName).Scan(ctx); err != nil {
 		return fmt.Errorf("store: find imported default quality profile %q: %w", defaultName, err)
 	}
-	if err := s.setDefaultQualityProfile(ctx, tx, defaultID); err != nil {
+	if err := s.setDefaultQualityProfile(ctx, tx, defaultProfile.ID); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
@@ -236,7 +173,7 @@ func (s *Store) DeleteQualityProfile(ctx context.Context, id int64) error {
 		return &QualityProfileDeleteConflict{References: refs}
 	}
 
-	res, err := tx.ExecContext(ctx, "DELETE FROM quality_profiles WHERE id = ?", id)
+	res, err := tx.NewDelete().Model((*qualityProfileStoreModel)(nil)).Where("id = ?", id).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("store: delete quality profile %d: %w", id, err)
 	}
@@ -311,14 +248,6 @@ func (s *Store) GetDefaultQualityProfile(ctx context.Context) (*core.QualityProf
 	return s.defaultQualityProfile(ctx, s.db)
 }
 
-// qualityProfileDB is the small database surface shared by *sql.DB and
-// *sql.Tx. Keeping repair and deletion on this abstraction lets deletion make
-// its integrity decision atomically.
-type qualityProfileDB interface {
-	QueryRowContext(context.Context, string, ...any) *sql.Row
-	ExecContext(context.Context, string, ...any) (sql.Result, error)
-}
-
 func (s *Store) setQualityProfile(ctx context.Context, item string, itemID, profileID int64) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -335,11 +264,14 @@ func (s *Store) setQualityProfile(ctx context.Context, item string, itemID, prof
 	var res sql.Result
 	switch item {
 	case "movie":
-		res, err = tx.ExecContext(ctx, "UPDATE movies SET quality_profile_id = ? WHERE id = ?", profileID, itemID)
+		res, err = tx.NewUpdate().Model((*movieProfileAssignmentStoreModel)(nil)).
+			Set("quality_profile_id = ?", profileID).Where("id = ?", itemID).Exec(ctx)
 	case "series":
-		res, err = tx.ExecContext(ctx, "UPDATE series SET quality_profile_id = ? WHERE id = ?", profileID, itemID)
+		res, err = tx.NewUpdate().Model((*seriesProfileAssignmentStoreModel)(nil)).
+			Set("quality_profile_id = ?", profileID).Where("id = ?", itemID).Exec(ctx)
 	case "library":
-		res, err = tx.ExecContext(ctx, "UPDATE libraries SET quality_profile_id = ? WHERE id = ?", nullInt64(profileID), itemID)
+		res, err = tx.NewUpdate().Model((*libraryProfileAssignmentStoreModel)(nil)).
+			Set("quality_profile_id = ?", int64Pointer(profileID)).Where("id = ?", itemID).Exec(ctx)
 	default:
 		return fmt.Errorf("store: unsupported quality profile target %q", item)
 	}
@@ -355,11 +287,11 @@ func (s *Store) setQualityProfile(ctx context.Context, item string, itemID, prof
 	return nil
 }
 
-func (s *Store) defaultQualityProfile(ctx context.Context, db qualityProfileDB) (*core.QualityProfile, error) {
-	var value string
-	err := db.QueryRowContext(ctx, "SELECT value FROM settings WHERE key = ?", SettingDefaultQualityProfileID).Scan(&value)
+func (s *Store) defaultQualityProfile(ctx context.Context, db bun.IDB) (*core.QualityProfile, error) {
+	var setting settingModel
+	err := db.NewSelect().Model(&setting).Column("value").Where("key = ?", SettingDefaultQualityProfileID).Scan(ctx)
 	if err == nil {
-		if id, parseErr := strconv.ParseInt(value, 10, 64); parseErr == nil && id > 0 {
+		if id, parseErr := strconv.ParseInt(setting.Value, 10, 64); parseErr == nil && id > 0 {
 			p, profileErr := s.getQualityProfile(ctx, db, id)
 			if profileErr == nil {
 				return p, nil
@@ -382,42 +314,49 @@ func (s *Store) defaultQualityProfile(ctx context.Context, db qualityProfileDB) 
 	return p, nil
 }
 
-func (s *Store) setDefaultQualityProfile(ctx context.Context, db qualityProfileDB, id int64) error {
+func (s *Store) setDefaultQualityProfile(ctx context.Context, db bun.IDB, id int64) error {
 	if id <= 0 {
 		return fmt.Errorf("store: default quality profile id must be positive")
 	}
 	if _, err := s.getQualityProfile(ctx, db, id); err != nil {
 		return err
 	}
-	if _, err := db.ExecContext(ctx, `
-		INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
-		ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-		SettingDefaultQualityProfileID, strconv.FormatInt(id, 10), formatTime(now())); err != nil {
+	setting := &settingModel{
+		Key: SettingDefaultQualityProfileID, Value: strconv.FormatInt(id, 10), UpdatedAt: formatTime(now()),
+	}
+	if _, err := db.NewInsert().Model(setting).
+		On("CONFLICT (key) DO UPDATE").
+		Set("value = EXCLUDED.value").
+		Set("updated_at = EXCLUDED.updated_at").
+		Exec(ctx); err != nil {
 		return fmt.Errorf("store: set default quality profile %d: %w", id, err)
 	}
 	return nil
 }
 
-func (s *Store) oldestQualityProfile(ctx context.Context, db qualityProfileDB) (*core.QualityProfile, error) {
-	p, err := scanQualityProfile(db.QueryRowContext(ctx,
-		"SELECT "+qualityProfileColumns+" FROM quality_profiles ORDER BY id LIMIT 1"))
+func (s *Store) oldestQualityProfile(ctx context.Context, db bun.IDB) (*core.QualityProfile, error) {
+	var model qualityProfileStoreModel
+	err := db.NewSelect().Model(&model).Order("id ASC").Limit(1).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("store: no quality profiles: %w", ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("store: get oldest quality profile: %w", err)
 	}
-	return p, nil
+	p, err := model.coreQualityProfile()
+	if err != nil {
+		return nil, fmt.Errorf("store: get oldest quality profile: %w", err)
+	}
+	return &p, nil
 }
 
-func (s *Store) qualityProfileReferenceCounts(ctx context.Context, db qualityProfileDB, id int64) (QualityProfileReferenceCounts, error) {
+func (s *Store) qualityProfileReferenceCounts(ctx context.Context, db bun.IDB, id int64) (QualityProfileReferenceCounts, error) {
 	var refs QualityProfileReferenceCounts
-	err := db.QueryRowContext(ctx, `
-		SELECT
-			(SELECT COUNT(*) FROM libraries WHERE quality_profile_id = ?),
-			(SELECT COUNT(*) FROM movies WHERE quality_profile_id = ?),
-			(SELECT COUNT(*) FROM series WHERE quality_profile_id = ?)`,
-		id, id, id).Scan(&refs.Libraries, &refs.Movies, &refs.Series)
+	err := db.NewSelect().
+		ColumnExpr("(SELECT COUNT(*) FROM libraries WHERE quality_profile_id = ?) AS libraries", id).
+		ColumnExpr("(SELECT COUNT(*) FROM movies WHERE quality_profile_id = ?) AS movies", id).
+		ColumnExpr("(SELECT COUNT(*) FROM series WHERE quality_profile_id = ?) AS series", id).
+		Scan(ctx, &refs)
 	if err != nil {
 		return QualityProfileReferenceCounts{}, fmt.Errorf("store: count quality profile %d references: %w", id, err)
 	}
@@ -429,75 +368,73 @@ func (s *Store) GetQualityProfile(ctx context.Context, id int64) (*core.QualityP
 	return s.getQualityProfile(ctx, s.db, id)
 }
 
-func (s *Store) getQualityProfile(ctx context.Context, db qualityProfileDB, id int64) (*core.QualityProfile, error) {
-	p, err := scanQualityProfile(db.QueryRowContext(ctx,
-		"SELECT "+qualityProfileColumns+" FROM quality_profiles WHERE id = ?", id))
+func (s *Store) getQualityProfile(ctx context.Context, db bun.IDB, id int64) (*core.QualityProfile, error) {
+	var model qualityProfileStoreModel
+	err := db.NewSelect().Model(&model).Where("id = ?", id).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("store: quality profile %d: %w", id, ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("store: get quality profile %d: %w", id, err)
 	}
-	return p, nil
+	p, err := model.coreQualityProfile()
+	if err != nil {
+		return nil, fmt.Errorf("store: get quality profile %d: %w", id, err)
+	}
+	return &p, nil
 }
 
 // ListQualityProfiles returns every profile ordered by creation order.
 func (s *Store) ListQualityProfiles(ctx context.Context) ([]core.QualityProfile, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT "+qualityProfileColumns+" FROM quality_profiles ORDER BY id")
-	if err != nil {
+	models := make([]qualityProfileStoreModel, 0)
+	if err := s.db.NewSelect().Model(&models).Order("id ASC").Scan(ctx); err != nil {
 		return nil, fmt.Errorf("store: list quality profiles: %w", err)
 	}
-	defer rows.Close()
-
-	out := []core.QualityProfile{}
-	for rows.Next() {
-		p, err := scanQualityProfile(rows)
+	out := make([]core.QualityProfile, 0, len(models))
+	for i := range models {
+		p, err := models[i].coreQualityProfile()
 		if err != nil {
 			return nil, fmt.Errorf("store: scan quality profile: %w", err)
 		}
-		out = append(out, *p)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: list quality profiles: %w", err)
+		out = append(out, p)
 	}
 	return out, nil
 }
 
-func scanQualityProfile(sc scanner) (*core.QualityProfile, error) {
-	var (
-		p                core.QualityProfile
-		items            string
-		preferredSources string
-		customFormats    string
-		createdAt        string
-		updatedAt        string
-	)
-	if err := sc.Scan(
-		&p.ID, &p.Name, &p.Cutoff, &items, &p.UpgradeAllowed,
-		&preferredSources, &p.ProperRepackPreference, &p.MinSeeders,
-		&p.MinSizeMB, &p.MaxSizeMB, &customFormats, &p.TVProfile,
-		&p.TVCompatibilityPolicy, &createdAt, &updatedAt,
-	); err != nil {
-		return nil, err
+func qualityProfileStoreModelFromCore(p *core.QualityProfile, items, preferredSources, customFormats string) *qualityProfileStoreModel {
+	return &qualityProfileStoreModel{
+		ID: p.ID, Name: p.Name, Cutoff: p.Cutoff, Items: items, UpgradeAllowed: p.UpgradeAllowed,
+		PreferredSources: preferredSources, ProperRepackPreference: p.ProperRepackPreference,
+		MinSeeders: p.MinSeeders, MinSizeMB: p.MinSizeMB, MaxSizeMB: p.MaxSizeMB,
+		CustomFormats: customFormats, TVProfile: p.TVProfile, TVCompatibilityPolicy: p.TVCompatibilityPolicy,
 	}
-	if items != "" {
-		if err := json.Unmarshal([]byte(items), &p.Items); err != nil {
-			return nil, fmt.Errorf("decode items of profile %q: %w", p.Name, err)
+}
+
+func (m *qualityProfileStoreModel) coreQualityProfile() (core.QualityProfile, error) {
+	p := core.QualityProfile{
+		ID: m.ID, Name: m.Name, Cutoff: m.Cutoff, UpgradeAllowed: m.UpgradeAllowed,
+		ProperRepackPreference: m.ProperRepackPreference, MinSeeders: m.MinSeeders,
+		MinSizeMB: m.MinSizeMB, MaxSizeMB: m.MaxSizeMB, TVProfile: m.TVProfile,
+		TVCompatibilityPolicy: m.TVCompatibilityPolicy,
+	}
+	if m.Items != "" {
+		if err := json.Unmarshal([]byte(m.Items), &p.Items); err != nil {
+			return core.QualityProfile{}, fmt.Errorf("decode items of profile %q: %w", p.Name, err)
 		}
 	}
-	if preferredSources != "" {
-		if err := json.Unmarshal([]byte(preferredSources), &p.PreferredSources); err != nil {
-			return nil, fmt.Errorf("decode preferred sources of profile %q: %w", p.Name, err)
+	if m.PreferredSources != "" {
+		if err := json.Unmarshal([]byte(m.PreferredSources), &p.PreferredSources); err != nil {
+			return core.QualityProfile{}, fmt.Errorf("decode preferred sources of profile %q: %w", p.Name, err)
 		}
 	}
-	if customFormats != "" {
-		if err := json.Unmarshal([]byte(customFormats), &p.CustomFormats); err != nil {
-			return nil, fmt.Errorf("decode custom formats of profile %q: %w", p.Name, err)
+	if m.CustomFormats != "" {
+		if err := json.Unmarshal([]byte(m.CustomFormats), &p.CustomFormats); err != nil {
+			return core.QualityProfile{}, fmt.Errorf("decode custom formats of profile %q: %w", p.Name, err)
 		}
 	}
-	p.CreatedAt = parseTime(createdAt)
-	p.UpdatedAt = parseTime(updatedAt)
-	return &p, nil
+	p.CreatedAt = parseTime(m.CreatedAt)
+	p.UpdatedAt = parseTime(m.UpdatedAt)
+	return p, nil
 }
 
 func effectiveProperRepackPreference(preference string) string {

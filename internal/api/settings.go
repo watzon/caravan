@@ -157,8 +157,8 @@ var publicSettingKeys = map[string]bool{
 // mux; this is the same door on the one other path from the settings table to a
 // response body.
 //
-// The module switch used to be the third entry. It is gone with migration 0028
-// — the switch is per-library now, and a library reports its own `active` on
+// The old module switch is gone: the switch is per-library now, and a library
+// reports its own `active` on
 // the surface that owns it, not through the settings bag.
 var adultOnlySettings = map[string]bool{
 	store.SettingStashURL:     true,

@@ -99,8 +99,8 @@ func (g *libraryGate) load(ctx context.Context) error {
 	}
 
 	// `library_access` is the whole answer. users.adult_access was bridged onto
-	// adult libraries here while both existed; migration 0028 dropped the column
-	// so that it cannot be consulted again. It had stopped being writable when
+	// adult libraries during prerelease development; the baseline has no such
+	// column, so it cannot be consulted again. It had stopped being writable when
 	// the access API replaced the module switch, which made every value in it
 	// stale by construction — an account whose grant was revoked through PUT
 	// /libraries/{id}/access still carried a 1, and reading it would have handed

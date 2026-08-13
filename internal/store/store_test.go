@@ -1,17 +1,22 @@
 package store
 
 import (
+	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"sync"
 	"syscall"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/watzon/caravan/internal/core"
+	_ "modernc.org/sqlite"
 )
 
 // openTemp opens a store in a fresh temp directory and closes it on cleanup.
@@ -26,22 +31,27 @@ func openTemp(t *testing.T) (*Store, string) {
 	return st, path
 }
 
-func TestOpenAppliesMigrations(t *testing.T) {
+func TestOpenAppliesGooseBaselineMigration(t *testing.T) {
 	st, _ := openTemp(t)
 
 	version, err := st.SchemaVersion()
 	if err != nil {
 		t.Fatalf("SchemaVersion: %v", err)
 	}
-	if version < 1 {
-		t.Fatalf("SchemaVersion = %d, want >= 1", version)
+	if version != 1 {
+		t.Fatalf("SchemaVersion = %d, want 1", version)
 	}
 
-	// Every table SPEC §7 names, plus the scan-review queue, must exist.
+	// The clean pre-release baseline contains the entire current model. Future
+	// schema changes are new Goose migrations; none of the development-era schema
+	// steps are part of the public upgrade history.
 	want := []string{
 		"settings", "movies", "series", "seasons", "episodes", "episode_files",
 		"quality_profiles", "indexers", "releases", "grabs", "downloads",
 		"download_clients", "media_files", "events", "jobs", "unmatched_files",
+		"conversions", "storage_migrations", "usenet_servers", "requests", "users",
+		"libraries", "library_indexers", "remote_path_mappings", "notification_webhooks",
+		"stashbox_instances", "library_access", "sessions", "caravan_schema_migrations",
 	}
 	for _, table := range want {
 		var name string
@@ -50,6 +60,490 @@ func TestOpenAppliesMigrations(t *testing.T) {
 		if err != nil {
 			t.Errorf("table %q missing after migration: %v", table, err)
 		}
+	}
+
+	var legacyMetadata int
+	if err := st.DB().QueryRow(
+		"SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'",
+	).Scan(&legacyMetadata); err != nil {
+		t.Fatalf("check legacy migration metadata: %v", err)
+	}
+	if legacyMetadata != 0 {
+		t.Errorf("legacy schema_version tables = %d, want 0", legacyMetadata)
+	}
+}
+
+func TestOpenRetriesAfterGooseMetadataBootstrap(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "caravan.db")
+	db, err := sql.Open("sqlite", dsn(path))
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	provider, err := migrationProvider(db, fstest.MapFS{
+		"0001_placeholder.sql": {Data: []byte("-- +goose Up\nSELECT 1;")},
+	})
+	if err != nil {
+		db.Close()
+		t.Fatalf("migrationProvider: %v", err)
+	}
+	if _, err := provider.Status(t.Context()); err != nil {
+		db.Close()
+		t.Fatalf("bootstrap Goose metadata: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close bootstrap database: %v", err)
+	}
+
+	st, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open after interrupted Goose bootstrap: %v", err)
+	}
+	defer st.Close()
+	version, err := st.SchemaVersion()
+	if err != nil {
+		t.Fatalf("SchemaVersion: %v", err)
+	}
+	if version != 1 {
+		t.Fatalf("SchemaVersion = %d, want 1", version)
+	}
+}
+
+func TestMigrationProviderRejectsMalformedSQLFilename(t *testing.T) {
+	db, err := sql.Open("sqlite", dsn(filepath.Join(t.TempDir(), "malformed.sqlite")))
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer db.Close()
+
+	_, err = migrationProvider(db, fstest.MapFS{
+		"feature.sql": {Data: []byte("-- +goose Up\nSELECT 1;")},
+	})
+	if err == nil {
+		t.Fatal("migrationProvider accepted an embedded SQL file without a migration version")
+	}
+}
+
+func TestStoreAndBunShareDatabaseAndRepresentation(t *testing.T) {
+	st, _ := openTemp(t)
+	ctx := context.Background()
+
+	if err := st.SetSetting(ctx, "written-by-store", "store-value"); err != nil {
+		t.Fatalf("SetSetting: %v", err)
+	}
+	var fromStore settingModel
+	if err := st.ORM().NewSelect().Model(&fromStore).
+		Where("key = ?", "written-by-store").Scan(ctx); err != nil {
+		t.Fatalf("Bun read after Store write: %v", err)
+	}
+	if fromStore.Value != "store-value" {
+		t.Fatalf("Bun value = %q, want %q", fromStore.Value, "store-value")
+	}
+
+	fromBun := settingModel{
+		Key: "written-by-bun", Value: "bun-value", UpdatedAt: formatTime(now()),
+	}
+	if _, err := st.ORM().NewInsert().Model(&fromBun).Exec(ctx); err != nil {
+		t.Fatalf("Bun insert: %v", err)
+	}
+	got, err := st.GetSetting(ctx, fromBun.Key)
+	if err != nil {
+		t.Fatalf("GetSetting after Bun write: %v", err)
+	}
+	if got != fromBun.Value {
+		t.Fatalf("Store value = %q, want %q", got, fromBun.Value)
+	}
+}
+
+func TestOpenRejectsLegacyDatabaseWithoutMutatingIt(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy.sqlite")
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	if _, err := db.Exec(`
+		CREATE TABLE schema_version (version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL);
+		CREATE TABLE legacy_data (value TEXT NOT NULL);
+		INSERT INTO schema_version VALUES (29, 'sessions', '2026-01-01T00:00:00Z');
+		INSERT INTO legacy_data VALUES ('keep me');
+	`); err != nil {
+		db.Close()
+		t.Fatalf("seed legacy database: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close legacy database: %v", err)
+	}
+	if err := os.Chmod(path, 0o640); err != nil {
+		t.Fatalf("chmod legacy database: %v", err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read legacy database before Open: %v", err)
+	}
+	beforeInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat legacy database before Open: %v", err)
+	}
+
+	if _, err := Open(path); !errors.Is(err, ErrLegacySchema) {
+		t.Fatalf("Open legacy database error = %v, want ErrLegacySchema", err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read legacy database after Open: %v", err)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatal("rejected Open changed legacy database bytes")
+	}
+	afterInfo, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("stat legacy database after Open: %v", err)
+	}
+	if afterInfo.Mode().Perm() != beforeInfo.Mode().Perm() {
+		t.Fatalf("rejected Open changed legacy database mode from %04o to %04o",
+			beforeInfo.Mode().Perm(), afterInfo.Mode().Perm())
+	}
+	for _, suffix := range []string{"-wal", "-shm"} {
+		if _, err := os.Stat(path + suffix); !os.IsNotExist(err) {
+			t.Fatalf("rejected Open created SQLite sidecar %q: %v", path+suffix, err)
+		}
+	}
+
+	db, err = sql.Open("sqlite", readOnlyDSN(path))
+	if err != nil {
+		t.Fatalf("reopen legacy database: %v", err)
+	}
+	defer db.Close()
+	var value string
+	if err := db.QueryRow("SELECT value FROM legacy_data").Scan(&value); err != nil {
+		t.Fatalf("legacy row after rejected Open: %v", err)
+	}
+	if value != "keep me" {
+		t.Fatalf("legacy row = %q, want unchanged", value)
+	}
+	var migrationTables int
+	if err := db.QueryRow(`
+		SELECT COUNT(*) FROM sqlite_master
+		WHERE type = 'table' AND name = 'caravan_schema_migrations'`,
+	).Scan(&migrationTables); err != nil {
+		t.Fatalf("count migration tables: %v", err)
+	}
+	if migrationTables != 0 {
+		t.Fatalf("rejected legacy database has %d migration metadata tables, want 0", migrationTables)
+	}
+}
+
+func TestOpenRejectsUnidentifiedSQLiteDatabase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "not-caravan.sqlite")
+	db, err := sql.Open("sqlite", dsn(path))
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	if _, err := db.Exec("CREATE TABLE other_app (value TEXT)"); err != nil {
+		db.Close()
+		t.Fatalf("create unrelated schema: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close unrelated database: %v", err)
+	}
+
+	if _, err := Open(path); !errors.Is(err, ErrUnrecognizedSchema) {
+		t.Fatalf("Open unrelated database error = %v, want ErrUnrecognizedSchema", err)
+	}
+}
+
+func TestOpenRejectsForgedCaravanIdentity(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "forged.sqlite")
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	if _, err := db.Exec(`
+		PRAGMA application_id = 1129469518;
+		CREATE TABLE caravan_schema_migrations (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			version_id INTEGER NOT NULL,
+			is_applied INTEGER NOT NULL,
+			tstamp TIMESTAMP DEFAULT (datetime('now'))
+		);
+		INSERT INTO caravan_schema_migrations (version_id, is_applied) VALUES (0, 1), (1, 1);
+		CREATE TABLE other_app (value TEXT);
+	`); err != nil {
+		db.Close()
+		t.Fatalf("seed forged database: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close forged database: %v", err)
+	}
+
+	if _, err := Open(path); !errors.Is(err, ErrUnrecognizedSchema) {
+		t.Fatalf("Open forged database error = %v, want ErrUnrecognizedSchema", err)
+	}
+}
+
+func TestOpenRejectsCurrentSchemaMissingRequiredSeedContracts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing-seed.sqlite")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open current database: %v", err)
+	}
+	if _, err := st.DB().Exec("DELETE FROM settings WHERE key = 'default_quality_profile_id'"); err != nil {
+		st.Close()
+		t.Fatalf("delete required seed contract: %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("close current database: %v", err)
+	}
+
+	if _, err := Open(path); !errors.Is(err, ErrUnrecognizedSchema) {
+		t.Fatalf("Open missing required seed error = %v, want ErrUnrecognizedSchema", err)
+	}
+}
+
+func TestSchemaVersionAcceptsKnownPendingSuffix(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "known-prefix.sqlite")
+	db, err := sql.Open("sqlite", dsn(path))
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer db.Close()
+
+	first := fstest.MapFS{
+		"0001_first.sql": {Data: []byte("-- +goose Up\nCREATE TABLE first (id INTEGER PRIMARY KEY);")},
+	}
+	if err := runMigrations(context.Background(), db, first); err != nil {
+		t.Fatalf("apply first migration: %v", err)
+	}
+	all := fstest.MapFS{
+		"0001_first.sql":  {Data: []byte("-- +goose Up\nCREATE TABLE first (id INTEGER PRIMARY KEY);")},
+		"0002_second.sql": {Data: []byte("-- +goose Up\nCREATE TABLE second (id INTEGER PRIMARY KEY);")},
+	}
+	version, err := schemaVersionFor(context.Background(), db, all)
+	if err != nil {
+		t.Fatalf("schemaVersionFor known prefix: %v", err)
+	}
+	if version != 1 {
+		t.Fatalf("schemaVersionFor known prefix = %d, want 1", version)
+	}
+}
+
+func TestOpenRejectsUnknownMigrationHistory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "unknown-migration.sqlite")
+	st, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open current database: %v", err)
+	}
+	if _, err := st.DB().Exec(`INSERT INTO caravan_schema_migrations (version_id, is_applied) VALUES (2, 1)`); err != nil {
+		st.Close()
+		t.Fatalf("insert unknown migration marker: %v", err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("close current database: %v", err)
+	}
+
+	if _, err := Open(path); !errors.Is(err, ErrUnrecognizedSchema) {
+		t.Fatalf("Open unknown migration error = %v, want ErrUnrecognizedSchema", err)
+	}
+}
+
+func TestOpenRejectsNoncanonicalGooseHistory(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate string
+	}{
+		{name: "duplicate known version", mutate: `INSERT INTO caravan_schema_migrations (version_id, is_applied) VALUES (1, 1)`},
+		{name: "duplicate zero version", mutate: `INSERT INTO caravan_schema_migrations (version_id, is_applied) VALUES (0, 1)`},
+		{name: "missing zero version", mutate: `DELETE FROM caravan_schema_migrations WHERE version_id = 0`},
+		{name: "known version marked rolled back", mutate: `UPDATE caravan_schema_migrations SET is_applied = 0 WHERE version_id = 1`},
+		{name: "out of order versions", mutate: `
+			DELETE FROM caravan_schema_migrations;
+			INSERT INTO caravan_schema_migrations (version_id, is_applied) VALUES (1, 1);
+			INSERT INTO caravan_schema_migrations (version_id, is_applied) VALUES (0, 1);`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "noncanonical.sqlite")
+			st, err := Open(path)
+			if err != nil {
+				t.Fatalf("Open current database: %v", err)
+			}
+			if _, err := st.DB().Exec(tt.mutate); err != nil {
+				st.Close()
+				t.Fatalf("mutate migration history: %v", err)
+			}
+			if err := st.Close(); err != nil {
+				t.Fatalf("close current database: %v", err)
+			}
+
+			if _, err := Open(path); !errors.Is(err, ErrUnrecognizedSchema) {
+				t.Fatalf("Open noncanonical history error = %v, want ErrUnrecognizedSchema", err)
+			}
+		})
+	}
+}
+
+func TestConcurrentFirstOpenSerializesMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "caravan.db")
+	const opens = 12
+
+	start := make(chan struct{})
+	results := make(chan error, opens)
+	stores := make(chan *Store, opens)
+	var wg sync.WaitGroup
+	for range opens {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			st, err := Open(path)
+			if err == nil {
+				stores <- st
+			}
+			results <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	close(stores)
+	for st := range stores {
+		defer st.Close()
+	}
+	for err := range results {
+		if err != nil {
+			t.Errorf("concurrent Open: %v", err)
+		}
+	}
+
+	db, err := sql.Open("sqlite", readOnlyDSN(path))
+	if err != nil {
+		t.Fatalf("open final database: %v", err)
+	}
+	defer db.Close()
+	version, err := schemaVersion(context.Background(), db)
+	if err != nil {
+		t.Fatalf("final schema version: %v", err)
+	}
+	if version != 1 {
+		t.Fatalf("final schema version = %d, want 1", version)
+	}
+}
+
+func TestFailedTransactionalGooseMigrationRollsBackAndIsNotMarkedApplied(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "failed.sqlite")
+	sqldb, err := sql.Open("sqlite", dsn(path))
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	t.Cleanup(func() { sqldb.Close() })
+
+	migrations := fstest.MapFS{
+		"0002_failure.sql": {Data: []byte(
+			"-- +goose Up\n" +
+				"CREATE TABLE partial_write (key TEXT PRIMARY KEY);\n" +
+				"CREATE TABLE partial_write (key TEXT PRIMARY KEY);",
+		)},
+	}
+	if err := runMigrations(context.Background(), sqldb, migrations); err == nil {
+		t.Fatal("runMigrations with failing migration = nil, want error")
+	}
+
+	var applied int
+	if err := sqldb.QueryRow(`
+		SELECT COUNT(*) FROM caravan_schema_migrations
+		WHERE version_id = 2 AND is_applied = 1`).Scan(&applied); err != nil {
+		t.Fatalf("count failed migration markers: %v", err)
+	}
+	if applied != 0 {
+		t.Fatalf("failed migration markers = %d, want 0", applied)
+	}
+
+	var partialTables int
+	if err := sqldb.QueryRow(`
+		SELECT COUNT(*) FROM sqlite_master
+		WHERE type = 'table' AND name = 'partial_write'`,
+	).Scan(&partialTables); err != nil {
+		t.Fatalf("count partial migration tables: %v", err)
+	}
+	if partialTables != 0 {
+		t.Fatalf("partial migration tables = %d, want transaction rollback", partialTables)
+	}
+}
+
+func TestGooseMarkerFailureRollsBackSchemaAndCanRetry(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "marker-failure.sqlite")
+	db, err := sql.Open("sqlite", dsn(path))
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer db.Close()
+
+	failing := fstest.MapFS{
+		"0001_marker_failure.sql": {Data: []byte(
+			"-- +goose Up\n" +
+				"CREATE TABLE marker_atomicity (id INTEGER PRIMARY KEY);\n" +
+				"DROP TABLE caravan_schema_migrations;",
+		)},
+	}
+	if err := runMigrations(context.Background(), db, failing); err == nil {
+		t.Fatal("runMigrations with marker failure = nil, want error")
+	}
+	assertTableCount(t, db, "marker_atomicity", 0)
+
+	succeeding := fstest.MapFS{
+		"0001_marker_failure.sql": {Data: []byte(
+			"-- +goose Up\n" +
+				"CREATE TABLE marker_atomicity (id INTEGER PRIMARY KEY);",
+		)},
+	}
+	if err := runMigrations(context.Background(), db, succeeding); err != nil {
+		t.Fatalf("retry migration after marker failure: %v", err)
+	}
+	assertTableCount(t, db, "marker_atomicity", 1)
+}
+
+func TestGooseCommitFailureRollsBackSchemaAndMarker(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "commit-failure.sqlite")
+	db, err := sql.Open("sqlite", dsn(path))
+	if err != nil {
+		t.Fatalf("sql.Open: %v", err)
+	}
+	defer db.Close()
+
+	migrations := fstest.MapFS{
+		"0001_commit_failure.sql": {Data: []byte(
+			"-- +goose Up\n" +
+				"CREATE TABLE deferred_parent (id INTEGER PRIMARY KEY);\n" +
+				"CREATE TABLE deferred_child (parent_id INTEGER REFERENCES deferred_parent(id) DEFERRABLE INITIALLY DEFERRED);\n" +
+				"INSERT INTO deferred_child (parent_id) VALUES (1);",
+		)},
+	}
+	if err := runMigrations(context.Background(), db, migrations); err == nil {
+		t.Fatal("runMigrations with deferred FK commit failure = nil, want error")
+	}
+	assertTableCount(t, db, "deferred_parent", 0)
+	assertTableCount(t, db, "deferred_child", 0)
+
+	var applied int
+	if err := db.QueryRow(`
+		SELECT COUNT(*) FROM caravan_schema_migrations
+		WHERE version_id = 1 AND is_applied = 1`).Scan(&applied); err != nil {
+		t.Fatalf("count commit-failed migration markers: %v", err)
+	}
+	if applied != 0 {
+		t.Fatalf("commit-failed migration markers = %d, want 0", applied)
+	}
+}
+
+func assertTableCount(t *testing.T, db *sql.DB, table string, want int) {
+	t.Helper()
+	var got int
+	if err := db.QueryRow(`
+		SELECT COUNT(*) FROM sqlite_master
+		WHERE type = 'table' AND name = ?`, table).Scan(&got); err != nil {
+		t.Fatalf("count table %q: %v", table, err)
+	}
+	if got != want {
+		t.Fatalf("table %q count = %d, want %d", table, got, want)
 	}
 }
 
@@ -166,7 +660,7 @@ func assertSQLiteFilesPrivate(t *testing.T, path string) {
 }
 
 // The disposable-cache pillar (SPEC §1.2) depends on reopening being a no-op:
-// a second Open must not re-run migration 0001 and duplicate the seeded
+// a second Open must not re-run the baseline migration and duplicate the seeded
 // profile, and data written before the close must still be there.
 func TestReopenIsIdempotent(t *testing.T) {
 	ctx := context.Background()

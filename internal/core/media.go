@@ -58,7 +58,7 @@ type Movie struct {
 }
 
 // Minimum-availability stages, stored verbatim in movies.min_availability and
-// constrained by a CHECK in migration 0010. The ordering is temporal:
+// constrained by the movies table. The ordering is temporal:
 // announced happens before cinemas, cinemas before the home release.
 const (
 	// AvailabilityAnnounced searches as soon as the movie is added.
@@ -75,7 +75,7 @@ func ValidAvailability(s string) bool {
 	return s == AvailabilityAnnounced || s == AvailabilityInCinemas || s == AvailabilityReleased
 }
 
-// Series kinds (`series.kind`, migration 0013). A series is a television show
+// Series kinds are stored in `series.kind`. A series is a television show
 // or — once the adult module is enabled — a site whose scenes are its episodes
 // (PLAN phase 9 task 3).
 //
@@ -110,7 +110,7 @@ type Series struct {
 	// StashID is the stash-box id of the site behind an adult series, a UUID
 	// string. Empty on every television series and on an adult series that has
 	// not been matched to a site yet. It is unique among the rows that set it,
-	// exactly as TMDBID is (migration 0013).
+	// exactly as TMDBID is.
 	StashID   string
 	TVDBID    int64
 	IMDBID    string
@@ -178,7 +178,7 @@ type Episode struct {
 	TMDBID        int64
 	// StashID is the stash-box id of the scene behind an adult episode, a UUID
 	// string, empty everywhere else. Unique among the rows that set it
-	// (migration 0013).
+	// by the episode identity index.
 	StashID string
 	Title   string
 	// Overview is the long description. On a scene it is the studio's own
@@ -191,7 +191,7 @@ type Episode struct {
 	// AbsoluteNumber is the provider's series-wide episode number — the count
 	// an anime-style release name uses ("Show - 105") — and 0 when no provider
 	// ever served one for this episode. Zero is "not known", not "the zeroth
-	// episode", so nothing may derive it (migration 0025).
+	// episode", so nothing may derive it.
 	AbsoluteNumber int
 	// Scene is the scene-side metadata of an adult episode, nil on every
 	// television episode. It rides in one JSON column because nothing queries
@@ -201,7 +201,7 @@ type Episode struct {
 
 // SceneInfo is what an adult episode carries that a television episode has no
 // counterpart for: the studio that released the scene, who is in it, and where
-// it lives on the web (migration 0013, `episodes.scene`).
+// it lives on the web (`episodes.scene`).
 //
 // It is a stored shape, deliberately separate from the provider-side SceneMeta
 // in adult.go: the database format must not move when a provider adds a field.

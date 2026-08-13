@@ -10,44 +10,32 @@ import (
 	"github.com/watzon/caravan/internal/core"
 )
 
-const libraryColumns = `id, kind, name, root_path, dlna_visible,
-	route_torrent, route_usenet, quality_profile_id, provider, providers, is_default,
-	active, restricted`
-
 // ListLibraries returns every library ordered by id, which is the order 0012
 // seeded them in: Movies first, then Series.
 func (s *Store) ListLibraries(ctx context.Context) ([]core.Library, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT "+libraryColumns+" FROM libraries ORDER BY id")
-	if err != nil {
+	models := make([]libraryStoreModel, 0)
+	if err := s.db.NewSelect().Model(&models).Order("id ASC").Scan(ctx); err != nil {
 		return nil, fmt.Errorf("store: list libraries: %w", err)
 	}
-	defer rows.Close()
-
-	out := []core.Library{}
-	for rows.Next() {
-		l, err := scanLibrary(rows)
-		if err != nil {
-			return nil, fmt.Errorf("store: scan library: %w", err)
-		}
-		out = append(out, *l)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: list libraries: %w", err)
+	out := make([]core.Library, 0, len(models))
+	for i := range models {
+		out = append(out, models[i].coreLibrary())
 	}
 	return out, nil
 }
 
 // GetLibrary returns the library with the given id, or ErrNotFound.
 func (s *Store) GetLibrary(ctx context.Context, id int64) (*core.Library, error) {
-	row := s.db.QueryRowContext(ctx, "SELECT "+libraryColumns+" FROM libraries WHERE id = ?", id)
-	l, err := scanLibrary(row)
+	var model libraryStoreModel
+	err := s.db.NewSelect().Model(&model).Where("id = ?", id).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("store: library %d: %w", id, ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("store: get library %d: %w", id, err)
 	}
-	return l, nil
+	library := model.coreLibrary()
+	return &library, nil
 }
 
 // GetLibraryByKind returns the DEFAULT library of the given kind, or
@@ -59,16 +47,20 @@ func (s *Store) GetLibrary(ctx context.Context, id int64) (*core.Library, error)
 // to the lowest id, so a by-kind caller never fails while a library of the
 // kind exists.
 func (s *Store) GetLibraryByKind(ctx context.Context, kind string) (*core.Library, error) {
-	row := s.db.QueryRowContext(ctx, "SELECT "+libraryColumns+
-		" FROM libraries WHERE kind = ? ORDER BY is_default DESC, id LIMIT 1", kind)
-	l, err := scanLibrary(row)
+	var model libraryStoreModel
+	err := s.db.NewSelect().Model(&model).
+		Where("kind = ?", kind).
+		Order("is_default DESC", "id ASC").
+		Limit(1).
+		Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("store: library of kind %q: %w", kind, ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("store: get library of kind %q: %w", kind, err)
 	}
-	return l, nil
+	library := model.coreLibrary()
+	return &library, nil
 }
 
 // GetDefaultLibrary is GetLibraryByKind under its post-0022 name. New code
@@ -82,23 +74,16 @@ func (s *Store) GetDefaultLibrary(ctx context.Context, kind string) (*core.Libra
 // default first among equals only by virtue of usually being oldest — callers
 // that need the default ask GetDefaultLibrary.
 func (s *Store) ListLibrariesByKind(ctx context.Context, kind string) ([]core.Library, error) {
-	rows, err := s.db.QueryContext(ctx,
-		"SELECT "+libraryColumns+" FROM libraries WHERE kind = ? ORDER BY id", kind)
-	if err != nil {
+	models := make([]libraryStoreModel, 0)
+	if err := s.db.NewSelect().Model(&models).
+		Where("kind = ?", kind).
+		Order("id ASC").
+		Scan(ctx); err != nil {
 		return nil, fmt.Errorf("store: list libraries of kind %q: %w", kind, err)
 	}
-	defer rows.Close()
-
-	out := []core.Library{}
-	for rows.Next() {
-		l, err := scanLibrary(rows)
-		if err != nil {
-			return nil, fmt.Errorf("store: scan library: %w", err)
-		}
-		out = append(out, *l)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: list libraries of kind %q: %w", kind, err)
+	out := make([]core.Library, 0, len(models))
+	for i := range models {
+		out = append(out, models[i].coreLibrary())
 	}
 	return out, nil
 }
@@ -131,22 +116,11 @@ func (s *Store) CreateLibrary(ctx context.Context, l *core.Library) error {
 		return fmt.Errorf("store: create library %q: %w", l.Name, err)
 	}
 	l.Active = true
-	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO libraries (kind, name, root_path, dlna_visible,
-			route_torrent, route_usenet, quality_profile_id, provider, providers, is_default,
-			active, restricted)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		l.Kind, l.Name, l.RootPath, l.DLNAVisible,
-		nullString(l.RouteTorrent), nullString(l.RouteUsenet), nullInt64(l.QualityProfileID),
-		l.Provider, chain, l.IsDefault, l.Active, l.Restricted)
-	if err != nil {
+	model := libraryStoreModelFromCore(l, chain)
+	if err := s.db.NewInsert().Model(model).Returning("id").Scan(ctx); err != nil {
 		return fmt.Errorf("store: create library %q: %w", l.Name, err)
 	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("store: create library %q: %w", l.Name, err)
-	}
-	l.ID = id
+	l.ID = model.ID
 	if l.DLNAVisible {
 		return s.bumpDLNAUpdateID(ctx)
 	}
@@ -178,7 +152,7 @@ func (s *Store) DeleteLibrary(ctx context.Context, id int64) error {
 	if n > 0 {
 		return fmt.Errorf("%w: %d", ErrLibraryNotEmpty, n)
 	}
-	if _, err := s.db.ExecContext(ctx, "DELETE FROM libraries WHERE id = ?", id); err != nil {
+	if _, err := s.db.NewDelete().Model((*libraryStoreModel)(nil)).Where("id = ?", id).Exec(ctx); err != nil {
 		return fmt.Errorf("store: delete library %d: %w", id, err)
 	}
 	if lib.DLNAVisible {
@@ -192,9 +166,9 @@ func (s *Store) DeleteLibrary(ctx context.Context, id int64) error {
 // Libraries screen renders, so both always agree.
 func (s *Store) CountLibraryItems(ctx context.Context, id int64) (int64, error) {
 	var n int64
-	err := s.db.QueryRowContext(ctx, `
-		SELECT (SELECT COUNT(*) FROM movies WHERE library_id = ?)
-		     + (SELECT COUNT(*) FROM series WHERE library_id = ?)`, id, id).Scan(&n)
+	err := s.db.NewSelect().
+		ColumnExpr("(SELECT COUNT(*) FROM movies WHERE library_id = ?) + (SELECT COUNT(*) FROM series WHERE library_id = ?)", id, id).
+		Scan(ctx, &n)
 	if err != nil {
 		return 0, fmt.Errorf("store: count items of library %d: %w", id, err)
 	}
@@ -214,12 +188,17 @@ func (s *Store) SetDefaultLibrary(ctx context.Context, id int64) error {
 		return fmt.Errorf("store: set default library %d: %w", id, err)
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx,
-		"UPDATE libraries SET is_default = 0 WHERE kind = ? AND is_default = 1", lib.Kind); err != nil {
+	if _, err := tx.NewUpdate().Model((*libraryStoreModel)(nil)).
+		Set("is_default = ?", false).
+		Where("kind = ?", lib.Kind).
+		Where("is_default = ?", true).
+		Exec(ctx); err != nil {
 		return fmt.Errorf("store: set default library %d: %w", id, err)
 	}
-	if _, err := tx.ExecContext(ctx,
-		"UPDATE libraries SET is_default = 1 WHERE id = ?", id); err != nil {
+	if _, err := tx.NewUpdate().Model((*libraryStoreModel)(nil)).
+		Set("is_default = ?", true).
+		Where("id = ?", id).
+		Exec(ctx); err != nil {
 		return fmt.Errorf("store: set default library %d: %w", id, err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -255,14 +234,12 @@ func (s *Store) UpdateLibrary(ctx context.Context, l *core.Library) error {
 	if err != nil {
 		return fmt.Errorf("store: update library %d: %w", l.ID, err)
 	}
-	res, err := s.db.ExecContext(ctx, `
-		UPDATE libraries SET name = ?, root_path = ?, dlna_visible = ?,
-			route_torrent = ?, route_usenet = ?, quality_profile_id = ?, provider = ?,
-			providers = ?, active = ?, restricted = ?
-		WHERE id = ?`,
-		l.Name, l.RootPath, l.DLNAVisible,
-		nullString(l.RouteTorrent), nullString(l.RouteUsenet), nullInt64(l.QualityProfileID),
-		l.Provider, chain, l.Active, l.Restricted, l.ID)
+	model := libraryStoreModelFromCore(l, chain)
+	res, err := s.db.NewUpdate().Model(model).
+		Column("name", "root_path", "dlna_visible", "route_torrent", "route_usenet",
+			"quality_profile_id", "provider", "providers", "active", "restricted").
+		WherePK().
+		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("store: update library %d: %w", l.ID, err)
 	}
@@ -282,12 +259,12 @@ func (s *Store) UpdateLibrary(ctx context.Context, l *core.Library) error {
 // client that had already cached 4 believing it was up to date. An absent key
 // reads as 1 (see SettingDLNAUpdateID), so the first bump lands on 2.
 func (s *Store) bumpDLNAUpdateID(ctx context.Context) error {
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO settings (key, value, updated_at) VALUES (?, '2', ?)
-		ON CONFLICT (key) DO UPDATE SET
-			value = CAST(CAST(settings.value AS INTEGER) + 1 AS TEXT),
-			updated_at = excluded.updated_at`,
-		SettingDLNAUpdateID, formatTime(now()))
+	setting := &settingModel{Key: SettingDLNAUpdateID, Value: "2", UpdatedAt: formatTime(now())}
+	_, err := s.db.NewInsert().Model(setting).
+		On("CONFLICT (key) DO UPDATE").
+		Set("value = CAST(CAST(value AS INTEGER) + 1 AS TEXT)").
+		Set("updated_at = EXCLUDED.updated_at").
+		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("store: bump dlna update id: %w", err)
 	}
@@ -301,33 +278,23 @@ func (s *Store) bumpDLNAUpdateID(ctx context.Context) error {
 // missing row as the default; callers running a search want
 // ResolveLibrarySettings instead.
 func (s *Store) ListLibraryIndexers(ctx context.Context, libraryID int64) ([]core.LibraryIndexer, error) {
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT library_id, indexer_id, enabled, categories FROM library_indexers
-		WHERE library_id = ? ORDER BY indexer_id`, libraryID)
-	if err != nil {
+	models := make([]libraryIndexerStoreModel, 0)
+	if err := s.db.NewSelect().Model(&models).
+		Where("library_id = ?", libraryID).
+		Order("indexer_id ASC").
+		Scan(ctx); err != nil {
 		return nil, fmt.Errorf("store: list indexers of library %d: %w", libraryID, err)
 	}
-	defer rows.Close()
-
-	out := []core.LibraryIndexer{}
-	for rows.Next() {
-		var (
-			li         core.LibraryIndexer
-			categories sql.NullString
-		)
-		if err := rows.Scan(&li.LibraryID, &li.IndexerID, &li.Enabled, &categories); err != nil {
-			return nil, fmt.Errorf("store: scan library indexer: %w", err)
-		}
-		if categories.Valid && categories.String != "" {
-			if err := json.Unmarshal([]byte(categories.String), &li.Categories); err != nil {
+	out := make([]core.LibraryIndexer, 0, len(models))
+	for i := range models {
+		li := core.LibraryIndexer{LibraryID: models[i].LibraryID, IndexerID: models[i].IndexerID, Enabled: models[i].Enabled}
+		if models[i].Categories != nil && *models[i].Categories != "" {
+			if err := json.Unmarshal([]byte(*models[i].Categories), &li.Categories); err != nil {
 				return nil, fmt.Errorf("store: decode categories of library %d indexer %d: %w",
 					li.LibraryID, li.IndexerID, err)
 			}
 		}
 		out = append(out, li)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: list indexers of library %d: %w", libraryID, err)
 	}
 	return out, nil
 }
@@ -336,21 +303,24 @@ func (s *Store) ListLibraryIndexers(ctx context.Context, libraryID int64) ([]cor
 // previous one. Writing enabled with nil categories is equivalent to having no
 // row at all, so a user can always get back to the default.
 func (s *Store) SetLibraryIndexer(ctx context.Context, li *core.LibraryIndexer) error {
-	var categories any
+	var categories *string
 	if li.Categories != nil {
 		b, err := json.Marshal(li.Categories)
 		if err != nil {
 			return fmt.Errorf("store: encode categories of library %d indexer %d: %w",
 				li.LibraryID, li.IndexerID, err)
 		}
-		categories = string(b)
+		encoded := string(b)
+		categories = &encoded
 	}
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO library_indexers (library_id, indexer_id, enabled, categories)
-		VALUES (?, ?, ?, ?)
-		ON CONFLICT (library_id, indexer_id) DO UPDATE SET
-			enabled = excluded.enabled, categories = excluded.categories`,
-		li.LibraryID, li.IndexerID, li.Enabled, categories)
+	model := &libraryIndexerStoreModel{
+		LibraryID: li.LibraryID, IndexerID: li.IndexerID, Enabled: li.Enabled, Categories: categories,
+	}
+	_, err := s.db.NewInsert().Model(model).
+		On("CONFLICT (library_id, indexer_id) DO UPDATE").
+		Set("enabled = EXCLUDED.enabled").
+		Set("categories = EXCLUDED.categories").
+		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("store: set library %d indexer %d: %w", li.LibraryID, li.IndexerID, err)
 	}
@@ -553,15 +523,6 @@ func overrideOrGlobal(library, global string) string {
 	return global
 }
 
-// nullInt64 stores zero as SQL NULL, which is what a nullable id column means
-// by "not set" — pointing at row 0 is not the same as pointing at nothing.
-func nullInt64(v int64) any {
-	if v == 0 {
-		return nil
-	}
-	return v
-}
-
 // normalizeChain settles l's two provider columns against each other and
 // returns the encoded `providers` value to store.
 //
@@ -590,30 +551,51 @@ func normalizeChain(l *core.Library) (string, error) {
 	return string(b), nil
 }
 
-func scanLibrary(sc scanner) (*core.Library, error) {
-	var (
-		l         core.Library
-		torrent   sql.NullString
-		usenet    sql.NullString
-		profileID sql.NullInt64
-		providers sql.NullString
-	)
-	if err := sc.Scan(&l.ID, &l.Kind, &l.Name, &l.RootPath, &l.DLNAVisible,
-		&torrent, &usenet, &profileID, &l.Provider, &providers, &l.IsDefault,
-		&l.Active, &l.Restricted); err != nil {
-		return nil, err
+func libraryStoreModelFromCore(l *core.Library, providers string) *libraryStoreModel {
+	return &libraryStoreModel{
+		ID: l.ID, Kind: l.Kind, Name: l.Name, RootPath: l.RootPath, DLNAVisible: l.DLNAVisible,
+		RouteTorrent: stringPointer(l.RouteTorrent), RouteUsenet: stringPointer(l.RouteUsenet),
+		QualityProfileID: int64Pointer(l.QualityProfileID), Provider: l.Provider, Providers: providers,
+		IsDefault: l.IsDefault, Active: l.Active, Restricted: l.Restricted,
 	}
-	l.RouteTorrent = torrent.String
-	l.RouteUsenet = usenet.String
-	l.QualityProfileID = profileID.Int64
+}
+
+func (m *libraryStoreModel) coreLibrary() core.Library {
+	l := core.Library{
+		ID: m.ID, Kind: m.Kind, Name: m.Name, RootPath: m.RootPath, DLNAVisible: m.DLNAVisible,
+		Provider: m.Provider, IsDefault: m.IsDefault, Active: m.Active, Restricted: m.Restricted,
+	}
+	if m.RouteTorrent != nil {
+		l.RouteTorrent = *m.RouteTorrent
+	}
+	if m.RouteUsenet != nil {
+		l.RouteUsenet = *m.RouteUsenet
+	}
+	if m.QualityProfileID != nil {
+		l.QualityProfileID = *m.QualityProfileID
+	}
 	// A chain that will not decode is treated as absent rather than as an
 	// error: `provider` is the head and still answers, so a library with a
 	// mangled list keeps working exactly as it did before 0024 instead of
 	// making the whole Libraries screen unreadable.
-	if providers.Valid && providers.String != "" {
-		if err := json.Unmarshal([]byte(providers.String), &l.Providers); err != nil {
+	if m.Providers != "" {
+		if err := json.Unmarshal([]byte(m.Providers), &l.Providers); err != nil {
 			l.Providers = nil
 		}
 	}
-	return &l, nil
+	return l
+}
+
+func stringPointer(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+func int64Pointer(value int64) *int64 {
+	if value == 0 {
+		return nil
+	}
+	return &value
 }

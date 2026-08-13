@@ -6,7 +6,7 @@ import (
 )
 
 // Every descriptor must be internally consistent and every kind must have a
-// default that actually serves it — the create form and migration 0022 both
+// default that actually serves it — the create form and baseline seed both
 // lean on that agreement.
 func TestProviderRegistryAgreement(t *testing.T) {
 	kinds := []string{LibraryKindMovie, LibraryKindTV, LibraryKindAdult}
@@ -77,9 +77,8 @@ func TestProviderServesRejectsMismatches(t *testing.T) {
 }
 
 // Registering a second television provider must not change which one a library
-// gets when nobody chose: migration 0022 backfilled every pre-existing tv row
-// onto TMDB, and moving the default would make the create form disagree with
-// the rows already on disk.
+// gets when nobody chose: the baseline seeds TV libraries onto TMDB, and moving
+// the default would make the create form disagree with rows already on disk.
 func TestDefaultTVProviderStaysTMDB(t *testing.T) {
 	if got := DefaultProviderForKind(LibraryKindTV); got != ProviderTMDB {
 		t.Errorf("DefaultProviderForKind(tv) = %q, want %q", got, ProviderTMDB)

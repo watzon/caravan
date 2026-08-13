@@ -79,14 +79,9 @@ func TestStageRestoreRejectsNewerSchemaWithoutChangingCurrentData(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Open future database: %v", err)
 	}
-	version, err := future.SchemaVersion()
-	if err != nil {
-		future.Close()
-		t.Fatalf("SchemaVersion: %v", err)
-	}
 	if _, err := future.DB().Exec(
-		"INSERT INTO schema_version (version, name, applied_at) VALUES (?, ?, ?)",
-		version+1, "future", formatTime(now()),
+		"INSERT INTO caravan_schema_migrations (version_id, is_applied) VALUES (?, ?)",
+		99999999999999, true,
 	); err != nil {
 		future.Close()
 		t.Fatalf("insert future schema version: %v", err)
@@ -109,6 +104,76 @@ func TestStageRestoreRejectsNewerSchemaWithoutChangingCurrentData(t *testing.T) 
 	}
 	if got != "current" {
 		t.Fatalf("setting after rejected newer restore = %q, want %q", got, "current")
+	}
+}
+
+func TestStageRestoreRejectsNoncanonicalMigrationHistoryWithoutChangingCurrentData(t *testing.T) {
+	ctx := context.Background()
+	target, targetPath := openTemp(t)
+	if err := target.SetSetting(ctx, "restore-test", "current"); err != nil {
+		t.Fatalf("SetSetting current: %v", err)
+	}
+
+	source, err := Open(filepath.Join(t.TempDir(), "rolled-back-history.sqlite"))
+	if err != nil {
+		t.Fatalf("Open source database: %v", err)
+	}
+	if _, err := source.DB().Exec(
+		"UPDATE caravan_schema_migrations SET is_applied = 0 WHERE version_id = 1",
+	); err != nil {
+		source.Close()
+		t.Fatalf("mark source migration rolled back: %v", err)
+	}
+	backup := storeBackup(t, source)
+	if err := source.Close(); err != nil {
+		t.Fatalf("Close source database: %v", err)
+	}
+
+	err = target.StageRestore(ctx, bytes.NewReader(backup), int64(len(backup)))
+	if !errors.Is(err, ErrInvalidRestore) {
+		t.Fatalf("StageRestore noncanonical history error = %v, want ErrInvalidRestore", err)
+	}
+	if _, err := os.Stat(stagedRestorePath(targetPath)); !os.IsNotExist(err) {
+		t.Fatalf("noncanonical restore left pending file: %v", err)
+	}
+	got, err := target.GetSetting(ctx, "restore-test")
+	if err != nil {
+		t.Fatalf("GetSetting after rejected restore: %v", err)
+	}
+	if got != "current" {
+		t.Fatalf("setting after rejected restore = %q, want %q", got, "current")
+	}
+}
+
+func TestStageRestoreRejectsForeignKeyInvalidDatabase(t *testing.T) {
+	ctx := context.Background()
+	target, targetPath := openTemp(t)
+
+	source, err := Open(filepath.Join(t.TempDir(), "foreign-key-invalid.sqlite"))
+	if err != nil {
+		t.Fatalf("Open source database: %v", err)
+	}
+	if _, err := source.DB().Exec("PRAGMA foreign_keys = OFF"); err != nil {
+		source.Close()
+		t.Fatalf("disable source foreign keys: %v", err)
+	}
+	if _, err := source.DB().Exec(
+		"INSERT INTO library_access (library_id, user_id) VALUES (?, ?)", 1, 999999,
+	); err != nil {
+		source.Close()
+		t.Fatalf("insert dangling library access: %v", err)
+	}
+	backup := storeBackup(t, source)
+	if err := source.Close(); err != nil {
+		t.Fatalf("Close source database: %v", err)
+	}
+
+	err = target.StageRestore(ctx, bytes.NewReader(backup), int64(len(backup)))
+	if !errors.Is(err, ErrInvalidRestore) {
+		t.Fatalf("StageRestore foreign-key-invalid database error = %v, want ErrInvalidRestore", err)
+	}
+	if _, err := os.Stat(stagedRestorePath(targetPath)); !os.IsNotExist(err) {
+		t.Fatalf("foreign-key-invalid restore left pending file: %v", err)
 	}
 }
 

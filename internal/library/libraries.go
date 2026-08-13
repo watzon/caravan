@@ -217,9 +217,8 @@ func (m *Manager) providerByID(ctx context.Context, id string) core.MetadataProv
 
 // adultRef fills in the instance a ref does not name.
 //
-// Empty is the LEGACY instance, `stashbox`: it is the id migration 0024 pinned
-// every adult row written before instances onto, the id 0026 carries the old
-// settings pair in under, and the id the first instance on a fresh install
+// Empty is the legacy instance, `stashbox`: it is the compatibility id older
+// adult rows use and the id the first instance on a fresh install
 // takes. Empty is therefore never "no box" — it is the one box that was there
 // before there could be more than one.
 func adultRef(ref core.ItemRef) core.ItemRef {

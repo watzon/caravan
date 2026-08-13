@@ -19,7 +19,7 @@ import (
 // asked for another box's UUID answers with a different site rather than with
 // "no".
 
-// The second instance's id. The first keeps the bare `stashbox` forever (0026),
+// The second instance's id. The first keeps the bare `stashbox` forever,
 // so a two-box fixture is always "the legacy one plus a slugged one".
 const boxB = core.ProviderStashbox + ":beta"
 

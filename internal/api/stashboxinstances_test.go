@@ -60,8 +60,8 @@ func createInstance(t *testing.T, h http.Handler, cookie *http.Cookie, body stri
 
 // The id of the first instance on an install is the bare `stashbox`, which is
 // what every adult row written before instances existed already carries. A fresh
-// install therefore lands in the same state migration 0026 carries an upgraded
-// one into, and neither ends up with a row nothing can resolve.
+// install therefore uses the compatibility id too, and neither state ends up
+// with a row nothing can resolve.
 func TestCreateStashboxInstanceMintsTheLegacyIDFirst(t *testing.T) {
 	h, _, _, cookie := adultAdmin(t)
 
@@ -453,7 +453,7 @@ func TestItemRefRefusesAnUnconfiguredInstance(t *testing.T) {
 }
 
 // The settings table is no longer a door to the stash-box credential: both keys
-// left writableSettings with the rows migration 0026 deleted, so PUT /settings
+// left writableSettings with the prerelease rows, so PUT /settings
 // answers them the way it answers any key nothing reads.
 func TestPutSettingsNoLongerAcceptsStashboxCredentials(t *testing.T) {
 	h, _, _ := newTestServer(t)

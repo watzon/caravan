@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/uptrace/bun"
 	"github.com/watzon/caravan/internal/core"
 )
 
@@ -86,7 +87,7 @@ func (s *Store) IntervalMinutes(ctx context.Context, key string, fallback int) i
 // recurringIntervalMinutesTx reads one recurring cadence within a write
 // transaction. Failure handling matches IntervalMinutes: an absent, malformed,
 // or unsafe setting falls back to the built-in cadence.
-func (s *Store) recurringIntervalMinutesTx(ctx context.Context, tx *sql.Tx, kind string) (int, bool, error) {
+func (s *Store) recurringIntervalMinutesTx(ctx context.Context, tx bun.Tx, kind string) (int, bool, error) {
 	interval, recurring := RecurringIntervalFor(kind)
 	if !recurring {
 		return 0, false, nil

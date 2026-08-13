@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/uptrace/bun"
 	"github.com/watzon/caravan/internal/core"
 )
 
@@ -30,33 +31,35 @@ func (s *Store) UpsertMediaFile(ctx context.Context, f *core.MediaFile) error {
 		f.ModifiedAt = ts
 	}
 
-	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO media_files (path, size, movie_id, quality, source, codec, audio,
-			release_group, added_at, modified_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT (path) DO UPDATE SET
-			size = excluded.size, movie_id = excluded.movie_id, quality = excluded.quality,
-			source = excluded.source, codec = excluded.codec, audio = excluded.audio,
-			release_group = excluded.release_group, modified_at = excluded.modified_at`,
-		f.Path, f.Size, f.MovieID, f.Quality, f.Source, f.Codec, f.Audio, f.ReleaseGroup,
-		formatTime(f.AddedAt), formatTime(f.ModifiedAt))
+	model := mediaFileModelFromCore(f)
+	_, err := s.db.NewInsert().Model(&model).
+		On("CONFLICT (path) DO UPDATE").
+		Set("size = EXCLUDED.size").
+		Set("movie_id = EXCLUDED.movie_id").
+		Set("quality = EXCLUDED.quality").
+		Set("source = EXCLUDED.source").
+		Set("codec = EXCLUDED.codec").
+		Set("audio = EXCLUDED.audio").
+		Set("release_group = EXCLUDED.release_group").
+		Set("modified_at = EXCLUDED.modified_at").
+		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("store: upsert media file %q: %w", f.Path, err)
 	}
 	if f.ID != 0 {
 		return nil
 	}
-	if err := s.db.QueryRowContext(ctx, "SELECT id FROM media_files WHERE path = ?", f.Path).Scan(&f.ID); err != nil {
+	if err := s.db.NewSelect().Model(&model).Column("id").Where("path = ?", f.Path).Scan(ctx); err != nil {
 		return fmt.Errorf("store: upsert media file %q: %w", f.Path, err)
 	}
+	f.ID = model.ID
 	return nil
 }
 
 // GetMediaFileByPath returns the media file at the given relative path, or
 // ErrNotFound.
 func (s *Store) GetMediaFileByPath(ctx context.Context, path string) (*core.MediaFile, error) {
-	row := s.db.QueryRowContext(ctx, "SELECT "+mediaFileColumns+" FROM media_files WHERE path = ?", path)
-	f, err := scanMediaFile(row)
+	f, err := s.mediaFile(ctx, s.db.NewSelect().Model((*mediaFileModel)(nil)).Where("path = ?", path))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("store: media file %q: %w", path, ErrNotFound)
 	}
@@ -70,8 +73,7 @@ func (s *Store) GetMediaFileByPath(ctx context.Context, path string) (*core.Medi
 // The convert queue addresses files by id rather than by path, because the
 // path is exactly what a conversion changes.
 func (s *Store) GetMediaFile(ctx context.Context, id int64) (*core.MediaFile, error) {
-	row := s.db.QueryRowContext(ctx, "SELECT "+mediaFileColumns+" FROM media_files WHERE id = ?", id)
-	f, err := scanMediaFile(row)
+	f, err := s.mediaFile(ctx, s.db.NewSelect().Model((*mediaFileModel)(nil)).Where("id = ?", id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("store: media file %d: %w", id, ErrNotFound)
 	}
@@ -156,10 +158,10 @@ func (s *Store) GetMediaFileLibrary(ctx context.Context, id int64) (int64, strin
 // claiming the source's resolution is one the TV compatibility check keeps
 // condemning after the file it describes has been made compatible.
 func (s *Store) UpdateMediaFileConverted(ctx context.Context, id int64, path string, size int64, quality, codec, audio string) error {
-	res, err := s.db.ExecContext(ctx, `
-		UPDATE media_files
-		SET path = ?, size = ?, quality = ?, codec = ?, audio = ?, modified_at = ?
-		WHERE id = ?`, path, size, quality, codec, audio, formatTime(now()), id)
+	res, err := s.db.NewUpdate().Model((*mediaFileModel)(nil)).
+		Set("path = ?", path).Set("size = ?", size).Set("quality = ?", quality).
+		Set("codec = ?", codec).Set("audio = ?", audio).
+		Set("modified_at = ?", formatTime(now())).Where("id = ?", id).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("store: update converted media file %d: %w", id, err)
 	}
@@ -171,9 +173,9 @@ func (s *Store) UpdateMediaFileConverted(ctx context.Context, id int64, path str
 // a delete-and-reinsert would orphan them (the same reason
 // UpdateMediaFileConverted updates in place).
 func (s *Store) UpdateMediaFilePath(ctx context.Context, id int64, path string) error {
-	res, err := s.db.ExecContext(ctx, `
-		UPDATE media_files SET path = ?, modified_at = ? WHERE id = ?`,
-		path, formatTime(now()), id)
+	res, err := s.db.NewUpdate().Model((*mediaFileModel)(nil)).
+		Set("path = ?", path).Set("modified_at = ?", formatTime(now())).
+		Where("id = ?", id).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("store: update media file %d path: %w", id, err)
 	}
@@ -182,7 +184,7 @@ func (s *Store) UpdateMediaFilePath(ctx context.Context, id int64, path string) 
 
 // ListMediaFiles returns every media file ordered by path.
 func (s *Store) ListMediaFiles(ctx context.Context) ([]core.MediaFile, error) {
-	return s.queryMediaFiles(ctx, "SELECT "+mediaFileColumns+" FROM media_files ORDER BY path")
+	return s.listMediaFileModels(ctx, s.db.NewSelect().Model((*mediaFileModel)(nil)).Order("path"))
 }
 
 // ConversionCandidate is a current library file with no queued or running
@@ -276,8 +278,8 @@ func (s *Store) ListConversionCandidates(ctx context.Context) ([]ConversionCandi
 
 // ListMediaFilesForMovie returns a movie's files ordered by path.
 func (s *Store) ListMediaFilesForMovie(ctx context.Context, movieID int64) ([]core.MediaFile, error) {
-	return s.queryMediaFiles(ctx,
-		"SELECT "+mediaFileColumns+" FROM media_files WHERE movie_id = ? ORDER BY path", movieID)
+	return s.listMediaFileModels(ctx, s.db.NewSelect().Model((*mediaFileModel)(nil)).
+		Where("movie_id = ?", movieID).Order("path"))
 }
 
 // ListMediaFilesForEpisode returns the files linked to an episode. An episode
@@ -349,7 +351,7 @@ func (s *Store) ListEpisodeMediaFilesForSeries(ctx context.Context, seriesID int
 // episode links. The file on disk is untouched: deleting media is a library
 // operation, not a store one.
 func (s *Store) DeleteMediaFileByPath(ctx context.Context, path string) error {
-	if _, err := s.db.ExecContext(ctx, "DELETE FROM media_files WHERE path = ?", path); err != nil {
+	if _, err := s.db.NewDelete().Model((*mediaFileModel)(nil)).Where("path = ?", path).Exec(ctx); err != nil {
 		return fmt.Errorf("store: delete media file %q: %w", path, err)
 	}
 	return nil
@@ -358,13 +360,33 @@ func (s *Store) DeleteMediaFileByPath(ctx context.Context, path string) error {
 // LinkEpisodeFile links a media file to an episode. Linking twice is a no-op,
 // which keeps rescans and re-imports idempotent.
 func (s *Store) LinkEpisodeFile(ctx context.Context, episodeID, mediaFileID int64) error {
-	_, err := s.db.ExecContext(ctx,
-		"INSERT INTO episode_files (episode_id, media_file_id) VALUES (?, ?) ON CONFLICT DO NOTHING",
-		episodeID, mediaFileID)
+	link := episodeFileModel{EpisodeID: episodeID, MediaFileID: mediaFileID}
+	_, err := s.db.NewInsert().Model(&link).On("CONFLICT DO NOTHING").Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("store: link episode %d to media file %d: %w", episodeID, mediaFileID, err)
 	}
 	return nil
+}
+
+func (s *Store) mediaFile(ctx context.Context, query *bun.SelectQuery) (*core.MediaFile, error) {
+	var model mediaFileModel
+	if err := query.Model(&model).Scan(ctx); err != nil {
+		return nil, err
+	}
+	out := model.core()
+	return &out, nil
+}
+
+func (s *Store) listMediaFileModels(ctx context.Context, query *bun.SelectQuery) ([]core.MediaFile, error) {
+	models := []mediaFileModel{}
+	if err := query.Model(&models).Scan(ctx); err != nil {
+		return nil, fmt.Errorf("store: list media files: %w", err)
+	}
+	out := make([]core.MediaFile, len(models))
+	for i := range models {
+		out[i] = models[i].core()
+	}
+	return out, nil
 }
 
 func (s *Store) queryMediaFiles(ctx context.Context, query string, args ...any) ([]core.MediaFile, error) {

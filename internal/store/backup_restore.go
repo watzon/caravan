@@ -299,72 +299,12 @@ func validateRestore(ctx context.Context, path string) error {
 	if err := integrityCheck(ctx, db); err != nil {
 		return invalidRestore(err)
 	}
-
-	var metadataTables int
-	if err := db.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'schema_version'",
-	).Scan(&metadataTables); err != nil {
+	if err := foreignKeyCheck(ctx, db); err != nil {
 		return invalidRestore(err)
-	}
-	if metadataTables != 1 {
-		return invalidRestore(errors.New("schema version table is missing"))
-	}
-	metadataColumns, err := db.QueryContext(ctx, "PRAGMA table_info(schema_version)")
-	if err != nil {
-		return invalidRestore(err)
-	}
-	requiredColumns := map[string]bool{"version": false, "name": false, "applied_at": false}
-	for metadataColumns.Next() {
-		var cid int
-		var name, columnType string
-		var notNull, primaryKey int
-		var defaultValue any
-		if err := metadataColumns.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
-			return invalidRestore(err)
-		}
-		if _, required := requiredColumns[name]; required {
-			requiredColumns[name] = true
-		}
-	}
-	if err := metadataColumns.Err(); err != nil {
-		return invalidRestore(err)
-	}
-	if err := metadataColumns.Close(); err != nil {
-		return invalidRestore(err)
-	}
-	for name, present := range requiredColumns {
-		if !present {
-			return invalidRestore(fmt.Errorf("schema version column %q is missing", name))
-		}
 	}
 
-	expected, err := loadMigrations(migrationFiles, "migrations")
-	if err != nil {
-		return fmt.Errorf("store: load migration metadata: %w", err)
-	}
-	rows, err := db.QueryContext(ctx, "SELECT version, name FROM schema_version ORDER BY version")
-	if err != nil {
+	if err := validateCurrentSchema(ctx, db); err != nil {
 		return invalidRestore(err)
-	}
-	defer rows.Close()
-
-	index := 0
-	for rows.Next() {
-		var version int
-		var name string
-		if err := rows.Scan(&version, &name); err != nil {
-			return invalidRestore(err)
-		}
-		if index >= len(expected) || expected[index].version != version || expected[index].name != name {
-			return invalidRestore(fmt.Errorf("unexpected schema version %d", version))
-		}
-		index++
-	}
-	if err := rows.Err(); err != nil {
-		return invalidRestore(err)
-	}
-	if index == 0 {
-		return invalidRestore(errors.New("schema version is missing"))
 	}
 	return nil
 }
@@ -390,6 +330,25 @@ func integrityCheck(ctx context.Context, db *sql.DB) error {
 		if result != "ok" {
 			return errors.New(result)
 		}
+	}
+	return rows.Err()
+}
+
+func foreignKeyCheck(ctx context.Context, db *sql.DB) error {
+	rows, err := db.QueryContext(ctx, "PRAGMA foreign_key_check")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	if rows.Next() {
+		var table string
+		var rowID sql.NullInt64
+		var parent string
+		var constraint int
+		if err := rows.Scan(&table, &rowID, &parent, &constraint); err != nil {
+			return err
+		}
+		return fmt.Errorf("foreign key violation in table %s row %v referencing %s", table, rowID, parent)
 	}
 	return rows.Err()
 }

@@ -1,2 +1,0 @@
-ALTER TABLE indexers
-ADD COLUMN priority INTEGER NOT NULL DEFAULT 25 CHECK (priority >= 0);

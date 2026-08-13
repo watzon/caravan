@@ -17,7 +17,7 @@ import (
 // specification; "-1" is the parent every client expects the root to claim.
 //
 // moviesID, tvID and adultID name the DEFAULT library of their kind rather
-// than the kind itself: an install may hold several libraries per kind (0022),
+// than the kind itself: an install may hold several libraries per kind,
 // and every one of them gets a container of its own. The default keeps the
 // legacy id because a television caches object ids for as long as it likes,
 // and an upgrade that renamed the three containers everybody already has would

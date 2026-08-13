@@ -18,22 +18,9 @@ import (
 // library a roster is a note about who would be admitted if it were ever
 // restricted, not a statement about who can see it today.
 func (s *Store) ListLibraryAccess(ctx context.Context, libraryID int64) ([]int64, error) {
-	rows, err := s.db.QueryContext(ctx,
-		"SELECT user_id FROM library_access WHERE library_id = ? ORDER BY user_id", libraryID)
-	if err != nil {
-		return nil, fmt.Errorf("store: list access of library %d: %w", libraryID, err)
-	}
-	defer rows.Close()
-
 	out := []int64{}
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("store: scan library access: %w", err)
-		}
-		out = append(out, id)
-	}
-	if err := rows.Err(); err != nil {
+	if err := s.db.NewSelect().Model((*libraryAccessStoreModel)(nil)).Column("user_id").
+		Where("library_id = ?", libraryID).OrderExpr("user_id").Scan(ctx, &out); err != nil {
 		return nil, fmt.Errorf("store: list access of library %d: %w", libraryID, err)
 	}
 	return out, nil
@@ -53,23 +40,14 @@ func (s *Store) ListLibraryAccess(ctx context.Context, libraryID int64) ([]int64
 // users row 0 to grant, and LibraryVisible never asks about a grant for an
 // admin.
 func (s *Store) ListLibraryAccessForUser(ctx context.Context, userID int64) (map[int64]bool, error) {
-	rows, err := s.db.QueryContext(ctx,
-		"SELECT library_id FROM library_access WHERE user_id = ?", userID)
-	if err != nil {
+	var ids []int64
+	if err := s.db.NewSelect().Model((*libraryAccessStoreModel)(nil)).Column("library_id").
+		Where("user_id = ?", userID).Scan(ctx, &ids); err != nil {
 		return nil, fmt.Errorf("store: list library access of user %d: %w", userID, err)
 	}
-	defer rows.Close()
-
 	out := map[int64]bool{}
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("store: scan library access: %w", err)
-		}
+	for _, id := range ids {
 		out[id] = true
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: list library access of user %d: %w", userID, err)
 	}
 	return out, nil
 }
@@ -104,29 +82,27 @@ func (s *Store) SetLibraryAccess(ctx context.Context, libraryID int64, restricte
 	}
 	defer tx.Rollback()
 
+	update := tx.NewUpdate().Model((*libraryStoreModel)(nil)).Where("id = ?", libraryID)
 	if restricted {
-		_, err = tx.ExecContext(ctx,
-			"UPDATE libraries SET restricted = 1, dlna_visible = 0 WHERE id = ?", libraryID)
+		_, err = update.Set("restricted = ?", true).Set("dlna_visible = ?", false).Exec(ctx)
 	} else {
-		_, err = tx.ExecContext(ctx,
-			"UPDATE libraries SET restricted = 0 WHERE id = ?", libraryID)
+		_, err = update.Set("restricted = ?", false).Exec(ctx)
 	}
 	if err != nil {
 		return fmt.Errorf("store: set access of library %d: %w", libraryID, err)
 	}
 
-	if _, err := tx.ExecContext(ctx,
-		"DELETE FROM library_access WHERE library_id = ?", libraryID); err != nil {
+	if _, err := tx.NewDelete().Model((*libraryAccessStoreModel)(nil)).
+		Where("library_id = ?", libraryID).Exec(ctx); err != nil {
 		return fmt.Errorf("store: set access of library %d: %w", libraryID, err)
 	}
+	grants := make([]libraryAccessStoreModel, 0, len(userIDs))
 	for _, userID := range userIDs {
-		// INSERT OR IGNORE so a caller that names the same account twice writes
-		// one grant rather than failing: a duplicate in a checklist submission is
-		// a malformed request, not a different decision.
-		if _, err := tx.ExecContext(ctx,
-			"INSERT OR IGNORE INTO library_access (library_id, user_id) VALUES (?, ?)",
-			libraryID, userID); err != nil {
-			return fmt.Errorf("store: grant user %d on library %d: %w", userID, libraryID, err)
+		grants = append(grants, libraryAccessStoreModel{LibraryID: libraryID, UserID: userID})
+	}
+	if len(grants) > 0 {
+		if _, err := tx.NewInsert().Model(&grants).On("CONFLICT DO NOTHING").Exec(ctx); err != nil {
+			return fmt.Errorf("store: grant users on library %d: %w", libraryID, err)
 		}
 	}
 
@@ -158,8 +134,8 @@ func (s *Store) SetLibraryActive(ctx context.Context, id int64, active bool) err
 	if err != nil {
 		return err
 	}
-	res, err := s.db.ExecContext(ctx,
-		"UPDATE libraries SET active = ? WHERE id = ?", active, id)
+	res, err := s.db.NewUpdate().Model((*libraryStoreModel)(nil)).Set("active = ?", active).
+		Where("id = ?", id).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("store: set library %d active: %w", id, err)
 	}
@@ -181,11 +157,10 @@ func (s *Store) SetLibraryActive(ctx context.Context, id int64, active bool) err
 // nothing at all — not degrade, not ask a provider, not advertise a container —
 // which is what keeps "off" meaning absent rather than merely hidden.
 func (s *Store) AnyActiveLibraryOfKind(ctx context.Context, kind string) (bool, error) {
-	var n int
-	err := s.db.QueryRowContext(ctx,
-		"SELECT EXISTS (SELECT 1 FROM libraries WHERE kind = ? AND active = 1)", kind).Scan(&n)
+	exists, err := s.db.NewSelect().Model((*libraryStoreModel)(nil)).
+		Where("kind = ?", kind).Where("active = ?", true).Exists(ctx)
 	if err != nil {
 		return false, fmt.Errorf("store: any active library of kind %q: %w", kind, err)
 	}
-	return n != 0, nil
+	return exists, nil
 }

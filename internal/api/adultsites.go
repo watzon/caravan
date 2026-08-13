@@ -284,7 +284,7 @@ func (s *server) siteProviderURL(ctx context.Context, sr *core.Series) string {
 	endpoint := s.siteEndpoint(ctx, sr)
 	if endpoint == "" {
 		// NOT stashbox.SiteWebURL's own blank-means-the-preset rule: that
-		// sentinel died with the settings pair (0026). A gone instance links
+		// sentinel died with the prerelease settings pair. A gone instance links
 		// nowhere rather than at whichever box the preset happens to name.
 		return ""
 	}

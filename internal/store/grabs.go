@@ -34,34 +34,29 @@ func (s *Store) InsertGrab(ctx context.Context, g *core.Grab) error {
 		g.CreatedAt = now()
 	}
 
-	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO grabs (release_id, movie_id, series_id, season_number, episode_ids,
-			release_title, reason, status, created_at, library_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		g.ReleaseID, g.MovieID, g.SeriesID, g.SeasonNum, string(episodeIDs),
-		g.ReleaseTitle, g.Reason, g.Status, formatTime(g.CreatedAt), nullInt64(g.LibraryID))
-	if err != nil {
+	model := grabModelFromCore(g, string(episodeIDs))
+	if err := s.db.NewInsert().Model(&model).Returning("id").Scan(ctx); err != nil {
 		return fmt.Errorf("store: insert grab of %q: %w", g.ReleaseTitle, err)
 	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("store: insert grab of %q: %w", g.ReleaseTitle, err)
-	}
-	g.GrabID = id
+	g.GrabID = model.ID
 	return nil
 }
 
 // GetGrab returns the grab with the given id, or ErrNotFound.
 func (s *Store) GetGrab(ctx context.Context, id int64) (*core.Grab, error) {
-	row := s.db.QueryRowContext(ctx, "SELECT "+grabColumns+" FROM grabs WHERE id = ?", id)
-	g, err := scanGrab(row)
+	var model grabModel
+	err := s.db.NewSelect().Model(&model).Where("id = ?", id).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("store: grab %d: %w", id, ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("store: get grab %d: %w", id, err)
 	}
-	return g, nil
+	out, err := model.core()
+	if err != nil {
+		return nil, fmt.Errorf("store: get grab %d: %w", id, err)
+	}
+	return &out, nil
 }
 
 // GetGrabByDownloadID returns the grab a download was started for, or
@@ -122,29 +117,21 @@ func (s *Store) activeGrab(ctx context.Context, target string, arg int64) (*core
 // less returns every grab. Ordering is by id for the same reason as events:
 // ids are monotonic where a timestamp can tie.
 func (s *Store) ListGrabs(ctx context.Context, limit int) ([]core.Grab, error) {
-	query := "SELECT " + grabColumns + " FROM grabs ORDER BY id DESC"
-	args := []any{}
+	models := []grabModel{}
+	query := s.db.NewSelect().Model(&models).Order("id DESC")
 	if limit > 0 {
-		query += " LIMIT ?"
-		args = append(args, limit)
+		query.Limit(limit)
 	}
-
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
+	if err := query.Scan(ctx); err != nil {
 		return nil, fmt.Errorf("store: list grabs: %w", err)
 	}
-	defer rows.Close()
-
-	out := []core.Grab{}
-	for rows.Next() {
-		g, err := scanGrab(rows)
+	out := make([]core.Grab, 0, len(models))
+	for _, model := range models {
+		g, err := model.core()
 		if err != nil {
-			return nil, fmt.Errorf("store: scan grab: %w", err)
+			return nil, fmt.Errorf("store: decode grab %d: %w", model.ID, err)
 		}
-		out = append(out, *g)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: list grabs: %w", err)
+		out = append(out, g)
 	}
 	return out, nil
 }
@@ -221,8 +208,8 @@ func (s *Store) ListCalendarGrabs(ctx context.Context, movieIDs, episodeIDs []in
 // SetGrabStatus records the outcome of a grab. Updating an absent grab is
 // ErrNotFound.
 func (s *Store) SetGrabStatus(ctx context.Context, id int64, status, reason string) error {
-	res, err := s.db.ExecContext(ctx,
-		"UPDATE grabs SET status = ?, reason = ? WHERE id = ?", status, reason, id)
+	res, err := s.db.NewUpdate().Model((*grabModel)(nil)).
+		Set("status = ?", status).Set("reason = ?", reason).Where("id = ?", id).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("store: set status of grab %d: %w", id, err)
 	}

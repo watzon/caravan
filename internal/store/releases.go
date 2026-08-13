@@ -7,27 +7,16 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/uptrace/bun"
 	"github.com/watzon/caravan/internal/core"
 )
 
-const releaseColumns = `id, indexer_id, indexer_name, title, guid, download_url, info_hash,
-	protocol, size, seeders, leechers, published_at, parsed, categories`
-
 // UpsertRelease caches a search result and writes back the assigned ID.
-//
-// Identity is (IndexerID, GUID): the same result seen by a later search
-// refreshes the row rather than duplicating it, which is what makes this table
-// usable as a "have I seen this already" cache. Losing the cache costs a
-// re-search and nothing else.
 func (s *Store) UpsertRelease(ctx context.Context, r *core.Release) error {
 	parsed, err := json.Marshal(r.Parsed)
 	if err != nil {
 		return fmt.Errorf("store: encode parsed release for %q: %w", r.Title, err)
 	}
-
-	// Empty stays "" rather than "[]": a release filed under no category and
-	// one cached before 0023 answer the adult gate identically (no adult
-	// category in evidence), so the distinction is not worth a sentinel.
 	categories := ""
 	if len(r.Categories) > 0 {
 		encoded, err := json.Marshal(r.Categories)
@@ -36,84 +25,58 @@ func (s *Store) UpsertRelease(ctx context.Context, r *core.Release) error {
 		}
 		categories = string(encoded)
 	}
-	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO releases (indexer_id, indexer_name, title, guid, download_url, info_hash,
-			protocol, size, seeders, leechers, published_at, parsed, categories, seen_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT (indexer_id, guid) DO UPDATE SET
-			indexer_name = excluded.indexer_name, title = excluded.title,
-			download_url = excluded.download_url, info_hash = excluded.info_hash,
-			protocol = excluded.protocol, size = excluded.size,
-			seeders = excluded.seeders, leechers = excluded.leechers,
-			published_at = excluded.published_at, parsed = excluded.parsed,
-			categories = excluded.categories, seen_at = excluded.seen_at`,
-		r.IndexerID, r.Indexer, r.Title, r.GUID, r.DownloadURL, r.InfoHash, r.Protocol,
-		r.Size, r.Seeders, r.Leechers, formatTime(r.PublishedAt), string(parsed),
-		categories, formatTime(now()))
+
+	model := releaseModelFromCore(r, string(parsed), categories)
+	_, err = s.db.NewInsert().Model(&model).
+		On("CONFLICT (indexer_id, guid) DO UPDATE").
+		Set("indexer_name = EXCLUDED.indexer_name").
+		Set("title = EXCLUDED.title").
+		Set("download_url = EXCLUDED.download_url").
+		Set("info_hash = EXCLUDED.info_hash").
+		Set("protocol = EXCLUDED.protocol").
+		Set("size = EXCLUDED.size").
+		Set("seeders = EXCLUDED.seeders").
+		Set("leechers = EXCLUDED.leechers").
+		Set("published_at = EXCLUDED.published_at").
+		Set("parsed = EXCLUDED.parsed").
+		Set("categories = EXCLUDED.categories").
+		Set("seen_at = EXCLUDED.seen_at").
+		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("store: upsert release %q: %w", r.Title, err)
 	}
-	if r.ID != 0 {
-		return nil
-	}
-	err = s.db.QueryRowContext(ctx,
-		"SELECT id FROM releases WHERE indexer_id = ? AND guid = ?", r.IndexerID, r.GUID).Scan(&r.ID)
-	if err != nil {
-		return fmt.Errorf("store: upsert release %q: %w", r.Title, err)
+	if r.ID == 0 {
+		if err := s.db.NewSelect().Model(&model).Column("id").
+			Where("indexer_id = ?", r.IndexerID).Where("guid = ?", r.GUID).Scan(ctx); err != nil {
+			return fmt.Errorf("store: upsert release %q: %w", r.Title, err)
+		}
+		r.ID = model.ID
 	}
 	return nil
 }
 
 // GetRelease returns the cached release with the given id, or ErrNotFound.
 func (s *Store) GetRelease(ctx context.Context, id int64) (*core.Release, error) {
-	row := s.db.QueryRowContext(ctx, "SELECT "+releaseColumns+" FROM releases WHERE id = ?", id)
-	r, err := scanRelease(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("store: release %d: %w", id, ErrNotFound)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("store: get release %d: %w", id, err)
-	}
-	return r, nil
+	return s.release(ctx, s.db.NewSelect().Model((*releaseModel)(nil)).Where("id = ?", id),
+		fmt.Sprintf("release %d", id))
 }
 
 // GetReleaseByGUID returns the cached result an indexer previously published
-// under guid, or ErrNotFound. This is the seen-cache lookup that keeps an RSS
-// sync from re-grabbing what it already handled.
+// under guid, or ErrNotFound.
 func (s *Store) GetReleaseByGUID(ctx context.Context, indexerID int64, guid string) (*core.Release, error) {
-	row := s.db.QueryRowContext(ctx,
-		"SELECT "+releaseColumns+" FROM releases WHERE indexer_id = ? AND guid = ?", indexerID, guid)
-	r, err := scanRelease(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("store: release %q on indexer %d: %w", guid, indexerID, ErrNotFound)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("store: get release %q on indexer %d: %w", guid, indexerID, err)
-	}
-	return r, nil
+	query := s.db.NewSelect().Model((*releaseModel)(nil)).
+		Where("indexer_id = ?", indexerID).Where("guid = ?", guid)
+	return s.release(ctx, query, fmt.Sprintf("release %q on indexer %d", guid, indexerID))
 }
 
-func scanRelease(sc scanner) (*core.Release, error) {
-	var (
-		r           core.Release
-		publishedAt string
-		parsed      string
-		categories  string
-	)
-	err := sc.Scan(&r.ID, &r.IndexerID, &r.Indexer, &r.Title, &r.GUID, &r.DownloadURL,
-		&r.InfoHash, &r.Protocol, &r.Size, &r.Seeders, &r.Leechers, &publishedAt, &parsed,
-		&categories)
-	if err != nil {
-		return nil, err
+func (s *Store) release(ctx context.Context, query *bun.SelectQuery, what string) (*core.Release, error) {
+	var model releaseModel
+	if err := query.Model(&model).Scan(ctx); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("store: %s: %w", what, ErrNotFound)
+		}
+		return nil, fmt.Errorf("store: get %s: %w", what, err)
 	}
-	if parsed != "" {
-		// As with unmatched files: a row whose JSON no longer decodes must
-		// still be readable, because the title is re-parseable at any time.
-		_ = json.Unmarshal([]byte(parsed), &r.Parsed)
-	}
-	if categories != "" {
-		_ = json.Unmarshal([]byte(categories), &r.Categories)
-	}
-	r.PublishedAt = parseTime(publishedAt)
-	return &r, nil
+	out := model.core()
+	return &out, nil
 }

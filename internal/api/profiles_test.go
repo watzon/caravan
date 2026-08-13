@@ -92,7 +92,7 @@ func TestResolveQualityProfileUsesExplicitDefaultAndRepairsLegacySettings(t *tes
 		t.Fatalf("default = %q, want Standard", standard.Name)
 	}
 
-	// A database upgraded from before migration 0015 has no persisted key.
+	// A database with no persisted key uses the historical fallback.
 	// Resolving it preserves the historical oldest-profile fallback and writes
 	// the explicit replacement exactly once.
 	if err := st.DeleteSetting(ctx, store.SettingDefaultQualityProfileID); err != nil {

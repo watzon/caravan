@@ -2,7 +2,7 @@ package core
 
 // Library kinds (SPEC §7 `libraries.kind`, PLAN phase 8). The kind names the
 // item vocabulary a library speaks — movie rows, television series, adult
-// sites. Since migration 0022 an install may hold several libraries of one
+// sites. An install may hold several libraries of one
 // kind; the one flagged is_default absorbs every lookup that still asks by
 // kind, and items name their own library through `library_id`.
 const (
@@ -71,12 +71,11 @@ type Library struct {
 	Provider string
 	// Providers is the ordered list of providers this library identifies new
 	// items through: the first one that answers wins, and the rest are the
-	// fallback. Empty on a row written before migration 0024, which is what
-	// ProviderChain exists to smooth over.
+	// fallback. ProviderChain also handles an empty list by using Provider.
 	Providers []string
 	// IsDefault marks the one library per kind that answers legacy by-kind
 	// lookups and receives items added without an explicit target. Exactly
-	// one default exists per kind (partial unique index, migration 0022).
+	// one default exists per kind, enforced by a partial unique index.
 	IsDefault bool
 	// Active is the library's master switch. False makes it dormant for
 	// EVERYONE — an admin included — and deletes nothing: the rows, the files

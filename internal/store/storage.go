@@ -6,22 +6,15 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/uptrace/bun"
 	"github.com/watzon/caravan/internal/core"
 )
 
-const storageMigrationColumns = `id, source_root, target_root, status,
-	files_total, files_done, bytes_total, bytes_done, error, created_at, updated_at`
-
 // ErrStorageMigrationOpen is returned by CreateStorageMigration when one is
-// already queued or running. It is a distinct error rather than a generic
-// constraint failure because the HTTP layer answers it with 409, not 500.
+// already queued or running.
 var ErrStorageMigrationOpen = errors.New("store: a storage migration is already open")
 
 // CreateStorageMigration inserts a queued migration and writes back its ID.
-//
-// The partial unique index over open statuses is what makes this safe against a
-// double submit: the second insert loses, and the caller sees
-// ErrStorageMigrationOpen rather than two movers over the same trees.
 func (s *Store) CreateStorageMigration(ctx context.Context, m *core.StorageMigration) error {
 	ts := now()
 	if m.CreatedAt.IsZero() {
@@ -32,23 +25,15 @@ func (s *Store) CreateStorageMigration(ctx context.Context, m *core.StorageMigra
 		m.Status = core.StorageMigrationQueued
 	}
 
-	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO storage_migrations (source_root, target_root, status,
-			files_total, files_done, bytes_total, bytes_done, error, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		m.SourceRoot, m.TargetRoot, m.Status, m.FilesTotal, m.FilesDone,
-		m.BytesTotal, m.BytesDone, m.Error, formatTime(m.CreatedAt), formatTime(m.UpdatedAt))
+	model := storageMigrationModelFromCore(m)
+	err := s.db.NewInsert().Model(&model).Returning("id").Scan(ctx)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return fmt.Errorf("store: create storage migration: %w", ErrStorageMigrationOpen)
 		}
 		return fmt.Errorf("store: create storage migration: %w", err)
 	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("store: create storage migration: %w", err)
-	}
-	m.ID = id
+	m.ID = model.ID
 	return nil
 }
 
@@ -56,13 +41,10 @@ func (s *Store) CreateStorageMigration(ctx context.Context, m *core.StorageMigra
 // an absent migration is ErrNotFound.
 func (s *Store) UpdateStorageMigration(ctx context.Context, m *core.StorageMigration) error {
 	m.UpdatedAt = now()
-	res, err := s.db.ExecContext(ctx, `
-		UPDATE storage_migrations
-		SET status = ?, files_total = ?, files_done = ?, bytes_total = ?,
-			bytes_done = ?, error = ?, updated_at = ?
-		WHERE id = ?`,
-		m.Status, m.FilesTotal, m.FilesDone, m.BytesTotal, m.BytesDone,
-		m.Error, formatTime(m.UpdatedAt), m.ID)
+	model := storageMigrationModelFromCore(m)
+	res, err := s.db.NewUpdate().Model(&model).
+		Column("status", "files_total", "files_done", "bytes_total", "bytes_done", "error", "updated_at").
+		WherePK().Exec(ctx)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return fmt.Errorf("store: update storage migration %d: %w", m.ID, ErrStorageMigrationOpen)
@@ -74,64 +56,34 @@ func (s *Store) UpdateStorageMigration(ctx context.Context, m *core.StorageMigra
 
 // GetStorageMigration returns one migration, or ErrNotFound.
 func (s *Store) GetStorageMigration(ctx context.Context, id int64) (*core.StorageMigration, error) {
-	row := s.db.QueryRowContext(ctx,
-		"SELECT "+storageMigrationColumns+" FROM storage_migrations WHERE id = ?", id)
-	m, err := scanStorageMigration(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("store: storage migration %d: %w", id, ErrNotFound)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("store: get storage migration %d: %w", id, err)
-	}
-	return m, nil
+	return s.storageMigration(ctx, s.db.NewSelect().Model((*storageMigrationModel)(nil)).Where("id = ?", id),
+		fmt.Sprintf("storage migration %d", id))
 }
 
-// OpenStorageMigration returns the queued or running migration, or ErrNotFound
-// when there is none. It is the check every operation that touches the roots
-// runs first.
+// OpenStorageMigration returns the queued or running migration, or ErrNotFound.
 func (s *Store) OpenStorageMigration(ctx context.Context) (*core.StorageMigration, error) {
-	row := s.db.QueryRowContext(ctx,
-		"SELECT "+storageMigrationColumns+" FROM storage_migrations WHERE status IN (?, ?) ORDER BY id DESC LIMIT 1",
-		core.StorageMigrationQueued, core.StorageMigrationRunning)
-	m, err := scanStorageMigration(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("store: open storage migration: %w", ErrNotFound)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("store: open storage migration: %w", err)
-	}
-	return m, nil
+	query := s.db.NewSelect().Model((*storageMigrationModel)(nil)).
+		Where("status IN (?)", bun.In([]string{core.StorageMigrationQueued, core.StorageMigrationRunning})).
+		OrderExpr("id DESC").Limit(1)
+	return s.storageMigration(ctx, query, "open storage migration")
 }
 
 // LatestStorageMigration returns the most recent migration whatever its status,
-// or ErrNotFound when none has ever run. It is what the settings screen polls:
-// a finished move has to stay on screen long enough to be read.
+// or ErrNotFound when none has ever run.
 func (s *Store) LatestStorageMigration(ctx context.Context) (*core.StorageMigration, error) {
-	row := s.db.QueryRowContext(ctx,
-		"SELECT "+storageMigrationColumns+" FROM storage_migrations ORDER BY id DESC LIMIT 1")
-	m, err := scanStorageMigration(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("store: latest storage migration: %w", ErrNotFound)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("store: latest storage migration: %w", err)
-	}
-	return m, nil
+	query := s.db.NewSelect().Model((*storageMigrationModel)(nil)).OrderExpr("id DESC").Limit(1)
+	return s.storageMigration(ctx, query, "latest storage migration")
 }
 
-func scanStorageMigration(sc scanner) (*core.StorageMigration, error) {
-	var (
-		m         core.StorageMigration
-		createdAt string
-		updatedAt string
-	)
-	err := sc.Scan(&m.ID, &m.SourceRoot, &m.TargetRoot, &m.Status,
-		&m.FilesTotal, &m.FilesDone, &m.BytesTotal, &m.BytesDone, &m.Error,
-		&createdAt, &updatedAt)
-	if err != nil {
-		return nil, err
+func (s *Store) storageMigration(ctx context.Context, query *bun.SelectQuery, what string) (*core.StorageMigration, error) {
+	var model storageMigrationModel
+	err := query.Model(&model).Scan(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("store: %s: %w", what, ErrNotFound)
 	}
-	m.CreatedAt = parseTime(createdAt)
-	m.UpdatedAt = parseTime(updatedAt)
-	return &m, nil
+	if err != nil {
+		return nil, fmt.Errorf("store: %s: %w", what, err)
+	}
+	out := model.core()
+	return &out, nil
 }

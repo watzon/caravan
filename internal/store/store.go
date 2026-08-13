@@ -17,15 +17,21 @@ import (
 	"strings"
 	"time"
 
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/sqlitedialect"
 	_ "modernc.org/sqlite" // pure-Go sqlite driver; no CGO (SPEC §4)
 )
 
 // ErrNotFound is returned by the Get* methods when no row matches.
-var ErrNotFound = errors.New("store: not found")
+var (
+	ErrNotFound           = errors.New("store: not found")
+	ErrLegacySchema       = errors.New("store: prerelease database schema is unsupported; start with a new database")
+	ErrUnrecognizedSchema = errors.New("store: database schema is not recognized as Caravan")
+)
 
 // Store is a handle on the Caravan database.
 type Store struct {
-	db   *sql.DB
+	db   *bun.DB
 	path string
 }
 
@@ -37,15 +43,40 @@ type Store struct {
 //
 // The returned Store must be closed with Close.
 func Open(path string) (*Store, error) {
+	if exists, err := databaseFileExists(path); err != nil {
+		return nil, err
+	} else if exists {
+		// Reject unsupported files before chmod, WAL pragmas, or even creating the
+		// migration lock sidecar. Rejection is a genuinely read-only operation.
+		if err := preflightDatabaseIdentity(context.Background(), path); err != nil {
+			return nil, err
+		}
+	}
+
+	initLock, err := acquireDatabaseInitLock(path)
+	if err != nil {
+		return nil, err
+	}
+	defer initLock.Close()
+
 	appliedRestore, err := applyStagedRestore(path)
 	if err != nil {
 		return nil, err
+	}
+	if exists, err := databaseFileExists(path); err != nil {
+		return nil, restoreOpenFailure(path, appliedRestore, err)
+	} else if exists {
+		// Recheck after taking the lock: another opener may have created or
+		// migrated the file while this caller was waiting.
+		if err := validateDatabaseBeforeOpen(context.Background(), path); err != nil {
+			return nil, restoreOpenFailure(path, appliedRestore, err)
+		}
 	}
 	if err := hardenSQLiteArtifacts(path, true); err != nil {
 		return nil, restoreOpenFailure(path, appliedRestore, err)
 	}
 
-	db, err := sql.Open("sqlite", dsn(path))
+	sqldb, err := sql.Open("sqlite", dsn(path))
 	if err != nil {
 		return nil, restoreOpenFailure(path, appliedRestore, fmt.Errorf("store: open %s: %w", path, err))
 	}
@@ -53,13 +84,13 @@ func Open(path string) (*Store, error) {
 	// sqlite takes a single writer. Serializing at the pool removes
 	// SQLITE_BUSY as a class of failure at the cost of write concurrency we
 	// do not have anyway.
-	db.SetMaxOpenConns(1)
+	sqldb.SetMaxOpenConns(1)
 
-	if err := db.Ping(); err != nil {
-		db.Close()
+	if err := sqldb.Ping(); err != nil {
+		sqldb.Close()
 		return nil, restoreOpenFailure(path, appliedRestore, fmt.Errorf("store: connect %s: %w", path, err))
 	}
-
+	db := bun.NewDB(sqldb, sqlitedialect.New())
 	s := &Store{db: db, path: path}
 	if err := s.migrate(); err != nil {
 		db.Close()
@@ -70,6 +101,18 @@ func Open(path string) (*Store, error) {
 		return nil, restoreOpenFailure(path, appliedRestore, err)
 	}
 	return s, nil
+}
+
+func databaseFileExists(path string) (bool, error) {
+	_, err := os.Stat(path)
+	switch {
+	case err == nil:
+		return true, nil
+	case os.IsNotExist(err):
+		return false, nil
+	default:
+		return false, fmt.Errorf("store: stat database %s: %w", path, err)
+	}
 }
 
 // hardenSQLiteArtifacts creates the main database with a private mode and
@@ -122,6 +165,12 @@ func (s *Store) Close() error {
 // DB exposes the underlying handle for callers that need a transaction or a
 // query this package does not wrap yet.
 func (s *Store) DB() *sql.DB {
+	return s.db.DB
+}
+
+// ORM exposes Caravan's Bun handle for typed models and query construction.
+// SQLite-specific operational queries can continue through DB when needed.
+func (s *Store) ORM() *bun.DB {
 	return s.db
 }
 

@@ -139,7 +139,7 @@ Verified constraints, from the spec research:
 | Layer | Choice | Rationale |
 |---|---|---|
 | Language | Go | Static cross-compiled binaries are the entire ballgame for portable mode |
-| Database | sqlite via modernc.org/sqlite | Pure Go, no CGO, WAL mode, single-file state |
+| Database | SQLite via modernc.org/sqlite + Bun | Pure Go/no CGO, WAL-mode single-file state, typed SQL-first ORM, embedded migrations |
 | Web UI | Svelte SPA (Vite build), embedded via `go:embed` | Zero-install UI, smallest bundle inside the binary |
 | Torrent engine | anacrolix/torrent | Mature, in-process, Go-native |
 | UPnP/DLNA | huin/goupnp + custom DMS | SSDP advertise + content directory for TV/network clients |
@@ -251,7 +251,7 @@ Everything path-like is relative to the storage root.
 
 Recovery contract: `media_files`, `movies`, `series` are reconstructable from a library rescan + metadata providers. `grabs`/`events` are history and may be lost without functional damage.
 
-**Migrations.** Embedded, sequential, forward-only SQL migrations run at startup; the applied version is tracked in the DB. The disposable-cache pillar makes a botched upgrade survivable (worst case: delete DB, rescan), but migrations are the normal path — never "delete and rescan" as a release strategy.
+**Persistence and migrations.** Store operations use private Bun database models so the SQL representation stays separate from the domain model; SQLite-specific operational and reporting queries may remain explicit SQL. Goose's embedded, sequential, forward-only SQL migrations run at startup and record each version in the same transaction as its schema changes. The disposable-cache pillar makes a botched upgrade survivable (worst case: delete DB, rescan), but migrations are the normal path — never "delete and rescan" as a release strategy.
 
 **Job queue semantics.** `jobs` is a durable at-least-once queue: a worker claims a job with a lease, failures retry with exponential backoff, and expired leases are reclaimed at startup after a crash. Consequently every job type (search, import, conversion, scan) must be idempotent.
 

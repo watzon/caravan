@@ -6,10 +6,57 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/uptrace/bun"
 	"github.com/watzon/caravan/internal/core"
 )
 
-const stashboxInstanceColumns = `id, provider_id, name, endpoint, api_key, created_at, updated_at`
+// stashboxInstanceModel is the database representation of a configured
+// stash-box endpoint. Stored timestamps stay as strings to preserve the
+// store-wide RFC3339Nano parsing behavior.
+type stashboxInstanceModel struct {
+	bun.BaseModel `bun:"table:stashbox_instances,alias:stashbox_instance"`
+
+	ID         int64 `bun:",pk,autoincrement"`
+	ProviderID string
+	Name       string
+	Endpoint   string
+	APIKey     string
+	CreatedAt  string
+	UpdatedAt  string
+}
+
+func (m stashboxInstanceModel) coreValue() core.StashboxInstance {
+	return core.StashboxInstance{
+		ID:         m.ID,
+		ProviderID: m.ProviderID,
+		Name:       m.Name,
+		Endpoint:   m.Endpoint,
+		APIKey:     m.APIKey,
+		CreatedAt:  parseTime(m.CreatedAt),
+		UpdatedAt:  parseTime(m.UpdatedAt),
+	}
+}
+
+// These narrow models support the provider-usage aggregate queries without
+// exposing database rows through the core API.
+type libraryProviderUsageModel struct {
+	bun.BaseModel `bun:"table:libraries,alias:library"`
+
+	Provider  string
+	Providers string
+}
+
+type movieProviderUsageModel struct {
+	bun.BaseModel `bun:"table:movies,alias:movie"`
+
+	Provider string
+}
+
+type seriesProviderUsageModel struct {
+	bun.BaseModel `bun:"table:series,alias:series"`
+
+	Provider string
+}
 
 // UpsertStashboxInstance inserts or updates in and writes back the assigned ID.
 // Identity is in.ID when set; otherwise a new instance is inserted.
@@ -24,10 +71,16 @@ func (s *Store) UpsertStashboxInstance(ctx context.Context, in *core.StashboxIns
 	ts := formatTime(now())
 
 	if in.ID != 0 {
-		res, err := s.db.ExecContext(ctx, `
-			UPDATE stashbox_instances SET name = ?, endpoint = ?, api_key = ?, updated_at = ?
-			WHERE id = ?`,
-			in.Name, in.Endpoint, in.APIKey, ts, in.ID)
+		model := &stashboxInstanceModel{
+			ID:        in.ID,
+			Name:      in.Name,
+			Endpoint:  in.Endpoint,
+			APIKey:    in.APIKey,
+			UpdatedAt: ts,
+		}
+		res, err := s.db.NewUpdate().Model(model).
+			Column("name", "endpoint", "api_key", "updated_at").
+			WherePK().Exec(ctx)
 		if err != nil {
 			return fmt.Errorf("store: update stash-box instance %d: %w", in.ID, err)
 		}
@@ -41,33 +94,33 @@ func (s *Store) UpsertStashboxInstance(ctx context.Context, in *core.StashboxIns
 		return nil
 	}
 
-	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO stashbox_instances (provider_id, name, endpoint, api_key, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)`,
-		in.ProviderID, in.Name, in.Endpoint, in.APIKey, ts, ts)
-	if err != nil {
+	model := &stashboxInstanceModel{
+		ProviderID: in.ProviderID,
+		Name:       in.Name,
+		Endpoint:   in.Endpoint,
+		APIKey:     in.APIKey,
+		CreatedAt:  ts,
+		UpdatedAt:  ts,
+	}
+	if _, err := s.db.NewInsert().Model(model).Exec(ctx); err != nil {
 		return fmt.Errorf("store: insert stash-box instance %q: %w", in.ProviderID, err)
 	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("store: insert stash-box instance %q: %w", in.ProviderID, err)
-	}
-	in.ID = id
+	in.ID = model.ID
 	return nil
 }
 
 // GetStashboxInstance returns the instance with the given id, or ErrNotFound.
 func (s *Store) GetStashboxInstance(ctx context.Context, id int64) (*core.StashboxInstance, error) {
-	row := s.db.QueryRowContext(ctx,
-		"SELECT "+stashboxInstanceColumns+" FROM stashbox_instances WHERE id = ?", id)
-	in, err := scanStashboxInstance(row)
+	var model stashboxInstanceModel
+	err := s.db.NewSelect().Model(&model).Where("id = ?", id).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("store: stash-box instance %d: %w", id, ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("store: get stash-box instance %d: %w", id, err)
 	}
-	return in, nil
+	out := model.coreValue()
+	return &out, nil
 }
 
 // GetStashboxInstanceByProviderID returns the instance a provider id names, or
@@ -75,16 +128,16 @@ func (s *Store) GetStashboxInstance(ctx context.Context, id int64) (*core.Stashb
 // the row is the question, and a missing answer is a gone instance rather than
 // a reason to fall back to another box.
 func (s *Store) GetStashboxInstanceByProviderID(ctx context.Context, providerID string) (*core.StashboxInstance, error) {
-	row := s.db.QueryRowContext(ctx,
-		"SELECT "+stashboxInstanceColumns+" FROM stashbox_instances WHERE provider_id = ?", providerID)
-	in, err := scanStashboxInstance(row)
+	var model stashboxInstanceModel
+	err := s.db.NewSelect().Model(&model).Where("provider_id = ?", providerID).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("store: stash-box instance %q: %w", providerID, ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("store: get stash-box instance %q: %w", providerID, err)
 	}
-	return in, nil
+	out := model.coreValue()
+	return &out, nil
 }
 
 // ListStashboxInstances returns every configured instance, oldest first. Id
@@ -92,23 +145,14 @@ func (s *Store) GetStashboxInstanceByProviderID(ctx context.Context, providerID 
 // was configured before there were instances — at the head of the list it has
 // always been the only member of.
 func (s *Store) ListStashboxInstances(ctx context.Context) ([]core.StashboxInstance, error) {
-	rows, err := s.db.QueryContext(ctx,
-		"SELECT "+stashboxInstanceColumns+" FROM stashbox_instances ORDER BY id")
-	if err != nil {
+	models := make([]stashboxInstanceModel, 0)
+	if err := s.db.NewSelect().Model(&models).Order("id ASC").Scan(ctx); err != nil {
 		return nil, fmt.Errorf("store: list stash-box instances: %w", err)
 	}
-	defer rows.Close()
 
-	out := []core.StashboxInstance{}
-	for rows.Next() {
-		in, err := scanStashboxInstance(rows)
-		if err != nil {
-			return nil, fmt.Errorf("store: scan stash-box instance: %w", err)
-		}
-		out = append(out, *in)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: list stash-box instances: %w", err)
+	out := make([]core.StashboxInstance, 0, len(models))
+	for _, model := range models {
+		out = append(out, model.coreValue())
 	}
 	return out, nil
 }
@@ -122,7 +166,8 @@ func (s *Store) ListStashboxInstances(ctx context.Context) ([]core.StashboxInsta
 // at all is a question about use, and CountLibrariesUsingProvider and
 // CountItemsPinnedToProvider are what answer it at the door.
 func (s *Store) DeleteStashboxInstance(ctx context.Context, id int64) error {
-	if _, err := s.db.ExecContext(ctx, "DELETE FROM stashbox_instances WHERE id = ?", id); err != nil {
+	if _, err := s.db.NewDelete().Model((*stashboxInstanceModel)(nil)).
+		Where("id = ?", id).Exec(ctx); err != nil {
 		return fmt.Errorf("store: delete stash-box instance %d: %w", id, err)
 	}
 	return nil
@@ -139,10 +184,13 @@ func (s *Store) DeleteStashboxInstance(ctx context.Context, id int64) error {
 // a way that escapes the delimiters this leans on.
 func (s *Store) CountLibrariesUsingProvider(ctx context.Context, providerID string) (int, error) {
 	var n int
-	err := s.db.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM libraries
-		WHERE provider = ? OR providers LIKE ?`,
-		providerID, `%"`+providerID+`"%`).Scan(&n)
+	err := s.db.NewSelect().Model((*libraryProviderUsageModel)(nil)).
+		ColumnExpr("COUNT(*)").
+		WhereGroup(" AND ", func(q *bun.SelectQuery) *bun.SelectQuery {
+			return q.Where("provider = ?", providerID).
+				WhereOr("providers LIKE ?", `%"`+providerID+`"%`)
+		}).
+		Scan(ctx, &n)
 	if err != nil {
 		return 0, fmt.Errorf("store: count libraries using provider %q: %w", providerID, err)
 	}
@@ -152,27 +200,15 @@ func (s *Store) CountLibrariesUsingProvider(ctx context.Context, providerID stri
 // CountItemsPinnedToProvider reports how many movies and series are pinned to
 // providerID — the rows whose refs only this provider can be asked about.
 func (s *Store) CountItemsPinnedToProvider(ctx context.Context, providerID string) (int, error) {
-	var n int
-	err := s.db.QueryRowContext(ctx, `
-		SELECT (SELECT COUNT(*) FROM movies WHERE provider = ?)
-		     + (SELECT COUNT(*) FROM series WHERE provider = ?)`,
-		providerID, providerID).Scan(&n)
+	movieCount, err := s.db.NewSelect().Model((*movieProviderUsageModel)(nil)).
+		Where("provider = ?", providerID).Count(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("store: count items pinned to provider %q: %w", providerID, err)
 	}
-	return n, nil
-}
-
-func scanStashboxInstance(sc scanner) (*core.StashboxInstance, error) {
-	var (
-		in                   core.StashboxInstance
-		createdAt, updatedAt string
-	)
-	if err := sc.Scan(&in.ID, &in.ProviderID, &in.Name, &in.Endpoint, &in.APIKey,
-		&createdAt, &updatedAt); err != nil {
-		return nil, err
+	seriesCount, err := s.db.NewSelect().Model((*seriesProviderUsageModel)(nil)).
+		Where("provider = ?", providerID).Count(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("store: count items pinned to provider %q: %w", providerID, err)
 	}
-	in.CreatedAt = parseTime(createdAt)
-	in.UpdatedAt = parseTime(updatedAt)
-	return &in, nil
+	return movieCount + seriesCount, nil
 }

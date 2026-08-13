@@ -182,14 +182,13 @@ git pull --ff-only
 docker compose up -d --build
 ```
 
-Database migrations run automatically on start; they are forward-only and each
-one is atomic. Nothing else is required.
+Database migrations run automatically on start through Goose; they are
+forward-only and each one is atomic. Nothing else is required.
 
-**Rolling back to an older tag is not supported.** There is no down path — an
-older binary does not refuse a newer schema, it just skips the migrations it
-does not know about and then trips over columns that were not there when it was
-built. Copy `./config` aside before a major upgrade if you want a way back;
-everything in it is small.
+**Rolling back to an older tag is not supported.** There is no down path. An
+older binary refuses a migration history it does not know instead of opening a
+newer schema unsafely. Copy `./config` aside before a major upgrade if you want
+a way back; everything in it is small.
 
 If a database is ever beyond repair, that is survivable by design: stop the
 container, delete `config/caravan.db*`, start it, rescan. The library comes

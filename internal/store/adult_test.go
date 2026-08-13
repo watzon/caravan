@@ -2,9 +2,7 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"errors"
-	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -12,35 +10,6 @@ import (
 
 	"github.com/watzon/caravan/internal/core"
 )
-
-// atSchema12 builds a populated database frozen one migration before the adult
-// module, and hands the caller the raw handle to seed it with.
-//
-// The seeding has to be raw SQL: the store's own writers speak the columns 0013
-// adds, so using them would prove nothing about what an install that predates
-// them looks like on the way through.
-func atSchema12(t *testing.T, seed func(*sql.DB)) string {
-	t.Helper()
-	path := filepath.Join(t.TempDir(), "caravan.db")
-	openAtSchemaVersion(t, path, 12)
-
-	db, err := sql.Open("sqlite", dsn(path))
-	if err != nil {
-		t.Fatalf("open seeded database: %v", err)
-	}
-	seed(db)
-	if err := db.Close(); err != nil {
-		t.Fatalf("close seeded database: %v", err)
-	}
-	return path
-}
-
-func exec(t *testing.T, db *sql.DB, query string, args ...any) {
-	t.Helper()
-	if _, err := db.Exec(query, args...); err != nil {
-		t.Fatalf("seed %q: %v", query, err)
-	}
-}
 
 // enableAdultLibrary says directly what a module-wide enable used to say for a
 // test: the Adult library exists and is switched on. An adult library IS the
@@ -104,158 +73,10 @@ func setAdultLibrariesActive(t *testing.T, s *Store, active bool) {
 	}
 }
 
-// 0013 rebuilds three tables to widen CHECK constraints. Rebuilding a table is
-// where installs lose data, and `libraries` is the dangerous one: its child
-// `library_indexers` cascades on delete, and DROP TABLE with foreign keys on
-// deletes every row first. If the rebuild is written the obvious way, every
-// per-library indexer override in the install disappears and nothing says so.
-func TestMigrate0013PreservesThePhase8Install(t *testing.T) {
-	ctx := context.Background()
-
-	path := atSchema12(t, func(db *sql.DB) {
-		exec(t, db, `INSERT INTO indexers (id, name, protocol, url, api_key, categories,
-			enabled, created_at, updated_at)
-			VALUES (7, 'Nzbee', 'newznab', 'http://nzb.example', 'k', '[5000]', 1,
-			        '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')`)
-
-		// The library rows the owner has since edited: a hidden TV shelf with a
-		// routing override, and one indexer narrowed for it.
-		exec(t, db, `UPDATE libraries SET dlna_visible = 0, route_torrent = 'embedded',
-			quality_profile_id = 1 WHERE kind = 'tv'`)
-		exec(t, db, `INSERT INTO library_indexers (library_id, indexer_id, enabled, categories)
-			VALUES ((SELECT id FROM libraries WHERE kind = 'tv'), 7, 0, '[5030,5040]')`)
-
-		exec(t, db, `INSERT INTO requests (media_type, tmdb_id, title, year, poster_path,
-			seasons, min_availability, status, requested_by, created_at, updated_at)
-			VALUES ('series', 1399, 'Game of Thrones', 2011, '/got.jpg', '[1,2]', '',
-			        'pending', 4, '2024-02-02T00:00:00Z', '2024-02-03T00:00:00Z')`)
-		exec(t, db, `INSERT INTO requests (media_type, tmdb_id, title, year, poster_path,
-			seasons, min_availability, status, requested_by, created_at, updated_at)
-			VALUES ('movie', 27205, 'Inception', 2010, NULL, NULL, 'released',
-			        'approved', 0, '2024-02-04T00:00:00Z', '2024-02-05T00:00:00Z')`)
-
-		exec(t, db, `INSERT INTO users (id, username, password_hash, role, created_at, updated_at)
-			VALUES (4, 'housemate', 'hash', 'member', '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')`)
-
-		exec(t, db, `INSERT INTO series (id, tmdb_id, title, sort_title, year, added_at, updated_at)
-			VALUES (11, 1399, 'Game of Thrones', 'game of thrones', 2011,
-			        '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')`)
-		exec(t, db, `INSERT INTO episodes (series_id, season_number, episode_number, tmdb_id,
-			title, air_date, monitored)
-			VALUES (11, 1, 1, 63056, 'Winter Is Coming', '2011-04-17T00:00:00Z', 1)`)
-	})
-
-	st, err := Open(path)
-	if err != nil {
-		t.Fatalf("Open after upgrade: %v", err)
-	}
-	t.Cleanup(func() { st.Close() })
-
-	if version, err := st.SchemaVersion(); err != nil || version < 13 {
-		t.Fatalf("SchemaVersion = (%d, %v), want >= 13 and no error", version, err)
-	}
-
-	// The libraries survive the rebuild with their edits, their ids, and
-	// nothing added.
-	libraries, err := st.ListLibraries(ctx)
-	if err != nil {
-		t.Fatalf("ListLibraries: %v", err)
-	}
-	wantLibraries := []core.Library{
-		{ID: 1, Kind: core.LibraryKindMovie, Name: "Movies", RootPath: "library/Movies",
-			DLNAVisible: true, Provider: core.ProviderTMDB,
-			Providers: []string{core.ProviderTMDB}, IsDefault: true, Active: true},
-		{ID: 2, Kind: core.LibraryKindTV, Name: "Series", RootPath: "library/TV",
-			DLNAVisible: false, RouteTorrent: "embedded", QualityProfileID: 1,
-			Provider: core.ProviderTMDB, Providers: []string{core.ProviderTMDB},
-			IsDefault: true, Active: true},
-	}
-	if !reflect.DeepEqual(libraries, wantLibraries) {
-		t.Errorf("ListLibraries = %+v, want %+v", libraries, wantLibraries)
-	}
-
-	// The override the cascade would have eaten.
-	overrides, err := st.ListLibraryIndexers(ctx, 2)
-	if err != nil {
-		t.Fatalf("ListLibraryIndexers(2): %v", err)
-	}
-	wantOverrides := []core.LibraryIndexer{
-		{LibraryID: 2, IndexerID: 7, Enabled: false, Categories: []int{5030, 5040}},
-	}
-	if !reflect.DeepEqual(overrides, wantOverrides) {
-		t.Errorf("ListLibraryIndexers(2) = %+v, want %+v", overrides, wantOverrides)
-	}
-
-	// Both requests, with every field the rebuild had to carry across — including
-	// the NULLable ones, which are the ones an INSERT SELECT gets wrong.
-	got, err := st.GetRequest(ctx, 1)
-	if err != nil {
-		t.Fatalf("GetRequest(1): %v", err)
-	}
-	want := &core.Request{
-		ID: 1, MediaType: core.MediaTypeSeries, TMDBID: 1399, Title: "Game of Thrones",
-		Year: 2011, PosterPath: "/got.jpg", Seasons: []int{1, 2},
-		Status: core.RequestPending, RequestedBy: 4,
-		CreatedAt: time.Date(2024, 2, 2, 0, 0, 0, 0, time.UTC),
-		UpdatedAt: time.Date(2024, 2, 3, 0, 0, 0, 0, time.UTC),
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("GetRequest(1) = %+v, want %+v", got, want)
-	}
-	movie, err := st.GetRequest(ctx, 2)
-	if err != nil {
-		t.Fatalf("GetRequest(2): %v", err)
-	}
-	if movie.MinAvailability != core.AvailabilityReleased || movie.Status != core.RequestApproved ||
-		movie.PosterPath != "" || movie.Seasons != nil {
-		t.Errorf("GetRequest(2) = %+v, want the approved Inception row unchanged", movie)
-	}
-
-	// The existing series is television and unmatched to any site, which is
-	// what the column defaults promise.
-	series, err := st.GetSeries(ctx, 11)
-	if err != nil {
-		t.Fatalf("GetSeries(11): %v", err)
-	}
-	if series.Kind != core.SeriesKindTV || series.StashID != "" {
-		t.Errorf("upgraded series = kind %q stash %q, want %q and empty",
-			series.Kind, series.StashID, core.SeriesKindTV)
-	}
-	episode, err := st.GetEpisodeByNumber(ctx, 11, 1, 1)
-	if err != nil {
-		t.Fatalf("GetEpisodeByNumber: %v", err)
-	}
-	if episode.StashID != "" || episode.Scene != nil {
-		t.Errorf("upgraded episode = stash %q scene %+v, want empty and nil",
-			episode.StashID, episode.Scene)
-	}
-
-	// Nobody is granted by an upgrade. 0013's per-account flag was the thing
-	// being asserted here until 0028 dropped it; the promise outlived the column
-	// and is now asked of the grants that replaced it.
-	grants, err := st.ListLibraryAccessForUser(ctx, 4)
-	if err != nil {
-		t.Fatalf("ListLibraryAccessForUser(4): %v", err)
-	}
-	if len(grants) != 0 {
-		t.Errorf("the upgrade granted an existing account %v", grants)
-	}
-
-	// And the module is off, which is now the same sentence as "there is no
-	// adult library on the install": an adult shelf IS the module, so an upgrade
-	// that produced one would be an upgrade that switched it on.
-	if _, err := st.GetLibraryByKind(ctx, core.LibraryKindAdult); !errors.Is(err, ErrNotFound) {
-		t.Errorf("GetLibraryByKind(adult) after upgrade = %v, want ErrNotFound", err)
-	}
-}
-
-// A table rebuild leaves the schema itself as a thing that can be wrong, and
-// wrong quietly: library_indexers' REFERENCES clause is rewritten by the
-// parent's rename, and a rebuild that left it naming libraries_rebuild — or
-// dropped the constraint while transcribing the table — would look perfectly
-// healthy until the day something deleted a row. This asserts the resulting
-// schema, not just the rows that came through it.
-func TestMigrate0013LeavesTheForeignKeysSound(t *testing.T) {
+// The baseline must leave every foreign key sound and keep the cascades its
+// runtime behavior relies on. This asserts the resulting schema as well as the
+// ordinary store operations that pass through it.
+func TestBaselineLeavesTheForeignKeysSound(t *testing.T) {
 	ctx := context.Background()
 	st, _ := openTemp(t)
 

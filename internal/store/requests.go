@@ -8,9 +8,12 @@ import (
 	"fmt"
 	"slices"
 
+	"github.com/uptrace/bun"
 	"github.com/watzon/caravan/internal/core"
 )
 
+// requestColumns remains for the scene-request lookup in adult.go. That query
+// is migrated with its owning domain; listRequests still scans it through Bun.
 const requestColumns = `id, media_type, tmdb_id, stash_id, title, year, poster_path, seasons,
 	min_availability, status, requested_by, created_at, updated_at`
 
@@ -54,35 +57,27 @@ func (s *Store) CreateRequest(ctx context.Context, r *core.Request) error {
 	}
 	defer tx.Rollback()
 
-	var (
-		existingID           int64
-		existingTitle        string
-		existingYear         int
-		existingPoster       sql.NullString
-		existingSeasons      sql.NullString
-		existingAvailability string
-		existingRequestedBy  int64
-	)
+	var existing requestStoreModel
 	idColumn, idValue := requestIdentity(r)
-	err = tx.QueryRowContext(ctx, `
-		SELECT id, title, year, poster_path, seasons, min_availability, requested_by FROM requests
-		WHERE media_type = ? AND `+idColumn+` = ? AND status = ?`,
-		r.MediaType, idValue, core.RequestPending).Scan(
-		&existingID, &existingTitle, &existingYear, &existingPoster, &existingSeasons,
-		&existingAvailability, &existingRequestedBy)
+	err = tx.NewSelect().Model(&existing).
+		Column("id", "title", "year", "poster_path", "seasons", "min_availability", "requested_by").
+		Where("media_type = ?", r.MediaType).
+		Where(idColumn+" = ?", idValue).
+		Where("status = ?", core.RequestPending).
+		Scan(ctx)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		// New request below.
 	case err != nil:
 		return fmt.Errorf("store: create request for %s %d: %w", r.MediaType, r.TMDBID, err)
 	default:
-		merged, err := mergeSeasons(existingSeasons, r.Seasons)
+		merged, err := mergeSeasons(existing.Seasons, r.Seasons)
 		if err != nil {
-			return fmt.Errorf("store: merge request %d: %w", existingID, err)
+			return fmt.Errorf("store: merge request %d: %w", existing.ID, err)
 		}
 		encoded, err := encodeSeasons(merged)
 		if err != nil {
-			return fmt.Errorf("store: merge request %d: %w", existingID, err)
+			return fmt.Errorf("store: merge request %d: %w", existing.ID, err)
 		}
 		// The first asker's row is theirs, so a merge fills a field only when
 		// nobody has filled it — it never overwrites one. POST /requests is
@@ -93,35 +88,36 @@ func (s *Store) CreateRequest(ctx context.Context, r *core.Request) error {
 		// the first asker's back.
 		//
 		// Seasons are the exception, and the reason a merge exists: they union.
-		if existingTitle != "" {
-			r.Title = existingTitle
+		if existing.Title != "" {
+			r.Title = existing.Title
 		}
-		if existingYear != 0 {
-			r.Year = existingYear
+		if existing.Year != 0 {
+			r.Year = existing.Year
 		}
-		if existingPoster.String != "" {
-			r.PosterPath = existingPoster.String
+		if existing.PosterPath != nil && *existing.PosterPath != "" {
+			r.PosterPath = *existing.PosterPath
 		}
-		if existingAvailability != "" {
-			r.MinAvailability = existingAvailability
+		if existing.MinAvailability != "" {
+			r.MinAvailability = existing.MinAvailability
 		}
 		// The first asker owns the row, so the UPDATE below leaves requested_by
 		// alone. A merge is a second person queueing behind the first, not a
 		// handover: rewriting the owner would move somebody else's request out
 		// of their own list and into the newcomer's.
-		r.RequestedBy = existingRequestedBy
-		if _, err := tx.ExecContext(ctx, `
-			UPDATE requests SET title = ?, year = ?, poster_path = ?, seasons = ?,
-				min_availability = ?, updated_at = ?
-			WHERE id = ?`,
-			r.Title, r.Year, nullString(r.PosterPath), encoded, r.MinAvailability,
-			formatTime(ts), existingID); err != nil {
-			return fmt.Errorf("store: merge request %d: %w", existingID, err)
+		r.RequestedBy = existing.RequestedBy
+		model := &requestStoreModel{
+			ID: existing.ID, Title: r.Title, Year: r.Year, PosterPath: stringPointer(r.PosterPath),
+			Seasons: encoded, MinAvailability: r.MinAvailability, UpdatedAt: formatTime(ts),
+		}
+		if _, err := tx.NewUpdate().Model(model).
+			Column("title", "year", "poster_path", "seasons", "min_availability", "updated_at").
+			WherePK().Exec(ctx); err != nil {
+			return fmt.Errorf("store: merge request %d: %w", existing.ID, err)
 		}
 		if err := tx.Commit(); err != nil {
-			return fmt.Errorf("store: merge request %d: %w", existingID, err)
+			return fmt.Errorf("store: merge request %d: %w", existing.ID, err)
 		}
-		r.ID = existingID
+		r.ID = existing.ID
 		r.Seasons = merged
 		r.Status = core.RequestPending
 		r.UpdatedAt = ts
@@ -133,23 +129,14 @@ func (s *Store) CreateRequest(ctx context.Context, r *core.Request) error {
 	if err != nil {
 		return fmt.Errorf("store: create request for %s %d: %w", r.MediaType, r.TMDBID, err)
 	}
-	res, err := tx.ExecContext(ctx, `
-		INSERT INTO requests (media_type, tmdb_id, stash_id, title, year, poster_path, seasons,
-			min_availability, status, requested_by, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		r.MediaType, r.TMDBID, r.StashID, r.Title, r.Year, nullString(r.PosterPath), encoded,
-		r.MinAvailability, r.Status, r.RequestedBy, formatTime(ts), formatTime(ts))
-	if err != nil {
-		return fmt.Errorf("store: create request for %s %d: %w", r.MediaType, r.TMDBID, err)
-	}
-	id, err := res.LastInsertId()
-	if err != nil {
+	model := requestStoreModelFromCore(r, encoded, formatTime(ts))
+	if err := tx.NewInsert().Model(model).Returning("id").Scan(ctx); err != nil {
 		return fmt.Errorf("store: create request for %s %d: %w", r.MediaType, r.TMDBID, err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("store: create request for %s %d: %w", r.MediaType, r.TMDBID, err)
 	}
-	r.ID = id
+	r.ID = model.ID
 	r.CreatedAt = ts
 	r.UpdatedAt = ts
 	return nil
@@ -157,29 +144,29 @@ func (s *Store) CreateRequest(ctx context.Context, r *core.Request) error {
 
 // GetRequest returns one request, or ErrNotFound.
 func (s *Store) GetRequest(ctx context.Context, id int64) (*core.Request, error) {
-	row := s.db.QueryRowContext(ctx,
-		"SELECT "+requestColumns+" FROM requests WHERE id = ?", id)
-	r, err := scanRequest(row)
+	var model requestStoreModel
+	err := s.db.NewSelect().Model(&model).Where("id = ?", id).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("store: request %d: %w", id, ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("store: get request %d: %w", id, err)
 	}
-	return r, nil
+	r, err := model.coreRequest()
+	if err != nil {
+		return nil, fmt.Errorf("store: get request %d: %w", id, err)
+	}
+	return &r, nil
 }
 
 // ListRequests returns requests newest first. An empty status returns every
 // request; otherwise only that status.
 func (s *Store) ListRequests(ctx context.Context, status string) ([]core.Request, error) {
-	query := "SELECT " + requestColumns + " FROM requests"
-	var args []any
+	query := s.db.NewSelect().Model((*requestStoreModel)(nil))
 	if status != "" {
-		query += " WHERE status = ?"
-		args = append(args, status)
+		query = query.Where("status = ?", status)
 	}
-	query += " ORDER BY created_at DESC, id DESC"
-	return s.listRequests(ctx, query, args...)
+	return s.listRequestModels(ctx, query.Order("created_at DESC", "id DESC"))
 }
 
 // ListRequestsBy returns one account's requests, newest first, filtered by
@@ -190,14 +177,11 @@ func (s *Store) ListRequests(ctx context.Context, status string) ([]core.Request
 // requestedBy 0 is a real query and not a wildcard: it selects the rows that
 // record no account, which is what a pre-accounts or open-server row is.
 func (s *Store) ListRequestsBy(ctx context.Context, requestedBy int64, status string) ([]core.Request, error) {
-	query := "SELECT " + requestColumns + " FROM requests WHERE requested_by = ?"
-	args := []any{requestedBy}
+	query := s.db.NewSelect().Model((*requestStoreModel)(nil)).Where("requested_by = ?", requestedBy)
 	if status != "" {
-		query += " AND status = ?"
-		args = append(args, status)
+		query = query.Where("status = ?", status)
 	}
-	query += " ORDER BY created_at DESC, id DESC"
-	return s.listRequests(ctx, query, args...)
+	return s.listRequestModels(ctx, query.Order("created_at DESC", "id DESC"))
 }
 
 // ListPendingRequestsForTMDBIDs returns the pending requests among the given
@@ -208,32 +192,38 @@ func (s *Store) ListPendingRequestsForTMDBIDs(ctx context.Context, tmdbIDs []int
 	if len(tmdbIDs) == 0 {
 		return []core.Request{}, nil
 	}
-	args := []any{core.RequestPending}
-	for _, id := range tmdbIDs {
-		args = append(args, id)
-	}
-	return s.listRequests(ctx,
-		"SELECT "+requestColumns+" FROM requests WHERE status = ? AND tmdb_id IN ("+
-			placeholders(len(tmdbIDs))+")", args...)
+	query := s.db.NewSelect().Model((*requestStoreModel)(nil)).
+		Where("status = ?", core.RequestPending).
+		Where("tmdb_id IN (?)", bun.In(tmdbIDs))
+	return s.listRequestModels(ctx, query)
 }
 
-func (s *Store) listRequests(ctx context.Context, query string, args ...any) ([]core.Request, error) {
-	rows, err := s.db.QueryContext(ctx, query, args...)
-	if err != nil {
+func (s *Store) listRequestModels(ctx context.Context, query *bun.SelectQuery) ([]core.Request, error) {
+	models := make([]requestStoreModel, 0)
+	if err := query.Model(&models).Scan(ctx); err != nil {
 		return nil, fmt.Errorf("store: list requests: %w", err)
 	}
-	defer rows.Close()
+	return requestModelsToCore(models)
+}
 
-	out := []core.Request{}
-	for rows.Next() {
-		r, err := scanRequest(rows)
+// listRequests is retained for adult.go's scene-specific lookup until that
+// domain is migrated. The ordinary request lists above use typed Bun builders.
+func (s *Store) listRequests(ctx context.Context, query string, args ...any) ([]core.Request, error) {
+	models := make([]requestStoreModel, 0)
+	if err := s.db.NewRaw(query, args...).Scan(ctx, &models); err != nil {
+		return nil, fmt.Errorf("store: list requests: %w", err)
+	}
+	return requestModelsToCore(models)
+}
+
+func requestModelsToCore(models []requestStoreModel) ([]core.Request, error) {
+	out := make([]core.Request, 0, len(models))
+	for i := range models {
+		r, err := models[i].coreRequest()
 		if err != nil {
 			return nil, fmt.Errorf("store: scan request: %w", err)
 		}
-		out = append(out, *r)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: list requests: %w", err)
+		out = append(out, r)
 	}
 	return out, nil
 }
@@ -241,9 +231,11 @@ func (s *Store) listRequests(ctx context.Context, query string, args ...any) ([]
 // SetRequestStatus moves a request to a new status. Setting the status of an
 // absent request is ErrNotFound.
 func (s *Store) SetRequestStatus(ctx context.Context, id int64, status string) error {
-	res, err := s.db.ExecContext(ctx,
-		"UPDATE requests SET status = ?, updated_at = ? WHERE id = ?",
-		status, formatTime(now()), id)
+	res, err := s.db.NewUpdate().Model((*requestStoreModel)(nil)).
+		Set("status = ?", status).
+		Set("updated_at = ?", formatTime(now())).
+		Where("id = ?", id).
+		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("store: set request %d status: %w", id, err)
 	}
@@ -259,10 +251,13 @@ func (s *Store) SetRequestStatus(ctx context.Context, id int64, status string) e
 // It is a no-op with no error when nothing is pending, which is the common
 // case: most library additions were never requested.
 func (s *Store) ApproveRequestsFor(ctx context.Context, mediaType string, tmdbID int64) (int64, error) {
-	res, err := s.db.ExecContext(ctx, `
-		UPDATE requests SET status = ?, updated_at = ?
-		WHERE media_type = ? AND tmdb_id = ? AND status = ?`,
-		core.RequestApproved, formatTime(now()), mediaType, tmdbID, core.RequestPending)
+	res, err := s.db.NewUpdate().Model((*requestStoreModel)(nil)).
+		Set("status = ?", core.RequestApproved).
+		Set("updated_at = ?", formatTime(now())).
+		Where("media_type = ?", mediaType).
+		Where("tmdb_id = ?", tmdbID).
+		Where("status = ?", core.RequestPending).
+		Exec(ctx)
 	if err != nil {
 		return 0, fmt.Errorf("store: approve requests for %s %d: %w", mediaType, tmdbID, err)
 	}
@@ -295,14 +290,13 @@ func (s *Store) GrantRequestSeasons(ctx context.Context, tmdbID int64, ungranted
 	}
 	defer tx.Rollback()
 
-	var (
-		id      int64
-		seasons sql.NullString
-	)
-	err = tx.QueryRowContext(ctx, `
-		SELECT id, seasons FROM requests
-		WHERE media_type = ? AND tmdb_id = ? AND status = ?`,
-		core.MediaTypeSeries, tmdbID, core.RequestPending).Scan(&id, &seasons)
+	var request requestStoreModel
+	err = tx.NewSelect().Model(&request).
+		Column("id", "seasons").
+		Where("media_type = ?", core.MediaTypeSeries).
+		Where("tmdb_id = ?", tmdbID).
+		Where("status = ?", core.RequestPending).
+		Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, nil
 	}
@@ -310,34 +304,38 @@ func (s *Store) GrantRequestSeasons(ctx context.Context, tmdbID int64, ungranted
 		return 0, fmt.Errorf("store: grant request seasons for series %d: %w", tmdbID, err)
 	}
 
-	asked, err := decodeSeasons(seasons)
+	asked, err := decodeSeasons(request.Seasons)
 	if err != nil {
-		return 0, fmt.Errorf("store: grant request %d: %w", id, err)
+		return 0, fmt.Errorf("store: grant request %d: %w", request.ID, err)
 	}
 	remaining := outstandingSeasons(asked, ungranted)
 
 	ts := formatTime(now())
 	var granted int64
 	if len(remaining) == 0 {
-		if _, err := tx.ExecContext(ctx,
-			"UPDATE requests SET status = ?, updated_at = ? WHERE id = ?",
-			core.RequestApproved, ts, id); err != nil {
-			return 0, fmt.Errorf("store: grant request %d: %w", id, err)
+		if _, err := tx.NewUpdate().Model((*requestStoreModel)(nil)).
+			Set("status = ?", core.RequestApproved).
+			Set("updated_at = ?", ts).
+			Where("id = ?", request.ID).
+			Exec(ctx); err != nil {
+			return 0, fmt.Errorf("store: grant request %d: %w", request.ID, err)
 		}
 		granted = 1
 	} else {
 		encoded, err := encodeSeasons(remaining)
 		if err != nil {
-			return 0, fmt.Errorf("store: grant request %d: %w", id, err)
+			return 0, fmt.Errorf("store: grant request %d: %w", request.ID, err)
 		}
-		if _, err := tx.ExecContext(ctx,
-			"UPDATE requests SET seasons = ?, updated_at = ? WHERE id = ?",
-			encoded, ts, id); err != nil {
-			return 0, fmt.Errorf("store: grant request %d: %w", id, err)
+		if _, err := tx.NewUpdate().Model((*requestStoreModel)(nil)).
+			Set("seasons = ?", encoded).
+			Set("updated_at = ?", ts).
+			Where("id = ?", request.ID).
+			Exec(ctx); err != nil {
+			return 0, fmt.Errorf("store: grant request %d: %w", request.ID, err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("store: grant request %d: %w", id, err)
+		return 0, fmt.Errorf("store: grant request %d: %w", request.ID, err)
 	}
 	return granted, nil
 }
@@ -358,32 +356,37 @@ func outstandingSeasons(asked, ungranted []int) []int {
 	return normalizeSeasons(out)
 }
 
-func scanRequest(sc scanner) (*core.Request, error) {
-	var (
-		r          core.Request
-		posterPath sql.NullString
-		seasons    sql.NullString
-		created    string
-		updated    string
-	)
-	if err := sc.Scan(&r.ID, &r.MediaType, &r.TMDBID, &r.StashID, &r.Title, &r.Year, &posterPath,
-		&seasons, &r.MinAvailability, &r.Status, &r.RequestedBy, &created, &updated); err != nil {
-		return nil, err
+func requestStoreModelFromCore(r *core.Request, seasons *string, timestamp string) *requestStoreModel {
+	return &requestStoreModel{
+		ID: r.ID, MediaType: r.MediaType, TMDBID: r.TMDBID, StashID: r.StashID,
+		Title: r.Title, Year: r.Year, PosterPath: stringPointer(r.PosterPath), Seasons: seasons,
+		MinAvailability: r.MinAvailability, Status: r.Status, RequestedBy: r.RequestedBy,
+		CreatedAt: timestamp, UpdatedAt: timestamp,
 	}
-	r.PosterPath = posterPath.String
-	decoded, err := decodeSeasons(seasons)
+}
+
+func (m *requestStoreModel) coreRequest() (core.Request, error) {
+	r := core.Request{
+		ID: m.ID, MediaType: m.MediaType, TMDBID: m.TMDBID, StashID: m.StashID,
+		Title: m.Title, Year: m.Year, MinAvailability: m.MinAvailability,
+		Status: m.Status, RequestedBy: m.RequestedBy,
+	}
+	if m.PosterPath != nil {
+		r.PosterPath = *m.PosterPath
+	}
+	decoded, err := decodeSeasons(m.Seasons)
 	if err != nil {
-		return nil, err
+		return core.Request{}, err
 	}
 	r.Seasons = decoded
-	r.CreatedAt = parseTime(created)
-	r.UpdatedAt = parseTime(updated)
-	return &r, nil
+	r.CreatedAt = parseTime(m.CreatedAt)
+	r.UpdatedAt = parseTime(m.UpdatedAt)
+	return r, nil
 }
 
 // mergeSeasons unions a stored season list with an incoming one. A nil list on
 // either side means "the whole title", which absorbs the other.
-func mergeSeasons(stored sql.NullString, incoming []int) ([]int, error) {
+func mergeSeasons(stored *string, incoming []int) ([]int, error) {
 	existing, err := decodeSeasons(stored)
 	if err != nil {
 		return nil, err
@@ -407,7 +410,7 @@ func normalizeSeasons(seasons []int) []int {
 	return slices.Compact(out)
 }
 
-func encodeSeasons(seasons []int) (any, error) {
+func encodeSeasons(seasons []int) (*string, error) {
 	if seasons == nil {
 		return nil, nil
 	}
@@ -415,25 +418,17 @@ func encodeSeasons(seasons []int) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return string(b), nil
+	encoded := string(b)
+	return &encoded, nil
 }
 
-func decodeSeasons(col sql.NullString) ([]int, error) {
-	if !col.Valid || col.String == "" {
+func decodeSeasons(col *string) ([]int, error) {
+	if col == nil || *col == "" {
 		return nil, nil
 	}
 	var out []int
-	if err := json.Unmarshal([]byte(col.String), &out); err != nil {
-		return nil, fmt.Errorf("decode seasons %q: %w", col.String, err)
+	if err := json.Unmarshal([]byte(*col), &out); err != nil {
+		return nil, fmt.Errorf("decode seasons %q: %w", *col, err)
 	}
 	return out, nil
-}
-
-// nullString stores the empty string as SQL NULL, which is what the nullable
-// poster_path column means by "no artwork".
-func nullString(s string) any {
-	if s == "" {
-		return nil
-	}
-	return s
 }

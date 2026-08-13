@@ -254,8 +254,8 @@ func ProviderCredentialSetting(id string) string {
 }
 
 // DefaultProviderForKind returns the provider a library of the given kind gets
-// when nobody chose one: the id migration 0022 backfills onto pre-existing
-// rows, and the id the create form preselects. An unknown kind gets "" so the
+// when nobody chose one: the id the baseline seeds and the create form
+// preselects. An unknown kind gets "" so the
 // mistake surfaces as a validation failure, not as a working library wired to
 // the wrong provider.
 func DefaultProviderForKind(kind string) string {

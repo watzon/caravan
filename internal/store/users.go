@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/uptrace/bun"
 	"github.com/watzon/caravan/internal/core"
 )
 
@@ -19,8 +20,6 @@ var ErrUsernameTaken = errors.New("store: username already taken")
 // exists. The setup endpoint maps it to its stable "already complete" reply.
 var ErrFirstUserExists = errors.New("store: first user already exists")
 
-const userColumns = `id, username, password_hash, role, created_at, updated_at`
-
 // CreateUser inserts a new account and writes back the assigned ID. The
 // username is compared case-insensitively by the column's collation, so a
 // second "Admin" alongside "admin" is ErrUsernameTaken rather than a duplicate.
@@ -32,21 +31,15 @@ func (s *Store) CreateUser(ctx context.Context, u *core.User) error {
 	u.CreatedAt = ts
 	u.UpdatedAt = ts
 
-	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO users (username, password_hash, role, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?)`,
-		u.Username, u.PasswordHash, u.Role, formatTime(ts), formatTime(ts))
+	model := userModelFromCore(u)
+	_, err := s.db.NewInsert().Model(model).Exec(ctx)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return fmt.Errorf("store: create user %q: %w", u.Username, ErrUsernameTaken)
 		}
 		return fmt.Errorf("store: create user %q: %w", u.Username, err)
 	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("store: create user %q: %w", u.Username, err)
-	}
-	u.ID = id
+	u.ID = model.ID
 	return nil
 }
 
@@ -64,11 +57,11 @@ func (s *Store) CreateFirstAdmin(ctx context.Context, u *core.User) error {
 	u.CreatedAt = ts
 	u.UpdatedAt = ts
 
-	res, err := s.db.ExecContext(ctx, `
+	res, err := s.db.NewRaw(`
 		INSERT INTO users (username, password_hash, role, created_at, updated_at)
 		SELECT ?, ?, ?, ?, ?
 		WHERE NOT EXISTS (SELECT 1 FROM users)`,
-		u.Username, u.PasswordHash, u.Role, formatTime(ts), formatTime(ts))
+		u.Username, u.PasswordHash, u.Role, formatTime(ts), formatTime(ts)).Exec(ctx)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return fmt.Errorf("store: create first administrator %q: %w", u.Username, ErrFirstUserExists)
@@ -92,52 +85,46 @@ func (s *Store) CreateFirstAdmin(ctx context.Context, u *core.User) error {
 
 // GetUser returns one account, or ErrNotFound.
 func (s *Store) GetUser(ctx context.Context, id int64) (*core.User, error) {
-	row := s.db.QueryRowContext(ctx, "SELECT "+userColumns+" FROM users WHERE id = ?", id)
-	u, err := scanUser(row)
+	var user userModel
+	err := s.db.NewSelect().Model(&user).Where("id = ?", id).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("store: user %d: %w", id, ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("store: get user %d: %w", id, err)
 	}
-	return u, nil
+	return user.toCore(), nil
 }
 
 // GetUserByUsername returns the account with that name, or ErrNotFound. The
 // match is case-insensitive: the column's NOCASE collation is what the login
 // form relies on, so nobody is refused for capitalising their own name.
 func (s *Store) GetUserByUsername(ctx context.Context, username string) (*core.User, error) {
-	row := s.db.QueryRowContext(ctx, "SELECT "+userColumns+" FROM users WHERE username = ?", username)
-	u, err := scanUser(row)
+	var user userModel
+	err := s.db.NewSelect().Model(&user).Where("username = ?", username).Scan(ctx)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, fmt.Errorf("store: user %q: %w", username, ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("store: get user %q: %w", username, err)
 	}
-	return u, nil
+	return user.toCore(), nil
 }
 
 // ListUsers returns every account by username. The list is empty, never nil,
 // on a server that runs open.
 func (s *Store) ListUsers(ctx context.Context) ([]core.User, error) {
-	rows, err := s.db.QueryContext(ctx,
-		"SELECT "+userColumns+" FROM users ORDER BY username COLLATE NOCASE")
+	var users []userModel
+	err := s.db.NewSelect().Model(&users).
+		OrderExpr("username COLLATE NOCASE ASC").
+		Scan(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: list users: %w", err)
 	}
-	defer rows.Close()
 
-	out := []core.User{}
-	for rows.Next() {
-		u, err := scanUser(rows)
-		if err != nil {
-			return nil, fmt.Errorf("store: scan user: %w", err)
-		}
-		out = append(out, *u)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: list users: %w", err)
+	out := make([]core.User, 0, len(users))
+	for i := range users {
+		out = append(out, *users[i].toCore())
 	}
 	return out, nil
 }
@@ -156,30 +143,17 @@ func (s *Store) UsernamesByID(ctx context.Context, ids []int64) (map[int64]strin
 	if len(ids) == 0 {
 		return out, nil
 	}
-	args := make([]any, 0, len(ids))
-	for _, id := range ids {
-		args = append(args, id)
-	}
-
-	rows, err := s.db.QueryContext(ctx,
-		"SELECT id, username FROM users WHERE id IN ("+placeholders(len(ids))+")", args...)
+	var users []userModel
+	err := s.db.NewSelect().Model(&users).
+		Column("id", "username").
+		Where("id IN (?)", bun.In(ids)).
+		Scan(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("store: usernames by id: %w", err)
 	}
-	defer rows.Close()
 
-	for rows.Next() {
-		var (
-			id       int64
-			username string
-		)
-		if err := rows.Scan(&id, &username); err != nil {
-			return nil, fmt.Errorf("store: scan username: %w", err)
-		}
-		out[id] = username
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: usernames by id: %w", err)
+	for _, user := range users {
+		out[user.ID] = user.Username
 	}
 	return out, nil
 }
@@ -190,7 +164,7 @@ func (s *Store) UsernamesByID(ctx context.Context, ids []int64) (map[int64]strin
 // is deliberately not a foreign key), so deleting a housemate leaves the record
 // of what they asked for intact rather than quietly rewriting history.
 func (s *Store) DeleteUser(ctx context.Context, id int64) error {
-	res, err := s.db.ExecContext(ctx, "DELETE FROM users WHERE id = ?", id)
+	res, err := s.db.NewDelete().Model((*userModel)(nil)).Where("id = ?", id).Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("store: delete user %d: %w", id, err)
 	}
@@ -200,9 +174,11 @@ func (s *Store) DeleteUser(ctx context.Context, id int64) error {
 // SetUserPassword replaces one account's hash. Setting the password of an
 // absent account is ErrNotFound.
 func (s *Store) SetUserPassword(ctx context.Context, id int64, hash string) error {
-	res, err := s.db.ExecContext(ctx,
-		"UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?",
-		hash, formatTime(now()), id)
+	res, err := s.db.NewUpdate().Model((*userModel)(nil)).
+		Set("password_hash = ?", hash).
+		Set("updated_at = ?", formatTime(now())).
+		Where("id = ?", id).
+		Exec(ctx)
 	if err != nil {
 		return fmt.Errorf("store: set user %d password: %w", id, err)
 	}
@@ -212,34 +188,22 @@ func (s *Store) SetUserPassword(ctx context.Context, id int64, hash string) erro
 // CountUsers reports how many accounts exist. Zero is what makes the API open:
 // it is read on every gated request, so it is a COUNT rather than a list.
 func (s *Store) CountUsers(ctx context.Context) (int, error) {
-	return s.countUsers(ctx, "SELECT COUNT(*) FROM users")
+	n, err := s.db.NewSelect().Model((*userModel)(nil)).Count(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("store: count users: %w", err)
+	}
+	return n, nil
 }
 
 // CountAdmins reports how many accounts hold RoleAdmin. It is what stops the
 // last admin being deleted or demoted: a server with members and no admin can
 // never be administered again short of deleting the database.
 func (s *Store) CountAdmins(ctx context.Context) (int, error) {
-	return s.countUsers(ctx, "SELECT COUNT(*) FROM users WHERE role = ?", core.RoleAdmin)
-}
-
-func (s *Store) countUsers(ctx context.Context, query string, args ...any) (int, error) {
-	var n int
-	if err := s.db.QueryRowContext(ctx, query, args...).Scan(&n); err != nil {
+	n, err := s.db.NewSelect().Model((*userModel)(nil)).
+		Where("role = ?", core.RoleAdmin).
+		Count(ctx)
+	if err != nil {
 		return 0, fmt.Errorf("store: count users: %w", err)
 	}
 	return n, nil
-}
-
-func scanUser(sc scanner) (*core.User, error) {
-	var (
-		u       core.User
-		created string
-		updated string
-	)
-	if err := sc.Scan(&u.ID, &u.Username, &u.PasswordHash, &u.Role, &created, &updated); err != nil {
-		return nil, err
-	}
-	u.CreatedAt = parseTime(created)
-	u.UpdatedAt = parseTime(updated)
-	return &u, nil
 }

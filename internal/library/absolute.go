@@ -32,8 +32,8 @@ func resolveAbsolute(meta *core.SeriesMeta, p core.ParsedRelease) (core.ParsedRe
 	// reason, and a special that carried a stray one would otherwise outrank
 	// the real episode.
 	//
-	// First hit wins. The absolute column is not unique (migration 0025 says
-	// why), and the tree arrives in season then episode order, so the earliest
+	// First hit wins. The absolute column is deliberately not unique, and the
+	// tree arrives in season then episode order, so the earliest
 	// episode claiming the number is the one a renumbering has not moved yet.
 	//
 	// p.Absolute is kept: it is what the name claimed, and the claim stays

@@ -2,67 +2,11 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"errors"
-	"path/filepath"
 	"testing"
 
 	"github.com/watzon/caravan/internal/core"
 )
-
-// 0025 adds one integer per episode, and an upgraded install must come out the
-// other side saying what it already said: every row it wrote before this
-// migration knows no absolute number, and 0 is how the column spells that.
-// Nothing is backfilled, because a number counted here would be an answer
-// Caravan invented rather than one a provider served.
-func TestMigrate0025AddsAbsoluteNumbering(t *testing.T) {
-	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "caravan.db")
-	openAtSchemaVersion(t, path, 24)
-
-	db, err := sql.Open("sqlite", dsn(path))
-	if err != nil {
-		t.Fatalf("open seeded database: %v", err)
-	}
-	exec(t, db, `INSERT INTO series (id, kind, title, sort_title, year, added_at, updated_at)
-		VALUES (7, 'tv', 'Frieren', 'frieren', 2023,
-		        '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')`)
-	exec(t, db, `INSERT INTO episodes (id, series_id, season_number, episode_number, title)
-		VALUES (70, 7, 1, 1, 'The Journey''s End')`)
-	if err := db.Close(); err != nil {
-		t.Fatalf("close seeded database: %v", err)
-	}
-
-	st, err := Open(path)
-	if err != nil {
-		t.Fatalf("Open after upgrade: %v", err)
-	}
-	t.Cleanup(func() { st.Close() })
-
-	version, err := st.SchemaVersion()
-	if err != nil {
-		t.Fatalf("SchemaVersion: %v", err)
-	}
-	if version < 25 {
-		t.Fatalf("schema version = %d, want at least 25", version)
-	}
-
-	// The column reads back through the ordinary door, which is the only proof
-	// that matters: the scan list and the column list agree.
-	e, err := st.GetEpisode(ctx, 70)
-	if err != nil {
-		t.Fatalf("GetEpisode: %v", err)
-	}
-	if e.AbsoluteNumber != 0 {
-		t.Errorf("pre-existing episode absolute = %d, want 0 — nothing may be invented for it",
-			e.AbsoluteNumber)
-	}
-	// And a zero absolute is not an identity: the lookup refuses it rather than
-	// handing back the first row that never had one.
-	if _, err := st.GetEpisodeByAbsoluteNumber(ctx, 7, 0); !errors.Is(err, ErrNotFound) {
-		t.Errorf("GetEpisodeByAbsoluteNumber(0) error = %v, want ErrNotFound", err)
-	}
-}
 
 // The absolute number is a provider's fact, written by whichever refresh heard
 // it and preserved against every writer that never did. A caller holding an

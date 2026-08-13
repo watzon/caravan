@@ -6,13 +6,9 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/uptrace/bun"
 	"github.com/watzon/caravan/internal/core"
 )
-
-const movieColumns = `id, provider, provider_ref, tmdb_id, imdb_id, title, sort_title, year, overview,
-	path, poster_path, poster_url, monitored, quality_profile_id, release_date,
-	digital_release, physical_release, min_availability, added_at, updated_at,
-	library_id`
 
 // UpsertMovie inserts or updates m and writes back the assigned ID.
 //
@@ -62,24 +58,19 @@ func (s *Store) UpsertMovie(ctx context.Context, m *core.Movie) error {
 		m.MinAvailability = core.AvailabilityReleased
 	}
 
+	model := catalogMovieModelFromCore(m)
 	if m.ID != 0 {
 		// library_id 0 keeps the stored value: a caller that rebuilt the
 		// struct from provider metadata has not decided the movie moves, and a
 		// rescan must never move an item between libraries. A move names its
 		// target explicitly.
-		res, err := s.db.ExecContext(ctx, `
-			UPDATE movies SET provider = ?, provider_ref = ?, tmdb_id = ?, imdb_id = ?,
-				title = ?, sort_title = ?, year = ?,
-				overview = ?, path = ?, poster_path = ?, poster_url = ?, monitored = ?,
-				quality_profile_id = ?, release_date = ?, digital_release = ?,
-				physical_release = ?, min_availability = ?, added_at = ?, updated_at = ?,
-				library_id = COALESCE(NULLIF(?, 0), library_id)
-			WHERE id = ?`,
-			m.Provider, m.ProviderRef, m.TMDBID, m.IMDBID, m.Title, m.SortTitle, m.Year,
-			m.Overview, m.Path, m.PosterPath,
-			m.PosterURL, m.Monitored, m.QualityProfileID, formatTime(m.ReleaseDate),
-			formatTime(m.DigitalRelease), formatTime(m.PhysicalRelease), m.MinAvailability,
-			formatTime(m.AddedAt), formatTime(m.UpdatedAt), m.LibraryID, m.ID)
+		res, err := s.db.NewUpdate().Model(&model).
+			Column("provider", "provider_ref", "tmdb_id", "imdb_id", "title", "sort_title", "year",
+				"overview", "path", "poster_path", "poster_url", "monitored", "quality_profile_id",
+				"release_date", "digital_release", "physical_release", "min_availability", "added_at", "updated_at",
+				"library_id").
+			Value("library_id", "COALESCE(NULLIF(?, 0), library_id)", m.LibraryID).
+			WherePK().Exec(ctx)
 		if err != nil {
 			return fmt.Errorf("store: update movie %d: %w", m.ID, err)
 		}
@@ -93,40 +84,17 @@ func (s *Store) UpsertMovie(ctx context.Context, m *core.Movie) error {
 		return nil
 	}
 
-	res, err := s.db.ExecContext(ctx, `
-		INSERT INTO movies (provider, provider_ref, tmdb_id, imdb_id, title, sort_title,
-			year, overview, path,
-			poster_path, poster_url, monitored, quality_profile_id, release_date,
-			digital_release, physical_release, min_availability, added_at, updated_at,
-			library_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		m.Provider, m.ProviderRef, m.TMDBID, m.IMDBID, m.Title, m.SortTitle, m.Year,
-		m.Overview, m.Path, m.PosterPath,
-		m.PosterURL, m.Monitored, m.QualityProfileID, formatTime(m.ReleaseDate),
-		formatTime(m.DigitalRelease), formatTime(m.PhysicalRelease), m.MinAvailability,
-		formatTime(m.AddedAt), formatTime(m.UpdatedAt), m.LibraryID)
-	if err != nil {
+	if err := s.db.NewInsert().Model(&model).Returning("id").Scan(ctx); err != nil {
 		return fmt.Errorf("store: insert movie %q: %w", m.Title, err)
 	}
-	id, err := res.LastInsertId()
-	if err != nil {
-		return fmt.Errorf("store: insert movie %q: %w", m.Title, err)
-	}
-	m.ID = id
+	m.ID = model.ID
 	return nil
 }
 
 // GetMovie returns the movie with the given id, or ErrNotFound.
 func (s *Store) GetMovie(ctx context.Context, id int64) (*core.Movie, error) {
-	row := s.db.QueryRowContext(ctx, "SELECT "+movieColumns+" FROM movies WHERE id = ?", id)
-	m, err := scanMovie(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("store: movie %d: %w", id, ErrNotFound)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("store: get movie %d: %w", id, err)
-	}
-	return m, nil
+	return s.movie(ctx, s.db.NewSelect().Model((*catalogMovieModel)(nil)).Where("id = ?", id),
+		fmt.Sprintf("movie %d", id))
 }
 
 // normalizeMovieProvider derives the provider identity from the legacy TMDB id
@@ -148,53 +116,46 @@ func normalizeMovieProvider(m *core.Movie) {
 // unidentified row — "" is precisely the value the partial unique index
 // excludes (GetSeriesByStashID's rule, generalized).
 func (s *Store) GetMovieByProviderRef(ctx context.Context, provider, ref string) (*core.Movie, error) {
+	what := fmt.Sprintf("movie %s/%s", provider, ref)
 	if provider == "" || ref == "" {
-		return nil, fmt.Errorf("store: movie %s/%s: %w", provider, ref, ErrNotFound)
+		return nil, fmt.Errorf("store: %s: %w", what, ErrNotFound)
 	}
-	row := s.db.QueryRowContext(ctx, "SELECT "+movieColumns+
-		" FROM movies WHERE provider = ? AND provider_ref = ?", provider, ref)
-	m, err := scanMovie(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("store: movie %s/%s: %w", provider, ref, ErrNotFound)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("store: get movie %s/%s: %w", provider, ref, err)
-	}
-	return m, nil
+	query := s.db.NewSelect().Model((*catalogMovieModel)(nil)).
+		Where("provider = ?", provider).Where("provider_ref = ?", ref)
+	return s.movie(ctx, query, what)
 }
 
 // GetMovieByTMDBID returns the movie with the given TMDB id, or ErrNotFound.
 func (s *Store) GetMovieByTMDBID(ctx context.Context, tmdbID int64) (*core.Movie, error) {
-	row := s.db.QueryRowContext(ctx, "SELECT "+movieColumns+" FROM movies WHERE tmdb_id = ?", tmdbID)
-	m, err := scanMovie(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("store: movie tmdb %d: %w", tmdbID, ErrNotFound)
+	return s.movie(ctx, s.db.NewSelect().Model((*catalogMovieModel)(nil)).Where("tmdb_id = ?", tmdbID),
+		fmt.Sprintf("movie tmdb %d", tmdbID))
+}
+
+func (s *Store) movie(ctx context.Context, query *bun.SelectQuery, what string) (*core.Movie, error) {
+	var model catalogMovieModel
+	if err := query.Model(&model).Scan(ctx); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("store: %s: %w", what, ErrNotFound)
+		}
+		return nil, fmt.Errorf("store: get %s: %w", what, err)
 	}
-	if err != nil {
-		return nil, fmt.Errorf("store: get movie tmdb %d: %w", tmdbID, err)
-	}
-	return m, nil
+	out := model.core()
+	return &out, nil
 }
 
 // ListMovies returns every movie ordered by sort title then title. The slice
 // is empty, never nil, on an empty library.
 func (s *Store) ListMovies(ctx context.Context) ([]core.Movie, error) {
-	rows, err := s.db.QueryContext(ctx, "SELECT "+movieColumns+" FROM movies ORDER BY sort_title, title, year")
-	if err != nil {
+	models := make([]catalogMovieModel, 0)
+	if err := s.db.NewSelect().Model(&models).
+		Order("sort_title ASC", "title ASC", "year ASC").
+		Scan(ctx); err != nil {
 		return nil, fmt.Errorf("store: list movies: %w", err)
 	}
-	defer rows.Close()
 
-	out := []core.Movie{}
-	for rows.Next() {
-		m, err := scanMovie(rows)
-		if err != nil {
-			return nil, fmt.Errorf("store: scan movie: %w", err)
-		}
-		out = append(out, *m)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: list movies: %w", err)
+	out := make([]core.Movie, 0, len(models))
+	for _, model := range models {
+		out = append(out, model.core())
 	}
 	return out, nil
 }
@@ -204,37 +165,18 @@ func (s *Store) ListMovies(ctx context.Context) ([]core.Movie, error) {
 // decorate a page of provider results with "already yours" and would otherwise
 // either load the whole library or issue a query per row.
 func (s *Store) MovieIDsByTMDBID(ctx context.Context, tmdbIDs []int64) (map[int64]int64, error) {
-	return s.idsByTMDBID(ctx, "movies", tmdbIDs)
-}
-
-// idsByTMDBID is the shared body of MovieIDsByTMDBID and SeriesIDsByTMDBID.
-// table is a package-internal literal, never caller input.
-func (s *Store) idsByTMDBID(ctx context.Context, table string, tmdbIDs []int64) (map[int64]int64, error) {
 	out := map[int64]int64{}
 	if len(tmdbIDs) == 0 {
 		return out, nil
 	}
-	args := make([]any, 0, len(tmdbIDs))
-	for _, id := range tmdbIDs {
-		args = append(args, id)
-	}
 
-	rows, err := s.db.QueryContext(ctx,
-		"SELECT tmdb_id, id FROM "+table+" WHERE tmdb_id IN ("+placeholders(len(tmdbIDs))+")", args...)
-	if err != nil {
-		return nil, fmt.Errorf("store: %s ids by tmdb id: %w", table, err)
+	models := make([]catalogMovieModel, 0)
+	if err := s.db.NewSelect().Model(&models).Column("tmdb_id", "id").
+		Where("tmdb_id IN (?)", bun.In(tmdbIDs)).Scan(ctx); err != nil {
+		return nil, fmt.Errorf("store: movies ids by tmdb id: %w", err)
 	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var tmdbID, id int64
-		if err := rows.Scan(&tmdbID, &id); err != nil {
-			return nil, fmt.Errorf("store: scan %s id: %w", table, err)
-		}
-		out[tmdbID] = id
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: %s ids by tmdb id: %w", table, err)
+	for _, model := range models {
+		out[model.TMDBID] = model.ID
 	}
 	return out, nil
 }
@@ -242,17 +184,14 @@ func (s *Store) idsByTMDBID(ctx context.Context, table string, tmdbIDs []int64) 
 // DeleteMovie removes the movie row. It does not touch files on disk and does
 // not remove media_files rows: those are reconciled by a rescan.
 func (s *Store) DeleteMovie(ctx context.Context, id int64) error {
-	if _, err := s.db.ExecContext(ctx, "DELETE FROM movies WHERE id = ?", id); err != nil {
+	if _, err := s.db.NewDelete().Model((*catalogMovieModel)(nil)).Where("id = ?", id).Exec(ctx); err != nil {
 		return fmt.Errorf("store: delete movie %d: %w", id, err)
 	}
 	return nil
 }
 
-// scanner is satisfied by both *sql.Row and *sql.Rows.
+// scanner is satisfied by both *sql.Row and *sql.Rows. Joined/aggregate raw
+// queries use it for their custom projections.
 type scanner interface {
 	Scan(dest ...any) error
-}
-
-func scanMovie(sc scanner) (*core.Movie, error) {
-	return scanMovieWith(sc)
 }

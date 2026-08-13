@@ -13,7 +13,7 @@ const (
 	MediaTypeSeries = "series"
 	// MediaTypeScene is one adult scene (PLAN phase 9 task 7). A scene request
 	// is identified by a stash-box id rather than a TMDB one, which is a rule
-	// the requests table enforces itself — see migration 0013.
+	// the requests table enforces itself.
 	MediaTypeScene = "scene"
 )
 

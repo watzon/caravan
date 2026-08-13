@@ -2,9 +2,7 @@ package store
 
 import (
 	"context"
-	"database/sql"
 	"errors"
-	"path/filepath"
 	"reflect"
 	"testing"
 
@@ -134,75 +132,6 @@ func TestListEnabledDownloadClientsOrdersByPriority(t *testing.T) {
 	}
 	if len(all) != 4 {
 		t.Errorf("ListDownloadClients = %d rows, want all 4 including the disabled one", len(all))
-	}
-}
-
-// 0007 reshapes a table 0001 already created, on databases that may already
-// hold rows. Upgrading is the normal path (SPEC §7), so the reshape has to
-// survive a row written under the old schema rather than only a fresh install.
-func TestMigration0007UpgradesAnExistingTable(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "caravan.db")
-	db, err := sql.Open("sqlite", dsn(path))
-	if err != nil {
-		t.Fatalf("sql.Open: %v", err)
-	}
-	defer db.Close()
-	st := &Store{db: db}
-
-	migrations, err := loadMigrations(migrationFiles, "migrations")
-	if err != nil {
-		t.Fatalf("loadMigrations: %v", err)
-	}
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_version (
-		version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL)`); err != nil {
-		t.Fatalf("create schema_version: %v", err)
-	}
-
-	// Everything up to, but not including, the migration under test.
-	const target = 7
-	for _, m := range migrations {
-		if m.version >= target {
-			break
-		}
-		if err := st.applyMigration(m); err != nil {
-			t.Fatalf("applyMigration %d: %v", m.version, err)
-		}
-	}
-
-	// A row in the pre-0007 shape, host/port and all.
-	ts := formatTime(now())
-	if _, err := db.Exec(`INSERT INTO download_clients
-		(name, kind, host, port, username, password, category, enabled, created_at, updated_at)
-		VALUES ('legacy', 'qbittorrent', '127.0.0.1', 8080, 'admin', 'adminadmin', 'caravan', 1, ?, ?)`,
-		ts, ts); err != nil {
-		t.Fatalf("insert legacy row: %v", err)
-	}
-
-	for _, m := range migrations {
-		if m.version < target {
-			continue
-		}
-		if err := st.applyMigration(m); err != nil {
-			t.Fatalf("applyMigration %d: %v", m.version, err)
-		}
-	}
-
-	got, err := st.ListDownloadClients(context.Background())
-	if err != nil {
-		t.Fatalf("ListDownloadClients after upgrade: %v", err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("clients after upgrade = %+v, want the legacy row kept", got)
-	}
-	want := core.DownloadClientConfig{
-		ID: got[0].ID, Type: core.DownloadClientQBittorrent, Name: "legacy",
-		// The host/port pair does not survive: it is replaced by a base URL
-		// the user re-enters, which is what makes this settings-class config.
-		URL: "", Username: "admin", Password: "adminadmin", Category: "caravan",
-		Priority: 25, Enabled: true,
-	}
-	if !reflect.DeepEqual(got[0], want) {
-		t.Errorf("upgraded row = %+v, want %+v", got[0], want)
 	}
 }
 

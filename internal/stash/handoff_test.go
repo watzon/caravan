@@ -89,7 +89,7 @@ func configure(t *testing.T, st *store.Store, url, key string, enabled, adult bo
 // a shelf on it is readable by every device in the house, which is the one
 // mistake this module may not make. The legacy `stashbox` chain because that is
 // what a single-box install is named by, here and in every pre-instances client
-// (0026). IsDefault only where no adult library exists yet — the partial unique
+// for compatibility. IsDefault only where no adult library exists yet — the partial unique
 // index admits one default per kind — and Active is CreateLibrary's own doing,
 // so nothing here sets it.
 //

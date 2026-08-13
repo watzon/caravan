@@ -11,66 +11,6 @@ import (
 	"github.com/watzon/caravan/internal/core"
 )
 
-// openAtSchemaVersion builds a database frozen at an older schema version, so
-// a test can watch a later migration run against a populated install rather
-// than against a fresh file.
-func openAtSchemaVersion(t *testing.T, path string, version int) {
-	t.Helper()
-	db, err := sql.Open("sqlite", dsn(path))
-	if err != nil {
-		t.Fatalf("open %q at schema %d: %v", path, version, err)
-	}
-	defer db.Close()
-	if err := (&Store{db: db}).migrateTo(version); err != nil {
-		t.Fatalf("migrate %q to schema %d: %v", path, version, err)
-	}
-}
-
-// The migration has to describe an install that already exists, not just a
-// fresh one: an upgrade seeds the two libraries that were implied by the
-// folders on disk, and seeds no overrides at all.
-func TestMigrateSeedsLibrariesIntoExistingDatabase(t *testing.T) {
-	ctx := context.Background()
-	path := filepath.Join(t.TempDir(), "caravan.db")
-
-	// 0011 is the last schema that knew nothing about libraries.
-	openAtSchemaVersion(t, path, 11)
-
-	st, err := Open(path)
-	if err != nil {
-		t.Fatalf("Open after upgrade: %v", err)
-	}
-	t.Cleanup(func() { st.Close() })
-
-	got, err := st.ListLibraries(ctx)
-	if err != nil {
-		t.Fatalf("ListLibraries: %v", err)
-	}
-	want := []core.Library{
-		{ID: 1, Kind: core.LibraryKindMovie, Name: "Movies", RootPath: "library/Movies",
-			DLNAVisible: true, Provider: core.ProviderTMDB,
-			Providers: []string{core.ProviderTMDB}, IsDefault: true, Active: true},
-		{ID: 2, Kind: core.LibraryKindTV, Name: "Series", RootPath: "library/TV",
-			DLNAVisible: true, Provider: core.ProviderTMDB,
-			Providers: []string{core.ProviderTMDB}, IsDefault: true, Active: true},
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("ListLibraries = %+v, want %+v", got, want)
-	}
-
-	// Absence is the default, so the join table starts empty however many
-	// indexers the install already had.
-	for _, l := range got {
-		rows, err := st.ListLibraryIndexers(ctx, l.ID)
-		if err != nil {
-			t.Fatalf("ListLibraryIndexers(%d): %v", l.ID, err)
-		}
-		if len(rows) != 0 {
-			t.Errorf("library %d seeded %d indexer overrides, want 0", l.ID, len(rows))
-		}
-	}
-}
-
 func TestGetLibraryByKind(t *testing.T) {
 	ctx := context.Background()
 	st, _ := openTemp(t)
