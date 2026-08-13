@@ -590,33 +590,63 @@ func TestSessionStoreRevocation(t *testing.T) {
 	}
 
 	// A live session reports whose it is, which is the whole point of the map.
-	if userID, ok := sessions.valid(first); !ok || userID != 7 {
-		t.Fatalf("valid(first) = %d, %v; want 7, true", userID, ok)
+	if userID, ok, err := sessions.valid(first); err != nil || !ok || userID != 7 {
+		t.Fatalf("valid(first) = %d, %v, %v; want 7, true, nil", userID, ok, err)
 	}
-	if userID, ok := sessions.valid(other); !ok || userID != 9 {
-		t.Fatalf("valid(other) = %d, %v; want 9, true", userID, ok)
+	if userID, ok, err := sessions.valid(other); err != nil || !ok || userID != 9 {
+		t.Fatalf("valid(other) = %d, %v, %v; want 9, true, nil", userID, ok, err)
 	}
-	if _, ok := sessions.valid(""); ok {
-		t.Fatal("the empty token is valid")
+	if _, ok, err := sessions.valid(""); err != nil || ok {
+		t.Fatalf("the empty token is valid: ok=%v err=%v", ok, err)
 	}
 
 	sessions.revoke(first)
-	if _, ok := sessions.valid(first); ok {
-		t.Fatal("a revoked session is still valid")
+	if _, ok, err := sessions.valid(first); err != nil || ok {
+		t.Fatalf("a revoked session is still valid: ok=%v err=%v", ok, err)
 	}
-	if _, ok := sessions.valid(second); !ok {
-		t.Fatal("revoking one session revoked another")
+	if _, ok, err := sessions.valid(second); err != nil || !ok {
+		t.Fatalf("revoking one session revoked another: ok=%v err=%v", ok, err)
 	}
 
 	// revokeUser is per-account: everything of account 7's goes, and account
 	// 9 never notices.
-	sessions.revokeUser(7)
-	if _, ok := sessions.valid(second); ok {
-		t.Fatal("revokeUser left the account's other session alive")
+	if err := sessions.revokeUser(7); err != nil {
+		t.Fatalf("revokeUser: %v", err)
 	}
-	if _, ok := sessions.valid(other); !ok {
-		t.Fatal("revokeUser ended somebody else's session")
+	if _, ok, err := sessions.valid(second); err != nil || ok {
+		t.Fatalf("revokeUser left the account's other session alive: ok=%v err=%v", ok, err)
 	}
+	if _, ok, err := sessions.valid(other); err != nil || !ok {
+		t.Fatalf("revokeUser ended somebody else's session: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestSessionSurvivesServerRestart(t *testing.T) {
+	h1, st, mgr := newTestServer(t)
+	setPassword(t, st, testPassword)
+	cookie := login(t, h1, testAdmin, testPassword)
+
+	// A new process is a new handler over the same database, the way Air
+	// rebuilds `caravan serve` without wiping the store.
+	h2 := NewServer(st, mgr, nil)
+	rec := doAuth(t, h2, http.MethodGet, "/api/v1/auth/me", "", withCookie(cookie))
+	wantStatus(t, rec, http.StatusOK)
+
+	// Logout on the new process must revoke the durable row, not just the
+	// empty in-memory cache of a freshly started server.
+	wantStatus(t, doAuth(t, h2, http.MethodPost, "/api/v1/auth/logout", "", withCookie(cookie)), http.StatusNoContent)
+	h3 := NewServer(st, mgr, nil)
+	wantStatus(t, doAuth(t, h3, http.MethodGet, "/api/v1/auth/me", "", withCookie(cookie)), http.StatusUnauthorized)
+}
+
+func TestPersistedSessionExpires(t *testing.T) {
+	h1, st, mgr := newTestServer(t, WithSessionTTL(time.Millisecond))
+	setPassword(t, st, testPassword)
+	cookie := login(t, h1, testAdmin, testPassword)
+	time.Sleep(5 * time.Millisecond)
+
+	h2 := NewServer(st, mgr, nil, WithSessionTTL(time.Millisecond))
+	wantStatus(t, doAuth(t, h2, http.MethodGet, "/api/v1/auth/me", "", withCookie(cookie)), http.StatusUnauthorized)
 }
 
 // The allowlist itself, stated as a table so the boundary is readable in one

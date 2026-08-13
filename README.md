@@ -77,6 +77,17 @@ go vet ./...
 on a fresh checkout because `go:embed` requires `web/dist/index.html`. CI builds
 the SPA once and passes that artifact to Go, cross-compile, and race jobs.
 
+## Local development
+
+`just dev` starts Vite (HMR) and Air (Go live-reload) together. Open
+<http://127.0.0.1:8677>. Frontend edits apply without restarting the Go
+process; Go edits still restart it.
+
+```sh
+go install github.com/air-verse/air@latest
+just dev
+```
+
 ## Project documents
 
 - [Technical specification](docs/SPEC.md)

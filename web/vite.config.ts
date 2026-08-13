@@ -13,7 +13,12 @@ export default defineConfig(({ mode }) => ({
     assetsInlineLimit: 0, // keep woff2 as files; the Go binary embeds the tree
   },
   server: {
-    // `caravan serve` default listen address (SPEC §10).
+    host: '127.0.0.1',
+    port: 5173,
+    strictPort: true,
+    // `caravan serve` default listen address (SPEC §10). Used when the
+    // browser is pointed at Vite directly; `just dev` also reverse-proxies
+    // the SPA from :8677 so either URL hot-reloads.
     proxy: { '/api': 'http://127.0.0.1:8677' },
   },
   // Under vitest the Svelte package must resolve to its browser build, which is

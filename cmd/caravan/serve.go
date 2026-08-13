@@ -217,6 +217,11 @@ func runServe(args []string) error {
 	converter := convert.New(st, mgr.StorageRoot, convert.Detect(), logger)
 	logger.Info("convert-for-tv queue", "ffmpeg", converter.Available())
 
+	devUI, err := devUIOrigin(logger)
+	if err != nil {
+		return err
+	}
+
 	// The built-in DLNA media server (SPEC §5.1): it shares this process's HTTP
 	// listener, so it needs that port to advertise a LOCATION clients can
 	// fetch. A listen address without a usable port means no advertisement —
@@ -340,7 +345,10 @@ func runServe(args []string) error {
 			// SPEC §10.1's second first-run step, for the two modes that never
 			// see the first-run screen because they brought a storage root with
 			// them. Only on the start that actually wrote it.
-			api.WithStartupScan(seededRoot)),
+			api.WithStartupScan(seededRoot),
+			// `just dev` sets CARAVAN_DEV_UI so the SPA is Vite (HMR) instead
+			// of the last embedded snapshot. Empty in every other start.
+			api.WithDevUI(devUI)),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -356,6 +364,26 @@ func runServe(args []string) error {
 	stop()
 	watcher.Wait()
 	return err
+}
+
+// devUIOrigin reads CARAVAN_DEV_UI. Release binaries ignore it so a leftover
+// env var cannot turn a shipped listener into a reverse proxy. The empty
+// string is the production path: serve the embedded SPA.
+func devUIOrigin(logger *slog.Logger) (string, error) {
+	raw := os.Getenv(api.EnvDevUI)
+	origin, err := api.ParseDevUIOrigin(raw)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", api.EnvDevUI, err)
+	}
+	if origin == "" {
+		return "", nil
+	}
+	if api.Version != "dev" {
+		logger.Warn("ignoring "+api.EnvDevUI+" in a non-dev build", "origin", origin)
+		return "", nil
+	}
+	logger.Info("proxying the SPA to the Vite dev server", "origin", origin)
+	return origin, nil
 }
 
 // listenPort extracts the port from a listen address, for the DLNA server to

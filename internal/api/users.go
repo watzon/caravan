@@ -182,7 +182,10 @@ func (s *server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreError(w, "delete user", err)
 		return
 	}
-	s.sessions.revokeUser(id)
+	if err := s.sessions.revokeUser(id); err != nil {
+		s.writeStoreError(w, "revoke sessions", err)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -212,7 +215,10 @@ func (s *server) handleResetUserPassword(w http.ResponseWriter, r *http.Request)
 		s.writeStoreError(w, "write password", err)
 		return
 	}
-	s.sessions.revokeUser(id)
+	if err := s.sessions.revokeUser(id); err != nil {
+		s.writeStoreError(w, "revoke sessions", err)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

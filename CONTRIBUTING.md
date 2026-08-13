@@ -13,8 +13,33 @@ documentation corrections, and focused pull requests are welcome.
 
 ## Development setup
 
-Source builds require Go 1.26.5, Node.js 22, and npm. Build the embedded web
-application before running Go commands on a fresh checkout:
+Source builds require Go 1.26.5, Node.js 22, npm, and
+[Air](https://github.com/air-verse/air) for live reload:
+
+```sh
+go install github.com/air-verse/air@latest
+```
+
+`just dev` starts Vite and the Go server together. Frontend edits hot-reload
+in the browser; Go edits restart the API process. Open
+<http://127.0.0.1:8677> — the same port as a normal `caravan serve`.
+
+```sh
+just dev
+```
+
+A first run builds `web/dist` so `go:embed` has something to compile against.
+Later starts reuse that tree; Vite serves the live sources instead.
+
+To run one side on its own (two terminals):
+
+```sh
+just web-dev
+just go-dev
+```
+
+Build the embedded web application before running Go commands that are not
+`just dev` on a fresh checkout:
 
 ```sh
 cd web

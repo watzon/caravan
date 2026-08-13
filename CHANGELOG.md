@@ -9,7 +9,14 @@ and Caravan uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `just dev` runs Vite HMR beside Air and reverse-proxies the SPA from
+  `:8677`, so frontend edits no longer need a Go restart.
 - Initial public-release documentation and release checklist.
+
+### Fixed
+
+- Session cookies survive a process restart (Air, Docker, portable remount)
+  instead of forcing a new login.
 
 ## [0.1.0] - TBD
 

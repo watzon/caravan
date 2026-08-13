@@ -3,8 +3,10 @@ package api
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -38,10 +40,10 @@ const (
 	// it, where the proxy can upgrade the cookie.
 	sessionCookieName = "caravan_session"
 
-	// defaultSessionTTL is how long a login lasts. Sessions live in memory
-	// only: a restart logs you out, which for a single-user media box is a
-	// cheaper trade than another table in a database that is meant to be
-	// deletable (SPEC §7).
+	// defaultSessionTTL is how long a login lasts. The cookie is an opaque
+	// handle; the pairing lives in sqlite so a process restart — Air, a
+	// Docker recreate, a portable-drive remount — does not sign everyone
+	// out. Seven days matches a household that opens the tab and leaves it.
 	defaultSessionTTL = 7 * 24 * time.Hour
 
 	// minPasswordLength is a floor, not a policy: Caravan does not demand
@@ -167,84 +169,142 @@ type session struct {
 	expiry time.Time
 }
 
-// sessionStore holds the live logins. In-memory by design (see
-// defaultSessionTTL) and tiny: a household has a handful of people, so this map
-// holds one entry per browser any of them has logged in from.
+// sessionBackend is the durable half of sessionStore. The production
+// implementation is *store.Store; tests that only exercise the map pass nil.
+type sessionBackend interface {
+	PutSession(ctx context.Context, tokenHash string, userID int64, expiry time.Time) error
+	GetSession(ctx context.Context, tokenHash string) (userID int64, expiry time.Time, err error)
+	DeleteSession(ctx context.Context, tokenHash string) error
+	DeleteSessionsForUser(ctx context.Context, userID int64) error
+	DeleteExpiredSessions(ctx context.Context, now time.Time) error
+}
+
+// sessionStore holds the live logins. The map is a cache keyed by SHA-256 of
+// the cookie; the pairing that survives a restart lives in sessionBackend.
+// A household has a handful of browsers, so the map stays tiny.
 type sessionStore struct {
-	mu     sync.Mutex
-	tokens map[string]session
+	mu      sync.Mutex
+	tokens  map[string]session
+	persist sessionBackend
 }
 
 func newSessionStore() *sessionStore {
 	return &sessionStore{tokens: make(map[string]session)}
 }
 
+func newPersistentSessionStore(persist sessionBackend) *sessionStore {
+	s := newSessionStore()
+	s.persist = persist
+	if persist != nil {
+		_ = persist.DeleteExpiredSessions(context.Background(), time.Now())
+	}
+	return s
+}
+
+func hashSessionToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
 // issue mints a 256-bit opaque token for userID, valid for ttl. The token
-// carries no identity itself — the map is the only place the pairing exists —
-// so a stolen cookie is worth nothing once the entry is gone.
+// carries no identity itself — the store is the only place the pairing
+// exists — so a stolen cookie is worth nothing once the row is gone.
 func (s *sessionStore) issue(userID int64, ttl time.Duration) (string, error) {
 	var raw [32]byte
 	if _, err := rand.Read(raw[:]); err != nil {
 		return "", fmt.Errorf("api: generate session token: %w", err)
 	}
 	token := base64.RawURLEncoding.EncodeToString(raw[:])
+	hash := hashSessionToken(token)
+	sess := session{userID: userID, expiry: time.Now().Add(ttl)}
+
+	if s.persist != nil {
+		if err := s.persist.PutSession(context.Background(), hash, userID, sess.expiry); err != nil {
+			return "", err
+		}
+	}
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.tokens[token] = session{userID: userID, expiry: time.Now().Add(ttl)}
+	s.tokens[hash] = sess
+	s.mu.Unlock()
 	return token, nil
 }
 
 // valid reports whose live session token names, dropping it when it has
-// expired.
-//
-// The lookup is a constant-time scan rather than a map hit: the map is at most
-// a handful of entries, and comparing a presented credential in constant time
-// is the rule here, not an optimisation to be traded away.
-func (s *sessionStore) valid(token string) (int64, bool) {
+// expired. A restart empties the cache; the durable store is what answers
+// then, which is how a cookie issued before Air rebuilt the process still
+// works.
+func (s *sessionStore) valid(token string) (int64, bool, error) {
 	if token == "" {
-		return 0, false
+		return 0, false, nil
+	}
+	hash := hashSessionToken(token)
+	now := time.Now()
+
+	s.mu.Lock()
+	sess, cached := s.tokens[hash]
+	s.mu.Unlock()
+	if cached {
+		if now.After(sess.expiry) {
+			s.drop(hash)
+			return 0, false, nil
+		}
+		return sess.userID, true, nil
+	}
+	if s.persist == nil {
+		return 0, false, nil
+	}
+
+	userID, expiry, err := s.persist.GetSession(context.Background(), hash)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+	if now.After(expiry) {
+		s.drop(hash)
+		return 0, false, nil
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.tokens[hash] = session{userID: userID, expiry: expiry}
+	s.mu.Unlock()
+	return userID, true, nil
+}
 
-	now := time.Now()
-	var (
-		userID int64
-		found  bool
-	)
-	for stored, sess := range s.tokens {
-		if subtle.ConstantTimeCompare([]byte(stored), []byte(token)) != 1 {
-			continue
-		}
-		if now.After(sess.expiry) {
-			delete(s.tokens, stored)
-			return 0, false
-		}
-		userID, found = sess.userID, true
+func (s *sessionStore) drop(hash string) {
+	s.mu.Lock()
+	delete(s.tokens, hash)
+	s.mu.Unlock()
+	if s.persist != nil {
+		_ = s.persist.DeleteSession(context.Background(), hash)
 	}
-	return userID, found
 }
 
 // revoke ends one session; revoking an unknown token is not an error.
 func (s *sessionStore) revoke(token string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	delete(s.tokens, token)
+	if token == "" {
+		return
+	}
+	s.drop(hashSessionToken(token))
 }
 
 // revokeUser ends every session belonging to one account, and nothing else. A
 // password that changed must not leave the sessions it protected alive, and a
 // deleted account must not leave a live browser behind — but neither is a
 // reason to sign a housemate out of the film they were browsing.
-func (s *sessionStore) revokeUser(userID int64) {
+func (s *sessionStore) revokeUser(userID int64) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-	for token, sess := range s.tokens {
+	for hash, sess := range s.tokens {
 		if sess.userID == userID {
-			delete(s.tokens, token)
+			delete(s.tokens, hash)
 		}
 	}
+	s.mu.Unlock()
+	if s.persist == nil {
+		return nil
+	}
+	return s.persist.DeleteSessionsForUser(context.Background(), userID)
 }
 
 // hashPassword returns an argon2id PHC string. The salt is per-password, so
@@ -455,13 +515,15 @@ func (s *server) resolveUser(r *http.Request) (requestUser, bool, error) {
 	}
 
 	if cookie, cerr := r.Cookie(sessionCookieName); cerr == nil {
-		if userID, ok := s.sessions.valid(cookie.Value); ok {
+		if userID, ok, err := s.sessions.valid(cookie.Value); err != nil {
+			return requestUser{}, false, err
+		} else if ok {
 			user, err := s.st.GetUser(r.Context(), userID)
 			switch {
 			case errors.Is(err, store.ErrNotFound):
 				// The account was deleted while this browser held a live
 				// session. Tidy the rest of them away and make it log in.
-				s.sessions.revokeUser(userID)
+				_ = s.sessions.revokeUser(userID)
 				return requestUser{}, false, nil
 			case err != nil:
 				return requestUser{}, false, err
@@ -904,7 +966,10 @@ func (s *server) handleSetPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.sessions.revokeUser(row.ID)
+	if err := s.sessions.revokeUser(row.ID); err != nil {
+		s.writeStoreError(w, "revoke sessions", err)
+		return
+	}
 	if !s.startSession(w, row.ID) {
 		return
 	}

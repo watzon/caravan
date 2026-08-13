@@ -42,7 +42,12 @@ type server struct {
 	st   *store.Store
 	mgr  Manager
 	dist fs.FS
-	log  *slog.Logger
+	// devUI, when set, reverse-proxies non-API requests to a Vite (or
+	// compatible) dev server so `just dev` can HMR the SPA on the same origin
+	// as the API. Nil means serve the embedded bundle, which is the production
+	// path and every test that does not opt in.
+	devUI http.Handler
+	log   *slog.Logger
 
 	// engine and indexers are the phase-2 acquisition dependencies, supplied
 	// through options. Either may be nil, in which case the endpoints that
@@ -76,7 +81,8 @@ type server struct {
 	startupScan bool
 
 	// sessions holds the live logins and sessionTTL is how long a new one
-	// lasts (SPEC §11). Both are inert until a password is set.
+	// lasts (SPEC §11). The pairing is persisted so a restart does not
+	// sign everyone out. Both are inert until a password is set.
 	sessions   *sessionStore
 	sessionTTL time.Duration
 
@@ -131,7 +137,7 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 		mgr:        mgr,
 		dist:       dist,
 		log:        slog.Default(),
-		sessions:   newSessionStore(),
+		sessions:   newPersistentSessionStore(st),
 		sessionTTL: defaultSessionTTL,
 		logins:     newLoginGuard(),
 		startedAt:  time.Now(),
@@ -569,3 +575,8 @@ func (r *statusRecorder) Write(b []byte) (int, error) {
 	r.wrote = true
 	return r.ResponseWriter.Write(b)
 }
+
+// Unwrap lets http.ResponseController find Hijack/Flush on the real
+// connection. Without it, Vite's HMR websocket dies with 502 because
+// ReverseProxy cannot upgrade through this wrapper.
+func (r *statusRecorder) Unwrap() http.ResponseWriter { return r.ResponseWriter }

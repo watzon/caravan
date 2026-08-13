@@ -737,6 +737,7 @@ func TestBinaryBootsAndResumesDownloads(t *testing.T) {
 	addr := freeAddr(t)
 	var logs strings.Builder
 	cmd := exec.Command(bin, "serve", "--config", dirs.cfgPath, "--listen", addr)
+	cmd.Env = append(os.Environ(), "CARAVAN_DEV_UI=")
 	cmd.Stdout = &logs
 	cmd.Stderr = &logs
 	if err := cmd.Start(); err != nil {

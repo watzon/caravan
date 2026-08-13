@@ -3,6 +3,7 @@ package main
 import (
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -33,6 +34,9 @@ func TestBinaryServesEmbeddedSPA(t *testing.T) {
 
 	addr := freeAddr(t)
 	cmd := exec.Command(bin, "serve", "--config", dirs.cfgPath, "--listen", addr)
+	// A leftover CARAVAN_DEV_UI from `just dev` would proxy GET / to Vite
+	// instead of serving the embedded bundle this test is proving.
+	cmd.Env = append(os.Environ(), "CARAVAN_DEV_UI=")
 	var logs strings.Builder
 	cmd.Stdout = &logs
 	cmd.Stderr = &logs
