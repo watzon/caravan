@@ -38,7 +38,7 @@ Caravan `v0.1.0` brings these workflows into one self-hosted application:
 This is an **early release**, not a production-readiness claim. Portable-drive
 behavior varies by filesystem, host, and television; external-client behavior
 depends on each deployment; and the binaries are not yet signed or notarized.
-Keep backups of Caravan's config directory and read the deployment-specific
+Keep backups of Caravan's application data directory and read the deployment-specific
 guides before pointing it at irreplaceable media.
 
 To try the checkout-based Docker setup:

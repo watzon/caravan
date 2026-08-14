@@ -1,6 +1,10 @@
 package prepare
 
-import "strings"
+import (
+	"fmt"
+	"path"
+	"strings"
+)
 
 // portableURL is where the launchers send the browser. It is the URL form of
 // config.DefaultPortableListen, which portable mode binds when the config file
@@ -8,12 +12,17 @@ import "strings"
 // cannot silently leave the launchers opening a dead page.
 const portableURL = "http://127.0.0.1:8677"
 
-// configYAML is the drive's bootstrap config.
+// configYAML is the default drive bootstrap config retained for asset tests.
+var configYAML = portableConfigYAML(DataDir, StorageRoot)
+
+// portableConfigYAML builds the drive's bootstrap config from the locations
+// selected during preparation.
 //
 // It deliberately sets no listen address: portable mode already defaults to
 // loopback (SPEC §11), and repeating the address here would be a second place
 // to change it.
-const configYAML = `# Caravan portable drive configuration (SPEC §2.3).
+func portableConfigYAML(dataDir, storageRoot string) string {
+	return fmt.Sprintf(`# Caravan portable drive configuration (SPEC §2.3).
 #
 # Every path in this file is RELATIVE, and that is the whole trick behind a
 # portable drive. The launchers at the drive root change directory to their own
@@ -30,22 +39,23 @@ const configYAML = `# Caravan portable drive configuration (SPEC §2.3).
 # checked on every start, and the UI offers "Shut down safely" before ejecting.
 portable: true
 
-# The storage root: the drive itself. library/ and incomplete/ live under it,
+# The storage root selected during prepare. library/ and incomplete/ live under it,
 # and every path Caravan stores in its database is relative to it.
-storage_root: "."
+storage_root: %q
 
 # Where Caravan keeps its own state: caravan.db, the clean-shutdown marker and
-# logs. The database is a rebuildable cache -- delete it and rescan and the
-# library comes back -- but the marker is not, so do not delete this folder
-# while Caravan is running.
-config_dir: "caravan/data"
+# restore staging. The database is a rebuildable cache -- delete it and rescan
+# and the library comes back -- but the marker is not, so do not delete this
+# folder while Caravan is running.
+data_dir: %q
 
 # Portable mode binds 127.0.0.1 by default, because this drive travels onto
 # coffee-shop and hotel networks. Set a password under Settings > Security
 # before listening on anything wider.
 
 log_level: "info"
-`
+`, storageRoot, dataDir)
+}
 
 // macLauncher is double-clicked in Finder.
 //
@@ -163,14 +173,36 @@ pause
 // windowsLauncher is windowsLauncherLF with CRLF line endings.
 var windowsLauncher = strings.ReplaceAll(windowsLauncherLF, "\n", "\r\n")
 
-// readme is written to the drive root. It is the only documentation somebody
-// who finds this drive in a drawer will have.
-const readme = `Caravan portable drive
+// readme is the default-layout README retained for asset tests.
+var readme = portableReadme(DataDir, StorageRoot)
+
+// portableReadme describes the actual locations selected during preparation;
+// it is the only documentation somebody who finds the drive in a drawer has.
+func portableReadme(dataDir, storageRoot string) string {
+	dir := func(value string) string {
+		if value == "." {
+			return "./"
+		}
+		return value + "/"
+	}
+	libraryDir := path.Join(storageRoot, "library")
+	return strings.NewReplacer(
+		"{{PORTABLE_URL}}", portableURL,
+		"{{LIBRARY_DIR}}", dir(libraryDir),
+		"{{MOVIES_DIR}}", dir(path.Join(libraryDir, "Movies")),
+		"{{TV_DIR}}", dir(path.Join(libraryDir, "TV")),
+		"{{INCOMPLETE_DIR}}", dir(path.Join(storageRoot, "incomplete")),
+		"{{DATA_DIR}}", dir(dataDir),
+		"{{DATABASE_PATH}}", path.Join(dataDir, "caravan.db"),
+	).Replace(readmeTemplate)
+}
+
+const readmeTemplate = `Caravan portable drive
 ======================
 
 This drive carries a whole media library and the software that manages it.
 Plug it into a computer and run the launcher for that operating system; plug it
-into a television's USB port and browse library/ as an ordinary media drive.
+into a television's USB port and browse {{LIBRARY_DIR}} as an ordinary media drive.
 No server runs in TV mode -- that is the point.
 
 
@@ -183,7 +215,7 @@ Starting it
            set to run executable text files)
 
 Each launcher works out which folder it is in, picks the binary for the current
-operating system and CPU, and opens ` + portableURL + ` in your browser.
+operating system and CPU, and opens {{PORTABLE_URL}} in your browser.
 
 
 Windows: the first-run SmartScreen warning
@@ -224,14 +256,14 @@ Caravan never runs one itself.
 What is on here
 ---------------
 
-  library/Movies/       your films, in folders a television can browse
-  library/TV/           your series, likewise
-  incomplete/           downloads still in progress; safe to delete when idle
+  {{MOVIES_DIR}}  your films, in folders a television can browse
+  {{TV_DIR}}  your series, likewise
+  {{INCOMPLETE_DIR}}  downloads still in progress; safe to delete when idle
   caravan/caravan.yaml  configuration, all paths relative to this drive
-  caravan/data/         the database, logs and the clean-shutdown marker
+  {{DATA_DIR}}  the database, restore state and clean-shutdown marker
   caravan/bin/          one Caravan binary per operating system
 
-Deleting caravan/data/caravan.db is not fatal: start Caravan again, rescan, and
+Deleting {{DATABASE_PATH}} is not fatal: start Caravan again, rescan, and
 the library comes back from the files themselves. Do not delete it while
 Caravan is running.
 

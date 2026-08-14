@@ -21,6 +21,10 @@ func runPrepare(args []string) error {
 	binDir := fs.String("bin-dir", "",
 		"directory holding release builds for the other operating systems "+
 			"(default: next to this binary)")
+	dataDir := fs.String("data-dir", "",
+		"drive-relative directory for the database and application state (default: "+prepare.DataDir+")")
+	storageRoot := fs.String("storage-root", "",
+		"drive-relative root for media libraries and downloads (default: drive root)")
 	// Off by default, and asked for by name every time: a prepared drive leaves
 	// the house, and the adult library goes on one only when somebody says so
 	// (PLAN phase 9 task 6). There is deliberately no config key and no
@@ -39,6 +43,8 @@ func runPrepare(args []string) error {
 		Target:       fs.Arg(0),
 		Force:        *force,
 		BinDir:       *binDir,
+		DataDir:      *dataDir,
+		StorageRoot:  *storageRoot,
 		IncludeAdult: *includeAdult,
 	})
 	if err != nil {

@@ -68,7 +68,7 @@ func exeSuffix(t Target) string {
 
 // placeBinaries installs this machine's binary and whatever sibling release
 // builds it can find, recording the rest as missing.
-func placeBinaries(res *Result, root string, opts Options) error {
+func placeBinaries(res *Result, root *os.Root, opts Options) error {
 	self := opts.Self
 	if self == "" {
 		exe, err := os.Executable()
@@ -134,21 +134,24 @@ func findBinary(dir string, t Target) (string, bool) {
 // it wrote anything: an existing binary is kept unless force is set, so
 // re-running prepare on a drive somebody already carries does not rewrite
 // hundreds of megabytes for nothing.
-func installBinary(root string, t Target, source string, force bool) (bool, error) {
-	dst := filepath.Join(root, filepath.FromSlash(t.RelPath()))
+func installBinary(root *os.Root, t Target, source string, force bool) (bool, error) {
+	dst := t.RelPath()
 	if !force {
-		switch _, err := os.Stat(dst); {
+		switch info, err := root.Lstat(filepath.FromSlash(dst)); {
 		case err == nil:
+			if !info.Mode().IsRegular() {
+				return false, fmt.Errorf("prepare: %s exists and is not a regular file", t.RelPath())
+			}
 			return false, nil
 		case !errors.Is(err, fs.ErrNotExist):
 			return false, fmt.Errorf("prepare: %s cannot be read: %w", t.RelPath(), err)
 		}
 	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+	if err := makePortableDir(root, relPath(BinDir, t.Slug())); err != nil {
 		return false, fmt.Errorf("prepare: create %s: %w", relPath(BinDir, t.Slug()), err)
 	}
 
-	err := writeAtomic(dst, 0o755, func(w io.Writer) error {
+	err := writeAtomic(root, dst, 0o755, func(w io.Writer) error {
 		in, err := os.Open(source)
 		if err != nil {
 			return err

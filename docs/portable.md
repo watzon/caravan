@@ -17,12 +17,14 @@ CI.
 
 ```
 DRIVE/
+  .caravan.prepare.lock      advisory preparation lock; leave in place
   Start-Mac.command          double-clicked in Finder
   Start-Windows.bat          double-clicked in Explorer
   Start-Linux.sh             run from a terminal or a file manager
   README.txt                 the only docs somebody who finds this drive will have
   caravan/
-    caravan.yaml             bootstrap config; storage_root is "."
+    caravan.yaml             bootstrap config; storage_root defaults to "."
+    data/                    database and clean-shutdown marker
     bin/
       darwin-amd64/caravan
       darwin-arm64/caravan
@@ -37,12 +39,27 @@ DRIVE/
 on purpose: a television plugged into the USB port shows the drive's top level,
 and the first thing on it should be the media.
 
-### Why the config says `storage_root: "."`
+Those are setup defaults, not hidden assumptions. `caravan prepare` accepts
+`--data-dir` and `--storage-root`:
+
+```sh
+caravan prepare /path/to/drive --data-dir state/caravan --storage-root media
+```
+
+The command writes both choices into `caravan/caravan.yaml` and creates the
+matching layout. The paths must be relative and may not escape the drive. On a
+rerun, the locations already recorded in the drive's config remain authoritative;
+conflicting location flags are rejected rather than silently creating a second
+data tree. Prepare holds the hidden `.caravan.prepare.lock` for the entire run,
+so two preparations cannot race and overwrite the drive's one-time config.
+
+### Why the default config says `storage_root: "."`
 
 Every path Caravan stores in its database is relative to the storage root, and
-on a portable drive the root is the drive itself. `"."` resolves against the
-launcher's own directory, so the same drive works at `/Volumes/CARAVAN` on a
-Mac, `D:\` on Windows and `/media/you/CARAVAN` on Linux without a single write.
+by default on a portable drive the root is the drive itself. `"."` resolves
+against the launcher's own directory, so the same drive works at
+`/Volumes/CARAVAN` on a Mac, `D:\` on Windows and `/media/you/CARAVAN` on Linux
+without a single write.
 
 An absolute path in that file — or in the settings table — pins the drive to
 one machine and it stops working on the next one. That is why **Settings →

@@ -48,7 +48,7 @@ services:
       - ./config:/config
       - /mnt/media:/data
     environment:
-      CARAVAN_CONFIG_DIR: /config
+      CARAVAN_DATA_DIR: /config
     restart: unless-stopped
 ```
 
@@ -59,10 +59,10 @@ the storage root. Change it in the web UI when you need a different root (see
 ### 2.2 Mode B: Bare binary
 
 ```
-caravan serve --config ./caravan.yaml
+caravan serve
 ```
 
-Single static binary per OS (Windows, macOS, Linux; amd64 + arm64). No runtime dependencies. sqlite is linked via a pure-Go driver (modernc.org/sqlite) so cross-compilation needs no CGO.
+Single static binary per OS (Windows, macOS, Linux; amd64 + arm64). No runtime dependencies. sqlite is linked via a pure-Go driver (modernc.org/sqlite) so cross-compilation needs no CGO. On Unix the bootstrap config defaults to `${XDG_CONFIG_HOME:-$HOME/.config}/caravan/caravan.yaml`, while the database and persistent process state default to `${XDG_DATA_HOME:-$HOME/.local/share}/caravan`. `--config` and `--data-dir` override those locations. The media storage root remains a separate first-run choice.
 
 ### 2.3 Mode C: Portable disk (the origin story)
 
@@ -86,8 +86,8 @@ caravan prepare /Volumes/MediaDrive
       windows-amd64/caravan.exe
       linux-amd64/caravan
       linux-arm64/caravan
-    caravan.yaml             # storage root: relative to drive
-    data/                    # caravan.db, logs, cache
+    caravan.yaml             # drive-relative data_dir + storage_root
+    data/                    # caravan.db, SQLite sidecars, marker, restore state
   incomplete/                # active downloads
   library/
     Movies/
@@ -99,7 +99,7 @@ Behavior of `prepare`:
 1. Detect the drive's filesystem; warn if not exFAT (see §3).
 2. Create the layout above.
 3. Copy the current binary into the matching `bin/` slot and fetch the other OS builds from the release artifact (or copy from a local directory if offline).
-4. Write `caravan.yaml` with a **drive-relative** storage root and `portable: true`.
+4. Write `caravan.yaml` with **drive-relative** data and storage roots and `portable: true`. `--data-dir` and `--storage-root` choose them; defaults are `caravan/data` and the drive root (`.`).
 5. Write the three launchers.
 
 Launchers resolve their own directory, pick the binary for the current OS/arch, and exec it with `--config` pointing at the on-disk config. All paths resolve relative to the binary location; the drive can mount at any letter or mountpoint.
@@ -114,6 +114,7 @@ Launchers resolve their own directory, pick the binary for the current OS/arch, 
 
 | Concern | Docker | Binary | Portable disk |
 |---|---|---|---|
+| App data | `/config` | XDG data directory or `--data-dir` | Drive-relative, chosen by `prepare` |
 | Storage root | `/data` (UI-configurable) | User-chosen path | Drive root, relative |
 | Download engine | Embedded torrent + external clients | Same | Embedded torrent; seeding paused by default |
 | Playback handoff | Jellyfin API + DLNA | Same | DLNA when running; TV USB browser when not |
@@ -289,7 +290,7 @@ Upgrade logic: when a monitored item has a file below its cutoff, it stays wante
 
 ## 10. Configuration
 
-Bootstrap config (`caravan.yaml`): config dir, listen address/port (default `8677`), storage root override, portable flag, log level. Everything else lives in the `settings` table and is UI-managed.
+Bootstrap config (`caravan.yaml`): application data directory, listen address/port (default `8677`), storage root seed, portable flag, and log level. Everything else lives in the `settings` table and is UI-managed. `data_dir` controls the database and process state; it is not the media storage root. The legacy `config_dir` key and `CARAVAN_CONFIG_DIR` environment variable remain deprecated aliases for `data_dir` and `CARAVAN_DATA_DIR`.
 
 **Changing the storage root** (the server-hosted requirement): settings screen offers two operations:
 

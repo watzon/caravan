@@ -1,6 +1,7 @@
 package prepare
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -96,7 +97,7 @@ func TestConfigIsDriveRelative(t *testing.T) {
 	}
 	cfg := read(t, root, ConfigFile)
 
-	for _, want := range []string{"portable: true", `storage_root: "."`, `config_dir: "caravan/data"`} {
+	for _, want := range []string{"portable: true", `storage_root: "."`, `data_dir: "caravan/data"`} {
 		if !strings.Contains(cfg, want) {
 			t.Fatalf("caravan.yaml is missing %q:\n%s", want, cfg)
 		}
@@ -120,6 +121,152 @@ func TestConfigIsDriveRelative(t *testing.T) {
 	}
 }
 
+func TestRunWritesChosenPortableLocations(t *testing.T) {
+	root := t.TempDir()
+	opts := hostOpts(t, root)
+	opts.DataDir = "state/caravan"
+	opts.StorageRoot = "media"
+
+	if _, err := Run(opts); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	cfg := read(t, root, ConfigFile)
+	for _, want := range []string{`data_dir: "state/caravan"`, `storage_root: "media"`} {
+		if !strings.Contains(cfg, want) {
+			t.Fatalf("caravan.yaml is missing %q:\n%s", want, cfg)
+		}
+	}
+	for _, dir := range []string{"state/caravan", "media/incomplete", "media/library/Movies", "media/library/TV"} {
+		if !exists(t, root, dir) {
+			t.Errorf("chosen portable layout is missing %s", dir)
+		}
+	}
+	readme := read(t, root, ReadmeFile)
+	for _, want := range []string{
+		"media/library/Movies/",
+		"media/library/TV/",
+		"media/incomplete/",
+		"state/caravan/",
+		"state/caravan/caravan.db",
+	} {
+		if !strings.Contains(readme, want) {
+			t.Errorf("custom-layout README is missing %q", want)
+		}
+	}
+	if strings.Contains(readme, "caravan/data/caravan.db") {
+		t.Error("custom-layout README still points at the default database")
+	}
+}
+
+func TestRunRejectsUnsafePortableLocations(t *testing.T) {
+	tests := []struct {
+		name        string
+		dataDir     string
+		storageRoot string
+	}{
+		{name: "absolute data directory", dataDir: filepath.Join(t.TempDir(), "state")},
+		{name: "parent data directory", dataDir: "../state"},
+		{name: "absolute storage root", storageRoot: filepath.Join(t.TempDir(), "media")},
+		{name: "parent storage root", storageRoot: "../media"},
+		{name: "Windows-shaped data directory", dataDir: `C:\caravan`},
+		{name: "data directory collides with config file", dataDir: ConfigFile},
+		{name: "storage root collides with launcher", storageRoot: MacLauncher},
+		{name: "data directory descends through config file", dataDir: ConfigFile + "/state"},
+		{name: "storage root descends through case-variant README", storageRoot: strings.ToUpper(ReadmeFile) + "/media"},
+		{name: "data directory descends through generated binary", dataDir: Targets[0].RelPath() + "/state"},
+		{name: "Windows device-name component", storageRoot: "NUL/media"},
+		{name: "Windows trailing-dot component", dataDir: "state./caravan"},
+		{name: "Windows outer trailing-space component", dataDir: "state "},
+		{name: "Windows-invalid character", storageRoot: "media*/library"},
+		{name: "Windows console device component", storageRoot: "CONIN$/media"},
+		{name: "Windows superscript COM device component", dataDir: "COM¹/cache"},
+		{name: "Windows superscript LPT device component", storageRoot: "LPT³/media"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opts := hostOpts(t, t.TempDir())
+			opts.DataDir = tt.dataDir
+			opts.StorageRoot = tt.storageRoot
+			if _, err := Run(opts); err == nil {
+				t.Fatal("Run succeeded with an unsafe portable location")
+			}
+		})
+	}
+}
+
+func TestRunRejectsSymlinkedLayoutAncestorThatEscapesDrive(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(root, "state")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	opts := hostOpts(t, root)
+	opts.DataDir = "state/caravan"
+	_, err := Run(opts)
+	if err == nil {
+		t.Fatal("Run succeeded through a symlink that leaves the portable drive")
+	}
+	if _, statErr := os.Stat(filepath.Join(outside, "caravan")); !os.IsNotExist(statErr) {
+		t.Fatalf("outside path was touched: %v", statErr)
+	}
+}
+
+func TestRunRejectsSymlinkedBinarySlotThatEscapesDrive(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	binDir := filepath.Join(root, filepath.FromSlash(BinDir))
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(binDir, "darwin-arm64")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	if _, err := Run(hostOpts(t, root)); err == nil {
+		t.Fatal("Run succeeded through a binary-slot symlink that leaves the portable drive")
+	}
+	if _, statErr := os.Stat(filepath.Join(outside, "caravan")); !os.IsNotExist(statErr) {
+		t.Fatalf("outside binary path was touched: %v", statErr)
+	}
+}
+
+func TestRunRejectsInvalidExistingArtifactBeforeCreatingLayout(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ReadmeFile), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Run(hostOpts(t, root)); err == nil {
+		t.Fatal("Run accepted a directory where README.txt must be a regular file")
+	}
+	if exists(t, root, CaravanDir) {
+		t.Error("Run created a partial layout before rejecting the invalid artifact")
+	}
+}
+
+func TestRunRejectsConcurrentPreparation(t *testing.T) {
+	root := t.TempDir()
+	drive, err := os.OpenRoot(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer drive.Close()
+	lock, err := acquirePrepareLock(drive)
+	if err != nil {
+		t.Fatalf("acquire first prepare lock: %v", err)
+	}
+	defer lock.Close()
+
+	if _, err := Run(hostOpts(t, root)); !errors.Is(err, ErrPrepareLocked) {
+		t.Fatalf("concurrent Run error = %v, want ErrPrepareLocked", err)
+	}
+	if exists(t, root, CaravanDir) {
+		t.Error("concurrent Run created a partial layout")
+	}
+}
+
 // Re-running prepare on a drive that has been used must not touch its state.
 func TestRerunKeepsConfigAndData(t *testing.T) {
 	root := t.TempDir()
@@ -128,7 +275,7 @@ func TestRerunKeepsConfigAndData(t *testing.T) {
 	}
 
 	// The marks a used drive would carry: an edited config and a database.
-	edited := "portable: true\nstorage_root: \".\"\nconfig_dir: \"caravan/data\"\nlog_level: \"debug\"\n"
+	edited := "portable: true\nstorage_root: \".\"\ndata_dir: \"caravan/data\"\nlog_level: \"debug\"\n"
 	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(ConfigFile)), []byte(edited), 0o644); err != nil {
 		t.Fatalf("edit config: %v", err)
 	}
@@ -164,13 +311,108 @@ func TestRerunKeepsConfigAndData(t *testing.T) {
 	}
 }
 
+func TestRerunUsesLocationsAlreadyRecordedOnTheDrive(t *testing.T) {
+	root := t.TempDir()
+	first := hostOpts(t, root)
+	first.DataDir = "state/caravan"
+	first.StorageRoot = "media"
+	if _, err := Run(first); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+
+	if _, err := Run(hostOpts(t, root)); err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+	if exists(t, root, DataDir) {
+		t.Errorf("rerun created default data directory %s instead of keeping the configured location", DataDir)
+	}
+	for _, dir := range []string{"state/caravan", "media/library/Movies", "media/incomplete"} {
+		if !exists(t, root, dir) {
+			t.Errorf("rerun lost configured portable location %s", dir)
+		}
+	}
+}
+
+func TestRerunRejectsConflictingLocationChoices(t *testing.T) {
+	root := t.TempDir()
+	first := hostOpts(t, root)
+	first.DataDir = "state/caravan"
+	first.StorageRoot = "media"
+	if _, err := Run(first); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+
+	second := hostOpts(t, root)
+	second.DataDir = "different-state"
+	if _, err := Run(second); err == nil {
+		t.Fatal("rerun accepted a data directory that conflicts with the existing config")
+	}
+	if exists(t, root, "different-state") {
+		t.Error("rerun created the conflicting data directory")
+	}
+}
+
+func TestRerunRejectsExistingConfigWithoutRecordedLocations(t *testing.T) {
+	tests := []struct {
+		name       string
+		configYAML string
+		want       string
+	}{
+		{
+			name:       "missing data directory",
+			configYAML: "portable: true\nstorage_root: \".\"\n",
+			want:       "data_dir",
+		},
+		{
+			name:       "empty data directory",
+			configYAML: "portable: true\ndata_dir: \"\"\nstorage_root: \".\"\n",
+			want:       "data_dir",
+		},
+		{
+			name:       "missing storage root",
+			configYAML: "portable: true\ndata_dir: \"caravan/data\"\n",
+			want:       "storage_root",
+		},
+		{
+			name:       "empty storage root",
+			configYAML: "portable: true\ndata_dir: \"caravan/data\"\nstorage_root: \"\"\n",
+			want:       "storage_root",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			if err := os.MkdirAll(filepath.Join(root, CaravanDir), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(ConfigFile)), []byte(tt.configYAML), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := Run(hostOpts(t, root))
+			if err == nil {
+				t.Fatal("rerun accepted an existing config without both recorded locations")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error = %v, want it to name %s", err, tt.want)
+			}
+			for _, unexpected := range []string{DataDir, "incomplete", "library"} {
+				if exists(t, root, unexpected) {
+					t.Errorf("rerun created %s before rejecting the incomplete config", unexpected)
+				}
+			}
+		})
+	}
+}
+
 // -force refreshes what this source tree owns, and still not the drive's state.
 func TestForceRefreshesLaunchersButNotConfig(t *testing.T) {
 	root := t.TempDir()
 	if _, err := Run(hostOpts(t, root)); err != nil {
 		t.Fatalf("first Run: %v", err)
 	}
-	edited := "portable: true\n# hand edited\n"
+	edited := "portable: true\nstorage_root: \".\"\ndata_dir: \"caravan/data\"\n# hand edited\n"
 	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(ConfigFile)), []byte(edited), 0o644); err != nil {
 		t.Fatalf("edit config: %v", err)
 	}
@@ -290,5 +532,18 @@ func TestReportNamesMissingBinariesAndWarnings(t *testing.T) {
 		if !strings.Contains(got, note) {
 			t.Fatalf("report dropped note %q:\n%s", note, got)
 		}
+	}
+}
+
+func TestReportNamesTheSelectedDataDirectory(t *testing.T) {
+	res := &Result{
+		Root:    "/media/CARAVAN",
+		DataDir: "state/caravan",
+		Skipped: []string{ConfigFile},
+	}
+	var out strings.Builder
+	res.Report(&out)
+	if got := out.String(); !strings.Contains(got, "state/caravan") {
+		t.Fatalf("report does not name the selected data directory:\n%s", got)
 	}
 }

@@ -136,6 +136,7 @@ func TestConfigYAMLLoads(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 	t.Setenv(config.EnvConfigDir, "")
+	t.Setenv(config.EnvDataDir, "")
 
 	cfg, err := config.Load(path)
 	if err != nil {
@@ -147,8 +148,8 @@ func TestConfigYAMLLoads(t *testing.T) {
 	if cfg.StorageRoot != "." {
 		t.Fatalf("StorageRoot = %q, want \".\"", cfg.StorageRoot)
 	}
-	if cfg.ConfigDir != "caravan/data" {
-		t.Fatalf("ConfigDir = %q, want \"caravan/data\"", cfg.ConfigDir)
+	if cfg.DataDir != "caravan/data" {
+		t.Fatalf("DataDir = %q, want \"caravan/data\"", cfg.DataDir)
 	}
 	// The config names no address, so portable mode's loopback default is what
 	// the launchers' URL has to match.

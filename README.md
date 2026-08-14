@@ -6,8 +6,9 @@ embedded torrent and Usenet downloads, optional external clients, metadata, and
 playback handoff.
 
 > [!IMPORTANT]
-> Caravan is pre-1.0 software for experienced self-hosters. Back up the config
-> directory, review the deployment guides, and expect compatibility gaps while
+> Caravan is pre-1.0 software for experienced self-hosters. Back up the
+> application data directory, review the deployment guides, and expect
+> compatibility gaps while
 > the first public release is validated on real hardware and external clients.
 >
 > Docker publishes port 8677 to the LAN by default. Complete administrator setup
@@ -30,11 +31,20 @@ Download the archive for the host OS and architecture, then run:
 
 ```sh
 caravan version
-caravan serve --config ./caravan.yaml
+caravan serve
 ```
 
-See [the technical specification](docs/SPEC.md) for configuration and deployment
-contracts.
+On Unix, the default bootstrap config is
+`${XDG_CONFIG_HOME:-$HOME/.config}/caravan/caravan.yaml` and persistent application
+data is under `${XDG_DATA_HOME:-$HOME/.local/share}/caravan`. Use `--config` and
+`--data-dir` to override them. Media and downloads remain separate: first-run
+setup asks for the storage root. See [the technical specification](docs/SPEC.md)
+for configuration and deployment contracts.
+
+Pre-release builds previously put application data in the launch directory.
+Caravan does not move those files while they may be live: stop it and move
+`caravan.db*` plus `caravan.state` into the new data directory, or temporarily
+start with `--data-dir .`.
 
 ### Docker checkout
 
@@ -62,6 +72,8 @@ caravan prepare /Volumes/CARAVAN -bin-dir ~/caravan-release-bins
 ```
 
 The command writes the drive-relative config, launchers, and target binary slots.
+Use `--data-dir` and `--storage-root` to choose different locations on the drive;
+both must remain drive-relative so the installation stays portable.
 Real exFAT, multiple host operating systems, safe eject, and TV playback remain
 manual hardware checks. See [the portable drive guide](docs/portable.md).
 
@@ -82,6 +94,9 @@ the SPA once and passes that artifact to Go, cross-compile, and race jobs.
 `just dev` starts Vite (HMR) and Air (Go live-reload) together. Open
 <http://127.0.0.1:8677>. Frontend edits apply without restarting the Go
 process; Go edits still restart it.
+
+Development state is isolated under `tmp/data`; it does not reuse a normal
+installation's XDG data directory.
 
 ```sh
 go install github.com/air-verse/air@latest

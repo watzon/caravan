@@ -116,7 +116,8 @@ container's conventions:
 
 | Variable | Image default | Meaning |
 | --- | --- | --- |
-| `CARAVAN_CONFIG_DIR` | `/config` | sqlite database, clean-shutdown marker, logs |
+| `CARAVAN_DATA_DIR` | unset | preferred sqlite database and process-state override |
+| `CARAVAN_CONFIG_DIR` | `/config` | deprecated image default for upgrade compatibility |
 | `CARAVAN_STORAGE_ROOT` | `/data` | seeds the storage root on first run |
 | `CARAVAN_LISTEN` | `0.0.0.0:8677` | HTTP listen address |
 
@@ -124,6 +125,11 @@ Precedence, highest first: **command-line flag → environment → config file �
 built-in default.** Environment beating the file is deliberate: it is what lets
 one image ship the `/config` + `/data` conventions while still honouring a
 `caravan.yaml` an operator bind-mounts in for everything else.
+
+`CARAVAN_CONFIG_DIR` remains the image's deprecated default so an existing
+deployment that overrides only that variable does not start against an empty
+database after upgrading. Set `CARAVAN_DATA_DIR` in new deployments; it has
+higher precedence.
 
 `CARAVAN_STORAGE_ROOT` only *seeds* the settings table, and only when it has no
 root yet. Re-point the root from the UI and the new value survives restarts —

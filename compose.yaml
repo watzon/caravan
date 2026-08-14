@@ -21,8 +21,8 @@ services:
       - "8677:8677"
 
     volumes:
-      # Caravan's own state: the sqlite database, the clean-shutdown marker,
-      # and an optional caravan.yaml. Small; back this up.
+      # Caravan's application data (sqlite and the clean-shutdown marker) plus
+      # an optional caravan.yaml. Small; back this up.
       - ./config:/config
 
       # EVERYTHING ELSE, ON ONE MOUNT. Downloads land in /data/incomplete and

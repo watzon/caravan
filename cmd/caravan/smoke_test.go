@@ -257,7 +257,7 @@ func smokeDirs(t *testing.T) smokeEnv {
 		}
 	}
 
-	cfg := fmt.Sprintf("config_dir: %q\nstorage_root: %q\nlog_level: warn\n", env.config, env.storage)
+	cfg := fmt.Sprintf("data_dir: %q\nstorage_root: %q\nlog_level: warn\n", env.config, env.storage)
 	if err := os.WriteFile(env.cfgPath, []byte(cfg), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}

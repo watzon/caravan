@@ -37,7 +37,7 @@ type portableServer struct {
 func writePortableConfig(t *testing.T, dir string) string {
 	t.Helper()
 	path := filepath.Join(dir, "caravan.yaml")
-	body := fmt.Sprintf("config_dir: %q\nportable: true\nlog_level: error\n", dir)
+	body := fmt.Sprintf("data_dir: %q\nportable: true\nlog_level: error\n", dir)
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatalf("write config: %v", err)
 	}

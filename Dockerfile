@@ -73,9 +73,10 @@ RUN apk add --no-cache ca-certificates tzdata \
 
 COPY --from=build /out/caravan /usr/local/bin/caravan
 
-# The container's whole configuration (SPEC §2.1). These are environment
-# overrides rather than a baked config file so `docker run` needs no file, and
-# so a bind-mounted /config/caravan.yaml can still set everything else.
+# The container's whole configuration (SPEC §2.1). The image keeps its /config
+# default on the deprecated variable during the compatibility window: an
+# operator's CARAVAN_DATA_DIR still wins, while an existing deployment that
+# overrides only CARAVAN_CONFIG_DIR is not masked by a baked new-name value.
 #
 # storage_root only seeds the settings table on first run: a root re-pointed
 # from the UI later stays re-pointed across restarts.

@@ -3,20 +3,22 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
 func TestLoadMissingFileUsesDefaults(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "absent.yaml")
+	dataHome := filepath.Join(dir, "data-home")
+	t.Setenv("XDG_DATA_HOME", dataHome)
 
 	cfg, err := Load(path)
 	if err != nil {
 		t.Fatalf("Load(%q) on a missing file: %v", path, err)
 	}
 	want := Default()
-	// ConfigDir is anchored at the requested path, not at Default's ".".
-	want.ConfigDir = dir
+	want.DataDir = filepath.Join(dataHome, "caravan")
 	if *cfg != want {
 		t.Errorf("Load = %+v, want %+v", *cfg, want)
 	}
@@ -25,22 +27,23 @@ func TestLoadMissingFileUsesDefaults(t *testing.T) {
 	}
 }
 
-// A zero-config first run must still keep its database next to the config file
-// it was pointed at. Anchoring ConfigDir at the working directory instead
-// scatters caravan.db wherever the process happened to be launched from, and
-// silently uses a different database when the launch directory changes.
-func TestLoadMissingFileAnchorsConfigDirAtRequestedPath(t *testing.T) {
+// An explicit config file and the application data directory are separate
+// concerns: moving one must not silently move the database.
+func TestLoadMissingFileDoesNotUseConfigDirectoryForData(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "caravan.yaml")
+	dataHome := filepath.Join(t.TempDir(), "data-home")
+	t.Setenv("XDG_DATA_HOME", dataHome)
 
 	cfg, err := Load(path)
 	if err != nil {
 		t.Fatalf("Load(%q): %v", path, err)
 	}
-	if cfg.ConfigDir != dir {
-		t.Errorf("ConfigDir = %q, want %q", cfg.ConfigDir, dir)
+	wantDataDir := filepath.Join(dataHome, "caravan")
+	if cfg.DataDir != wantDataDir {
+		t.Errorf("DataDir = %q, want %q", cfg.DataDir, wantDataDir)
 	}
-	if want := filepath.Join(dir, DatabaseFile); cfg.DatabasePath() != want {
+	if want := filepath.Join(wantDataDir, DatabaseFile); cfg.DatabasePath() != want {
 		t.Errorf("DatabasePath = %q, want %q", cfg.DatabasePath(), want)
 	}
 }
@@ -52,30 +55,34 @@ func TestLoad(t *testing.T) {
 		want Config
 	}{
 		{
-			name: "empty file keeps defaults except config_dir",
+			name: "empty file keeps defaults",
 			yaml: "",
-			// config_dir defaults to the file's own directory.
-			want: Config{ConfigDir: "", Listen: DefaultListen, LogLevel: "info"},
+			want: Config{Listen: DefaultListen, LogLevel: "info"},
 		},
 		{
 			name: "full file",
-			yaml: "config_dir: /config\nlisten: 127.0.0.1:9000\nstorage_root: /data\nportable: true\nlog_level: debug\n",
-			want: Config{ConfigDir: "/config", Listen: "127.0.0.1:9000", StorageRoot: "/data", Portable: true, LogLevel: "debug"},
+			yaml: "data_dir: /state\nlisten: 127.0.0.1:9000\nstorage_root: /data\nportable: true\nlog_level: debug\n",
+			want: Config{DataDir: "/state", Listen: "127.0.0.1:9000", StorageRoot: "/data", Portable: true, LogLevel: "debug"},
 		},
 		{
 			name: "partial file falls back per field",
 			yaml: "storage_root: /mnt/media\n",
-			want: Config{ConfigDir: "", Listen: DefaultListen, StorageRoot: "/mnt/media", LogLevel: "info"},
+			want: Config{Listen: DefaultListen, StorageRoot: "/mnt/media", LogLevel: "info"},
 		},
 		{
 			name: "portable false is respected",
 			yaml: "portable: false\nconfig_dir: /c\n",
-			want: Config{ConfigDir: "/c", Listen: DefaultListen, LogLevel: "info"},
+			want: Config{DataDir: "/c", Listen: DefaultListen, LogLevel: "info"},
+		},
+		{
+			name: "data directory wins over legacy alias",
+			yaml: "data_dir: /new\nconfig_dir: /legacy\n",
+			want: Config{DataDir: "/new", Listen: DefaultListen, LogLevel: "info"},
 		},
 		{
 			name: "explicitly empty values fall back to defaults",
 			yaml: "listen: \"\"\nlog_level: \"\"\n",
-			want: Config{ConfigDir: "", Listen: DefaultListen, LogLevel: "info"},
+			want: Config{Listen: DefaultListen, LogLevel: "info"},
 		},
 	}
 
@@ -83,12 +90,14 @@ func TestLoad(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dir := t.TempDir()
 			path := filepath.Join(dir, "caravan.yaml")
+			dataHome := filepath.Join(dir, "data-home")
+			t.Setenv("XDG_DATA_HOME", dataHome)
 			if err := os.WriteFile(path, []byte(tt.yaml), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			want := tt.want
-			if want.ConfigDir == "" {
-				want.ConfigDir = dir
+			if want.DataDir == "" {
+				want.DataDir = filepath.Join(dataHome, "caravan")
 			}
 
 			cfg, err := Load(path)
@@ -137,7 +146,7 @@ func TestLoadPortableBindsLoopbackUnlessTold(t *testing.T) {
 	}
 }
 
-func TestLoadEnvOverridesConfigDir(t *testing.T) {
+func TestLoadLegacyEnvOverridesDataDir(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "caravan.yaml")
 	if err := os.WriteFile(path, []byte("config_dir: /from-file\n"), 0o644); err != nil {
@@ -149,8 +158,8 @@ func TestLoadEnvOverridesConfigDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.ConfigDir != "/from-env" {
-		t.Errorf("ConfigDir = %q, want %q", cfg.ConfigDir, "/from-env")
+	if cfg.DataDir != "/from-env" {
+		t.Errorf("DataDir = %q, want %q", cfg.DataDir, "/from-env")
 	}
 }
 
@@ -160,7 +169,7 @@ func TestLoadEnvOverridesConfigDir(t *testing.T) {
 // completely absent caravan.yaml.
 func TestLoadEnvOverridesWithoutAConfigFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "caravan.yaml")
-	t.Setenv(EnvConfigDir, "/config")
+	t.Setenv(EnvDataDir, "/config")
 	t.Setenv(EnvListen, "0.0.0.0:8677")
 	t.Setenv(EnvStorageRoot, "/data")
 
@@ -168,7 +177,7 @@ func TestLoadEnvOverridesWithoutAConfigFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	want := Config{ConfigDir: "/config", Listen: "0.0.0.0:8677", StorageRoot: "/data", LogLevel: "info"}
+	want := Config{DataDir: "/config", Listen: "0.0.0.0:8677", StorageRoot: "/data", LogLevel: "info"}
 	if *cfg != want {
 		t.Errorf("Load = %+v, want %+v", *cfg, want)
 	}
@@ -179,11 +188,11 @@ func TestLoadEnvOverridesWithoutAConfigFile(t *testing.T) {
 // silently drag that install's paths into the container.
 func TestLoadEnvOverridesFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "caravan.yaml")
-	yaml := "config_dir: /from-file\nlisten: 127.0.0.1:9999\nstorage_root: /from-file-root\n"
+	yaml := "data_dir: /from-file\nlisten: 127.0.0.1:9999\nstorage_root: /from-file-root\n"
 	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv(EnvConfigDir, "/config")
+	t.Setenv(EnvDataDir, "/config")
 	t.Setenv(EnvListen, "0.0.0.0:8677")
 	t.Setenv(EnvStorageRoot, "/data")
 
@@ -191,7 +200,7 @@ func TestLoadEnvOverridesFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	want := Config{ConfigDir: "/config", Listen: "0.0.0.0:8677", StorageRoot: "/data", LogLevel: "info"}
+	want := Config{DataDir: "/config", Listen: "0.0.0.0:8677", StorageRoot: "/data", LogLevel: "info"}
 	if *cfg != want {
 		t.Errorf("Load = %+v, want %+v", *cfg, want)
 	}
@@ -202,11 +211,11 @@ func TestLoadEnvOverridesFile(t *testing.T) {
 // file's value or trip validation.
 func TestLoadEmptyEnvIsIgnored(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "caravan.yaml")
-	yaml := "config_dir: /from-file\nlisten: 127.0.0.1:9999\nstorage_root: /from-file-root\n"
+	yaml := "data_dir: /from-file\nlisten: 127.0.0.1:9999\nstorage_root: /from-file-root\n"
 	if err := os.WriteFile(path, []byte(yaml), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv(EnvConfigDir, "")
+	t.Setenv(EnvDataDir, "")
 	t.Setenv(EnvListen, "")
 	t.Setenv(EnvStorageRoot, "")
 
@@ -214,7 +223,7 @@ func TestLoadEmptyEnvIsIgnored(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	want := Config{ConfigDir: "/from-file", Listen: "127.0.0.1:9999", StorageRoot: "/from-file-root", LogLevel: "info"}
+	want := Config{DataDir: "/from-file", Listen: "127.0.0.1:9999", StorageRoot: "/from-file-root", LogLevel: "info"}
 	if *cfg != want {
 		t.Errorf("Load = %+v, want %+v", *cfg, want)
 	}
@@ -278,8 +287,128 @@ func TestLoadUnreadableFile(t *testing.T) {
 }
 
 func TestDatabasePath(t *testing.T) {
-	cfg := Config{ConfigDir: "/config"}
-	if got, want := cfg.DatabasePath(), filepath.Join("/config", DatabaseFile); got != want {
+	cfg := Config{DataDir: "/data"}
+	if got, want := cfg.DatabasePath(), filepath.Join("/data", DatabaseFile); got != want {
 		t.Errorf("DatabasePath = %q, want %q", got, want)
+	}
+}
+
+func TestDefaultPathsFollowXDGDirectories(t *testing.T) {
+	configHome := filepath.Join(t.TempDir(), "config-home")
+	dataHome := filepath.Join(t.TempDir(), "data-home")
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	t.Setenv("XDG_DATA_HOME", dataHome)
+
+	configPath, err := DefaultConfigPath()
+	if err != nil {
+		t.Fatalf("DefaultConfigPath: %v", err)
+	}
+	if want := filepath.Join(configHome, "caravan", "caravan.yaml"); configPath != want {
+		t.Errorf("DefaultConfigPath = %q, want %q", configPath, want)
+	}
+
+	dataDir, err := DefaultDataDir()
+	if err != nil {
+		t.Fatalf("DefaultDataDir: %v", err)
+	}
+	if want := filepath.Join(dataHome, "caravan"); dataDir != want {
+		t.Errorf("DefaultDataDir = %q, want %q", dataDir, want)
+	}
+}
+
+func TestDefaultPathsIgnoreRelativeXDGDirectories(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows uses AppData fallbacks instead of Unix home directories")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "relative-config")
+	t.Setenv("XDG_DATA_HOME", "relative-data")
+
+	configPath, err := DefaultConfigPath()
+	if err != nil {
+		t.Fatalf("DefaultConfigPath: %v", err)
+	}
+	if want := filepath.Join(home, ".config", "caravan", "caravan.yaml"); configPath != want {
+		t.Errorf("DefaultConfigPath = %q, want %q", configPath, want)
+	}
+	dataDir, err := DefaultDataDir()
+	if err != nil {
+		t.Fatalf("DefaultDataDir: %v", err)
+	}
+	if want := filepath.Join(home, ".local", "share", "caravan"); dataDir != want {
+		t.Errorf("DefaultDataDir = %q, want %q", dataDir, want)
+	}
+}
+
+func TestLoadMissingFileUsesDefaultDataDirectory(t *testing.T) {
+	dataHome := filepath.Join(t.TempDir(), "data-home")
+	t.Setenv("XDG_DATA_HOME", dataHome)
+	configPath := filepath.Join(t.TempDir(), "config", "caravan.yaml")
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if want := filepath.Join(dataHome, "caravan"); cfg.DataDir != want {
+		t.Errorf("DataDir = %q, want %q", cfg.DataDir, want)
+	}
+	if cfg.DataDir == filepath.Dir(configPath) {
+		t.Errorf("DataDir followed the config file into %q", cfg.DataDir)
+	}
+}
+
+func TestLoadDataDirectoryControlsPersistentStatePaths(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "caravan.yaml")
+	dataDir := filepath.Join(dir, "state")
+	if err := os.WriteFile(configPath, []byte("data_dir: "+dataDir+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.DataDir != dataDir {
+		t.Errorf("DataDir = %q, want %q", cfg.DataDir, dataDir)
+	}
+	if want := filepath.Join(dataDir, DatabaseFile); cfg.DatabasePath() != want {
+		t.Errorf("DatabasePath = %q, want %q", cfg.DatabasePath(), want)
+	}
+	if want := filepath.Join(dataDir, StateFile); cfg.StatePath() != want {
+		t.Errorf("StatePath = %q, want %q", cfg.StatePath(), want)
+	}
+}
+
+func TestDataDirectoryEnvironmentOverridesLegacyConfigDirectory(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "caravan.yaml")
+	if err := os.WriteFile(configPath, []byte("config_dir: /legacy-file\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EnvConfigDir, "/legacy-env")
+	t.Setenv(EnvDataDir, "/data-env")
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.DataDir != "/data-env" {
+		t.Errorf("DataDir = %q, want /data-env", cfg.DataDir)
+	}
+}
+
+func TestLoadEnvironmentDataDirectoryDoesNotNeedHome(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("XDG_DATA_HOME", "")
+	want := filepath.Join(t.TempDir(), "data")
+	t.Setenv(EnvDataDir, want)
+
+	cfg, err := Load(filepath.Join(t.TempDir(), "missing.yaml"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.DataDir != want {
+		t.Errorf("DataDir = %q, want %q", cfg.DataDir, want)
 	}
 }

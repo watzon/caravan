@@ -11,6 +11,11 @@ and Caravan uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `just dev` runs Vite HMR beside Air and reverse-proxies the SPA from
   `:8677`, so frontend edits no longer need a Go restart.
+- Bare installs now keep `caravan.yaml` under the XDG config directory and
+  persistent application state under the XDG data directory by default;
+  `--data-dir`, `CARAVAN_DATA_DIR`, and `data_dir` provide explicit overrides.
+- Portable preparation accepts drive-relative `--data-dir` and `--storage-root`
+  choices and records them in the generated config.
 - Initial public-release documentation and release checklist.
 
 ### Fixed

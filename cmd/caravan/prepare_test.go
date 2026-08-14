@@ -114,6 +114,30 @@ func TestPrepareBinDirFlag(t *testing.T) {
 	}
 }
 
+func TestPrepareLocationFlagsConfigureThePortableDrive(t *testing.T) {
+	root := t.TempDir()
+	if err := run([]string{
+		"prepare", root,
+		"--data-dir", "state/caravan",
+		"--storage-root", "media",
+	}); err != nil {
+		t.Fatalf("run prepare: %v", err)
+	}
+
+	cfg := readFileForTest(t, filepath.Join(root, filepath.FromSlash(prepare.ConfigFile)))
+	for _, want := range []string{`data_dir: "state/caravan"`, `storage_root: "media"`} {
+		if !strings.Contains(cfg, want) {
+			t.Fatalf("portable config is missing %q:\n%s", want, cfg)
+		}
+	}
+	readme := readFileForTest(t, filepath.Join(root, prepare.ReadmeFile))
+	for _, want := range []string{"media/library/Movies/", "media/incomplete/", "state/caravan/caravan.db"} {
+		if !strings.Contains(readme, want) {
+			t.Errorf("portable README is missing configured location %q", want)
+		}
+	}
+}
+
 func TestNormalizePrepareArgsMovesDriveAfterFlags(t *testing.T) {
 	args := []string{"/tmp/drive", "-bin-dir", "/tmp/release-bins"}
 	got := normalizePrepareArgs(args)
@@ -177,7 +201,7 @@ func bootPreparedDrive(t *testing.T, drive string) {
 	}
 	p.waitStopped(t)
 
-	// config_dir sent the database and the clean-shutdown marker into the
+	// data_dir sent the database and the clean-shutdown marker into the
 	// drive's own folder, and nothing leaked outside it.
 	data := filepath.Join(drive, filepath.FromSlash(prepare.DataDir))
 	for _, name := range []string{config.DatabaseFile, config.StateFile} {

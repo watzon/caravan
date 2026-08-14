@@ -36,26 +36,16 @@ import (
 const shutdownTimeout = 10 * time.Second
 
 func runServe(args []string) error {
-	fs := newFlagSet("serve")
-	configPath := fs.String("config", "caravan.yaml", "path to the bootstrap YAML config")
-	listen := fs.String("listen", "", "listen address override (default from config)")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	cfg, err := config.Load(*configPath)
+	cfg, configPath, err := loadServeConfig(args)
 	if err != nil {
 		return err
 	}
-	if *listen != "" {
-		cfg.Listen = *listen
-	}
 
-	configDir, err := filepath.Abs(cfg.ConfigDir)
+	configDir, err := filepath.Abs(filepath.Dir(configPath))
 	if err != nil {
 		return fmt.Errorf("resolve config dir: %w", err)
 	}
-	configFile, err := filepath.Abs(*configPath)
+	configFile, err := filepath.Abs(configPath)
 	if err != nil {
 		return fmt.Errorf("resolve config file: %w", err)
 	}
@@ -66,10 +56,40 @@ func runServe(args []string) error {
 
 	logger := newLogger(cfg.LogLevel)
 
-	if err := os.MkdirAll(cfg.ConfigDir, 0o755); err != nil {
-		return fmt.Errorf("create config dir %s: %w", cfg.ConfigDir, err)
+	if err := os.MkdirAll(cfg.DataDir, 0o755); err != nil {
+		return fmt.Errorf("create data dir %s: %w", cfg.DataDir, err)
 	}
 
+	return serve(cfg, configDir, configFile, databasePath, logger)
+}
+
+func loadServeConfig(args []string) (*config.Config, string, error) {
+	fs := newFlagSet("serve")
+	configPath := fs.String("config", "", "path to the bootstrap YAML config (default: platform config directory)")
+	dataDir := fs.String("data-dir", "", "application data directory override (database and runtime state)")
+	listen := fs.String("listen", "", "listen address override (default from config)")
+	if err := fs.Parse(args); err != nil {
+		return nil, "", err
+	}
+	if *configPath == "" {
+		defaultConfigPath, err := config.DefaultConfigPath()
+		if err != nil {
+			return nil, "", err
+		}
+		*configPath = defaultConfigPath
+	}
+
+	cfg, err := config.LoadWithDataDir(*configPath, *dataDir)
+	if err != nil {
+		return nil, "", err
+	}
+	if *listen != "" {
+		cfg.Listen = *listen
+	}
+	return cfg, *configPath, nil
+}
+
+func serve(cfg *config.Config, configDir, configFile, databasePath string, logger *slog.Logger) error {
 	// The clean-shutdown marker (SPEC §2.3) is claimed before the database is
 	// opened, because "did the last session end properly?" has to be answered
 	// while the answer is still on disk — opening the database is already a
@@ -81,7 +101,7 @@ func runServe(args []string) error {
 		// A second launcher double-click, most often. Serving anyway would open
 		// the same database from two processes and let whichever exited first
 		// declare the drive clean while the other was still writing.
-		return fmt.Errorf("another Caravan is already using %s; stop it before starting a second one", cfg.ConfigDir)
+		return fmt.Errorf("another Caravan is already using %s; stop it before starting a second one", cfg.DataDir)
 	}
 	if err != nil {
 		// A marker that cannot be read or written is not a reason to refuse to
