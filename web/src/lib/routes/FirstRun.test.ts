@@ -1,11 +1,11 @@
 /**
  * First run (SPEC §10.1, PLAN phase 10 tasks 1 and 6).
  *
- * The wizard is the one screen a user cannot come back to, so the tests are
- * about what it refuses to let them leave with: a key that does not work, or a
- * skip they did not make on purpose. And about the promise the whole adult
- * module rests on — an install that has never turned it on must not learn it
- * exists here.
+ * The wizard is the one flow a user cannot come back to, so the tests are
+ * about what it refuses to let them leave with: a key that does not work.
+ * Leaving a metadata field blank is how you skip it. And about the promise
+ * the whole adult module rests on — an install that has never turned it on
+ * must not learn it exists here.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
@@ -114,6 +114,13 @@ function button(label: string): HTMLButtonElement {
   return found as HTMLButtonElement;
 }
 
+function testButton(which: 'tmdb' | 'thetvdb'): HTMLButtonElement {
+  const tests = [...host.querySelectorAll('button')].filter((b) => b.textContent?.trim() === 'Test');
+  const found = tests[which === 'tmdb' ? 0 : 1];
+  expect(found, `${which} Test`).toBeDefined();
+  return found as HTMLButtonElement;
+}
+
 function called(fragment: string): Call[] {
   return calls.filter((c) => c.url.includes(fragment));
 }
@@ -125,6 +132,14 @@ function scanOff() {
   scanToggle.click();
   flushSync();
 }
+
+function openPin() {
+  const details = host.querySelector('details');
+  expect(details, 'the subscriber PIN accordion').not.toBeNull();
+  details!.open = true;
+  details!.dispatchEvent(new Event('toggle'));
+  flushSync();
+}
 async function createAccount() {
   typeInto('#admin-username', 'admin');
   typeInto('#admin-password', 'correct horse');
@@ -134,30 +149,54 @@ async function createAccount() {
 }
 
 describe('FirstRun', () => {
-  it('offers the four setup steps on one screen', () => {
+  it('creates the administrator on the first screen before showing configuration', async () => {
     mountWizard();
 
     expect(host.textContent).toContain('Create your administrator account');
+    expect(host.querySelector('[aria-current="step"]')?.textContent).toContain('Account');
+    expect(host.querySelector('#admin-username')).not.toBeNull();
+    expect(host.querySelector('#storage-root')).toBeNull();
+    expect(host.querySelector('#tmdb-key')).toBeNull();
+    expect(host.querySelector('#thetvdb-key')).toBeNull();
+
+    await createAccount();
+
+    expect(called('/setup/admin')).toHaveLength(1);
+    expect(host.querySelector('[aria-current="step"]')?.textContent).toContain('Configuration');
+    expect(host.querySelector('#admin-username')).toBeNull();
     expect(host.textContent).toContain('Where does your media live?');
     expect(host.textContent).toContain('How should Caravan identify it?');
     expect(host.textContent).toContain('Already have a library?');
-    expect(host.querySelector('#admin-username')).not.toBeNull();
     expect(host.querySelector('#storage-root')).not.toBeNull();
     expect(host.querySelector('#tmdb-key')).not.toBeNull();
+    expect(host.querySelector('#thetvdb-key')).not.toBeNull();
+    expect(host.querySelector('details')?.open).toBe(false);
+    expect(host.textContent).not.toContain('Skip for now');
   });
 
-  it('associates setup inputs with visible labels and names the scan switch', () => {
+  it('associates setup inputs with visible labels and names the scan switch', async () => {
     mountWizard();
 
     for (const [id, label] of [
       ['admin-username', 'Username'],
       ['admin-password', 'Password'],
       ['admin-confirm', 'Confirm password'],
-      ['storage-root', 'Storage root'],
-      ['tmdb-key', 'TMDB API key'],
     ]) {
       expect(host.querySelector(`label[for="${id}"]`)?.textContent).toContain(label);
     }
+
+    await createAccount();
+
+    for (const [id, label] of [
+      ['storage-root', 'Storage root'],
+      ['tmdb-key', 'TMDB API key'],
+      ['thetvdb-key', 'TheTVDB API key'],
+    ]) {
+      expect(host.querySelector(`label[for="${id}"]`)?.textContent).toContain(label);
+    }
+    expect(host.querySelector('details summary')?.textContent).toContain('Subscriber PIN');
+    openPin();
+    expect(host.querySelector('label[for="thetvdb-pin"]')?.textContent).toContain('Subscriber PIN');
     expect(host.querySelector('[role="switch"]')?.getAttribute('aria-label')).toBe(
       'Scan for existing media now',
     );
@@ -173,8 +212,6 @@ describe('FirstRun', () => {
     typeInto('#storage-root', '/data');
 
     scanOff();
-    button('Skip for now').click();
-    flushSync();
     button('Start Caravan').click();
     await settle();
 
@@ -193,8 +230,9 @@ describe('FirstRun', () => {
     }
   });
 
-  it('proves the key against TMDB before anything is written', async () => {
+  it('proves the key against TMDB before any configuration is written', async () => {
     mountWizard();
+    await createAccount();
     typeInto('#tmdb-key', ' abc123 ');
 
     button('Test').click();
@@ -236,9 +274,9 @@ describe('FirstRun', () => {
     expect(window.location.pathname).toBe('/settings');
   });
 
-  // The acceptance criterion: a wrong key is caught at first run, and it is
-  // caught BEFORE the install is touched.
-  it('refuses to finish with a key TMDB rejects, and writes nothing', async () => {
+  // The acceptance criterion: a wrong key is caught at first run, before any
+  // configuration is written.
+  it('refuses to finish with a key TMDB rejects, and writes no configuration', async () => {
     responders.push({
       match: '/settings/metadata/test',
       reply: () =>
@@ -279,18 +317,13 @@ describe('FirstRun', () => {
     expect(called('/storage-root/repoint')).toHaveLength(1);
   });
 
-  // The escape hatch, taken on purpose - and it names what it costs.
-  it('lets the key be skipped, saying what that means, and saves no key', async () => {
+  it('lets metadata stay blank and saves no key', async () => {
     mountWizard();
     await createAccount();
     typeInto('#storage-root', '/data');
     scanOff();
 
-    button('Skip for now').click();
-    flushSync();
-    expect(host.textContent).toContain('cannot match media');
-    expect(host.textContent).toContain('Settings > Metadata');
-
+    expect(host.textContent).not.toContain('Skip for now');
     button('Start Caravan').click();
     await settle();
 
@@ -309,8 +342,6 @@ describe('FirstRun', () => {
     mountWizard();
     await createAccount();
     typeInto('#storage-root', '/data');
-    button('Skip for now').click();
-    flushSync();
 
     button('Start Caravan').click();
     await settle();
@@ -331,8 +362,6 @@ describe('FirstRun', () => {
     mountWizard();
     await createAccount();
     typeInto('#storage-root', '/data');
-    button('Skip for now').click();
-    flushSync();
 
     button('Start Caravan').click();
     await settle();
@@ -349,6 +378,7 @@ describe('FirstRun', () => {
   });
 
   it('links the remaining setup directly to its settings', () => {
+    system.status = { ...STATUS, needs_setup: true, password_set: true };
     mountWizard();
 
     expect(host.querySelector('a[href="/settings/indexers"]')?.textContent?.trim()).toBe('Indexers');
@@ -358,57 +388,110 @@ describe('FirstRun', () => {
     );
   });
 
-  // "I have not typed it yet" is not the same answer as "I am going without
-  // one", and only the second one should get through.
-  it('still requires account creation when system status says no password is set', async () => {
+  it('does not expose configuration while the administrator account is missing', async () => {
     system.status = { ...STATUS, storage_root: '', needs_setup: true, password_set: false };
     mountWizard();
+
     expect(host.querySelector('#admin-username')).not.toBeNull();
-    typeInto('#storage-root', '/data');
-    button('Skip for now').click();
-    flushSync();
+    expect(host.querySelector('#storage-root')).toBeNull();
+    expect(host.querySelector('#tmdb-key')).toBeNull();
+    expect(host.querySelector('#thetvdb-key')).toBeNull();
 
-    button('Start Caravan').click();
+    button('Create account').click();
     await settle();
 
-    expect(host.textContent).toContain('Create the administrator account');
+    expect(host.textContent).toContain('Enter a username for the administrator account');
+    expect(called('/setup/admin')).toHaveLength(0);
     expect(called('/storage-root/repoint')).toHaveLength(0);
-  });
-
-  it('will not finish on an empty key that was never skipped', async () => {
-    mountWizard();
-    await createAccount();
-    typeInto('#storage-root', '/data');
-    scanOff();
-
-    button('Start Caravan').click();
-    await settle();
-
-    expect(host.textContent).toContain('skip that step on purpose');
-    expect(called('/storage-root/repoint')).toHaveLength(0);
-  });
-
-  it('re-arms the skip the moment a key is typed', async () => {
-    mountWizard();
-    button('Skip for now').click();
-    flushSync();
-    typeInto('#tmdb-key', 'abc123');
-
-    // Typing is un-skipping: the escape hatch is offered again, and the key
-    // now has to be proved.
-    expect(host.textContent).not.toContain('nothing is matched');
-    expect(button('Skip for now')).toBeDefined();
   });
 
   it('still refuses an empty storage root', async () => {
     mountWizard();
-    button('Skip for now').click();
-    flushSync();
+    await createAccount();
 
     button('Start Caravan').click();
     await settle();
 
     expect(host.textContent).toContain('Enter the folder');
-    expect(calls).toEqual([]);
+    expect(called('/storage-root/repoint')).toHaveLength(0);
+    expect(called('/settings/metadata/test')).toHaveLength(0);
+    expect(called('/library/rescan')).toHaveLength(0);
+    expect(calls.some((call) => call.method === 'PUT')).toBe(false);
+  });
+
+  it('proves an unsaved TheTVDB key and PIN before writing them', async () => {
+    mountWizard();
+    await createAccount();
+    typeInto('#thetvdb-key', ' tvdb-key ');
+    openPin();
+    typeInto('#thetvdb-pin', ' 1234 ');
+
+    testButton('thetvdb').click();
+    await settle();
+
+    expect(called('/settings/metadata/test')).toEqual([
+      expect.objectContaining({
+        method: 'POST',
+        body: { api_key: 'tvdb-key', provider: 'thetvdb', pin: '1234' },
+      }),
+    ]);
+    expect(host.textContent).toContain('TheTVDB accepted the credential');
+  });
+
+  it('saves a proven TheTVDB pair without requiring TMDB when that step is skipped', async () => {
+    mountWizard();
+    await createAccount();
+    typeInto('#storage-root', '/data');
+    typeInto('#thetvdb-key', 'tvdb-key');
+    openPin();
+    typeInto('#thetvdb-pin', '1234');
+    scanOff();
+
+    testButton('thetvdb').click();
+    await settle();
+    button('Start Caravan').click();
+    await settle();
+
+    expect(calls.find((c) => c.method === 'PUT' && c.url.endsWith('/settings'))?.body).toEqual({
+      thetvdb_api_key: 'tvdb-key',
+      thetvdb_pin: '1234',
+    });
+    expect(called('/storage-root/repoint')).toHaveLength(1);
+  });
+
+  it('refuses to finish with a TheTVDB key the provider rejects, and writes no configuration', async () => {
+    responders.push({
+      match: '/settings/metadata/test',
+      reply: () =>
+        jsonResponse(
+          { error: 'metadata test failed: unauthorized', code: 'metadata_credential_invalid' },
+          502,
+        ),
+    });
+    mountWizard();
+    await createAccount();
+    typeInto('#storage-root', '/data');
+    typeInto('#thetvdb-key', 'wrong');
+    scanOff();
+
+    button('Start Caravan').click();
+    await settle();
+
+    expect(host.textContent).toContain('unauthorized');
+    expect(called('/storage-root/repoint')).toHaveLength(0);
+    expect(calls.some((c) => c.method === 'PUT')).toBe(false);
+    expect(host.querySelector('#thetvdb-key')).not.toBeNull();
+  });
+
+  it('leaves TheTVDB unset when both fields stay blank', async () => {
+    mountWizard();
+    await createAccount();
+    typeInto('#storage-root', '/data');
+    scanOff();
+    button('Start Caravan').click();
+    await settle();
+
+    expect(calls.some((c) => c.method === 'PUT')).toBe(false);
+    expect(called('/settings/metadata/test')).toHaveLength(0);
   });
 });

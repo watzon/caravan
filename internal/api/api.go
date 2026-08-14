@@ -172,6 +172,9 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("POST /system/storage-root/repoint", s.handleRepointStorageRoot)
 	api.HandleFunc("POST /system/storage-root/migrate", s.handleMigrateStorageRoot)
 	api.HandleFunc("GET /system/storage-root/migration", s.handleStorageMigration)
+	// The storage-root picker lists host folders. Admin-only: it is a map of
+	// the machine Caravan is running on, not a library browse.
+	api.HandleFunc("GET /system/directories", s.handleListDirectories)
 	// First-run setup is the one unauthenticated write. The handler itself
 	// refuses once any account exists and issues the first session.
 	api.HandleFunc("POST /setup/admin", s.handleSetupAdmin)

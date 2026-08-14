@@ -357,5 +357,11 @@
   "component.downloadClient.usernamePlaceholder": "admin",
   "component.downloadClient.passwordPlaceholder": "•••••",
   "component.downloadClient.categoryPlaceholder": "caravan",
-  "component.dlna.noDeviceID": "-"
+  "component.dlna.noDeviceID": "-",
+  "component.directoryPicker.browse": "Browse",
+  "component.directoryPicker.title": "Choose a folder",
+  "component.directoryPicker.useFolder": "Use this folder",
+  "component.directoryPicker.up": "Up",
+  "component.directoryPicker.empty": "No folders here.",
+  "component.directoryPicker.loading": "Loading folders..."
 }

@@ -1011,13 +1011,13 @@ describe('App shell', () => {
     expect(warning?.querySelector('.bg-warning')).not.toBeNull();
   });
 
-  it('sends the user to first run when there is no storage root', async () => {
+  it('sends an existing administrator to first-run configuration when there is no storage root', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
         const url = String(input);
         if (url.endsWith('/system/status')) {
-          return jsonResponse({ ...STATUS, storage_root: '' });
+          return jsonResponse({ ...STATUS, storage_root: '', password_set: true });
         }
         throw new Error(`unexpected fetch: ${url}`);
       }),

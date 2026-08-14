@@ -438,6 +438,9 @@ type metadataTestRequest struct {
 	// wizard proves the key before it writes it, so a fresh install never
 	// stores a credential it knows is wrong.
 	APIKey string `json:"api_key"`
+
+	// PIN is TheTVDB's subscriber PIN. Empty means "use the stored one".
+	PIN string `json:"pin"`
 }
 
 // handleMetadataTest proves one provider's API key against that provider (PLAN
@@ -490,7 +493,7 @@ func (s *server) handleMetadataTest(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), credentialCheckTimeout)
 	defer cancel()
 
-	if err := s.mgr.ValidateMetadataKey(ctx, providerID, key); err != nil {
+	if err := s.mgr.ValidateMetadataKey(ctx, providerID, key, strings.TrimSpace(body.PIN)); err != nil {
 		s.credentials.record(providerID, key, err)
 		if errors.Is(err, core.ErrMetadataUnauthorized) {
 			writeCodedError(w, http.StatusBadGateway, CodeMetadataCredentialInvalid,
@@ -524,5 +527,5 @@ func (s *server) revalidateMetadataKey(ctx context.Context, providerID, key stri
 	ctx, cancel := context.WithTimeout(ctx, credentialCheckTimeout)
 	defer cancel()
 
-	s.credentials.record(providerID, key, s.mgr.ValidateMetadataKey(ctx, providerID, key))
+	s.credentials.record(providerID, key, s.mgr.ValidateMetadataKey(ctx, providerID, key, ""))
 }

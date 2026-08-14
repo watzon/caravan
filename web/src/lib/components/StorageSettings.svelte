@@ -25,6 +25,7 @@
   import { system } from '../state/system.svelte';
   import Banner from './Banner.svelte';
   import Button from './Button.svelte';
+  import DirectoryPicker from './DirectoryPicker.svelte';
   import Field from './Field.svelte';
   import Icon from './Icon.svelte';
   import Modal from './Modal.svelte';
@@ -337,7 +338,7 @@
       label={t('component.storageSettings.newStorageRoot')}
       for="settings-storage-root"
       help={t('component.storageSettings.anAbsolutePathThatAlreadyExistsOnThisMachine')}>
-      <TextInput id="settings-storage-root" bind:value={newRoot} mono placeholder={t('component.storageSettings.data')} />
+      <DirectoryPicker id="settings-storage-root" bind:value={newRoot} placeholder={t('component.storageSettings.data')} />
     </Field>
   {/if}
 

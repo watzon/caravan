@@ -301,11 +301,11 @@ Disk-to-server migration is therefore: copy or move the drive contents, re-point
 
 ### 10.1 First run
 
-Four light steps, then the scan review. Everything else ships with defaults; there is no further wizard.
+Four light steps across two screens, then the scan review. The administrator account is created on the first screen; storage, metadata and the optional scan are configured on the second. Everything else ships with defaults; there is no further wizard.
 
 1. **Administrator account.** Create the first administrator username and password (at least 8 characters). The account is required before setup can finish; `POST /setup/admin` creates it once and signs that browser in with an HttpOnly session cookie.
 2. **Storage root.** Pick the storage root (pre-filled: `/data` in Docker, the drive root in portable mode).
-3. **Metadata.** Enter the TMDB API key. The key is proved before it is stored — `POST /settings/metadata/test` runs one live check and answers `{"status":"ok"}` or the provider's own reason — so an invalid key is caught in the field it was typed into rather than by the first add that fails. "Skip for now" is an explicit escape hatch and names its consequence: scanning still parses and imports, but nothing matches against TMDB until a key is entered in Settings → Metadata.
+3. **Metadata.** Enter a TMDB API key and, optionally, a TheTVDB v4 key (with a subscriber PIN when the subscription is user-supported). Each typed credential is proved before it is stored — `POST /settings/metadata/test` runs one live check and answers `{"status":"ok"}` or the provider's own reason — so an invalid key is caught in the field it was typed into rather than by the first add that fails. Leaving a field blank skips that provider: scanning still parses and imports, but nothing matches against it until a key is entered in Settings → Metadata.
 4. **Optional scan.** Point Caravan at existing media; a library scan is queued immediately.
 5. **Scan review.** Confidently matched items land in the library; everything else parks in an unmatched queue showing the parser's best guess, with manual metadata search to resolve.
 The first run contains no adult-content references at all: with no adult library there is nothing to be invisible, and creating one is its own act inside Settings → Libraries (§10.2).

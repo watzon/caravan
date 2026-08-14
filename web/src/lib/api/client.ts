@@ -67,6 +67,7 @@ import type {
   NotificationWebhookInput,
   RemotePathMapping,
   RemotePathMappingInput,
+  DirectoryListing,
   RepointResult,
   RequestStatus,
   RunTaskResult,
@@ -130,6 +131,7 @@ export const endpoints = {
   storageRootRepoint: () => `${API_BASE}/system/storage-root/repoint`,
   storageRootMigrate: () => `${API_BASE}/system/storage-root/migrate`,
   storageMigration: () => `${API_BASE}/system/storage-root/migration`,
+  directories: () => `${API_BASE}/system/directories`,
   settings: () => `${API_BASE}/settings`,
   // Phase 10 — proving the TMDB key where it is typed, the same idiom as
   // POST /indexers/{id}/test. It takes the key in the body so the first-run
@@ -532,6 +534,13 @@ export const api = {
   storageMigration: (signal?: AbortSignal) =>
     request<StorageMigrationStatus>(endpoints.storageMigration(), { signal }),
 
+  /**
+   * List child folders on the host. An empty path starts at the filesystem
+   * root so the picker can open before anything has been typed.
+   */
+  listDirectories: (path = '', signal?: AbortSignal) =>
+    request<DirectoryListing>(endpoints.directories(), { query: { path }, signal }),
+
   getSettings: (signal?: AbortSignal) =>
     request<Settings>(endpoints.settings(), { signal }),
 
@@ -553,11 +562,15 @@ export const api = {
    * The server caches the verdict against the key's value, so testing and then
    * saving the same key costs one upstream call, not two: prefer test-then-save
    * over saving blind.
+   *
+   * `pin` is TheTVDB's subscriber PIN. Empty means "use the stored one", which
+   * is what the settings Test button needs. First run sends the unsaved PIN
+   * so a user-supported key can be proved before either half is written.
    */
-  testMetadataKey: (apiKey = '', provider = 'tmdb') =>
+  testMetadataKey: (apiKey = '', provider = 'tmdb', pin = '') =>
     request<{ status: string }>(endpoints.metadataTest(), {
       method: 'POST',
-      body: { api_key: apiKey, provider },
+      body: pin === '' ? { api_key: apiKey, provider } : { api_key: apiKey, provider, pin },
     }),
 
   /**

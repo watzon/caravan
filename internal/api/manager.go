@@ -124,7 +124,12 @@ type Manager interface {
 	// wizard, which proves the credential before writing it, and the settings
 	// Test button, which proves what is in the field rather than what was last
 	// saved.
-	ValidateMetadataKey(ctx context.Context, providerID, apiKey string) error
+	//
+	// pin is TheTVDB's subscriber PIN. Empty means "use the stored one", which
+	// is what the settings Test button needs. First run sends the unsaved PIN
+	// so a user-supported key can be proved before either half is written.
+	// TMDB ignores it.
+	ValidateMetadataKey(ctx context.Context, providerID, apiKey, pin string) error
 
 	// ValidateAdultCredential is ValidateMetadataKey's stash-box twin. The
 	// endpoint travels with the key because a stash-box credential is only

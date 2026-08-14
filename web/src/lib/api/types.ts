@@ -569,6 +569,19 @@ export interface RepointResult {
   restart_required: boolean;
 }
 
+/** GET /system/directories — one folder the storage-root picker can show. */
+export interface DirectoryListing {
+  path: string;
+  parent: string;
+  directories: DirectoryEntry[];
+}
+
+/** One child folder in a directory listing. */
+export interface DirectoryEntry {
+  name: string;
+  path: string;
+}
+
 /** A storage migration's status. */
 export type StorageMigrationStatusName =
   | 'queued'

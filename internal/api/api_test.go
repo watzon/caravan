@@ -421,10 +421,10 @@ func (m *stubManager) adultProviders() []string {
 // credential model has to get right. A bare key with no provider prefix answers
 // for every provider, which is what the tests written before there was a second
 // credentialed one mean.
-func (m *stubManager) ValidateMetadataKey(ctx context.Context, providerID, apiKey string) error {
+func (m *stubManager) ValidateMetadataKey(ctx context.Context, providerID, apiKey, pin string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.validateCalls = append(m.validateCalls, validateCall{provider: providerID, key: apiKey})
+	m.validateCalls = append(m.validateCalls, validateCall{provider: providerID, key: apiKey, pin: pin})
 	if err, ok := m.validateKeys[providerID+"/"+apiKey]; ok {
 		return err
 	}
@@ -437,6 +437,7 @@ func (m *stubManager) ValidateMetadataKey(ctx context.Context, providerID, apiKe
 type validateCall struct {
 	provider string
 	key      string
+	pin      string
 }
 
 // ValidateAdultCredential answers from adultCredentialErr, recording what it

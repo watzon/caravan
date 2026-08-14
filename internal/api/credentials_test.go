@@ -535,6 +535,21 @@ func TestMetadataTestNamesItsProvider(t *testing.T) {
 		}
 	})
 
+	// First run proves a user-supported TheTVDB pair before either half is
+	// stored. The PIN has to travel in the body: the settings Test button can
+	// read the stored one, but first run has nothing stored yet.
+	t.Run("an unsaved thetvdb pin travels with the key", func(t *testing.T) {
+		h, _, mgr := newTestServer(t)
+
+		wantStatus(t, do(t, h, http.MethodPost, "/api/v1/settings/metadata/test",
+			`{"provider":"thetvdb","api_key":"supporter","pin":"1234"}`), http.StatusOK)
+
+		want := validateCall{provider: core.ProviderTheTVDB, key: "supporter", pin: "1234"}
+		if got := mgr.validations(); len(got) != 1 || got[0] != want {
+			t.Fatalf("validated %v, want exactly [%v]", got, want)
+		}
+	})
+
 	// A rejection from the Test button lands under the provider that was tested
 	// and nowhere else.
 	t.Run("a rejection lands under the provider tested", func(t *testing.T) {

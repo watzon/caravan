@@ -550,21 +550,21 @@ func (a *libraryAdapter) metadata(ctx context.Context) core.MetadataProvider {
 // not know is an error rather than a fall-through to TMDB: proving the wrong
 // provider's key and reporting the answer as this one's is the failure the
 // per-provider credential model exists to prevent.
-func (a *libraryAdapter) ValidateMetadataKey(ctx context.Context, providerID, apiKey string) error {
+func (a *libraryAdapter) ValidateMetadataKey(ctx context.Context, providerID, apiKey, pin string) error {
 	switch providerID {
 	case core.ProviderTMDB:
 		return tmdb.New(apiKey, a.hc).Test(ctx)
 	case core.ProviderTheTVDB:
-		// The candidate key is paired with the STORED pin. The Test button's
-		// question is "is this key good", and a PIN is not a secret anybody
-		// rotates per test: it belongs to the subscription, it is already saved
-		// beside the key, and asking the caller to re-send it would mean a
-		// licensed user's blank field could not be told apart from "leave the
-		// stored one alone". A read that fails is reported rather than silently
-		// treated as the licensed case, which would prove the wrong pair.
-		pin, err := a.setting(ctx, store.SettingTheTVDBPIN)
-		if err != nil {
-			return fmt.Errorf("caravan: read thetvdb pin: %w", err)
+		// An explicit PIN is the unsaved one first-run is proving. Empty means
+		// "use what is stored", which is the settings Test button: a licensed
+		// user's blank field must not wipe the stored PIN, and a supporter's
+		// stored PIN is already the other half of the login.
+		if pin == "" {
+			stored, err := a.setting(ctx, store.SettingTheTVDBPIN)
+			if err != nil {
+				return fmt.Errorf("caravan: read thetvdb pin: %w", err)
+			}
+			pin = stored
 		}
 		return thetvdb.New(apiKey, pin, a.hc).Test(ctx)
 	}
