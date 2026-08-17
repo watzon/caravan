@@ -19,9 +19,10 @@
  */
 export const ROUTES = [
   '/first-run',
-  // Explore. The index is Discover: the first question on opening Caravan is
-  // "what should I watch", not "what do I already have". /discover is the same
-  // screen under its own name, so the nav entry has a canonical href.
+  // Explore. The index is the brand target and forwards to Discover: the
+  // first question on opening Caravan is "what should I watch", not "what do
+  // I already have". /discover is the same screen under its own name, so the
+  // nav entry has a canonical href.
   '/',
   '/discover',
   // The filtered scopes (phase 12). One screen each, all of their state in the

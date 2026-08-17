@@ -281,7 +281,7 @@
   </button>
 
   <a
-    href={session.isAdmin ? '/movies' : '/discover'}
+    href="/"
     class="flex items-center gap-3 px-4 py-6 focus:outline-none"
     onclick={closeForNavigation}>
     <!-- The mark is the accent itself, not inverse-on-a-fill (the Paper mock,
@@ -327,7 +327,7 @@
       <div data-settings-sidebar-navigation class="flex flex-col gap-4">
         <a
           data-settings-back
-          href={session.isAdmin ? '/movies' : '/discover'}
+          href="/"
           class="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-ink-secondary transition-colors duration-150 ease-out hover:bg-raised hover:text-ink"
           onclick={closeForNavigation}>
           <Icon name="back" size={16} />

@@ -455,7 +455,7 @@ describe('App shell', () => {
     expect(host.querySelectorAll('[data-settings-sidebar]')).toHaveLength(0);
     expect(sidebar.dataset.sidebarMode).toBe('settings');
     expect(back.tagName).toBe('A');
-    expect(back.getAttribute('href')).toBe('/movies');
+    expect(back.getAttribute('href')).toBe('/');
     expect(back.textContent).toContain('Back to Caravan');
     expect(categories.map((group) => group.querySelector('p')?.textContent?.trim())).toEqual(
       SETTINGS_CATEGORIES.map((category) => settingsCategoryLabel(category)),
@@ -478,7 +478,7 @@ describe('App shell', () => {
       expect(sidebar.querySelector(`a[href="${href}"]`)).toBeNull();
     }
     expect(
-      [...sidebar.querySelectorAll<HTMLAnchorElement>('a[href="/movies"]')].map((link) =>
+      [...sidebar.querySelectorAll<HTMLAnchorElement>('a[href="/"]')].map((link) =>
         link.textContent?.trim(),
       ),
     ).toEqual(['CARAVAN', 'Back to Caravan']);
@@ -495,7 +495,7 @@ describe('App shell', () => {
     back.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
     await settle();
 
-    expect(window.location.pathname).toBe('/movies');
+    expect(window.location.pathname).toBe('/discover');
     expect(sidebar.dataset.sidebarMode).toBe('primary');
     expect(sidebar.querySelector('[data-settings-sidebar-navigation]')).toBeNull();
     expect(sidebar.textContent).toContain('Explore');
@@ -601,7 +601,7 @@ describe('App shell', () => {
   });
 
   /**
-   * `/` is Discover, not a redirect to the library: the first question on
+   * `/` forwards to Discover, not to the library: the first question on
    * opening Caravan is what to watch, not what is already downloaded.
    */
   it('renders Discover at the index and leaves the library where it was', async () => {
@@ -609,6 +609,7 @@ describe('App shell', () => {
     app = mount(App, { target: host });
     await settle();
 
+    expect(window.location.pathname).toBe('/discover');
     expect(host.querySelector('a[href="/discover"]')).not.toBeNull();
     expect(host.querySelector('a[href="/requests"]')).not.toBeNull();
     // The trending billboard, from the stubbed /discover payload.
@@ -622,6 +623,24 @@ describe('App shell', () => {
     const main = host.querySelector('main');
     expect(main?.classList.contains('min-w-0')).toBe(true);
     expect(main?.parentElement?.classList.contains('overflow-x-hidden')).toBe(true);
+  });
+
+  it('sends the brand mark through the index to Discover', async () => {
+    app = mount(App, { target: host });
+    await settle();
+
+    expect(host.textContent).toContain('Big Buck Bunny');
+
+    const brand = [...host.querySelectorAll<HTMLAnchorElement>('a')].find((link) =>
+      link.textContent?.includes('CARAVAN'),
+    );
+    expect(brand?.getAttribute('href')).toBe('/');
+    brand!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+    await settle();
+
+    expect(window.location.pathname).toBe('/discover');
+    expect(host.textContent).toContain('Severance');
+    expect(host.textContent).not.toContain('Big Buck Bunny');
   });
 
   it('says nothing about the metadata key in the sidebar', async () => {

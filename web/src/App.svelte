@@ -210,10 +210,26 @@ import Search from './lib/routes/Search.svelte';
       if (router.path !== '/first-run') navigate('/first-run', { replace: true });
       return;
     }
-    // `/` is Discover now, so only the finished first-run screen is redirected.
+    // The index forwards to Discover below. Finished first-run lands there
+    // so the brand mark and a completed setup share one home.
     if (router.path === '/first-run') {
       navigate('/', { replace: true });
     }
+  });
+
+  /**
+   * `/` is the brand target. Discover is the primary screen, so the index
+   * only exists long enough to send the reader there. The Discover nav row
+   * stays at `/discover` so a reload and a bookmark share one URL.
+   *
+   * An unconfigured admin is still first-run's: forwarding here while setup
+   * is loading or still needed would race that gate.
+   */
+  $effect(() => {
+    if (auth.required) return;
+    if (router.path !== '/') return;
+    if (session.isAdmin && (system.loading || system.needsSetup)) return;
+    navigate('/discover', { replace: true });
   });
 
   /**

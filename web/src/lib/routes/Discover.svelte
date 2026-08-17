@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * Explore → Discover: the landing screen, and what `/` now shows.
+   * Explore → Discover: the landing screen. `/` forwards here.
    *
    * Everything on it is pre-decorated by GET /discover (in_library, requested),
    * so no card cross-references a second call to know its own state. The

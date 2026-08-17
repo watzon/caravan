@@ -115,8 +115,8 @@ describe('matchRoutes', () => {
     expect(memberAllowedRoute('/search')).toBe(false);
   });
 
-  // The index is Discover now: it is a route in its own right, not a redirect
-  // to the library.
+  // The index still matches so the brand mark can land on `/` and App can
+  // forward it to Discover. It is not a redirect to the library.
   it('resolves the index and the discover screens', () => {
     expect(matchRoutes(ROUTES, '/')?.pattern).toBe('/');
     expect(matchRoutes(ROUTES, '/discover')?.pattern).toBe('/discover');

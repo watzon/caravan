@@ -223,6 +223,32 @@ describe('Sidebar task rail', () => {
     expect(host.textContent).toContain('Sign out ada');
   });
 
+  it('sends the brand mark to the index for an administrator and a member', async () => {
+    session.user = { username: 'root', role: 'admin', open: false, adult: false };
+    await render();
+
+    const brand = [...host.querySelectorAll('a')].find((link) =>
+      link.textContent?.includes('CARAVAN'),
+    );
+    expect(brand?.getAttribute('href')).toBe('/');
+
+    unmount(app);
+    session.user = { username: 'ada', role: 'member', open: false, adult: false };
+    await render();
+
+    const memberBrand = [...host.querySelectorAll('a')].find((link) =>
+      link.textContent?.includes('CARAVAN'),
+    );
+    expect(memberBrand?.getAttribute('href')).toBe('/');
+  });
+
+  it('sends settings back to the index rather than the movie shelf', async () => {
+    session.user = { username: 'root', role: 'admin', open: false, adult: false };
+    await render({ settingsSection: '' });
+
+    expect(host.querySelector('[data-settings-back]')?.getAttribute('href')).toBe('/');
+  });
+
   it('keeps sign-out when an administrator is named', async () => {
     session.user = { username: 'root', role: 'admin', open: false, adult: false };
     await render();
