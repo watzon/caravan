@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   applyDisplayPreferences,
   readDisplayPreferences,
+  resolvedTheme,
   saveDisplayPreferences,
+  toggleResolvedTheme,
 } from './displayPreferences';
 
 beforeEach(() => {
@@ -33,5 +35,15 @@ describe('display preferences', () => {
   it('falls back safely when stored preferences are malformed', () => {
     localStorage.setItem('caravan.display-preferences', '{bad json');
     expect(readDisplayPreferences()).toEqual({ theme: 'system', motion: 'system' });
+  });
+
+  it('resolves System against the device and flips the visible theme', () => {
+    expect(resolvedTheme('system')).toBe('light');
+    expect(resolvedTheme('dark')).toBe('dark');
+
+    const flipped = toggleResolvedTheme();
+    expect(flipped.theme).toBe('dark');
+    expect(document.documentElement.dataset.theme).toBe('dark');
+    expect(toggleResolvedTheme().theme).toBe('light');
   });
 });

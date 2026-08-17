@@ -495,6 +495,50 @@ func TestDownloadCRUD(t *testing.T) {
 	}
 }
 
+func TestGetUnlinkedGrabbedByReleaseTitle(t *testing.T) {
+	ctx := context.Background()
+	st, _ := openTemp(t)
+
+	if _, err := st.GetUnlinkedGrabbedByReleaseTitle(ctx, ""); !errors.Is(err, ErrNotFound) {
+		t.Errorf("empty title = %v, want ErrNotFound", err)
+	}
+	if _, err := st.GetUnlinkedGrabbedByReleaseTitle(ctx, "Missing.Release"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("unknown title = %v, want ErrNotFound", err)
+	}
+
+	g := core.Grab{GrabInfo: core.GrabInfo{SeriesID: 10, ReleaseTitle: "Site.26.05.20.Scene.XXX.2160p"}}
+	if err := st.InsertGrab(ctx, &g); err != nil {
+		t.Fatalf("InsertGrab: %v", err)
+	}
+	got, err := st.GetUnlinkedGrabbedByReleaseTitle(ctx, "Site.26.05.20.Scene.XXX.2160p")
+	if err != nil {
+		t.Fatalf("unlinked grab: %v", err)
+	}
+	if got.GrabID != g.GrabID {
+		t.Errorf("unlinked grab = %d, want %d", got.GrabID, g.GrabID)
+	}
+
+	if err := st.UpsertDownload(ctx, &core.Download{
+		GrabID: g.GrabID, Engine: "embedded-usenet", EngineID: "u1", Title: g.ReleaseTitle,
+	}); err != nil {
+		t.Fatalf("UpsertDownload: %v", err)
+	}
+	if _, err := st.GetUnlinkedGrabbedByReleaseTitle(ctx, g.ReleaseTitle); !errors.Is(err, ErrNotFound) {
+		t.Errorf("already-linked grab = %v, want ErrNotFound", err)
+	}
+
+	finished := core.Grab{
+		GrabInfo: core.GrabInfo{SeriesID: 10, ReleaseTitle: "Site.26.05.20.Scene.XXX.1080p"},
+		Status:   core.GrabStatusImported,
+	}
+	if err := st.InsertGrab(ctx, &finished); err != nil {
+		t.Fatalf("InsertGrab finished: %v", err)
+	}
+	if _, err := st.GetUnlinkedGrabbedByReleaseTitle(ctx, finished.ReleaseTitle); !errors.Is(err, ErrNotFound) {
+		t.Errorf("imported grab = %v, want ErrNotFound", err)
+	}
+}
+
 func TestGetGrabByDownloadID(t *testing.T) {
 	ctx := context.Background()
 	st, _ := openTemp(t)

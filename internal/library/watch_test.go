@@ -161,8 +161,42 @@ func TestWatcherImportsACompletedDownloadExactlyOnce(t *testing.T) {
 	}
 }
 
-// TestWatcherSkipsUnfinishedDownloads: progress is persisted every tick, but
-// nothing is imported until the data is actually there.
+// Automatic grabs used to persist the engine row and never write grab_id.
+// The watcher must still import that finished download, because the grab
+// named the same release and the file is sitting in incomplete.
+func TestWatcherImportsOrphanedDownloadByReleaseTitle(t *testing.T) {
+	h := newHarness(t)
+	mv := addMovieItem(h)
+	dl := movieDownload(h, "movie bytes")
+	grab := h.grabFor(core.GrabInfo{MovieID: mv.ID, ReleaseTitle: dl.Name})
+
+	ctx := context.Background()
+	if err := h.st.UpsertDownload(ctx, &core.Download{
+		Engine: "embedded-usenet", EngineID: dl.ID, Title: dl.Name, State: core.DownloadDownloading,
+	}); err != nil {
+		t.Fatalf("UpsertDownload orphan: %v", err)
+	}
+
+	w := newWatcher(h, &fakeEngine{statuses: []core.DownloadStatus{dl}})
+	if err := w.tick(ctx); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+
+	if got := h.read(organizedRel); got != "movie bytes" {
+		t.Fatalf("imported content = %q, want the download's bytes", got)
+	}
+	if got := h.grabStatus(grab.GrabID); got != core.GrabStatusImported {
+		t.Errorf("grab status = %q, want %q", got, core.GrabStatusImported)
+	}
+	stored, err := h.st.GetDownloadByEngineID(ctx, dl.ID)
+	if err != nil {
+		t.Fatalf("GetDownloadByEngineID: %v", err)
+	}
+	if stored.GrabID != grab.GrabID {
+		t.Errorf("download grab_id = %d, want %d", stored.GrabID, grab.GrabID)
+	}
+}
+
 func TestWatcherSkipsUnfinishedDownloads(t *testing.T) {
 	h := newHarness(t)
 	mv := addMovieItem(h)

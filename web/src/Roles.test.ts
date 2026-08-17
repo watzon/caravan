@@ -16,6 +16,7 @@ import { navigate, router } from './lib/router.svelte';
 import { discover } from './lib/state/discover.svelte';
 import { session } from './lib/state/session.svelte';
 import { system } from './lib/state/system.svelte';
+import { tasks } from './lib/state/tasks.svelte';
 import { auth } from './lib/state/auth.svelte';
 import { clearToasts } from './lib/state/toast.svelte';
 
@@ -123,6 +124,8 @@ beforeEach(() => {
       if (url.endsWith('/system/status')) return jsonResponse(STATUS);
       if (url.endsWith('/discover')) return jsonResponse(discoverHome());
       if (url.includes('/requests')) return jsonResponse({ requests: [] });
+      if (url.includes('/system/tasks')) return jsonResponse({ tasks: [] });
+      if (url.includes('/jobs')) return jsonResponse({ jobs: [] });
       if (url.endsWith('/downloads')) return jsonResponse({ downloads: [] });
       if (url.endsWith('/library/movies')) return jsonResponse({ movies: [] });
       // Answered so that an adult screen which DOES render has something to
@@ -154,6 +157,9 @@ afterEach(() => {
   host.remove();
   vi.unstubAllGlobals();
   session.forget();
+  tasks.stopSoon();
+  tasks.tasks = null;
+  tasks.jobs = null;
   auth.required = false;
   system.status = null;
   system.loading = true;

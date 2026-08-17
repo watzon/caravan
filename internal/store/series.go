@@ -84,6 +84,7 @@ func (s *Store) UpsertSeries(ctx context.Context, sr *core.Series) error {
 		if n == 0 {
 			return fmt.Errorf("store: update series %d: %w", sr.ID, ErrNotFound)
 		}
+		s.note("library")
 		return nil
 	}
 
@@ -91,6 +92,7 @@ func (s *Store) UpsertSeries(ctx context.Context, sr *core.Series) error {
 		return fmt.Errorf("store: insert series %q: %w", sr.Title, err)
 	}
 	sr.ID = model.ID
+	s.note("library")
 	return nil
 }
 
@@ -256,5 +258,6 @@ func (s *Store) DeleteSeries(ctx context.Context, id int64) error {
 	if _, err := s.db.NewDelete().Model((*catalogSeriesModel)(nil)).Where("id = ?", id).Exec(ctx); err != nil {
 		return fmt.Errorf("store: delete series %d: %w", id, err)
 	}
+	s.note("library")
 	return nil
 }

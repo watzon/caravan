@@ -18,6 +18,7 @@
   import MetadataLinks from '../components/MetadataLinks.svelte';
   import Poster from '../components/Poster.svelte';
   import Skeleton from '../components/Skeleton.svelte';
+  import { requestCreated } from '../state/activity';
   import { pushToast } from '../state/toast.svelte';
   import { useI18n } from '../i18n.svelte';
 
@@ -61,7 +62,7 @@
     if (!current || current.in_library || current.requested) return;
     requesting = true;
     try {
-      await api.createRequest({
+      const created = await api.createRequest({
         media_type: 'scene',
         tmdb_id: 0,
         stash_id: current.stash_id,
@@ -70,6 +71,7 @@
         poster_path: current.image_url,
         provider: current.provider,
       });
+      requestCreated(created);
       // One flag changed; retain the provider response rather than rereading it.
       scene = { ...current, requested: true };
       pushToast(t('route.adultScene.requested', { title: current.title }), 'success');

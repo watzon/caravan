@@ -11,6 +11,7 @@
   import { useI18n } from '../i18n.svelte';
   import { formatAge } from '../format';
   import { TONE_DOT, type Tone } from '../status';
+  import { jobKindLabel } from '../tasks';
 
   const { t, tp } = useI18n();
 
@@ -32,12 +33,7 @@
     done: { label: t('route.history.jobDone'), tone: 'success' },
     failed: { label: t('route.history.jobFailed'), tone: 'danger' },
   };
-  const JOB_KIND: Record<Job['kind'], string> = {
-    rss_sync: t('route.history.jobRssSync'),
-    backlog_sweep: t('route.history.jobBacklogSweep'),
-    search_movie: t('route.history.jobMovieSearch'),
-    search_episode: t('route.history.jobEpisodeSearch'),
-  };
+
   const POLL_MS = 10_000;
   const RECOVERY_MESSAGE = 'Database verified after an unclean shutdown';
 
@@ -231,7 +227,7 @@
         {@const meta = JOB_META[job.state]}
         <li class="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-3 py-3 last:border-b-0">
           <span class="size-2 shrink-0 rounded-full {TONE_DOT[meta.tone]}" aria-hidden="true"></span>
-          <p class="min-w-36 font-medium text-ink">{JOB_KIND[job.kind]}</p>
+          <p class="min-w-36 font-medium text-ink">{jobKindLabel(job.kind)}</p>
           <Badge tone={meta.tone}>{meta.label}</Badge>
           <span class="font-mono text-xs text-ink-secondary">{job.attempts}/5</span>
           <time class="ml-auto text-sm text-ink-muted" datetime={job.updated_at || job.created_at} title={job.updated_at || job.created_at}>{t('route.history.ago', { time: formatAge(job.updated_at || job.created_at) })}</time>

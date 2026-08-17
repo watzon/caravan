@@ -1,29 +1,33 @@
 /**
- * The download queue (SPEC §11 `GET /downloads`).
+ * Recurring tasks and live one-shot jobs, shared by the sidebar footer and
+ * the Settings badge.
  *
- * The sidebar badge reads this store. Local writes and GET /events/stream
- * keep the count current. The Queue screen still polls while it is open so
- * progress bars move; that timer is not a badge poll.
+ * The shell does not poll this. Local writes and GET /events/stream refresh
+ * the snapshot. subscribe() remains for the Tasks screen and watchSoon.
  */
 
 import { api, errorText } from '../api/client';
-import type { DownloadStatus } from '../api/types';
-import { countActiveDownloads } from '../download';
+import type { Job, SystemTask } from '../api/types';
+import { failedTaskCount, footerActivity } from '../tasks';
 
-/** Queue screen cadence — fast enough that progress bars move (DESIGN.md §6). */
-export const QUEUE_POLL_MS = 3000;
+/** Tasks screen and a just-queued search. */
+export const TASKS_POLL_MS = 5000;
 
-/** How long a grab we just queued is watched at the queue-screen rate. */
-export const WATCH_SOON_MS = 30_000;
+/** How long a just-queued search is watched at the fast rate. */
+export const TASKS_WATCH_SOON_MS = 30_000;
 
-class DownloadsState {
-  items = $state<DownloadStatus[] | null>(null);
+class TasksState {
+  tasks = $state<SystemTask[] | null>(null);
+  jobs = $state<Job[] | null>(null);
   error = $state<string | null>(null);
   loading = $state(true);
 
-  /** What the sidebar badge shows. */
-  get activeCount(): number {
-    return countActiveDownloads(this.items ?? []);
+  get activity() {
+    return footerActivity(this.tasks, this.jobs);
+  }
+
+  get issueCount(): number {
+    return failedTaskCount(this.tasks);
   }
 
   #subscribers = new Map<number, number>();
@@ -35,10 +39,6 @@ class DownloadsState {
   #soonStop: (() => void) | null = null;
   #soonTimer: ReturnType<typeof setTimeout> | null = null;
 
-  /**
-   * Fetch once. A second call while one is in flight is remembered and run
-   * after, so a grab that lands during a poll is not dropped.
-   */
   async refresh(): Promise<void> {
     if (this.#inFlight) {
       this.#pending = true;
@@ -48,14 +48,12 @@ class DownloadsState {
     try {
       do {
         this.#pending = false;
-        const items: DownloadStatus[] = [];
-        let cursor: string | undefined;
-        do {
-          const page = await api.listDownloadsPage(100, cursor);
-          items.push(...page.downloads);
-          cursor = page.next_cursor || undefined;
-        } while (cursor);
-        this.items = items;
+        const [taskList, jobList] = await Promise.all([
+          api.listTasks(),
+          api.listJobs(50),
+        ]);
+        this.tasks = taskList;
+        this.jobs = jobList;
         this.error = null;
       } while (this.#pending);
     } catch (err) {
@@ -66,10 +64,6 @@ class DownloadsState {
     }
   }
 
-  /**
-   * Poll at least this often while the returned function has not been called.
-   * Returns the unsubscribe.
-   */
   subscribe(intervalMs: number): () => void {
     const token = this.#nextToken++;
     this.#subscribers.set(token, intervalMs);
@@ -83,25 +77,13 @@ class DownloadsState {
     };
   }
 
-  /** Drop a download from the local list without waiting for the next poll. */
-  forget(id: string): void {
-    if (this.items === null) return;
-    this.items = this.items.filter((d) => d.id !== id);
-  }
-
-  /**
-   * Poll at the queue-screen rate for a short while. A grab that was just
-   * queued is not on the list yet; the badge and the queue page both need
-   * to see it land without a full reload.
-   */
-  watchSoon(durationMs = WATCH_SOON_MS): void {
+  watchSoon(durationMs = TASKS_WATCH_SOON_MS): void {
     void this.refresh();
     this.stopSoon();
-    this.#soonStop = this.subscribe(QUEUE_POLL_MS);
+    this.#soonStop = this.subscribe(TASKS_POLL_MS);
     this.#soonTimer = setTimeout(() => this.stopSoon(), durationMs);
   }
 
-  /** Cancel a watchSoon burst. Tests call this so a timer cannot outlive them. */
   stopSoon(): void {
     if (this.#soonTimer !== null) {
       clearTimeout(this.#soonTimer);
@@ -120,7 +102,6 @@ class DownloadsState {
     }
     if (this.#subscribers.size === 0) return;
     if (typeof document !== 'undefined' && document.hidden) return;
-
     const interval = Math.min(...this.#subscribers.values());
     this.#timer = setInterval(() => void this.refresh(), interval);
   }
@@ -129,11 +110,10 @@ class DownloadsState {
     if (this.#watchingVisibility || typeof document === 'undefined') return;
     this.#watchingVisibility = true;
     document.addEventListener('visibilitychange', () => {
-      // Coming back to a stale queue should not wait out a full interval.
       if (!document.hidden && this.#subscribers.size > 0) void this.refresh();
       this.#restart();
     });
   }
 }
 
-export const downloads = new DownloadsState();
+export const tasks = new TasksState();

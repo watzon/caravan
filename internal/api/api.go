@@ -126,6 +126,10 @@ type server struct {
 	// by the serving process to the same cancel a signal uses. Nil means this
 	// process cannot stop itself, which the endpoint reports rather than fakes.
 	shutdown func()
+
+	// stream fans sidebar invalidation hints to open browsers. Nil only in
+	// tests that construct a server by hand; NewServer always sets one.
+	stream *invalidationHub
 }
 
 // NewServer builds the HTTP handler: the JSON API under /api/v1 and the SPA
@@ -149,9 +153,13 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 		sessionTTL: defaultSessionTTL,
 		logins:     newLoginGuard(),
 		startedAt:  time.Now(),
+		stream:     newInvalidationHub(),
 	}
 	for _, opt := range opts {
 		opt(s)
+	}
+	if st != nil {
+		st.SetChangeHook(s.stream.Invalidate)
 	}
 
 	// Registered without the /api/v1 prefix and mounted below, so the prefix
@@ -476,6 +484,7 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("DELETE /import/queue/{id}", s.handleImportDelete)
 
 	api.HandleFunc("GET /events", s.handleEvents)
+	api.HandleFunc("GET /events/stream", s.handleEventStream)
 
 	root := http.NewServeMux()
 	// requireAuth wraps the JSON API and nothing else: the SPA (whose login
@@ -545,6 +554,11 @@ func (w *jsonErrorWriter) Write(b []byte) (int, error) {
 	}
 	return w.ResponseWriter.Write(b)
 }
+
+// Unwrap lets http.ResponseController find Flush on the real connection.
+// GET /events/stream needs it; without it the wrapper is not a Flusher
+// and the handler answers 500.
+func (w *jsonErrorWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 // statusClientClosedRequest is nginx's 499: the caller hung up before the
 // answer existed. Nobody receives it — it exists so the request log records

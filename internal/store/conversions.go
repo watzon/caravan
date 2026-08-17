@@ -35,6 +35,7 @@ func (s *Store) CreateConversion(ctx context.Context, c *core.Conversion) error 
 		return fmt.Errorf("store: create conversion for media file %d: %w", c.MediaFileID, err)
 	}
 	c.ID = model.ID
+	s.note("library")
 	return nil
 }
 
@@ -52,7 +53,11 @@ func (s *Store) UpdateConversion(ctx context.Context, c *core.Conversion) error 
 		}
 		return fmt.Errorf("store: update conversion %d: %w", c.ID, err)
 	}
-	return affectedOne(res, "update conversion", c.ID)
+	if err := affectedOne(res, "update conversion", c.ID); err != nil {
+		return err
+	}
+	s.note("library")
+	return nil
 }
 
 // TransitionConversion moves a conversion to `to`, but only while it is still
@@ -74,6 +79,9 @@ func (s *Store) TransitionConversion(ctx context.Context, id int64, to string, f
 	n, err := res.RowsAffected()
 	if err != nil {
 		return false, fmt.Errorf("store: transition conversion %d: %w", id, err)
+	}
+	if n > 0 {
+		s.note("library")
 	}
 	return n > 0, nil
 }

@@ -12,6 +12,7 @@
    */
   import { bulkSummary, runBulk } from '../bulk';
   import type { Selection } from '../selection.svelte';
+  import { libraryChanged } from '../state/activity';
   import { pushToast } from '../state/toast.svelte';
   import Button from './Button.svelte';
   import Icon from './Icon.svelte';
@@ -48,6 +49,7 @@
     // toast whether every item worked or none did.
     const result = await runBulk(ids, action);
     busy = false;
+    if (result.ok > 0) libraryChanged();
     pushToast(bulkSummary(result, verb), result.failed === 0 ? 'success' : 'danger');
   }
 
@@ -61,6 +63,7 @@
     confirmingRemove = false;
     selection.clear();
     pushToast(bulkSummary(result, t('component.selectActions.removed')), result.failed === 0 ? 'success' : 'danger');
+    if (result.ok > 0) libraryChanged();
     await onchanged();
   }
 

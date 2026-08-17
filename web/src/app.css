@@ -187,6 +187,17 @@
   outline-offset: 2px;
 }
 
+/* Sidebar task rail: a breath, not a spinner. Reduced-motion rules above
+   collapse this to a single frame. */
+@keyframes sidebar-task-pulse {
+  0%,
+  100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+.sidebar-task-pulse {
+  animation: sidebar-task-pulse 1.4s ease-in-out infinite;
+}
+
 @media (forced-colors: active) {
   :focus-visible {
     outline-color: CanvasText;

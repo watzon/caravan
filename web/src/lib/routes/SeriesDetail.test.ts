@@ -6,6 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import SeriesDetail from './SeriesDetail.svelte';
+import { tasks } from '../state/tasks.svelte';
 import { clearToasts, toasts } from '../state/toast.svelte';
 
 const SERIES = {
@@ -175,6 +176,7 @@ afterEach(() => {
   app = undefined;
   host.remove();
   clearToasts();
+  tasks.stopSoon();
   vi.unstubAllGlobals();
 });
 
@@ -440,7 +442,7 @@ describe('SeriesDetail search actions', () => {
     ).toEqual([
       { url: '/api/v1/library/series/3/search', method: 'POST' },
     ]);
-    expect(toasts.items.map((t) => t.message)).toEqual(['4 searches started']);
+    expect(toasts.items).toHaveLength(0);
   });
 
   it('says nothing was queued when the series is already covered', async () => {
@@ -463,7 +465,7 @@ describe('SeriesDetail search actions', () => {
     searchNowButton().click();
     await settle();
 
-    expect(toasts.items.map((t) => t.message)).toEqual(['1 search started']);
+    expect(toasts.items).toHaveLength(0);
   });
 });
 

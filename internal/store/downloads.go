@@ -49,6 +49,7 @@ func (s *Store) UpsertDownload(ctx context.Context, d *core.Download) error {
 		return fmt.Errorf("store: upsert download %q: %w", d.EngineID, err)
 	}
 	if d.ID != 0 {
+		s.note("downloads")
 		return nil
 	}
 	// Read back both id and created_at: on conflict the insert's created_at was
@@ -61,6 +62,7 @@ func (s *Store) UpsertDownload(ctx context.Context, d *core.Download) error {
 	}
 	d.ID = model.ID
 	d.CreatedAt = parseTime(model.CreatedAt)
+	s.note("downloads")
 	return nil
 }
 

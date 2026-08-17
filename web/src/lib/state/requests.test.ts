@@ -6,6 +6,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { requests } from './requests.svelte';
+import type { MediaRequest } from '../api/types';
 
 let hidden = false;
 let fetches: number;
@@ -86,5 +87,55 @@ describe('RequestsState', () => {
     expect(fetches).toBeGreaterThan(1);
 
     stop();
+  });
+
+  it('remembers a created request and counts it as pending', () => {
+    requests.items = [];
+    requests.remember({
+      id: 7,
+      media_type: 'scene',
+      tmdb_id: 0,
+      stash_id: 'abc',
+      title: 'Deep Impact',
+      year: 2022,
+      poster_path: '',
+      poster_url: '',
+      seasons: null,
+      min_availability: '',
+      requested_by_username: '',
+      status: 'pending',
+      created_at: '',
+      updated_at: '',
+    } as MediaRequest);
+    expect(requests.pendingCount).toBe(1);
+
+    requests.applyStatus(7, 'approved');
+    expect(requests.pendingCount).toBe(0);
+    expect(requests.items?.[0]?.status).toBe('approved');
+  });
+
+  it('runs a refresh that arrived while another was in flight', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    let fetches = 0;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        fetches++;
+        if (fetches === 1) await gate;
+        return new Response(JSON.stringify({ requests: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    );
+
+    const first = requests.refresh();
+    const second = requests.refresh();
+    release();
+    await first;
+    await second;
+    await settle();
+    expect(fetches).toBe(2);
   });
 });

@@ -9,6 +9,8 @@ import { flushSync, mount, unmount, type ComponentProps } from 'svelte';
 import AddRequestModal from './AddRequestModal.svelte';
 import type { DiscoverSeason } from '../api/types';
 import type { AddRequestResult } from '../discover';
+import { downloads } from '../state/downloads.svelte';
+import { tasks } from '../state/tasks.svelte';
 import { session } from '../state/session.svelte';
 import { system } from '../state/system.svelte';
 import { clearToasts, toasts } from '../state/toast.svelte';
@@ -68,6 +70,20 @@ function stubFetch() {
       }
       if (url.endsWith('/library/movies') && method === 'POST') {
         return json({ id: 7, title: 'Blade Runner' }, 201);
+      }
+      if (url.includes('/downloads')) return json({ downloads: [] });
+      if (url.endsWith('/system/status')) {
+        return json({
+          version: '0',
+          mode: 'server',
+          storage_root: '',
+          schema_version: 1,
+          scanning: false,
+          counts: { movies: 0, series: 0, media_files: 0, unmatched: 0, wanted: 0 },
+          disk_free_bytes: 0,
+          disk_total_bytes: 0,
+          engine_health: 'ok',
+        });
       }
       return json(null, 204);
     }),
@@ -142,6 +158,8 @@ afterEach(() => {
   // copy it reads; null is "not answered for yet", which reads as admin.
   session.user = null;
   system.status = null;
+  downloads.stopSoon();
+  tasks.stopSoon();
   clearToasts();
   window.localStorage.clear();
   vi.unstubAllGlobals();

@@ -9,6 +9,27 @@ import (
 	"github.com/watzon/caravan/internal/core"
 )
 
+func TestChangeHookFiresOnRequestWrite(t *testing.T) {
+	st, _ := openTemp(t)
+	var got []string
+	st.SetChangeHook(func(resource string) {
+		got = append(got, resource)
+	})
+
+	r := core.Request{
+		MediaType: core.MediaTypeMovie,
+		TMDBID:    78,
+		Title:     "Blade Runner",
+		Year:      1982,
+	}
+	if err := st.CreateRequest(context.Background(), &r); err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+	if len(got) != 1 || got[0] != "requests" {
+		t.Fatalf("hook = %v, want [requests]", got)
+	}
+}
+
 func TestCreateRequestMovie(t *testing.T) {
 	ctx := context.Background()
 	st, _ := openTemp(t)

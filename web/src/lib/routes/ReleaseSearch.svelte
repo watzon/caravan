@@ -63,6 +63,13 @@
 
   let movie = $state<Movie | null>(null);
   let series = $state<Series | null>(null);
+
+  /**
+   * The route may say series while the row is a site — Wanted used to link
+   * scenes that way. The item's own kind wins so the box and the heading
+   * do not flash the television spelling and then rewrite it.
+   */
+  let asSite = $derived(kind === 'site' || series?.kind === 'adult');
   let releases = $state<Release[] | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
@@ -98,7 +105,7 @@
   /** Where the "back" link points. */
   let itemHref = $derived.by(() => {
     if (kind === 'movie') return `/movies/${id}`;
-    if (kind === 'site') return `/adult/sites/${id}`;
+    if (asSite) return `/adult/sites/${id}`;
     return `/series/${id}`;
   });
 
@@ -117,9 +124,9 @@
 
   let heading = $derived.by((): string => {
     if (kind === 'movie') return movie?.title ?? t('route.releaseSearch.movie');
-    const title = series?.title ?? (kind === 'site' ? t('route.releaseSearch.site') : t('route.releaseSearch.series'));
+    const title = series?.title ?? (asSite ? t('route.releaseSearch.site') : t('route.releaseSearch.series'));
     if (season < 0) return title;
-    if (kind === 'site') {
+    if (asSite) {
       return episode >= 0 ? `${title} · ${season} · ${sceneNumber(episode)}` : `${title} · ${season}`;
     }
     if (episode >= 0) return `${title} · ${episodeCode(season, episode)}`;
@@ -130,7 +137,7 @@
     t('route.releaseSearch.context', {
       kind: kind === 'movie'
         ? t('route.releaseSearch.movie')
-        : kind === 'site'
+        : asSite
           ? t('route.releaseSearch.site')
           : t('route.releaseSearch.series'),
       heading,
@@ -164,12 +171,14 @@
     let seed = '';
     if (kind === 'movie' && movie) {
       seed = movieSeed(movie.title, movie.year);
-    } else if (kind === 'series' && series) {
-      seed = seriesSeed(series.title, season, episode);
-    } else if (kind === 'site' && series) {
-      const found = series.seasons?.find((s) => s.season_number === season);
-      const scene = found?.episodes?.find((e) => e.episode_number === episode);
-      seed = sceneSeed(series.title, scene?.air_date ?? '', scene?.title ?? '');
+    } else if (asSeries && series) {
+      if (asSite) {
+        const found = series.seasons?.find((s) => s.season_number === season);
+        const scene = found?.episodes?.find((e) => e.episode_number === episode);
+        seed = sceneSeed(series.title, scene?.air_date ?? '', scene?.title ?? '');
+      } else {
+        seed = seriesSeed(series.title, season, episode);
+      }
     }
     if (seed === '') return;
     derivedQuery = seed;

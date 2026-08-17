@@ -10,7 +10,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import ReleaseSearch from './ReleaseSearch.svelte';
-import type { Movie, ParsedRelease, Release } from '../api/types';
+import type { Movie, ParsedRelease, Release, Series } from '../api/types';
 import { session } from '../state/session.svelte';
 import { clearToasts } from '../state/toast.svelte';
 
@@ -69,6 +69,40 @@ const MOVIE = {
   library_id: 4,
   monitored: true,
 } as Movie;
+
+const SITE = {
+  id: 9,
+  title: 'Transfixed',
+  kind: 'adult',
+  library_id: 5,
+  seasons: [
+    {
+      id: 1,
+      series_id: 9,
+      season_number: 2026,
+      title: '',
+      overview: '',
+      poster_path: '',
+      air_date: '2026-05-20',
+      monitored: true,
+      episodes: [
+        {
+          id: 24,
+          series_id: 9,
+          season_number: 2026,
+          episode_number: 24,
+          tmdb_id: 0,
+          title: 'A Lesson',
+          overview: '',
+          air_date: '2026-05-20',
+          monitored: true,
+        },
+      ],
+    },
+  ],
+} as Series;
+
+const SITE_EXPRESSION = '(site:"Transfixed" date:2026-05-20) OR "Transfixed A Lesson"';
 
 /** When set, the per-item search endpoint waits on it: the item is fast and
  * the fan-out is slow, and one test needs to look at the screen in between. */
@@ -130,7 +164,7 @@ beforeEach(() => {
           ],
         });
       }
-      if (url.includes('/movies/3/releases')) {
+      if (url.includes('/movies/3/releases') || url.includes('/series/9/releases')) {
         if (releaseGate) await releaseGate;
         return jsonResponse(itemAnswer.body, itemAnswer.status);
       }
@@ -139,6 +173,7 @@ beforeEach(() => {
       }
       if (url.includes('/movies/3/grab')) return jsonResponse({}, 204);
       if (url.includes('/movies/3')) return jsonResponse(MOVIE);
+      if (url.includes('/series/9')) return jsonResponse(SITE);
       throw new Error(`unexpected fetch: ${url}`);
     }),
   );
@@ -160,6 +195,13 @@ async function settle() {
 
 function mountPicker() {
   app = mount(ReleaseSearch, { target: host, props: { kind: 'movie' as const, id: 3 } });
+}
+
+function mountSitePicker(kind: 'site' | 'series' = 'site') {
+  app = mount(ReleaseSearch, {
+    target: host,
+    props: { kind, id: 9, season: 2026, episode: 24 },
+  });
 }
 
 function queryBox(): HTMLInputElement {
@@ -351,6 +393,41 @@ describe('ReleaseSearch', () => {
     close.click();
     flushSync();
     expect(host.querySelector('[data-syntax-help]')).toBeNull();
+  });
+
+  it('seeds a site with the scene spelling before the search lands', async () => {
+    (itemAnswer.body as Record<string, unknown>).search_expression = SITE_EXPRESSION;
+    let releaseSearch!: () => void;
+    releaseGate = new Promise((resolve) => (releaseSearch = resolve));
+    mountSitePicker();
+    await settle();
+
+    expect(queryBox().value).toBe(SITE_EXPRESSION);
+    expect(host.textContent).toContain('Transfixed · 2026 · #024');
+    expect(host.textContent).not.toContain('S2026E24');
+
+    releaseSearch();
+    await settle();
+    expect(queryBox().value).toBe(SITE_EXPRESSION);
+  });
+
+  it('treats an adult series row as a site even when the route said series', async () => {
+    // Wanted used to open /series/:id/search/:season/:episode for a scene.
+    // The item is a site; the television seed must never reach the box.
+    (itemAnswer.body as Record<string, unknown>).search_expression = SITE_EXPRESSION;
+    let releaseSearch!: () => void;
+    releaseGate = new Promise((resolve) => (releaseSearch = resolve));
+    mountSitePicker('series');
+    await settle();
+
+    expect(queryBox().value).toBe(SITE_EXPRESSION);
+    expect(host.textContent).toContain('Transfixed · 2026 · #024');
+    expect(host.textContent).not.toContain('S2026E24');
+    expect(host.querySelector('a[href="/adult/sites/9"]')).not.toBeNull();
+
+    releaseSearch();
+    await settle();
+    expect(queryBox().value).toBe(SITE_EXPRESSION);
   });
 
   it('omits the adult category block when the module is not visible', async () => {

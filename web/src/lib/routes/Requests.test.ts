@@ -12,6 +12,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import Requests from './Requests.svelte';
 import type { MediaRequest } from '../api/types';
+import { downloads } from '../state/downloads.svelte';
+import { tasks } from '../state/tasks.svelte';
 import { requests } from '../state/requests.svelte';
 import { session } from '../state/session.svelte';
 import { clearToasts, toasts } from '../state/toast.svelte';
@@ -138,6 +140,20 @@ beforeEach(() => {
       const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
       calls.push({ url, method, ...(body === null ? {} : { body }) });
       if (url.endsWith('/requests') && method === 'GET') return json({ requests: served });
+      if (url.includes('/downloads')) return json({ downloads: [] });
+      if (url.endsWith('/system/status')) {
+        return json({
+          version: '0',
+          mode: 'server',
+          storage_root: '',
+          schema_version: 1,
+          scanning: false,
+          counts: { movies: 0, series: 0, media_files: 0, unmatched: 0, wanted: 0 },
+          disk_free_bytes: 0,
+          disk_total_bytes: 0,
+          engine_health: 'ok',
+        });
+      }
       if (method === 'DELETE') return json(null, 204);
       if (url.endsWith('/quality-profiles')) return json({ profiles: [] });
       if (url.endsWith('/approve')) {
@@ -160,6 +176,8 @@ afterEach(() => {
   app = undefined;
   host.remove();
   requests.items = null;
+  downloads.stopSoon();
+  tasks.stopSoon();
   session.forget();
   clearToasts();
   vi.unstubAllGlobals();
@@ -394,6 +412,20 @@ describe('Requests — a scene row', () => {
             ? new Promise<Response>((resolve) => (resolveRefresh = resolve))
             : json({ requests: served });
         }
+        if (url.includes('/downloads')) return json({ downloads: [] });
+        if (url.endsWith('/system/status')) {
+          return json({
+            version: '0',
+            mode: 'server',
+            storage_root: '',
+            schema_version: 1,
+            scanning: false,
+            counts: { movies: 0, series: 0, media_files: 0, unmatched: 0, wanted: 0 },
+            disk_free_bytes: 0,
+            disk_total_bytes: 0,
+            engine_health: 'ok',
+          });
+        }
         if (url.endsWith('/approve')) {
           approvalComplete = true;
           return json({
@@ -427,6 +459,68 @@ describe('Requests — a scene row', () => {
     expect(toasts.items.map((t) => t.message)).toContain('Approved Deep Impact. Search queued.');
     resolveRefresh!(json({ requests: served.filter((request) => request.id !== SCENE_ROW.id) }));
     await settle();
+  });
+
+  it('keeps both scene rows in the approving state when both are clicked', async () => {
+    const second: MediaRequest = { ...SCENE_ROW, id: 15, title: 'The Sexy Setup' };
+    served = [SCENE_ROW, second];
+    const gates: Record<number, () => void> = {};
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? 'GET';
+        if (url.endsWith('/requests') && method === 'GET') return json({ requests: served });
+        if (url.includes('/downloads')) return json({ downloads: [] });
+        if (url.endsWith('/system/status')) {
+          return json({
+            version: '0',
+            mode: 'server',
+            storage_root: '',
+            schema_version: 1,
+            scanning: false,
+            counts: { movies: 0, series: 0, media_files: 0, unmatched: 0, wanted: 0 },
+            disk_free_bytes: 0,
+            disk_total_bytes: 0,
+            engine_health: 'ok',
+          });
+        }
+        const match = url.match(/\/requests\/(\d+)\/approve$/);
+        if (match) {
+          const id = Number(match[1]);
+          await new Promise<void>((resolve) => {
+            gates[id] = resolve;
+          });
+          served = served.filter((row) => row.id !== id);
+          return json({ request: { id, status: 'approved' }, search_queued: true });
+        }
+        return json(null, 204);
+      }),
+    );
+    app = mount(Requests, { target: host }) as Record<string, unknown>;
+    await settle();
+
+    const labels = ['Deep Impact', 'The Sexy Setup'];
+    for (const title of labels) {
+      const row = [...host.querySelectorAll('li')].find((li) => li.textContent?.includes(title));
+      [...row!.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Approve')!.click();
+    }
+    await settle();
+
+    for (const title of labels) {
+      const row = [...host.querySelectorAll('li')].find((li) => li.textContent?.includes(title));
+      expect(row?.textContent).toContain('Approving');
+    }
+
+    gates[14]!();
+    await settle();
+    const first = [...host.querySelectorAll('li')].find((li) => li.textContent?.includes('The Sexy Setup'));
+    expect(first?.textContent).toContain('Approving');
+    expect(host.textContent).not.toContain('Deep Impact');
+
+    gates[15]!();
+    await settle();
+    expect(host.textContent).not.toContain('The Sexy Setup');
   });
 });
 

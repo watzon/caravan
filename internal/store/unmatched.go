@@ -38,6 +38,7 @@ func (s *Store) UpsertUnmatchedFile(ctx context.Context, u *core.UnmatchedFile) 
 		}
 		u.ID = model.ID
 	}
+	s.note("library")
 	return nil
 }
 
@@ -73,5 +74,6 @@ func (s *Store) DeleteUnmatchedFileByPath(ctx context.Context, path string) erro
 	if _, err := s.db.NewDelete().Model((*unmatchedFileModel)(nil)).Where("path = ?", path).Exec(ctx); err != nil {
 		return fmt.Errorf("store: delete unmatched file %q: %w", path, err)
 	}
+	s.note("library")
 	return nil
 }

@@ -121,6 +121,7 @@ func (s *Store) CreateRequest(ctx context.Context, r *core.Request) error {
 		r.Seasons = merged
 		r.Status = core.RequestPending
 		r.UpdatedAt = ts
+		s.note("requests")
 		return nil
 	}
 
@@ -139,6 +140,7 @@ func (s *Store) CreateRequest(ctx context.Context, r *core.Request) error {
 	r.ID = model.ID
 	r.CreatedAt = ts
 	r.UpdatedAt = ts
+	s.note("requests")
 	return nil
 }
 
@@ -239,7 +241,12 @@ func (s *Store) SetRequestStatus(ctx context.Context, id int64, status string) e
 	if err != nil {
 		return fmt.Errorf("store: set request %d status: %w", id, err)
 	}
-	return affectedOne(res, "set request status", id)
+	if err := affectedOne(res, "set request status", id); err != nil {
+		return err
+	}
+	s.note("requests")
+	s.note("library")
+	return nil
 }
 
 // ApproveRequestsFor absorbs the pending request for a title that has just
@@ -264,6 +271,10 @@ func (s *Store) ApproveRequestsFor(ctx context.Context, mediaType string, tmdbID
 	n, err := res.RowsAffected()
 	if err != nil {
 		return 0, fmt.Errorf("store: approve requests for %s %d: %w", mediaType, tmdbID, err)
+	}
+	if n > 0 {
+		s.note("requests")
+		s.note("library")
 	}
 	return n, nil
 }

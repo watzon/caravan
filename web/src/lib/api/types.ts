@@ -152,6 +152,8 @@ export interface Series {
   quality_profile_id: number;
   /** The library that owns the series; 0 on rows from before libraries were plural. */
   library_id: number;
+  /** `tv` or `adult`. Adult series are sites; their seasons are release years. */
+  kind?: string;
   first_aired: string;
   added_at: string;
   updated_at: string;
@@ -1466,6 +1468,8 @@ export interface WantedEpisode {
   id: number;
   series_id: number;
   series_title: string;
+  /** `tv` or `adult`. Missing on older payloads; treated as television. */
+  series_kind?: string;
   season_number: number;
   episode_number: number;
   title: string;
@@ -1504,7 +1508,7 @@ export type JobState = 'pending' | 'running' | 'done' | 'failed';
 
 export interface Job {
   id: number;
-  kind: 'rss_sync' | 'backlog_sweep' | 'search_movie' | 'search_episode';
+  kind: string;
   payload: string;
   state: JobState;
   attempts: number;
@@ -1514,6 +1518,12 @@ export interface Job {
   last_error: string;
   created_at: string;
   updated_at: string;
+  /** Library title this live job is about. Empty on history rows and unknown ids. */
+  subject?: string;
+  /** How to name a grouped search: movie, series, or adult site. */
+  subject_kind?: 'movie' | 'series' | 'site';
+  /** Library id the footer should open. Missing when the row is gone. */
+  subject_id?: number;
 }
 
 export interface JobPage {

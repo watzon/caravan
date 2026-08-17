@@ -22,6 +22,7 @@
   import MetadataLinks from '../components/MetadataLinks.svelte';
   import { movieLinks } from '../metadataLinks';
   import { navigate } from '../router.svelte';
+  import { libraryChanged, searchQueued } from '../state/activity';
   import { pushToast } from '../state/toast.svelte';
   import { movieStatus } from '../status';
   import { compatBadge } from '../tvcompat';
@@ -97,6 +98,7 @@
     movie = { ...current, monitored: next };
     try {
       await api.setMovieMonitored(current.id, next);
+      libraryChanged();
     } catch (err) {
       movie = current;
       pushToast(errorText(err), 'danger');
@@ -136,7 +138,7 @@
     try {
       const { queued } = await api.searchMovieNow(current.id);
       if (queued > 0) {
-        pushToast(t('route.movieDetail.searchStarted'), 'success');
+        searchQueued(queued);
       } else {
         pushToast(t('route.movieDetail.searchNone'), 'info');
       }
@@ -157,6 +159,7 @@
     removing = true;
     try {
       await api.deleteMovie(current.id, deleteFiles);
+      libraryChanged();
       confirmingRemove = false;
       pushToast(
         deleteFiles

@@ -807,7 +807,8 @@ func (r *Runner) grab(ctx context.Context, st *store.Store, libraryID int64, kin
 		}
 		return fmt.Errorf("resolve indexer download: %w", err)
 	}
-	if _, err := engine.Add(ctx, release, opts); err != nil {
+	downloadID, err := engine.Add(ctx, release, opts)
+	if err != nil {
 		// The automatic path routes by protocol exactly like the interactive
 		// one (PLAN phase 6 task 3), so it meets the same wall: a usenet
 		// release with no usenet client configured. That is a recorded
@@ -832,6 +833,20 @@ func (r *Runner) grab(ctx context.Context, st *store.Store, libraryID int64, kin
 		}
 		return fmt.Errorf("engine: add download: %w", err)
 	}
+	// The interactive grab writes this row. Without it the engine's own
+	// persistence lands first with grab_id 0, and the watcher treats the
+	// finished download as unowned — it stays in incomplete and the item
+	// stays wanted.
+	if err := st.UpsertDownload(ctx, &core.Download{
+		GrabID:   grab.GrabID,
+		Engine:   engineNameFor(ctx, engine, release.Protocol),
+		EngineID: downloadID,
+		Title:    release.Title,
+		State:    core.DownloadQueued,
+		Size:     release.Size,
+	}); err != nil {
+		return fmt.Errorf("store: record download: %w", err)
+	}
 	if err := st.InsertEvent(ctx, &core.Event{
 		Category: "grab",
 		Message:  "Grabbed " + release.Title,
@@ -842,6 +857,19 @@ func (r *Runner) grab(ctx context.Context, st *store.Store, libraryID int64, kin
 		return fmt.Errorf("store: record grab event: %w", err)
 	}
 	return nil
+}
+
+// engineNameFor is the backend name recorded on a download row. A routing
+// engine is several backends behind one interface, so the row has to name
+// the one that actually took the release — the same rule the interactive
+// grab uses.
+func engineNameFor(ctx context.Context, engine core.Engine, protocol string) string {
+	if router, ok := engine.(core.EngineRouting); ok {
+		if name := router.EngineNameFor(ctx, protocol); name != "" {
+			return name
+		}
+	}
+	return ""
 }
 
 func (r *Runner) resolveReleaseDownload(ctx context.Context, st *store.Store, release *core.Release) error {

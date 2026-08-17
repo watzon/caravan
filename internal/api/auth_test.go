@@ -697,6 +697,7 @@ func TestMemberAllowlist(t *testing.T) {
 		{http.MethodGet, "/import/queue", false},
 		{http.MethodGet, "/jobs", false},
 		{http.MethodGet, "/events", false},
+		{http.MethodGet, "/events/stream", false},
 		{http.MethodGet, "/search", false},
 		{http.MethodGet, "/indexers", false},
 		{http.MethodGet, "/users", false},

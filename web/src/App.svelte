@@ -51,6 +51,7 @@ import Search from './lib/routes/Search.svelte';
   import { ADULT_EXPLORE_HREF, stashUnreachableBanner } from './lib/adult';
   import { unreachableClientBanner } from './lib/download';
   import { auth } from './lib/state/auth.svelte';
+  import { startLiveUpdates } from './lib/state/live';
   import { session } from './lib/state/session.svelte';
   import { shutdown } from './lib/state/shutdown.svelte';
   import { system } from './lib/state/system.svelte';
@@ -184,6 +185,14 @@ import Search from './lib/routes/Search.svelte';
     await session.refresh();
     if (session.isAdmin) await system.refresh();
   }
+
+  // Admin badges stay live through SSE invalidation, not a 60s poll.
+  // Members do not get the stream: it is admin-only, and their only
+  // badge (requests) updates from the request they just wrote.
+  $effect(() => {
+    if (!session.isAdmin) return;
+    return startLiveUpdates();
+  });
 
   // Route gate: no storage root means first run, and once there is one the
   // first-run screen is no longer reachable (SPEC §10.1).

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/watzon/caravan/internal/core"
@@ -177,6 +178,13 @@ func (w *watcher) queueImport(ctx context.Context, s core.DownloadStatus) error 
 
 	grab, err := w.mgr.store.GetGrabByDownloadID(ctx, s.ID)
 	if errors.Is(err, store.ErrNotFound) {
+		// Automatic grabs used to persist the engine row and never write
+		// grab_id. The titles still match, so a finished download can be
+		// claimed by the grab that fetched it instead of sitting in
+		// incomplete forever.
+		grab, err = w.attachGrabByTitle(ctx, s)
+	}
+	if errors.Is(err, store.ErrNotFound) {
 		// A download nobody grabbed — added out of band, or its grab row is
 		// gone — has no library item to import into. Leaving the data alone is
 		// the honest answer; the library scan is how such files get in.
@@ -205,6 +213,48 @@ func (w *watcher) queueImport(ctx context.Context, s core.DownloadStatus) error 
 	}
 	w.queued[s.ID] = true
 	return nil
+}
+
+// attachGrabByTitle links a grab-less download to the open grab that named
+// the same release. persistDownload has already written the row with grab_id
+// 0; this writes the missing link so runImportJob can find the grab.
+func (w *watcher) attachGrabByTitle(ctx context.Context, s core.DownloadStatus) (*core.Grab, error) {
+	grab, err := w.mgr.store.GetUnlinkedGrabbedByReleaseTitle(ctx, strings.TrimSpace(s.Name))
+	if err != nil {
+		return nil, err
+	}
+	existing, err := w.mgr.store.GetDownloadByEngineID(ctx, s.ID)
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return nil, err
+	}
+	d := core.Download{
+		EngineID:  s.ID,
+		Engine:    s.Engine,
+		Title:     s.Name,
+		State:     s.State,
+		Progress:  s.Progress,
+		BytesDone: s.BytesDone,
+		Size:      s.Size,
+		GrabID:    grab.GrabID,
+	}
+	if existing != nil {
+		d.ID = existing.ID
+		d.CreatedAt = existing.CreatedAt
+		if d.Engine == "" {
+			d.Engine = existing.Engine
+		}
+		if !foreignPath(s.SavePath) {
+			d.SavePath = s.SavePath
+		} else {
+			d.SavePath = existing.SavePath
+		}
+	} else if !foreignPath(s.SavePath) {
+		d.SavePath = s.SavePath
+	}
+	if err := w.mgr.store.UpsertDownload(ctx, &d); err != nil {
+		return nil, err
+	}
+	return grab, nil
 }
 
 // importable reports whether a download's data is complete enough to import.

@@ -36,6 +36,7 @@
   import MetadataLinks from '../components/MetadataLinks.svelte';
   import { episodeLink, seriesLinks } from '../metadataLinks';
   import { navigate } from '../router.svelte';
+  import { libraryChanged, searchQueued } from '../state/activity';
   import { pushToast } from '../state/toast.svelte';
   import { episodeStatus, seriesStatus } from '../status';
   import { compatBadge } from '../tvcompat';
@@ -96,6 +97,7 @@
     busy = true;
     try {
       await action();
+      libraryChanged();
       await load();
     } catch (err) {
       pushToast(`${failureNote}: ${errorText(err)}`, 'danger');
@@ -122,7 +124,7 @@
     try {
       const { queued } = await api.searchSeriesNow(current.id);
       if (queued > 0) {
-        pushToast(tp('route.seriesDetail.searchStarted', queued), 'success');
+        searchQueued(queued);
       } else {
         pushToast(t('route.seriesDetail.nothingToSearch'), 'info');
       }
@@ -140,6 +142,7 @@
     removing = true;
     try {
       await api.deleteSeries(current.id, deleteFiles);
+      libraryChanged();
       confirmingRemove = false;
       pushToast(
         deleteFiles

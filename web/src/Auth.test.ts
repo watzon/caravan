@@ -13,6 +13,7 @@ import App from './App.svelte';
 import type { SystemStatus } from './lib/api/types';
 import { auth } from './lib/state/auth.svelte';
 import { session } from './lib/state/session.svelte';
+import { tasks } from './lib/state/tasks.svelte';
 import { clearToasts, pushToast, toasts } from './lib/state/toast.svelte';
 
 const STATUS: SystemStatus = {
@@ -60,6 +61,9 @@ afterEach(() => {
   auth.required = false;
   auth.error = null;
   session.forget();
+  tasks.stopSoon();
+  tasks.tasks = null;
+  tasks.jobs = null;
   clearToasts();
 });
 
@@ -112,6 +116,9 @@ describe('password gate', () => {
         if (url.endsWith('/system/status')) return jsonResponse(STATUS);
         if (url.endsWith('/library/movies')) return jsonResponse({ movies: [] });
         if (url.endsWith('/downloads')) return jsonResponse({ downloads: [] });
+        if (url.endsWith('/requests')) return jsonResponse({ requests: [] });
+        if (url.includes('/system/tasks')) return jsonResponse({ tasks: [] });
+        if (url.includes('/jobs')) return jsonResponse({ jobs: [] });
         throw new Error(`unexpected fetch: ${url}`);
       }),
     );
@@ -193,6 +200,9 @@ describe('password gate', () => {
         if (url.endsWith('/system/status')) return jsonResponse(STATUS);
         if (url.endsWith('/library/movies')) return jsonResponse({ movies: [] });
         if (url.endsWith('/downloads')) return jsonResponse({ downloads: [] });
+        if (url.endsWith('/requests')) return jsonResponse({ requests: [] });
+        if (url.includes('/system/tasks')) return jsonResponse({ tasks: [] });
+        if (url.includes('/jobs')) return jsonResponse({ jobs: [] });
         throw new Error(`unexpected fetch: ${url}`);
       }),
     );
@@ -224,6 +234,9 @@ describe('password gate', () => {
         }
         if (url.endsWith('/library/movies')) return jsonResponse({ movies: [] });
         if (url.endsWith('/downloads')) return jsonResponse({ downloads: [] });
+        if (url.endsWith('/requests')) return jsonResponse({ requests: [] });
+        if (url.includes('/system/tasks')) return jsonResponse({ tasks: [] });
+        if (url.includes('/jobs')) return jsonResponse({ jobs: [] });
         throw new Error(`unexpected fetch: ${url}`);
       }),
     );
@@ -249,6 +262,9 @@ describe('password gate', () => {
         }
         if (url.endsWith('/library/movies')) return jsonResponse({ movies: [] });
         if (url.endsWith('/downloads')) return jsonResponse({ downloads: [] });
+        if (url.endsWith('/requests')) return jsonResponse({ requests: [] });
+        if (url.includes('/system/tasks')) return jsonResponse({ tasks: [] });
+        if (url.includes('/jobs')) return jsonResponse({ jobs: [] });
         throw new Error(`unexpected fetch: ${url}`);
       }),
     );

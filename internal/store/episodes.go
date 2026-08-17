@@ -97,6 +97,7 @@ func (s *Store) UpsertEpisode(ctx context.Context, e *core.Episode) error {
 			e.SeasonNumber, e.EpisodeNumber, e.SeriesID, err)
 	}
 	if e.ID != 0 {
+		s.note("library")
 		return nil
 	}
 	if err := s.db.NewSelect().Model((*catalogEpisodeModel)(nil)).Column("id").
@@ -105,6 +106,7 @@ func (s *Store) UpsertEpisode(ctx context.Context, e *core.Episode) error {
 		return fmt.Errorf("store: upsert episode S%02dE%02d of series %d: %w",
 			e.SeasonNumber, e.EpisodeNumber, e.SeriesID, err)
 	}
+	s.note("library")
 	return nil
 }
 
@@ -229,6 +231,7 @@ func (s *Store) CascadeSeriesMonitored(ctx context.Context, seriesID int64, moni
 		Where("series_id = ?", seriesID).Exec(ctx); err != nil {
 		return fmt.Errorf("store: cascade monitored to episodes of series %d: %w", seriesID, err)
 	}
+	s.note("library")
 	return nil
 }
 
@@ -238,6 +241,7 @@ func (s *Store) CascadeSeasonMonitored(ctx context.Context, seriesID int64, seas
 		Where("series_id = ?", seriesID).Where("season_number = ?", seasonNumber).Exec(ctx); err != nil {
 		return fmt.Errorf("store: cascade monitored to season %d of series %d: %w", seasonNumber, seriesID, err)
 	}
+	s.note("library")
 	return nil
 }
 

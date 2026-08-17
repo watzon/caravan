@@ -549,6 +549,9 @@ func TestAddAndListSeries(t *testing.T) {
 	if created.ID == 0 || created.TMDBID != 66732 {
 		t.Fatalf("created = %+v, want an id and the requested tmdb id", created)
 	}
+	if created.Kind != core.SeriesKindTV {
+		t.Fatalf("created kind = %q, want %q", created.Kind, core.SeriesKindTV)
+	}
 
 	rec = do(t, h, http.MethodGet, "/api/v1/library/series", "")
 	wantStatus(t, rec, http.StatusOK)

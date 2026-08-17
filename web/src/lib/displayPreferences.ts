@@ -29,14 +29,27 @@ export function readDisplayPreferences(): DisplayPreferences {
   }
 }
 
-export function applyDisplayPreferences(preferences: DisplayPreferences): void {
+/** The theme the document is showing after System is resolved. */
+export function resolvedTheme(theme: ThemePreference): 'dark' | 'light' {
+  if (theme !== 'system') return theme;
   const systemDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? true;
-  const resolvedTheme = preferences.theme === 'system'
-    ? (systemDark ? 'dark' : 'light')
-    : preferences.theme;
+  return systemDark ? 'dark' : 'light';
+}
 
-  document.documentElement.dataset.theme = resolvedTheme;
+export function applyDisplayPreferences(preferences: DisplayPreferences): void {
+  document.documentElement.dataset.theme = resolvedTheme(preferences.theme);
   document.documentElement.dataset.reducedMotion = String(preferences.motion === 'reduced');
+}
+
+/** Flip the visible theme between dark and light. System becomes an explicit choice. */
+export function toggleResolvedTheme(): DisplayPreferences {
+  const current = readDisplayPreferences();
+  const next: DisplayPreferences = {
+    ...current,
+    theme: resolvedTheme(current.theme) === 'dark' ? 'light' : 'dark',
+  };
+  saveDisplayPreferences(next);
+  return next;
 }
 
 export function saveDisplayPreferences(preferences: DisplayPreferences): void {

@@ -21,11 +21,14 @@ import {
 import type {
   DiscoverHome,
   DownloadStatus,
+  Job,
   MediaRequest,
   Movie,
   Release,
   SystemStatus,
+  SystemTask,
 } from './lib/api/types';
+import { tasks } from './lib/state/tasks.svelte';
 
 const STATUS: SystemStatus = {
   version: '0.1.0',
@@ -213,11 +216,16 @@ let statusBody: SystemStatus = STATUS;
 let sessionBody = { username: '', role: 'admin', open: true };
 /** What GET /requests answers; the sidebar badge counts the pending ones. */
 let requestRows: MediaRequest[] = [];
+/** What GET /system/tasks and GET /jobs answer for the footer rail. */
+let taskRows: SystemTask[] = [];
+let jobRows: Job[] = [];
 
 beforeEach(() => {
   statusBody = STATUS;
   sessionBody = { username: '', role: 'admin', open: true };
   requestRows = [];
+  taskRows = [];
+  jobRows = [];
   // Most shell tests deliberately run without matchMedia, like SSR/jsdom.
   // Responsive cases install their own media-query result before mounting.
   discover.reset();
@@ -246,10 +254,12 @@ beforeEach(() => {
       if (url.endsWith('/indexers')) return jsonResponse({ indexers: [] });
       if (url.endsWith('/usenet-servers')) return jsonResponse({ usenet_servers: [] });
       if (url.endsWith('/download-clients')) return jsonResponse({ download_clients: [] });
-      // The sidebar badge polls the queue as soon as the shell mounts.
+      // The sidebar badge reads the queue as soon as the shell mounts.
       if (url.includes('/downloads')) return jsonResponse({ downloads: DOWNLOADS });
       // …and the requests badge alongside it.
       if (url.endsWith('/requests')) return jsonResponse({ requests: requestRows });
+      if (url.includes('/system/tasks')) return jsonResponse({ tasks: taskRows });
+      if (url.includes('/jobs')) return jsonResponse({ jobs: jobRows });
       if (url.endsWith('/discover')) return jsonResponse(DISCOVER);
       throw new Error(`unexpected fetch: ${url}`);
     }),
@@ -265,6 +275,9 @@ afterEach(() => {
   // A module singleton: these tests all run as the open-server admin, and the
   // next file must not inherit that.
   session.forget();
+  tasks.tasks = null;
+  tasks.jobs = null;
+  tasks.stopSoon();
 });
 
 async function settle() {
@@ -611,43 +624,14 @@ describe('App shell', () => {
     expect(main?.parentElement?.classList.contains('overflow-x-hidden')).toBe(true);
   });
 
-  /**
-   * The credential badge (PLAN phase 10 task 2). It reads the cached verdict
-   * on /system/status, so the card can report it on every poll without
-   * anything calling TMDB — and it stays quiet while the key works, because a
-   * healthy credential is not news.
-   */
-  it('says nothing about the metadata key while it works', async () => {
-    statusBody = { ...STATUS, metadata_credential: 'ok' };
+  it('says nothing about the metadata key in the sidebar', async () => {
+    statusBody = { ...STATUS, metadata_credential: 'absent' };
     app = mount(App, { target: host });
     await settle();
 
     expect(host.textContent).not.toContain('No TMDB key');
     expect(host.textContent).not.toContain('TMDB key rejected');
-  });
-
-  it('badges a missing metadata key and links to the screen that fixes it', async () => {
-    statusBody = { ...STATUS, metadata_credential: 'absent' };
-    app = mount(App, { target: host });
-    await settle();
-
-    const badge = host.querySelector('a[href="/settings/metadata"]');
-    expect(badge?.textContent).toContain('No TMDB key');
-  });
-
-  it('badges a rejected metadata key', async () => {
-    statusBody = {
-      ...STATUS,
-      metadata_credential: 'invalid',
-      metadata_credential_reason: 'tmdb: http 401: Invalid API key',
-    };
-    app = mount(App, { target: host });
-    await settle();
-
-    const badge = host.querySelector('a[href="/settings/metadata"]');
-    expect(badge?.textContent).toContain('TMDB key rejected');
-    // The provider's own words, where they do not crowd the card.
-    expect(badge?.getAttribute('title')).toContain('Invalid API key');
+    expect(host.querySelector('a[href="/settings/metadata"]')).toBeNull();
   });
 
   it('uses uniform semantic badges for every nonzero sidebar count', async () => {
@@ -724,26 +708,52 @@ describe('App shell', () => {
     expect(host.querySelector('a[href="/series"] > span[title]')).toBeNull();
   });
 
-  it('shows the full storage path with free space visible and the used breakdown on the tooltip', async () => {
-    const storageRoot = '/Volumes/Media Archive/Caravan Library';
-    statusBody = { ...STATUS, storage_root: storageRoot };
+  it('shows live search progress in the sidebar footer instead of a toast', async () => {
+    jobRows = [
+      {
+        id: 1,
+        kind: 'search_episode',
+        payload: '',
+        state: 'running',
+        attempts: 1,
+        run_after: '',
+        lease_expires_at: '',
+        last_error: '',
+        created_at: '',
+        updated_at: '',
+      },
+    ];
     app = mount(App, { target: host });
     await settle();
 
-    const path = [...host.querySelectorAll('span')].find(
-      (node) => node.getAttribute('title') === storageRoot,
-    );
-    expect(path).toBeDefined();
-    expect(path?.classList).toContain('truncate');
-    expect(path?.textContent).toContain(storageRoot);
-    // Free space is the visible number; used and total ride the tooltip so
-    // the row never wraps into a dangling "free".
-    expect(host.textContent).toContain('500 GB free');
-    expect(host.textContent).not.toContain('524 GB used');
-    expect(
-      host.querySelector('span[title="524 GB used of 1 TB"]')?.classList,
-    ).toContain('whitespace-nowrap');
-    expect(host.querySelector('[role="progressbar"][aria-label="Disk used"]')).not.toBeNull();
+    const rail = host.querySelector('[data-sidebar-activity]');
+    const row = host.querySelector<HTMLAnchorElement>('[data-sidebar-activity-row]');
+    expect(rail?.textContent).toContain('Searching');
+    expect(row?.getAttribute('href')).toBe('/wanted');
+    expect(host.textContent).not.toContain('500 GB free');
+    expect(host.querySelector('[role="progressbar"][aria-label="Disk used"]')).toBeNull();
+  });
+
+  it('badges Settings when a background task failed', async () => {
+    taskRows = [
+      {
+        kind: 'rss_sync',
+        name: 'RSS sync',
+        description: 'Checks indexer feeds for newly posted releases.',
+        interval_minutes: 15,
+        last_run: '',
+        last_result: 'failed',
+        last_error: 'indexer timed out',
+        next_run: '',
+        running: false,
+        queued: true,
+      },
+    ];
+    app = mount(App, { target: host });
+    await settle();
+
+    expect(host.querySelector('a[href="/settings"] > span[title="1 task needs attention"]')).not.toBeNull();
+    expect(host.querySelector('[data-sidebar-activity]')?.textContent).toContain('RSS sync failed');
   });
 
   it('renders the queue screen with its rows and controls', async () => {
@@ -839,6 +849,9 @@ describe('App shell', () => {
         const url = String(input);
         if (url.endsWith('/system/status')) return jsonResponse(statusBody);
         if (url.includes('/downloads')) return jsonResponse({ downloads: [] });
+        if (url.includes('/system/tasks')) return jsonResponse({ tasks: [] });
+        if (url.includes('/jobs')) return jsonResponse({ jobs: [] });
+        if (url.endsWith('/requests')) return jsonResponse({ requests: [] });
         if (url.endsWith('/library/movies')) return jsonResponse({ movies: [MOVIE] });
         if (url.endsWith('/library/movies/7')) return jsonResponse(MOVIE);
         if (url.endsWith('/library/movies/7/releases')) {
@@ -879,6 +892,9 @@ describe('App shell', () => {
         const url = String(input);
         if (url.endsWith('/system/status')) return jsonResponse(statusBody);
         if (url.includes('/downloads')) return jsonResponse({ downloads: [] });
+        if (url.includes('/system/tasks')) return jsonResponse({ tasks: [] });
+        if (url.includes('/jobs')) return jsonResponse({ jobs: [] });
+        if (url.endsWith('/requests')) return jsonResponse({ requests: [] });
         if (url.endsWith('/library/movies')) return jsonResponse({ movies: [MOVIE] });
         if (url.endsWith('/library/movies/7')) return jsonResponse(MOVIE);
         if (url.endsWith('/library/movies/7/releases')) {
@@ -914,6 +930,9 @@ describe('App shell', () => {
           return jsonResponse({ ...STATUS, mode: 'portable', dirty: true });
         }
         if (url.includes('/downloads')) return jsonResponse({ downloads: [] });
+        if (url.includes('/system/tasks')) return jsonResponse({ tasks: [] });
+        if (url.includes('/jobs')) return jsonResponse({ jobs: [] });
+        if (url.endsWith('/requests')) return jsonResponse({ requests: [] });
         if (url.endsWith('/library/movies')) return jsonResponse({ movies: [MOVIE] });
         throw new Error(`unexpected fetch: ${url}`);
       }),
@@ -949,6 +968,9 @@ describe('App shell', () => {
           return jsonResponse({ ...STATUS, mode: 'portable' });
         }
         if (url.includes('/downloads')) return jsonResponse({ downloads: [] });
+        if (url.includes('/system/tasks')) return jsonResponse({ tasks: [] });
+        if (url.includes('/jobs')) return jsonResponse({ jobs: [] });
+        if (url.endsWith('/requests')) return jsonResponse({ requests: [] });
         if (url.endsWith('/library/movies')) return jsonResponse({ movies: [MOVIE] });
         throw new Error(`unexpected fetch: ${url} ${init?.method ?? 'GET'}`);
       }),

@@ -4,7 +4,7 @@
  */
 
 import { api, errorText } from '../api/client';
-import type { SystemStatus } from '../api/types';
+import type { StatusCounts, SystemStatus } from '../api/types';
 import {
   PROVIDER_TMDB,
   providerStateOf,
@@ -88,14 +88,41 @@ class SystemState {
       .filter((c) => c.state !== 'ok');
   }
 
+  /**
+   * Move a sidebar count immediately, before the next status fetch. Used when
+   * a mutation we just made will change Wanted (or another inventory badge)
+   * and the snapshot has not come back yet.
+   */
+  adjustCount(key: keyof StatusCounts, delta: number): void {
+    const current = this.status;
+    if (!current) return;
+    const value = Number(current.counts[key] ?? 0) + delta;
+    this.status = {
+      ...current,
+      counts: { ...current.counts, [key]: Math.max(0, value) },
+    };
+  }
+
+  #inFlight = false;
+  #pending = false;
+
   async refresh(): Promise<void> {
-    this.loading = true;
+    if (this.#inFlight) {
+      this.#pending = true;
+      return;
+    }
+    this.#inFlight = true;
+    if (this.status === null) this.loading = true;
     try {
-      this.status = await api.systemStatus();
-      this.error = null;
+      do {
+        this.#pending = false;
+        this.status = await api.systemStatus();
+        this.error = null;
+      } while (this.#pending);
     } catch (err) {
       this.error = errorText(err);
     } finally {
+      this.#inFlight = false;
       this.loading = false;
     }
   }

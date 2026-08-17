@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import TasksSettings from './TasksSettings.svelte';
 import type { SystemTask } from '../api/types';
+import { tasks as taskActivity } from '../state/tasks.svelte';
 import { toasts } from '../state/toast.svelte';
 
 const NOW = Date.parse('2026-08-04T12:00:00Z');
@@ -114,6 +115,7 @@ beforeEach(() => {
         taskReads += 1;
         return jsonResponse({ tasks });
       }
+      if (url.includes('/jobs')) return jsonResponse({ jobs: [] });
       throw new Error(`unexpected fetch: ${init?.method ?? 'GET'} ${url}`);
     }),
   );
@@ -124,6 +126,9 @@ beforeEach(() => {
 afterEach(() => {
   unmount(app);
   host.remove();
+  taskActivity.stopSoon();
+  taskActivity.tasks = null;
+  taskActivity.jobs = null;
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
@@ -246,8 +251,7 @@ describe('TasksSettings', () => {
     await settle();
 
     expect(runButton('RSS sync').disabled).toBe(false);
-    expect(toasts.items.at(-1)?.message).toContain('RSS sync');
-    expect(toasts.items.at(-1)?.tone).toBe('success');
+    expect(toasts.items).toHaveLength(0);
   });
 
   it('reports an already-running task as information, not success', async () => {

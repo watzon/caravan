@@ -31,6 +31,12 @@ var (
 	ErrUnrecognizedSchema = errors.New("store: database schema is not recognized as Caravan")
 )
 
+// ChangeHook is an optional, non-blocking hint that a sidebar-visible
+// resource just changed. The API stream uses it; the store does not wait
+// on it. Resource names are the activity-stream invalidate keys:
+// downloads, requests, jobs, library.
+type ChangeHook func(resource string)
+
 // Store is a handle on the Caravan database.
 type Store struct {
 	db   *bun.DB
@@ -40,6 +46,20 @@ type Store struct {
 	// caller wins by replacing the single pending sidecar; callers never report
 	// two uncoordinated staged restores in one process.
 	restoreMu sync.Mutex
+
+	changeHook ChangeHook
+}
+
+// SetChangeHook installs the live-update hint. Nil disables it.
+func (s *Store) SetChangeHook(hook ChangeHook) {
+	s.changeHook = hook
+}
+
+func (s *Store) note(resource string) {
+	if s == nil || s.changeHook == nil || resource == "" {
+		return
+	}
+	s.changeHook(resource)
 }
 
 // Open opens (creating if needed) the sqlite database at path and runs every

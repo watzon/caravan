@@ -7,6 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import MovieDetail from './MovieDetail.svelte';
+import { tasks } from '../state/tasks.svelte';
 import { clearToasts, toasts } from '../state/toast.svelte';
 
 const MOVIE = {
@@ -165,6 +166,7 @@ afterEach(() => {
   app = undefined;
   host.remove();
   clearToasts();
+  tasks.stopSoon();
   vi.unstubAllGlobals();
 });
 
@@ -425,8 +427,7 @@ describe('MovieDetail search actions', () => {
     expect(calls.filter((c) => c.method === 'POST').map(({ url, method }) => ({ url, method }))).toEqual([
       { url: '/api/v1/library/movies/7/search', method: 'POST' },
     ]);
-    expect(toasts.items.map((t) => t.message)).toEqual(['Search started']);
-    expect(toasts.items[0]!.tone).toBe('success');
+    expect(toasts.items).toHaveLength(0);
   });
 
   it('says nothing was queued when the file already meets the cutoff', async () => {

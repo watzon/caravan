@@ -58,6 +58,7 @@
   } from '../explore';
   import { sceneYear } from '../adult';
   import { navigate, router } from '../router.svelte';
+  import { requestCreated } from '../state/activity';
   import { session } from '../state/session.svelte';
   import { pushToast } from '../state/toast.svelte';
   import { useI18n } from '../i18n.svelte';
@@ -200,7 +201,7 @@
   async function request(scene: SceneMeta) {
     requesting = scene.stash_id;
     try {
-      await api.createRequest({
+      const created = await api.createRequest({
         media_type: 'scene',
         // A scene is named by its stash-box id and nothing else; the server
         // refuses a scene request that also carries a tmdb id.
@@ -211,6 +212,7 @@
         poster_path: scene.image_url,
         provider: scene.provider,
       });
+      requestCreated(created);
       // Patch in place rather than refetch: one flag on one card changed, and a
       // refetch is another round trip to the provider.
       const mark = (row: SceneMeta) =>

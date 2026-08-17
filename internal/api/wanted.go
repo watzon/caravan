@@ -21,9 +21,13 @@ type wantedMovieJSON struct {
 // wantedEpisodeJSON is one row of the wanted episode list. The poster is the
 // series' — episodes have no artwork of their own.
 type wantedEpisodeJSON struct {
-	ID            int64  `json:"id"`
-	SeriesID      int64  `json:"series_id"`
-	SeriesTitle   string `json:"series_title"`
+	ID          int64  `json:"id"`
+	SeriesID    int64  `json:"series_id"`
+	SeriesTitle string `json:"series_title"`
+	// SeriesKind is the series' core.SeriesKind* value. The wanted screen
+	// routes and labels from it: a scene is not a television episode, and a
+	// link that pretends it is opens the picker on the wrong seed.
+	SeriesKind    string `json:"series_kind"`
 	SeasonNumber  int    `json:"season_number"`
 	EpisodeNumber int    `json:"episode_number"`
 	Title         string `json:"title"`
@@ -61,6 +65,7 @@ func (s *server) handleWanted(w http.ResponseWriter, r *http.Request) {
 			ID:            e.ID,
 			SeriesID:      e.SeriesID,
 			SeriesTitle:   e.SeriesTitle,
+			SeriesKind:    e.SeriesKind,
 			SeasonNumber:  e.SeasonNumber,
 			EpisodeNumber: e.EpisodeNumber,
 			Title:         e.Title,

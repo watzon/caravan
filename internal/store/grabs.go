@@ -59,6 +59,38 @@ func (s *Store) GetGrab(ctx context.Context, id int64) (*core.Grab, error) {
 	return &out, nil
 }
 
+// GetUnlinkedGrabbedByReleaseTitle returns the open grab that named this
+// release, or ErrNotFound. It is the recovery path for a download the engine
+// persisted before the grab handler could write grab_id: the titles match
+// because both sides recorded the same release name.
+//
+// Only an unlinked grabbed row is returned. A grab already tied to a download
+// is somebody else's payload, and a finished grab is a decision that must not
+// be replayed.
+func (s *Store) GetUnlinkedGrabbedByReleaseTitle(ctx context.Context, title string) (*core.Grab, error) {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return nil, fmt.Errorf("store: grab for release %q: %w", title, ErrNotFound)
+	}
+	row := s.db.QueryRowContext(ctx, "SELECT "+grabColumns+`
+		FROM grabs
+		WHERE status = ?
+			AND release_title = ?
+			AND NOT EXISTS (
+				SELECT 1 FROM downloads WHERE downloads.grab_id = grabs.id
+			)
+		ORDER BY id DESC
+		LIMIT 1`, core.GrabStatusGrabbed, title)
+	g, err := scanGrab(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("store: grab for release %q: %w", title, ErrNotFound)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("store: get grab for release %q: %w", title, err)
+	}
+	return g, nil
+}
+
 // GetGrabByDownloadID returns the grab a download was started for, or
 // ErrNotFound when the download has no grab behind it (a download added out of
 // band, or one whose grab row is gone). This is what the import pipeline calls

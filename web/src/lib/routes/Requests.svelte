@@ -46,7 +46,8 @@
   } from '../requests';
   import { session } from '../state/session.svelte';
   import { pushToast } from '../state/toast.svelte';
-  import { REQUESTS_POLL_MS, requests } from '../state/requests.svelte';
+  import { requestDecided } from '../state/activity';
+  import { requests } from '../state/requests.svelte';
   import { useI18n } from '../i18n.svelte';
 
   const { t } = useI18n();
@@ -60,11 +61,22 @@
 
   let approving = $state<MediaRequest | null>(null);
   let dismissing = $state<number | null>(null);
-  /** The scene row whose approve call is in flight. */
-  let approvingScene = $state<number | null>(null);
+  /**
+   * Scene rows whose approve call is in flight. A single id would drop the
+   * "Approving" state from the first row the moment a second was clicked.
+   */
+  let approvingScenes = $state<number[]>([]);
   let tab = $state<Tab>('pending');
 
-  $effect(() => requests.subscribe(REQUESTS_POLL_MS));
+  function isApprovingScene(id: number): boolean {
+    return approvingScenes.includes(id);
+  }
+
+  // One snapshot on open. After that the live stream (admin) or a
+  // local write (member) updates the shared store — no interval.
+  $effect(() => {
+    void requests.refresh();
+  });
 
   let isAdmin = $derived(session.isAdmin);
   let pending = $derived(pendingRequests(requests.items));
@@ -96,10 +108,11 @@
    * the refresh verifies the server's final list.
    */
   async function approveScene(request: MediaRequest) {
-    approvingScene = request.id;
+    if (isApprovingScene(request.id)) return;
+    approvingScenes = [...approvingScenes, request.id];
     try {
       const result = await api.approveRequest(request.id, true);
-      requests.forget(request.id);
+      requestDecided(request.id, 'approved', { expectDownload: result.search_queued });
       pushToast(
         result.search_queued
           ? t('route.requests.approvedQueued', { title: request.title })
@@ -109,7 +122,7 @@
     } catch (err) {
       pushToast(metadataToast(err, isAdmin) ?? errorText(err), 'danger');
     } finally {
-      approvingScene = null;
+      approvingScenes = approvingScenes.filter((id) => id !== request.id);
       void requests.refresh();
     }
   }
@@ -118,7 +131,8 @@
     dismissing = request.id;
     try {
       await api.dismissRequest(request.id);
-      requests.forget(request.id);
+      requestDecided(request.id, 'dismissed');
+      if (isAdmin) requests.forget(request.id);
       pushToast(
         isAdmin
           ? t('route.requests.dismissed', { title: request.title })
@@ -234,9 +248,9 @@
                 <Button
                   variant="primary"
                   size="sm"
-                  disabled={dismissing === request.id || approvingScene === request.id}
+                  disabled={dismissing === request.id || isApprovingScene(request.id)}
                   onclick={() => void approveScene(request)}>
-                  {approvingScene === request.id ? t('route.requests.approving') : t('route.requests.approve')}
+                  {isApprovingScene(request.id) ? t('route.requests.approving') : t('route.requests.approve')}
                 </Button>
               {:else}
                 <Button
@@ -291,6 +305,7 @@
       // Refetch rather than drop the row: an approval that granted fewer
       // seasons than were asked for leaves it pending for the remainder
       // (internal/api/library.go), and it has to keep showing that.
+      if (approving) requestDecided(approving.id, 'approved');
       void requests.refresh();
     }} />
 {/if}

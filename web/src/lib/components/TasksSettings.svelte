@@ -20,6 +20,7 @@
   import { api, errorText } from '../api/client';
   import type { SystemTask, TaskIntervalUpdate } from '../api/types';
   import { UNKNOWN, formatAge, formatUntil } from '../format';
+  import { tasks as taskActivity } from '../state/tasks.svelte';
   import { pushToast } from '../state/toast.svelte';
   import { useI18n } from '../i18n.svelte';
   import Badge from './Badge.svelte';
@@ -76,9 +77,10 @@
       const result = await api.runTask(task.kind);
       if (result?.already_running) {
         pushToast(t('component.tasksSettings.alreadyRunning', { name: task.name }), 'info');
-      } else {
-        pushToast(t('component.tasksSettings.startingSoon', { name: task.name }), 'success');
       }
+      // The sidebar footer is the progress surface. Watch immediately so a
+      // run that just left this button is visible there on the next tick.
+      taskActivity.watchSoon();
       // Refresh straight away rather than waiting out the poll: the button was
       // just pressed, so this is the one moment the screen must be current.
       await load();

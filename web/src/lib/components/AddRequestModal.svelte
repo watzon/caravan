@@ -55,6 +55,7 @@
   import { formatBytes, seasonLabel } from '../format';
   import { navigate } from '../router.svelte';
   import { readSearchOnAdd, writeSearchOnAdd } from '../searchOnAdd';
+  import { libraryChanged, requestCreated } from '../state/activity';
   import { session } from '../state/session.svelte';
   import { pushToast } from '../state/toast.svelte';
   import { system } from '../state/system.svelte';
@@ -274,6 +275,7 @@
 
   async function sendRequest() {
     const created = await api.createRequest(requestBody());
+    requestCreated(created);
     pushToast(t('component.addRequest.requested', { title }), 'success');
     ondone?.({ kind: 'requested', request: created });
     onclose();
@@ -290,6 +292,7 @@
     const added = mediaType === 'movie' ? result.movie : result.series;
     if (!added) throw new Error('the approval did not return the added title');
     pushToast(t('component.addRequest.added', { title: added.title }), 'success');
+    libraryChanged({ expectDownload: true });
     ondone?.({ kind: 'added', mediaType, libraryID: added.id });
     onclose();
     navigate(mediaType === 'movie' ? `/movies/${added.id}` : `/series/${added.id}`);
@@ -301,6 +304,7 @@
     // search follows only after that request has returned successfully.
     if (mediaType === 'series' && monitored && searchNow) await api.searchSeriesNow(added.id);
     pushToast(t('component.addRequest.added', { title: added.title }), 'success');
+    libraryChanged({ expectDownload: Boolean(monitored && searchNow) });
     ondone?.({ kind: 'added', mediaType, libraryID: added.id });
     onclose();
     navigate(mediaType === 'movie' ? `/movies/${added.id}` : `/series/${added.id}`);

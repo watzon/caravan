@@ -40,6 +40,7 @@ func (s *Store) EnqueueJob(ctx context.Context, j *core.Job) error {
 		return fmt.Errorf("store: enqueue %s job: %w", j.Kind, err)
 	}
 	j.ID = model.ID
+	s.note("jobs")
 	return nil
 }
 
@@ -86,6 +87,7 @@ func (s *Store) EnqueueJobIfNotOpen(ctx context.Context, j *core.Job) (bool, err
 	j.CreatedAt = createdAt
 	j.UpdatedAt = ts
 	j.State = state
+	s.note("jobs")
 	return true, nil
 }
 
@@ -147,6 +149,7 @@ func (s *Store) claimJob(ctx context.Context, op string, kinds []string, lease t
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("store: claim job %d: %w", j.ID, err)
 	}
+	s.note("jobs")
 	return j, nil
 }
 
@@ -160,7 +163,12 @@ func (s *Store) CompleteJob(ctx context.Context, id int64) error {
 	if err != nil {
 		return fmt.Errorf("store: complete job %d: %w", id, err)
 	}
-	return affectedOne(res, "complete job", id)
+	if err := affectedOne(res, "complete job", id); err != nil {
+		return err
+	}
+	s.note("jobs")
+	s.note("library")
+	return nil
 }
 
 // FailJob records a failed attempt. The job goes back to pending with an
@@ -243,6 +251,7 @@ func (s *Store) failJob(ctx context.Context, id int64, reason string, scheduleRe
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("store: fail job %d: %w", id, err)
 	}
+	s.note("jobs")
 	return nil
 }
 

@@ -258,7 +258,7 @@ describe('Movies grid', () => {
     ]);
     expect(toasts.items.map((t) => t.message)).toEqual(['Removed 2']);
     // The list is re-read and the grid is a set of links again.
-    expect(methodsOf('GET')).toHaveLength(2);
+    expect(calls.filter((call) => call.method === 'GET' && call.url.endsWith('/library/movies'))).toHaveLength(2);
     expect(host.querySelector('a[href="/movies/2"]')).toBeTruthy();
   });
 

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import Wanted from './Wanted.svelte';
+import { tasks } from '../state/tasks.svelte';
 import { clearToasts, toasts } from '../state/toast.svelte';
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -39,6 +40,8 @@ beforeEach(() => {
         reply.status,
       );
     }
+    if (url.includes('/system/tasks')) return jsonResponse({ tasks: [] });
+    if (url.includes('/jobs')) return jsonResponse({ jobs: [] });
     if (url.endsWith('/wanted')) {
       return jsonResponse({
         movies: [
@@ -46,9 +49,10 @@ beforeEach(() => {
           { id: 8, title: 'Blade Runner', year: 1982, poster_path: '', poster_url: '', reason: 'below_cutoff', file_quality: '720p' },
         ],
         episodes: [
-          { id: 10, series_id: 3, series_title: 'Severance', season_number: 1, episode_number: 2, title: 'Half Loop', air_date: '2026-07-14', poster_path: 'TV/Severance/poster.jpg', poster_url: '', reason: 'missing', file_quality: '' },
-          { id: 11, series_id: 3, series_title: 'Severance', season_number: 1, episode_number: 3, title: 'In Perpetuity', air_date: '', poster_path: 'TV/Severance/poster.jpg', poster_url: '', reason: 'missing', file_quality: '' },
-          { id: 12, series_id: 3, series_title: 'Severance', season_number: 1, episode_number: 4, title: 'The You You Are', air_date: '2026-07-28', poster_path: 'TV/Severance/poster.jpg', poster_url: '', reason: 'below_cutoff', file_quality: '720p' },
+          { id: 10, series_id: 3, series_title: 'Severance', series_kind: 'tv', season_number: 1, episode_number: 2, title: 'Half Loop', air_date: '2026-07-14', poster_path: 'TV/Severance/poster.jpg', poster_url: '', reason: 'missing', file_quality: '' },
+          { id: 11, series_id: 3, series_title: 'Severance', series_kind: 'tv', season_number: 1, episode_number: 3, title: 'In Perpetuity', air_date: '', poster_path: 'TV/Severance/poster.jpg', poster_url: '', reason: 'missing', file_quality: '' },
+          { id: 12, series_id: 3, series_title: 'Severance', series_kind: 'tv', season_number: 1, episode_number: 4, title: 'The You You Are', air_date: '2026-07-28', poster_path: 'TV/Severance/poster.jpg', poster_url: '', reason: 'below_cutoff', file_quality: '720p' },
+          { id: 13, series_id: 9, series_title: 'Transfixed', series_kind: 'adult', season_number: 2026, episode_number: 24, title: 'A Lesson', air_date: '2026-05-20', poster_path: 'Adult/Transfixed/poster.jpg', poster_url: '', reason: 'missing', file_quality: '' },
         ],
       });
     }
@@ -63,6 +67,7 @@ afterEach(() => {
   unmount(app);
   host.remove();
   clearToasts();
+  tasks.stopSoon();
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
@@ -105,8 +110,11 @@ describe('Wanted', () => {
     expect(host.textContent).toContain('Severance · S01E03 · In Perpetuity');
     expect(host.textContent).toContain('Air date unknown');
     expect(host.querySelector('a[href="/series/3/search/1/2"]')).not.toBeNull();
+    expect(host.querySelector('a[href="/adult/sites/9/search/2026/24"]')).not.toBeNull();
+    expect(host.textContent).toContain('Transfixed · 2026 · #024 · A Lesson');
     expect(host.querySelector('[title="Arrival (2016)"]')).not.toBeNull();
     expect(host.querySelector('[title="Severance · S01E02 · Half Loop"]')).not.toBeNull();
+    expect(host.querySelector('[title="Transfixed · 2026 · #024 · A Lesson"]')).not.toBeNull();
     expect(host.querySelector('[title="Air date unknown"]')).not.toBeNull();
     expect(host.textContent).not.toContain('Blade Runner');
 
@@ -150,7 +158,7 @@ describe('Wanted', () => {
     expect(calls.filter((c) => c.method === 'POST')).toEqual([
       { url: '/api/v1/wanted/search', method: 'POST' },
     ]);
-    expect(toasts.items.map((t) => t.message)).toEqual(['Queued 3 searches']);
+    expect(toasts.items).toHaveLength(0);
   });
 
   it('searches mixed movie and episode selections sequentially with exact endpoints', async () => {
@@ -184,9 +192,7 @@ describe('Wanted', () => {
     await settle();
 
     expect(calls.filter((call) => call.method === 'GET' && call.url.endsWith('/wanted'))).toHaveLength(2);
-    expect(toasts.items).toEqual([
-      expect.objectContaining({ message: 'Queued 3 searches', tone: 'success' }),
-    ]);
+    expect(toasts.items).toHaveLength(0);
     expect(selectionBar()).toBeNull();
   });
 

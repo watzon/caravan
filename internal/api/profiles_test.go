@@ -720,4 +720,7 @@ func TestWantedList(t *testing.T) {
 		t.Fatalf("episode poster = %q/%q, want the series' %q/%q",
 			got.PosterPath, got.PosterURL, sr.PosterPath, sr.PosterURL)
 	}
+	if got := body.Episodes[0].SeriesKind; got != core.SeriesKindTV {
+		t.Fatalf("episode series_kind = %q, want %q", got, core.SeriesKindTV)
+	}
 }

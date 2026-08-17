@@ -24,6 +24,18 @@ func (s *Store) InsertEvent(ctx context.Context, e *core.Event) error {
 		return fmt.Errorf("store: insert event: %w", err)
 	}
 	e.ID = model.ID
+	switch e.Category {
+	case "download":
+		s.note("downloads")
+	case "grab":
+		s.note("downloads")
+		s.note("library")
+	case "import":
+		s.note("library")
+		s.note("jobs")
+	case "convert", "library":
+		s.note("library")
+	}
 	return nil
 }
 

@@ -61,9 +61,13 @@ type seriesJSON struct {
 	Monitored        bool   `json:"monitored"`
 	QualityProfileID int64  `json:"quality_profile_id"`
 	LibraryID        int64  `json:"library_id"`
-	FirstAired       string `json:"first_aired"`
-	AddedAt          string `json:"added_at"`
-	UpdatedAt        string `json:"updated_at"`
+	// Kind is core.SeriesKindTV or core.SeriesKindAdult. The picker seeds
+	// from it: an adult series is a site, and a television seed for one
+	// writes season/episode into the box until the search lands.
+	Kind       string `json:"kind"`
+	FirstAired string `json:"first_aired"`
+	AddedAt    string `json:"added_at"`
+	UpdatedAt  string `json:"updated_at"`
 	// EpisodeCount and EpisodeFileCount are what "12 / 24" and the
 	// downloaded/incomplete status are computed from, so the list endpoint
 	// carries them and the client never has to fetch every season to render a
@@ -161,6 +165,7 @@ func seriesDTO(sr core.Series) seriesJSON {
 		Monitored:        sr.Monitored,
 		QualityProfileID: sr.QualityProfileID,
 		LibraryID:        sr.LibraryID,
+		Kind:             sr.Kind,
 		FirstAired:       jsonTime(sr.FirstAired),
 		AddedAt:          jsonTime(sr.AddedAt),
 		UpdatedAt:        jsonTime(sr.UpdatedAt),

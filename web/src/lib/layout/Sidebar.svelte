@@ -4,13 +4,13 @@
    * border. Nav is phase-gated: Wanted and Calendar arrived with phase 3 and
    * Convert with phase 4, so every entry here has a screen behind it.
    *
-   * The persistent bottom slot holds system status (disk free, engine health).
+   * The persistent bottom slot is a live task rail (what is running, or
+   * the last failure) plus sign-out — not a status card.
    *
    * A member sees the Explore group and nothing else: the other three lead to
-   * screens the server answers 403 for (SPEC §11), and the status card below
-   * reads a status they may not fetch. The one exception is the Adult shelf,
-   * which a granted member may read — so their Library group holds that row
-   * alone rather than being suppressed wholesale.
+   * screens the server answers 403 for (SPEC §11). The one exception is the
+   * Adult shelf, which a granted member may read — so their Library group
+   * holds that row alone rather than being suppressed wholesale.
    */
   import { onMount } from 'svelte';
   import { isActive } from '../router.svelte';
@@ -24,20 +24,21 @@
   } from '../settings/catalog';
   import { auth } from '../state/auth.svelte';
   import { session } from '../state/session.svelte';
-  import { BADGE_POLL_MS, downloads } from '../state/downloads.svelte';
-  import { REQUESTS_BADGE_POLL_MS, requests } from '../state/requests.svelte';
+  import { downloads } from '../state/downloads.svelte';
+  import { requests } from '../state/requests.svelte';
+  import { tasks } from '../state/tasks.svelte';
+  import { footerStack } from '../tasks';
   import { system } from '../state/system.svelte';
-  import { providers } from '../state/providers.svelte';
-  import { formatBytes } from '../format';
-  import { metadataStateLabel, PROVIDER_TMDB } from '../credentials';
   import Badge from '../components/Badge.svelte';
   import Button from '../components/Button.svelte';
   import Icon, { type IconName } from '../components/Icon.svelte';
-  import ProgressBar from '../components/ProgressBar.svelte';
   import SafeShutdown from '../components/SafeShutdown.svelte';
-  import Skeleton from '../components/Skeleton.svelte';
   import type { Tone } from '../status';
-  import { TONE_DOT } from '../status';
+  import {
+    readDisplayPreferences,
+    resolvedTheme,
+    toggleResolvedTheme,
+  } from '../displayPreferences';
   import { useI18n, type TranslationKey } from '../i18n.svelte';
 
   interface Props {
@@ -53,8 +54,13 @@
 
   let narrow = $state(false);
   let closeButton = $state<HTMLButtonElement | undefined>(undefined);
+  let theme = $state<'dark' | 'light'>('dark');
+  let themeLabel = $derived(
+    theme === 'dark' ? t('sidebar.theme.toLight') : t('sidebar.theme.toDark'),
+  );
 
   onMount(() => {
+    theme = resolvedTheme(readDisplayPreferences().theme);
     // jsdom and SSR-adjacent hosts may expose `window` without matchMedia. In
     // that case CSS still owns the layout; leave the drawer in its desktop
     // state rather than making mounting the shell depend on a browser-only API.
@@ -69,6 +75,10 @@
 
   function closeForNavigation() {
     if (narrow) onclose();
+  }
+
+  function flipTheme() {
+    theme = resolvedTheme(toggleResolvedTheme().theme);
   }
 
   $effect(() => {
@@ -128,23 +138,13 @@
     items: SETTINGS_CATALOG.filter((entry) => entry.category === category),
   }));
 
-  // The badge is the only reason the shell polls downloads, so it does so
-  // lazily; the queue screen subscribes at its own faster rate while open.
-  // A member has no queue badge and no permission to ask for one.
-  $effect(() => (session.isAdmin ? downloads.subscribe(BADGE_POLL_MS) : undefined));
-
-  // Same deal for pending requests: the badge is work waiting on the user, so
-  // it stays live, at the laziest rate that still feels current.
-  $effect(() => requests.subscribe(REQUESTS_BADGE_POLL_MS));
-
-  // The nav counts come from system status, which is otherwise only fetched
-  // on mount and after setting changes. A lazy poll keeps them honest without
-  // making the shell chatty.
-  const COUNT_POLL_MS = 60_000;
+  // Prime the stores the badges read. After that, local writes and the
+  // live stream update them — the shell does not poll.
   $effect(() => {
+    void requests.refresh();
     if (!session.isAdmin) return;
-    const timer = setInterval(() => void system.refresh(), COUNT_POLL_MS);
-    return () => clearInterval(timer);
+    void downloads.refresh();
+    void tasks.refresh();
   });
 
   let status = $derived(system.status);
@@ -221,68 +221,24 @@
           ? { count, tone: 'warning', title: tp('sidebar.badge.unmatchedFile', count) }
           : null;
       }
+      case '/settings': {
+        const count = tasks.issueCount;
+        return count
+          ? { count, tone: 'warning', title: tp('sidebar.badge.taskIssue', count) }
+          : null;
+      }
       default:
         return null;
     }
   }
 
-  let usedFraction = $derived.by(() => {
-    const s = status;
-    if (!s || s.disk_total_bytes <= 0) return 0;
-    return (s.disk_total_bytes - s.disk_free_bytes) / s.disk_total_bytes;
-  });
-
-  let diskUsage = $derived.by(() => {
-    const s = status;
-    if (!s || s.disk_total_bytes <= 0) return null;
-    return {
-      used: Math.max(0, s.disk_total_bytes - s.disk_free_bytes),
-      free: s.disk_free_bytes,
-    };
-  });
-
-  let health = $derived.by((): { tone: Tone; label: string } => {
-    if (system.error) return { tone: 'danger', label: t('sidebar.health.serverUnreachable') };
-    const s = status;
-    if (!s) return { tone: 'neutral', label: t('sidebar.health.checking') };
-    if (s.dirty) return { tone: 'danger', label: t('sidebar.health.dirtyShutdown') };
-    if (s.engine_health === 'ok') return { tone: 'success', label: t('sidebar.health.ready') };
-    if (s.engine_health === 'degraded') return { tone: 'warning', label: t('sidebar.health.engineDegraded') };
-    if (s.engine_health === 'error') return { tone: 'danger', label: t('sidebar.health.engineError') };
-    // "unconfigured": no storage root yet, so no engine. This is a setup state.
-    return { tone: 'neutral', label: t('sidebar.health.notSetUp') };
-  });
-
-  /**
-   * The provider display name to warn about a credential under.
-   *
-   * `providers` is an admin-only list loaded lazily by the surfaces that need
-   * names, so the shell usually has none and `name()` hands back the raw id —
-   * a worse label but never a wrong one. TMDB is the exception: its row
-   * predates the list entirely and must read the same either way.
-   */
-  function credentialName(id: string): string {
-    const named = providers.name(id);
-    if (named !== id) return named;
-    return id === PROVIDER_TMDB ? 'TMDB' : id;
-  }
-
-  /**
-   * The credentials that need attention (PLAN phase 10 task 2), one row each.
-   *
-   * The card is quiet while a key works — a healthy credential is not news —
-   * and loud in exactly the two states where the surfaces behind that provider
-   * are degraded. Every state is read from the status payload's cached
-   * verdicts, so these rows cost no upstream call however often it refreshes.
-   */
-  let credentialRows = $derived(
-    system.unhealthyCredentials
-      .map((c) => ({
-        id: c.id,
-        reason: c.reason,
-        label: metadataStateLabel(c.state, credentialName(c.id)),
-      }))
-      .filter((row): row is typeof row & { label: string } => row.label !== null),
+  let stack = $derived(
+    footerStack({
+      tasks: tasks.tasks,
+      jobs: tasks.jobs,
+      downloads: downloads.items,
+      converting: status?.counts.converting ?? 0,
+    }),
   );
   let signOutLabel = $derived(
     auth.busy
@@ -405,12 +361,20 @@
               <a
                 href={settingsHref(item)}
                 aria-current={active ? 'page' : undefined}
-                class="flex rounded-md border-l-2 py-1.5 pl-4 pr-3 text-sm transition-colors duration-150 ease-out
+                class="flex items-center gap-2 rounded-md border-l-2 py-1.5 pl-4 pr-3 text-sm transition-colors duration-150 ease-out
                        {active
                   ? 'border-l-accent bg-accent-tint font-medium text-accent-text'
                   : 'border-l-transparent text-ink-secondary hover:bg-raised hover:text-ink'}"
                 onclick={closeForNavigation}>
-                {settingsLabel(item, t)}
+                <span class="min-w-0 flex-1">{settingsLabel(item, t)}</span>
+                {#if item.route === '/settings/tasks' && tasks.issueCount}
+                  <Badge
+                    tone="warning"
+                    title={tp('sidebar.badge.taskIssue', tasks.issueCount)}
+                    class="tabular-nums">
+                    {tasks.issueCount}
+                  </Badge>
+                {/if}
               </a>
             {/each}
           </div>
@@ -451,85 +415,57 @@
     {/if}
   </nav>
 
-  <div class="m-2 flex flex-col gap-3 rounded-md border border-border bg-raised p-3">
-    <!-- Disks, engine health and the safe-eject button are all read from
-         GET /system/status, which is an admin route. A member gets the part of
-         this card that is about them. -->
-    {#if !session.isAdmin}
-      <!-- The sign-out row below names them; there is nothing else to say. -->
-    {:else if system.loading && !status}
-      <Skeleton class="h-3 w-full" />
-      <Skeleton class="h-3 w-2/3" />
-    {:else}
-      <div class="flex items-center gap-2">
-        <span class="size-2 shrink-0 rounded-full {TONE_DOT[health.tone]}"></span>
-        <span class="text-sm text-ink">{health.label}</span>
+  <div data-sidebar-footer class="flex flex-col gap-1 border-t border-border px-2 py-3">
+    {#if session.isAdmin && stack.length > 0}
+      <div data-sidebar-activity class="flex flex-col gap-0.5" aria-live="polite">
+        {#each stack as item (item.id)}
+          <a
+            data-sidebar-activity-row
+            href={item.href}
+            title={item.title}
+            class="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors duration-150 ease-out
+                   {item.tone === 'warning'
+              ? 'text-warning hover:bg-raised'
+              : 'text-accent-text hover:bg-raised'}"
+            onclick={closeForNavigation}>
+            <span
+              class="size-1.5 shrink-0 rounded-full
+                     {item.tone === 'warning' ? 'bg-warning' : 'bg-accent'}
+                     {item.spinning ? 'sidebar-task-pulse' : ''}"
+              aria-hidden="true"></span>
+            <span class="min-w-0 truncate">{item.label}</span>
+          </a>
+        {/each}
       </div>
+    {/if}
 
-      <!-- A link rather than a statement: every screen this breaks is fixed in
-           one place, so the card that reports it goes there. -->
-      {#each credentialRows as row (row.id)}
-        <a
-          href="/settings/metadata"
-          class="flex items-center gap-2 rounded-sm text-sm text-warning transition-colors duration-150 ease-out hover:underline"
-          title={row.reason || undefined}
-          onclick={closeForNavigation}>
-          <span class="size-2 shrink-0 rounded-full {TONE_DOT.warning}"></span>
-          <span>{row.label}</span>
-        </a>
-      {/each}
-
-      <div class="flex flex-col gap-2">
-        <span
-          class="min-w-0 truncate font-mono text-xs text-ink-muted"
-          title={status?.storage_root}>
-          {status?.storage_root || t('sidebar.storage.noRoot')}
-        </span>
-        <div class="flex items-baseline justify-between gap-2 text-xs">
-          <span class="text-ink-secondary">{t('sidebar.storage.disk')}</span>
-          <!-- The free number is the one a reader acts on (DESIGN.md §5), so
-               it gets the line to itself: one nowrap value, never a wrapped
-               pair with a dangling "free". The full breakdown moves to the
-               tooltip. -->
-          <span
-            class="whitespace-nowrap font-mono text-ink"
-            title={diskUsage
-              ? t('sidebar.storage.usedOf', {
-                  used: formatBytes(diskUsage.used),
-                  total: formatBytes(diskUsage.used + diskUsage.free),
-                })
-              : undefined}>
-            {diskUsage
-              ? t('sidebar.storage.free', { free: formatBytes(diskUsage.free) })
-              : t('sidebar.storage.unknown')}
-          </span>
-        </div>
-        <ProgressBar
-          value={usedFraction}
-          tone={usedFraction > 0.9 ? 'danger' : usedFraction > 0.75 ? 'warning' : 'accent'}
-          label={t('sidebar.storage.diskUsed')} />
-      </div>
-
-      <!-- Portable mode only: a drive that gets unplugged needs a way to be
-           told first (SPEC §2.3). A server install is stopped by whatever
-           started it. -->
-      {#if status?.mode === 'portable'}
+    {#if session.isAdmin && status?.mode === 'portable'}
+      <div class="px-3">
         <SafeShutdown />
-      {/if}
+      </div>
     {/if}
 
-    <!-- A username means an account is behind this browser; an open server has
-         nobody to sign out (SPEC §11). -->
-    {#if session.username}
-      <Button
-        variant="ghost"
-        size="sm"
-        class="w-full min-w-0 justify-start"
-        disabled={auth.busy}
-        onclick={() => auth.logout()}>
-        <Icon name="logout" size={14} />
-        <span class="min-w-0 truncate" title={signOutLabel}>{signOutLabel}</span>
-      </Button>
-    {/if}
+    <div class="flex items-center gap-1">
+      {#if session.username}
+        <Button
+          variant="ghost"
+          size="sm"
+          class="min-w-0 flex-1 justify-start text-ink-muted"
+          disabled={auth.busy}
+          onclick={() => auth.logout()}>
+          <Icon name="logout" size={14} />
+          <span class="min-w-0 truncate" title={signOutLabel}>{signOutLabel}</span>
+        </Button>
+      {/if}
+      <button
+        type="button"
+        data-sidebar-theme
+        class="flex size-7 shrink-0 items-center justify-center rounded-md text-ink-muted transition-colors duration-150 ease-out hover:bg-raised hover:text-ink"
+        aria-label={themeLabel}
+        title={themeLabel}
+        onclick={flipTheme}>
+        <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={14} />
+      </button>
+    </div>
   </div>
 </aside>

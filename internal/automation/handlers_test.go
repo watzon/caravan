@@ -167,6 +167,13 @@ func TestRunnerHandleSearchMovieGrabsBestOnce(t *testing.T) {
 	if grabs[0].ReleaseTitle != "Example Movie 2024 1080p" || grabs[0].Reason == "" {
 		t.Fatalf("winning grab = %#v, want scored best release with a reason", grabs[0])
 	}
+	linked, err := st.GetGrabByDownloadID(ctx, "fake-download")
+	if err != nil {
+		t.Fatalf("GetGrabByDownloadID: %v", err)
+	}
+	if linked.GrabID != grabs[0].GrabID {
+		t.Fatalf("linked grab = %d, want winning grab %d", linked.GrabID, grabs[0].GrabID)
+	}
 }
 
 func TestRunnerHandleSearchMovieKeepsIndexerPriorityWhenResultsFinishOutOfOrder(t *testing.T) {

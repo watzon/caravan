@@ -60,3 +60,79 @@ func TestHandleListJobsReturnsNewestFeed(t *testing.T) {
 		wantErrorBody(t, rec)
 	}
 }
+
+func TestHandleListJobsNamesLiveSearchSubjects(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	ctx := context.Background()
+
+	movie := &core.Movie{TMDBID: 329865, Title: "Arrival", SortTitle: "arrival"}
+	if err := st.UpsertMovie(ctx, movie); err != nil {
+		t.Fatalf("UpsertMovie: %v", err)
+	}
+	show := &core.Series{Kind: core.SeriesKindTV, TMDBID: 95396, Title: "Severance", SortTitle: "severance"}
+	if err := st.UpsertSeries(ctx, show); err != nil {
+		t.Fatalf("UpsertSeries: %v", err)
+	}
+	site := &core.Series{Kind: core.SeriesKindAdult, StashID: "site-1", Title: "Transfixed", SortTitle: "transfixed"}
+	if err := st.UpsertSeries(ctx, site); err != nil {
+		t.Fatalf("UpsertSeries(adult): %v", err)
+	}
+	episode := &core.Episode{SeriesID: show.ID, SeasonNumber: 1, EpisodeNumber: 2, Title: "Half Loop"}
+	if err := st.UpsertEpisode(ctx, episode); err != nil {
+		t.Fatalf("UpsertEpisode: %v", err)
+	}
+	scene := &core.Episode{SeriesID: site.ID, SeasonNumber: 2026, EpisodeNumber: 20, Title: "An Unexpected Craving"}
+	if err := st.UpsertEpisode(ctx, scene); err != nil {
+		t.Fatalf("UpsertEpisode(scene): %v", err)
+	}
+
+	moviePayload, err := json.Marshal(core.JobSearchMoviePayload{MovieID: movie.ID})
+	if err != nil {
+		t.Fatalf("encode movie payload: %v", err)
+	}
+	episodePayload, err := json.Marshal(core.JobSearchEpisodePayload{EpisodeID: episode.ID})
+	if err != nil {
+		t.Fatalf("encode episode payload: %v", err)
+	}
+	scenePayload, err := json.Marshal(core.JobSearchEpisodePayload{EpisodeID: scene.ID})
+	if err != nil {
+		t.Fatalf("encode scene payload: %v", err)
+	}
+	for _, job := range []*core.Job{
+		{Kind: core.JobSearchMovie, Payload: string(moviePayload)},
+		{Kind: core.JobSearchEpisode, Payload: string(episodePayload)},
+		{Kind: core.JobSearchEpisode, Payload: string(scenePayload)},
+	} {
+		if err := st.EnqueueJob(ctx, job); err != nil {
+			t.Fatalf("EnqueueJob(%s): %v", job.Kind, err)
+		}
+	}
+
+	rec := do(t, h, http.MethodGet, "/api/v1/jobs?limit=10", "")
+	wantStatus(t, rec, http.StatusOK)
+	var body struct {
+		Jobs []jobJSON `json:"jobs"`
+	}
+	decodeBody(t, rec, &body)
+	type got struct {
+		kind string
+		id   int64
+	}
+	found := map[string]got{}
+	for _, job := range body.Jobs {
+		if job.Subject == "" {
+			continue
+		}
+		found[job.Subject] = got{kind: job.SubjectKind, id: job.SubjectID}
+	}
+	want := map[string]got{
+		"Arrival":    {kind: "movie", id: movie.ID},
+		"Severance":  {kind: "series", id: show.ID},
+		"Transfixed": {kind: "site", id: site.ID},
+	}
+	for name, wantRow := range want {
+		if found[name] != wantRow {
+			t.Fatalf("subject %q = %+v, want %+v (jobs=%+v)", name, found[name], wantRow, body.Jobs)
+		}
+	}
+}

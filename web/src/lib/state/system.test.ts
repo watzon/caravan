@@ -8,7 +8,7 @@
  * because they are two names for one fact.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import type { SystemStatus } from '../api/types';
+import type { StatusCounts, SystemStatus } from '../api/types';
 import { system } from './system.svelte';
 
 /** A status carrying only the credential fields under test. */
@@ -18,6 +18,18 @@ function seed(fields: Partial<SystemStatus>): void {
 
 afterEach(() => {
   system.status = null;
+});
+
+describe('system counts', () => {
+  it('adjusts a sidebar count without waiting for a fetch', () => {
+    seed({
+      counts: { movies: 0, series: 0, media_files: 0, unmatched: 0, wanted: 2 } satisfies StatusCounts,
+    });
+    system.adjustCount('wanted', 1);
+    expect(system.status?.counts.wanted).toBe(3);
+    system.adjustCount('wanted', -10);
+    expect(system.status?.counts.wanted).toBe(0);
+  });
 });
 
 describe('system credentials', () => {

@@ -180,6 +180,7 @@ beforeEach(() => {
         });
       }
       if (url.includes('/import/queue')) return jsonResponse({ items: unmatched });
+      if (url.endsWith('/system/status')) return jsonResponse(system.status ?? STATUS);
       throw new Error(`unexpected fetch: ${url}`);
     }),
   );

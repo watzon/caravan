@@ -26,6 +26,7 @@
   } from '../format';
   import { libraries } from '../state/libraries.svelte';
   import { pushToast } from '../state/toast.svelte';
+  import { libraryChanged, scanReviewResolved } from '../state/activity';
   import { system } from '../state/system.svelte';
   import { useI18n } from '../i18n.svelte';
 
@@ -63,6 +64,7 @@
     try {
       await api.rescan();
       const summary = await api.awaitScan();
+      libraryChanged();
       pushToast(
         t('route.scanReview.scanFinished', {
           files: summary.media_files,
@@ -83,6 +85,7 @@
     try {
       await api.dismissUnmatched(file.id);
       files = (files ?? []).filter((f) => f.id !== file.id);
+      scanReviewResolved();
       pushToast(t('route.scanReview.removed'), 'neutral');
     } catch (err) {
       pushToast(errorText(err), 'danger');
@@ -107,6 +110,7 @@
           : {}),
       });
       files = (files ?? []).filter((f) => f.id !== file.id);
+      scanReviewResolved();
       closeMatch();
       pushToast(t('route.scanReview.matched'), 'success');
     } catch (err) {
@@ -124,6 +128,7 @@
         provider_ref: scene.stash_id,
       });
       files = (files ?? []).filter((f) => f.id !== file.id);
+      scanReviewResolved();
       closeMatch();
       pushToast(t('route.scanReview.matched'), 'success');
     } catch (err) {

@@ -17,6 +17,23 @@ func seedMediaFile(t *testing.T, st *Store, path string) *core.MediaFile {
 	return &f
 }
 
+func TestChangeHookFiresOnConversionWrite(t *testing.T) {
+	st, _ := openTemp(t)
+	file := seedMediaFile(t, st, "library/Movies/A (2001)/A (2001).mkv")
+	var got []string
+	st.SetChangeHook(func(resource string) {
+		got = append(got, resource)
+	})
+
+	c := core.Conversion{MediaFileID: file.ID, SourcePath: file.Path, ProfileID: core.TVProfileSafe}
+	if err := st.CreateConversion(context.Background(), &c); err != nil {
+		t.Fatalf("CreateConversion: %v", err)
+	}
+	if len(got) != 1 || got[0] != "library" {
+		t.Fatalf("hook = %v, want [library]", got)
+	}
+}
+
 func TestConversionLifecycle(t *testing.T) {
 	ctx := context.Background()
 	st, _ := openTemp(t)

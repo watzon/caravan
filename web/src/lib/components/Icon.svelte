@@ -57,6 +57,10 @@
     // which is the point — it reads as "this is a different kind of shelf".
     flame:
       '<path d="M12 21a6 6 0 0 0 6-6c0-4-3-6.5-4-9.5-1.5 1.5-2 3-2 4.5-1-1-1.5-2.5-1.5-4C8 8 6 10.5 6 15a6 6 0 0 0 6 6z"/><path d="M12 21a2.5 2.5 0 0 0 2.5-2.5c0-1.6-1.3-2.4-2.5-4-1.2 1.6-2.5 2.4-2.5 4A2.5 2.5 0 0 0 12 21z"/>',
+    // Theme toggle: sun when the chrome is dark (switch to light), moon
+    // when it is light (switch to dark). Same 24 stroke language as the rest.
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>',
+    moon: '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>',
   } as const;
 
   export type IconName = keyof typeof ICONS;

@@ -1,18 +1,19 @@
 /**
- * The sidebar's credential warning rows.
+ * The sidebar's task rail and the Settings badge that points at it.
  *
- * "The metadata provider" is a chain now, so the card carries one row per
- * credential that needs attention rather than the single TMDB row it started
- * as. These assert on rendered text on purpose: `npm run check` type-checks the
- * script blocks and not the templates, so a mistyped prop or a row that never
- * renders is a silent pass everywhere else.
+ * Background work used to toast; it now lives here. These assert on rendered
+ * text on purpose: `npm run check` type-checks the script blocks and not the
+ * templates, so a mistyped prop or a row that never renders is a silent pass
+ * everywhere else.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mount, unmount } from 'svelte';
+import { flushSync, mount, unmount } from 'svelte';
 import Sidebar from './Sidebar.svelte';
-import type { SystemStatus } from '../api/types';
-import { providers } from '../state/providers.svelte';
+import type { Job, SystemStatus, SystemTask } from '../api/types';
+import { saveDisplayPreferences } from '../displayPreferences';
+import { session } from '../state/session.svelte';
 import { system } from '../state/system.svelte';
+import { tasks } from '../state/tasks.svelte';
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -21,8 +22,7 @@ function jsonResponse(body: unknown): Response {
   });
 }
 
-/** The credential fields under test, on an otherwise minimal admin status. */
-function seed(fields: Partial<SystemStatus>): void {
+function seedStatus(fields: Partial<SystemStatus> = {}): void {
   system.status = {
     version: '0.1.0',
     mode: 'server',
@@ -30,8 +30,8 @@ function seed(fields: Partial<SystemStatus>): void {
     schema_version: 1,
     scanning: false,
     counts: { movies: 0, series: 0, media_files: 0, unmatched: 0 },
-    disk_free_bytes: 0,
-    disk_total_bytes: 0,
+    disk_free_bytes: 500 * 1024 ** 3,
+    disk_total_bytes: 1024 ** 4,
     engine_health: 'ok',
     ffmpeg_available: true,
     ...fields,
@@ -39,105 +39,213 @@ function seed(fields: Partial<SystemStatus>): void {
   system.loading = false;
 }
 
+function task(extra: Partial<SystemTask> = {}): SystemTask {
+  return {
+    kind: 'rss_sync',
+    name: 'RSS sync',
+    description: 'Checks indexer feeds for newly posted releases.',
+    interval_minutes: 15,
+    last_run: '',
+    last_result: 'ok',
+    last_error: '',
+    next_run: '',
+    running: false,
+    queued: true,
+    ...extra,
+  };
+}
+
+function job(extra: Partial<Job> = {}): Job {
+  return {
+    id: 1,
+    kind: 'search_episode',
+    payload: '',
+    state: 'running',
+    attempts: 1,
+    run_after: '',
+    lease_expires_at: '',
+    last_error: '',
+    created_at: '',
+    updated_at: '',
+    ...extra,
+  };
+}
+
 let host: HTMLElement;
 let app: Record<string, unknown>;
+let taskRows: SystemTask[];
+let jobRows: Job[];
 
 beforeEach(() => {
   host = document.createElement('div');
   document.body.appendChild(host);
   window.scrollTo = () => {};
-  // The shell polls the queue and the request badge as soon as it mounts.
+  seedStatus();
+  taskRows = [];
+  jobRows = [];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes('/downloads')) return jsonResponse({ downloads: [] });
       if (url.endsWith('/requests')) return jsonResponse({ requests: [] });
+      if (url.includes('/system/tasks')) return jsonResponse({ tasks: taskRows });
+      if (url.includes('/jobs')) return jsonResponse({ jobs: jobRows });
       if (url.endsWith('/system/status')) return jsonResponse(system.status ?? {});
       throw new Error(`unexpected fetch: ${url}`);
     }),
   );
 });
 
-afterEach(() => {
+afterEach(async () => {
   unmount(app);
   host.remove();
   vi.unstubAllGlobals();
-  // Module singletons.
+  localStorage.clear();
+  document.documentElement.removeAttribute('data-theme');
   system.status = null;
   system.loading = true;
-  providers.all = [];
-  providers.loaded = false;
+  tasks.stopSoon();
+  tasks.tasks = null;
+  tasks.jobs = null;
+  session.forget();
 });
 
-/** The card's credential rows, which are the only links to the metadata screen. */
-function credentialRows(): string[] {
-  return [...host.querySelectorAll('a[href="/settings/metadata"]')].map(
-    (a) => a.textContent?.trim() ?? '',
-  );
+async function settle() {
+  for (let i = 0; i < 4; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
 }
 
-function render(): void {
-  app = mount(Sidebar, { target: host, props: { open: true, onclose: () => {} } });
+async function render(props: { settingsSection?: string } = {}) {
+  app = mount(Sidebar, { target: host, props: { open: true, onclose: () => {}, ...props } });
+  await settle();
 }
 
-describe('Sidebar credential rows', () => {
-  it('warns once per credential that needs attention', () => {
-    providers.all = [
-      { id: 'tmdb', name: 'TMDB', kinds: ['movie'] },
-      { id: 'thetvdb', name: 'TheTVDB', kinds: ['tv'] },
+function activity(): HTMLAnchorElement[] {
+  return [...host.querySelectorAll<HTMLAnchorElement>('[data-sidebar-activity-row]')];
+}
+
+describe('Sidebar task rail', () => {
+  it('stays quiet while nothing is running and nothing failed', async () => {
+    await render();
+
+    expect(activity()).toEqual([]);
+    expect(host.querySelector('[data-sidebar-footer]')).not.toBeNull();
+    expect(host.textContent).not.toContain('Ready');
+    expect(host.textContent).not.toContain('500 GB free');
+    expect(host.textContent).not.toContain('No TMDB key');
+    expect(host.querySelector('[role="progressbar"]')).toBeNull();
+    expect(host.querySelector('a[href="/settings"] > span[title]')).toBeNull();
+  });
+
+  it('stacks two named searches at once', async () => {
+    jobRows = [
+      job({
+        id: 1,
+        subject: 'Transfixed',
+        subject_kind: 'site',
+        subject_id: 9,
+      }),
+      job({
+        id: 2,
+        subject: 'Transfixed',
+        subject_kind: 'site',
+        subject_id: 9,
+      }),
+      job({
+        id: 3,
+        subject: 'Severance',
+        subject_kind: 'series',
+        subject_id: 3,
+      }),
     ];
-    seed({
-      metadata_credential: 'invalid',
-      metadata_credential_reason: 'tmdb: http 401: Invalid API key',
-      metadata_credentials: {
-        tmdb: { state: 'invalid', reason: 'tmdb: http 401: Invalid API key' },
-        thetvdb: { state: 'absent' },
-      },
-    });
-    render();
+    await render();
 
-    expect(credentialRows()).toEqual(['No TheTVDB key', 'TMDB key rejected']);
-    // The provider's own words, where they do not crowd the card.
-    const rejected = [...host.querySelectorAll('a[href="/settings/metadata"]')].find((a) =>
-      a.textContent?.includes('TMDB key rejected'),
+    expect(activity().map((row) => ({
+      text: row.textContent?.replace(/\s+/g, ' ').trim(),
+      href: row.getAttribute('href'),
+    }))).toEqual([
+      { text: 'Searching 2 scenes from Transfixed', href: '/adult/sites/9' },
+      { text: 'Searching Severance', href: '/series/3' },
+    ]);
+  });
+
+  it('shows a live search and sends the click to the work it names', async () => {
+    jobRows = [job()];
+    await render();
+
+    expect(activity()).toHaveLength(1);
+    expect(activity()[0]?.textContent).toContain('Searching');
+    expect(activity()[0]?.getAttribute('href')).toBe('/wanted');
+    expect(activity()[0]?.querySelector('.sidebar-task-pulse')).not.toBeNull();
+    expect(activity()[0]?.className).toContain('text-accent-text');
+  });
+
+  it('warns about a failed last run without a pulse', async () => {
+    taskRows = [task({ last_result: 'failed', last_error: 'indexer timed out' })];
+    await render();
+
+    expect(activity()[0]?.textContent).toContain('RSS sync failed');
+    expect(activity()[0]?.getAttribute('title')).toContain('indexer timed out');
+    expect(activity()[0]?.querySelector('.sidebar-task-pulse')).toBeNull();
+    expect(activity()[0]?.className).toContain('text-warning');
+  });
+
+  it('badges Settings when a recurring task failed', async () => {
+    taskRows = [task({ last_result: 'failed' })];
+    await render();
+
+    const badge = host.querySelector('a[href="/settings"] > span[title="1 task needs attention"]');
+    expect(badge).not.toBeNull();
+    expect(badge?.classList).toContain('bg-warning-tint');
+    expect(badge?.textContent).toContain('1');
+  });
+
+  it('badges the Tasks row once the settings rail is open', async () => {
+    taskRows = [task({ last_result: 'failed' })];
+    await render({ settingsSection: '' });
+
+    const badge = host.querySelector(
+      'a[href="/settings/tasks#tasks"] span[title="1 task needs attention"]',
     );
-    expect(rejected?.getAttribute('title')).toContain('Invalid API key');
+    expect(badge).not.toBeNull();
+    expect(host.querySelector('[data-settings-sidebar-navigation]')).not.toBeNull();
   });
 
-  // The provider list is admin-only and loaded lazily by the surfaces that need
-  // names, so the shell usually has none. A row named by its id is a worse
-  // label but never a wrong one — except TMDB's, whose row predates the list.
-  it('degrades an unnamed provider to its id and still brands TMDB', () => {
-    seed({
-      metadata_credential: 'absent',
-      metadata_credentials: {
-        tmdb: { state: 'absent' },
-        thetvdb: { state: 'absent' },
-      },
-    });
-    render();
+  it('keeps the rail off a member account', async () => {
+    session.user = { username: 'ada', role: 'member', open: false, adult: false };
+    jobRows = [job()];
+    taskRows = [task({ last_result: 'failed' })];
+    await render();
 
-    expect(credentialRows()).toEqual(['No thetvdb key', 'No TMDB key']);
+    expect(activity()).toEqual([]);
+    expect(host.querySelector('a[href="/settings"]')).toBeNull();
+    expect(host.textContent).toContain('Sign out ada');
   });
 
-  it('says nothing while every credential works', () => {
-    seed({
-      metadata_credential: 'ok',
-      metadata_credentials: { tmdb: { state: 'ok' }, thetvdb: { state: 'ok' } },
-    });
-    render();
+  it('keeps sign-out when an administrator is named', async () => {
+    session.user = { username: 'root', role: 'admin', open: false, adult: false };
+    await render();
 
-    expect(credentialRows()).toEqual([]);
-    expect(host.textContent).not.toContain('key rejected');
+    expect(host.textContent).toContain('Sign out root');
+    expect(host.querySelector('[data-sidebar-footer]')).not.toBeNull();
   });
 
-  // An older server sends no map at all, and the row it has always raised must
-  // still be raised from the flat fields.
-  it('still warns about TMDB from the flat fields alone', () => {
-    seed({ metadata_credential: 'invalid', metadata_credential_reason: 'tmdb: http 401' });
-    render();
+  it('puts a theme toggle to the right of sign-out and flips the document theme', async () => {
+    saveDisplayPreferences({ theme: 'dark', motion: 'system' });
+    session.user = { username: 'ada', role: 'admin', open: false, adult: false };
+    await render();
 
-    expect(credentialRows()).toEqual(['TMDB key rejected']);
+    const toggle = host.querySelector<HTMLButtonElement>('[data-sidebar-theme]');
+    expect(toggle).not.toBeNull();
+    expect(toggle?.getAttribute('aria-label')).toBe('Use the light theme');
+
+    toggle?.click();
+    await settle();
+
+    expect(document.documentElement.dataset.theme).toBe('light');
+    expect(host.querySelector('[data-sidebar-theme]')?.getAttribute('aria-label')).toBe(
+      'Use the dark theme',
+    );
   });
 });

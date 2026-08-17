@@ -81,6 +81,7 @@ func (s *Store) UpsertMovie(ctx context.Context, m *core.Movie) error {
 		if n == 0 {
 			return fmt.Errorf("store: update movie %d: %w", m.ID, ErrNotFound)
 		}
+		s.note("library")
 		return nil
 	}
 
@@ -88,6 +89,7 @@ func (s *Store) UpsertMovie(ctx context.Context, m *core.Movie) error {
 		return fmt.Errorf("store: insert movie %q: %w", m.Title, err)
 	}
 	m.ID = model.ID
+	s.note("library")
 	return nil
 }
 
@@ -187,6 +189,7 @@ func (s *Store) DeleteMovie(ctx context.Context, id int64) error {
 	if _, err := s.db.NewDelete().Model((*catalogMovieModel)(nil)).Where("id = ?", id).Exec(ctx); err != nil {
 		return fmt.Errorf("store: delete movie %d: %w", id, err)
 	}
+	s.note("library")
 	return nil
 }
 

@@ -10,8 +10,10 @@
   import Poster from '../components/Poster.svelte';
   import Skeleton from '../components/Skeleton.svelte';
   import Icon from '../components/Icon.svelte';
+  import { searchQueued } from '../state/activity';
   import { pushToast } from '../state/toast.svelte';
   import { episodeCode, formatDate, titleWithYear } from '../format';
+  import { sceneNumber } from '../adult';
   import { createSelection } from '../selection.svelte';
   import { useI18n } from '../i18n.svelte';
 
@@ -83,7 +85,8 @@
     searching = true;
     try {
       const { queued } = await api.searchWanted();
-      pushToast(tp('route.wanted.queued', queued), queued > 0 ? 'success' : 'info');
+      if (queued > 0) searchQueued(queued);
+      else pushToast(tp('route.wanted.queued', queued), 'info');
     } catch (err) {
       pushToast(errorText(err), 'danger');
     } finally {
@@ -128,9 +131,15 @@
       for (const id of failedEpisodes) episodeSelection.toggle(id);
 
       const failed = failedMovies.length + failedEpisodes.length;
-      const message = tp('route.wanted.queued', queued);
-      if (failed > 0) pushToast(tp('route.wanted.queuedFailed', failed, { message }), 'danger');
-      else pushToast(message, queued > 0 ? 'success' : 'info');
+      if (queued > 0) searchQueued(queued);
+      if (failed > 0) {
+        pushToast(
+          tp('route.wanted.queuedFailed', failed, { message: tp('route.wanted.queued', queued) }),
+          'danger',
+        );
+      } else if (queued === 0) {
+        pushToast(tp('route.wanted.queued', queued), 'info');
+      }
       await load();
     } finally {
       bulkSearching = false;
@@ -146,8 +155,25 @@
     if (event.key === 'Escape' && selectionActive) clearSelection();
   }
 
+  function isAdultEpisode(item: WantedEpisode): boolean {
+    return item.series_kind === 'adult';
+  }
+
+  /**
+   * The ordinal a wanted row prints. A scene's season is a release year, so
+   * S2026E24 is the television spelling of the same numbers and sends the
+   * picker down the wrong seed.
+   */
+  function episodeLabel(item: WantedEpisode): string {
+    if (isAdultEpisode(item)) return `${item.season_number} · ${sceneNumber(item.episode_number)}`;
+    return episodeCode(item.season_number, item.episode_number);
+  }
+
   function searchHref(item: WantedMovie | WantedEpisode): string {
     if ('series_id' in item) {
+      if (isAdultEpisode(item)) {
+        return `/adult/sites/${item.series_id}/search/${item.season_number}/${item.episode_number}`;
+      }
       return `/series/${item.series_id}/search/${item.season_number}/${item.episode_number}`;
     }
     return `/movies/${item.id}/search`;
@@ -263,7 +289,7 @@
                   <button
                     type="button"
                     class="absolute inset-0 z-10 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-accent"
-                    aria-label={t(episodeSelection.has(episode.id) ? 'route.wanted.deselect' : 'route.wanted.select', { title: t('route.wanted.episodeSelection', { series: episode.series_title, episode: episodeCode(episode.season_number, episode.episode_number) }) })}
+                    aria-label={t(episodeSelection.has(episode.id) ? 'route.wanted.deselect' : 'route.wanted.select', { title: t('route.wanted.episodeSelection', { series: episode.series_title, episode: episodeLabel(episode) }) })}
                     aria-pressed={episodeSelection.has(episode.id)}
                     onclick={() => episodeSelection.toggle(episode.id)}></button>
                 {/if}
@@ -287,7 +313,7 @@
                              transition-opacity duration-150 ease-out hover:border-accent hover:text-accent
                              focus-visible:opacity-100 group-hover/row:opacity-100
                              group-focus-within/row:opacity-100 pointer-coarse:opacity-100"
-                      aria-label={t('route.wanted.select', { title: t('route.wanted.episodeSelection', { series: episode.series_title, episode: episodeCode(episode.season_number, episode.episode_number) }) })}
+                      aria-label={t('route.wanted.select', { title: t('route.wanted.episodeSelection', { series: episode.series_title, episode: episodeLabel(episode) }) })}
                       aria-pressed="false"
                       onclick={() => episodeSelection.toggle(episode.id)}>
                       <Icon name="check" size={12} />
@@ -303,8 +329,8 @@
                   <div class="min-w-0 basis-40 flex-1">
                     <p
                       class="truncate font-medium text-ink"
-                      title={t('route.wanted.episodeTitle', { series: episode.series_title, episode: episodeCode(episode.season_number, episode.episode_number), title: episode.title })}>
-                      {t('route.wanted.episodeTitle', { series: episode.series_title, episode: episodeCode(episode.season_number, episode.episode_number), title: episode.title })}
+                      title={t('route.wanted.episodeTitle', { series: episode.series_title, episode: episodeLabel(episode), title: episode.title })}>
+                      {t('route.wanted.episodeTitle', { series: episode.series_title, episode: episodeLabel(episode), title: episode.title })}
                     </p>
                     <p class="mt-0.5 truncate text-sm text-ink-secondary" title={detail(episode)}>{detail(episode)}</p>
                   </div>

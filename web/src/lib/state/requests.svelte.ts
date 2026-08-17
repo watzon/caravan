@@ -2,20 +2,14 @@
  * The request list (SPEC §11 `GET /requests`), shared by the requests screen
  * and the sidebar badge.
  *
- * Same shape as the downloads store: subscribers declare the interval they
- * need and the store polls at the fastest one currently asked for, so the badge
- * staying live does not make the shell chatty while the screen is open.
+ * The shell does not poll this. Local writes update the list immediately;
+ * GET /events/stream tells another browser to refresh the snapshot.
+ * subscribe() remains for tests and any screen that still wants a timer.
  */
 
 import { api, errorText } from '../api/client';
-import type { MediaRequest } from '../api/types';
+import type { MediaRequest, RequestStatus } from '../api/types';
 import { pendingRequestCount } from '../requests';
-
-/** Requests screen cadence — an approval elsewhere shows up quickly. */
-export const REQUESTS_POLL_MS = 15000;
-
-/** Sidebar badge cadence: a count a minute stale costs nothing. */
-export const REQUESTS_BADGE_POLL_MS = 60000;
 
 class RequestsState {
   items = $state<MediaRequest[] | null>(null);
@@ -32,14 +26,24 @@ class RequestsState {
   #timer: ReturnType<typeof setInterval> | null = null;
   #watchingVisibility = false;
   #inFlight = false;
+  #pending = false;
 
-  /** Fetch once. Overlapping calls are dropped rather than queued. */
+  /**
+   * Fetch once. A second call while one is in flight is remembered and run
+   * after, so an approve that finishes during a poll is not dropped.
+   */
   async refresh(): Promise<void> {
-    if (this.#inFlight) return;
+    if (this.#inFlight) {
+      this.#pending = true;
+      return;
+    }
     this.#inFlight = true;
     try {
-      this.items = await api.listRequests();
-      this.error = null;
+      do {
+        this.#pending = false;
+        this.items = await api.listRequests();
+        this.error = null;
+      } while (this.#pending);
     } catch (err) {
       this.error = errorText(err);
     } finally {
@@ -60,6 +64,25 @@ class RequestsState {
       this.#subscribers.delete(token);
       this.#restart();
     };
+  }
+
+  /**
+   * Put a request into the local list the moment it is created. A second
+   * request for the same title merges into the pending row (the server's 201
+   * is that row), so this replaces by id rather than appending.
+   */
+  remember(request: MediaRequest): void {
+    const list = this.items ?? [];
+    const index = list.findIndex((row) => row.id === request.id);
+    this.items = index >= 0
+      ? [...list.slice(0, index), request, ...list.slice(index + 1)]
+      : [request, ...list];
+  }
+
+  /** Change one row's status without waiting for the next poll. */
+  applyStatus(id: number, status: RequestStatus): void {
+    if (this.items === null) return;
+    this.items = this.items.map((row) => (row.id === id ? { ...row, status } : row));
   }
 
   /** Drop a row locally after it stops being pending, without waiting a poll. */
