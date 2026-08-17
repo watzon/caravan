@@ -90,6 +90,7 @@ func NewRunner(st *store.Store, indexers api.IndexerFactory, engine EngineGetter
 		handlers: make(map[string]Handler),
 	}
 	r.handlers[core.JobRSSSync] = r.handleRSSSync
+	r.handlers[core.JobIndexerHealth] = r.handleIndexerHealth
 	r.handlers[core.JobBacklogSweep] = r.handleBacklogSweep
 	r.handlers[core.JobSearchMovie] = r.handleSearchMovie
 	r.handlers[core.JobSearchEpisode] = r.handleSearchEpisode

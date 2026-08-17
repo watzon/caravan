@@ -154,6 +154,9 @@ func rssFeeds(ctx context.Context, st *store.Store) ([]rssFeed, error) {
 			return nil, fmt.Errorf("store: resolve settings of library %d: %w", library.ID, err)
 		}
 		for _, cfg := range settings.Indexers {
+			if !cfg.Searchable() {
+				continue
+			}
 			feed, ok := byIndexer[cfg.ID]
 			if !ok {
 				feed = &rssFeed{cfg: cfg, categories: map[int]bool{}}
@@ -473,8 +476,10 @@ func (r *Runner) searchScene(ctx context.Context, st *store.Store, series core.S
 	info := core.GrabInfo{
 		SeriesID: series.ID, SeasonNum: episode.SeasonNumber, EpisodeIDs: []int64{episode.ID},
 	}
-	// Deduped across variants: the same release coming back from both queries
-	// is one candidate and, when it loses, one rejection record rather than two.
+	// Deduped across variants within each configured indexer: GUIDs are
+	// provider-local, so the same value from two indexers remains two candidates.
+	// A release returned by both query variants is still one candidate and, when
+	// it loses, one rejection record rather than two.
 	seen := map[string]bool{}
 	tried := make([]string, 0, len(searches))
 	matched := 0
@@ -491,14 +496,15 @@ func (r *Runner) searchScene(ctx context.Context, st *store.Store, series core.S
 
 		automatic := make([]core.Release, 0, len(candidates))
 		for _, candidate := range candidates {
-			if candidate.GUID != "" && seen[candidate.GUID] {
+			key := fmt.Sprintf("%d\x00%s", candidate.IndexerID, candidate.GUID)
+			if candidate.GUID != "" && seen[key] {
 				continue
 			}
 			if !matchesScene(candidate, search.Variant, series, episode) {
 				continue
 			}
 			if candidate.GUID != "" {
-				seen[candidate.GUID] = true
+				seen[key] = true
 			}
 			automatic = append(automatic, candidate)
 		}
@@ -704,21 +710,28 @@ func (r *Runner) searchIndexers(ctx context.Context, st *store.Store, libraryID 
 	}
 
 	results := make(chan indexerResult, len(indexers))
+	launched := 0
 	for index, cfg := range indexers {
+		if !cfg.Searchable() {
+			continue
+		}
+		launched++
 		go func(index int, cfg core.IndexerConfig) {
 			searchCtx, cancel := context.WithTimeout(ctx, searchTimeout)
 			releases, err := search(searchCtx, r.indexers(cfg), cfg)
 			cancel()
 			if err == nil {
+				_ = st.RecordIndexerHealth(ctx, cfg.ID, nil)
 				results <- indexerResult{index: index, cfg: cfg, releases: releases}
 				return
 			}
+			_ = st.RecordIndexerHealth(ctx, cfg.ID, err)
 			results <- indexerResult{index: index, cfg: cfg}
 		}(index, cfg)
 	}
 
 	indexerResults := make([]indexerResult, len(indexers))
-	for range indexers {
+	for range launched {
 		result := <-results
 		indexerResults[result.index] = result
 	}
@@ -788,6 +801,12 @@ func (r *Runner) grab(ctx context.Context, st *store.Store, libraryID int64, kin
 	if err := st.InsertGrab(ctx, grab); err != nil {
 		return fmt.Errorf("store: record grab: %w", err)
 	}
+	if err := r.resolveReleaseDownload(ctx, st, &release); err != nil {
+		if statusErr := st.SetGrabStatus(ctx, grab.GrabID, core.GrabStatusFailed, err.Error()); statusErr != nil {
+			return fmt.Errorf("resolve indexer download: %w (store: mark failed grab: %v)", err, statusErr)
+		}
+		return fmt.Errorf("resolve indexer download: %w", err)
+	}
 	if _, err := engine.Add(ctx, release, opts); err != nil {
 		// The automatic path routes by protocol exactly like the interactive
 		// one (PLAN phase 6 task 3), so it meets the same wall: a usenet
@@ -823,6 +842,77 @@ func (r *Runner) grab(ctx context.Context, st *store.Store, libraryID int64, kin
 		return fmt.Errorf("store: record grab event: %w", err)
 	}
 	return nil
+}
+
+func (r *Runner) resolveReleaseDownload(ctx context.Context, st *store.Store, release *core.Release) error {
+	if release == nil || release.IndexerID <= 0 || r.indexers == nil {
+		return nil
+	}
+	config, err := st.GetIndexer(ctx, release.IndexerID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil
+		}
+		return fmt.Errorf("load indexer configuration: %w", err)
+	}
+	resolver, ok := r.indexers(*config).(api.IndexerDownloadResolver)
+	if !ok {
+		return nil
+	}
+	resolved, err := resolver.ResolveDownload(ctx, release.DownloadURL)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(resolved) == "" {
+		return fmt.Errorf("indexer returned an empty download URL")
+	}
+	release.DownloadURL = resolved
+	lower := strings.ToLower(strings.TrimSpace(resolved))
+	if strings.HasPrefix(lower, "magnet:") {
+		return nil
+	}
+	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+		return fmt.Errorf("indexer returned an unsupported download URL scheme")
+	}
+	payloadResolver, ok := resolver.(api.IndexerTorrentPayloadFetcher)
+	if !ok {
+		return fmt.Errorf("indexer cannot retrieve its authenticated download payload")
+	}
+	payload, err := payloadResolver.FetchDownload(ctx, resolved)
+	if err != nil {
+		return err
+	}
+	if len(payload) == 0 {
+		return fmt.Errorf("indexer returned an empty download payload")
+	}
+	if len(payload) > core.MaxTorrentPayloadBytes {
+		return fmt.Errorf("indexer download payload exceeds size limit")
+	}
+	release.TorrentPayload = append([]byte(nil), payload...)
+	release.DownloadURL = ""
+	return nil
+}
+
+func (r *Runner) handleIndexerHealth(ctx context.Context, st *store.Store, payload json.RawMessage) error {
+	if err := emptyPayload(payload); err != nil {
+		return err
+	}
+	if r.indexers == nil {
+		return fmt.Errorf("no indexer client configured")
+	}
+	indexers, err := st.ListEnabledIndexers(ctx)
+	if err != nil {
+		return fmt.Errorf("store: list indexers: %w", err)
+	}
+	for _, cfg := range indexers {
+		probe, cancel := context.WithTimeout(ctx, 10*time.Second)
+		err := r.indexers(cfg).Test(probe)
+		cancel()
+		if recErr := st.RecordIndexerHealth(ctx, cfg.ID, err); recErr != nil {
+			return fmt.Errorf("store: record indexer health: %w", recErr)
+		}
+	}
+	return r.scheduleRecurring(ctx, core.JobIndexerHealth)
 }
 
 func (r *Runner) scheduleRecurring(ctx context.Context, kind string) error {

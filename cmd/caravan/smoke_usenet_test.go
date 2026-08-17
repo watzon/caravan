@@ -396,11 +396,21 @@ func queueRowFor(t *testing.T, api *caravanProcess, id string) (queueRow, bool) 
 	return queueRow{}, false
 }
 
+func allowPrivateReleasePayloadsForSmoke(t *testing.T) {
+	t.Helper()
+	previous := releasePayloadHTTPClientFactory
+	releasePayloadHTTPClientFactory = func() *http.Client {
+		return &http.Client{Timeout: 30 * time.Second}
+	}
+	t.Cleanup(func() { releasePayloadHTTPClientFactory = previous })
+}
+
 // The whole phase-7 path in one test.
 func TestSmokeUsenetGrabRepairExtractImport(t *testing.T) {
 	if testing.Short() {
 		t.Skip("end-to-end: runs a real NNTP transfer, par2 repair and unpack")
 	}
+	allowPrivateReleasePayloadsForSmoke(t)
 
 	fx := loadUsenetFixture(t)
 	dirs := smokeDirs(t)
@@ -532,6 +542,7 @@ func TestSmokeUsenetUnrepairableReportsTheDeficit(t *testing.T) {
 	if testing.Short() {
 		t.Skip("end-to-end: runs a real NNTP transfer and par2 verification")
 	}
+	allowPrivateReleasePayloadsForSmoke(t)
 
 	fx := loadUsenetFixture(t)
 	dirs := smokeDirs(t)

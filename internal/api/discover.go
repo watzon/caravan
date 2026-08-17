@@ -2,11 +2,13 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"slices"
 	"strconv"
 
 	"github.com/watzon/caravan/internal/core"
+	"golang.org/x/sync/errgroup"
 )
 
 // Values accepted by GET /discover/browse?type=.
@@ -14,6 +16,11 @@ const (
 	SourceNetwork = "network"
 	SourceStudio  = "studio"
 )
+
+// discoverLogoBaseURL is the TMDB image prefix for curated shelf logos.
+// w185 is the logo-sized sibling of the poster prefix (w500): sharp on a
+// tile, small enough that a full row of them is not a download.
+const discoverLogoBaseURL = "https://image.tmdb.org/t/p/w185"
 
 // discoverSource is one curated browse destination: a TV network or a film
 // studio, named by its TMDB id.
@@ -27,24 +34,55 @@ type discoverSource struct {
 	ID   int64
 	Name string
 	Type string
+	// LogoPath is the TMDB image path ("/abc.png"), empty when the shelf
+	// has no artwork. It is rendered as LogoURL on the wire.
+	LogoPath string
+	// Lockup is true when the mark is a filled badge plus lettering. Flat
+	// marks silhouette to ink; a lockup keeps the tri-tone so the letters
+	// stay visible against the badge.
+	Lockup bool
 }
 
 var discoverNetworks = []discoverSource{
-	{ID: 213, Name: "Netflix", Type: SourceNetwork},
-	{ID: 49, Name: "HBO", Type: SourceNetwork},
-	{ID: 2552, Name: "Apple TV+", Type: SourceNetwork},
-	{ID: 2739, Name: "Disney+", Type: SourceNetwork},
-	{ID: 88, Name: "FX", Type: SourceNetwork},
-	{ID: 4, Name: "BBC One", Type: SourceNetwork},
+	{ID: 213, Name: "Netflix", Type: SourceNetwork, LogoPath: "/wwemzKWzjKYJFfCeiB57q3r4Bcm.png"},
+	{ID: 49, Name: "HBO", Type: SourceNetwork, LogoPath: "/tuomPhY2UtuPTqqFnKMVHvSb724.png"},
+	{ID: 2552, Name: "Apple TV+", Type: SourceNetwork, LogoPath: "/bngHRFi794mnMq34gfVcm9nDxN1.png"},
+	{ID: 2739, Name: "Disney+", Type: SourceNetwork, LogoPath: "/1edZOYAfoyZyZ3rklNSiUpXX30Q.png"},
+	{ID: 1024, Name: "Prime Video", Type: SourceNetwork, LogoPath: "/w7HfLNm9CWwRmAMU58udl2L7We7.png"},
+	{ID: 453, Name: "Hulu", Type: SourceNetwork, LogoPath: "/pqUTCleNUiTLAVlelGxUgWn1ELh.png"},
+	{ID: 3186, Name: "HBO Max", Type: SourceNetwork, LogoPath: "/nmU0UMDJB3dRRQSTUqawzF2Od1a.png"},
+	{ID: 4330, Name: "Paramount+", Type: SourceNetwork, LogoPath: "/fi83B1oztoS47xxcemFdPMhIzK.png"},
+	{ID: 3353, Name: "Peacock", Type: SourceNetwork, LogoPath: "/gIAcGTjKKr0KOHL5s4O36roJ8p7.png"},
+	{ID: 88, Name: "FX", Type: SourceNetwork, LogoPath: "/aexGjtcs42DgRtZh7zOxayiry4J.png"},
+	{ID: 174, Name: "AMC", Type: SourceNetwork, LogoPath: "/pmvRmATOCaDykE6JrVoeYxlFHw3.png"},
+	{ID: 67, Name: "Showtime", Type: SourceNetwork, LogoPath: "/Allse9kbjiP6ExaQrnSpIhkurEi.png"},
+	{ID: 1112, Name: "Crunchyroll", Type: SourceNetwork, LogoPath: "/qqyXcZlJQKlRmAD1TCKV7mGLQlt.png"},
+	{ID: 80, Name: "Adult Swim", Type: SourceNetwork, LogoPath: "/tHZPHOLc6iF27G34cAZGPsMtMSy.png"},
+	{ID: 4, Name: "BBC One", Type: SourceNetwork, LogoPath: "/uJjcCg3O4DMEjM0xtno9OWFciRP.png"},
+	{ID: 71, Name: "The CW", Type: SourceNetwork, LogoPath: "/hEpcdJ4O6eitG9ADSnDXNUrlovS.png"},
+	{ID: 56, Name: "Cartoon Network", Type: SourceNetwork, LogoPath: "/c5OC6oVCg6QP4eqzW6XIq17CQjI.png"},
+	{ID: 318, Name: "STARZ", Type: SourceNetwork, LogoPath: "/qx3Y9LCaK4mq1ykFuDIfjshlo3U.png"},
 }
 
 var discoverStudios = []discoverSource{
-	{ID: 41077, Name: "A24", Type: SourceStudio},
-	{ID: 174, Name: "Warner Bros.", Type: SourceStudio},
-	{ID: 33, Name: "Universal", Type: SourceStudio},
-	{ID: 10342, Name: "Studio Ghibli", Type: SourceStudio},
-	{ID: 4, Name: "Paramount", Type: SourceStudio},
-	{ID: 923, Name: "Legendary", Type: SourceStudio},
+	{ID: 41077, Name: "A24", Type: SourceStudio, LogoPath: "/1ZXsGaFPgrgS6ZZGS37AqD5uU12.png"},
+	{ID: 174, Name: "Warner Bros.", Type: SourceStudio, LogoPath: "/zhD3hhtKB5qyv7ZeL4uLpNxgMVU.png"},
+	{ID: 33, Name: "Universal", Type: SourceStudio, LogoPath: "/8lvHyhjr8oUKOOy2dKXoALWKdp0.png"},
+	{ID: 10342, Name: "Studio Ghibli", Type: SourceStudio, LogoPath: "/uFuxPEZRUcBTEiYIxjHJq62Vr77.png"},
+	{ID: 4, Name: "Paramount", Type: SourceStudio, LogoPath: "/jay6WcMgagAklUt7i9Euwj1pzTF.png"},
+	{ID: 923, Name: "Legendary", Type: SourceStudio, LogoPath: "/5UQsZrfbfG2dYJbx8DxfoTr2Bvu.png"},
+	{ID: 420, Name: "Marvel", Type: SourceStudio, LogoPath: "/hUzeosd33nzE5MCNsZxCGEKTXaQ.png", Lockup: true},
+	{ID: 3, Name: "Pixar", Type: SourceStudio, LogoPath: "/1TjvGVDMYsj6JBxOAkUHpPEwLf7.png"},
+	{ID: 2, Name: "Disney", Type: SourceStudio, LogoPath: "/wdrCwmRnLFJhEoH8GSfymY85KHT.png"},
+	{ID: 5, Name: "Columbia", Type: SourceStudio, LogoPath: "/71BqEFAF4V3qjjMPCpLuyJFB9A.png"},
+	{ID: 25, Name: "20th Century", Type: SourceStudio, LogoPath: "/nM2MfoMqzJQRiSynsDabOtFKetD.png"},
+	{ID: 35, Name: "Lionsgate", Type: SourceStudio, LogoPath: "/wxrHa3nZ1K4zo65p56991INkGo6.png"},
+	{ID: 12, Name: "New Line", Type: SourceStudio, LogoPath: "/2ycs64eqV5rqKYHyQK0GVoKGvfX.png"},
+	{ID: 21, Name: "MGM", Type: SourceStudio, LogoPath: "/usUnaYV6hQnlVAXP6r4HwrlLFPG.png"},
+	{ID: 7, Name: "DreamWorks", Type: SourceStudio, LogoPath: "/zcKhWbxFJ4CohZ9dLBMxmOArTVn.png"},
+	{ID: 1, Name: "Lucasfilm", Type: SourceStudio, LogoPath: "/tlVSws0RvvtPBwViUyOFAO0vcQS.png"},
+	{ID: 3172, Name: "Blumhouse", Type: SourceStudio, LogoPath: "/rzKluDcRkIwHZK2pHsiT667A2Kw.png"},
+	{ID: 6704, Name: "Illumination", Type: SourceStudio, LogoPath: "/fOG2oY4m1YuYTQh4bMqqZkmgOAI.png"},
 }
 
 // discoverItemJSON is one provider title decorated with what Caravan knows
@@ -76,14 +114,23 @@ type discoverSourceJSON struct {
 	ID   int64  `json:"id"`
 	Name string `json:"name"`
 	Type string `json:"type"`
+	// LogoURL is the absolute TMDB image URL, empty when the shelf has no mark.
+	LogoURL string `json:"logo_url"`
+	Lockup  bool   `json:"lockup"`
 }
 
 type discoverHomeResponse struct {
-	Trending      []discoverItemJSON   `json:"trending"`
-	PopularMovies []discoverItemJSON   `json:"popular_movies"`
-	PopularSeries []discoverItemJSON   `json:"popular_series"`
-	Networks      []discoverSourceJSON `json:"networks"`
-	Studios       []discoverSourceJSON `json:"studios"`
+	Trending       []discoverItemJSON   `json:"trending"`
+	PopularMovies  []discoverItemJSON   `json:"popular_movies"`
+	UpcomingMovies []discoverItemJSON   `json:"upcoming_movies"`
+	NowPlaying     []discoverItemJSON   `json:"now_playing"`
+	PopularSeries  []discoverItemJSON   `json:"popular_series"`
+	UpcomingSeries []discoverItemJSON   `json:"upcoming_series"`
+	AiringSeries   []discoverItemJSON   `json:"airing_series"`
+	MovieGenres    []discoverNamedJSON  `json:"movie_genres"`
+	SeriesGenres   []discoverNamedJSON  `json:"series_genres"`
+	Networks       []discoverSourceJSON `json:"networks"`
+	Studios        []discoverSourceJSON `json:"studios"`
 }
 
 type discoverBrowseResponse struct {
@@ -134,13 +181,14 @@ type discoverTitleResponse struct {
 }
 
 // handleDiscoverHome serves the discover landing page: this week's trending
-// titles and the two popularity lists, plus the curated shelves the browse
-// endpoint takes ids from.
+// titles, the movie and series editorial shelves, the two genre vocabularies,
+// and the curated network/studio tiles the browse endpoint takes ids from.
 //
-// The three provider calls are sequential (each fetching a couple of pages —
-// see tmdb's homePages). A discover page is one screen and TMDB is rate
-// limited; those round trips are the honest cost of the data, and racing them
-// would buy latency at the price of a bigger burst.
+// The required popularity lists fail the page; extras (upcoming, now playing,
+// currently airing, genres) degrade to empty so one missing TMDB list does not
+// blank Featured. A limit of 4 keeps the burst inside TMDB's usual 40/10s
+// window — each shelf is two pages, and racing every call at once is how a
+// key gets a 429 on first paint.
 func (s *server) handleDiscoverHome(w http.ResponseWriter, r *http.Request) {
 	provider, ok := s.discovery(w, r)
 	if !ok {
@@ -148,34 +196,153 @@ func (s *server) handleDiscoverHome(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 
-	trending, err := provider.TrendingWeek(ctx)
-	if err != nil {
-		s.writeDiscoverError(w, r, "trending", err)
-		return
-	}
-	movies, err := provider.PopularMovies(ctx)
-	if err != nil {
-		s.writeDiscoverError(w, r, "popular movies", err)
-		return
-	}
-	series, err := provider.PopularSeries(ctx)
-	if err != nil {
-		s.writeDiscoverError(w, r, "popular series", err)
+	var (
+		trending       []core.DiscoverItem
+		movies         []core.DiscoverItem
+		series         []core.DiscoverItem
+		upcomingMovies []core.DiscoverItem
+		nowPlaying     []core.DiscoverItem
+		upcomingSeries []core.DiscoverItem
+		airing         []core.DiscoverItem
+		movieGenres    []core.DiscoverGenre
+		seriesGenres   []core.DiscoverGenre
+	)
+
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(4)
+
+	g.Go(func() error {
+		var err error
+		trending, err = provider.TrendingWeek(gctx)
+		if err != nil {
+			return fmtDiscoverShelfError("trending", err)
+		}
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		movies, err = provider.PopularMovies(gctx)
+		if err != nil {
+			return fmtDiscoverShelfError("popular movies", err)
+		}
+		return nil
+	})
+	g.Go(func() error {
+		var err error
+		series, err = provider.PopularSeries(gctx)
+		if err != nil {
+			return fmtDiscoverShelfError("popular series", err)
+		}
+		return nil
+	})
+	g.Go(func() error {
+		items, err := provider.UpcomingMovies(gctx)
+		if err != nil {
+			s.log.Error("discover extra shelf failed", "shelf", "upcoming movies", "error", err)
+			return nil
+		}
+		upcomingMovies = items
+		return nil
+	})
+	g.Go(func() error {
+		items, err := provider.NowPlayingMovies(gctx)
+		if err != nil {
+			s.log.Error("discover extra shelf failed", "shelf", "now playing", "error", err)
+			return nil
+		}
+		nowPlaying = items
+		return nil
+	})
+	g.Go(func() error {
+		items, err := provider.UpcomingSeries(gctx)
+		if err != nil {
+			s.log.Error("discover extra shelf failed", "shelf", "upcoming series", "error", err)
+			return nil
+		}
+		upcomingSeries = items
+		return nil
+	})
+	g.Go(func() error {
+		items, err := provider.AiringSeries(gctx)
+		if err != nil {
+			s.log.Error("discover extra shelf failed", "shelf", "airing series", "error", err)
+			return nil
+		}
+		airing = items
+		return nil
+	})
+	g.Go(func() error {
+		items, err := provider.Genres(gctx, MediaTypeMovie)
+		if err != nil {
+			s.log.Error("discover extra shelf failed", "shelf", "movie genres", "error", err)
+			return nil
+		}
+		movieGenres = items
+		return nil
+	})
+	g.Go(func() error {
+		items, err := provider.Genres(gctx, MediaTypeSeries)
+		if err != nil {
+			s.log.Error("discover extra shelf failed", "shelf", "series genres", "error", err)
+			return nil
+		}
+		seriesGenres = items
+		return nil
+	})
+
+	if err := g.Wait(); err != nil {
+		s.writeDiscoverError(w, r, discoverShelfName(err), err)
 		return
 	}
 
-	state, err := s.libraryStateFor(ctx, trending, movies, series)
+	state, err := s.libraryStateFor(ctx, trending, movies, series, upcomingMovies, nowPlaying, upcomingSeries, airing)
 	if err != nil {
 		s.writeStoreError(w, "read library state", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, discoverHomeResponse{
-		Trending:      state.decorateAll(trending),
-		PopularMovies: state.decorateAll(movies),
-		PopularSeries: state.decorateAll(series),
-		Networks:      sourceDTOs(discoverNetworks),
-		Studios:       sourceDTOs(discoverStudios),
+		Trending:       state.decorateAll(trending),
+		PopularMovies:  state.decorateAll(movies),
+		UpcomingMovies: state.decorateAll(upcomingMovies),
+		NowPlaying:     state.decorateAll(nowPlaying),
+		PopularSeries:  state.decorateAll(series),
+		UpcomingSeries: state.decorateAll(upcomingSeries),
+		AiringSeries:   state.decorateAll(airing),
+		MovieGenres:    namedDTOs(movieGenres),
+		SeriesGenres:   namedDTOs(seriesGenres),
+		Networks:       sourceDTOs(discoverNetworks),
+		Studios:        sourceDTOs(discoverStudios),
 	})
+}
+
+// shelfError names which required shelf failed so writeDiscoverError can
+// still log "trending" rather than a generic "home".
+type shelfError struct {
+	shelf string
+	err   error
+}
+
+func (e *shelfError) Error() string { return e.err.Error() }
+func (e *shelfError) Unwrap() error { return e.err }
+
+func fmtDiscoverShelfError(shelf string, err error) error {
+	return &shelfError{shelf: shelf, err: err}
+}
+
+func discoverShelfName(err error) string {
+	var se *shelfError
+	if errors.As(err, &se) && se.shelf != "" {
+		return se.shelf
+	}
+	return "home"
+}
+
+func namedDTOs(list []core.DiscoverGenre) []discoverNamedJSON {
+	out := make([]discoverNamedJSON, 0, len(list))
+	for _, g := range list {
+		out = append(out, discoverNamedJSON{TMDBID: g.TMDBID, Name: g.Name})
+	}
+	return out
 }
 
 // handleDiscoverBrowse serves one page of a curated shelf. A network browses
@@ -504,7 +671,20 @@ func findSource(sourceType string, id int64) (discoverSource, bool) {
 }
 
 func sourceDTO(src discoverSource) discoverSourceJSON {
-	return discoverSourceJSON{ID: src.ID, Name: src.Name, Type: src.Type}
+	return discoverSourceJSON{
+		ID:      src.ID,
+		Name:    src.Name,
+		Type:    src.Type,
+		LogoURL: sourceLogoURL(src.LogoPath),
+		Lockup:  src.Lockup,
+	}
+}
+
+func sourceLogoURL(path string) string {
+	if path == "" {
+		return ""
+	}
+	return discoverLogoBaseURL + path
 }
 
 func sourceDTOs(list []discoverSource) []discoverSourceJSON {

@@ -1,14 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import type { Indexer, IndexerCategory } from './api/types';
+import type { Indexer, IndexerCategory, IndexerDefinition } from './api/types';
 import {
   allCategoryIds,
+  catalogContentValues,
+  catalogLanguages,
+  catalogPrivacyValues,
   categoryGroups,
+  filterDefinitions,
+  feedURLFromBase,
   formatCategories,
   isAdultCategory,
+  indexerFormURL,
   parseCategories,
   searchCategoryOptions,
   selectionState,
   toggleCategory,
+  toggleFilterValue,
   unknownCategoryIds,
   validateIndexer,
 } from './indexer';
@@ -68,6 +75,158 @@ describe('validateIndexer', () => {
 
   it('rejects a URL without a scheme, which fetches as a relative path', () => {
     expect(validateIndexer({ name: 'Jackett', url: '127.0.0.1:9117' })).toMatch(/http/i);
+  });
+
+  it('requires an API key only when the definition says so', () => {
+    expect(
+      validateIndexer({ name: '1337x', url: 'https://1337x.to', requiresAPIKey: false }),
+    ).toBeNull();
+    expect(
+      validateIndexer({ name: 'NZBgeek', url: 'https://api.nzbgeek.info', requiresAPIKey: true }),
+    ).toMatch(/API key/i);
+    expect(
+      validateIndexer({
+        name: 'NZBgeek',
+        url: 'https://api.nzbgeek.info',
+        requiresAPIKey: true,
+        apiKey: 'secret',
+      }),
+    ).toBeNull();
+    expect(
+      validateIndexer({
+        name: 'NZBgeek',
+        url: 'https://api.nzbgeek.info',
+        requiresAPIKey: true,
+        hasStoredKey: true,
+      }),
+    ).toBeNull();
+  });
+});
+
+describe('filterDefinitions', () => {
+  const defs: IndexerDefinition[] = [
+    {
+      id: 'nzbgeek',
+      name: 'NZBgeek',
+      kind: 'usenet' as const,
+      protocol: 'newznab' as const,
+      privacy: 'private' as const,
+      language: 'en-US',
+      description: 'Private Usenet indexer.',
+      info_url: 'https://nzbgeek.info',
+      url: 'https://api.nzbgeek.info',
+      urls: ['https://api.nzbgeek.info'],
+      url_placeholder: '',
+      requires_api_key: true,
+      categories: [2000],
+      content: ['movies', 'tv', 'adult'],
+    },
+    {
+      id: '1337x',
+      name: '1337x',
+      kind: 'torrent' as const,
+      protocol: 'torznab' as const,
+      privacy: 'public' as const,
+      language: 'en-US',
+      description: 'Public torrent site',
+      info_url: 'https://1337x.to/',
+      url: 'https://1337x.to',
+      urls: ['https://1337x.to'],
+      url_placeholder: 'http://127.0.0.1:9117/api/v2.0/indexers/1337x/results/torznab',
+      requires_api_key: true,
+      categories: [],
+      content: ['movies', 'tv', 'anime'],
+    },
+    {
+      id: 'nyaasi',
+      name: 'Nyaa.si',
+      kind: 'torrent' as const,
+      protocol: 'torznab' as const,
+      privacy: 'public' as const,
+      language: 'en-US',
+      description: 'Public anime torrent site',
+      info_url: 'https://nyaa.si/',
+      url: 'https://nyaa.si',
+      urls: ['https://nyaa.si'],
+      url_placeholder: '',
+      requires_api_key: true,
+      categories: [],
+      content: ['anime'],
+    },
+    {
+      id: 'beyondhd',
+      name: 'BeyondHD',
+      kind: 'torrent' as const,
+      protocol: 'torznab' as const,
+      privacy: 'private' as const,
+      language: 'en-US',
+      description: 'Private HD tracker',
+      info_url: '',
+      url: 'https://beyond-hd.me',
+      urls: ['https://beyond-hd.me'],
+      url_placeholder: '',
+      requires_api_key: true,
+      categories: [],
+      content: ['movies', 'tv'],
+    },
+    {
+      id: 'yggtorrent',
+      name: 'Yggtorrent',
+      kind: 'torrent' as const,
+      protocol: 'torznab' as const,
+      privacy: 'private' as const,
+      language: 'fr-FR',
+      description: 'French private tracker',
+      info_url: '',
+      url: 'https://www.yggtorrent.top',
+      urls: ['https://www.yggtorrent.top'],
+      url_placeholder: '',
+      requires_api_key: true,
+      categories: [],
+      content: ['movies', 'tv'],
+    },
+  ];
+
+  it('returns the whole list for a blank query', () => {
+    expect(filterDefinitions(defs, '  ')).toHaveLength(5);
+  });
+
+  it('matches name, id, and description', () => {
+    expect(filterDefinitions(defs, 'geek').map((d) => d.id)).toEqual(['nzbgeek']);
+    expect(filterDefinitions(defs, '1337').map((d) => d.id)).toEqual(['1337x']);
+    expect(filterDefinitions(defs, 'french').map((d) => d.id)).toEqual(['yggtorrent']);
+  });
+
+  it('filters by privacy, language, and content, ANDed across facets', () => {
+    expect(filterDefinitions(defs, '', { privacy: ['public'] }).map((d) => d.id)).toEqual([
+      '1337x',
+      'nyaasi',
+    ]);
+    expect(filterDefinitions(defs, '', { languages: ['fr-FR'] }).map((d) => d.id)).toEqual([
+      'yggtorrent',
+    ]);
+    expect(filterDefinitions(defs, '', { content: ['anime'] }).map((d) => d.id)).toEqual([
+      '1337x',
+      'nyaasi',
+    ]);
+    expect(
+      filterDefinitions(defs, '', { privacy: ['public'], content: ['anime'] }).map((d) => d.id),
+    ).toEqual(['1337x', 'nyaasi']);
+    expect(
+      filterDefinitions(defs, 'nyaa', { privacy: ['public'], content: ['anime'] }).map((d) => d.id),
+    ).toEqual(['nyaasi']);
+    expect(filterDefinitions(defs, '', { privacy: ['semi-private'] })).toEqual([]);
+  });
+
+  it('lists the facet values present in the loaded catalog', () => {
+    expect(catalogPrivacyValues(defs)).toEqual(['public', 'private']);
+    expect(catalogLanguages(defs)).toEqual(['en-US', 'fr-FR']);
+    expect(catalogContentValues(defs)).toEqual(['movies', 'tv', 'anime', 'adult']);
+  });
+
+  it('toggles a filter value on and off', () => {
+    expect(toggleFilterValue(['public'], 'private')).toEqual(['public', 'private']);
+    expect(toggleFilterValue(['public', 'private'], 'public')).toEqual(['private']);
   });
 });
 
@@ -235,5 +394,67 @@ describe('isAdultCategory', () => {
     expect(isAdultCategory(6999)).toBe(true);
     expect(isAdultCategory(5999)).toBe(false);
     expect(isAdultCategory(7000)).toBe(false);
+  });
+});
+
+describe('indexerFormURL', () => {
+  it('builds the feed URL from the first published site', () => {
+    expect(
+      indexerFormURL({
+        kind: 'torrent',
+        url: '',
+        urls: ['https://1337x.st/', 'https://x1337x.ws/'],
+        url_placeholder: 'http://127.0.0.1:9117/api/v2.0/indexers/1337x/results/torznab',
+      }),
+    ).toBe('https://1337x.st/api');
+  });
+
+  it('appends /api to a native torrent host', () => {
+    expect(
+      indexerFormURL({
+        kind: 'torrent',
+        url: 'https://feed.animetosho.org',
+        url_placeholder: 'http://127.0.0.1:9117/api/v2.0/indexers/animetosho/results/torznab',
+      }),
+    ).toBe('https://feed.animetosho.org/api');
+  });
+
+  it('preserves an explicit nonstandard Torznab endpoint', () => {
+    expect(feedURLFromBase('https://tntracker.org/api/torznab')).toBe(
+      'https://tntracker.org/api/torznab',
+    );
+  });
+
+  it('appends /api to a Usenet API host', () => {
+    expect(
+      indexerFormURL({
+        kind: 'usenet',
+        url: 'https://api.nzbgeek.info',
+        url_placeholder: '',
+      }),
+    ).toBe('https://api.nzbgeek.info/api');
+  });
+
+  it('keeps a Jackett placeholder when there is no site address', () => {
+    expect(
+      indexerFormURL({
+        kind: 'generic',
+        url: '',
+        urls: [],
+        url_placeholder: 'http://127.0.0.1:9117/api/v2.0/indexers/INDEXER/results/torznab',
+      }),
+    ).toBe('http://127.0.0.1:9117/api/v2.0/indexers/INDEXER/results/torznab');
+  });
+
+  it('keeps a local definition on its tracker base', () => {
+    expect(
+      indexerFormURL({
+        kind: 'torrent',
+        definition_id: 'thepiratebay',
+        url: 'https://thepiratebay.org',
+        urls: ['https://thepiratebay.org/'],
+        url_placeholder: '',
+      }),
+    ).toBe('https://thepiratebay.org');
   });
 });

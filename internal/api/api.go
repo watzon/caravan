@@ -26,6 +26,8 @@ import (
 	"time"
 
 	"github.com/watzon/caravan/internal/clients"
+	"github.com/watzon/caravan/internal/indexer/catalog"
+	"github.com/watzon/caravan/internal/indexer/packs"
 	"github.com/watzon/caravan/internal/store"
 )
 
@@ -54,6 +56,12 @@ type server struct {
 	// need it answer 503 rather than the server refusing to start.
 	engine   EngineProvider
 	indexers IndexerFactory
+	// localDefinitions is the executable runtime registry's validation seam.
+	// It never feeds the advertised static catalog.
+	localDefinitions            LocalDefinitionLookup
+	exactLocalDefinitions       ExactLocalDefinitionLookup
+	definitionInventoryStatuses []catalog.ExecutionStatus
+	definitionPacks             *packs.Service
 
 	// downloadClients is the phase-6 external-client registry (SPEC §5.1).
 	// Nil means the process-wide one; see (*server).clients.
@@ -159,6 +167,11 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("GET /system/status", s.handleSystemStatus)
 	api.HandleFunc("GET /system/backup", s.handleBackup)
 	api.HandleFunc("POST /system/restore", s.handleRestore)
+	api.HandleFunc("GET /definition-packs", s.handleListDefinitionPacks)
+	api.HandleFunc("POST /definition-packs/preview", s.handlePreviewDefinitionPack)
+	api.HandleFunc("POST /definition-packs/install", s.handleInstallDefinitionPack)
+	api.HandleFunc("POST /definition-packs/activate", s.handleActivateDefinitionPack)
+	api.HandleFunc("POST /definition-packs/rollback", s.handleRollbackDefinitionPack)
 
 	// The portable integrity flow (SPEC §2.3, §13). Both are deliberately
 	// inside the auth gate: stopping the server and clearing the dirty flag
@@ -337,6 +350,18 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("GET /libraries/{id}/access", s.handleGetLibraryAccess)
 	api.HandleFunc("PUT /libraries/{id}/access", s.handleSetLibraryAccess)
 
+	// Stash-box endpoints are metadata credentials, same as TMDB: an admin
+	// configures them on Settings → Metadata before (or after) creating an
+	// adult library. They keep the /adult/ URL so existing clients still
+	// find them, but they sit outside requireAdult so the first library can
+	// be added with a box already on file. Admin-only by the ordinary rule.
+	api.HandleFunc("GET /adult/stashbox-instances", s.handleListStashboxInstances)
+	api.HandleFunc("POST /adult/stashbox-instances", s.handleCreateStashboxInstance)
+	api.HandleFunc("POST /adult/stashbox-instances/test", s.handleTestStashboxInstanceConfig)
+	api.HandleFunc("PUT /adult/stashbox-instances/{id}", s.handleUpdateStashboxInstance)
+	api.HandleFunc("DELETE /adult/stashbox-instances/{id}", s.handleDeleteStashboxInstance)
+	api.HandleFunc("POST /adult/stashbox-instances/{id}/test", s.handleTestStashboxInstance)
+
 	// The adult module (PLAN phase 9). Its routes are registered on a mux of
 	// their own and mounted behind requireAdult, so the gate is a property of
 	// where a route lives rather than of what its handler remembers to check:
@@ -379,18 +404,10 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	adult.HandleFunc("GET /adult/stash", s.handleGetStash)
 	adult.HandleFunc("POST /adult/stash", s.handleSetStash)
 	adult.HandleFunc("POST /adult/stash/test", s.handleTestStash)
-	// The configured stash-box endpoints (PLAN Part 2 phase 3). They are the
-	// adult module's metadata sources, so they belong on this subtree even
-	// though the screen that edits them is Settings → Metadata: a list of
-	// catalogues a household subscribes to is exactly what "absent when off"
-	// has to cover. /test with no id in the path probes an unsaved
-	// configuration, as the indexer category and download-client endpoints do.
-	adult.HandleFunc("GET /adult/stashbox-instances", s.handleListStashboxInstances)
-	adult.HandleFunc("POST /adult/stashbox-instances", s.handleCreateStashboxInstance)
-	adult.HandleFunc("POST /adult/stashbox-instances/test", s.handleTestStashboxInstanceConfig)
-	adult.HandleFunc("PUT /adult/stashbox-instances/{id}", s.handleUpdateStashboxInstance)
-	adult.HandleFunc("DELETE /adult/stashbox-instances/{id}", s.handleDeleteStashboxInstance)
-	adult.HandleFunc("POST /adult/stashbox-instances/{id}/test", s.handleTestStashboxInstance)
+	// The configured stash-box endpoints live on the admin mux, not this
+	// subtree. Settings → Metadata has to edit them before the first adult
+	// library exists — that library is the door into /adult, so putting CRUD
+	// behind requireAdult made the warning on Add library unsatisfiable.
 	// The module has no master switch left to register. Turning it on is
 	// POST /libraries with kind=adult — the one door into this subtree, and the
 	// reason it sits outside it — and turning it off is PATCH {active:false} on
@@ -399,9 +416,12 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 
 	api.HandleFunc("GET /indexers", s.handleListIndexers)
 	api.HandleFunc("POST /indexers", s.handleCreateIndexer)
+	api.HandleFunc("GET /indexers/catalog", s.handleIndexerCatalog)
 	api.HandleFunc("PUT /indexers/{id}", s.handleUpdateIndexer)
 	api.HandleFunc("DELETE /indexers/{id}", s.handleDeleteIndexer)
 	api.HandleFunc("POST /indexers/{id}/test", s.handleTestIndexer)
+	api.HandleFunc("GET /indexers/{id}/feed", s.handleIndexerFeed)
+	api.HandleFunc("POST /indexers/test", s.handleTestIndexerConfig)
 	api.HandleFunc("GET /indexers/{id}/categories", s.handleStoredIndexerCategories)
 	api.HandleFunc("POST /indexers/categories", s.handleIndexerCategories)
 

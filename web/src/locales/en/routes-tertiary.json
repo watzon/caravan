@@ -219,8 +219,13 @@
   "route.exploreAdult.loading": "Loading...",
   "route.exploreAdult.loadMore": "Load more",
   "route.exploreAdult.requested": "Requested {title}",
+  "route.exploreAdult.recentScenes": "Recently released",
+  "route.exploreAdult.newlyAdded": "Newly added",
+  "route.exploreAdult.browseBySite": "Browse by site",
+  "route.exploreAdult.featuredFirst": "Just released",
 
   "route.exploreTitles.catalogNote": "Browse the full catalog with filters.",
+  "route.exploreTitles.landingNote": "Editorial shelves first. Apply a filter, or open a heading, to browse the full list.",
   "route.exploreTitles.genre": "Genre",
   "route.exploreTitles.noGenres": "No genres. The provider did not respond.",
   "route.exploreTitles.castCrew": "Cast & crew",

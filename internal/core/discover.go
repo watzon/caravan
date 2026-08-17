@@ -269,6 +269,15 @@ type DiscoverProvider interface {
 	// PopularMovies and PopularSeries return the provider's popularity lists.
 	PopularMovies(ctx context.Context) ([]DiscoverItem, error)
 	PopularSeries(ctx context.Context) ([]DiscoverItem, error)
+	// UpcomingMovies is theatrical upcoming: titles with a release date still
+	// ahead. UpcomingSeries is any series whose first air date is today or
+	// later — TV has no theatrical window, so "upcoming" is the date bound.
+	UpcomingMovies(ctx context.Context) ([]DiscoverItem, error)
+	UpcomingSeries(ctx context.Context) ([]DiscoverItem, error)
+	// NowPlayingMovies is currently in theatres. AiringSeries is currently
+	// on the air (a season in progress), which is not the same as upcoming.
+	NowPlayingMovies(ctx context.Context) ([]DiscoverItem, error)
+	AiringSeries(ctx context.Context) ([]DiscoverItem, error)
 	// MoviesByCompany browses one production company's movies. page is
 	// 1-based; anything lower is clamped.
 	MoviesByCompany(ctx context.Context, companyID int64, page int) (*DiscoverPage, error)

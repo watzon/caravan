@@ -32,10 +32,13 @@ function item(tmdbID: number): DiscoverItem {
 let host: HTMLElement;
 let app: Record<string, unknown> | undefined;
 
-function show(items: DiscoverItem[]) {
+function show(items: DiscoverItem[], href = '') {
   host = document.createElement('div');
   document.body.appendChild(host);
-  app = mount(DiscoverShelf, { target: host, props: { title: 'Trending', items } });
+  app = mount(DiscoverShelf, {
+    target: host,
+    props: { title: 'Trending', items, href },
+  });
   flushSync();
 }
 
@@ -66,6 +69,24 @@ afterEach(() => {
 });
 
 describe('DiscoverShelf', () => {
+  it('keeps the wide row inside a shrinkable scroller', () => {
+    show(Array.from({ length: 12 }, (_, i) => item(i + 1)));
+
+    const row = host.querySelector<HTMLElement>('.overflow-x-auto');
+    expect(row?.classList.contains('w-full')).toBe(true);
+    expect(row?.classList.contains('min-w-0')).toBe(true);
+    expect(row?.classList.contains('max-w-full')).toBe(true);
+    expect(row?.parentElement?.classList.contains('min-w-0')).toBe(true);
+  });
+
+  it('turns the heading into a link when the shelf has a wider view', () => {
+    show([item(1)], '/discover/movies?view=grid');
+
+    const heading = host.querySelector('h2 a');
+    expect(heading?.getAttribute('href')).toBe('/discover/movies?view=grid');
+    expect(heading?.textContent).toBe('Trending');
+  });
+
   it('renders every item it is given, not a sample', () => {
     show(Array.from({ length: 25 }, (_, i) => item(i + 1)));
 

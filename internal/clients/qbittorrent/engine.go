@@ -13,6 +13,7 @@ import (
 
 	"github.com/watzon/caravan/internal/clients"
 	"github.com/watzon/caravan/internal/core"
+	"github.com/watzon/caravan/internal/torrentmeta"
 )
 
 // EngineName is what downloads handed to qBittorrent record in their
@@ -95,15 +96,32 @@ func (e *Engine) Add(ctx context.Context, r core.Release, opts core.AddOpts) (co
 		return "", fmt.Errorf("qbittorrent: release %q is usenet: qBittorrent only handles torrents", r.Title)
 	}
 	link := strings.TrimSpace(r.DownloadURL)
-	if link == "" {
+	if link == "" && len(r.TorrentPayload) == 0 {
 		return "", fmt.Errorf("qbittorrent: release %q has no download url", r.Title)
+	}
+	payloadHash := ""
+	if len(r.TorrentPayload) > 0 {
+		if len(r.TorrentPayload) > core.MaxTorrentPayloadBytes {
+			return "", fmt.Errorf("qbittorrent: torrent payload exceeds size limit")
+		}
+		mi, _, err := torrentmeta.Parse(r.TorrentPayload)
+		if err != nil {
+			return "", fmt.Errorf("qbittorrent: read torrent payload: %w", err)
+		}
+		payloadHash = fmt.Sprintf("%x", mi.HashInfoBytes())
+		if reported := normalizeHash(r.InfoHash); reported != "" && reported != payloadHash {
+			return "", fmt.Errorf("qbittorrent: torrent payload info hash does not match release")
+		}
 	}
 
 	// The info hash is the download id, and it is knowable up front for a
 	// magnet link or an indexer that reported one. When it is not — a
 	// .torrent URL qBittorrent has to fetch and parse — the only honest answer
 	// is to watch our tag for the torrent that appears.
-	want := normalizeHash(r.InfoHash)
+	want := payloadHash
+	if want == "" {
+		want = normalizeHash(r.InfoHash)
+	}
 	if want == "" {
 		want = magnetHash(link)
 	}
@@ -114,9 +132,13 @@ func (e *Engine) Add(ctx context.Context, r core.Release, opts core.AddOpts) (co
 			return "", err
 		}
 	}
+	requestURL := link
+	if len(r.TorrentPayload) > 0 {
+		requestURL = ""
+	}
 
 	if err := e.c.Add(ctx, AddRequest{
-		URL: link, Category: e.cfg.Category, Tags: []string{Tag},
+		URL: requestURL, Payload: r.TorrentPayload, Category: e.cfg.Category, Tags: []string{Tag},
 		Paused: opts.Paused,
 	}); err != nil {
 		return "", err

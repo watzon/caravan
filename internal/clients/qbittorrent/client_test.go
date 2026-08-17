@@ -1,6 +1,7 @@
 package qbittorrent
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/http"
@@ -215,6 +216,45 @@ func TestAddSendsURLCategoryAndTag(t *testing.T) {
 	}
 	if _, ok := form["savepath"]; ok {
 		t.Fatalf("savepath sent: qBittorrent's own configuration decides where it writes")
+	}
+}
+
+func TestAddRequiresExactlyOneTorrentSource(t *testing.T) {
+	client, fake := newClient(t)
+	for name, request := range map[string]AddRequest{
+		"neither": {},
+		"both":    {URL: "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567", Payload: []byte("payload")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := client.Add(context.Background(), request); err == nil {
+				t.Fatal("Add succeeded")
+			}
+		})
+	}
+	if calls := fake.seen("/torrents/add"); len(calls) != 0 {
+		t.Fatalf("qBittorrent add calls = %d, want 0", len(calls))
+	}
+}
+
+func TestAddTorrentPayloadReloginsAndReplaysMultipartBody(t *testing.T) {
+	client, fake := newClient(t)
+	if _, err := client.WebAPIVersion(context.Background()); err != nil {
+		t.Fatalf("WebAPIVersion: %v", err)
+	}
+	fake.expireSessions()
+	payload := []byte("replayable torrent payload")
+	if err := client.Add(context.Background(), AddRequest{Payload: payload, Tags: []string{Tag}}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if got := fake.loginCount(); got != 2 {
+		t.Fatalf("login count = %d, want initial login plus one retry", got)
+	}
+	if calls := fake.seen("/torrents/add"); len(calls) != 2 {
+		t.Fatalf("qBittorrent add attempts = %d, want 2", len(calls))
+	}
+	payloads := fake.payloads()
+	if len(payloads) != 1 || !bytes.Equal(payloads[0], payload) {
+		t.Fatalf("uploaded payloads = %q", payloads)
 	}
 }
 

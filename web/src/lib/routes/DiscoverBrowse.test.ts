@@ -31,7 +31,7 @@ function item(tmdbID: number): DiscoverItem {
 /** One page of the stub shelf: two rows whose ids follow the page number. */
 function pageBody(page: number, totalPages = 5) {
   return {
-    source: { id: 213, name: 'Netflix', type: 'network' },
+    source: { id: 213, name: 'Netflix', type: 'network', logo_url: '' },
     page,
     total_pages: totalPages,
     items: [item(page * 10), item(page * 10 + 1)],
@@ -113,11 +113,26 @@ async function mountBrowse() {
 }
 
 describe('DiscoverBrowse — paging', () => {
+  it('uses the source logo in the header when the payload has one', async () => {
+    const logo = 'https://images.test/w185/netflix.png';
+    served = (page) => ({
+      ...pageBody(page),
+      source: { id: 213, name: 'Netflix', type: 'network' as const, logo_url: logo },
+    });
+
+    await mountBrowse();
+
+    const img = host.querySelector(`img[src="${logo}"]`);
+    expect(img).not.toBeNull();
+    expect(img?.getAttribute('alt')).toBe('');
+    expect(host.textContent).toContain('Netflix');
+  });
+
   it('exposes the complete source name when the heading truncates', async () => {
     const sourceName = 'A Curated Network Name That Is Longer Than the Browse Header';
     served = (page) => ({
       ...pageBody(page),
-      source: { id: 213, name: sourceName, type: 'network' as const },
+      source: { id: 213, name: sourceName, type: 'network' as const, logo_url: '' },
     });
 
     await mountBrowse();

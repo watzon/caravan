@@ -1,0 +1,63 @@
+id: nyaa
+name: Nyaa
+description: Public torrent search for Japanese media and related releases.
+language: en-US
+type: public
+links:
+  - https://nyaa.si/
+caps:
+  categorymappings:
+    - {id: "1_0", cat: TV/Anime}
+    - {id: "1_1", cat: TV/Anime}
+    - {id: "1_2", cat: TV/Anime}
+    - {id: "1_3", cat: TV/Anime}
+    - {id: "1_4", cat: TV/Anime}
+    - {id: "2_0", cat: Audio}
+    - {id: "2_1", cat: Audio/Lossless}
+    - {id: "2_2", cat: Audio}
+    - {id: "3_0", cat: Books}
+    - {id: "3_1", cat: Books}
+    - {id: "3_2", cat: Books}
+    - {id: "3_3", cat: Books}
+    - {id: "4_0", cat: TV}
+    - {id: "4_1", cat: TV}
+    - {id: "4_2", cat: TV}
+    - {id: "4_3", cat: TV}
+    - {id: "4_4", cat: TV}
+    - {id: "5_0", cat: Other}
+    - {id: "5_1", cat: Other}
+    - {id: "5_2", cat: Other}
+    - {id: "6_0", cat: PC}
+    - {id: "6_1", cat: PC/ISO}
+    - {id: "6_2", cat: PC/Games}
+  modes:
+    search: [q]
+    tv-search: [q, season, ep]
+    movie-search: [q]
+    music-search: [q]
+    book-search: [q]
+search:
+  paths:
+    - path: "?f=0&c=0_0&q={{ urlquery .Keywords }}"
+  rows:
+    selector: "table.torrent-list tr"
+  fields:
+    category:
+      selector: "td:nth-child(1) a"
+      attribute: href
+      filters:
+        - {name: split, args: ["=", -1]}
+    title:
+      selector: "td:nth-child(2) a"
+    details:
+      selector: "td:nth-child(2) a"
+      attribute: href
+    download:
+      selector: "td:nth-child(3) a:last-child"
+      attribute: href
+    size:
+      selector: "td:nth-child(4)"
+    seeders:
+      selector: "td:nth-child(6)"
+    leechers:
+      selector: "td:nth-child(7)"

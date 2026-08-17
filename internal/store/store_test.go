@@ -10,12 +10,12 @@ import (
 	"reflect"
 	"runtime"
 	"sync"
-	"syscall"
 	"testing"
 	"testing/fstest"
 	"time"
 
 	"github.com/watzon/caravan/internal/core"
+	storemigrations "github.com/watzon/caravan/internal/store/migrations"
 	_ "modernc.org/sqlite"
 )
 
@@ -38,8 +38,8 @@ func TestOpenAppliesGooseBaselineMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SchemaVersion: %v", err)
 	}
-	if version != 1 {
-		t.Fatalf("SchemaVersion = %d, want 1", version)
+	if version != int(storemigrations.LatestVersion) {
+		t.Fatalf("SchemaVersion = %d, want %d", version, storemigrations.LatestVersion)
 	}
 
 	// The clean pre-release baseline contains the entire current model. Future
@@ -52,6 +52,7 @@ func TestOpenAppliesGooseBaselineMigration(t *testing.T) {
 		"conversions", "storage_migrations", "usenet_servers", "requests", "users",
 		"libraries", "library_indexers", "remote_path_mappings", "notification_webhooks",
 		"stashbox_instances", "library_access", "sessions", "caravan_schema_migrations",
+		"definition_pack_sources", "definition_pack_revisions", "definition_pack_entries", "indexer_definition_pins",
 	}
 	for _, table := range want {
 		var name string
@@ -103,8 +104,8 @@ func TestOpenRetriesAfterGooseMetadataBootstrap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SchemaVersion: %v", err)
 	}
-	if version != 1 {
-		t.Fatalf("SchemaVersion = %d, want 1", version)
+	if version != int(storemigrations.LatestVersion) {
+		t.Fatalf("SchemaVersion = %d, want %d", version, storemigrations.LatestVersion)
 	}
 }
 
@@ -423,8 +424,8 @@ func TestConcurrentFirstOpenSerializesMigration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("final schema version: %v", err)
 	}
-	if version != 1 {
-		t.Fatalf("final schema version = %d, want 1", version)
+	if version != int(storemigrations.LatestVersion) {
+		t.Fatalf("final schema version = %d, want %d", version, storemigrations.LatestVersion)
 	}
 }
 
@@ -572,8 +573,7 @@ func TestNewSQLiteFilesArePrivate(t *testing.T) {
 		t.Skip("POSIX file modes are not Windows ACL semantics")
 	}
 
-	oldUmask := syscall.Umask(0)
-	defer syscall.Umask(oldUmask)
+	defer setTestUmaskZero()
 
 	path := filepath.Join(t.TempDir(), "caravan.db")
 	st, err := Open(path)

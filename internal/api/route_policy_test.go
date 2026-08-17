@@ -33,6 +33,30 @@ func TestRoutePolicyManifest(t *testing.T) {
 	}
 }
 
+func TestDefinitionPackRoutePoliciesRemainExactAndAdminOnly(t *testing.T) {
+	want := map[string]string{
+		"definition-packs.list":     http.MethodGet + " /definition-packs",
+		"definition-packs.preview":  http.MethodPost + " /definition-packs/preview",
+		"definition-packs.install":  http.MethodPost + " /definition-packs/install",
+		"definition-packs.activate": http.MethodPost + " /definition-packs/activate",
+		"definition-packs.rollback": http.MethodPost + " /definition-packs/rollback",
+	}
+	seen := make(map[string]bool, len(want))
+	for _, policy := range routePolicies {
+		exact, ok := want[policy.Name]
+		if !ok {
+			continue
+		}
+		seen[policy.Name] = true
+		if got := policy.Method + " " + policy.Path; got != exact || policy.Access != routeAdmin || policy.Member {
+			t.Fatalf("pack policy %q = %+v, want exact %q admin-only", policy.Name, policy, exact)
+		}
+	}
+	if len(seen) != len(want) {
+		t.Fatalf("definition pack policies found = %v, want all %v", seen, want)
+	}
+}
+
 func TestRoutePolicyMemberAndExemptionMatching(t *testing.T) {
 	for _, test := range []struct {
 		method string
@@ -92,5 +116,23 @@ func TestRoutePolicyAdultSurfaceIsClosed(t *testing.T) {
 	// And nothing answers at the retired module switch, on any mux.
 	if _, ok := policyForRegistration(http.MethodPost, "/settings/adult"); ok {
 		t.Fatal("POST /settings/adult still has a policy row; the module switch is gone")
+	}
+	// Stash-box instance CRUD is admin metadata, not an adult-surface route:
+	// Settings → Metadata has to reach it before the first adult library exists.
+	for _, path := range []string{
+		"/adult/stashbox-instances",
+		"/adult/stashbox-instances/{id}",
+		"/adult/stashbox-instances/test",
+		"/adult/stashbox-instances/{id}/test",
+	} {
+		for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete} {
+			policy, ok := policyForRegistration(method, path)
+			if !ok {
+				continue
+			}
+			if policy.Access != routeAdmin || policy.Member {
+				t.Errorf("%s %s policy = %+v; want admin-only", method, path, policy)
+			}
+		}
 	}
 }

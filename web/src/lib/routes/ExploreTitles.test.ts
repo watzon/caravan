@@ -100,10 +100,16 @@ beforeEach(() => {
       if (url.endsWith('/discover')) {
         return jsonResponse({
           trending: [],
-          popular_movies: [],
+          popular_movies: [item(9)],
+          upcoming_movies: [],
+          now_playing: [],
           popular_series: [],
-          networks: [{ id: 213, name: 'Netflix', type: 'network' }],
-          studios: [],
+          upcoming_series: [],
+          airing_series: [],
+          movie_genres: [{ tmdb_id: 28, name: 'Action' }],
+          series_genres: [],
+          networks: [{ id: 213, name: 'Netflix', type: 'network', logo_url: '' }],
+          studios: [{ id: 41077, name: 'A24', type: 'studio', logo_url: '' }],
         });
       }
       throw new Error(`unexpected fetch: ${url}`);
@@ -120,6 +126,22 @@ afterEach(() => {
   vi.unstubAllGlobals();
   discover.reset();
   navigate('/', { replace: true });
+});
+
+describe('the unfiltered movie landing', () => {
+  it('shows editorial shelves and studio tiles instead of the infinite grid', async () => {
+    await open('movie', '/discover/movies');
+
+    expect(host.textContent).toContain('Popular movies');
+    expect(host.textContent).toContain('Browse by studio');
+    expect(host.querySelector('a[href="/discover/studio/41077"]')?.textContent).toContain('A24');
+    expect(host.querySelector('a[href="/discover/movies?genres=28%3AAction"]')?.textContent).toContain(
+      'Action',
+    );
+    expect(host.querySelector('a[href="/discover/movies?view=grid"]')).not.toBeNull();
+    expect(buttonWithText('Load more')).toBeUndefined();
+    expect(requested.some((url) => /\/discover\/movies\b/.test(url))).toBe(false);
+  });
 });
 
 describe('a filtered movie scope', () => {
@@ -195,7 +217,7 @@ describe('a filtered movie scope', () => {
     expect(host.textContent).not.toContain('Genre: Science Fiction');
   });
 
-  it('clears every chip at once, and asks the unfiltered question', async () => {
+  it('clears every chip at once, and returns to the editorial landing', async () => {
     await open('movie', '/discover/movies?genres=878:Science+Fiction&rating_min=7');
 
     buttonWithText('Clear all')?.click();
@@ -203,8 +225,8 @@ describe('a filtered movie scope', () => {
 
     expect(router.path).toBe('/discover/movies');
     expect(router.search).toBe('');
-    expect(lastScopeQuery().get('genres')).toBeNull();
-    expect(lastScopeQuery().get('rating_min')).toBeNull();
+    expect(host.textContent).toContain('Popular movies');
+    expect(buttonWithText('Load more')).toBeUndefined();
   });
 
   /**
@@ -214,7 +236,7 @@ describe('a filtered movie scope', () => {
    */
   it('hides owned rows in the browser without re-asking the provider', async () => {
     served = [item(1, true), item(2)];
-    await open('movie', '/discover/movies?hide=1');
+    await open('movie', '/discover/movies?view=grid&hide=1');
 
     const query = lastScopeQuery();
     expect(query.get('hide')).toBeNull();
@@ -223,7 +245,7 @@ describe('a filtered movie scope', () => {
   });
 
   it('appends the next page rather than replacing the grid', async () => {
-    await open('movie', '/discover/movies');
+    await open('movie', '/discover/movies?view=grid');
     served = [item(3), item(4)];
 
     buttonWithText('Load more')?.click();
@@ -241,7 +263,7 @@ describe('a filtered movie scope', () => {
    * a keyed {#each} down.
    */
   it('survives the same page being served twice', async () => {
-    await open('movie', '/discover/movies');
+    await open('movie', '/discover/movies?view=grid');
 
     buttonWithText('Load more')?.click();
     await settle();
@@ -321,7 +343,7 @@ describe('failures', () => {
       }),
     );
 
-    await open('movie', '/discover/movies');
+    await open('movie', '/discover/movies?view=grid');
 
     expect(host.textContent).toContain('Title 1');
   });

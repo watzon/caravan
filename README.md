@@ -95,8 +95,9 @@ the SPA once and passes that artifact to Go, cross-compile, and race jobs.
 <http://127.0.0.1:8677>. Frontend edits apply without restarting the Go
 process; Go edits still restart it.
 
-Development state is isolated under `tmp/data`; it does not reuse a normal
-installation's XDG data directory.
+`just dev` uses the same config and data directories as `caravan serve`
+(`${XDG_DATA_HOME:-$HOME/.local/share}/caravan` on Unix). Restart Air after
+changing `.air.toml`.
 
 ```sh
 go install github.com/air-verse/air@latest

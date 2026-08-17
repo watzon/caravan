@@ -22,6 +22,7 @@ import (
 	"github.com/watzon/caravan/internal/convert"
 	"github.com/watzon/caravan/internal/core"
 	"github.com/watzon/caravan/internal/dlna"
+	"github.com/watzon/caravan/internal/indexer/packs"
 	"github.com/watzon/caravan/internal/integrity"
 	"github.com/watzon/caravan/internal/jellyfin"
 	"github.com/watzon/caravan/internal/notify"
@@ -219,7 +220,15 @@ func serve(cfg *config.Config, configDir, configFile, databasePath string, logge
 		}
 	}()
 
-	indexers := newIndexerFactory()
+	if err := refreshManagedDefinitionCache(ctx, cfg.DataDir, logger, &http.Client{Timeout: indexerTimeout}, managedDefinitionSourceURL); err != nil {
+		logger.Warn("managed indexer definition refresh failed; using last verified cache", "error", err)
+	}
+	indexerRuntime, err := newIndexerRuntime(cfg.DataDir, logger, st)
+	if err != nil {
+		return err
+	}
+	definitionPacks := &packs.Service{Store: st, DataDir: cfg.DataDir, Version: api.Version}
+	indexers := indexerRuntime.factory
 	// Which external download clients this build can actually talk to. Nothing
 	// is configured by default (SPEC §12); this only decides whether a client
 	// the user adds can be tested, or is stored and answered with a 501.
@@ -342,6 +351,10 @@ func serve(cfg *config.Config, configDir, configFile, databasePath string, logge
 		Handler: api.NewServer(st, mgr, web.DistFS(),
 			api.WithEngine(engines),
 			api.WithIndexerClients(indexers),
+			api.WithLocalDefinitions(indexerRuntime.definitions),
+			api.WithExactLocalDefinitions(indexerRuntime.exactDefinitions),
+			api.WithDefinitionInventoryStatuses(indexerRuntime.managedStatuses),
+			api.WithDefinitionPacks(definitionPacks),
 			api.WithConverter(converter),
 			api.WithDLNA(dlnaServer),
 			// So GET /system/status can raise the unreachable-Stash banner for

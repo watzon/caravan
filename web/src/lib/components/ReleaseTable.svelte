@@ -34,6 +34,8 @@
     grabLabel?: string;
     ongrab: (release: Release) => void;
     emptyMessage?: string;
+    /** Rows shown before "Show more"; a fan-out can return hundreds. */
+    pageSize?: number;
   }
 
   let {
@@ -43,10 +45,24 @@
     grabLabel = t('component.releaseTable.grabDefault'),
     ongrab,
     emptyMessage = t('component.releaseTable.emptyDefault'),
+    pageSize = 50,
   }: Props = $props();
 
-  let rows = $derived(sortReleases(releases ?? []));
+  let sorted = $derived(sortReleases(releases ?? []));
 
+  /**
+   * The page window. It slices AFTER the sort, so "show more" only ever
+   * reveals worse rows than the ones on screen — a cut before sorting could
+   * hide the best release behind a button. A new result set starts back at
+   * one page; the search that produced it is a different question.
+   */
+  let visibleCount = $state(pageSize);
+  $effect(() => {
+    releases;
+    visibleCount = pageSize;
+  });
+  let rows = $derived(sorted.slice(0, visibleCount));
+  let remaining = $derived(Math.max(0, sorted.length - visibleCount));
 </script>
 
 {#if loading}
@@ -62,7 +78,7 @@
       </div>
     {/each}
   </div>
-{:else if rows.length === 0}
+{:else if sorted.length === 0}
   <EmptyState icon="search" title={t('component.releaseTable.noReleasesFound')} message={emptyMessage}>
     {#snippet action()}
       <Button variant="secondary" href="/settings">{t('component.releaseTable.openIndexerSettings')}</Button>
@@ -173,4 +189,17 @@
       </tbody>
     </table>
   </div>
+  {#if remaining > 0}
+    <div class="mt-2 flex items-center justify-center gap-3">
+      <Button
+        variant="secondary"
+        size="sm"
+        onclick={() => (visibleCount += pageSize)}>
+        {tp('component.releaseTable.showMore', Math.min(pageSize, remaining))}
+      </Button>
+      <span class="text-sm text-ink-muted">
+        {t('component.releaseTable.showingOf', { shown: String(rows.length), total: String(sorted.length) })}
+      </span>
+    </div>
+  {/if}
 {/if}

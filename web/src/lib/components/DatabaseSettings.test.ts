@@ -61,4 +61,13 @@ describe('Database settings', () => {
     expect(toasts.items.at(-1)?.message).toContain('Backup staged');
     expect(host.textContent).toContain('Restore ready');
   });
+
+  it('accepts portable zip backups alongside SQLite types', () => {
+    const input = host.querySelector('input[type="file"]') as HTMLInputElement;
+    expect(input.accept).toContain('application/vnd.caravan.portable+zip');
+    expect(input.accept).toContain('.zip');
+    expect(input.accept).toContain('.caravan-backup');
+    expect(input.accept).toContain('.db');
+    expect(input.accept).toContain('application/vnd.sqlite3');
+  });
 });

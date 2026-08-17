@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/uptrace/bun"
@@ -25,6 +26,7 @@ import (
 // ErrNotFound is returned by the Get* methods when no row matches.
 var (
 	ErrNotFound           = errors.New("store: not found")
+	ErrConflict           = errors.New("store: conflict")
 	ErrLegacySchema       = errors.New("store: prerelease database schema is unsupported; start with a new database")
 	ErrUnrecognizedSchema = errors.New("store: database schema is not recognized as Caravan")
 )
@@ -33,6 +35,11 @@ var (
 type Store struct {
 	db   *bun.DB
 	path string
+
+	// restoreMu serializes StageRestore for this handle. The last successful
+	// caller wins by replacing the single pending sidecar; callers never report
+	// two uncoordinated staged restores in one process.
+	restoreMu sync.Mutex
 }
 
 // Open opens (creating if needed) the sqlite database at path and runs every

@@ -18,6 +18,8 @@
     mono?: boolean;
     /** Accessible name when this input is not paired to a Field through id/for. */
     ariaLabel?: string;
+    autocomplete?: string;
+    spellcheck?: boolean;
     oninput?: (event: Event) => void;
     onkeydown?: (event: KeyboardEvent) => void;
     class?: string;
@@ -33,6 +35,8 @@
     readonly = false,
     mono = false,
     ariaLabel,
+    autocomplete,
+    spellcheck,
     oninput,
     onkeydown,
     class: klass = '',
@@ -52,6 +56,8 @@
   {readonly}
   {autofocus}
   aria-label={ariaLabel}
+  autocomplete={autocomplete}
+  spellcheck={spellcheck}
   aria-describedby={fieldAccessibility?.describedBy}
   aria-invalid={fieldAccessibility?.invalid ? 'true' : undefined}
   bind:value

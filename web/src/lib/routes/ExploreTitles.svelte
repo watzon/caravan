@@ -22,6 +22,8 @@
   import Button from '../components/Button.svelte';
   import DiscoverCard from '../components/DiscoverCard.svelte';
   import DiscoverError from '../components/DiscoverError.svelte';
+  import DiscoverShelf from '../components/DiscoverShelf.svelte';
+  import DiscoverTiles from '../components/DiscoverTiles.svelte';
   import Dropdown from '../components/Dropdown.svelte';
   import EmptyState from '../components/EmptyState.svelte';
   import ExploreScopes from '../components/ExploreScopes.svelte';
@@ -34,17 +36,22 @@
   import Toggle from '../components/Toggle.svelte';
   import {
     clearedTitleFilter,
+    isTitleLanding,
     languageOptions,
     parseTitleFilter,
     removeTitleChip,
     titleApiQuery,
     titleChips,
     titleFilterHref,
+    titleGenreHref,
+    titleGridHref,
+    titleUpcomingHref,
     toggleRef,
     TITLE_SORTS,
     type FilterRef,
     type TitleFilter,
   } from '../explore';
+  import { sourceHref } from '../discover';
   import { navigate, router } from '../router.svelte';
   import { discover } from '../state/discover.svelte';
   import { useI18n } from '../i18n.svelte';
@@ -67,6 +74,8 @@
 
   let filter = $derived(parseTitleFilter(mediaType, router.params));
   let chips = $derived(titleChips(mediaType, filter));
+  /** Unfiltered path is shelves; a filter, a sort, or view=grid is the list. */
+  let landing = $derived(isTitleLanding(mediaType, filter, router.params));
 
   let items = $state<DiscoverItem[]>([]);
   let page = $state<DiscoverScopePage | null>(null);
@@ -129,22 +138,32 @@
   }
 
   // Every filter change is a fresh first page, including the first render.
+  // The unfiltered landing does not ask the scoped endpoint — those titles
+  // already sit on GET /discover.
   $effect(() => {
+    if (landing) {
+      items = [];
+      page = null;
+      loading = false;
+      loadingMore = false;
+      error = null;
+      fault = null;
+      void discover.load();
+      return;
+    }
     void question;
     items = [];
     page = null;
     void load(1);
   });
 
-  // The curated network list lives on the Featured payload, which the store
-  // already caches — the series scope borrows it rather than paying for a
-  // second copy, and does not load it at all on the movie scope.
+  // The curated lists live on the Featured payload, which the store already
+  // caches — both scopes borrow it rather than paying for a second copy.
   let networkOptions = $derived(
     (discover.home?.networks ?? []).map((source) => ({ id: String(source.id), name: source.name })),
   );
 
   $effect(() => {
-    if (mediaType !== 'series') return;
     void discover.load();
   });
 
@@ -199,6 +218,37 @@
   let nextPage = $derived((page?.page ?? 0) + 1);
   let noun = $derived(mediaType === 'movie' ? 'movie' : 'series');
   let sortKey = $derived(filter.sort);
+
+  function visibleShelf(list: DiscoverItem[] | undefined): DiscoverItem[] {
+    const rows = list ?? [];
+    return filter.hideOwned ? rows.filter((item) => !item.in_library) : rows;
+  }
+
+  let popular = $derived(
+    visibleShelf(mediaType === 'movie' ? discover.home?.popular_movies : discover.home?.popular_series),
+  );
+  let upcoming = $derived(
+    visibleShelf(mediaType === 'movie' ? discover.home?.upcoming_movies : discover.home?.upcoming_series),
+  );
+  let current = $derived(
+    visibleShelf(mediaType === 'movie' ? discover.home?.now_playing : discover.home?.airing_series),
+  );
+  let genreTiles = $derived(
+    (mediaType === 'movie' ? discover.home?.movie_genres : discover.home?.series_genres)?.map(
+      (genre) => ({
+        href: titleGenreHref(mediaType, { id: String(genre.tmdb_id), name: genre.name }),
+        name: genre.name,
+      }),
+    ) ?? [],
+  );
+  let sourceTiles = $derived(
+    (mediaType === 'movie' ? discover.home?.studios : discover.home?.networks)?.map((source) => ({
+      href: sourceHref(source),
+      name: source.name,
+      image: source.logo_url,
+      lockup: source.lockup,
+    })) ?? [],
+  );
 </script>
 
 <div class="flex flex-col gap-6">
@@ -207,7 +257,7 @@
        than none. -->
   <ExploreScopes
     active={mediaType === 'movie' ? 'movies' : 'series'}
-    note={t('route.exploreTitles.catalogNote')} />
+    note={landing ? t('route.exploreTitles.landingNote') : t('route.exploreTitles.catalogNote')} />
 
   <div class="flex flex-wrap items-center gap-2">
     <FilterPill label={t('route.exploreTitles.genre')} applied={filter.genres.length > 0}>
@@ -353,7 +403,34 @@
     onremove={(key) => apply(removeTitleChip(filter, key))}
     onclear={() => apply(clearedTitleFilter(filter))} />
 
-  {#if error && items.length === 0}
+  {#if landing && discover.error}
+    <DiscoverError
+      message={discover.error}
+      fault={discover.fault}
+      onretry={() => void discover.load(true)} />
+  {:else if landing && discover.loading && discover.home === null}
+    <PosterGridSkeleton />
+  {:else if landing && discover.home}
+    <div class="flex flex-col gap-8">
+      <DiscoverShelf
+        title={t(mediaType === 'movie' ? 'route.discover.popularMovies' : 'route.discover.popularSeries')}
+        items={popular}
+        href={titleGridHref(mediaType)} />
+      <DiscoverShelf
+        title={t(mediaType === 'movie' ? 'route.discover.upcomingMovies' : 'route.discover.upcomingSeries')}
+        items={upcoming}
+        href={titleUpcomingHref(mediaType)} />
+      <DiscoverShelf
+        title={t(mediaType === 'movie' ? 'route.discover.nowPlaying' : 'route.discover.airingSeries')}
+        items={current} />
+      <DiscoverTiles
+        title={t(mediaType === 'movie' ? 'route.discover.movieGenres' : 'route.discover.seriesGenres')}
+        tiles={genreTiles} />
+      <DiscoverTiles
+        title={t(mediaType === 'movie' ? 'route.discover.browseByStudio' : 'route.discover.browseByNetwork')}
+        tiles={sourceTiles} />
+    </div>
+  {:else if error && items.length === 0}
     <DiscoverError message={error} {fault} onretry={() => void load(1)} />
   {:else if loading && items.length === 0}
     <PosterGridSkeleton />

@@ -276,6 +276,9 @@ export const EMPTY_SCENE_FILTER: SceneFilter = {
  * ------------------------------------------------------------------------ */
 
 const HIDE_PARAM = 'hide';
+/** Client-only: the unfiltered movies/series/adult path is a shelf landing. */
+const VIEW_PARAM = 'view';
+const VIEW_GRID = 'grid';
 
 function readRefs(params: URLSearchParams, key: string): FilterRef[] {
   const out: FilterRef[] = [];
@@ -423,6 +426,68 @@ export function titleFilterHref(mediaType: MediaType, filter: TitleFilter): stri
 export function sceneFilterHref(filter: SceneFilter): string {
   const query = sceneFilterQuery(filter);
   return query === '' ? '/discover/adult' : `/discover/adult?${query}`;
+}
+
+/**
+ * The unfiltered movies/series path is the editorial landing. `view=grid` is
+ * the infinite popular list that used to be that path; it is client-only, so
+ * it must never ride along to the API the way `hide` must not.
+ */
+export function isTitleLanding(
+  mediaType: MediaType,
+  filter: TitleFilter,
+  params: URLSearchParams,
+): boolean {
+  return (
+    titleChips(mediaType, filter).length === 0 &&
+    filter.sort === 'popularity' &&
+    params.get(VIEW_PARAM) !== VIEW_GRID
+  );
+}
+
+export function isSceneLanding(filter: SceneFilter, params: URLSearchParams): boolean {
+  return (
+    sceneChips(filter).length === 0 &&
+    filter.sort === 'newest' &&
+    params.get(VIEW_PARAM) !== VIEW_GRID
+  );
+}
+
+export function titleGridHref(mediaType: MediaType): string {
+  const path = mediaType === 'movie' ? '/discover/movies' : '/discover/series';
+  return `${path}?${VIEW_PARAM}=${VIEW_GRID}`;
+}
+
+export function sceneGridHref(): string {
+  return `/discover/adult?${VIEW_PARAM}=${VIEW_GRID}`;
+}
+
+/** Today's UTC date as YYYY-MM-DD — the bound "upcoming" asks the API. */
+export function utcDateString(now = new Date()): string {
+  const year = now.getUTCFullYear();
+  const month = String(now.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(now.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+export function titleUpcomingHref(mediaType: MediaType, now = new Date()): string {
+  return titleFilterHref(mediaType, {
+    ...EMPTY_TITLE_FILTER,
+    from: utcDateString(now),
+    sort: 'newest',
+  });
+}
+
+export function titleGenreHref(mediaType: MediaType, genre: FilterRef): string {
+  return titleFilterHref(mediaType, { ...EMPTY_TITLE_FILTER, genres: [genre] });
+}
+
+export function sceneSiteHref(site: FilterRef): string {
+  return sceneFilterHref({ ...EMPTY_SCENE_FILTER, site });
+}
+
+export function sceneAddedHref(): string {
+  return sceneFilterHref({ ...EMPTY_SCENE_FILTER, sort: 'added' });
 }
 
 /* ---------------------------------------------------------------------------

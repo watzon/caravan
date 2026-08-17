@@ -14,11 +14,12 @@ import (
 
 // The stash-box instance CRUD (PLAN Part 2 phase 3).
 //
-// Every route in this file is registered on the adult mux in api.go and nowhere
-// else, for the reason adultsites.go gives: the gate is a property of where a
-// route lives. An endpoint list is a list of catalogues a household subscribes
-// to, and a settings screen that could enumerate them on a server with the
-// module off is exactly the trace the module promises not to leave.
+// These routes keep the /adult/ URL but live on the admin mux. They are
+// metadata credentials — same job as a TMDB key — and Settings → Metadata
+// has to edit them before the first adult library exists. That library is
+// the door into requireAdult, so putting CRUD behind it made the Add-library
+// warning unsatisfiable. Members still cannot reach them: memberAllowed
+// names none of these.
 //
 // The shape is the indexers one — request struct, config() validator,
 // has_api_key redaction, a stored-credential test beside a body-only test —

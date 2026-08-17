@@ -33,6 +33,11 @@ const (
 	DefaultRecycleCleanupIntervalMinutes = 1440
 	// DefaultNotificationIntervalMinutes sends selected events within five minutes.
 	DefaultNotificationIntervalMinutes = 5
+	// DefaultIndexerHealthIntervalMinutes probes enabled indexers every
+	// quarter hour, the same cadence as RSS: often enough to notice an
+	// outage before the next backlog sweep, rarely enough not to look like
+	// a scrape.
+	DefaultIndexerHealthIntervalMinutes = 15
 )
 
 // RecurringInterval says where one recurring kind's cadence is configured: the
@@ -44,10 +49,11 @@ type RecurringInterval struct {
 
 // recurringKinds is the order recurring jobs are bootstrapped and listed in —
 // most frequent first, which is also how a user reads them.
-var recurringKinds = []string{core.JobRSSSync, core.JobNotificationDispatch, core.JobBacklogSweep, core.JobRefreshMetadata, core.JobRecycleCleanup}
+var recurringKinds = []string{core.JobRSSSync, core.JobIndexerHealth, core.JobNotificationDispatch, core.JobBacklogSweep, core.JobRefreshMetadata, core.JobRecycleCleanup}
 
 var recurringIntervals = map[string]RecurringInterval{
 	core.JobRSSSync:              {SettingRSSSyncIntervalMinutes, DefaultRSSSyncIntervalMinutes},
+	core.JobIndexerHealth:        {SettingIndexerHealthIntervalMinutes, DefaultIndexerHealthIntervalMinutes},
 	core.JobBacklogSweep:         {SettingBacklogIntervalMinutes, DefaultBacklogIntervalMinutes},
 	core.JobRefreshMetadata:      {SettingRefreshIntervalMinutes, DefaultRefreshIntervalMinutes},
 	core.JobRecycleCleanup:       {SettingRecycleCleanupIntervalMinutes, DefaultRecycleCleanupIntervalMinutes},

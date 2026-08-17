@@ -16,9 +16,11 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/watzon/caravan/internal/cardigann"
 	"github.com/watzon/caravan/internal/clients"
 	"github.com/watzon/caravan/internal/core"
 	"github.com/watzon/caravan/internal/download"
+	"github.com/watzon/caravan/internal/indexer/catalog"
 	"github.com/watzon/caravan/internal/store"
 	"github.com/watzon/caravan/internal/tmdb"
 	"github.com/watzon/caravan/internal/usenet"
@@ -33,6 +35,196 @@ func testAdapter(t *testing.T) (*libraryAdapter, *store.Store) {
 	}
 	t.Cleanup(func() { st.Close() })
 	return newLibraryAdapter(st, "", slog.New(slog.NewTextHandler(io.Discard, nil)), nil, nil), st
+}
+
+func TestIndexerFactoryRoutesDefinitionsThroughLocalEngine(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/q.php" || r.URL.Query().Get("q") != "ubuntu" {
+			t.Errorf("upstream request = %s", r.URL.String())
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `[{"id":"1","name":"Ubuntu ISO","info_hash":"0123456789abcdef0123456789abcdef01234567","category":"207","added":"1700000000","size":"1024","seeders":"9","leechers":"1"}]`)
+	}))
+	t.Cleanup(upstream.Close)
+
+	definitions, err := cardigann.LoadBuiltins()
+	if err != nil {
+		t.Fatalf("LoadBuiltins: %v", err)
+	}
+	factory := configuredIndexerFactory(definitions, upstream.Client(), upstream.Client())
+	client := factory(core.IndexerConfig{
+		ID:           7,
+		DefinitionID: "thepiratebay",
+		Name:         "Local TPB",
+		URL:          "https://thepiratebay.org",
+		Type:         core.IndexerTypeTorznab,
+		Settings:     map[string]string{"apiurl": upstream.URL},
+	})
+	releases, err := client.Search(context.Background(), "ubuntu", nil)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(releases) != 1 || releases[0].IndexerID != 7 || !strings.HasPrefix(releases[0].DownloadURL, "magnet:?") {
+		t.Fatalf("releases = %+v", releases)
+	}
+}
+
+func TestIndexerFactoryNeverResolvesPinnedPackThroughLegacyRegistry(t *testing.T) {
+	called := false
+	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		called = true
+	}))
+	t.Cleanup(upstream.Close)
+	definitions, err := cardigann.LoadBuiltins()
+	if err != nil {
+		t.Fatal(err)
+	}
+	factory := configuredIndexerFactory(definitions, upstream.Client(), upstream.Client())
+	for _, cfg := range []core.IndexerConfig{
+		{
+			DefinitionID:       "builtin:thepiratebay",
+			DefinitionSource:   "builtin",
+			DefinitionRevision: "malicious-pack-revision",
+			DefinitionDigest:   "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			URL:                "https://thepiratebay.org",
+		},
+		{
+			DefinitionID: "community:thepiratebay",
+			URL:          "https://thepiratebay.org",
+		},
+	} {
+		client := factory(cfg)
+		if _, err := client.Search(context.Background(), "ubuntu", nil); err == nil || !strings.Contains(err.Error(), "exact pin") {
+			t.Fatalf("pinned client Search error = %v", err)
+		}
+	}
+	if called {
+		t.Fatal("pinned definition fell through to an executable registry client")
+	}
+}
+
+func TestEveryLocalCatalogEntryExistsInEmbeddedRegistry(t *testing.T) {
+	registry, err := cardigann.LoadBuiltins()
+	if err != nil {
+		t.Fatalf("LoadBuiltins: %v", err)
+	}
+	for _, entry := range catalog.All() {
+		if entry.DefinitionID == "" {
+			continue
+		}
+		if _, ok := registry.Get(entry.DefinitionID); !ok {
+			t.Errorf("catalog entry %q references missing local definition %q", entry.ID, entry.DefinitionID)
+		}
+	}
+}
+
+func TestIndexerFactoryBlocksPrivateLocalDefinitionTarget(t *testing.T) {
+	called := false
+	private := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		_, _ = io.WriteString(w, `[]`)
+	}))
+	t.Cleanup(private.Close)
+
+	factory, err := newIndexerFactory()
+	if err != nil {
+		t.Fatalf("newIndexerFactory: %v", err)
+	}
+	client := factory(core.IndexerConfig{
+		DefinitionID: "thepiratebay",
+		Name:         "private target",
+		URL:          "https://thepiratebay.org",
+		Type:         core.IndexerTypeTorznab,
+		Settings:     map[string]string{"apiurl": private.URL},
+	})
+	_, err = client.Search(context.Background(), "ubuntu", nil)
+	if err == nil || !strings.Contains(err.Error(), "public network") {
+		t.Fatalf("Search error = %q, want public-network rejection", err)
+	}
+	if called {
+		t.Fatal("private target received a request")
+	}
+}
+
+func TestReleasePayloadHTTPClientBlocksPrivateTarget(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		called = true
+	}))
+	defer server.Close()
+	request, err := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL+"/release.torrent", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := newReleasePayloadHTTPClient().Do(request); err == nil {
+		t.Fatal("release payload client accepted a private target")
+	}
+	if called {
+		t.Fatal("private release target received a request")
+	}
+}
+
+func TestIndexerRuntimeLoadsOnlyExecutableUserDefinitionsFromApplicationData(t *testing.T) {
+	dataDir := t.TempDir()
+	definitionsDir := filepath.Join(dataDir, "indexer-definitions")
+	if err := os.MkdirAll(definitionsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	valid := `
+id: fixture
+name: Fixture
+type: public
+links: [https://tracker.example]
+caps: {modes: {search: [q]}}
+settings:
+  - {name: token, type: text}
+search:
+  paths:
+    - path: /search
+      method: post
+      inputs: {q: "{{ .Keywords }}"}
+      response: {type: xml}
+  rows: {selector: rss.channel.item}
+  fields:
+    title: {selector: title}
+    download: {selector: link}
+`
+	unsupported := `
+id: login-required
+name: Login Required
+type: private
+links: [https://tracker.example]
+caps: {modes: {search: [q]}}
+login: {path: /login}
+search: {paths: [{path: /search}], rows: {selector: tr}, fields: {title: {selector: td}, download: {selector: a, attribute: href}}}
+`
+	for name, contents := range map[string]string{
+		"valid.yml":       valid,
+		"malformed.yml":   "name: missing identifier\n",
+		"unsupported.yml": unsupported,
+	} {
+		if err := os.WriteFile(filepath.Join(definitionsDir, name), []byte(contents), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	runtime, err := newIndexerRuntime(dataDir, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatalf("newIndexerRuntime: %v", err)
+	}
+	schema, ok := runtime.definitions("user:fixture")
+	if !ok || !slices.Equal(schema.Settings, []string{"token"}) {
+		t.Fatalf("user:fixture schema = %+v, %v", schema, ok)
+	}
+	if _, ok := runtime.definitions("user:login-required"); ok {
+		t.Fatal("unsupported login definition entered executable registry")
+	}
+	if _, err := runtime.factory(core.IndexerConfig{
+		DefinitionID: "user:fixture", Name: "Fixture", URL: "https://tracker.example",
+		Type: core.IndexerTypeTorznab, Settings: map[string]string{"token": "secret"},
+	}).Categories(context.Background()); err != nil {
+		t.Fatalf("user definition client: %v", err)
+	}
 }
 
 // The watcher holds one library.Manager for the life of the process, so the

@@ -24,6 +24,10 @@ const (
 	SettingRecycleCleanupIntervalMinutes = "recycle_cleanup_interval_minutes"
 	// SettingNotificationIntervalMinutes controls webhook delivery cadence.
 	SettingNotificationIntervalMinutes = "notification_interval_minutes"
+	// SettingIndexerHealthIntervalMinutes is how often enabled indexers are
+	// probed. A failure flags the indexer out of search immediately; several
+	// in a row switch it off.
+	SettingIndexerHealthIntervalMinutes = "indexer_health_interval_minutes"
 	// Naming settings describe the generated Jellyfin-compatible paths. Unset
 	// values use the built-in formats so existing installations keep their
 	// exact paths.

@@ -61,6 +61,7 @@ function mountTable(props: Partial<{
   grabLabel: string;
   ongrab: (release: Release) => void;
   emptyMessage: string;
+  pageSize: number;
 }> = {}): HTMLElement {
   host = document.createElement('div');
   document.body.appendChild(host);
@@ -110,6 +111,37 @@ describe('ReleaseTable', () => {
     const cell = host!.querySelector<HTMLTableCellElement>('tbody td[title]');
     expect(cell?.textContent?.trim()).toBe(title);
     expect(cell?.title).toBe(title);
+  });
+
+  it('pages long result sets, slicing only after the sort', () => {
+    // Seeders descend with the index, so the sort keeps arrival order and the
+    // first page provably holds the BEST rows, not the first-received ones.
+    const many = Array.from({ length: 7 }, (_, i) =>
+      release({ guid: `guid-${i}`, title: `Release ${i}`, seeders: 100 - i }),
+    );
+    // Arrive worst-first: the sort must pull the strongest rows into page one.
+    mountTable({ releases: [...many].reverse(), pageSize: 3 });
+
+    expect(host!.querySelectorAll('tbody tr').length).toBe(3);
+    expect(host!.textContent).toContain('Release 0'); // 100 seeders — page one
+    expect(host!.textContent).not.toContain('Release 6'); // 94 — behind the button
+    expect(host!.textContent).toContain('Showing 3 of 7');
+
+    const more = [...host!.querySelectorAll<HTMLButtonElement>('button')].find((b) =>
+      b.textContent?.includes('Show 3 more'),
+    )!;
+    more.click();
+    flushSync();
+    expect(host!.querySelectorAll('tbody tr').length).toBe(6);
+    expect(host!.textContent).toContain('Show 1 more');
+
+    [...host!.querySelectorAll<HTMLButtonElement>('button')]
+      .find((b) => b.textContent?.includes('Show 1 more'))!
+      .click();
+    flushSync();
+    expect(host!.querySelectorAll('tbody tr').length).toBe(7);
+    // Everything is on screen, so the footer withdraws.
+    expect(host!.textContent).not.toContain('Showing');
   });
 
   it('marks the top-ranked row as best, whatever order it arrived in', () => {

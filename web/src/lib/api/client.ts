@@ -38,7 +38,13 @@ import type {
   GrabRequest,
   Indexer,
   IndexerCategory,
+  IndexerCatalogResponse,
   IndexerInput,
+  IndexerKind,
+  DefinitionPackInstall,
+  DefinitionPackPreview,
+  DefinitionPackRevision,
+  DefinitionPackUpload,
   JellyfinConfig,
   JellyfinConfigInput,
   JellyfinTestResult,
@@ -157,9 +163,16 @@ export const endpoints = {
   // Phase 2 — search & download (SPEC §5.1, §9, §11).
   indexers: () => `${API_BASE}/indexers`,
   indexer: (id: number) => `${API_BASE}/indexers/${id}`,
+  indexerCatalog: () => `${API_BASE}/indexers/catalog`,
   indexerTest: (id: number) => `${API_BASE}/indexers/${id}/test`,
+  indexerTestConfig: () => `${API_BASE}/indexers/test`,
   indexerCategories: () => `${API_BASE}/indexers/categories`,
   indexerStoredCategories: (id: number) => `${API_BASE}/indexers/${id}/categories`,
+  definitionPacks: () => `${API_BASE}/definition-packs`,
+  definitionPacksPreview: () => `${API_BASE}/definition-packs/preview`,
+  definitionPacksInstall: () => `${API_BASE}/definition-packs/install`,
+  definitionPacksActivate: () => `${API_BASE}/definition-packs/activate`,
+  definitionPacksRollback: () => `${API_BASE}/definition-packs/rollback`,
 
   // Phase 6 — external download clients (SPEC §5.1). downloadClientTestConfig
   // takes the form's current values, so Test works before a client is saved.
@@ -362,15 +375,16 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
   let res: Response;
   try {
     const hasBody = body !== undefined || rawBody !== undefined;
+    const formData =
+      rawBody !== undefined && typeof FormData !== 'undefined' && rawBody instanceof FormData;
+    const headers: Record<string, string> = { Accept: 'application/json' };
+    if (hasBody && !formData) {
+      headers['Content-Type'] = contentType ?? 'application/json';
+    }
     res = await fetch(withQuery(path, query), {
       method,
       signal,
-      headers: hasBody
-        ? {
-            Accept: 'application/json',
-            'Content-Type': contentType ?? 'application/json',
-          }
-        : { Accept: 'application/json' },
+      headers,
       body: rawBody ?? (body === undefined ? undefined : JSON.stringify(body)),
     });
   } catch (err) {
@@ -479,6 +493,26 @@ async function listOf<T>(
   return payload?.[key] ?? [];
 }
 
+/** Cardigann signed-pack archive limit (80 MiB). */
+export const MAX_PACK_ARCHIVE_BYTES = 80 * 1024 * 1024;
+
+function packUploadFields(input: DefinitionPackUpload): FormData {
+  const archive = input.archive;
+  const signerKeyID = input.signer_key_id.trim();
+  const publicKey = input.public_key.trim();
+  if (!archive) throw new Error('Definition pack archive is required.');
+  if (!signerKeyID) throw new Error('Definition pack signer key id is required.');
+  if (!publicKey) throw new Error('Definition pack public key is required.');
+  if (archive.size > MAX_PACK_ARCHIVE_BYTES) {
+    throw new Error('Definition pack archive must be 80 MiB or smaller.');
+  }
+  const fields = new FormData();
+  fields.set('archive', archive);
+  fields.set('signer_key_id', signerKeyID);
+  fields.set('public_key', publicKey);
+  return fields;
+}
+
 /** How often awaitScan re-checks whether a running scan has finished. */
 const SCAN_POLL_MS = 750;
 
@@ -505,13 +539,20 @@ export const api = {
    */
   verifyIntegrity: () => request<VerifyResult>(endpoints.systemVerify(), { method: 'POST' }),
 
-  /** Stage a Caravan SQLite backup for replacement after the next restart. */
-  restoreBackup: (file: Blob) =>
-    request<{ restart_required: boolean }>(endpoints.systemRestore(), {
+  /**
+   * Stage a Caravan backup for replacement after the next restart. Backups
+   * come in two shapes — a raw SQLite snapshot or a portable ZIP with
+   * definition packs — so the payload's magic bytes pick the content type.
+   */
+  restoreBackup: async (file: Blob) => {
+    const head = new Uint8Array(await file.slice(0, 4).arrayBuffer());
+    const isZip = head[0] === 0x50 && head[1] === 0x4b && head[2] === 0x03 && head[3] === 0x04;
+    return request<{ restart_required: boolean }>(endpoints.systemRestore(), {
       method: 'POST',
       rawBody: file,
-      contentType: 'application/vnd.sqlite3',
-    }),
+      contentType: isZip ? 'application/vnd.caravan.portable+zip' : 'application/vnd.sqlite3',
+    });
+  },
 
   /**
    * Re-point the storage root (SPEC §10): change where Caravan looks without
@@ -753,6 +794,15 @@ export const api = {
   listIndexers: (signal?: AbortSignal) =>
     listOf<Indexer>(endpoints.indexers(), 'indexers', signal),
 
+  listIndexerCatalog: (kind?: IndexerKind, q?: string, signal?: AbortSignal) =>
+    request<IndexerCatalogResponse>(endpoints.indexerCatalog(), {
+      query: { kind, q },
+      signal,
+    }).then((payload) => ({
+      definitions: payload?.definitions ?? [],
+      inventory: payload?.inventory ?? [],
+    })),
+
   addIndexer: (body: IndexerInput) =>
     request<Indexer>(endpoints.indexers(), { method: 'POST', body }),
 
@@ -770,13 +820,25 @@ export const api = {
   testIndexer: (id: number) =>
     request<void>(endpoints.indexerTest(id), { method: 'POST' }),
 
+  testIndexerConfig: (body: IndexerInput) =>
+    request<void>(endpoints.indexerTestConfig(), { method: 'POST', body }),
+
   /**
    * Fetch the category tree an indexer advertises. Takes the form's current
    * values rather than a stored id so the picker works while the indexer is
    * still being typed in, before it is saved.
    */
   indexerCategories: (
-    body: Pick<IndexerInput, 'url' | 'type'> & { api_key: string },
+    body: Pick<
+      IndexerInput,
+      | 'url'
+      | 'type'
+      | 'definition_id'
+      | 'definition_source'
+      | 'definition_revision'
+      | 'definition_digest'
+      | 'settings'
+    > & { api_key: string },
     signal?: AbortSignal,
   ) =>
     request<{ categories: IndexerCategory[] }>(endpoints.indexerCategories(), {
@@ -790,6 +852,43 @@ export const api = {
     request<{ categories: IndexerCategory[] }>(endpoints.indexerStoredCategories(id), {
       signal,
     }).then((payload) => payload?.categories ?? []),
+
+  listDefinitionPacks: (signal?: AbortSignal) =>
+    listOf<DefinitionPackRevision>(endpoints.definitionPacks(), 'revisions', signal),
+
+  previewDefinitionPack: async (input: DefinitionPackUpload) => {
+    const fields = packUploadFields(input);
+    return request<DefinitionPackPreview>(endpoints.definitionPacksPreview(), {
+      method: 'POST',
+      rawBody: fields,
+    });
+  },
+
+  installDefinitionPack: async (input: DefinitionPackInstall) => {
+    const source = input.source.trim();
+    const token = input.token.trim();
+    if (!source) throw new Error('Definition pack source is required.');
+    if (!token) throw new Error('Definition pack preview token is required.');
+    const fields = packUploadFields(input);
+    fields.set('source', source);
+    fields.set('token', token);
+    return request<DefinitionPackRevision>(endpoints.definitionPacksInstall(), {
+      method: 'POST',
+      rawBody: fields,
+    });
+  },
+
+  activateDefinitionPack: (source: string, revision: string) =>
+    request<{ restart_required: boolean }>(endpoints.definitionPacksActivate(), {
+      method: 'POST',
+      body: { source, revision },
+    }),
+
+  rollbackDefinitionPack: (source: string, revision: string) =>
+    request<DefinitionPackRevision>(endpoints.definitionPacksRollback(), {
+      method: 'POST',
+      body: { source, revision },
+    }),
 
   /* ---------------------------------------------------------------------
    * Phase 6 — external download clients (SPEC §5.1, §11).
@@ -1209,7 +1308,7 @@ export const api = {
    * ApiError, so the routes branch on `status` rather than on the message.
    * --------------------------------------------------------------------- */
 
-  /** The discover landing page. Three sequential provider calls — show a skeleton. */
+  /** The discover landing page. Several provider shelves — show a skeleton. */
   discoverHome: (signal?: AbortSignal) =>
     request<DiscoverHome>(endpoints.discover(), { signal }),
 

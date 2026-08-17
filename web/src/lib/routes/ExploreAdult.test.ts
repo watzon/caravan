@@ -296,6 +296,52 @@ describe('a filtered scene scope', () => {
   });
 });
 
+describe('the unfiltered adult landing', () => {
+  it('shows recent scenes, newly added, and site tiles instead of the infinite grid', async () => {
+    served = [scene('a', { title: 'Newest scene' }), scene('b', { title: 'Also new' })];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        requested.push(url);
+        if (init?.method === 'POST') {
+          posted.push({ url, body: JSON.parse(String(init.body)) });
+          return jsonResponse({ id: 1, status: 'pending' }, 201);
+        }
+        if (url.includes('/adult/discover')) {
+          return jsonResponse({
+            page: 1,
+            per_page: 25,
+            total: served.length,
+            scenes: served,
+          });
+        }
+        if (url.includes('/adult/search')) {
+          return jsonResponse({
+            sites: [{ provider: 'stashbox', stash_id: '84060', name: 'Vixen', aliases: [], parent_name: '', url: '', image_url: '', in_library: false, library_id: 0 }],
+          });
+        }
+        if (url.includes('/adult/performers')) {
+          return jsonResponse({ performers: [] });
+        }
+        if (url.includes('/adult/tags')) return jsonResponse({ tags: [] });
+        throw new Error(`unexpected fetch: ${url}`);
+      }),
+    );
+    session.user = grantedUser(EVERY_SCENE_FILTER);
+    await open('/discover/adult');
+
+    expect(host.textContent).toContain('Recently released');
+    expect(host.textContent).toContain('Newly added');
+    expect(host.textContent).toContain('Browse by site');
+    expect(host.querySelector('a[href="/discover/adult?site=84060%3AVixen"]')?.textContent).toContain(
+      'Vixen',
+    );
+    expect(host.querySelector('a[href="/discover/adult?view=grid"]')).not.toBeNull();
+    expect(buttonWithText('Load more')).toBeUndefined();
+  });
+});
+
 describe('a scene card', () => {
   it('reads its state as owned, requested, or askable — in that order', async () => {
     served = [
@@ -303,7 +349,7 @@ describe('a scene card', () => {
       scene('b', { title: 'Asked for', requested: true }),
       scene('c', { title: 'Free one' }),
     ];
-    await open('/discover/adult');
+    await open('/discover/adult?view=grid');
 
     // Owned beats requested: once the library holds it, the request is moot.
     expect(host.textContent).toContain('IN LIBRARY');
@@ -318,7 +364,7 @@ describe('a scene card', () => {
 
   it('links artwork and title to the provider-qualified detail URL', async () => {
     served = [scene('a/b', { provider: 'stashbox:tpdb' })];
-    await open('/discover/adult');
+    await open('/discover/adult?view=grid');
 
     const href = '/adult/scenes/stashbox%3Atpdb/a%2Fb';
     expect(host.querySelectorAll(`a[href="${href}"]`)).toHaveLength(2);
@@ -326,7 +372,7 @@ describe('a scene card', () => {
   });
 
   it('badges the run time as a run time', async () => {
-    await open('/discover/adult');
+    await open('/discover/adult?view=grid');
     expect(host.textContent).toContain('41:12');
   });
 
@@ -335,7 +381,7 @@ describe('a scene card', () => {
    * a stash id alone is not globally unique across configured instances.
    */
   it('asks for a scene by stash id and no tmdb id', async () => {
-    await open('/discover/adult');
+    await open('/discover/adult?view=grid');
 
     buttonWithText('Request')?.click();
     await settle();
@@ -354,7 +400,7 @@ describe('a scene card', () => {
 
   /** The card is patched in place: one flag changed, and a refetch is a round trip. */
   it('turns the button into a badge without refetching', async () => {
-    await open('/discover/adult');
+    await open('/discover/adult?view=grid');
     const before = requested.filter((u) => u.includes('/adult/discover')).length;
 
     buttonWithText('Request')?.click();
@@ -531,7 +577,7 @@ describe('hide in library', () => {
   it('keeps Load more on a page the toggle emptied, and says who emptied it', async () => {
     served = [scene('a', { in_library: true, library_id: 5 })];
     paging = { per_page: 1, total: 9 };
-    await open('/discover/adult?hide=1');
+    await open('/discover/adult?view=grid&hide=1');
 
     expect(host.textContent).not.toContain('Scene a');
     expect(host.textContent).toContain('already in the library');

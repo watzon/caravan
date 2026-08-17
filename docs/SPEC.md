@@ -182,7 +182,7 @@ flowchart LR
 
 **Release Parser & Quality Profiles.** Scene-name parsing (title, year, season/episode, quality, source, codec, group, PROPER/REPACK). Quality ladder with upgrade-until-cutoff per item. Scope explicitly excludes anime absolute numbering and custom formats in v1.
 
-**Indexer Clients.** Newznab/Torznab implementations. Prowlarr can be pointed at Caravan as a Torznab source feed, or indexers are configured directly. Pluggable direct sources (Internet Archive, yt-dlp-supported sites) behind the same interface.
+**Indexer Clients.** Newznab/Torznab implementations plus a fail-closed local tracker-definition engine. Caravan invokes local definitions in process for its own searches and exposes each stored local indexer as an authenticated Torznab feed at `/api/v1/indexers/{id}/feed`; it never calls its own HTTP listener internally. Definition sources are namespaced (`builtin:id`, `user:id`) and first compile into inert capability manifests; only fully supported manifests enter the executable registry. Owner-supplied files are read from `<application-data>/indexer-definitions` with rooted file, size, and symlink checks. They may be explicitly configured through the API when executable but are not automatically advertised in the catalog. Only Caravan-authored definitions that pass schema, security, synthetic, canonical-suite, and real stored-feed verification appear there. The current Prowlarr/Jackett definition pack is not bundled because no compatible redistribution grant has been established.
 
 **Download Manager.** Queue, priorities, categories, seeding limits. Engine interface:
 
@@ -242,7 +242,7 @@ Everything path-like is relative to the storage root.
 | `movies` / `series` / `seasons` / `episodes` | Library + wanted items, TMDB/TVDB IDs, monitored flags, profile ID |
 | `quality_profiles` | Quality ladder, cutoff, per-item assignment |
 | `indexers` | Configured Torznab/Newznab sources + direct sources |
-| `releases` | Parsed search results (cache of what was seen) |
+| `releases` | Parsed search results, including bounded extended Torznab attributes (cache of what was seen) |
 | `grabs` | History: which release was grabbed for which item and why |
 | `downloads` | Active/historical downloads: engine, engine ID, state, paths |
 | `download_clients` | External engine configs (host, credentials ref) |
@@ -349,6 +349,7 @@ GET       /calendar.ics             # iCal feed (API-key auth)
 GET       /library/movies/{id}/releases   # interactive release picker
 POST      /library/movies/{id}/grab       # (same pair on /library/series/{id} with ?season=&episode=)
 GET/POST  /indexers                 # config; POST /indexers/{id}/test
+GET       /indexers/catalog         # add-indexer directory (kind=torrent|usenet|generic)
 POST      /indexers/categories      # caps category tree for the settings picker (body: url/type/api_key)
 GET       /downloads                # queue; POST /downloads/{id}/pause|resume
 DELETE    /downloads/{id}?deleteData=true|false

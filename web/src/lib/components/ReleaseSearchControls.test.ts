@@ -37,6 +37,7 @@ function mountControls(props: Partial<{
   busy: boolean;
   onsearch: () => void;
   contextLabel: string;
+  onhelp: () => void;
 }> = {}): HTMLElement {
   host = document.createElement('div');
   document.body.appendChild(host);
@@ -89,6 +90,21 @@ describe('ReleaseSearchControls', () => {
     expect(searched).toBe(1);
     // The default is a form submit that would reload the SPA.
     expect(event.defaultPrevented).toBe(true);
+  });
+
+  it('clears the query with its own in-field button, never the native one', () => {
+    mountControls({ query: 'blade runner', onhelp: () => {} });
+    const clear = host!.querySelector<HTMLButtonElement>('[data-clear-search]')!;
+    expect(clear).not.toBeNull();
+    expect(clear.getAttribute('aria-label')).toBe('Clear search');
+    // It shares the field with the help button, in one control cluster.
+    expect(clear.parentElement?.querySelector('[data-syntax-toggle]')).not.toBeNull();
+
+    clear.click();
+    flushSync();
+    expect(host!.querySelector('input')!.value).toBe('');
+    // Nothing left to clear, so the button withdraws.
+    expect(host!.querySelector('[data-clear-search]')).toBeNull();
   });
 
   it('offers the adult category block only while the module is visible', () => {

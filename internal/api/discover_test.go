@@ -18,13 +18,18 @@ import (
 type stubDiscoverProvider struct {
 	stubProvider
 
-	trending      []core.DiscoverItem
-	popularMovies []core.DiscoverItem
-	popularSeries []core.DiscoverItem
-	page          *core.DiscoverPage
-	movieDetail   *core.TitleDetail
-	seriesDetail  *core.TitleDetail
-	err           error
+	trending       []core.DiscoverItem
+	popularMovies  []core.DiscoverItem
+	popularSeries  []core.DiscoverItem
+	upcomingMovies []core.DiscoverItem
+	nowPlaying     []core.DiscoverItem
+	upcomingSeries []core.DiscoverItem
+	airingSeries   []core.DiscoverItem
+	upcomingErr    error
+	page           *core.DiscoverPage
+	movieDetail    *core.TitleDetail
+	seriesDetail   *core.TitleDetail
+	err            error
 
 	// browseCalls records what the browse endpoint forwarded.
 	browseCalls []browseCall
@@ -61,6 +66,25 @@ func (p *stubDiscoverProvider) PopularMovies(context.Context) ([]core.DiscoverIt
 
 func (p *stubDiscoverProvider) PopularSeries(context.Context) ([]core.DiscoverItem, error) {
 	return p.popularSeries, p.err
+}
+
+func (p *stubDiscoverProvider) UpcomingMovies(context.Context) ([]core.DiscoverItem, error) {
+	if p.upcomingErr != nil {
+		return nil, p.upcomingErr
+	}
+	return p.upcomingMovies, nil
+}
+
+func (p *stubDiscoverProvider) NowPlayingMovies(context.Context) ([]core.DiscoverItem, error) {
+	return p.nowPlaying, nil
+}
+
+func (p *stubDiscoverProvider) UpcomingSeries(context.Context) ([]core.DiscoverItem, error) {
+	return p.upcomingSeries, nil
+}
+
+func (p *stubDiscoverProvider) AiringSeries(context.Context) ([]core.DiscoverItem, error) {
+	return p.airingSeries, nil
 }
 
 func (p *stubDiscoverProvider) MoviesByCompany(_ context.Context, companyID int64, page int) (*core.DiscoverPage, error) {
@@ -155,11 +179,17 @@ func seriesItem(tmdbID int64, title string) core.DiscoverItem {
 }
 
 type discoverHomeBody struct {
-	Trending      []discoverItemJSON   `json:"trending"`
-	PopularMovies []discoverItemJSON   `json:"popular_movies"`
-	PopularSeries []discoverItemJSON   `json:"popular_series"`
-	Networks      []discoverSourceJSON `json:"networks"`
-	Studios       []discoverSourceJSON `json:"studios"`
+	Trending       []discoverItemJSON   `json:"trending"`
+	PopularMovies  []discoverItemJSON   `json:"popular_movies"`
+	UpcomingMovies []discoverItemJSON   `json:"upcoming_movies"`
+	NowPlaying     []discoverItemJSON   `json:"now_playing"`
+	PopularSeries  []discoverItemJSON   `json:"popular_series"`
+	UpcomingSeries []discoverItemJSON   `json:"upcoming_series"`
+	AiringSeries   []discoverItemJSON   `json:"airing_series"`
+	MovieGenres    []discoverNamedJSON  `json:"movie_genres"`
+	SeriesGenres   []discoverNamedJSON  `json:"series_genres"`
+	Networks       []discoverSourceJSON `json:"networks"`
+	Studios        []discoverSourceJSON `json:"studios"`
 }
 
 func TestDiscoverHomeDecoratesLibraryAndRequests(t *testing.T) {
@@ -258,15 +288,89 @@ func TestDiscoverHomeServesCuratedShelves(t *testing.T) {
 	if body.Networks[0].Type != SourceNetwork {
 		t.Errorf("networks[0].Type = %q, want %q", body.Networks[0].Type, SourceNetwork)
 	}
+	if body.Networks[0].LogoURL != discoverLogoBaseURL+"/wwemzKWzjKYJFfCeiB57q3r4Bcm.png" {
+		t.Errorf("networks[0].LogoURL = %q, want the Netflix mark", body.Networks[0].LogoURL)
+	}
 	if len(body.Studios) != len(discoverStudios) {
 		t.Fatalf("studios = %d, want %d", len(body.Studios), len(discoverStudios))
 	}
 	if body.Studios[0].ID != 41077 || body.Studios[0].Name != "A24" {
 		t.Errorf("studios[0] = %+v, want A24 41077", body.Studios[0])
 	}
+	if body.Studios[0].LogoURL != discoverLogoBaseURL+"/1ZXsGaFPgrgS6ZZGS37AqD5uU12.png" {
+		t.Errorf("studios[0].LogoURL = %q, want the A24 mark", body.Studios[0].LogoURL)
+	}
+	if body.Networks[0].Lockup {
+		t.Errorf("networks[0].Lockup = true, want a flat Netflix mark")
+	}
 	// Empty lists must still be arrays, never null.
-	if body.Trending == nil || body.PopularMovies == nil || body.PopularSeries == nil {
+	if body.Trending == nil || body.PopularMovies == nil || body.PopularSeries == nil ||
+		body.UpcomingMovies == nil || body.NowPlaying == nil ||
+		body.UpcomingSeries == nil || body.AiringSeries == nil ||
+		body.MovieGenres == nil || body.SeriesGenres == nil {
 		t.Errorf("lists = %+v, want empty arrays rather than null", body)
+	}
+}
+
+func TestDiscoverHomeServesExtraShelvesAndGenres(t *testing.T) {
+	upcoming := movieItem(335984, "Blade Runner 2049")
+	playing := movieItem(78, "Blade Runner")
+	premiering := seriesItem(66732, "Stranger Things")
+	airing := seriesItem(1396, "Breaking Bad")
+	p := &stubDiscoverProvider{
+		upcomingMovies: []core.DiscoverItem{upcoming},
+		nowPlaying:     []core.DiscoverItem{playing},
+		upcomingSeries: []core.DiscoverItem{premiering},
+		airingSeries:   []core.DiscoverItem{airing},
+		genres: map[string][]core.DiscoverGenre{
+			MediaTypeMovie:  {{TMDBID: 878, Name: "Science Fiction"}},
+			MediaTypeSeries: {{TMDBID: 18, Name: "Drama"}},
+		},
+	}
+	h, _ := discoverServer(t, p)
+
+	rec := do(t, h, http.MethodGet, "/api/v1/discover", "")
+	wantStatus(t, rec, http.StatusOK)
+
+	var body discoverHomeBody
+	decodeBody(t, rec, &body)
+	if len(body.UpcomingMovies) != 1 || body.UpcomingMovies[0].TMDBID != 335984 {
+		t.Errorf("upcoming movies = %+v, want Blade Runner 2049", body.UpcomingMovies)
+	}
+	if len(body.NowPlaying) != 1 || body.NowPlaying[0].TMDBID != 78 {
+		t.Errorf("now playing = %+v, want Blade Runner", body.NowPlaying)
+	}
+	if len(body.UpcomingSeries) != 1 || body.UpcomingSeries[0].TMDBID != 66732 {
+		t.Errorf("upcoming series = %+v, want Stranger Things", body.UpcomingSeries)
+	}
+	if len(body.AiringSeries) != 1 || body.AiringSeries[0].TMDBID != 1396 {
+		t.Errorf("airing series = %+v, want Breaking Bad", body.AiringSeries)
+	}
+	if len(body.MovieGenres) != 1 || body.MovieGenres[0].Name != "Science Fiction" {
+		t.Errorf("movie genres = %+v, want Science Fiction", body.MovieGenres)
+	}
+	if len(body.SeriesGenres) != 1 || body.SeriesGenres[0].Name != "Drama" {
+		t.Errorf("series genres = %+v, want Drama", body.SeriesGenres)
+	}
+}
+
+func TestDiscoverHomeKeepsGoingWhenAnExtraShelfFails(t *testing.T) {
+	p := &stubDiscoverProvider{
+		popularMovies: []core.DiscoverItem{movieItem(78, "Blade Runner")},
+		upcomingErr:   errors.New("tmdb upcoming down"),
+	}
+	h, _ := discoverServer(t, p)
+
+	rec := do(t, h, http.MethodGet, "/api/v1/discover", "")
+	wantStatus(t, rec, http.StatusOK)
+
+	var body discoverHomeBody
+	decodeBody(t, rec, &body)
+	if len(body.PopularMovies) != 1 {
+		t.Errorf("popular movies = %+v, want the required shelf intact", body.PopularMovies)
+	}
+	if body.UpcomingMovies == nil || len(body.UpcomingMovies) != 0 {
+		t.Errorf("upcoming movies = %+v, want an empty array after the extra failed", body.UpcomingMovies)
 	}
 }
 
@@ -315,6 +419,52 @@ func TestDiscoverBrowseForwardsCuratedSource(t *testing.T) {
 	want := []browseCall{{kind: SourceNetwork, id: 213, page: 2}}
 	if len(p.browseCalls) != 1 || p.browseCalls[0] != want[0] {
 		t.Errorf("browse calls = %+v, want %+v", p.browseCalls, want)
+	}
+}
+
+func TestDiscoverSourcesCarryLogos(t *testing.T) {
+	var sawMarvelLockup bool
+	for _, src := range append(append([]discoverSource{}, discoverNetworks...), discoverStudios...) {
+		if src.LogoPath == "" {
+			t.Errorf("%s %d (%s) has no logo path", src.Name, src.ID, src.Type)
+		}
+		if got := sourceLogoURL(src.LogoPath); !strings.HasPrefix(got, discoverLogoBaseURL+"/") {
+			t.Errorf("%s logo URL = %q, want a TMDB w185 path", src.Name, got)
+		}
+		if src.ID == 420 && src.Type == SourceStudio {
+			sawMarvelLockup = src.Lockup
+		}
+		if src.Lockup && !(src.ID == 420 && src.Type == SourceStudio) {
+			t.Errorf("%s is marked lockup; only Marvel's filled badge needs the tri-tone", src.Name)
+		}
+	}
+	if !sawMarvelLockup {
+		t.Error("Marvel studio is not marked lockup")
+	}
+}
+
+func TestDiscoverBrowseAcceptsExtendedShelves(t *testing.T) {
+	p := &stubDiscoverProvider{page: &core.DiscoverPage{Page: 1, TotalPages: 1}}
+	h, _ := discoverServer(t, p)
+
+	tests := []struct {
+		name string
+		path string
+		kind string
+		id   int64
+	}{
+		{name: "prime video", path: "/api/v1/discover/browse?type=network&id=1024", kind: SourceNetwork, id: 1024},
+		{name: "marvel", path: "/api/v1/discover/browse?type=studio&id=420", kind: SourceStudio, id: 420},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p.browseCalls = nil
+			rec := do(t, h, http.MethodGet, tt.path, "")
+			wantStatus(t, rec, http.StatusOK)
+			if len(p.browseCalls) != 1 || p.browseCalls[0].kind != tt.kind || p.browseCalls[0].id != tt.id {
+				t.Fatalf("browse calls = %+v, want one %s %d", p.browseCalls, tt.kind, tt.id)
+			}
+		})
 	}
 }
 

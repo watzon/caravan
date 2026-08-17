@@ -1,6 +1,9 @@
 package core
 
 import (
+	"fmt"
+	"net/url"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -20,8 +23,25 @@ const (
 // something the user added.
 const IndexerDefaultPriority = 25
 
+// MaxTorrentPayloadBytes bounds authenticated .torrent documents while they
+// move ephemerally from an indexer to a download engine.
+const MaxTorrentPayloadBytes = 4 << 20
+
 type IndexerConfig struct {
 	ID int64
+	// DefinitionID selects a locally executed tracker definition. Empty keeps
+	// the existing remote Torznab/Newznab client behavior.
+	DefinitionID string
+	// DefinitionSource, DefinitionRevision, and DefinitionDigest are populated
+	// together only for an immutable signed-pack definition. The exact pin must
+	// resolve at runtime; a newer definition with the same source:id cannot
+	// silently replace it. Builtin and loose user definitions keep these empty.
+	DefinitionSource   string
+	DefinitionRevision string
+	DefinitionDigest   string
+	// Settings are definition-specific values such as an alternate API host or
+	// private-tracker credentials. The API treats every value as write-only.
+	Settings map[string]string
 	// Name is the user-facing label, unique across indexers.
 	Name string
 	// URL is the indexer's base API URL, without the `/api` path or query.
@@ -41,6 +61,69 @@ type IndexerConfig struct {
 	// Enabled excludes the indexer from search fan-out when false, without
 	// losing its configuration.
 	Enabled bool
+	// HealthError is the last failed t=caps / search probe. Empty means the
+	// indexer last answered. A non-empty value keeps the row enabled but
+	// drops it from search until a later probe succeeds, so one dead host
+	// cannot hold a fan-out open.
+	HealthError string
+	// ConsecutiveFailures is how many probes in a row have failed. After
+	// IndexerHealthDisableAfter the indexer is switched off.
+	ConsecutiveFailures int
+	// LastHealthAt is when HealthError / ConsecutiveFailures last changed.
+	LastHealthAt time.Time
+}
+
+// IndexerHealthDisableAfter is how many failed probes turn an indexer off.
+// The first failure already drops it from search; these extra tries are so a
+// blip does not require the owner to flip the switch back.
+const IndexerHealthDisableAfter = 3
+
+// Searchable reports whether this indexer should be asked during a fan-out.
+func (c IndexerConfig) Searchable() bool {
+	return c.Enabled && c.HealthError == ""
+}
+
+// RedactSecrets replaces configured credential material embedded in message
+// with "[REDACTED]": the URL and its userinfo and query values, the API key,
+// and every settings value. Overlapping secrets are replaced longest-first.
+// Fragments shorter than 4 bytes carry no secrecy and shred unrelated words
+// when substituted out of messages, so they are left alone.
+func (c IndexerConfig) RedactSecrets(message string) string {
+	secrets := make([]string, 0, len(c.Settings)+4)
+	collect := func(value string) {
+		value = strings.TrimSpace(value)
+		if len(value) >= 4 {
+			secrets = append(secrets, value)
+		}
+	}
+	collect(c.URL)
+	if parsed, err := url.Parse(c.URL); err == nil {
+		if parsed.User != nil {
+			if password, ok := parsed.User.Password(); ok {
+				collect(password)
+			}
+			collect(parsed.User.Username())
+		}
+		for _, values := range parsed.Query() {
+			for _, value := range values {
+				collect(value)
+			}
+		}
+	}
+	collect(c.APIKey)
+	for _, value := range c.Settings {
+		collect(value)
+	}
+	sort.SliceStable(secrets, func(i, j int) bool { return len(secrets[i]) > len(secrets[j]) })
+	seen := make(map[string]struct{}, len(secrets))
+	for _, secret := range secrets {
+		if _, exists := seen[secret]; exists {
+			continue
+		}
+		seen[secret] = struct{}{}
+		message = strings.ReplaceAll(message, secret, "[REDACTED]")
+	}
+	return message
 }
 
 // AdultCategoryBase is the Newznab/Torznab category block adult releases are
@@ -143,6 +226,42 @@ func sceneQueryText(title string) string {
 	return strings.Join(strings.Fields(b.String()), " ")
 }
 
+// MovieSearches returns the query forms an interactive movie search fans out.
+// The year-qualified form comes first so its results win ordering ties, but
+// many torrent listings omit the year, so the bare title is searched too.
+func MovieSearches(title string, year int) []string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return nil
+	}
+	if year <= 0 {
+		return []string{title}
+	}
+	return []string{fmt.Sprintf("%s %d", title, year), title}
+}
+
+// SeriesSearches returns the query forms an interactive series search fans
+// out. An episode request also searches the season-pack form, because a pack
+// containing the episode is a valid grab (the picker flags it 'season-pack').
+// Pass season -1 for a whole-series search.
+func SeriesSearches(title string, season, episode int) []string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return nil
+	}
+	switch {
+	case episode > 0:
+		return []string{
+			fmt.Sprintf("%s S%02dE%02d", title, season, episode),
+			fmt.Sprintf("%s S%02d", title, season),
+		}
+	case season >= 0:
+		return []string{fmt.Sprintf("%s S%02d", title, season)}
+	default:
+		return []string{title}
+	}
+}
+
 // IsAdultCategory reports whether an indexer category id is in the adult
 // block, parent id or subcategory alike.
 func IsAdultCategory(id int) bool {
@@ -201,6 +320,10 @@ type Release struct {
 	GUID string
 	// DownloadURL is the .torrent/.nzb URL, or a magnet link.
 	DownloadURL string
+	// TorrentPayload is an ephemeral, already-authenticated .torrent document
+	// supplied directly to a download engine. It is never serialized or
+	// persisted; cached releases retain only their indexer URL.
+	TorrentPayload []byte `json:"-"`
 	// InfoHash is the torrent info hash when the indexer supplied one; empty
 	// for Usenet and for indexers that do not publish it.
 	InfoHash string
@@ -230,6 +353,69 @@ type Release struct {
 	Categories []int
 	// Parsed is what the release parser made of Title.
 	Parsed ParsedRelease
+	// Attributes are non-canonical Torznab/Newznab attributes supplied by a
+	// local definition. Feed serialization preserves them after canonical
+	// fields while refusing duplicate reserved names.
+	Attributes []ReleaseAttribute
+}
+
+// ReleaseAttribute is one extra protocol attribute on a search result.
+type ReleaseAttribute struct {
+	Name  string
+	Value string
+}
+
+const (
+	MaxReleaseAttributes     = 64
+	MaxReleaseAttributeValue = 4 << 10
+)
+
+var reservedReleaseAttributes = map[string]bool{
+	"size": true, "seeders": true, "peers": true, "leechers": true,
+	"infohash": true, "magneturl": true, "category": true,
+}
+
+// NormalizeReleaseAttributes applies the shared extension-attribute contract
+// used by local feeds, remote Torznab clients, and the release cache. Canonical
+// protocol fields remain authoritative; extension names are lowercase,
+// bounded, unique, and sorted so persistence and feed output are deterministic.
+func NormalizeReleaseAttributes(attributes []ReleaseAttribute) []ReleaseAttribute {
+	byName := make(map[string]string, len(attributes))
+	for _, attribute := range attributes {
+		name := strings.ToLower(strings.TrimSpace(attribute.Name))
+		value := strings.TrimSpace(attribute.Value)
+		if len(byName) >= MaxReleaseAttributes || !validReleaseAttributeName(name) || reservedReleaseAttributes[name] || len(value) > MaxReleaseAttributeValue {
+			continue
+		}
+		if _, duplicate := byName[name]; duplicate {
+			continue
+		}
+		byName[name] = value
+	}
+	names := make([]string, 0, len(byName))
+	for name := range byName {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	out := make([]ReleaseAttribute, 0, len(names))
+	for _, name := range names {
+		out = append(out, ReleaseAttribute{Name: name, Value: byName[name]})
+	}
+	return out
+}
+
+func validReleaseAttributeName(name string) bool {
+	if len(name) == 0 || len(name) > 64 || name[0] < 'a' || name[0] > 'z' {
+		return false
+	}
+	for i := 1; i < len(name); i++ {
+		c := name[i]
+		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // InCategories reports whether this release satisfies a category filter.

@@ -241,7 +241,7 @@
                 {t('route.discoverTitle.fullCast')}
               </a>
             </div>
-            <ul class="flex gap-4 overflow-x-auto pb-1">
+            <ul class="flex min-w-0 max-w-full gap-4 overflow-x-auto pb-1">
               {#each title.cast.slice(0, 6) as member (member.tmdb_id)}
                 <li class="flex w-24 shrink-0 flex-col items-center gap-2 text-center">
                   {#if posterSrc(member.profile_url)}

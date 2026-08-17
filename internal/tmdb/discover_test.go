@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -153,6 +154,70 @@ func TestHomeShelfIsCapped(t *testing.T) {
 	// The cap trims the tail, not the head: the list stays most-popular-first.
 	if got[0].TMDBID != 100 {
 		t.Errorf("first item = %d, want 100", got[0].TMDBID)
+	}
+}
+
+func TestUpcomingAndNowPlayingMovies(t *testing.T) {
+	c, s := newStub(t, map[string][]response{
+		"/movie/upcoming":    {okJSON(t, "movie_popular.json")},
+		"/movie/now_playing": {okJSON(t, "movie_popular.json")},
+	})
+	ctx := context.Background()
+
+	upcoming, err := c.UpcomingMovies(ctx)
+	if err != nil {
+		t.Fatalf("UpcomingMovies: %v", err)
+	}
+	if len(upcoming) == 0 || upcoming[0].MediaType != core.MediaTypeMovie {
+		t.Fatalf("UpcomingMovies = %+v, want movies", upcoming)
+	}
+
+	playing, err := c.NowPlayingMovies(ctx)
+	if err != nil {
+		t.Fatalf("NowPlayingMovies: %v", err)
+	}
+	if len(playing) == 0 || playing[0].Title != "Blade Runner" {
+		t.Fatalf("NowPlayingMovies = %+v, want Blade Runner", playing)
+	}
+
+	paths := []string{}
+	for _, req := range s.seen() {
+		paths = append(paths, req.path)
+	}
+	if !slices.Contains(paths, "/movie/upcoming") || !slices.Contains(paths, "/movie/now_playing") {
+		t.Errorf("paths = %v, want upcoming and now_playing", paths)
+	}
+}
+
+func TestUpcomingAndAiringSeries(t *testing.T) {
+	c, s := newStub(t, map[string][]response{
+		"/discover/tv":   {okJSON(t, "discover_tv.json")},
+		"/tv/on_the_air": {okJSON(t, "tv_popular.json")},
+	})
+	ctx := context.Background()
+
+	upcoming, err := c.UpcomingSeries(ctx)
+	if err != nil {
+		t.Fatalf("UpcomingSeries: %v", err)
+	}
+	if len(upcoming) == 0 || upcoming[0].MediaType != core.MediaTypeSeries {
+		t.Fatalf("UpcomingSeries = %+v, want series", upcoming)
+	}
+	q := s.seen()[0].query
+	wantDate := startOfUTCDay(time.Now()).Format(dateLayout)
+	if q.Get("first_air_date.gte") != wantDate {
+		t.Errorf("first_air_date.gte = %q, want %q", q.Get("first_air_date.gte"), wantDate)
+	}
+	if q.Get("sort_by") != "popularity.desc" {
+		t.Errorf("sort_by = %q, want popularity.desc", q.Get("sort_by"))
+	}
+
+	airing, err := c.AiringSeries(ctx)
+	if err != nil {
+		t.Fatalf("AiringSeries: %v", err)
+	}
+	if len(airing) == 0 || airing[0].MediaType != core.MediaTypeSeries {
+		t.Fatalf("AiringSeries = %+v, want series", airing)
 	}
 }
 

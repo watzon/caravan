@@ -32,12 +32,6 @@ var adultRoutes = []struct{ method, path string }{
 	{http.MethodGet, "/api/v1/adult/stash"},
 	{http.MethodPost, "/api/v1/adult/stash"},
 	{http.MethodPost, "/api/v1/adult/stash/test"},
-	{http.MethodGet, "/api/v1/adult/stashbox-instances"},
-	{http.MethodPost, "/api/v1/adult/stashbox-instances"},
-	{http.MethodPost, "/api/v1/adult/stashbox-instances/test"},
-	{http.MethodPut, "/api/v1/adult/stashbox-instances/1"},
-	{http.MethodDelete, "/api/v1/adult/stashbox-instances/1"},
-	{http.MethodPost, "/api/v1/adult/stashbox-instances/1/test"},
 }
 
 // fakeAdultProvider is a canned core.AdultMetadataProvider that records every
@@ -707,15 +701,12 @@ func TestSiteEndpointRefusesATelevisionSeries(t *testing.T) {
 // Bringing the module into existence.
 // ---------------------------------------------------------------------------
 
-// The whole bootstrap, in the order the only door admits.
+// The whole bootstrap, in the order the door now admits.
 //
 // There is no module switch: an adult library IS the module, so POST /libraries
-// is what turns it on. The ordering is forced rather than chosen — the
-// stash-box instance routes live under /adult, which is absent to a caller who
-// can see no adult library, so the library has to exist before its first
-// endpoint can be configured. That is why creating one is not gated on a
-// credential the way the old enable was: nothing could ever have proved one
-// through a door that is not open yet.
+// is what turns the /adult browse surface on. Stash-box instance CRUD is
+// admin metadata, reachable before that library exists, so the Add-library
+// warning can be satisfied first.
 //
 // The row is born restricted and DLNA-dark, which is what the module's own
 // switch used to guarantee: the household does not acquire a shelf because
@@ -727,10 +718,12 @@ func TestCreatingAnAdultLibraryOpensTheModuleAndThenItsInstanceRoutes(t *testing
 	adminCookie := login(t, h, testAdmin, testPassword)
 	memberCookie := login(t, h, testMember, testPassword)
 
-	// Before it exists, the instance routes are not merely empty — they are not
-	// there, for the admin who is about to create the library too.
+	// Instance routes are admin metadata: they answer before any adult library
+	// exists, so Settings → Metadata can collect an endpoint first.
 	wantStatus(t, doAuth(t, h, http.MethodGet, "/api/v1/adult/stashbox-instances", "",
-		withCookie(adminCookie)), http.StatusNotFound)
+		withCookie(adminCookie)), http.StatusOK)
+	wantStatus(t, doAuth(t, h, http.MethodGet, "/api/v1/adult/stashbox-instances", "",
+		withCookie(memberCookie)), http.StatusForbidden)
 
 	// A member may not make one. POST /libraries is admin-only by the ordinary
 	// rule, and a household member acquiring a shelf for everybody is precisely
@@ -754,15 +747,8 @@ func TestCreatingAnAdultLibraryOpensTheModuleAndThenItsInstanceRoutes(t *testing
 		t.Errorf("chain = %v, want the legacy stash-box id alone", created.Providers)
 	}
 
-	// Now the instance routes answer, which is the point of the ordering.
-	wantStatus(t, doAuth(t, h, http.MethodGet, "/api/v1/adult/stashbox-instances", "",
-		withCookie(adminCookie)), http.StatusOK)
-	wantStatus(t, doAuth(t, h, http.MethodPost, "/api/v1/adult/stashbox-instances",
-		`{"name":"StashDB","endpoint":"https://stashdb.org/graphql","api_key":"stash-key"}`,
-		withCookie(adminCookie)), http.StatusCreated)
-
-	// And the member still sees nothing: created restricted means the admins
-	// alone until somebody is named.
+	// And the member still sees nothing of the browse surface: created
+	// restricted means the admins alone until somebody is named.
 	wantStatus(t, doAuth(t, h, http.MethodGet, "/api/v1/adult/discover", "",
 		withCookie(memberCookie)), http.StatusNotFound)
 }
@@ -1652,11 +1638,15 @@ func TestInteractiveReleaseSearchForATelevisionSeriesIsUnchanged(t *testing.T) {
 	wantStatus(t, rec, http.StatusOK)
 
 	searches := fake.recorded()
-	if len(searches) != 1 || searches[0].query != "Planet Earth II S01E02" {
-		t.Fatalf("searches = %+v, want the television query", searches)
+	// The episode and season-pack forms both use television numbering,
+	// never a scene-date query.
+	if len(searches) != 2 || searches[0].query != "Planet Earth II S01E02" || searches[1].query != "Planet Earth II S01" {
+		t.Fatalf("searches = %+v, want the television query forms", searches)
 	}
-	if searches[0].cats != "5000" {
-		t.Errorf("cats = %q, want the television library's categories", searches[0].cats)
+	for _, search := range searches {
+		if search.cats != "5000" {
+			t.Errorf("cats = %q, want the television library's categories", search.cats)
+		}
 	}
 }
 

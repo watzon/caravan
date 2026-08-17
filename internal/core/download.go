@@ -386,6 +386,9 @@ const (
 	JobRecycleCleanup = "recycle_cleanup"
 	// JobNotificationDispatch delivers new activity events to configured webhooks.
 	JobNotificationDispatch = "notification_dispatch"
+	// JobIndexerHealth probes every enabled indexer and disables ones that
+	// have failed IndexerHealthDisableAfter times in a row.
+	JobIndexerHealth = "indexer_health"
 	// JobSyncSite walks one adult site's whole scene catalogue into season and
 	// episode rows.
 	//

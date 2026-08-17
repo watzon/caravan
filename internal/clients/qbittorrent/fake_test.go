@@ -2,6 +2,7 @@ package qbittorrent
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -25,10 +26,11 @@ const (
 
 // call is one request the fake saw, for asserting on wire format.
 type call struct {
-	Method string
-	Path   string
-	Form   url.Values
-	SID    string
+	Method       string
+	Path         string
+	Form         url.Values
+	SID          string
+	TorrentFiles []string
 }
 
 // fakeQB is a qBittorrent WebUI API v2 good enough to exercise every call
@@ -56,8 +58,9 @@ type fakeQB struct {
 	// and torrents/info answers with the whole queue.
 	ignoresTagFilter bool
 
-	logins int
-	calls  []call
+	logins      int
+	calls       []call
+	addPayloads [][]byte
 	// onAdd runs after a successful torrents/add, so a test can decide what
 	// the server produces.
 	onAdd func(f *fakeQB, form url.Values)
@@ -239,9 +242,48 @@ func (f *fakeQB) serveAdd(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if strings.TrimSpace(r.Form.Get("urls")) == "" {
+	var payload []byte
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+		if err := r.ParseMultipartForm(8 << 20); err != nil {
+			http.Error(w, "bad multipart form", http.StatusBadRequest)
+			return
+		}
+		files := r.MultipartForm.File["torrents"]
+		fileNames := make([]string, 0, len(files))
+		for _, file := range files {
+			fileNames = append(fileNames, file.Filename)
+		}
+		form := make(url.Values, len(r.Form))
+		for name, values := range r.Form {
+			form[name] = append([]string(nil), values...)
+		}
+		f.mu.Lock()
+		for i := len(f.calls) - 1; i >= 0; i-- {
+			if f.calls[i].Path == "/torrents/add" {
+				f.calls[i].Form = form
+				f.calls[i].TorrentFiles = fileNames
+				break
+			}
+		}
+		f.mu.Unlock()
+		file, _, err := r.FormFile("torrents")
+		if err == nil {
+			payload, err = io.ReadAll(io.LimitReader(file, core.MaxTorrentPayloadBytes+1))
+			_ = file.Close()
+		}
+		if err != nil {
+			http.Error(w, "missing torrent payload", http.StatusBadRequest)
+			return
+		}
+	}
+	if strings.TrimSpace(r.Form.Get("urls")) == "" && len(payload) == 0 {
 		http.Error(w, "Fails.", http.StatusBadRequest)
 		return
+	}
+	if len(payload) > 0 {
+		f.mu.Lock()
+		f.addPayloads = append(f.addPayloads, append([]byte(nil), payload...))
+		f.mu.Unlock()
 	}
 	if f.rejectsAdd {
 		f.text(w, "Fails.")
@@ -329,6 +371,16 @@ func (f *fakeQB) seen(path string) []call {
 		if c.Path == path {
 			out = append(out, c)
 		}
+	}
+	return out
+}
+
+func (f *fakeQB) payloads() [][]byte {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([][]byte, len(f.addPayloads))
+	for i := range f.addPayloads {
+		out[i] = append([]byte(nil), f.addPayloads[i]...)
 	}
 	return out
 }

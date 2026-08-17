@@ -65,16 +65,44 @@ const MOVIE = {
   id: 3,
   tmdb_id: 335984,
   title: 'Blade Runner 2049',
+  year: 2017,
   library_id: 4,
   monitored: true,
 } as Movie;
+
+/** When set, the per-item search endpoint waits on it: the item is fast and
+ * the fan-out is slow, and one test needs to look at the screen in between. */
+let releaseGate: Promise<void> | null = null;
 
 let host: HTMLElement;
 let app: Record<string, unknown> | undefined;
 let calls: { url: string; method: string; body: unknown }[];
 
+/** The two answers a test bends: the per-item seed, and the free-text reply. */
+let itemAnswer: { body: unknown; status: number };
+let searchAnswer: { body: unknown; status: number };
+
 beforeEach(() => {
   calls = [];
+  releaseGate = null;
+  itemAnswer = {
+    status: 200,
+    body: {
+      query: 'Blade Runner 2049 2017',
+      queries: ['Blade Runner 2049 2017'],
+      releases: [release()],
+      errors: [{ indexer_id: 2, indexer: 'Down Indexer', error: 'dial tcp: refused' }],
+    },
+  };
+  searchAnswer = {
+    status: 200,
+    body: {
+      query: 'br2049 remux',
+      queries: ['br2049 remux'],
+      releases: [release({ id: 99, guid: 'guid-2', title: 'BR2049.2017.REMUX-GROUP' })],
+      errors: [],
+    },
+  };
   host = document.createElement('div');
   document.body.appendChild(host);
   vi.stubGlobal(
@@ -103,20 +131,11 @@ beforeEach(() => {
         });
       }
       if (url.includes('/movies/3/releases')) {
-        return jsonResponse({
-          query: 'Blade Runner 2049 2017',
-          queries: ['Blade Runner 2049 2017'],
-          releases: [release()],
-          errors: [{ indexer_id: 2, indexer: 'Down Indexer', error: 'dial tcp: refused' }],
-        });
+        if (releaseGate) await releaseGate;
+        return jsonResponse(itemAnswer.body, itemAnswer.status);
       }
       if (url.includes('/search/releases')) {
-        return jsonResponse({
-          query: 'br2049 remux',
-          queries: ['br2049 remux'],
-          releases: [release({ id: 99, guid: 'guid-2', title: 'BR2049.2017.REMUX-GROUP' })],
-          errors: [],
-        });
+        return jsonResponse(searchAnswer.body, searchAnswer.status);
       }
       if (url.includes('/movies/3/grab')) return jsonResponse({}, 204);
       if (url.includes('/movies/3')) return jsonResponse(MOVIE);
@@ -234,6 +253,104 @@ describe('ReleaseSearch', () => {
     expect(grab?.body).toEqual({ release_id: 99 });
     // Nothing is posted to the universal grab: the item context never leaves.
     expect(calls.some((c) => c.url.includes('/search/grab'))).toBe(false);
+  });
+
+  it('seeds the box with the query-language spelling the server sent, not the raw query', async () => {
+    // The raw `query` is only the first string the fan-out sent; the expression
+    // is the whole search written in the language the box speaks, so widening
+    // it is an edit rather than a retype.
+    (itemAnswer.body as Record<string, unknown>).search_expression =
+      'title:"Blade Runner 2049" year:2017';
+    mountPicker();
+    await settle();
+
+    expect(queryBox().value).toBe('title:"Blade Runner 2049" year:2017');
+  });
+
+  it('seeds the box from the item while the search is still in flight', async () => {
+    (itemAnswer.body as Record<string, unknown>).search_expression =
+      'title:"Blade Runner 2049" year:2017';
+    let releaseSearch!: () => void;
+    releaseGate = new Promise((resolve) => (releaseSearch = resolve));
+    mountPicker();
+    await settle();
+
+    // The fan-out has not answered, but the box already speaks: the item
+    // arrived, and the client twin wrote the same seed the server will send.
+    expect(queryBox().value).toBe('title:"Blade Runner 2049" year:2017');
+
+    releaseSearch();
+    await settle();
+    // The authoritative seed replaced the twin without visible change.
+    expect(queryBox().value).toBe('title:"Blade Runner 2049" year:2017');
+  });
+
+  it('puts the syntax help inside the search box as an icon button', async () => {
+    mountPicker();
+    await settle();
+
+    const toggle = host.querySelector<HTMLButtonElement>('[data-syntax-toggle]')!;
+    expect(toggle).not.toBeNull();
+    // Icon-only, so the name lives in the accessible label.
+    expect(toggle.getAttribute('aria-label')).toBe('Query syntax');
+    // It rides inside the query box's wrapper, not in a row of its own.
+    expect(toggle.closest('.relative')?.querySelector('input')).not.toBeNull();
+  });
+
+  it('counts the rows the expression hid, and says nothing when it hid none', async () => {
+    mountPicker();
+    await settle();
+    // The seed answer hid nothing, so there is no note to read.
+    expect(host.querySelector('[data-filtered-note]')).toBeNull();
+
+    (searchAnswer.body as Record<string, unknown>).filtered = 3;
+    type('br2049 remux -hdtv');
+    clickSearch();
+    await settle();
+
+    expect(host.querySelector('[data-filtered-note]')?.textContent).toContain(
+      '3 results hidden by your filters',
+    );
+  });
+
+  it('shows the parser’s own message when the expression will not read', async () => {
+    mountPicker();
+    await settle();
+
+    searchAnswer.status = 400;
+    searchAnswer.body = { error: 'unclosed quote in query' };
+    type('title:"Dune');
+    clickSearch();
+    await settle();
+
+    expect(host.textContent).toContain('unclosed quote in query');
+  });
+
+  it('opens the syntax cheatsheet in a modal naming the fields the language understands', async () => {
+    mountPicker();
+    await settle();
+    expect(host.querySelector('[data-syntax-help]')).toBeNull();
+
+    const toggle = host.querySelector<HTMLButtonElement>('[data-syntax-toggle]')!;
+    toggle.click();
+    flushSync();
+
+    // The cheatsheet lives in a dialog now, closed by the modal's own
+    // affordances rather than a second press of the opener.
+    expect(host.querySelector('[data-syntax-help]')?.closest('[role="dialog"]')).not.toBeNull();
+    const panel = host.querySelector('[data-syntax-help]')?.textContent ?? '';
+    for (const field of ['title', 'site', 'year', 'season', 'episode', 'date', 'quality', 'codec']) {
+      expect(panel).toContain(field);
+    }
+    expect(panel).toContain('site:"Vixen" date:2026-01-19');
+    expect(panel).toContain('foo OR bar');
+
+    const close = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+      (candidate) => candidate.getAttribute('aria-label') === 'Close',
+    )!;
+    close.click();
+    flushSync();
+    expect(host.querySelector('[data-syntax-help]')).toBeNull();
   });
 
   it('omits the adult category block when the module is not visible', async () => {

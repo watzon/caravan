@@ -36,6 +36,8 @@
     onsearch: () => void;
     /** The locked grab target, when there is one ("Movie · Blade Runner 2049"). */
     contextLabel?: string;
+    /** Opens the query-syntax help; the "?" in the box renders only when set. */
+    onhelp?: () => void;
   }
 
   let {
@@ -46,6 +48,7 @@
     busy,
     onsearch,
     contextLabel,
+    onhelp,
   }: Props = $props();
 
   // FilterOptions speaks string ids because a provider id is not always a
@@ -85,6 +88,20 @@
     onsearch();
   }
 
+  let queryWrapper = $state<HTMLDivElement>();
+
+  /** Room for the in-field buttons, so a long expression never runs under them. */
+  let inputPadding = $derived(
+    query !== '' && onhelp ? 'pr-16' : query !== '' || onhelp ? 'pr-10' : '',
+  );
+
+  // Clearing is a step in typing the next query, so the caret goes back where
+  // typing happens rather than stranding focus on a button that just vanished.
+  function clearQuery() {
+    query = '';
+    queryWrapper?.querySelector('input')?.focus();
+  }
+
   const { t, tp } = useI18n();
   let categoryLabel = $derived(
     categories.length === 0
@@ -100,13 +117,44 @@
 
 <div class="flex flex-col gap-2">
   <div class="flex flex-wrap items-center gap-2">
-    <div class="min-w-[16rem] flex-1">
+    <div bind:this={queryWrapper} class="relative min-w-[16rem] flex-1">
       <TextInput
         bind:value={query}
         type="search"
         {onkeydown}
+        class={inputPadding}
         placeholder={t('component.releaseSearchControls.searchEveryEnabledIndexer')}
         ariaLabel={t('component.releaseSearchControls.releaseSearchQuery')} />
+      <!-- The in-field controls replace the native search ✕, which ignores the
+           design tokens. Both draw from the app icon set so the box reads as
+           one piece. -->
+      <div class="absolute right-1.5 top-1/2 flex -translate-y-1/2 items-center gap-0.5">
+        {#if query !== ''}
+          <button
+            type="button"
+            data-clear-search
+            aria-label={t('component.releaseSearchControls.clearSearch')}
+            title={t('component.releaseSearchControls.clearSearch')}
+            onclick={clearQuery}
+            class="inline-flex h-7 w-7 items-center justify-center rounded-full text-ink-muted
+                   transition-colors duration-150 ease-out hover:bg-raised hover:text-ink">
+            <Icon name="close" size={16} />
+          </button>
+        {/if}
+        {#if onhelp}
+          <button
+            type="button"
+            data-syntax-toggle
+            aria-haspopup="dialog"
+            aria-label={t('component.releaseSearchControls.querySyntax')}
+            title={t('component.releaseSearchControls.querySyntax')}
+            onclick={onhelp}
+            class="inline-flex h-7 w-7 items-center justify-center rounded-full text-ink-muted
+                   transition-colors duration-150 ease-out hover:bg-raised hover:text-ink">
+            <Icon name="help" size={16} />
+          </button>
+        {/if}
+      </div>
     </div>
 
     <FilterPill label={categoryLabel} applied={categories.length > 0} shape="box" width="w-56">

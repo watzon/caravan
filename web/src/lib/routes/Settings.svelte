@@ -370,7 +370,7 @@
           <p class="text-sm text-ink-secondary">{t('route.settings.tvmazeMessage')}</p>
         </SettingsCard>
 
-        {#if session.adult}
+        {#if session.isAdmin}
           <StashboxSettings />
         {/if}
       </section>

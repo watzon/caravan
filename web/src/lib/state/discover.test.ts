@@ -34,7 +34,13 @@ function home(): DiscoverHome {
     // has to cover.
     trending: [item(1), item(2, { media_type: 'series' })],
     popular_movies: [item(1)],
+    upcoming_movies: [item(1)],
+    now_playing: [],
     popular_series: [item(2, { media_type: 'series' })],
+    upcoming_series: [],
+    airing_series: [],
+    movie_genres: [],
+    series_genres: [],
     networks: [],
     studios: [],
   };
@@ -127,6 +133,7 @@ describe('discover store', () => {
 
     expect(discover.home?.trending[0]?.requested).toBe(true);
     expect(discover.home?.popular_movies[0]?.requested).toBe(true);
+    expect(discover.home?.upcoming_movies[0]?.requested).toBe(true);
     // Same TMDB id, different media type: two id spaces, not one.
     expect(discover.home?.popular_series[0]?.requested).toBe(false);
   });

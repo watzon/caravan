@@ -104,7 +104,13 @@ async function mountRatingSurface(surface: RatingSurface, body: DiscoverTitlePay
     discover.home = {
       trending: [body],
       popular_movies: [],
+      upcoming_movies: [],
+      now_playing: [],
       popular_series: [],
+      upcoming_series: [],
+      airing_series: [],
+      movie_genres: [],
+      series_genres: [],
       networks: [],
       studios: [],
     };
@@ -192,8 +198,14 @@ describe('Discover text fallbacks', () => {
     discover.home = {
       trending: [payload({ title: heroTitle, overview: heroOverview })],
       popular_movies: [],
+      upcoming_movies: [],
+      now_playing: [],
       popular_series: [],
-      networks: [{ id: 213, name: sourceName, type: 'network' }],
+      upcoming_series: [],
+      airing_series: [],
+      movie_genres: [],
+      series_genres: [],
+      networks: [{ id: 213, name: sourceName, type: 'network', logo_url: '' }],
       studios: [],
     };
     app = mount(DiscoverRoute, { target: host }) as Record<string, unknown>;

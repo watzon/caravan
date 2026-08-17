@@ -6,6 +6,8 @@ import (
 
 	"github.com/watzon/caravan/internal/clients"
 	"github.com/watzon/caravan/internal/core"
+	"github.com/watzon/caravan/internal/indexer/catalog"
+	"github.com/watzon/caravan/internal/indexer/packs"
 )
 
 // The acquisition endpoints (indexers, interactive search, grabs, the download
@@ -78,6 +80,20 @@ type IndexerClient interface {
 	Categories(ctx context.Context) ([]core.IndexerCategory, error)
 }
 
+// IndexerDownloadResolver is implemented by definition-backed clients whose
+// search result points at a detail page rather than a final torrent or magnet.
+// Resolution is intentionally lazy and runs only for the release being grabbed.
+type IndexerDownloadResolver interface {
+	ResolveDownload(ctx context.Context, raw string) (string, error)
+}
+
+// IndexerTorrentPayloadFetcher lets a definition-backed indexer retrieve an
+// authenticated payload itself instead of leaking cookies, headers, or a POST
+// requirement to the selected download client.
+type IndexerTorrentPayloadFetcher interface {
+	FetchDownload(ctx context.Context, raw string) ([]byte, error)
+}
+
 // IndexerFactory builds a client for a stored indexer configuration. The
 // serving process wires this to indexer.New so the HTTP layer never has to
 // know how a client is constructed.
@@ -85,6 +101,24 @@ type IndexerClient interface {
 // It is called concurrently: one interactive search fans out across every
 // enabled indexer at once.
 type IndexerFactory func(cfg core.IndexerConfig) IndexerClient
+
+// LocalDefinitionSchema is the non-secret subset the HTTP API needs to
+// validate an explicitly loaded definition without depending on its execution
+// package or advertising it in the static catalog.
+type LocalDefinitionSchema struct {
+	Settings []string
+	Fields   []catalog.Setting
+	BaseURLs []string
+}
+
+// LocalDefinitionLookup resolves only definitions that compiled into the
+// executable registry. Returning false keeps unsupported manifests inert.
+type LocalDefinitionLookup func(id string) (LocalDefinitionSchema, bool)
+
+// ExactLocalDefinitionLookup resolves an immutable executable definition only
+// by its complete source, revision, and digest identity. It must never fall
+// back to a short identifier.
+type ExactLocalDefinitionLookup func(id, source, revision, digest string) (LocalDefinitionSchema, bool)
 
 // Option configures the optional dependencies of NewServer.
 type Option func(*server)
@@ -98,6 +132,33 @@ func WithEngine(p EngineProvider) Option {
 // endpoints build clients with.
 func WithIndexerClients(f IndexerFactory) Option {
 	return func(s *server) { s.indexers = f }
+}
+
+// WithLocalDefinitions authorizes explicitly loaded, executable definitions
+// for configuration. It does not add them to GET /indexer-catalog.
+func WithLocalDefinitions(lookup LocalDefinitionLookup) Option {
+	return func(s *server) { s.localDefinitions = lookup }
+}
+
+// WithExactLocalDefinitions authorizes immutable executable definitions by all
+// persisted identity fields.
+func WithExactLocalDefinitions(lookup ExactLocalDefinitionLookup) Option {
+	return func(s *server) { s.exactLocalDefinitions = lookup }
+}
+
+// WithDefinitionInventoryStatuses supplies executable or blocked definition
+// states from automatically managed sources. It is separate from the static
+// research catalog and from signed-pack lifecycle persistence.
+func WithDefinitionInventoryStatuses(statuses []catalog.ExecutionStatus) Option {
+	return func(s *server) {
+		s.definitionInventoryStatuses = append([]catalog.ExecutionStatus(nil), statuses...)
+	}
+}
+
+// WithDefinitionPacks supplies the authenticated owner-facing signed pack
+// lifecycle service. A nil service leaves its routes present but unavailable.
+func WithDefinitionPacks(service *packs.Service) Option {
+	return func(s *server) { s.definitionPacks = service }
 }
 
 // WithDownloadClients supplies the external download-client registry the

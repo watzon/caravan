@@ -75,7 +75,7 @@
         class="sr-only"
         bind:this={fileInput}
         type="file"
-        accept=".db,.sqlite,.sqlite3,application/vnd.sqlite3,application/x-sqlite3"
+        accept=".db,.sqlite,.sqlite3,.zip,.caravan-backup,application/vnd.sqlite3,application/x-sqlite3,application/vnd.caravan.portable+zip"
         aria-label={t('component.databaseSettings.chooseBackup')}
         onchange={chooseRestore} />
     </div>

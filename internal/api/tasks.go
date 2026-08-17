@@ -30,6 +30,10 @@ var taskCopy = map[string]struct{ name, description string }{
 		"RSS sync",
 		"Checks indexer feeds for newly posted releases.",
 	},
+	core.JobIndexerHealth: {
+		"Indexer health",
+		"Probes each indexer and disables ones that stay down.",
+	},
 	core.JobBacklogSweep: {
 		"Backlog search",
 		"Searches indexers for everything on the wanted list.",

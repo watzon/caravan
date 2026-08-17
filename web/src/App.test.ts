@@ -177,8 +177,14 @@ const DISCOVER: DiscoverHome = {
     },
   ],
   popular_movies: [],
+  upcoming_movies: [],
+  now_playing: [],
   popular_series: [],
-  networks: [{ id: 213, name: 'Netflix', type: 'network' }],
+  upcoming_series: [],
+  airing_series: [],
+  movie_genres: [],
+  series_genres: [],
+  networks: [{ id: 213, name: 'Netflix', type: 'network', logo_url: '' }],
   studios: [],
 };
 
@@ -598,6 +604,11 @@ describe('App shell', () => {
     expect(host.textContent).toContain('Browse by network');
     // The movie grid did not come along for the ride.
     expect(host.textContent).not.toContain('Big Buck Bunny');
+    // A wide Discover shelf must not raise <main>'s automatic minimum and
+    // turn the shell column into the horizontal scroller.
+    const main = host.querySelector('main');
+    expect(main?.classList.contains('min-w-0')).toBe(true);
+    expect(main?.parentElement?.classList.contains('overflow-x-hidden')).toBe(true);
   });
 
   /**

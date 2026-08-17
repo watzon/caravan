@@ -4,16 +4,17 @@
    *
    * Everything on it is pre-decorated by GET /discover (in_library, requested),
    * so no card cross-references a second call to know its own state. The
-   * payload is cached in the discover store because it costs three sequential
-   * TMDB round trips — bouncing into a title and back must not pay twice.
+   * payload is cached in the discover store because it fans out several TMDB
+   * shelves — bouncing into a title and back must not pay twice.
    */
   import { onMount } from 'svelte';
-  import type { DiscoverItem, DiscoverSource } from '../api/types';
+  import type { DiscoverItem } from '../api/types';
   import AddRequestModal from '../components/AddRequestModal.svelte';
   import Badge from '../components/Badge.svelte';
   import Button from '../components/Button.svelte';
   import DiscoverError from '../components/DiscoverError.svelte';
   import DiscoverShelf from '../components/DiscoverShelf.svelte';
+  import DiscoverTiles from '../components/DiscoverTiles.svelte';
   import EmptyState from '../components/EmptyState.svelte';
   import ExploreScopes from '../components/ExploreScopes.svelte';
   import Icon from '../components/Icon.svelte';
@@ -27,6 +28,7 @@
     sourceHref,
     type RequestMode,
   } from '../discover';
+  import { titleGenreHref, titleGridHref, titleUpcomingHref } from '../explore';
   import { discover } from '../state/discover.svelte';
   import { session } from '../state/session.svelte';
 
@@ -67,29 +69,38 @@
       type: t(item.media_type === 'movie' ? 'route.discover.movie' : 'route.discover.series'),
     });
   }
+
+  let movieGenreTiles = $derived(
+    (home?.movie_genres ?? []).map((genre) => ({
+      href: titleGenreHref('movie', { id: String(genre.tmdb_id), name: genre.name }),
+      name: genre.name,
+    })),
+  );
+  let seriesGenreTiles = $derived(
+    (home?.series_genres ?? []).map((genre) => ({
+      href: titleGenreHref('series', { id: String(genre.tmdb_id), name: genre.name }),
+      name: genre.name,
+    })),
+  );
+  let studioTiles = $derived(
+    (home?.studios ?? []).map((source) => ({
+      href: sourceHref(source),
+      name: source.name,
+      image: source.logo_url,
+      lockup: source.lockup,
+    })),
+  );
+  let networkTiles = $derived(
+    (home?.networks ?? []).map((source) => ({
+      href: sourceHref(source),
+      name: source.name,
+      image: source.logo_url,
+      lockup: source.lockup,
+    })),
+  );
 </script>
 
-{#snippet tiles(label: string, sources: DiscoverSource[])}
-  {#if sources.length > 0}
-    <section class="flex flex-col gap-3">
-      <h2 class="font-display text-lg font-semibold tracking-tight text-ink">{label}</h2>
-      <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        {#each sources as source (source.id)}
-          <a
-            href={sourceHref(source)}
-            title={source.name}
-            class="flex h-14 min-w-0 items-center justify-center rounded-md border border-border bg-surface px-3
-                   text-center text-sm text-ink-secondary transition-colors duration-150 ease-out
-                   hover:border-border-strong hover:bg-raised hover:text-ink">
-            <span class="line-clamp-2">{source.name}</span>
-          </a>
-        {/each}
-      </div>
-    </section>
-  {/if}
-{/snippet}
-
-<div class="flex flex-col gap-8">
+<div class="flex w-full min-w-0 flex-col gap-8">
   <!-- Featured is one of four scopes now (PLAN phase 12 task 4), so the row is
        here too: this screen is where somebody arrives, and it is the only place
        the other three are announced. -->
@@ -102,7 +113,7 @@
       onretry={() => void discover.load(true)} />
   {:else if discover.loading && home === null}
     <Skeleton class="h-64 w-full rounded-lg" />
-    <div class="flex gap-4">
+    <div class="flex min-w-0 max-w-full gap-4 overflow-x-auto">
       {#each Array.from({ length: 6 }) as _, i (i)}
         <div class="flex w-40 shrink-0 flex-col gap-2">
           <Skeleton class="aspect-[2/3] w-full rounded-md" />
@@ -184,15 +195,39 @@
     {/if}
 
     <DiscoverShelf title={t('route.discover.trendingWeek')} items={trendingRest} showType />
-    <DiscoverShelf title={t('route.discover.popularMovies')} items={home.popular_movies} />
-    <DiscoverShelf title={t('route.discover.popularSeries')} items={home.popular_series} />
 
-    <!-- The curated lists ARE the whole shelf (internal/api/discover.go), so
-         there is no "all networks" screen to link to. -->
-    {@render tiles(t('route.discover.browseByNetwork'), home.networks)}
-    {@render tiles(t('route.discover.browseByStudio'), home.studios)}
+    <!-- Movies first, studios as that section's end cap; series next, networks last. -->
+    <DiscoverShelf
+      title={t('route.discover.popularMovies')}
+      items={home.popular_movies}
+      href={titleGridHref('movie')} />
+    <DiscoverShelf
+      title={t('route.discover.upcomingMovies')}
+      items={home.upcoming_movies}
+      href={titleUpcomingHref('movie')} />
+    <DiscoverShelf title={t('route.discover.nowPlaying')} items={home.now_playing} />
+    <DiscoverTiles title={t('route.discover.movieGenres')} tiles={movieGenreTiles} />
+    <DiscoverTiles title={t('route.discover.browseByStudio')} tiles={studioTiles} />
 
-    {#if home.trending.length === 0 && home.popular_movies.length === 0 && home.popular_series.length === 0}
+    <DiscoverShelf
+      title={t('route.discover.popularSeries')}
+      items={home.popular_series}
+      href={titleGridHref('series')} />
+    <DiscoverShelf
+      title={t('route.discover.upcomingSeries')}
+      items={home.upcoming_series}
+      href={titleUpcomingHref('series')} />
+    <DiscoverShelf title={t('route.discover.airingSeries')} items={home.airing_series} />
+    <DiscoverTiles title={t('route.discover.seriesGenres')} tiles={seriesGenreTiles} />
+    <DiscoverTiles title={t('route.discover.browseByNetwork')} tiles={networkTiles} />
+
+    {#if home.trending.length === 0 &&
+      home.popular_movies.length === 0 &&
+      home.upcoming_movies.length === 0 &&
+      home.now_playing.length === 0 &&
+      home.popular_series.length === 0 &&
+      home.upcoming_series.length === 0 &&
+      home.airing_series.length === 0}
       <EmptyState
         icon="compass"
         title={t('route.discover.emptyTitle')}

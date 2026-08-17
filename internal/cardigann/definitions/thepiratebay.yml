@@ -1,0 +1,97 @@
+id: thepiratebay
+name: The Pirate Bay
+description: Public BitTorrent search through The Pirate Bay's JSON API.
+language: en-US
+type: public
+links:
+  - https://thepiratebay.org/
+settings:
+  - name: apiurl
+    type: text
+    default: https://apibay.org
+caps:
+  categorymappings:
+    - {id: 100, cat: Audio}
+    - {id: 101, cat: Audio}
+    - {id: 102, cat: Audio/Audiobook}
+    - {id: 103, cat: Audio}
+    - {id: 104, cat: Audio/Lossless}
+    - {id: 199, cat: Audio/Other}
+    - {id: 200, cat: Movies}
+    - {id: 201, cat: Movies}
+    - {id: 202, cat: Movies/SD}
+    - {id: 203, cat: Audio/Video}
+    - {id: 204, cat: Movies/Other}
+    - {id: 205, cat: TV}
+    - {id: 206, cat: TV/Other}
+    - {id: 207, cat: Movies/HD}
+    - {id: 208, cat: TV/HD}
+    - {id: 209, cat: Movies/3D}
+    - {id: 210, cat: Movies/SD}
+    - {id: 211, cat: Movies/UHD}
+    - {id: 212, cat: TV/UHD}
+    - {id: 299, cat: Movies/Other}
+    - {id: 300, cat: PC}
+    - {id: 301, cat: PC}
+    - {id: 302, cat: PC/Mac}
+    - {id: 303, cat: PC}
+    - {id: 304, cat: PC/Mobile-Other}
+    - {id: 305, cat: PC/Mobile-iOS}
+    - {id: 306, cat: PC/Mobile-Android}
+    - {id: 399, cat: PC}
+    - {id: 400, cat: Console}
+    - {id: 401, cat: PC/Games}
+    - {id: 402, cat: PC/Mac}
+    - {id: 403, cat: Console/PS4}
+    - {id: 404, cat: Console/XBox}
+    - {id: 405, cat: Console/Wii}
+    - {id: 406, cat: Console/Other}
+    - {id: 407, cat: Console/Other}
+    - {id: 408, cat: Console/Other}
+    - {id: 499, cat: Console/Other}
+    - {id: 500, cat: XXX}
+    - {id: 501, cat: XXX}
+    - {id: 502, cat: XXX/DVD}
+    - {id: 503, cat: XXX/ImageSet}
+    - {id: 504, cat: XXX}
+    - {id: 505, cat: XXX/x264}
+    - {id: 506, cat: XXX}
+    - {id: 507, cat: XXX/UHD}
+    - {id: 599, cat: XXX/Other}
+    - {id: 600, cat: Other}
+    - {id: 601, cat: Books/EBook}
+    - {id: 602, cat: Books/Comics}
+    - {id: 603, cat: Books}
+    - {id: 604, cat: Books}
+    - {id: 605, cat: Books}
+    - {id: 699, cat: Books/Other}
+  modes:
+    search: [q]
+    tv-search: [q, season, ep]
+    movie-search: [q]
+    music-search: [q]
+    book-search: [q]
+search:
+  paths:
+    - path: '{{ .Config.apiurl }}/{{ if .Keywords }}q.php?q={{ urlquery .Keywords }}{{ else }}precompiled/data_top100_recent.json{{ end }}'
+      response:
+        type: json
+  keywordsfilters:
+    - name: tolower
+  rows:
+    selector: '$'
+  fields:
+    title:
+      selector: name
+    category:
+      selector: category
+    infohash:
+      selector: info_hash
+    date:
+      selector: added
+    size:
+      selector: size
+    seeders:
+      selector: seeders
+    leechers:
+      selector: leechers

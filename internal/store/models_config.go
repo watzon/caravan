@@ -28,16 +28,21 @@ type downloadClientModel struct {
 type indexerModel struct {
 	bun.BaseModel `bun:"table:indexers,alias:indexer"`
 
-	ID         int64  `bun:",pk,autoincrement"`
-	Name       string `bun:",notnull"`
-	URL        string `bun:",notnull"`
-	APIKey     string `bun:"api_key,notnull"`
-	Protocol   string `bun:",notnull"`
-	Categories string `bun:",notnull"`
-	Priority   int    `bun:",notnull"`
-	Enabled    bool   `bun:",notnull"`
-	CreatedAt  string `bun:"created_at,notnull"`
-	UpdatedAt  string `bun:"updated_at,notnull"`
+	ID                  int64  `bun:",pk,autoincrement"`
+	DefinitionID        string `bun:"definition_id,notnull"`
+	Settings            string `bun:",notnull"`
+	Name                string `bun:",notnull"`
+	URL                 string `bun:",notnull"`
+	APIKey              string `bun:"api_key,notnull"`
+	Protocol            string `bun:",notnull"`
+	Categories          string `bun:",notnull"`
+	Priority            int    `bun:",notnull"`
+	Enabled             bool   `bun:",notnull"`
+	HealthError         string `bun:"health_error,notnull"`
+	ConsecutiveFailures int    `bun:"consecutive_failures,notnull"`
+	LastHealthAt        string `bun:"last_health_at,notnull"`
+	CreatedAt           string `bun:"created_at,notnull"`
+	UpdatedAt           string `bun:"updated_at,notnull"`
 }
 
 // usenetServerModel is the database representation of an NNTP server. The core

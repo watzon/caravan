@@ -12,11 +12,9 @@
    * endpoint that is configured but unreachable must report that HERE rather
    * than quietly identifying nothing on the next scan.
    *
-   * Every route it calls lives under the adult mux and answers 404 while the
-   * module is off, so the caller mounts this only for a session that already
-   * sees the module. That is not a courtesy: a card that could enumerate a
-   * household's catalogues on a server with the module off is the trace the
-   * module promises not to leave.
+   * Every route it calls is admin-only. The card is mounted for any admin
+   * session, including one that has no adult library yet: that is how the
+   * first endpoint gets added before Add library can point at it.
    */
   import { onMount } from 'svelte';
   import { api, errorText } from '../api/client';

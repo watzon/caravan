@@ -18,17 +18,26 @@
    */
   import { onMount } from 'svelte';
   import { api, errorText } from '../api/client';
-  import type { Indexer, IndexerError, Movie, Release, Series } from '../api/types';
+  import type {
+    Indexer,
+    IndexerError,
+    Movie,
+    Release,
+    ReleasesResponse,
+    Series,
+  } from '../api/types';
   import Icon from '../components/Icon.svelte';
   import IndexerErrors from '../components/IndexerErrors.svelte';
   import LoadError from '../components/LoadError.svelte';
+  import Modal from '../components/Modal.svelte';
   import ReleaseSearchControls from '../components/ReleaseSearchControls.svelte';
   import ReleaseTable from '../components/ReleaseTable.svelte';
   import { episodeCode, seasonLabel } from '../format';
   import { sceneNumber } from '../adult';
   import { navigate } from '../router.svelte';
+  import { movieSeed, seriesSeed, sceneSeed } from '../searchseed';
   import { pushToast } from '../state/toast.svelte';
-  import { useI18n } from '../i18n.svelte';
+  import { useI18n, type TranslationKey } from '../i18n.svelte';
 
   const { t, tp } = useI18n();
 
@@ -69,6 +78,22 @@
   let indexerIDs = $state<number[]>([]);
   let indexers = $state<Indexer[]>([]);
   let failures = $state<IndexerError[]>([]);
+
+  /** Rows the expression's own filters hid. 0 — nothing was hidden. */
+  let filteredCount = $state(0);
+  let helpOpen = $state(false);
+
+  /**
+   * The syntax cheatsheet's worked examples. The expressions are literal — they
+   * are the language, not prose — so only the line explaining each is
+   * translated.
+   */
+  const syntaxExamples: { code: string; note: TranslationKey }[] = [
+    { code: 'site:"Vixen" date:2026-01-19', note: 'route.releaseSearch.syntaxExampleSite' },
+    { code: 'title:"Dune" year:2021 -hdtv', note: 'route.releaseSearch.syntaxExampleTitle' },
+    { code: 'quality:1080p codec:x265', note: 'route.releaseSearch.syntaxExampleQuality' },
+    { code: 'foo OR bar', note: 'route.releaseSearch.syntaxExampleOr' },
+  ];
 
   /** Where the "back" link points. */
   let itemHref = $derived.by(() => {
@@ -128,21 +153,44 @@
     });
   }
 
+  /**
+   * The client-side twin of the server's seed, written into the box the moment
+   * the item arrives. The fan-out is the slow half of this screen, and a box
+   * that sits empty for its whole duration reads as broken. The server's
+   * `search_expression` replaces this when the search lands; the twins spell
+   * the identical string (their tests pin it), so the hand-off is invisible.
+   */
+  function seedFromItem() {
+    let seed = '';
+    if (kind === 'movie' && movie) {
+      seed = movieSeed(movie.title, movie.year);
+    } else if (kind === 'series' && series) {
+      seed = seriesSeed(series.title, season, episode);
+    } else if (kind === 'site' && series) {
+      const found = series.seasons?.find((s) => s.season_number === season);
+      const scene = found?.episodes?.find((e) => e.episode_number === episode);
+      seed = sceneSeed(series.title, scene?.air_date ?? '', scene?.title ?? '');
+    }
+    if (seed === '') return;
+    derivedQuery = seed;
+    query = seed;
+  }
+
   async function load() {
     loading = true;
     releases = null;
+    resetAnswerNotes();
     try {
+      // The item load is what gives the screen a title AND the box its seed;
+      // the search is the slow half, so it starts first and lands last.
+      const searchPromise = perItemSearch();
       if (!asSeries) {
-        // The item load is what gives the screen a title; the search is the
-        // slow half, so they run together rather than in sequence.
-        const [item, found] = await Promise.all([api.getMovie(id), perItemSearch()]);
-        movie = item;
-        applyResponse(found);
+        movie = await api.getMovie(id);
       } else {
-        const [item, found] = await Promise.all([api.getSeries(id), perItemSearch()]);
-        series = item;
-        applyResponse(found);
+        series = await api.getSeries(id);
       }
+      seedFromItem();
+      applyResponse(await searchPromise);
       error = null;
     } catch (err) {
       error = errorText(err);
@@ -155,14 +203,20 @@
    * Seed the rail from the server's own answer. `query` is only overwritten on
    * a per-item search, which is the only one that derives a query at all — a
    * free-text search echoes back what the user typed.
+   *
+   * The seed is the query-language spelling when the server has one: it is the
+   * same search written in the language the box speaks, so widening it is an
+   * edit rather than a retype. `query` is only the first raw string sent
+   * upstream, which for a scene is half of what was asked.
    */
-  function applyResponse(found: { query: string; releases: Release[]; errors: IndexerError[] }, seed = true) {
+  function applyResponse(found: ReleasesResponse, seed = true) {
     releases = found.releases;
     failures = found.errors ?? [];
+    filteredCount = found.filtered ?? 0;
     askedCount = countAsked();
     if (!seed) return;
-    derivedQuery = found.query;
-    query = found.query;
+    derivedQuery = found.search_expression ?? found.query;
+    query = derivedQuery;
   }
 
   /**
@@ -172,6 +226,15 @@
    * Zero — the indexer list has not arrived — reads as "we do not know".
    */
   let askedCount = $state(0);
+
+  /**
+   * Drop everything that describes the answer being replaced. A stale "3 hidden
+   * by your filters" over a fresh result set is a lie, and a failed search must
+   * leave no note at all.
+   */
+  function resetAnswerNotes() {
+    filteredCount = 0;
+  }
 
   function countAsked(): number {
     const enabled = indexers.filter((indexer) => indexer.enabled);
@@ -208,6 +271,7 @@
 
     loading = true;
     releases = null;
+    resetAnswerNotes();
     try {
       if (untouched) {
         applyResponse(await perItemSearch());
@@ -282,9 +346,18 @@
     {indexers}
     busy={loading}
     onsearch={runSearch}
+    onhelp={() => (helpOpen = true)}
     {contextLabel} />
 
   <IndexerErrors errors={failures} total={askedCount || undefined} />
+
+  {#if filteredCount > 0}
+    <!-- Hidden, not lost: every one of these rows is cached, so loosening the
+         expression brings it straight back. -->
+    <p data-filtered-note class="text-sm text-ink-muted">
+      {tp('route.releaseSearch.filteredCount', filteredCount)}
+    </p>
+  {/if}
 
   {#if error}
     <LoadError message={error} onretry={load} />
@@ -292,3 +365,23 @@
     <ReleaseTable {releases} {loading} busyGUID={grabbingGUID} ongrab={grab} />
   {/if}
 </div>
+
+{#if helpOpen}
+  <Modal title={t('route.releaseSearch.syntaxHelp')} width="max-w-2xl" onclose={() => (helpOpen = false)}>
+    <div
+      data-syntax-help
+      class="flex flex-col gap-2 p-4 text-sm text-ink-secondary">
+      <p>{t('route.releaseSearch.syntaxIntro')}</p>
+      <ul class="flex flex-col gap-1">
+        {#each syntaxExamples as example (example.code)}
+          <li class="flex flex-wrap items-baseline gap-2">
+            <code class="rounded-sm bg-raised px-1.5 py-0.5 font-mono text-ink">{example.code}</code>
+            <span>{t(example.note)}</span>
+          </li>
+        {/each}
+      </ul>
+      <p>{t('route.releaseSearch.syntaxOperators')}</p>
+      <p>{t('route.releaseSearch.syntaxFields')}</p>
+    </div>
+  </Modal>
+{/if}

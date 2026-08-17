@@ -25,8 +25,17 @@ func (s *Store) UpsertRelease(ctx context.Context, r *core.Release) error {
 		}
 		categories = string(encoded)
 	}
+	attributes := ""
+	r.Attributes = core.NormalizeReleaseAttributes(r.Attributes)
+	if len(r.Attributes) > 0 {
+		encoded, err := json.Marshal(r.Attributes)
+		if err != nil {
+			return fmt.Errorf("store: encode attributes for %q: %w", r.Title, err)
+		}
+		attributes = string(encoded)
+	}
 
-	model := releaseModelFromCore(r, string(parsed), categories)
+	model := releaseModelFromCore(r, string(parsed), categories, attributes)
 	_, err = s.db.NewInsert().Model(&model).
 		On("CONFLICT (indexer_id, guid) DO UPDATE").
 		Set("indexer_name = EXCLUDED.indexer_name").
@@ -40,6 +49,7 @@ func (s *Store) UpsertRelease(ctx context.Context, r *core.Release) error {
 		Set("published_at = EXCLUDED.published_at").
 		Set("parsed = EXCLUDED.parsed").
 		Set("categories = EXCLUDED.categories").
+		Set("attributes = EXCLUDED.attributes").
 		Set("seen_at = EXCLUDED.seen_at").
 		Exec(ctx)
 	if err != nil {

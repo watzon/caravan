@@ -67,7 +67,13 @@ function discoverHome(): DiscoverHome {
       },
     ],
     popular_movies: [],
+    upcoming_movies: [],
+    now_playing: [],
     popular_series: [],
+    upcoming_series: [],
+    airing_series: [],
+    movie_genres: [],
+    series_genres: [],
     networks: [],
     studios: [],
   };

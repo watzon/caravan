@@ -6,7 +6,9 @@ tmp_dir = "tmp"
 [build]
   cmd = "go build -o ./tmp/caravan ./cmd/caravan"
   delay = 1000
-  entrypoint = ["./tmp/caravan", "serve", "--config", "tmp/caravan.yaml", "--data-dir", "tmp/data"]
+  # Use the platform data dir (~/.local/share/caravan) so `just dev` is the
+  # same install as a normal `caravan serve`, not an empty tmp sandbox.
+  entrypoint = ["./tmp/caravan", "serve"]
   exclude_dir = ["assets", "tmp", "vendor", "testdata", "web/node_modules", "web/dist", "web/src"]
   exclude_regex = ["_test.go"]
   include_ext = ["go", "tpl", "tmpl", "html", "yaml", "yml"]

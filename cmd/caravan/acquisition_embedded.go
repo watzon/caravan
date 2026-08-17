@@ -2,11 +2,20 @@ package main
 
 import (
 	"context"
+	"net/http"
+	"time"
 
+	"github.com/watzon/caravan/internal/cardigann"
 	"github.com/watzon/caravan/internal/core"
 	"github.com/watzon/caravan/internal/download"
 	"github.com/watzon/caravan/internal/usenet"
 )
+
+var releasePayloadHTTPClientFactory = func() *http.Client {
+	return cardigann.NewRestrictedHTTPClient(30 * time.Second)
+}
+
+func newReleasePayloadHTTPClient() *http.Client { return releasePayloadHTTPClientFactory() }
 
 // embedded returns the built-in torrent engine, or nil when there is no
 // storage root to build one under or building one failed. A failure is logged
@@ -39,6 +48,7 @@ func (p *engineProvider) embedded() core.Engine {
 	}
 	opts.Store = downloadPersistence{st: p.adapter.st}
 	opts.Admitter = p.admission
+	opts.HTTPClient = newReleasePayloadHTTPClient()
 	// The caps have to be live before the engine restores its queue, or a
 	// restart would start everything at once for the moment before the first
 	// settings read.
@@ -86,11 +96,12 @@ func (p *engineProvider) embeddedUsenet() *usenet.Engine {
 		return nil
 	}
 	engine, err := usenet.NewEngine(root, usenet.EngineOpts{
-		Servers:  usenet.ServerConfigs(servers),
-		Store:    downloadPersistence{st: p.adapter.st},
-		Paused:   p.paused,
-		Logger:   p.log,
-		Admitter: p.admission,
+		Servers:    usenet.ServerConfigs(servers),
+		Store:      downloadPersistence{st: p.adapter.st},
+		HTTPClient: newReleasePayloadHTTPClient(),
+		Paused:     p.paused,
+		Logger:     p.log,
+		Admitter:   p.admission,
 	})
 	if err != nil {
 		p.reportLocked("start usenet engine", err)

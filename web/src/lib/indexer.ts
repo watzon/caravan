@@ -8,7 +8,15 @@
  * Pure — unit-tested in indexer.test.ts.
  */
 
-import type { Indexer, IndexerCategory, IndexerType } from './api/types';
+import type {
+  Indexer,
+  IndexerCategory,
+  IndexerContent,
+  IndexerDefinition,
+  IndexerKind,
+  IndexerPrivacy,
+  IndexerType,
+} from './api/types';
 import { translate } from './i18n.svelte';
 
 export const INDEXER_TYPES: { value: IndexerType; label: string; help: string }[] = [
@@ -23,6 +31,92 @@ export const INDEXER_TYPES: { value: IndexerType; label: string; help: string }[
     get help() { return translate('indexer.type.newznab.help'); },
   },
 ];
+
+export const INDEXER_KINDS: {
+  value: IndexerKind;
+  label: string;
+  help: string;
+}[] = [
+  {
+    value: 'torrent',
+    get label() { return translate('indexer.kind.torrent.label'); },
+    get help() { return translate('indexer.kind.torrent.help'); },
+  },
+  {
+    value: 'usenet',
+    get label() { return translate('indexer.kind.usenet.label'); },
+    get help() { return translate('indexer.kind.usenet.help'); },
+  },
+  {
+    value: 'generic',
+    get label() { return translate('indexer.kind.generic.label'); },
+    get help() { return translate('indexer.kind.generic.help'); },
+  },
+];
+
+export const INDEXER_CONTENT: IndexerContent[] = [
+  'movies',
+  'tv',
+  'anime',
+  'audio',
+  'books',
+  'adult',
+  'pc',
+  'other',
+];
+
+export interface CatalogFilters {
+  privacy?: readonly string[];
+  languages?: readonly string[];
+  content?: readonly string[];
+}
+
+/** Filter a catalog list the way the add-indexer picker does. */
+export function filterDefinitions(
+  definitions: readonly IndexerDefinition[],
+  query: string,
+  filters: CatalogFilters = {},
+): IndexerDefinition[] {
+  const q = query.trim().toLowerCase();
+  const privacy = new Set((filters.privacy ?? []).filter(Boolean));
+  const languages = new Set((filters.languages ?? []).filter(Boolean));
+  const content = new Set((filters.content ?? []).filter(Boolean));
+  return definitions.filter((def) => {
+    if (privacy.size > 0 && !privacy.has(def.privacy)) return false;
+    if (languages.size > 0 && !languages.has(def.language)) return false;
+    if (content.size > 0 && !(def.content ?? []).some((tag) => content.has(tag))) return false;
+    if (q === '') return true;
+    return (
+      def.id.toLowerCase().includes(q) ||
+      def.name.toLowerCase().includes(q) ||
+      def.description.toLowerCase().includes(q)
+    );
+  });
+}
+
+export function catalogPrivacyValues(definitions: readonly IndexerDefinition[]): IndexerPrivacy[] {
+  const order: IndexerPrivacy[] = ['public', 'private', 'semi-private'];
+  const seen = new Set(definitions.map((def) => def.privacy));
+  return order.filter((value) => seen.has(value));
+}
+
+export function catalogLanguages(definitions: readonly IndexerDefinition[]): string[] {
+  return [...new Set(definitions.map((def) => def.language).filter(Boolean))].sort((a, b) =>
+    a.localeCompare(b),
+  );
+}
+
+export function catalogContentValues(definitions: readonly IndexerDefinition[]): IndexerContent[] {
+  const seen = new Set<string>();
+  for (const def of definitions) {
+    for (const tag of def.content ?? []) seen.add(tag);
+  }
+  return INDEXER_CONTENT.filter((tag) => seen.has(tag));
+}
+
+export function toggleFilterValue(selected: readonly string[], id: string): string[] {
+  return selected.includes(id) ? selected.filter((value) => value !== id) : [...selected, id];
+}
 
 /**
  * Parse a user-typed category list. Unparseable entries are dropped rather than
@@ -42,6 +136,34 @@ export function parseCategories(text: string): number[] {
 /** Render stored category ids back into the text the form edits. */
 export function formatCategories(categories: readonly number[] | null | undefined): string {
   return (categories ?? []).join(', ');
+}
+
+/** Append /api to a published site address unless it is already a feed. */
+export function feedURLFromBase(base: string): string {
+  const trimmed = base.trim().replace(/\/+$/, '');
+  if (!trimmed) return '';
+  const lower = trimmed.toLowerCase();
+  if (lower.endsWith('/api') || lower.includes('/torznab') || lower.includes('/newznab')) {
+    return trimmed;
+  }
+  return `${trimmed}/api`;
+}
+
+/**
+ * Value for the add-indexer URL field. Local definitions keep the tracker base
+ * because Caravan executes them; remote presets become the API endpoint the
+ * Torznab/Newznab client calls.
+ */
+export function indexerFormURL(def: {
+  kind: string;
+  definition_id?: string;
+  url: string;
+  url_placeholder: string;
+  urls?: readonly string[];
+}): string {
+  const base = def.urls?.[0] || def.url || '';
+  if (base) return def.definition_id ? base.replace(/\/+$/, '') : feedURLFromBase(base);
+  return def.url_placeholder || '';
 }
 
 /* ----------------------------------------------------------------------------
@@ -233,10 +355,28 @@ export function searchCategoryOptions(
  * Why this indexer config cannot be saved, or null when it can. The server
  * validates too; this exists so the user is told before a round trip.
  */
-export function validateIndexer(input: { name: string; url: string }): string | null {
+export function validateIndexer(input: {
+  name: string;
+  url: string;
+  apiKey?: string;
+  requiresAPIKey?: boolean;
+  hasStoredKey?: boolean;
+}): string | null {
   if (input.name.trim() === '') return translate('validation.indexer.name');
   const url = input.url.trim();
   if (url === '') return translate('validation.indexer.urlRequired');
   if (!/^https?:\/\//i.test(url)) return translate('validation.indexer.urlScheme');
+  if (input.requiresAPIKey && !input.hasStoredKey && (input.apiKey ?? '').trim() === '') {
+    return translate('validation.indexer.apiKey');
+  }
   return null;
+}
+
+/** Host label for a catalog mirror, falling back to the raw URL. */
+export function urlHost(url: string): string {
+  try {
+    return new URL(url).host || url;
+  } catch {
+    return url;
+  }
 }

@@ -9,6 +9,11 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/sqlitedialect"
+	"github.com/watzon/caravan/internal/core"
+	storemigrations "github.com/watzon/caravan/internal/store/migrations"
 )
 
 var (
@@ -28,6 +33,61 @@ const (
 // renameRestoreSidecar lets tests simulate an interrupted sidecar cutover.
 var renameRestoreSidecar = os.Rename
 
+var (
+	restoreFileSync      = func(file *os.File) error { return file.Sync() }
+	restoreDirectorySync = func(dir *os.File) error { return dir.Sync() }
+)
+
+// DefinitionPackSnapshot is the immutable pack inventory read from one verified,
+// read-only SQLite snapshot. Entries are keyed by source+"\x00"+revision.
+type DefinitionPackSnapshot struct {
+	Revisions []core.DefinitionPackRevision
+	Entries   map[string][]core.DefinitionPackEntry
+}
+
+func DefinitionPackSnapshotKey(source, revision string) string { return source + "\x00" + revision }
+
+// BackupAndInspect writes one bounded SQLite snapshot and returns only pack
+// receipt data read from that exact file. It never reads live pack rows after
+// VACUUM INTO, and it never migrates or writes the snapshot during inspection.
+func (s *Store) BackupAndInspect(ctx context.Context, dst io.Writer, maxBytes int64) (DefinitionPackSnapshot, error) {
+	if maxBytes <= 0 {
+		return DefinitionPackSnapshot{}, fmt.Errorf("store: backup size limit must be positive")
+	}
+	dir, err := os.MkdirTemp(filepath.Dir(s.path), "."+filepath.Base(s.path)+".backup-")
+	if err != nil {
+		return DefinitionPackSnapshot{}, fmt.Errorf("store: create backup directory: %w", err)
+	}
+	defer os.RemoveAll(dir)
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return DefinitionPackSnapshot{}, fmt.Errorf("store: chmod backup directory: %w", err)
+	}
+	snapshot := filepath.Join(dir, "snapshot.sqlite")
+	if _, err := s.db.ExecContext(ctx, "VACUUM INTO ?", snapshot); err != nil {
+		return DefinitionPackSnapshot{}, fmt.Errorf("store: create backup snapshot: %w", err)
+	}
+	if err := os.Chmod(snapshot, 0o600); err != nil {
+		return DefinitionPackSnapshot{}, fmt.Errorf("store: chmod backup snapshot: %w", err)
+	}
+	inventory, err := InspectDefinitionPackSnapshot(ctx, snapshot)
+	if err != nil {
+		return DefinitionPackSnapshot{}, err
+	}
+	file, err := os.Open(snapshot)
+	if err != nil {
+		return DefinitionPackSnapshot{}, fmt.Errorf("store: open backup snapshot: %w", err)
+	}
+	defer file.Close()
+	written, err := io.Copy(dst, io.LimitReader(file, maxBytes+1))
+	if err != nil {
+		return DefinitionPackSnapshot{}, fmt.Errorf("store: write backup snapshot: %w", err)
+	}
+	if written > maxBytes {
+		return DefinitionPackSnapshot{}, ErrRestoreTooLarge
+	}
+	return inventory, nil
+}
+
 // Backup writes a transactionally consistent SQLite snapshot to dst. VACUUM
 // INTO copies the database as SQLite sees it, including committed WAL content;
 // copying the main file would silently omit those committed pages.
@@ -40,15 +100,10 @@ func (s *Store) Backup(ctx context.Context, dst io.Writer) error {
 	if err := os.Chmod(dir, 0o700); err != nil {
 		return fmt.Errorf("store: chmod backup directory: %w", err)
 	}
-
 	snapshot := filepath.Join(dir, "snapshot.sqlite")
 	if _, err := s.db.ExecContext(ctx, "VACUUM INTO ?", snapshot); err != nil {
 		return fmt.Errorf("store: create backup snapshot: %w", err)
 	}
-	if err := os.Chmod(snapshot, 0o600); err != nil {
-		return fmt.Errorf("store: chmod backup snapshot: %w", err)
-	}
-
 	file, err := os.Open(snapshot)
 	if err != nil {
 		return fmt.Errorf("store: open backup snapshot: %w", err)
@@ -60,12 +115,60 @@ func (s *Store) Backup(ctx context.Context, dst io.Writer) error {
 	return nil
 }
 
+// InspectDefinitionPackSnapshot validates a database read-only as the exact
+// current Caravan schema and returns its pack inventory. Older, repairable, and
+// newer databases are rejected; this seam never invokes Store.Open or Goose.
+func InspectDefinitionPackSnapshot(ctx context.Context, path string) (DefinitionPackSnapshot, error) {
+	db, err := sql.Open("sqlite", readOnlyDSN(path))
+	if err != nil {
+		return DefinitionPackSnapshot{}, invalidRestore(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+	if err := db.PingContext(ctx); err != nil {
+		return DefinitionPackSnapshot{}, invalidRestore(err)
+	}
+	if err := integrityCheck(ctx, db); err != nil {
+		return DefinitionPackSnapshot{}, invalidRestore(err)
+	}
+	if err := foreignKeyCheck(ctx, db); err != nil {
+		return DefinitionPackSnapshot{}, invalidRestore(err)
+	}
+	version, err := schemaVersion(ctx, db)
+	if err != nil {
+		return DefinitionPackSnapshot{}, invalidRestore(err)
+	}
+	if int64(version) != storemigrations.LatestVersion {
+		return DefinitionPackSnapshot{}, invalidRestore(fmt.Errorf("database is not current schema v%d", storemigrations.LatestVersion))
+	}
+	if err := validateCurrentSchema(ctx, db); err != nil {
+		return DefinitionPackSnapshot{}, invalidRestore(err)
+	}
+	bunDB := bun.NewDB(db, sqlitedialect.New())
+	view := &Store{db: bunDB, path: path}
+	revisions, err := view.ListDefinitionPackRevisions(ctx)
+	if err != nil {
+		return DefinitionPackSnapshot{}, invalidRestore(err)
+	}
+	result := DefinitionPackSnapshot{Revisions: revisions, Entries: make(map[string][]core.DefinitionPackEntry, len(revisions))}
+	for _, revision := range revisions {
+		entries, err := view.ListDefinitionPackEntries(ctx, revision.Source, revision.Revision)
+		if err != nil {
+			return DefinitionPackSnapshot{}, invalidRestore(err)
+		}
+		result.Entries[DefinitionPackSnapshotKey(revision.Source, revision.Revision)] = entries
+	}
+	return result, nil
+}
+
 // StageRestore validates src and atomically makes it the restore that Open
 // applies next. It never touches the currently open database.
 func (s *Store) StageRestore(ctx context.Context, src io.Reader, maxBytes int64) error {
 	if maxBytes <= 0 {
 		return fmt.Errorf("store: restore size limit must be positive")
 	}
+	s.restoreMu.Lock()
+	defer s.restoreMu.Unlock()
 
 	stage, err := os.CreateTemp(filepath.Dir(s.path), "."+filepath.Base(s.path)+".restore-")
 	if err != nil {
@@ -79,7 +182,7 @@ func (s *Store) StageRestore(ctx context.Context, src io.Reader, maxBytes int64)
 		return fmt.Errorf("store: chmod restore stage: %w", err)
 	}
 	written, copyErr := io.Copy(stage, io.LimitReader(src, maxBytes+1))
-	if syncErr := stage.Sync(); copyErr == nil {
+	if syncErr := restoreFileSync(stage); copyErr == nil {
 		copyErr = syncErr
 	}
 	if closeErr := stage.Close(); copyErr == nil {
@@ -96,13 +199,52 @@ func (s *Store) StageRestore(ctx context.Context, src io.Reader, maxBytes int64)
 	}
 
 	pending := stagedRestorePath(s.path)
-	if err := removeSQLiteArtifacts(pending); err != nil {
-		return fmt.Errorf("store: remove previous staged restore: %w", err)
+	previous := pending + ".previous"
+	if err := removeSQLiteArtifacts(previous); err != nil {
+		return fmt.Errorf("store: remove previous staged restore backup: %w", err)
+	}
+	hadPrevious := false
+	if _, err := os.Stat(pending); err == nil {
+		if err := os.Rename(pending, previous); err != nil {
+			return fmt.Errorf("store: retain previous staged restore: %w", err)
+		}
+		hadPrevious = true
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("store: inspect previous staged restore: %w", err)
+	}
+	if err := removeSQLiteSidecars(pending); err != nil {
+		if hadPrevious {
+			_ = os.Rename(previous, pending)
+		}
+		return fmt.Errorf("store: remove previous staged restore sidecars: %w", err)
 	}
 	if err := os.Rename(stagePath, pending); err != nil {
+		if hadPrevious {
+			_ = os.Rename(previous, pending)
+		}
 		return fmt.Errorf("store: stage restore: %w", err)
 	}
+	if err := syncRestoreParent(s.path); err != nil {
+		rollbackErr := removeSQLiteArtifacts(pending)
+		if hadPrevious {
+			rollbackErr = errors.Join(rollbackErr, os.Rename(previous, pending))
+		}
+		rollbackErr = errors.Join(rollbackErr, syncRestoreParent(s.path))
+		return fmt.Errorf("store: sync staged restore parent: %w", errors.Join(err, rollbackErr))
+	}
+	// The new pending restore is durable. A retained predecessor is now only a
+	// rollback scratch file; best-effort cleanup cannot change success semantics.
+	_ = removeSQLiteArtifacts(previous)
 	return nil
+}
+
+func syncRestoreParent(path string) error {
+	parent, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return fmt.Errorf("open restore parent for sync: %w", err)
+	}
+	syncErr, closeErr := restoreDirectorySync(parent), parent.Close()
+	return errors.Join(syncErr, closeErr)
 }
 
 func stagedRestorePath(path string) string { return path + restorePendingSuffix }
@@ -303,8 +445,10 @@ func validateRestore(ctx context.Context, path string) error {
 		return invalidRestore(err)
 	}
 
-	if err := validateCurrentSchema(ctx, db); err != nil {
-		return invalidRestore(err)
+	if err := validateSchemaIdentity(ctx, db, false); err != nil {
+		if repairableErr := validateRepairableV8Preflight(ctx, db); repairableErr != nil {
+			return invalidRestore(err)
+		}
 	}
 	return nil
 }

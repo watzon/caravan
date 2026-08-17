@@ -28,6 +28,7 @@ web/dist/
 # Agents
 .claude
 .agents
+.hermes/
 .omp
 .codex
 

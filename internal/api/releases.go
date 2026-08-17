@@ -5,13 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/watzon/caravan/internal/core"
 	"github.com/watzon/caravan/internal/download"
 	"github.com/watzon/caravan/internal/parse"
+	"github.com/watzon/caravan/internal/searchql"
 	"github.com/watzon/caravan/internal/store"
 )
 
@@ -34,6 +37,13 @@ const (
 	flagWrongEpisode = "wrong-episode"
 	flagSeasonPack   = "season-pack"
 	flagNoSeeders    = "no-seeders"
+	// flagWrongTitle marks a release whose parsed name is not the item that
+	// was searched for. Torrent meta-search engines return fuzzy matches, so
+	// without this a search for one movie surfaces unrelated releases as
+	// equals. It is a warning and a sort demotion, never a rejection: a
+	// release named by an alternate title Caravan does not know reads as
+	// different.
+	flagWrongTitle = "wrong-title"
 	// flagWrongDate is the scene equivalent of wrong-season/wrong-episode: a
 	// scene is addressed by its release date, so a release whose parsed date is
 	// not the searched scene's is the wrong scene (PLAN phase 9 task 3).
@@ -90,6 +100,18 @@ type releasesResponse struct {
 	// Queries is every search that was run, in the order they were run. It has
 	// one entry for everything but a scene.
 	Queries []string `json:"queries"`
+	// SearchExpression is the searchql spelling of what this item page just
+	// searched for, and only the per-item endpoints set it. It is what the
+	// universal search box is seeded with when a user moves a per-item search
+	// there to widen it: re-running the seed through /search/releases asks the
+	// indexers exactly the questions this response was built from, which is a
+	// property searchql's own tests pin.
+	SearchExpression string `json:"search_expression,omitempty"`
+	// Filtered counts the releases the universal search's expression hid with
+	// its local filters — a field term or a negation the indexers cannot be
+	// asked to honour. Every one of them is still cached, so it is a display
+	// count, not a loss.
+	Filtered int `json:"filtered,omitempty"`
 	// Truncated reports that the universal search cut the list at its limit.
 	// Every cut row is still cached, so narrowing the search re-finds it.
 	Truncated bool `json:"truncated,omitempty"`
@@ -124,18 +146,15 @@ func (s *server) handleMovieReleases(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	query := m.Title
-	if m.Year > 0 {
-		query = fmt.Sprintf("%s %d", m.Title, m.Year)
-	}
 	profile, err := s.st.ResolveItemQualityProfileByLibrary(r.Context(), m.LibraryID, core.LibraryKindMovie, m.QualityProfileID)
 	if err != nil {
 		s.writeStoreError(w, "resolve movie quality profile", err)
 		return
 	}
-	s.serveReleases(w, r, m.LibraryID, core.LibraryKindMovie, []string{query}, profile, func(rel core.Release) []string {
-		return movieReleaseFlags(rel, *m)
-	})
+	s.serveReleases(w, r, m.LibraryID, core.LibraryKindMovie, core.MovieSearches(m.Title, m.Year),
+		searchql.MovieExpression(m.Title, m.Year), profile, func(rel core.Release) []string {
+			return movieReleaseFlags(rel, *m)
+		})
 }
 
 func (s *server) handleSeriesReleases(w http.ResponseWriter, r *http.Request) {
@@ -171,16 +190,10 @@ func (s *server) handleSeriesReleases(w http.ResponseWriter, r *http.Request) {
 
 	// Indexers index episodes by SxxEyy and season packs by Sxx, so the query
 	// is narrowed exactly as far as the caller narrowed the request.
-	query := sr.Title
-	switch {
-	case episode > 0:
-		query = fmt.Sprintf("%s S%02dE%02d", sr.Title, season, episode)
-	case season >= 0:
-		query = fmt.Sprintf("%s S%02d", sr.Title, season)
-	}
-	s.serveReleases(w, r, sr.LibraryID, kind, []string{query}, profile, func(rel core.Release) []string {
-		return seriesReleaseFlags(rel, season, episode)
-	})
+	s.serveReleases(w, r, sr.LibraryID, kind, core.SeriesSearches(sr.Title, season, episode),
+		searchql.SeriesExpression(sr.Title, season, episode), profile, func(rel core.Release) []string {
+			return seriesReleaseFlags(rel, sr.Title, season, episode)
+		})
 }
 
 // serveSceneReleases is handleSeriesReleases' adult branch, and it differs from
@@ -228,9 +241,13 @@ func (s *server) serveSceneReleases(w http.ResponseWriter, r *http.Request, sr c
 		queries = []string{sr.Title}
 	}
 
-	s.serveReleases(w, r, sr.LibraryID, core.LibraryKindAdult, queries, profile, func(rel core.Release) []string {
-		return sceneReleaseFlags(rel, airDate)
-	})
+	// The seed spells out every variant this handler runs — the dated form OR
+	// the site-and-title fallback — so the box the user edits and the
+	// "searched indexers for" line always tell the same story.
+	s.serveReleases(w, r, sr.LibraryID, core.LibraryKindAdult, queries,
+		searchql.SceneExpression(sr.Title, airDate, title), profile, func(rel core.Release) []string {
+			return sceneReleaseFlags(rel, airDate)
+		})
 }
 
 // serveReleases runs one interactive search and writes the picker payload:
@@ -238,8 +255,9 @@ func (s *server) serveSceneReleases(w http.ResponseWriter, r *http.Request, sr c
 // own library — which decides which indexers answer and with which categories
 // (PLAN phase 8 task 4) — with kind as the fallback for an item that names
 // none. profile is resolved once from the item, its library, and then the
-// system default.
-func (s *server) serveReleases(w http.ResponseWriter, r *http.Request, libraryID int64, kind string, queries []string, profile *core.QualityProfile, flags func(core.Release) []string) {
+// system default. expression is the searchql seed echoed to the client, which
+// is display only: the fan-out runs queries, exactly as it always has.
+func (s *server) serveReleases(w http.ResponseWriter, r *http.Request, libraryID int64, kind string, queries []string, expression string, profile *core.QualityProfile, flags func(core.Release) []string) {
 	newClient, ok := s.requireIndexerClients(w)
 	if !ok {
 		return
@@ -259,12 +277,14 @@ func (s *server) serveReleases(w http.ResponseWriter, r *http.Request, libraryID
 	ctx, cancel := context.WithTimeout(r.Context(), releaseSearchTimeout)
 	defer cancel()
 	releases, failures := searchIndexers(ctx, newClient, indexers, queries)
+	s.noteIndexerSearchFailures(r.Context(), indexers, failures)
 
 	out := releasesResponse{
-		Query:    queries[0],
-		Queries:  queries,
-		Releases: make([]releaseJSON, 0, len(releases)),
-		Errors:   failures,
+		Query:            queries[0],
+		Queries:          queries,
+		SearchExpression: expression,
+		Releases:         make([]releaseJSON, 0, len(releases)),
+		Errors:           failures,
 	}
 	for _, rel := range releases {
 		// Caching every result is what makes the grab endpoint a lookup by id
@@ -297,12 +317,14 @@ type indexerSearch struct {
 //
 // Several queries is how a scene is searched: by date and by title, because a
 // release named either way is the same scene and the picker should show both.
-// Results are deduplicated by GUID across all of them, and the queries run in
-// order so the first query's answers keep their place at the top.
+// Results are deduplicated by configured indexer and GUID across all queries.
+// A GUID is provider-local, so two indexers may legitimately publish the same
+// value. Queries run in order so the first query's answers keep their place at
+// the top.
 func searchIndexers(ctx context.Context, newClient IndexerFactory, indexers []core.IndexerConfig, queries []string) ([]core.Release, []indexerErrorJSON) {
 	merged := []core.Release{}
 	failures := []indexerErrorJSON{}
-	seenGUID := map[string]bool{}
+	seenRelease := map[string]bool{}
 	// One failure per indexer however many queries it failed: the user is being
 	// told an indexer is down, and being told twice is not more true.
 	seenFailure := map[int64]bool{}
@@ -310,11 +332,12 @@ func searchIndexers(ctx context.Context, newClient IndexerFactory, indexers []co
 	for _, query := range queries {
 		releases, errs := searchIndexersOnce(ctx, newClient, indexers, query)
 		for _, rel := range releases {
-			if rel.GUID != "" && seenGUID[rel.GUID] {
+			key := fmt.Sprintf("%d\x00%s", rel.IndexerID, rel.GUID)
+			if rel.GUID != "" && seenRelease[key] {
 				continue
 			}
 			if rel.GUID != "" {
-				seenGUID[rel.GUID] = true
+				seenRelease[key] = true
 			}
 			merged = append(merged, rel)
 		}
@@ -332,7 +355,16 @@ func searchIndexers(ctx context.Context, newClient IndexerFactory, indexers []co
 // searchIndexersOnce is one query against every indexer.
 func searchIndexersOnce(ctx context.Context, newClient IndexerFactory, indexers []core.IndexerConfig, query string) ([]core.Release, []indexerErrorJSON) {
 	results := make(chan indexerSearch, len(indexers))
+	knownDown := map[int64]string{}
+	launched := 0
 	for _, cfg := range indexers {
+		if !cfg.Searchable() {
+			if cfg.HealthError != "" {
+				knownDown[cfg.ID] = cfg.HealthError
+			}
+			continue
+		}
+		launched++
 		go func() {
 			// Exactly the resolved categories, nothing inferred: an empty
 			// list searches the indexer unfiltered. Guessing a
@@ -343,8 +375,8 @@ func searchIndexersOnce(ctx context.Context, newClient IndexerFactory, indexers 
 		}()
 	}
 
-	byIndexer := make(map[int64]indexerSearch, len(indexers))
-	for range indexers {
+	byIndexer := make(map[int64]indexerSearch, launched)
+	for range launched {
 		res := <-results
 		byIndexer[res.cfg.ID] = res
 	}
@@ -353,7 +385,18 @@ func searchIndexersOnce(ctx context.Context, newClient IndexerFactory, indexers 
 	failures := []indexerErrorJSON{}
 	seen := map[string]bool{}
 	for _, cfg := range indexers {
-		res := byIndexer[cfg.ID]
+		if reason, skip := knownDown[cfg.ID]; skip {
+			failures = append(failures, indexerErrorJSON{
+				IndexerID: cfg.ID,
+				Indexer:   cfg.Name,
+				Error:     reason,
+			})
+			continue
+		}
+		res, ok := byIndexer[cfg.ID]
+		if !ok {
+			continue
+		}
 		if res.err != nil {
 			failures = append(failures, indexerErrorJSON{
 				IndexerID: cfg.ID,
@@ -438,16 +481,26 @@ func releaseIsIncompatible(rel releaseJSON) bool {
 	return rel.Compatibility.Verdict == core.TVCompatIncompatible
 }
 
-// sortReleases orders the picker: incompatible releases last, then best quality,
-// then the healthiest swarm. This is presentation only, scoring a release
-// against a quality profile is phase 3, and this ordering must not be mistaken
-// for it. The title is the final tiebreak so a fan-out that finishes in a
-// different order still renders the same table.
+// releaseIsMismatched reports whether rel was flagged as naming a different
+// work than the one searched for. Such rows stay visible but sink.
+func releaseIsMismatched(rel releaseJSON) bool {
+	return slices.Contains(rel.Flags, flagWrongTitle)
+}
+
+// sortReleases orders the picker: incompatible releases last, wrong-title
+// matches just above them, then best quality, then the healthiest swarm. This
+// is presentation only, scoring a release against a quality profile is phase
+// 3, and this ordering must not be mistaken for it. The title is the final
+// tiebreak so a fan-out that finishes in a different order still renders the
+// same table.
 func sortReleases(releases []releaseJSON) {
 	sort.Slice(releases, func(i, j int) bool {
 		a, b := releases[i], releases[j]
 		if aIncompatible, bIncompatible := releaseIsIncompatible(a), releaseIsIncompatible(b); aIncompatible != bIncompatible {
 			return !aIncompatible
+		}
+		if aMismatched, bMismatched := releaseIsMismatched(a), releaseIsMismatched(b); aMismatched != bMismatched {
+			return !aMismatched
 		}
 		if ra, rb := core.QualityRank(a.Parsed.Quality), core.QualityRank(b.Parsed.Quality); ra != rb {
 			return ra < rb
@@ -466,6 +519,9 @@ func movieReleaseFlags(rel core.Release, m core.Movie) []string {
 	if rel.Parsed.Year != 0 && m.Year != 0 && rel.Parsed.Year != m.Year {
 		flags = append(flags, flagWrongYear)
 	}
+	if !parse.SameTitle(m.Title, rel.Parsed.Title) {
+		flags = append(flags, flagWrongTitle)
+	}
 	return flags
 }
 
@@ -473,8 +529,11 @@ func movieReleaseFlags(rel core.Release, m core.Movie) []string {
 // the season/episode it was searched for. season is -1 and episode 0 when the
 // caller did not narrow the search, in which case there is nothing to compare
 // against.
-func seriesReleaseFlags(rel core.Release, season, episode int) []string {
+func seriesReleaseFlags(rel core.Release, title string, season, episode int) []string {
 	flags := commonReleaseFlags(rel)
+	if !parse.SameTitle(title, rel.Parsed.Title) {
+		flags = append(flags, flagWrongTitle)
+	}
 	if season >= 0 && rel.Parsed.Season != season {
 		flags = append(flags, flagWrongSeason)
 	}
@@ -691,6 +750,11 @@ func (s *server) grabRelease(w http.ResponseWriter, r *http.Request, libraryID i
 		s.writeStoreError(w, "record grab", err)
 		return
 	}
+	if err := s.resolveReleaseDownload(ctx, rel); err != nil {
+		s.failGrab(ctx, g, info, err)
+		writeError(w, http.StatusBadGateway, "resolve indexer download: "+err.Error())
+		return
+	}
 
 	downloadID, err := engine.Add(ctx, *rel, opts)
 	if err != nil {
@@ -745,6 +809,56 @@ func (s *server) grabRelease(w http.ResponseWriter, r *http.Request, libraryID i
 		DownloadID:   string(downloadID),
 		ReleaseTitle: rel.Title,
 	})
+}
+
+func (s *server) resolveReleaseDownload(ctx context.Context, release *core.Release) error {
+	if release == nil || release.IndexerID <= 0 || s.indexers == nil {
+		return nil
+	}
+	config, err := s.st.GetIndexer(ctx, release.IndexerID)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil
+		}
+		return fmt.Errorf("load indexer configuration: %w", err)
+	}
+	client := s.indexers(*config)
+	resolver, ok := client.(IndexerDownloadResolver)
+	if !ok {
+		return nil
+	}
+	resolved, err := resolver.ResolveDownload(ctx, release.DownloadURL)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(resolved) == "" {
+		return fmt.Errorf("indexer returned an empty download URL")
+	}
+	release.DownloadURL = resolved
+	lower := strings.ToLower(strings.TrimSpace(resolved))
+	if strings.HasPrefix(lower, "magnet:") {
+		return nil
+	}
+	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+		return fmt.Errorf("indexer returned an unsupported download URL scheme")
+	}
+	payloadResolver, ok := client.(IndexerTorrentPayloadFetcher)
+	if !ok {
+		return fmt.Errorf("indexer cannot retrieve its authenticated download payload")
+	}
+	payload, err := payloadResolver.FetchDownload(ctx, resolved)
+	if err != nil {
+		return err
+	}
+	if len(payload) == 0 {
+		return fmt.Errorf("indexer returned an empty download payload")
+	}
+	if len(payload) > core.MaxTorrentPayloadBytes {
+		return fmt.Errorf("indexer download payload exceeds size limit")
+	}
+	release.TorrentPayload = append([]byte(nil), payload...)
+	release.DownloadURL = ""
+	return nil
 }
 
 // failGrab records a rejected grab. Neither write can be allowed to replace the
@@ -822,4 +936,22 @@ func seasonEpisodeParams(w http.ResponseWriter, r *http.Request) (season, episod
 		episode = n
 	}
 	return season, episode, true
+}
+
+// noteIndexerSearchFailures records live probe failures so the next fan-out
+// skips those hosts. Known-down indexers were not contacted and must not
+// increment the streak again.
+func (s *server) noteIndexerSearchFailures(ctx context.Context, asked []core.IndexerConfig, failures []indexerErrorJSON) {
+	contacted := map[int64]bool{}
+	for _, cfg := range asked {
+		if cfg.Searchable() {
+			contacted[cfg.ID] = true
+		}
+	}
+	for _, failure := range failures {
+		if !contacted[failure.IndexerID] {
+			continue
+		}
+		_ = s.st.RecordIndexerHealth(ctx, failure.IndexerID, errors.New(failure.Error))
+	}
 }

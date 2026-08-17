@@ -214,15 +214,14 @@ func (s *server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 // up.
 //
 // Creating an ADULT library is how the adult module is turned on, and this
-// route is the only door: the instance CRUD lives under /adult, which is absent
-// until a caller can see an adult library (requireAdult), so the library must
-// come first and the stash-box endpoint after it. The row is therefore born
-// RESTRICTED — to the admins alone until somebody is named — which is what the
-// module's own switch used to guarantee. Nothing here asks whether an endpoint
-// is configured: the screen warns, and a library whose chain resolves to no box
-// parks its scans rather than failing them (see library.adultChain). The old
-// enable proved a credential before the module existed; the general shape can
-// only promise that an adult library may exist before its chain resolves.
+// route is the only door into /adult. Stash-box instance CRUD sits on the
+// admin mux so an endpoint can be added first — Settings → Metadata is
+// reachable without a library, and the Add-library form points there.
+// The row is born RESTRICTED — to the admins alone until somebody is named —
+// which is what the module's own switch used to guarantee. Nothing here asks
+// whether an endpoint is configured: the screen warns, and a library whose
+// chain resolves to no box parks its scans rather than failing them (see
+// library.adultChain).
 func (s *server) handleCreateLibrary(w http.ResponseWriter, r *http.Request) {
 	var body libraryCreateRequest
 	if !decodeJSON(w, r, &body) {

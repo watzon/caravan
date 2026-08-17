@@ -5,10 +5,10 @@
    * rather than overlaying the posters because an overlay would sit exactly
    * where a card's availability chip does.
    *
-   * There is deliberately no "See all" link: the API serves each shelf whole
-   * (internal/api/discover.go) and has nothing wider behind it, and a link
-   * that lands somewhere else is worse than no link. The network and studio
-   * tiles on the discover screen are the browsable half.
+   * `href` is optional. When set, the heading is the way onto the wider
+   * filtered list (popular → the movies grid, a genre shelf's twin). Shelves
+   * the filter rail cannot express (now playing, currently airing) stay
+   * unlinked rather than pointing at an approximation.
    */
   import type { DiscoverItem } from '../api/types';
   import { useI18n } from '../i18n.svelte';
@@ -19,9 +19,10 @@
     title: string;
     items: DiscoverItem[];
     showType?: boolean;
+    href?: string;
   }
 
-  let { title, items, showType = false }: Props = $props();
+  let { title, items, showType = false, href = '' }: Props = $props();
   const { t } = useI18n();
 
   let scroller = $state<HTMLDivElement | null>(null);
@@ -87,9 +88,19 @@
 <svelte:window onresize={updateArrows} />
 
 {#if items.length > 0}
-  <section class="flex flex-col gap-3">
+  <section class="flex min-w-0 flex-col gap-3">
     <div class="flex items-center justify-between gap-3">
-      <h2 class="font-display text-lg font-semibold tracking-tight text-ink">{title}</h2>
+      <h2 class="font-display text-lg font-semibold tracking-tight text-ink">
+        {#if href}
+          <a
+            {href}
+            class="transition-colors duration-150 ease-out hover:text-accent-text">
+            {title}
+          </a>
+        {:else}
+          {title}
+        {/if}
+      </h2>
 
       {#if canScrollLeft || canScrollRight}
         <div class="flex items-center gap-1">
@@ -130,7 +141,7 @@
       onwheel={cancelPendingScroll}
       ontouchstart={cancelPendingScroll}
       onkeydown={cancelPendingScrollOnKeydown}
-      class="flex gap-4 overflow-x-auto pb-1">
+      class="flex w-full min-w-0 max-w-full gap-4 overflow-x-auto pb-1">
       {#each items as item (`${item.media_type}-${item.tmdb_id}`)}
         <div class="w-32 shrink-0 sm:w-40">
           <DiscoverCard {item} {showType} />

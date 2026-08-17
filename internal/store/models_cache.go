@@ -27,15 +27,16 @@ type releaseModel struct {
 	Parsed      string
 	SeenAt      string
 	Categories  string
+	Attributes  string
 }
 
-func releaseModelFromCore(r *core.Release, parsed, categories string) releaseModel {
+func releaseModelFromCore(r *core.Release, parsed, categories, attributes string) releaseModel {
 	return releaseModel{
 		ID: r.ID, IndexerID: r.IndexerID, IndexerName: r.Indexer, GUID: r.GUID,
 		Title: r.Title, DownloadURL: r.DownloadURL, InfoHash: r.InfoHash,
 		Protocol: r.Protocol, Size: r.Size, Seeders: r.Seeders, Leechers: r.Leechers,
 		PublishedAt: formatTime(r.PublishedAt), Parsed: parsed, SeenAt: formatTime(now()),
-		Categories: categories,
+		Categories: categories, Attributes: attributes,
 	}
 }
 
@@ -51,6 +52,10 @@ func (m releaseModel) core() core.Release {
 	}
 	if m.Categories != "" {
 		_ = json.Unmarshal([]byte(m.Categories), &out.Categories)
+	}
+	if m.Attributes != "" {
+		_ = json.Unmarshal([]byte(m.Attributes), &out.Attributes)
+		out.Attributes = core.NormalizeReleaseAttributes(out.Attributes)
 	}
 	return out
 }

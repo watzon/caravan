@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/watzon/caravan/internal/core"
+	"github.com/watzon/caravan/internal/searchql"
 )
 
 // Universal indexer search (plan part B): a free-text query fanned out over
@@ -25,7 +26,10 @@ const (
 	searchReleaseDefaultLimit = 200
 	searchReleaseMaxLimit     = 500
 	// searchQueryMaxLen keeps a pathological query out of every outbound URL.
-	searchQueryMaxLen = 200
+	// An expression spends characters on field names, quotes and negations
+	// that never reach an indexer, so the cap is looser than the free text it
+	// used to bound.
+	searchQueryMaxLen = 500
 )
 
 func (s *server) handleSearchReleases(w http.ResponseWriter, r *http.Request) {
@@ -37,6 +41,24 @@ func (s *server) handleSearchReleases(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(q) > searchQueryMaxLen {
 		writeError(w, http.StatusBadRequest, "q is too long")
+		return
+	}
+	// The parser's message is written for the search box and is passed through
+	// verbatim, because it names the part of the expression that broke and the
+	// user is the only one who can fix it. It only refuses input with no
+	// reading at all — an unknown field name stays a keyword, so "Re:Zero" is
+	// searched for rather than rejected.
+	query, err := searchql.Parse(q)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	// An expression of nothing but filters — `quality:1080p` — narrows results
+	// that were never asked for. Fanning it out would send the empty string to
+	// every indexer and filter whatever came back, so it is refused instead.
+	upstream := query.UpstreamQueries()
+	if len(upstream) == 0 {
+		writeError(w, http.StatusBadRequest, "search needs at least one keyword or a searchable field")
 		return
 	}
 	rawCats, ok := intListParam(w, r, "cats")
@@ -81,7 +103,7 @@ func (s *server) handleSearchReleases(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(cats) > 0 && len(kept) == 0 {
 			writeJSON(w, http.StatusOK, releasesResponse{
-				Query: q, Queries: []string{q},
+				Query: q, Queries: upstream,
 				Releases: []releaseJSON{}, Errors: []indexerErrorJSON{},
 			})
 			return
@@ -145,11 +167,15 @@ func (s *server) handleSearchReleases(w http.ResponseWriter, r *http.Request) {
 
 	searchCtx, cancel := context.WithTimeout(ctx, releaseSearchTimeout)
 	defer cancel()
-	releases, failures := searchIndexers(searchCtx, newClient, chosen, []string{q})
+	releases, failures := searchIndexers(searchCtx, newClient, chosen, upstream)
+	s.noteIndexerSearchFailures(ctx, chosen, failures)
 
 	tvProfile := s.activeTVProfile(ctx)
 	out := releasesResponse{
-		Query: q, Queries: []string{q}, LibraryID: libraryID,
+		// Query echoes the expression exactly as it was typed, so the box the
+		// user is looking at and the answer they got agree. Queries is what the
+		// expression actually compiled to and went out as.
+		Query: q, Queries: upstream, LibraryID: libraryID,
 		Releases: make([]releaseJSON, 0, len(releases)),
 		Errors:   failures,
 	}
@@ -164,6 +190,15 @@ func (s *server) handleSearchReleases(w http.ResponseWriter, r *http.Request) {
 		if err := s.st.UpsertRelease(ctx, &rel); err != nil {
 			s.writeStoreError(w, "cache release", err)
 			return
+		}
+		// The half of the expression no indexer could be asked to honour, applied
+		// after the cache and before the cut: a hidden row keeps its id, so
+		// loosening the expression re-finds it without a second fan-out. The
+		// count is reported rather than the rows silently vanishing — a search
+		// that returns three of forty should say so.
+		if !query.Matches(rel) {
+			out.Filtered++
+			continue
 		}
 		out.Releases = append(out.Releases, releaseDTO(rel, commonReleaseFlags(rel), tvProfile, profile))
 	}

@@ -50,7 +50,9 @@ describe('endpoints', () => {
   it('builds the phase-2 paths under /api/v1', () => {
     expect(endpoints.indexers()).toBe('/api/v1/indexers');
     expect(endpoints.indexer(3)).toBe('/api/v1/indexers/3');
+    expect(endpoints.indexerCatalog()).toBe('/api/v1/indexers/catalog');
     expect(endpoints.indexerTest(3)).toBe('/api/v1/indexers/3/test');
+    expect(endpoints.indexerTestConfig()).toBe('/api/v1/indexers/test');
     expect(endpoints.indexerStoredCategories(3)).toBe('/api/v1/indexers/3/categories');
     expect(endpoints.movieReleases(7)).toBe('/api/v1/library/movies/7/releases');
     expect(endpoints.movieGrab(7)).toBe('/api/v1/library/movies/7/grab');
@@ -61,6 +63,11 @@ describe('endpoints', () => {
     expect(endpoints.conversions()).toBe('/api/v1/convert');
     expect(endpoints.conversionCancel(4)).toBe('/api/v1/convert/4/cancel');
     expect(endpoints.conversionRetry(4)).toBe('/api/v1/convert/4/retry');
+    expect(endpoints.definitionPacks()).toBe('/api/v1/definition-packs');
+    expect(endpoints.definitionPacksPreview()).toBe('/api/v1/definition-packs/preview');
+    expect(endpoints.definitionPacksInstall()).toBe('/api/v1/definition-packs/install');
+    expect(endpoints.definitionPacksActivate()).toBe('/api/v1/definition-packs/activate');
+    expect(endpoints.definitionPacksRollback()).toBe('/api/v1/definition-packs/rollback');
   });
 
   it('builds remote path mapping and editable task paths', () => {
@@ -552,5 +559,173 @@ describe('downloads', () => {
     stubFetch(null);
     await api.removeDownload('abc', true);
     expect(only().url).toBe('/api/v1/downloads/abc?deleteData=true');
+  });
+});
+
+describe('definition packs', () => {
+  const REVISION = {
+    source: 'community',
+    revision: '2026.08.14',
+    install_state: 'installed',
+    pending: false,
+    active: true,
+    last_known_good: true,
+    definition_count: 12,
+    runnable_count: 10,
+    archive_digest: 'sha256:archive',
+    manifest_digest: 'sha256:manifest',
+    license_digest: 'sha256:license',
+    signature_fingerprint: 'aa:bb',
+    license_expression: 'MIT',
+    provenance: 'signed',
+    minimum_caravan_version: '0.1.0',
+    installed_at: '2026-08-14T00:00:00Z',
+    accepted_at: '2026-08-14T00:00:00Z',
+    accepted_by_user_id: 1,
+  };
+  const PREVIEW = {
+    source: 'community',
+    revision: '2026.08.14',
+    archive_digest: 'sha256:archive',
+    manifest_digest: 'sha256:manifest',
+    license_digest: 'sha256:license',
+    signature_fingerprint: 'aa:bb',
+    license: 'MIT license text',
+    notice: 'Notice text',
+    token: 'preview-token',
+    expires_at: '2026-08-15T12:00:00Z',
+  };
+
+  function stubPackFetch(body: unknown, status = 200) {
+    calls = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const headers = (init?.headers ?? {}) as Record<string, string>;
+        calls.push({
+          url: String(input),
+          method: init?.method ?? 'GET',
+          body: init?.body ?? null,
+          headers,
+        } as Call & { headers: Record<string, string> });
+        return new Response(JSON.stringify(body), {
+          status,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    );
+  }
+
+  function packCall() {
+    expect(calls).toHaveLength(1);
+    return calls[0] as Call & { headers: Record<string, string>; body: FormData | string | null };
+  }
+
+  it('unwraps GET /definition-packs revisions', async () => {
+    stubPackFetch({ revisions: [REVISION] });
+    await expect(api.listDefinitionPacks()).resolves.toEqual([REVISION]);
+    expect(packCall()).toMatchObject({ method: 'GET', url: '/api/v1/definition-packs' });
+  });
+
+  it('sends preview multipart fields and omits Content-Type', async () => {
+    stubPackFetch(PREVIEW);
+    const archive = new File(['zip'], 'community.zip', { type: 'application/zip' });
+    await expect(
+      api.previewDefinitionPack({
+        archive,
+        signer_key_id: 'owner-1',
+        public_key: 'cHVibGljLWtleQ==',
+      }),
+    ).resolves.toEqual(PREVIEW);
+
+    const call = packCall();
+    expect(call.method).toBe('POST');
+    expect(call.url).toBe('/api/v1/definition-packs/preview');
+    expect(call.headers.Accept).toBe('application/json');
+    expect(call.headers['Content-Type']).toBeUndefined();
+    expect(call.body).toBeInstanceOf(FormData);
+    const fields = call.body as FormData;
+    expect(fields.get('archive')).toBe(archive);
+    expect(fields.get('signer_key_id')).toBe('owner-1');
+    expect(fields.get('public_key')).toBe('cHVibGljLWtleQ==');
+    expect(fields.has('token')).toBe(false);
+  });
+
+  it('resends the same archive plus source and token on install', async () => {
+    stubPackFetch(REVISION, 201);
+    const archive = new File(['zip'], 'community.zip', { type: 'application/zip' });
+    await expect(
+      api.installDefinitionPack({
+        archive,
+        signer_key_id: 'owner-1',
+        public_key: 'cHVibGljLWtleQ==',
+        source: 'community',
+        token: 'preview-token',
+      }),
+    ).resolves.toEqual(REVISION);
+
+    const call = packCall();
+    expect(call.method).toBe('POST');
+    expect(call.url).toBe('/api/v1/definition-packs/install');
+    expect(call.headers.Accept).toBe('application/json');
+    expect(call.headers['Content-Type']).toBeUndefined();
+    const fields = call.body as FormData;
+    expect(fields.get('archive')).toBe(archive);
+    expect(fields.get('signer_key_id')).toBe('owner-1');
+    expect(fields.get('public_key')).toBe('cHVibGljLWtleQ==');
+    expect(fields.get('source')).toBe('community');
+    expect(fields.get('token')).toBe('preview-token');
+  });
+
+  it('POSTs activate and rollback as exact JSON refs', async () => {
+    stubPackFetch({ restart_required: true }, 202);
+    await expect(api.activateDefinitionPack('community', '2026.08.14')).resolves.toEqual({
+      restart_required: true,
+    });
+    expect(packCall()).toMatchObject({
+      method: 'POST',
+      url: '/api/v1/definition-packs/activate',
+      body: JSON.stringify({ source: 'community', revision: '2026.08.14' }),
+    });
+
+    calls = [];
+    stubPackFetch(REVISION);
+    await expect(api.rollbackDefinitionPack('community', '2026.08.14')).resolves.toEqual(REVISION);
+    expect(packCall()).toMatchObject({
+      method: 'POST',
+      url: '/api/v1/definition-packs/rollback',
+      body: JSON.stringify({ source: 'community', revision: '2026.08.14' }),
+    });
+  });
+
+  it('rejects missing pack inputs and files larger than 80 MiB without fetching', async () => {
+    stubPackFetch(PREVIEW);
+    const archive = new File(['zip'], 'community.zip');
+    await expect(
+      api.previewDefinitionPack({ archive, signer_key_id: '', public_key: 'cHVibGljLWtleQ==' }),
+    ).rejects.toThrow(/signer key/i);
+    await expect(
+      api.previewDefinitionPack({ archive, signer_key_id: 'owner-1', public_key: '' }),
+    ).rejects.toThrow(/public key/i);
+    await expect(
+      api.installDefinitionPack({
+        archive,
+        signer_key_id: 'owner-1',
+        public_key: 'cHVibGljLWtleQ==',
+        source: '',
+        token: 'preview-token',
+      }),
+    ).rejects.toThrow(/source/i);
+
+    const oversized = new File(['x'], 'huge.zip');
+    Object.defineProperty(oversized, 'size', { value: 80 * 1024 * 1024 + 1 });
+    await expect(
+      api.previewDefinitionPack({
+        archive: oversized,
+        signer_key_id: 'owner-1',
+        public_key: 'cHVibGljLWtleQ==',
+      }),
+    ).rejects.toThrow(/80 MiB/i);
+    expect(calls).toHaveLength(0);
   });
 });

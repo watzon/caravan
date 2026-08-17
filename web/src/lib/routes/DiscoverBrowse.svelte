@@ -20,6 +20,7 @@
   import Icon from '../components/Icon.svelte';
   import PosterGrid from '../components/PosterGrid.svelte';
   import PosterGridSkeleton from '../components/PosterGridSkeleton.svelte';
+  import SourceLogo from '../components/SourceLogo.svelte';
   import Toggle from '../components/Toggle.svelte';
 
   interface Props {
@@ -143,7 +144,14 @@
         class="flex size-12 shrink-0 items-center justify-center rounded-md border border-border
                bg-surface font-display text-lg font-bold text-ink-secondary"
         aria-hidden="true">
-        {monogram}
+        {#if page?.source.logo_url}
+          <SourceLogo
+            src={page.source.logo_url}
+            lockup={page.source.lockup}
+            class="max-h-7 max-w-10 object-contain" />
+        {:else}
+          {monogram}
+        {/if}
       </span>
       <div class="min-w-0 flex-1">
         <h2

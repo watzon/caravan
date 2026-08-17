@@ -3,12 +3,18 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/watzon/caravan/internal/api"
+	"github.com/watzon/caravan/internal/cardigann"
 	"github.com/watzon/caravan/internal/clients"
 	"github.com/watzon/caravan/internal/clients/nzbget"
 	"github.com/watzon/caravan/internal/clients/qbittorrent"
@@ -16,6 +22,7 @@ import (
 	"github.com/watzon/caravan/internal/core"
 	"github.com/watzon/caravan/internal/download"
 	"github.com/watzon/caravan/internal/indexer"
+	"github.com/watzon/caravan/internal/indexer/catalog"
 	"github.com/watzon/caravan/internal/store"
 	"github.com/watzon/caravan/internal/usenet"
 )
@@ -24,6 +31,11 @@ import (
 // fans out across every enabled indexer and waits for all of them, so a dead
 // indexer must time out well inside a user's patience.
 const indexerTimeout = 30 * time.Second
+
+// managedDefinitionSourceURL is a variable only so the command package's real
+// runServe tests can disable external network access. Production uses the
+// Prowlarr-compatible definition service by default.
+var managedDefinitionSourceURL = cardigann.DefaultManagedDefinitionURL
 
 // engineWaitInterval is how often the import watcher re-checks for a download
 // engine while none exists. It only matters on a first run, between the
@@ -52,14 +64,244 @@ var registerDownloadClients = sync.OnceValue(func() error {
 	)
 })
 
-// newIndexerFactory wires api.IndexerFactory to the real Torznab/Newznab
-// client. The clients share one http.Client so a fan-out reuses connections
-// to an indexer instead of opening one per search.
-func newIndexerFactory() api.IndexerFactory {
-	hc := &http.Client{Timeout: indexerTimeout}
-	return func(cfg core.IndexerConfig) api.IndexerClient {
-		return indexer.New(cfg, hc)
+// newIndexerFactory routes remote configurations to the Torznab/Newznab client
+// and local definition configurations to Caravan's scraper engine. Local
+// definitions use a separate restricted transport so tracker-controlled
+// redirects cannot reach private services on the Caravan host.
+func newIndexerFactory() (api.IndexerFactory, error) {
+	runtime, err := newIndexerRuntime("", slog.Default())
+	if err != nil {
+		return nil, err
 	}
+	return runtime.factory, nil
+}
+
+type indexerRuntime struct {
+	factory          api.IndexerFactory
+	definitions      api.LocalDefinitionLookup
+	exactDefinitions api.ExactLocalDefinitionLookup
+	managedStatuses  []catalog.ExecutionStatus
+}
+
+func newIndexerRuntime(dataDir string, logger *slog.Logger, packStores ...definitionPackRuntimeStore) (*indexerRuntime, error) {
+	if len(packStores) > 1 {
+		return nil, fmt.Errorf("indexer runtime accepts at most one definition pack store")
+	}
+	remoteHTTP := &http.Client{Timeout: indexerTimeout}
+	localHTTP := cardigann.NewRestrictedHTTPClient(indexerTimeout)
+	definitions, err := cardigann.LoadBuiltins()
+	if err != nil {
+		return nil, fmt.Errorf("load local indexer definitions: %w", err)
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	managedStatuses := []catalog.ExecutionStatus{}
+	if strings.TrimSpace(dataDir) != "" {
+		snapshot, snapshotErr := cardigann.LoadManagedSnapshot(dataDir)
+		switch {
+		case snapshotErr == nil:
+			provider := snapshot.Provider()
+			descriptors, describeErr := cardigann.DescribeProvider(provider)
+			if describeErr != nil {
+				return nil, fmt.Errorf("describe managed indexer definitions: %w", describeErr)
+			}
+			manifests, problems := definitions.LoadProvider(provider)
+			for _, problem := range problems {
+				logger.Warn("managed indexer definition is not executable", "error", problem)
+			}
+			managedStatuses = managedCatalogExecutionStatuses(descriptors, definitions)
+			logger.Info("loaded managed indexer definitions", "revision", snapshot.Revision, "manifests", len(manifests), "addable", countAddableStatuses(managedStatuses), "catalogued", len(managedStatuses))
+		case errors.Is(snapshotErr, fs.ErrNotExist):
+			// A first run has no cache yet. The serving path refreshes it before
+			// constructing this runtime; tests and offline starts stay deterministic.
+		default:
+			logger.Warn("managed indexer definition cache is unavailable", "error", snapshotErr)
+		}
+	}
+	if len(packStores) == 1 && packStores[0] != nil {
+		if err := loadPersistedDefinitionPacks(context.Background(), packStores[0], dataDir, definitions, storeInstalledPackOpener(dataDir, api.Version)); err != nil {
+			return nil, fmt.Errorf("load persisted definition packs: %w", err)
+		}
+	}
+	if strings.TrimSpace(dataDir) != "" {
+		directory := filepath.Join(dataDir, "indexer-definitions")
+		info, statErr := os.Lstat(directory)
+		switch {
+		case statErr == nil:
+			if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+				return nil, fmt.Errorf("user indexer definitions path must be a regular directory")
+			}
+			canonical, resolveErr := filepath.EvalSymlinks(directory)
+			if resolveErr != nil {
+				return nil, fmt.Errorf("resolve user indexer definitions directory: %w", resolveErr)
+			}
+			provider, providerErr := cardigann.NewDirectoryProvider("user", canonical)
+			if providerErr != nil {
+				return nil, fmt.Errorf("open user indexer definitions: %w", providerErr)
+			}
+			manifests, problems := definitions.LoadProvider(provider)
+			for _, problem := range problems {
+				logger.Warn("user indexer definition quarantined", "error", problem)
+			}
+			logger.Info("user indexer definitions classified",
+				"manifests", len(manifests), "quarantined", len(problems))
+		case errors.Is(statErr, os.ErrNotExist):
+			// Optional by design. The static built-in cohort remains the only
+			// advertised catalog when the owner has supplied no definitions.
+		case statErr != nil:
+			return nil, fmt.Errorf("inspect user indexer definitions directory: %w", statErr)
+		}
+	}
+	lookup := api.LocalDefinitionLookup(func(id string) (api.LocalDefinitionSchema, bool) {
+		settings, ok := definitions.SettingNames(id)
+		if !ok {
+			return api.LocalDefinitionSchema{}, false
+		}
+		fields, ok := definitions.SettingSchemas(id)
+		if !ok {
+			return api.LocalDefinitionSchema{}, false
+		}
+		baseURLs, ok := definitions.BaseURLs(id)
+		if !ok {
+			return api.LocalDefinitionSchema{}, false
+		}
+		return api.LocalDefinitionSchema{Settings: settings, Fields: catalogSettingSchemas(fields), BaseURLs: baseURLs}, true
+	})
+	exactLookup := api.ExactLocalDefinitionLookup(func(id, source, revision, digest string) (api.LocalDefinitionSchema, bool) {
+		settings, ok := definitions.SettingNamesExact(id, source, revision, digest)
+		if !ok {
+			return api.LocalDefinitionSchema{}, false
+		}
+		fields, ok := definitions.SettingSchemasExact(id, source, revision, digest)
+		if !ok {
+			return api.LocalDefinitionSchema{}, false
+		}
+		baseURLs, ok := definitions.BaseURLsExact(id, source, revision, digest)
+		if !ok {
+			return api.LocalDefinitionSchema{}, false
+		}
+		return api.LocalDefinitionSchema{Settings: settings, Fields: catalogSettingSchemas(fields), BaseURLs: baseURLs}, true
+	})
+	return &indexerRuntime{
+		factory:          configuredIndexerFactory(definitions, remoteHTTP, localHTTP),
+		definitions:      lookup,
+		exactDefinitions: exactLookup,
+		managedStatuses:  managedStatuses,
+	}, nil
+}
+
+func refreshManagedDefinitionCache(ctx context.Context, dataDir string, logger *slog.Logger, client *http.Client, sourceURL string) error {
+	if strings.TrimSpace(dataDir) == "" || strings.TrimSpace(sourceURL) == "" {
+		return nil
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	snapshot, err := cardigann.FetchManagedSnapshot(ctx, client, sourceURL)
+	if err != nil {
+		return fmt.Errorf("fetch managed indexer definitions: %w", err)
+	}
+	if err := cardigann.InstallManagedSnapshot(dataDir, snapshot); err != nil {
+		return fmt.Errorf("install managed indexer definitions: %w", err)
+	}
+	logger.Info("updated managed indexer definitions", "revision", snapshot.Revision)
+	return nil
+}
+
+func catalogSettingSchemas(fields []cardigann.SettingSchema) []catalog.Setting {
+	out := make([]catalog.Setting, 0, len(fields))
+	for _, field := range fields {
+		options := make([]catalog.SettingOption, 0, len(field.Options))
+		for _, option := range field.Options {
+			options = append(options, catalog.SettingOption{Value: option.Value, Label: option.Label})
+		}
+		out = append(out, catalog.Setting{
+			Name: field.Name, Label: field.Label, Type: field.Type, Default: field.Default,
+			Options: options, Secret: field.Secret, Editable: field.Editable,
+		})
+	}
+	return out
+}
+
+func managedCatalogExecutionStatuses(descriptors []cardigann.DefinitionDescriptor, definitions *cardigann.Registry) []catalog.ExecutionStatus {
+	statuses := make([]catalog.ExecutionStatus, 0, len(descriptors))
+	for _, descriptor := range descriptors {
+		if descriptor.Ref.Source != cardigann.ManagedSource || descriptor.MetadataID == "" || !catalog.HasMetadataID(descriptor.MetadataID) {
+			continue
+		}
+		unsupported := make([]string, len(descriptor.Unsupported))
+		for i, capability := range descriptor.Unsupported {
+			unsupported[i] = string(capability)
+		}
+		status := catalog.ExecutionStatus{
+			MetadataID: descriptor.MetadataID, DefinitionID: descriptor.Ref.String(), Source: descriptor.Ref.Source,
+			Revision: descriptor.Revision, Digest: descriptor.Digest, Unsupported: unsupported,
+		}
+		switch descriptor.State {
+		case cardigann.DefinitionStateQuarantined:
+			status.State = catalog.InventoryStateQuarantined
+			status.BlockedCode = "compiler.invalid"
+		case cardigann.DefinitionStateUnsupported:
+			status.State = catalog.InventoryStateUnsupported
+		case cardigann.DefinitionStateRunnableUnverified:
+			fields, fieldsOK := definitions.SettingSchemasExact(status.DefinitionID, status.Source, status.Revision, status.Digest)
+			baseURLs, urlsOK := definitions.BaseURLsExact(status.DefinitionID, status.Source, status.Revision, status.Digest)
+			if !fieldsOK || !urlsOK || len(baseURLs) == 0 {
+				status.State = catalog.InventoryStateRunnableUnverified
+				status.BlockedCode = "definition.runtime.unavailable"
+				break
+			}
+			status.State, status.Addable = catalog.InventoryStateVerified, true
+			status.BaseURLs = baseURLs
+			status.Settings = catalogSettingSchemas(fields)
+		}
+		statuses = append(statuses, status)
+	}
+	return statuses
+}
+
+func countAddableStatuses(statuses []catalog.ExecutionStatus) int {
+	count := 0
+	for _, status := range statuses {
+		if status.Addable {
+			count++
+		}
+	}
+	return count
+}
+
+func configuredIndexerFactory(definitions *cardigann.Registry, remoteHTTP, localHTTP *http.Client) api.IndexerFactory {
+	return func(cfg core.IndexerConfig) api.IndexerClient {
+		ref, refErr := cardigann.ParseDefinitionRef(cfg.DefinitionID)
+		exactNamespace := refErr == nil && ref.Source != cardigann.BuiltinSource && ref.Source != "user" && ref.Source != cardigann.ManagedSource
+		if exactNamespace || cfg.DefinitionSource != "" || cfg.DefinitionRevision != "" || cfg.DefinitionDigest != "" {
+			if _, ok := definitions.GetExact(cfg.DefinitionID, cfg.DefinitionSource, cfg.DefinitionRevision, cfg.DefinitionDigest); !ok {
+				return unavailableIndexerClient{err: fmt.Errorf("definition %q exact pin is not active in this runtime", cfg.DefinitionID)}
+			}
+			return cardigann.NewClient(definitions, cfg, localHTTP)
+		}
+		if cfg.DefinitionID != "" {
+			return cardigann.NewClient(definitions, cfg, localHTTP)
+		}
+		return indexer.New(cfg, remoteHTTP)
+	}
+}
+
+type unavailableIndexerClient struct {
+	err error
+}
+
+func (client unavailableIndexerClient) Search(context.Context, string, []int) ([]core.Release, error) {
+	return nil, client.err
+}
+
+func (client unavailableIndexerClient) Test(context.Context) error {
+	return client.err
+}
+
+func (client unavailableIndexerClient) Categories(context.Context) ([]core.IndexerCategory, error) {
+	return nil, client.err
 }
 
 // downloadPersistence is download.Persistence backed by the `downloads` table.

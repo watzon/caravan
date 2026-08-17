@@ -858,12 +858,114 @@ export interface MatchRequest {
 /** internal/core.IndexerType* — both dialects, one client. */
 export type IndexerType = 'torznab' | 'newznab';
 
+/** internal/indexer/catalog.Kind* — the add-indexer directory grouping. */
+export type IndexerKind = 'torrent' | 'usenet' | 'generic';
+
+export type IndexerPrivacy = 'public' | 'private' | 'semi-private';
+
+export type IndexerContent =
+  | 'movies'
+  | 'tv'
+  | 'anime'
+  | 'audio'
+  | 'books'
+  | 'adult'
+  | 'pc'
+  | 'other';
+
+/**
+ * One row of GET /indexers/catalog. A preset prefills the add form; torrent
+ * sites usually leave url empty and offer a Jackett-shaped placeholder.
+ */
+export interface IndexerDefinition {
+  id: string;
+  /** Non-empty when Caravan executes this source locally instead of calling URL as Torznab. */
+  definition_id?: string;
+  definition_source?: string;
+  definition_revision?: string;
+  definition_digest?: string;
+  name: string;
+  kind: IndexerKind;
+  protocol: IndexerType;
+  privacy: IndexerPrivacy;
+  language: string;
+  description: string;
+  info_url: string;
+  url: string;
+  urls: string[];
+  url_placeholder: string;
+  requires_api_key: boolean;
+  categories: number[];
+  /** Coarse media kinds this source is good for (movies, tv, anime, …). */
+  content: IndexerContent[];
+  settings?: IndexerDefinitionSetting[];
+}
+
+export type IndexerInventoryState =
+  | 'metadata-only'
+  | 'source-not-installed'
+  | 'unsupported'
+  | 'quarantined'
+  | 'runnable-unverified'
+  | 'verified';
+
+export interface IndexerExecutionStatus {
+  definition_id: string;
+  state: IndexerInventoryState;
+  source: string;
+  revision?: string;
+  digest?: string;
+  blocked_code?: string;
+  unsupported: string[];
+  addable: boolean;
+  settings?: IndexerDefinitionSetting[];
+  base_urls?: string[];
+}
+
+/** Metadata inventory is display-only unless an exact verified definition is addable. */
+export interface IndexerInventoryEntry {
+  id: string;
+  name: string;
+  description: string;
+  privacy: IndexerPrivacy;
+  language: string;
+  info_url: string;
+  metadata_urls: string[];
+  requires_api_key: boolean;
+  content: IndexerContent[];
+  state: IndexerInventoryState;
+  addable: boolean;
+  definition_id?: string;
+  definitions: IndexerExecutionStatus[];
+}
+
+export interface IndexerCatalogResponse {
+  definitions: IndexerDefinition[];
+  inventory: IndexerInventoryEntry[];
+}
+
+export interface IndexerDefinitionSetting {
+  name: string;
+  label: string;
+  type: string;
+  default: string;
+  options?: Array<{ value: string; label: string }>;
+  secret: boolean;
+  editable?: boolean;
+}
+
 /**
  * internal/core.IndexerConfig. The API key is write-only; `has_api_key` reports
  * whether one is stored.
  */
 export interface Indexer {
   id: number;
+  definition_id?: string;
+  definition_source?: string;
+  definition_revision?: string;
+  definition_digest?: string;
+  /** Names of configured definition settings; values are always write-only. */
+  has_settings?: string[];
   name: string;
   url: string;
   has_api_key: boolean;
@@ -873,10 +975,17 @@ export interface Indexer {
   /** Lower values run first and break otherwise equal release scores. */
   priority: number;
   enabled: boolean;
+  health_error?: string;
+  consecutive_failures?: number;
 }
 
 /** Body for POST /indexers and PUT /indexers/{id}. */
 export interface IndexerInput {
+  definition_id?: string;
+  definition_source?: string;
+  definition_revision?: string;
+  definition_digest?: string;
+  settings?: Record<string, string>;
   name: string;
   url: string;
   api_key?: string;
@@ -884,6 +993,59 @@ export interface IndexerInput {
   categories: number[];
   priority?: number;
   enabled: boolean;
+}
+
+/** One installed or pending owner-signed definition pack revision. Never includes public key material. */
+export interface DefinitionPackRevision {
+  source: string;
+  revision: string;
+  install_state: string;
+  pending: boolean;
+  active: boolean;
+  last_known_good: boolean;
+  validation_code?: string;
+  definition_count: number;
+  runnable_count: number;
+  archive_digest: string;
+  manifest_digest: string;
+  license_digest: string;
+  notice_digest?: string;
+  signature_fingerprint: string;
+  license_expression: string;
+  provenance: string;
+  minimum_caravan_version: string;
+  installed_at?: string;
+  accepted_at: string;
+  accepted_by_user_id: number;
+}
+
+/** Preview receipt for a signed pack. Token stays in component memory only. */
+export interface DefinitionPackPreview {
+  source: string;
+  revision: string;
+  archive_digest: string;
+  manifest_digest: string;
+  license_digest: string;
+  signature_fingerprint: string;
+  license: string;
+  notice: string;
+  token: string;
+  expires_at: string;
+}
+
+export interface DefinitionPackList {
+  revisions: DefinitionPackRevision[];
+}
+
+export interface DefinitionPackUpload {
+  archive: File;
+  signer_key_id: string;
+  public_key: string;
+}
+
+export interface DefinitionPackInstall extends DefinitionPackUpload {
+  source: string;
+  token: string;
 }
 
 /**
@@ -1064,6 +1226,12 @@ export interface Release {
   leechers: number;
   published_at: string;
   parsed: ParsedRelease;
+  /**
+   * Server-side mismatch flags relative to the item searched for: wrong-title,
+   * wrong-year, wrong-season, wrong-episode, wrong-date, season-pack,
+   * no-seeders. The picker renders them beside its client-derived flags.
+   */
+  flags?: string[];
   compatibility: TVCompatibility;
   /** Active quality profile's score and accept/reject rationale when evaluated. */
   profile_decision?: ProfileDecision;
@@ -1084,6 +1252,20 @@ export interface IndexerError {
 export interface ReleasesResponse {
   query: string;
   queries: string[];
+  /**
+   * The query-language spelling of the search a per-item picker just ran
+   * (`site:"Vixen" date:2026-01-19`). Only the per-item endpoints set it: it is
+   * what the editable box is seeded with, because re-running it through
+   * /search/releases asks the indexers the same questions this answer came
+   * from — which the raw first `query` alone does not.
+   */
+  search_expression?: string;
+  /**
+   * How many rows the expression's local filters hid — a field term or a
+   * negation no indexer can be asked to honour. Every one is still cached, so
+   * this is a display count, not a loss. Omitted when nothing was hidden.
+   */
+  filtered?: number;
   truncated?: boolean;
   library_id?: number;
   releases: Release[];
@@ -1617,13 +1799,26 @@ export interface DiscoverSource {
   id: number;
   name: string;
   type: DiscoverSourceType;
+  /** Absolute TMDB image URL; "" when the shelf has no mark. */
+  logo_url: string;
+  /**
+   * True when the mark is a filled badge plus lettering. Flat marks
+   * silhouette to ink; omitted on older payloads.
+   */
+  lockup?: boolean;
 }
 
 /** GET /discover. */
 export interface DiscoverHome {
   trending: DiscoverItem[];
   popular_movies: DiscoverItem[];
+  upcoming_movies: DiscoverItem[];
+  now_playing: DiscoverItem[];
   popular_series: DiscoverItem[];
+  upcoming_series: DiscoverItem[];
+  airing_series: DiscoverItem[];
+  movie_genres: DiscoverNamed[];
+  series_genres: DiscoverNamed[];
   networks: DiscoverSource[];
   studios: DiscoverSource[];
 }

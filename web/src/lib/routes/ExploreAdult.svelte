@@ -16,9 +16,12 @@
    * "add" here would be one click for several hundred scenes.
    */
   import { ApiError, api, errorText } from '../api/client';
-  import type { AdultDiscoverPage, SceneMeta } from '../api/types';
+  import type { AdultDiscoverPage, SceneMeta, SiteMeta } from '../api/types';
   import AppliedChips from '../components/AppliedChips.svelte';
+  import Badge from '../components/Badge.svelte';
   import Button from '../components/Button.svelte';
+  import DiscoverSceneShelf from '../components/DiscoverSceneShelf.svelte';
+  import DiscoverTiles from '../components/DiscoverTiles.svelte';
   import Dropdown from '../components/Dropdown.svelte';
   import EmptyState from '../components/EmptyState.svelte';
   import ExploreScopes from '../components/ExploreScopes.svelte';
@@ -34,12 +37,16 @@
   import Toggle from '../components/Toggle.svelte';
   import {
     clearedSceneFilter,
+    isSceneLanding,
     parseSceneFilter,
     removeSceneChip,
     matchCountLine,
+    sceneAddedHref,
     sceneApiQuery,
     sceneChips,
     sceneFilterHref,
+    sceneGridHref,
+    sceneSiteHref,
     sceneYearNow,
     toggleRef,
     SCENE_SITE_SCOPES,
@@ -61,6 +68,7 @@
 
   let filter = $derived(parseSceneFilter(router.params));
   let chips = $derived(sceneChips(filter));
+  let landing = $derived(isSceneLanding(filter, router.params));
 
   let scenes = $state<SceneMeta[]>([]);
   let answer = $state<AdultDiscoverPage | null>(null);
@@ -76,6 +84,11 @@
   let inFlight: AbortController | null = null;
 
   let question = $derived(JSON.stringify(sceneApiQuery(filter, 1)));
+
+  let recent = $state<SceneMeta[]>([]);
+  let added = $state<SceneMeta[]>([]);
+  let sites = $state<SiteMeta[]>([]);
+  let landingAnswer = $state<AdultDiscoverPage | null>(null);
 
   async function load(pageNumber: number) {
     inFlight?.abort();
@@ -108,7 +121,62 @@
     return [...existing, ...fetched.filter((s) => !seen.has(s.stash_id))];
   }
 
+  async function loadLanding() {
+    inFlight?.abort();
+    const controller = new AbortController();
+    inFlight = controller;
+    loading = true;
+    try {
+      const [recentPage, addedPage, siteHits] = await Promise.all([
+        api.adultDiscover(sceneApiQuery({ ...filter, sort: 'newest' }, 1), controller.signal),
+        api
+          .adultDiscover(sceneApiQuery({ ...filter, sort: 'added' }, 1), controller.signal)
+          .catch(() => null),
+        api.searchSites('', controller.signal).catch(() => []),
+      ]);
+      landingAnswer = recentPage;
+      recent = recentPage.scenes;
+      added = addedPage?.scenes ?? [];
+      if (siteHits.length > 0) {
+        sites = siteHits;
+      } else {
+        // A blank provider search is a default list, not a guarantee: some
+        // dialects answer it empty. The sites already in the library are then
+        // the browse destinations that still mean something.
+        const held = await api.listSites(controller.signal).catch(() => []);
+        sites = held.map((site) => ({
+          provider: '',
+          stash_id: site.stash_id,
+          name: site.title,
+          aliases: [],
+          parent_name: '',
+          url: '',
+          image_url: site.poster_url,
+          in_library: true,
+          library_id: site.id,
+        }));
+      }
+      error = null;
+      status = 0;
+    } catch (err) {
+      if (controller.signal.aborted) return;
+      error = errorText(err);
+      status = err instanceof ApiError ? err.status : 0;
+    } finally {
+      if (!controller.signal.aborted) {
+        loading = false;
+        loadingMore = false;
+      }
+    }
+  }
+
   $effect(() => {
+    if (landing) {
+      scenes = [];
+      answer = null;
+      void loadLanding();
+      return;
+    }
     void question;
     scenes = [];
     answer = null;
@@ -145,9 +213,11 @@
       });
       // Patch in place rather than refetch: one flag on one card changed, and a
       // refetch is another round trip to the provider.
-      scenes = scenes.map((s) =>
-        s.stash_id === scene.stash_id ? { ...s, requested: true } : s,
-      );
+      const mark = (row: SceneMeta) =>
+        row.stash_id === scene.stash_id ? { ...row, requested: true } : row;
+      scenes = scenes.map(mark);
+      recent = recent.map(mark);
+      added = added.map(mark);
       pushToast(t('route.exploreAdult.requested', { title: scene.title }), 'success');
     } catch (err) {
       pushToast(errorText(err), 'danger');
@@ -157,12 +227,25 @@
   }
 
   let visible = $derived(filter.hideOwned ? scenes.filter((s) => !s.in_library) : scenes);
+  let visibleRecent = $derived(filter.hideOwned ? recent.filter((s) => !s.in_library) : recent);
+  let visibleAdded = $derived(filter.hideOwned ? added.filter((s) => !s.in_library) : added);
+  let hero = $derived(visibleRecent[0] ?? null);
+  let recentRest = $derived(visibleRecent.slice(1));
+  let siteTiles = $derived(
+    sites.map((site) => ({
+      href: sceneSiteHref({ id: site.stash_id, name: site.name }),
+      name: site.name,
+      image: site.image_url,
+    })),
+  );
   /**
    * "18,442 scenes match" — the provider gives a real total here, unlike the
    * title scopes, whose page carries only a page count. A number nobody can
    * trust is worse than none, so this line exists on the one scope that has one.
    */
-  let countNote = $derived(error ? '' : matchCountLine(answer?.total ?? 0, 'scene'));
+  let countNote = $derived(
+    error ? '' : matchCountLine((landing ? landingAnswer?.total : answer?.total) ?? 0, 'scene'),
+  );
   let hasMore = $derived(
     answer !== null &&
       answer.per_page > 0 &&
@@ -177,7 +260,7 @@
    * on screen because there is still a next page to reach.
    */
   let emptyMessage = $derived(
-    filter.hideOwned && scenes.length > 0
+    filter.hideOwned && (landing ? recent.length + added.length > 0 : scenes.length > 0)
       ? t('route.exploreAdult.hideOwnedEmpty')
       : chips.length === 0
         ? t('route.exploreAdult.providerEmpty')
@@ -422,7 +505,91 @@
       {/snippet}
     </EmptyState>
   {:else if error}
-    <LoadError message={error} onretry={() => void load(1)} />
+    <LoadError message={error} onretry={() => void (landing ? loadLanding() : load(1))} />
+  {:else if landing && loading && recent.length === 0}
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {#each Array.from({ length: 6 }) as _, i (i)}
+        <Skeleton class="aspect-video w-full rounded-md" />
+      {/each}
+    </div>
+  {:else if landing}
+    <div class="flex flex-col gap-8">
+      {#if hero}
+        <section
+          class="relative overflow-hidden rounded-lg border border-border bg-surface"
+          aria-label={t('route.exploreAdult.featuredFirst')}>
+          {#if hero.image_url}
+            <img
+              src={hero.image_url}
+              alt=""
+              class="absolute inset-0 size-full object-cover"
+              loading="eager"
+              decoding="async" />
+          {:else}
+            <div class="absolute inset-0 bg-raised"></div>
+          {/if}
+          <div class="absolute inset-0 bg-linear-to-r from-bg via-bg/85 to-bg/20"></div>
+          <div class="relative flex max-w-2xl flex-col gap-3 px-6 py-10">
+            <p class="font-mono text-xs font-medium tracking-wide text-warning">
+              {t('route.exploreAdult.featuredFirst')}
+            </p>
+            <h2 class="font-display text-2xl font-bold tracking-tight text-ink" title={hero.title}>
+              {hero.title}
+            </h2>
+            {#if hero.site_name || hero.date}
+              <p class="text-base text-ink-secondary">
+                {[hero.site_name, hero.date].filter((part) => part !== '').join(' · ')}
+              </p>
+            {/if}
+            <div class="mt-1 flex flex-wrap items-center gap-3">
+              {#if hero.in_library}
+                <Badge tone="success">{t('route.discover.inLibrary')}</Badge>
+              {:else if hero.requested}
+                <Badge tone="warning">{t('component.sceneCard.requested')}</Badge>
+              {:else}
+                <Button
+                  variant="primary"
+                  disabled={requesting !== null}
+                  onclick={() => void request(hero)}>
+                  <Icon name="plus" size={14} />
+                  {requesting === hero.stash_id
+                    ? t('component.sceneCard.requesting')
+                    : t('component.sceneCard.request')}
+                </Button>
+              {/if}
+              <Button
+                variant="secondary"
+                href={`/adult/scenes/${encodeURIComponent(hero.provider)}/${encodeURIComponent(hero.stash_id)}`}>
+                {t('route.discover.details')}
+              </Button>
+            </div>
+          </div>
+        </section>
+      {/if}
+
+      <DiscoverSceneShelf
+        title={t('route.exploreAdult.recentScenes')}
+        scenes={recentRest}
+        href={sceneGridHref()}
+        {requesting}
+        busy={requesting !== null}
+        onrequest={request} />
+      <DiscoverSceneShelf
+        title={t('route.exploreAdult.newlyAdded')}
+        scenes={visibleAdded}
+        href={sceneAddedHref()}
+        {requesting}
+        busy={requesting !== null}
+        onrequest={request} />
+      <DiscoverTiles title={t('route.exploreAdult.browseBySite')} tiles={siteTiles} />
+
+      {#if visibleRecent.length === 0 && visibleAdded.length === 0 && siteTiles.length === 0}
+        <EmptyState
+          icon="flame"
+          title={t('route.exploreAdult.emptyTitle')}
+          message={emptyMessage} />
+      {/if}
+    </div>
   {:else if loading && scenes.length === 0}
     <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
       {#each Array.from({ length: 6 }) as _, i (i)}

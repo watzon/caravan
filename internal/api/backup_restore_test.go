@@ -99,6 +99,24 @@ func TestDatabaseRestoreRejectsInvalidAndOversizeBodies(t *testing.T) {
 	}
 }
 
+// Regression: a portable ZIP uploaded with a generic or wrong content type
+// must still route to the portable restore path instead of being rejected as
+// a corrupt SQLite file.
+func TestDatabaseRestoreRoutesZipPayloadsByMagic(t *testing.T) {
+	h, _, _ := newTestServer(t)
+	zipBody := []byte("PK\x03\x04rest-of-archive")
+	for _, contentType := range []string{"", "application/octet-stream", "application/zip"} {
+		rec := doRaw(t, h, http.MethodPost, "/api/v1/system/restore", zipBody, func(req *http.Request) {
+			if contentType != "" {
+				req.Header.Set("Content-Type", contentType)
+			}
+		})
+		// No pack service is configured in this harness, so reaching the
+		// portable branch is observable as 503 rather than a 400.
+		wantStatus(t, rec, http.StatusServiceUnavailable)
+	}
+}
+
 func TestRestoreUploadLimitFromUsage(t *testing.T) {
 	unavailable := errors.New("filesystem unavailable")
 	tests := []struct {

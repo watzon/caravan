@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/watzon/caravan/internal/core"
 )
@@ -129,6 +130,30 @@ func (c *Client) PopularSeries(ctx context.Context) ([]core.DiscoverItem, error)
 	return c.list(ctx, "/tv/popular", nil, core.MediaTypeSeries)
 }
 
+// UpcomingMovies returns TMDB's theatrical upcoming list.
+func (c *Client) UpcomingMovies(ctx context.Context) ([]core.DiscoverItem, error) {
+	return c.list(ctx, "/movie/upcoming", nil, core.MediaTypeMovie)
+}
+
+// NowPlayingMovies returns titles currently in theatres.
+func (c *Client) NowPlayingMovies(ctx context.Context) ([]core.DiscoverItem, error) {
+	return c.list(ctx, "/movie/now_playing", nil, core.MediaTypeMovie)
+}
+
+// UpcomingSeries returns series whose first air date is today or later.
+//
+// TMDB has no /tv/upcoming sibling of /movie/upcoming — theatrical windows
+// are a movie idea — so this is /discover/tv bounded on first_air_date.
+func (c *Client) UpcomingSeries(ctx context.Context) ([]core.DiscoverItem, error) {
+	q := commonQuery(core.DiscoverFilter{ReleasedFrom: startOfUTCDay(time.Now())}, paramSeriesDate, seriesSortBy)
+	return c.list(ctx, "/discover/tv", q, core.MediaTypeSeries)
+}
+
+// AiringSeries returns series with a season currently on the air.
+func (c *Client) AiringSeries(ctx context.Context) ([]core.DiscoverItem, error) {
+	return c.list(ctx, "/tv/on_the_air", nil, core.MediaTypeSeries)
+}
+
 // MovieDetail returns one movie with its cast, its recommendations and its
 // external ids, in a single request.
 func (c *Client) MovieDetail(ctx context.Context, tmdbID int64) (*core.TitleDetail, error) {
@@ -230,6 +255,13 @@ func firstName(list []struct {
 type titleKey struct {
 	mediaType string
 	tmdbID    int64
+}
+
+// startOfUTCDay is today's date with the clock zeroed. Upcoming series is a
+// date bound, not a timestamp one, and TMDB's first_air_date.gte is a date.
+func startOfUTCDay(now time.Time) time.Time {
+	t := now.UTC()
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 }
 
 // list fetches an unpaged home shelf: up to homePages pages merged into one

@@ -109,6 +109,18 @@ describe('releaseFlags', () => {
     expect(isFlagged(release())).toBe(false);
   });
 
+  it('renders server mismatch flags and sinks wrong-title rows', () => {
+    const wrong = release({ guid: 'wrong', flags: ['wrong-title'], seeders: 900 });
+    const wrongFlags = releaseFlags(wrong);
+    expect(wrongFlags.map((f) => f.key)).toContain('wrong-title');
+    expect(wrongFlags.find((f) => f.key === 'wrong-title')?.tone).toBe('danger');
+    // The server's no-seeders duplicate of the client-derived badge is skipped.
+    expect(releaseFlags(release({ flags: ['no-seeders'], seeders: 5 }))).toEqual([]);
+    // A wrong-title row sinks below a true match with a worse swarm.
+    const right = release({ guid: 'right', seeders: 5 });
+    expect(sortReleases([wrong, right]).map((r) => r.guid)).toEqual(['right', 'wrong']);
+  });
+
   it('flags a cinema recording as dangerous', () => {
     const flags = releaseFlags(release({ parsed: parsed({ source: 'cam' }) }));
     expect(flags.map((f) => f.key)).toContain('cam');

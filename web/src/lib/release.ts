@@ -88,6 +88,47 @@ export interface ReleaseFlag {
 /** Sources that are a recording of a screen, not a copy of a master. */
 const RECORDED_SOURCES = new Set(['cam']);
 
+/**
+ * Server-computed mismatch flags worth a badge, keyed by the wire value.
+ * "no-seeders" is deliberately absent — the client already derives NO SEEDS
+ * from the seeder count and a duplicate badge would say nothing new.
+ */
+const SERVER_FLAGS: Record<
+  string,
+  { labelKey: Parameters<typeof translate>[0]; titleKey: Parameters<typeof translate>[0]; tone: Tone }
+> = {
+  'wrong-title': {
+    labelKey: 'release.flag.wrongTitle.label',
+    titleKey: 'release.flag.wrongTitle.title',
+    tone: 'danger',
+  },
+  'wrong-year': {
+    labelKey: 'release.flag.wrongYear.label',
+    titleKey: 'release.flag.wrongYear.title',
+    tone: 'warning',
+  },
+  'wrong-season': {
+    labelKey: 'release.flag.wrongSeason.label',
+    titleKey: 'release.flag.wrongSeason.title',
+    tone: 'warning',
+  },
+  'wrong-episode': {
+    labelKey: 'release.flag.wrongEpisode.label',
+    titleKey: 'release.flag.wrongEpisode.title',
+    tone: 'warning',
+  },
+  'wrong-date': {
+    labelKey: 'release.flag.wrongDate.label',
+    titleKey: 'release.flag.wrongDate.title',
+    tone: 'warning',
+  },
+  'season-pack': {
+    labelKey: 'release.flag.seasonPack.label',
+    titleKey: 'release.flag.seasonPack.title',
+    tone: 'info',
+  },
+};
+
 /** Scene tags for burned-in subtitles, which cannot be turned off. */
 const HARDCODED_RE = /\b(hc|hardcoded|korsub)\b/i;
 
@@ -98,6 +139,17 @@ const HARDCODED_RE = /\b(hc|hardcoded|korsub)\b/i;
 export function releaseFlags(release: Release): ReleaseFlag[] {
   const flags: ReleaseFlag[] = [];
   const parsed = release.parsed;
+
+  for (const key of release.flags ?? []) {
+    const known = SERVER_FLAGS[key];
+    if (!known) continue;
+    flags.push({
+      key,
+      label: translate(known.labelKey),
+      tone: known.tone,
+      title: translate(known.titleKey),
+    });
+  }
 
   if (RECORDED_SOURCES.has(parsed.source)) {
     flags.push({
@@ -158,6 +210,12 @@ export function sortReleases(releases: readonly Release[]): Release[] {
       Number(a.compatibility.verdict === 'incompatible') -
       Number(b.compatibility.verdict === 'incompatible');
     if (byCompatibility !== 0) return byCompatibility;
+    // The server sinks wrong-title matches; the client re-sort must agree
+    // or its visible order would fight the server's.
+    const byMismatch =
+      Number((a.flags ?? []).includes('wrong-title')) -
+      Number((b.flags ?? []).includes('wrong-title'));
+    if (byMismatch !== 0) return byMismatch;
     const byScore = releaseScore(b) - releaseScore(a);
     if (byScore !== 0) return byScore;
     const bySeeders = b.seeders - a.seeders;

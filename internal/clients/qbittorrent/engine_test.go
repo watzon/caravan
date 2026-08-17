@@ -1,12 +1,16 @@
 package qbittorrent
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 	"testing"
 
+	"github.com/anacrolix/torrent/bencode"
+	"github.com/anacrolix/torrent/metainfo"
 	"github.com/watzon/caravan/internal/core"
 )
 
@@ -291,6 +295,95 @@ func TestAddFailsWhenTheTorrentNeverAppears(t *testing.T) {
 	}, core.AddOpts{})
 	if err == nil {
 		t.Fatalf("Add succeeded for a torrent qBittorrent never produced")
+	}
+}
+
+func TestAddUploadsResolvedTorrentPayloadInsteadOfRefetchingIndexerURL(t *testing.T) {
+	engine, fake := newEngine(t)
+	engine.cfg.Category = "movies"
+	payload, payloadHash := testTorrentPayload(t)
+	id, err := engine.Add(context.Background(), core.Release{
+		Title:          "Payload Torrent",
+		Protocol:       core.ProtocolTorrent,
+		DownloadURL:    "https://tracker.example/private.torrent",
+		TorrentPayload: payload,
+		InfoHash:       payloadHash,
+	}, core.AddOpts{Paused: true})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if id != core.DownloadID(payloadHash) {
+		t.Fatalf("id = %q", id)
+	}
+	payloads := fake.payloads()
+	if len(payloads) != 1 || !bytes.Equal(payloads[0], payload) {
+		t.Fatalf("uploaded payloads = %q", payloads)
+	}
+	addCalls := fake.seen("/torrents/add")
+	if len(addCalls) != 1 {
+		t.Fatalf("qBittorrent add calls = %d, want 1", len(addCalls))
+	}
+	addCall := addCalls[0]
+	if got := addCall.Form.Get("urls"); got != "" {
+		t.Fatalf("qBittorrent URL = %q, want uploaded bytes", got)
+	}
+	if got := addCall.Form.Get("category"); got != "movies" {
+		t.Fatalf("qBittorrent category = %q, want movies", got)
+	}
+	if got := addCall.Form.Get("paused"); got != "true" {
+		t.Fatalf("qBittorrent paused = %q, want true", got)
+	}
+	if got := addCall.Form.Get("stopped"); got != "true" {
+		t.Fatalf("qBittorrent stopped = %q, want true", got)
+	}
+	if len(addCall.TorrentFiles) != 1 || addCall.TorrentFiles[0] != "caravan.torrent" {
+		t.Fatalf("qBittorrent torrent parts = %q, want one caravan.torrent", addCall.TorrentFiles)
+	}
+}
+
+func testTorrentPayload(t *testing.T) ([]byte, string) {
+	t.Helper()
+	infoBytes, err := bencode.Marshal(metainfo.Info{
+		Name: "payload.bin", Length: 1, PieceLength: 1, Pieces: make([]byte, 20),
+	})
+	if err != nil {
+		t.Fatalf("marshal torrent info: %v", err)
+	}
+	mi := metainfo.MetaInfo{InfoBytes: infoBytes}
+	var payload bytes.Buffer
+	if err := mi.Write(&payload); err != nil {
+		t.Fatalf("write torrent payload: %v", err)
+	}
+	return payload.Bytes(), fmt.Sprintf("%x", mi.HashInfoBytes())
+}
+
+func TestAddRejectsMalformedTorrentPayloadBeforeCallingQBittorrent(t *testing.T) {
+	engine, fake := newEngine(t)
+	_, err := engine.Add(context.Background(), core.Release{
+		Title:          "Malformed Payload",
+		Protocol:       core.ProtocolTorrent,
+		TorrentPayload: []byte("not bencoded metainfo"),
+	}, core.AddOpts{})
+	if err == nil || !strings.Contains(err.Error(), "torrent payload") {
+		t.Fatalf("Add error = %v, want malformed-payload rejection", err)
+	}
+	if calls := fake.seen("/torrents/add"); len(calls) != 0 {
+		t.Fatalf("qBittorrent add calls = %d, want 0", len(calls))
+	}
+}
+
+func TestAddRejectsEmptyTorrentInfoDictionaryBeforeCallingQBittorrent(t *testing.T) {
+	engine, fake := newEngine(t)
+	_, err := engine.Add(context.Background(), core.Release{
+		Title:          "Empty Info Payload",
+		Protocol:       core.ProtocolTorrent,
+		TorrentPayload: []byte("d4:infodee"),
+	}, core.AddOpts{})
+	if err == nil || !strings.Contains(err.Error(), "torrent payload") {
+		t.Fatalf("Add error = %v, want invalid-info rejection", err)
+	}
+	if calls := fake.seen("/torrents/add"); len(calls) != 0 {
+		t.Fatalf("qBittorrent add calls = %d, want 0", len(calls))
 	}
 }
 

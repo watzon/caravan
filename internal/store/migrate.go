@@ -16,11 +16,25 @@ import (
 
 const caravanApplicationID = 1129469518 // ASCII "CRVN"
 
-// schemaFingerprints maps every supported public schema version to the
-// canonical sqlite_master contract for its application-authored tables and
-// indexes. Add the new fingerprint whenever a reviewed migration is added.
-var schemaFingerprints = map[int]string{
-	1: "bae95532d0be9ff024ada4952aa5b30a50ceb4d800fc83d9f91f9bcbdfee4f6e",
+// schemaFingerprints maps every supported public schema version to its reviewed
+// sqlite_master contracts. Version 5 has two known contracts because the first
+// development database applied migration 0005 before its constraints and
+// immutability triggers were finalized. Both are migrated immediately to v6;
+// arbitrary v5 fingerprints remain rejected.
+var schemaFingerprints = map[int][]string{
+	1: {"bae95532d0be9ff024ada4952aa5b30a50ceb4d800fc83d9f91f9bcbdfee4f6e"},
+	2: {"e548d3eb8e9a1f0baab042c3149d801af6e431dce07723d71b527898181eb254"},
+	3: {"eb93d7cf57f7b19fe5492584b9238b0512487adeaec7e79d6b792b516533a7a0"},
+	4: {"492b0e21cee6a53d5ea6ed2aedfaf9e27110df68b1f3522a5b266b41abd286bc"},
+	5: {
+		"13a989b874b43a87032285fefe4892194ac383e7cce79871d69675ced5931af6",
+		"97f402e89f85778e8cea7c9408b94ec93ab9694947b5f00f66b9112f8dd9591e",
+	},
+	6:  {"41a0b864d0208cd24d024d03c3805139e57ce951425f13ef4c3d1169a734ebee"},
+	7:  {"60ab99094c20aacf22d96e9139c6b4afe715aee36100285de544737819da6174"},
+	8:  {"dd6eefe43bfa0eb30af3063b9bf9bc435f57d09267d07d99b2bf868c9068ae3c"},
+	9:  {"103770fedde7b2bbf5ed746c5034abb85c873dba5652d48704b4a917fb4c0631"},
+	10: {"53e3f69c7e10718a08b33fa7f2ff702ef8984a5d06f4df8577cd4161a0c02e1b"},
 }
 
 func (s *Store) migrate() error {
@@ -84,10 +98,20 @@ func validateSchemaIdentity(ctx context.Context, db *sql.DB, allowEmpty bool) er
 		if err != nil {
 			return err
 		}
-		if fingerprint != expected {
+		if !containsSchemaFingerprint(expected, fingerprint) {
 			return fmt.Errorf("%w: schema fingerprint %s", ErrUnrecognizedSchema, fingerprint)
 		}
-		return validateRequiredSeedContracts(ctx, db)
+		if err := validateRequiredSeedContracts(ctx, db); err != nil {
+			return err
+		}
+		if version >= 5 {
+			// Databases that have not yet run the 0009 trust repair may
+			// legitimately hold keyless failed revisions (the V8 bug shape).
+			// The strict mode only applies once 0009 has rewritten them,
+			// mirroring validateRepairableV8Preflight and validateRestore.
+			return validateDefinitionPackPersistenceMode(ctx, db, version < 9)
+		}
+		return nil
 	}
 
 	var legacyTables int
@@ -116,11 +140,20 @@ func validateSchemaIdentity(ctx context.Context, db *sql.DB, allowEmpty bool) er
 	return ErrUnrecognizedSchema
 }
 
+func containsSchemaFingerprint(expected []string, fingerprint string) bool {
+	for _, candidate := range expected {
+		if candidate == fingerprint {
+			return true
+		}
+	}
+	return false
+}
+
 func schemaFingerprint(ctx context.Context, db *sql.DB) (string, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT type, name, tbl_name, sql
 		FROM sqlite_master
-		WHERE name NOT LIKE 'sqlite_%' AND type IN ('table', 'index')
+		WHERE name NOT LIKE 'sqlite_%' AND type IN ('table', 'index', 'trigger')
 		ORDER BY type, name`)
 	if err != nil {
 		return "", fmt.Errorf("store: read schema fingerprint: %w", err)
@@ -201,7 +234,10 @@ func preflightDatabaseIdentity(ctx context.Context, path string) error {
 		return fmt.Errorf("store: read database identity: %w", err)
 	}
 	if applicationID == caravanApplicationID {
-		return validateCurrentSchema(ctx, db)
+		if err := validateCurrentSchema(ctx, db); err == nil {
+			return nil
+		}
+		return validateRepairableV8Preflight(ctx, db)
 	}
 
 	var legacyTables, otherTables int
@@ -218,6 +254,27 @@ func preflightDatabaseIdentity(ctx context.Context, path string) error {
 	}
 	if otherTables != 0 {
 		return ErrUnrecognizedSchema
+	}
+	return nil
+}
+
+// validateRepairableV8Preflight is the one compatibility bridge for databases
+// produced by V8's keyless historical-failed-row bug. It repeats every normal
+// identity check and permits only the exact inert rows that 0009 rewrites.
+func validateRepairableV8Preflight(ctx context.Context, db *sql.DB) error {
+	version, err := schemaVersion(ctx, db)
+	if err != nil || version != 8 {
+		return ErrUnrecognizedSchema
+	}
+	fingerprint, err := schemaFingerprint(ctx, db)
+	if err != nil || !containsSchemaFingerprint(schemaFingerprints[8], fingerprint) {
+		return ErrUnrecognizedSchema
+	}
+	if err := validateRequiredSeedContracts(ctx, db); err != nil {
+		return err
+	}
+	if err := validateDefinitionPackPersistenceMode(ctx, db, true); err != nil {
+		return err
 	}
 	return nil
 }

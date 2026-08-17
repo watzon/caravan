@@ -2,10 +2,10 @@
  * The discover landing page's payload (SPEC §11 `GET /discover`).
  *
  * It is a store rather than route-local state for one reason: the endpoint
- * costs three sequential TMDB round trips, so bouncing into a title and back
- * must not pay for them twice. The cache is kept honest by the two mark*
- * methods, which patch what the user just did into every shelf holding that
- * title instead of refetching the whole page for one changed flag.
+ * fans out several TMDB shelves, so bouncing into a title and back must not
+ * pay for them twice. The cache is kept honest by the two mark* methods,
+ * which patch what the user just did into every shelf holding that title
+ * instead of refetching the whole page for one changed flag.
  */
 
 import { api, errorText } from '../api/client';
@@ -77,7 +77,15 @@ class DiscoverState {
   #patch(mediaType: MediaType, tmdbID: number, apply: (item: DiscoverItem) => void): void {
     const home = this.home;
     if (!home) return;
-    for (const shelf of [home.trending, home.popular_movies, home.popular_series]) {
+    for (const shelf of [
+      home.trending,
+      home.popular_movies,
+      home.upcoming_movies,
+      home.now_playing,
+      home.popular_series,
+      home.upcoming_series,
+      home.airing_series,
+    ]) {
       for (const item of shelf) {
         if (item.media_type === mediaType && item.tmdb_id === tmdbID) apply(item);
       }

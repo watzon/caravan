@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/watzon/caravan/internal/core"
+	"github.com/watzon/caravan/internal/searchql"
 	"github.com/watzon/caravan/internal/store"
 )
 
@@ -52,6 +53,70 @@ func torrentRelease(title, guid string, seeders int, parsed core.ParsedRelease) 
 		Seeders:     seeders,
 		PublishedAt: time.Now().Add(-48 * time.Hour),
 		Parsed:      parsed,
+	}
+}
+
+// Regression: interactive searches fan out every query form — torrent
+// listings often omit the year, and season packs answer only the Sxx form.
+func TestReleaseSearchesFanOutMultipleQueryForms(t *testing.T) {
+	h, st, _, fake := newAcquisitionServer(t)
+	m := addMovie(t, st, "Big Buck Bunny", 2008)
+	sr, _ := addSeries(t, st, "Some Show")
+	addIndexer(t, st, fake, "alpha")
+
+	queriesFor := func(name string) []string {
+		out := []string{}
+		for _, search := range fake.recorded() {
+			if search.name == name {
+				out = append(out, search.query)
+			}
+		}
+		return out
+	}
+
+	rec := do(t, h, http.MethodGet, "/api/v1/library/movies/"+itoa(m.ID)+"/releases", "")
+	wantStatus(t, rec, http.StatusOK)
+	if got := queriesFor("alpha"); !slices.Equal(got, []string{"Big Buck Bunny 2008", "Big Buck Bunny"}) {
+		t.Fatalf("movie queries = %v, want year-qualified then bare title", got)
+	}
+
+	rec = do(t, h, http.MethodGet, "/api/v1/library/series/"+itoa(sr.ID)+"/releases?season=1&episode=2", "")
+	wantStatus(t, rec, http.StatusOK)
+	if got := queriesFor("alpha")[2:]; !slices.Equal(got, []string{"Some Show S01E02", "Some Show S01"}) {
+		t.Fatalf("episode queries = %v, want episode then season-pack form", got)
+	}
+}
+
+// Regression: a torrent meta-search fuzzy match naming another work is
+// flagged wrong-title and sinks below every real match, even with better
+// quality and seeders.
+func TestMovieReleasesFlagAndSinkWrongTitleMatches(t *testing.T) {
+	h, st, _, fake := newAcquisitionServer(t)
+	m := addMovie(t, st, "Dune", 2021)
+	addIndexer(t, st, fake, "alpha")
+
+	fake.serve("alpha",
+		torrentRelease("Dune.2021.720p.WEB-DL", "d1", 5, core.ParsedRelease{Title: "Dune", Year: 2021, Quality: core.Quality720p}),
+		torrentRelease("Unrelated.Documentary.About.Dunes.2021.2160p", "x1", 900,
+			core.ParsedRelease{Title: "Unrelated Documentary About Dunes", Year: 2021, Quality: core.Quality2160p}),
+	)
+
+	rec := do(t, h, http.MethodGet, "/api/v1/library/movies/"+itoa(m.ID)+"/releases", "")
+	wantStatus(t, rec, http.StatusOK)
+	var body releasesResponse
+	decodeBody(t, rec, &body)
+	if len(body.Releases) != 2 {
+		t.Fatalf("releases = %d, want 2", len(body.Releases))
+	}
+	// The real match leads despite worse quality and swarm.
+	if body.Releases[0].GUID != "d1" {
+		t.Fatalf("first release = %q, want the true title match first", body.Releases[0].Title)
+	}
+	if slices.Contains(body.Releases[0].Flags, flagWrongTitle) {
+		t.Fatalf("flags = %v, want no wrong-title on the real match", body.Releases[0].Flags)
+	}
+	if !slices.Contains(body.Releases[1].Flags, flagWrongTitle) {
+		t.Fatalf("flags = %v, want wrong-title on the fuzzy match", body.Releases[1].Flags)
 	}
 }
 
@@ -145,12 +210,13 @@ func TestMovieReleasesFanOutMergesSortsAndCaches(t *testing.T) {
 	// silently returns nothing from indexers that do not expand parent
 	// categories.
 	searches := fake.recorded()
-	if len(searches) != 3 {
-		t.Fatalf("searches = %+v, want one per enabled indexer", searches)
+	// Two query forms (year-qualified and bare title) per enabled indexer.
+	if len(searches) != 6 {
+		t.Fatalf("searches = %+v, want both query forms per enabled indexer", searches)
 	}
 	for _, s := range searches {
-		if s.query != "Big Buck Bunny 2008" || s.cats != "" {
-			t.Fatalf("search = %+v, want the movie query and no category filter", s)
+		if (s.query != "Big Buck Bunny 2008" && s.query != "Big Buck Bunny") || s.cats != "" {
+			t.Fatalf("search = %+v, want a movie query form and no category filter", s)
 		}
 	}
 }
@@ -260,8 +326,13 @@ func TestReleaseSearchUsesConfiguredCategories(t *testing.T) {
 	wantStatus(t, rec, http.StatusOK)
 
 	searches := fake.recorded()
-	if len(searches) != 1 || searches[0].cats != "2040,2045" {
-		t.Fatalf("searches = %+v, want the configured categories", searches)
+	if len(searches) == 0 {
+		t.Fatal("no searches recorded")
+	}
+	for _, search := range searches {
+		if search.cats != "2040,2045" {
+			t.Fatalf("searches = %+v, want the configured categories on every query form", searches)
+		}
 	}
 }
 
@@ -300,13 +371,20 @@ func TestReleaseSearchUsesTheLibrarysIndexersAndCategories(t *testing.T) {
 	rec := do(t, h, http.MethodGet, "/api/v1/library/movies/"+itoa(m.ID)+"/releases", "")
 	wantStatus(t, rec, http.StatusOK)
 	searches := fake.recorded()
-	if len(searches) != 1 || searches[0].name != "shared" || searches[0].cats != "2000" {
-		t.Fatalf("movie searches = %+v, want only the movie library's indexer and categories", searches)
+	// Both movie query forms go out, only to the movie library's indexer
+	// with its categories.
+	if len(searches) != 2 {
+		t.Fatalf("movie searches = %+v, want the two movie query forms", searches)
+	}
+	for _, search := range searches {
+		if search.name != "shared" || search.cats != "2000" {
+			t.Fatalf("movie searches = %+v, want only the movie library's indexer and categories", searches)
+		}
 	}
 
 	rec = do(t, h, http.MethodGet, "/api/v1/library/series/"+itoa(sr.ID)+"/releases", "")
 	wantStatus(t, rec, http.StatusOK)
-	tvSearches := fake.recorded()[1:]
+	tvSearches := fake.recorded()[2:]
 	byIndexer := map[string]string{}
 	for _, s := range tvSearches {
 		byIndexer[s.name] = s.cats
@@ -335,7 +413,9 @@ func TestSeriesReleasesNarrowsQueryAndFlags(t *testing.T) {
 	if body.Query != "Planet Earth II S01E02" {
 		t.Fatalf("query = %q, want the SxxEyy form", body.Query)
 	}
-	if searches := fake.recorded(); len(searches) != 1 || searches[0].cats != "" {
+	// The episode and season-pack query forms both go out, neither with a
+	// category filter on an unconfigured indexer.
+	if searches := fake.recorded(); len(searches) != 2 || searches[0].cats != "" || searches[1].cats != "" {
 		t.Fatalf("searches = %+v, want no category filter on an unconfigured indexer", searches)
 	}
 
@@ -676,4 +756,68 @@ func titlesOf(releases []releaseJSON) []string {
 		out = append(out, rel.Title)
 	}
 	return out
+}
+
+// A per-item picker hands back the searchql spelling of what it just searched
+// for, so the universal search box can be seeded with it and widened by hand.
+// The exact strings matter: they are the contract the frontend pastes.
+func TestPerItemReleasesCarryASearchExpression(t *testing.T) {
+	h, st, _, fake := newAcquisitionServer(t)
+	m := addMovie(t, st, "Big Buck Bunny", 2008)
+	sr, _ := addSeries(t, st, "Some Show")
+	addIndexer(t, st, fake, "alpha")
+
+	expressionFor := func(target string) string {
+		t.Helper()
+		rec := do(t, h, http.MethodGet, target, "")
+		wantStatus(t, rec, http.StatusOK)
+		var body releasesResponse
+		decodeBody(t, rec, &body)
+		return body.SearchExpression
+	}
+
+	if got := expressionFor("/api/v1/library/movies/" + itoa(m.ID) + "/releases"); got != `title:"Big Buck Bunny" year:2008` {
+		t.Errorf("movie search_expression = %q", got)
+	}
+	if got := expressionFor("/api/v1/library/series/" + itoa(sr.ID) + "/releases?season=1&episode=2"); got != `title:"Some Show" season:1 episode:2` {
+		t.Errorf("episode search_expression = %q", got)
+	}
+	// A whole-series search narrows to nothing, so the seed is the title alone.
+	if got := expressionFor("/api/v1/library/series/" + itoa(sr.ID) + "/releases"); got != `title:"Some Show"` {
+		t.Errorf("series search_expression = %q", got)
+	}
+}
+
+// A scene is addressed by its site and release date, never by Caravan's own
+// season and episode numbers — and its seed spells out BOTH variants the
+// handler runs, dated form and site-and-title fallback, so the search box
+// and the "searched indexers for" line agree.
+func TestSceneReleasesCarryASiteAndDateSearchExpression(t *testing.T) {
+	fake := newFakeIndexer(t)
+	h, st, _ := newTestServer(t, WithIndexerClients(fake.factory()))
+	enableAdult(t, st)
+	site := seedSite(t, st)
+	addIndexer(t, st, fake, "alpha", 6000)
+
+	createUser(t, st, testAdmin, testPassword, core.RoleAdmin)
+	cookie := login(t, h, testAdmin, testPassword)
+
+	rec := doAuth(t, h, http.MethodGet,
+		"/api/v1/library/series/"+itoa(site.ID)+"/releases?season=2022&episode=1", "", withCookie(cookie))
+	wantStatus(t, rec, http.StatusOK)
+	var body releasesResponse
+	decodeBody(t, rec, &body)
+
+	if body.SearchExpression != `(site:"Brazzers" date:2022-03-14) OR "Brazzers Deep Impact"` {
+		t.Fatalf("scene search_expression = %q", body.SearchExpression)
+	}
+	// The seed is the whole truth: parsing it reproduces exactly the queries
+	// this response was built from.
+	parsed, err := searchql.Parse(body.SearchExpression)
+	if err != nil {
+		t.Fatalf("parse scene seed: %v", err)
+	}
+	if got := parsed.UpstreamQueries(); !slices.Equal(got, body.Queries) {
+		t.Fatalf("seed compiles to %v, want the response queries %v", got, body.Queries)
+	}
 }

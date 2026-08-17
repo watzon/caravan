@@ -169,8 +169,17 @@ func (c *Client) release(it feedItem) (core.Release, bool) {
 		PublishedAt: publishedAt(it, attrs),
 		Categories:  cats,
 		Parsed:      parseTitle(title, cats),
+		Attributes:  extensionAttributes(it.Attrs),
 	}
 	return r, true
+}
+
+func extensionAttributes(attributes []feedAttr) []core.ReleaseAttribute {
+	out := make([]core.ReleaseAttribute, 0, len(attributes))
+	for _, attribute := range attributes {
+		out = append(out, core.ReleaseAttribute{Name: attribute.Name, Value: attribute.Value})
+	}
+	return core.NormalizeReleaseAttributes(out)
 }
 
 // parseTitle reads a result's name the way the category it was published under

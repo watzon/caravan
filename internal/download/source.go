@@ -1,7 +1,6 @@
 package download
 
 import (
-	"bytes"
 	"context"
 	"encoding/hex"
 	"fmt"
@@ -16,6 +15,7 @@ import (
 	"github.com/anacrolix/torrent/metainfo"
 
 	"github.com/watzon/caravan/internal/core"
+	"github.com/watzon/caravan/internal/torrentmeta"
 )
 
 // metainfoTimeout bounds fetching one .torrent file. Indexers stall; grabs
@@ -34,6 +34,29 @@ const infoHashLength = 2 * metainfo.HashSize
 // a bare info hash — so all three are accepted, in that order of preference:
 // a magnet and a .torrent carry trackers, a bare hash carries nothing.
 func (e *Embedded) torrentSpec(ctx context.Context, r core.Release) (*torrent.TorrentSpec, error) {
+	if len(r.TorrentPayload) > 0 {
+		if len(r.TorrentPayload) > maxMetainfoBytes {
+			return nil, fmt.Errorf("download: torrent payload for %q exceeds size limit", r.Title)
+		}
+		mi, _, err := torrentmeta.Parse(r.TorrentPayload)
+		if err != nil {
+			return nil, fmt.Errorf("download: read torrent payload for %q: %w", r.Title, err)
+		}
+		reported := strings.ToLower(strings.TrimSpace(r.InfoHash))
+		if len(reported) == 40 {
+			if _, decodeErr := hex.DecodeString(reported); decodeErr == nil {
+				actual := fmt.Sprintf("%x", mi.HashInfoBytes())
+				if reported != actual {
+					return nil, fmt.Errorf("download: torrent payload for %q does not match reported info hash", r.Title)
+				}
+			}
+		}
+		spec, err := torrent.TorrentSpecFromMetaInfoErr(mi)
+		if err != nil {
+			return nil, fmt.Errorf("download: read torrent payload for %q: %w", r.Title, err)
+		}
+		return spec, nil
+	}
 	url := strings.TrimSpace(r.DownloadURL)
 	lower := strings.ToLower(url)
 
@@ -140,7 +163,7 @@ func (e *Embedded) fetchMetainfo(ctx context.Context, url string) (*metainfo.Met
 	if err != nil {
 		return nil, err
 	}
-	mi, err := metainfo.Load(bytes.NewReader(body))
+	mi, _, err := torrentmeta.Parse(body)
 	if err != nil {
 		return nil, err
 	}

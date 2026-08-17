@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,13 +27,15 @@ func TestIndexerCRUD(t *testing.T) {
 	}
 
 	idx := core.IndexerConfig{
-		Name:       "Nyaa",
-		URL:        "https://example.invalid/torznab",
-		APIKey:     "secret",
-		Type:       core.IndexerTypeTorznab,
-		Categories: []int{2000, 5000},
-		Priority:   20,
-		Enabled:    true,
+		Name:         "Nyaa",
+		DefinitionID: "fixture",
+		Settings:     map[string]string{"username": "member", "password": "secret"},
+		URL:          "https://example.invalid/torznab",
+		APIKey:       "test-api-key",
+		Type:         core.IndexerTypeTorznab,
+		Categories:   []int{2000, 5000},
+		Priority:     20,
+		Enabled:      true,
 	}
 	if err := st.UpsertIndexer(ctx, &idx); err != nil {
 		t.Fatalf("UpsertIndexer: %v", err)
@@ -85,6 +88,97 @@ func TestIndexerCRUD(t *testing.T) {
 	// Deleting twice is not an error.
 	if err := st.DeleteIndexer(ctx, idx.ID); err != nil {
 		t.Errorf("DeleteIndexer twice: %v", err)
+	}
+}
+
+func TestRecordIndexerHealthFlagsThenDisables(t *testing.T) {
+	ctx := context.Background()
+	st, _ := openTemp(t)
+	idx := core.IndexerConfig{Name: "dead", URL: "https://example.invalid", Type: core.IndexerTypeTorznab, Enabled: true}
+	if err := st.UpsertIndexer(ctx, &idx); err != nil {
+		t.Fatalf("UpsertIndexer: %v", err)
+	}
+
+	if err := st.RecordIndexerHealth(ctx, idx.ID, errors.New("dial timeout")); err != nil {
+		t.Fatalf("RecordIndexerHealth: %v", err)
+	}
+	got, err := st.GetIndexer(ctx, idx.ID)
+	if err != nil {
+		t.Fatalf("GetIndexer: %v", err)
+	}
+	if got.HealthError == "" || !got.Enabled || got.Searchable() {
+		t.Fatalf("after first failure = %+v, want flagged but still enabled", got)
+	}
+	if got.ConsecutiveFailures != 1 {
+		t.Fatalf("consecutive = %d, want 1", got.ConsecutiveFailures)
+	}
+
+	for i := 2; i <= core.IndexerHealthDisableAfter; i++ {
+		if err := st.RecordIndexerHealth(ctx, idx.ID, errors.New("dial timeout")); err != nil {
+			t.Fatalf("RecordIndexerHealth #%d: %v", i, err)
+		}
+	}
+	got, err = st.GetIndexer(ctx, idx.ID)
+	if err != nil {
+		t.Fatalf("GetIndexer after disable: %v", err)
+	}
+	if got.Enabled {
+		t.Fatal("indexer still enabled after the disable threshold")
+	}
+
+	if err := st.RecordIndexerHealth(ctx, idx.ID, nil); err != nil {
+		t.Fatalf("RecordIndexerHealth success: %v", err)
+	}
+	got, err = st.GetIndexer(ctx, idx.ID)
+	if err != nil {
+		t.Fatalf("GetIndexer after recover: %v", err)
+	}
+	if got.HealthError != "" || got.ConsecutiveFailures != 0 {
+		t.Fatalf("after recover = %+v, want a clear streak", got)
+	}
+}
+
+func TestRecordIndexerHealthRedactsStoredSecrets(t *testing.T) {
+	ctx := context.Background()
+	st, _ := openTemp(t)
+	apiSecret := strings.Repeat("api-key-", 2)
+	idx := core.IndexerConfig{
+		Name:     "secret fixture",
+		URL:      "https://tracker.example/api?token=url-secret-marker",
+		Settings: map[string]string{"password": "setting-secret-marker"},
+		Type:     core.IndexerTypeTorznab,
+		Enabled:  true,
+	}
+	idx.APIKey = apiSecret
+	if err := st.UpsertIndexer(ctx, &idx); err != nil {
+		t.Fatalf("UpsertIndexer: %v", err)
+	}
+	probeErr := errors.New("request " + idx.URL + " failed with " + idx.APIKey + " and " + idx.Settings["password"])
+	if err := st.RecordIndexerHealth(ctx, idx.ID, probeErr); err != nil {
+		t.Fatalf("RecordIndexerHealth: %v", err)
+	}
+	got, err := st.GetIndexer(ctx, idx.ID)
+	if err != nil {
+		t.Fatalf("GetIndexer: %v", err)
+	}
+	for _, secret := range []string{"url-secret-marker", apiSecret, "setting-secret-marker"} {
+		if strings.Contains(got.HealthError, secret) {
+			t.Fatalf("HealthError exposed %q: %q", secret, got.HealthError)
+		}
+	}
+	if !strings.Contains(got.HealthError, "[REDACTED]") {
+		t.Fatalf("HealthError = %q, want redaction marker", got.HealthError)
+	}
+}
+
+func TestIndexerHealthRedactionHandlesOverlappingSecretsLongestFirst(t *testing.T) {
+	indexer := core.IndexerConfig{
+		APIKey:   "abc",
+		Settings: map[string]string{"token": "abcdef"},
+	}
+	message := redactIndexerHealthError(indexer, errors.New("tracker returned abcdef"))
+	if strings.Contains(message, "abc") || strings.Contains(message, "def") {
+		t.Fatalf("overlapping health secret was only partially redacted: %q", message)
 	}
 }
 
@@ -157,6 +251,11 @@ func TestReleaseSeenCache(t *testing.T) {
 	}
 
 	r := testRelease()
+	r.TorrentPayload = []byte("ephemeral torrent payload")
+	r.Attributes = []core.ReleaseAttribute{
+		{Name: "genre", Value: "drama"},
+		{Name: "downloadvolumefactor", Value: "0"},
+	}
 	if err := st.UpsertRelease(ctx, &r); err != nil {
 		t.Fatalf("UpsertRelease: %v", err)
 	}
@@ -168,8 +267,13 @@ func TestReleaseSeenCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetRelease: %v", err)
 	}
-	if !reflect.DeepEqual(*got, r) {
-		t.Errorf("GetRelease = %+v, want %+v", *got, r)
+	want := r
+	want.TorrentPayload = nil
+	if !reflect.DeepEqual(*got, want) {
+		t.Errorf("GetRelease = %+v, want %+v", *got, want)
+	}
+	if len(got.TorrentPayload) != 0 {
+		t.Fatalf("persisted transient torrent payload = %q", got.TorrentPayload)
 	}
 
 	// Seeing the same GUID again refreshes the row instead of duplicating it:

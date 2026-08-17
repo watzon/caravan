@@ -1,0 +1,40 @@
+id: tokyotosho
+name: TokyoTosho
+description: Public torrent search for Japanese media.
+language: en-US
+type: public
+links:
+  - https://www.tokyo-tosho.net/
+caps:
+  categorymappings:
+    - {id: 1, cat: TV/Anime}
+    - {id: 2, cat: Audio}
+    - {id: 3, cat: Books}
+    - {id: 4, cat: XXX}
+    - {id: 5, cat: Other}
+    - {id: 7, cat: TV/Anime}
+    - {id: 8, cat: TV}
+  modes:
+    search: [q]
+    tv-search: [q, season, ep]
+    music-search: [q]
+    book-search: [q]
+search:
+  paths:
+    - path: "search.php?terms={{ urlquery .Keywords }}&cat=0"
+  rows:
+    selector: "table.listing tr.shade"
+  fields:
+    category:
+      selector: 'a[href*="?cat="]'
+      attribute: href
+      filters:
+        - {name: regexp, args: '(\d+)'}
+    title:
+      selector: "td.desc-top a:last-child"
+    details:
+      selector: "td.web a:last-child"
+      attribute: href
+    download:
+      selector: "td.desc-top a:first-child"
+      attribute: href

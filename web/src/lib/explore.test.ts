@@ -38,6 +38,15 @@ import {
   titleChips,
   titleFilterHref,
   titleFilterQuery,
+  titleGenreHref,
+  titleGridHref,
+  titleUpcomingHref,
+  isSceneLanding,
+  isTitleLanding,
+  sceneAddedHref,
+  sceneGridHref,
+  sceneSiteHref,
+  utcDateString,
   toggleRef,
   visibleScopes,
   type SceneFilter,
@@ -352,6 +361,37 @@ describe('the movie scope query', () => {
     expect(Object.keys(query)).not.toContain('hideOwned');
     // It IS in the URL, which is how a shared link keeps the same view.
     expect(titleFilterQuery('movie', { ...EMPTY_TITLE_FILTER, hideOwned: true })).toBe('hide=1');
+  });
+
+  it('treats the unfiltered path as a landing unless view=grid is set', () => {
+    expect(isTitleLanding('movie', EMPTY_TITLE_FILTER, new URLSearchParams())).toBe(true);
+    expect(isTitleLanding('movie', EMPTY_TITLE_FILTER, new URLSearchParams('hide=1'))).toBe(true);
+    expect(isTitleLanding('movie', EMPTY_TITLE_FILTER, new URLSearchParams('view=grid'))).toBe(false);
+    expect(
+      isTitleLanding(
+        'movie',
+        { ...EMPTY_TITLE_FILTER, genres: [{ id: '28', name: 'Action' }] },
+        new URLSearchParams(),
+      ),
+    ).toBe(false);
+    expect(isSceneLanding(EMPTY_SCENE_FILTER, new URLSearchParams())).toBe(true);
+    expect(isSceneLanding(EMPTY_SCENE_FILTER, new URLSearchParams('view=grid'))).toBe(false);
+  });
+
+  it('addresses the grid, upcoming, genre, and site landings without leaking view to the API', () => {
+    expect(titleGridHref('movie')).toBe('/discover/movies?view=grid');
+    expect(titleGridHref('series')).toBe('/discover/series?view=grid');
+    expect(sceneGridHref()).toBe('/discover/adult?view=grid');
+    expect(titleUpcomingHref('movie', new Date('2026-08-16T12:00:00Z'))).toBe(
+      '/discover/movies?from=2026-08-16&sort=release_date&order=desc',
+    );
+    expect(titleGenreHref('movie', { id: '28', name: 'Action' })).toBe(
+      '/discover/movies?genres=28%3AAction',
+    );
+    expect(sceneSiteHref({ id: '84060', name: 'Vixen' })).toBe('/discover/adult?site=84060%3AVixen');
+    expect(sceneAddedHref()).toBe('/discover/adult?sort=created&order=desc');
+    expect(utcDateString(new Date('2026-08-16T12:00:00Z'))).toBe('2026-08-16');
+    expect(Object.keys(titleApiQuery('movie', EMPTY_TITLE_FILTER, 1))).not.toContain('view');
   });
 
   it('sends the ids without the names TMDB has no room for', () => {

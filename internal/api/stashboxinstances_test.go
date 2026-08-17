@@ -58,6 +58,23 @@ func createInstance(t *testing.T, h http.Handler, cookie *http.Cookie, body stri
 	return out
 }
 
+// Instance CRUD is admin metadata: it must answer before any adult library
+// exists, or Settings → Metadata cannot collect the endpoint Add library asks
+// for.
+func TestStashboxInstanceRoutesWorkWithoutAnAdultLibrary(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	createUser(t, st, testAdmin, testPassword, core.RoleAdmin)
+	cookie := login(t, h, testAdmin, testPassword)
+
+	wantStatus(t, doAuth(t, h, http.MethodGet, "/api/v1/adult/stashbox-instances", "",
+		withCookie(cookie)), http.StatusOK)
+	created := createInstance(t, h, cookie,
+		`{"name":"StashDB","endpoint":"https://stashdb.org/graphql","api_key":"k"}`)
+	if created.Name != "StashDB" {
+		t.Fatalf("created name = %q", created.Name)
+	}
+}
+
 // The id of the first instance on an install is the bare `stashbox`, which is
 // what every adult row written before instances existed already carries. A fresh
 // install therefore uses the compatibility id too, and neither state ends up

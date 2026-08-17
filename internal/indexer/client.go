@@ -240,9 +240,12 @@ func (c *Client) fetch(ctx context.Context, params url.Values) ([]byte, error) {
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
 	if err != nil {
 		return nil, fmt.Errorf("indexer %s: read body: %w", c.cfg.Name, err)
+	}
+	if len(body) > maxBody {
+		return nil, fmt.Errorf("indexer %s: response exceeds %d bytes", c.cfg.Name, maxBody)
 	}
 
 	// Indexers report credential and parameter failures as an <error>
@@ -274,11 +277,15 @@ func (c *Client) errorDoc(body []byte) *APIError {
 // string: encoding/xml skips unknown elements, so without it an HTML page
 // decodes into an empty feed and reads as "no results".
 func decodeDoc(body []byte, root string, out any) error {
-	dec := xml.NewDecoder(bytes.NewReader(body))
+	raw := xml.NewDecoder(bytes.NewReader(body))
+	dec := xml.NewTokenDecoder(&boundedXMLTokenReader{source: raw})
 	for {
 		tok, err := dec.Token()
 		if err != nil {
 			return fmt.Errorf("no <%s> element: %w", root, err)
+		}
+		if text, ok := tok.(xml.CharData); ok && strings.TrimSpace(string(text)) != "" {
+			return fmt.Errorf("non-whitespace data precedes <%s>", root)
 		}
 		start, ok := tok.(xml.StartElement)
 		if !ok {
@@ -287,7 +294,27 @@ func decodeDoc(body []byte, root string, out any) error {
 		if start.Name.Local != root {
 			return fmt.Errorf("root element is <%s>, want <%s>", start.Name.Local, root)
 		}
-		return dec.DecodeElement(out, &start)
+		if err := dec.DecodeElement(out, &start); err != nil {
+			return err
+		}
+		for {
+			tok, err := dec.Token()
+			if err == io.EOF {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			switch value := tok.(type) {
+			case xml.CharData:
+				if strings.TrimSpace(string(value)) == "" {
+					continue
+				}
+			case xml.Comment:
+				continue
+			}
+			return fmt.Errorf("trailing content after <%s>", root)
+		}
 	}
 }
 

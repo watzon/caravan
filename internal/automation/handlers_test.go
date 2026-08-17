@@ -3,6 +3,7 @@ package automation
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -39,6 +40,14 @@ func (f *fakeIndexer) Categories(context.Context) ([]core.IndexerCategory, error
 }
 
 func (f *fakeIndexer) factory() api.IndexerFactory {
+	return func(core.IndexerConfig) api.IndexerClient { return f }
+}
+
+type failingIndexer struct{ fakeIndexer }
+
+func (f *failingIndexer) Test(context.Context) error { return errors.New("dial timeout") }
+
+func (f *failingIndexer) factory() api.IndexerFactory {
 	return func(core.IndexerConfig) api.IndexerClient { return f }
 }
 
@@ -421,5 +430,25 @@ func TestRunnerAutomaticGrabRecordsUnroutableProtocol(t *testing.T) {
 	}
 	if len(events) != 1 || events[0].Level != core.EventLevelWarn || events[0].Category != "grab" {
 		t.Fatalf("events = %#v, want one warning grab event", events)
+	}
+}
+
+func TestIndexerHealthDisablesAfterRepeatedFailures(t *testing.T) {
+	ctx := context.Background()
+	st := openStore(t)
+	addIndexer(t, ctx, st)
+	runner := NewRunner(st, (&failingIndexer{}).factory(), nil)
+
+	for i := 0; i < core.IndexerHealthDisableAfter; i++ {
+		if err := runner.handleIndexerHealth(ctx, st, json.RawMessage(`{}`)); err != nil {
+			t.Fatalf("health run %d: %v", i+1, err)
+		}
+	}
+	list, err := st.ListIndexers(ctx)
+	if err != nil {
+		t.Fatalf("ListIndexers: %v", err)
+	}
+	if len(list) != 1 || list[0].Enabled || list[0].HealthError == "" {
+		t.Fatalf("after %d failures = %+v, want disabled with an error", core.IndexerHealthDisableAfter, list)
 	}
 }

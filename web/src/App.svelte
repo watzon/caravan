@@ -317,7 +317,7 @@ import Search from './lib/routes/Search.svelte';
          they anchor to <body>, and one sitting below the fold extends the
          document's scrollable area: the whole shell, sidebar included,
          scrolls behind this column's own scrollbar. -->
-    <div class="relative flex min-w-0 flex-1 flex-col overflow-y-auto">
+    <div class="relative flex min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto">
       <TopBar
         {title}
         onadd={
@@ -329,7 +329,10 @@ import Search from './lib/routes/Search.svelte';
         menuOpen={sidebarOpen}
         bind:menuButton={sidebarMenuButton} />
 
-      <main class="flex flex-1 flex-col gap-4 px-6 py-6">
+      <!-- min-w-0 so a wide child (Discover's poster row) cannot raise this
+           column's automatic minimum and turn the page into the scroller.
+           overflow-x lives on the child that owns the row. -->
+      <main class="flex min-w-0 flex-1 flex-col gap-4 px-6 py-6">
         <!-- Every banner here reports on the server itself, and every one of
              them offers a fix on a screen a member cannot open. They are also
              read from a status a member is never allowed to fetch (see boot). -->

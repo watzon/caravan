@@ -131,6 +131,34 @@
     scrollbar-width: thin;
   }
 
+  /* Search inputs keep their semantics, not WebKit's native ✕: it ignores
+   * the design tokens, and the query box has its own controls in the field. */
+  input[type="search"]::-webkit-search-cancel-button,
+  input[type="search"]::-webkit-search-decoration {
+    -webkit-appearance: none;
+    appearance: none;
+  }
+
+  /*
+   * Discover network/studio marks. The SVG filters live in SourceLogo.svelte;
+   * the numbers in those tables are --color-surface / --color-ink-secondary /
+   * --color-ink (dark) and --color-ink / --color-ink-secondary / --color-bg
+   * (light). A binary invert flattened filled lockups to one bar.
+   */
+  .source-logo {
+    filter: url(#source-logo-tritone-dark);
+  }
+  :root[data-theme="light"] .source-logo {
+    filter: url(#source-logo-tritone-light);
+  }
+  /* One-color marks (Hulu, Crunchyroll): silhouette to bone, not mid-gray. */
+  .source-logo-flat {
+    filter: brightness(0) invert(1);
+  }
+  :root[data-theme="light"] .source-logo-flat {
+    filter: brightness(0);
+  }
+
   /* DESIGN.md §7: prefers-reduced-motion kills all transitions. */
   @media (prefers-reduced-motion: reduce) {
     *,

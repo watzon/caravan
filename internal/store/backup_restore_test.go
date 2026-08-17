@@ -7,7 +7,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sync"
 	"testing"
+
+	storemigrations "github.com/watzon/caravan/internal/store/migrations"
 )
 
 func storeBackup(t *testing.T, st *Store) []byte {
@@ -423,5 +426,203 @@ func TestApplyStagedRestoreRecoversInterruptedSQLiteArtifactMoves(t *testing.T) 
 				}
 			}
 		})
+	}
+}
+
+type blockingRestoreReader struct {
+	reader  *bytes.Reader
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (r *blockingRestoreReader) Read(p []byte) (int, error) {
+	r.once.Do(func() {
+		close(r.entered)
+		<-r.release
+	})
+	return r.reader.Read(p)
+}
+
+func restoreBackupWithSetting(t *testing.T, value string) []byte {
+	t.Helper()
+	st, err := Open(filepath.Join(t.TempDir(), value+".sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSetting(context.Background(), "serialized-restore", value); err != nil {
+		st.Close()
+		t.Fatal(err)
+	}
+	backup := storeBackup(t, st)
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return backup
+}
+
+func TestStageRestorePreservesOlderSchemaMigrationOnReopen(t *testing.T) {
+	ctx := context.Background()
+	oldPath := filepath.Join(t.TempDir(), "v8.sqlite")
+	old, err := Open(oldPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, trigger := range []string{
+		"definition_pack_source_public_key_is_exact_on_insert",
+		"definition_pack_source_delete_is_immutable",
+		"definition_pack_revision_delete_is_immutable",
+		"definition_pack_entry_delete_is_immutable",
+		"indexer_definition_pin_matches_indexer_insert",
+		"indexer_definition_pin_matches_indexer_update",
+		"indexer_definition_update_matches_pin",
+		// 0010 replaced this trigger; the v8 fixture needs the 0008 body.
+		"definition_pack_source_public_key_is_immutable",
+	} {
+		if _, err := old.DB().Exec("DROP TRIGGER " + trigger); err != nil {
+			old.Close()
+			t.Fatalf("drop post-v8 trigger %s: %v", trigger, err)
+		}
+	}
+	if _, err := old.DB().Exec(`
+CREATE TRIGGER definition_pack_source_public_key_is_immutable
+BEFORE UPDATE OF owner_signer_key_id, owner_signer_key_fingerprint, owner_signer_public_key
+ON definition_pack_sources
+FOR EACH ROW
+WHEN OLD.owner_signer_key_id != NEW.owner_signer_key_id
+  OR OLD.owner_signer_key_fingerprint != NEW.owner_signer_key_fingerprint
+  OR OLD.owner_signer_public_key != NEW.owner_signer_public_key
+BEGIN
+    SELECT RAISE(ABORT, 'definition pack source trust key is immutable');
+END;`); err != nil {
+		old.Close()
+		t.Fatal(err)
+	}
+	if _, err := old.DB().Exec("DELETE FROM caravan_schema_migrations WHERE version_id IN (9, 10)"); err != nil {
+		old.Close()
+		t.Fatal(err)
+	}
+	if err := old.SetSetting(ctx, "older-restore", "preserved"); err != nil {
+		old.Close()
+		t.Fatal(err)
+	}
+	backup := storeBackup(t, old)
+	if err := old.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	targetPath := filepath.Join(t.TempDir(), "target.sqlite")
+	target, err := Open(targetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := target.StageRestore(ctx, bytes.NewReader(backup), int64(len(backup))); err != nil {
+		target.Close()
+		t.Fatalf("StageRestore v8 backup: %v", err)
+	}
+	if err := target.Close(); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := Open(targetPath)
+	if err != nil {
+		t.Fatalf("reopen and migrate v8 restore: %v", err)
+	}
+	defer restored.Close()
+	version, err := restored.SchemaVersion()
+	if err != nil || int64(version) != storemigrations.LatestVersion {
+		t.Fatalf("restored schema version=%d err=%v, want %d", version, err, storemigrations.LatestVersion)
+	}
+	got, err := restored.GetSetting(ctx, "older-restore")
+	if err != nil || got != "preserved" {
+		t.Fatalf("older restore setting=%q err=%v", got, err)
+	}
+}
+
+func TestStageRestoreSerializesConcurrentCallsWithLastSuccessWinning(t *testing.T) {
+	ctx := context.Background()
+	first := restoreBackupWithSetting(t, "first")
+	second := restoreBackupWithSetting(t, "second")
+	targetPath := filepath.Join(t.TempDir(), "target.sqlite")
+	target, err := Open(targetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocking := &blockingRestoreReader{reader: bytes.NewReader(first), entered: make(chan struct{}), release: make(chan struct{})}
+	firstResult := make(chan error, 1)
+	go func() { firstResult <- target.StageRestore(ctx, blocking, int64(len(first))) }()
+	<-blocking.entered
+	secondStarted := make(chan struct{})
+	secondResult := make(chan error, 1)
+	go func() {
+		close(secondStarted)
+		secondResult <- target.StageRestore(ctx, bytes.NewReader(second), int64(len(second)))
+	}()
+	<-secondStarted
+	close(blocking.release)
+	if err := <-firstResult; err != nil {
+		t.Fatalf("first StageRestore: %v", err)
+	}
+	if err := <-secondResult; err != nil {
+		t.Fatalf("second StageRestore: %v", err)
+	}
+	if err := target.Close(); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := Open(targetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+	got, err := restored.GetSetting(ctx, "serialized-restore")
+	if err != nil || got != "second" {
+		t.Fatalf("serialized restore value=%q err=%v, want second", got, err)
+	}
+}
+
+func TestStageRestoreSyncsParentAndFailedSyncDoesNotReplacePriorSuccess(t *testing.T) {
+	ctx := context.Background()
+	first := restoreBackupWithSetting(t, "first")
+	second := restoreBackupWithSetting(t, "second")
+	targetPath := filepath.Join(t.TempDir(), "target.sqlite")
+	target, err := Open(targetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalSync := restoreDirectorySync
+	syncCalls := 0
+	restoreDirectorySync = func(dir *os.File) error {
+		syncCalls++
+		return originalSync(dir)
+	}
+	if err := target.StageRestore(ctx, bytes.NewReader(first), int64(len(first))); err != nil {
+		t.Fatalf("StageRestore with successful parent sync: %v", err)
+	}
+	if syncCalls == 0 {
+		t.Fatal("StageRestore did not sync its parent directory")
+	}
+	injected := errors.New("injected parent sync failure")
+	failed := false
+	restoreDirectorySync = func(dir *os.File) error {
+		if !failed {
+			failed = true
+			return injected
+		}
+		return originalSync(dir)
+	}
+	t.Cleanup(func() { restoreDirectorySync = originalSync })
+	if err := target.StageRestore(ctx, bytes.NewReader(second), int64(len(second))); !errors.Is(err, injected) {
+		t.Fatalf("StageRestore parent sync error=%v, want injected failure", err)
+	}
+	if err := target.Close(); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := Open(targetPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+	got, err := restored.GetSetting(ctx, "serialized-restore")
+	if err != nil || got != "first" {
+		t.Fatalf("failed sync replaced prior successful restore: value=%q err=%v", got, err)
 	}
 }

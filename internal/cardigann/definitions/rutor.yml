@@ -1,0 +1,40 @@
+id: rutor
+name: RuTor
+description: Public Russian-language torrent search.
+language: ru-RU
+type: public
+links:
+  - https://rutor.info/
+caps:
+  categorymappings:
+    - {id: 1, cat: Movies}
+    - {id: 2, cat: TV}
+    - {id: 3, cat: Audio}
+    - {id: 4, cat: Other}
+  modes:
+    search: [q]
+    tv-search: [q, season, ep]
+    movie-search: [q]
+    music-search: [q]
+search:
+  paths:
+    - path: "search/0/0/100/0/{{ urlquery .Keywords }}"
+  rows:
+    selector: tr
+  fields:
+    category:
+      text: "4"
+    title:
+      selector: 'td:nth-child(2) a:last-child'
+    details:
+      selector: 'td:nth-child(2) a:last-child'
+      attribute: href
+    download:
+      selector: 'td:nth-child(2) a:nth-of-type(2)'
+      attribute: href
+    size:
+      selector: 'td:nth-child(3)'
+    seeders:
+      selector: span.green
+    leechers:
+      selector: span.red

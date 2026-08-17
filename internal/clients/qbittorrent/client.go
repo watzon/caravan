@@ -23,11 +23,13 @@
 package qbittorrent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -156,6 +158,9 @@ func (c *Client) WebAPIVersion(ctx context.Context) (string, error) {
 type AddRequest struct {
 	// URL is a magnet link or an http(s) .torrent URL.
 	URL string
+	// Payload is an authenticated .torrent document Caravan already fetched.
+	// When present it is uploaded instead of asking qBittorrent to reach URL.
+	Payload []byte
 	// Category is the qBittorrent category to file the torrent under, empty
 	// for the client's own default.
 	Category string
@@ -179,9 +184,16 @@ type AddRequest struct {
 // accepted: a queue row that never progresses, never imports, and never
 // retries, because a grab that is not failed is not retried.
 func (c *Client) Add(ctx context.Context, req AddRequest) error {
+	hasURL := strings.TrimSpace(req.URL) != ""
+	hasPayload := len(req.Payload) > 0
+	if hasURL == hasPayload {
+		return fmt.Errorf("qbittorrent: add requires exactly one torrent URL or payload")
+	}
 	form := url.Values{}
-	// urls is newline-separated; we only ever send one.
-	form.Set("urls", req.URL)
+	if len(req.Payload) == 0 {
+		// urls is newline-separated; we only ever send one.
+		form.Set("urls", req.URL)
+	}
 	if req.Category != "" {
 		form.Set("category", req.Category)
 	}
@@ -196,7 +208,16 @@ func (c *Client) Add(ctx context.Context, req AddRequest) error {
 		form.Set("paused", "true")
 		form.Set("stopped", "true")
 	}
-	body, err := c.post(ctx, "/torrents/add", form)
+	var body []byte
+	var err error
+	if len(req.Payload) > 0 {
+		if len(req.Payload) > core.MaxTorrentPayloadBytes {
+			return fmt.Errorf("qbittorrent: torrent payload exceeds size limit")
+		}
+		body, err = c.postTorrent(ctx, "/torrents/add", form, req.Payload)
+	} else {
+		body, err = c.post(ctx, "/torrents/add", form)
+	}
 	if err != nil {
 		return err
 	}
@@ -204,6 +225,66 @@ func (c *Client) Add(ctx context.Context, req AddRequest) error {
 		return &APIError{Path: "/torrents/add", Status: http.StatusOK, Body: clients.Snippet(body)}
 	}
 	return nil
+}
+
+func (c *Client) postTorrent(ctx context.Context, path string, fields url.Values, payload []byte) ([]byte, error) {
+	body, status, err := c.attemptTorrent(ctx, path, fields, payload)
+	if err != nil {
+		return nil, err
+	}
+	if status == http.StatusForbidden || status == http.StatusUnauthorized {
+		c.forget()
+		body, status, err = c.attemptTorrent(ctx, path, fields, payload)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if status != http.StatusOK {
+		return nil, &APIError{Path: path, Status: status, Body: clients.Snippet(body)}
+	}
+	return body, nil
+}
+
+func (c *Client) attemptTorrent(ctx context.Context, path string, fields url.Values, payload []byte) ([]byte, int, error) {
+	sid, err := c.session(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	var encoded bytes.Buffer
+	writer := multipart.NewWriter(&encoded)
+	for name, values := range fields {
+		for _, value := range values {
+			if err := writer.WriteField(name, value); err != nil {
+				return nil, 0, fmt.Errorf("qbittorrent: %s: build multipart form", path)
+			}
+		}
+	}
+	part, err := writer.CreateFormFile("torrents", "caravan.torrent")
+	if err != nil {
+		return nil, 0, fmt.Errorf("qbittorrent: %s: build torrent upload", path)
+	}
+	if _, err := part.Write(payload); err != nil {
+		return nil, 0, fmt.Errorf("qbittorrent: %s: build torrent upload", path)
+	}
+	if err := writer.Close(); err != nil {
+		return nil, 0, fmt.Errorf("qbittorrent: %s: build multipart form", path)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+apiPath+path, &encoded)
+	if err != nil {
+		return nil, 0, fmt.Errorf("qbittorrent: %s: %w", path, err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	c.stamp(req, sid)
+	resp, err := c.hc.Do(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("qbittorrent: %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
+	if err != nil {
+		return nil, 0, fmt.Errorf("qbittorrent: %s: %w", path, err)
+	}
+	return body, resp.StatusCode, nil
 }
 
 // InfoQuery filters GET /torrents/info.

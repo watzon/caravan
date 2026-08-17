@@ -95,6 +95,7 @@ function stubFetch() {
     if (url.endsWith('/settings')) return jsonResponse(ENGINE_SETTINGS);
     if (url.endsWith('/system/status')) return jsonResponse(SYSTEM_STATUS);
     if (url.endsWith('/indexers')) return jsonResponse({ indexers: [] });
+    if (url.endsWith('/definition-packs')) return jsonResponse({ revisions: [] });
     if (url.endsWith('/usenet-servers')) return jsonResponse({ usenet_servers: [] });
     if (url.endsWith('/download-clients/types')) return jsonResponse({ types: [] });
     if (url.endsWith('/download-clients')) return jsonResponse({ download_clients: [] });
@@ -249,6 +250,17 @@ describe('Settings overview and route resolution', () => {
     expect(host.querySelector('h1#playback')?.textContent).toContain('Playback');
     expect(host.querySelector('[data-settings-sidebar]')).toBeNull();
     expect(host.querySelector('[data-settings-navigation-toggle]')).toBeNull();
+  });
+
+  it('keeps definition delivery invisible on the Indexers page', async () => {
+    stubFetch();
+    app = mount(Settings, { target: host, props: { section: 'indexers' } });
+    await settle();
+
+    expect(host.textContent).not.toContain('Definition packs');
+    expect(host.textContent).not.toContain('Manage packs');
+    const fetch = vi.mocked(globalThis.fetch);
+    expect(fetch.mock.calls.some(([input]) => String(input).endsWith('/definition-packs'))).toBe(false);
   });
 
   it('offers advanced settings only on catalog entries marked advanced', async () => {
@@ -437,6 +449,7 @@ describe('Settings engine tab', () => {
       }
       if (url.endsWith('/system/status')) return jsonResponse(SYSTEM_STATUS);
       if (url.endsWith('/indexers')) return jsonResponse({ indexers: [] });
+      if (url.endsWith('/definition-packs')) return jsonResponse({ revisions: [] });
       if (url.endsWith('/usenet-servers')) return jsonResponse({ usenet_servers: [] });
       if (url.endsWith('/download-clients/types')) return jsonResponse({ types: [] });
       if (url.endsWith('/download-clients')) return jsonResponse({ download_clients: [] });
@@ -509,16 +522,13 @@ describe('Settings metadata pane', () => {
       });
       if (url.includes('/settings/metadata/test')) return testReply();
       if (url.endsWith('/adult/stashbox-instances')) {
-        // What the server answers a session that does not see the module: the
-        // route is not merely empty, it is not there.
-        return session.user?.adult
-          ? jsonResponse({ instances: STASHBOX_INSTANCES })
-          : jsonResponse({ error: 'not found' }, 404);
+        return jsonResponse({ instances: STASHBOX_INSTANCES });
       }
       if (url.endsWith('/libraries/providers')) return jsonResponse({ providers: providerList });
       if (url.endsWith('/settings')) return jsonResponse({ tmdb_api_key_set: 'true' });
       if (url.endsWith('/system/status')) return jsonResponse(SYSTEM_STATUS);
       if (url.endsWith('/indexers')) return jsonResponse({ indexers: [] });
+      if (url.endsWith('/definition-packs')) return jsonResponse({ revisions: [] });
       if (url.endsWith('/usenet-servers')) return jsonResponse({ usenet_servers: [] });
       if (url.endsWith('/download-clients/types')) return jsonResponse({ types: [] });
       if (url.endsWith('/download-clients')) return jsonResponse({ download_clients: [] });
@@ -777,9 +787,10 @@ describe('Settings metadata pane', () => {
   });
 
   // The pointer card is gone (PLAN Part 2 phase 8): stash-box endpoints are
-  // managed HERE now, one row per configured box.
-  it('manages the stash-box instances for a session that sees the module', async () => {
-    session.user = { username: 'root', role: 'admin', open: false, adult: true };
+  // managed HERE now, one row per configured box. The card is on Metadata
+  // for any admin, including one with no adult library yet.
+  it('manages the stash-box instances for an admin session', async () => {
+    session.user = { username: 'root', role: 'admin', open: false, adult: false };
     stubMetadata(() => jsonResponse({ status: 'ok' }));
     app = mount(Settings, { target: host, props: { section: 'metadata' } });
     await settle();
@@ -795,9 +806,8 @@ describe('Settings metadata pane', () => {
     expect(host.querySelector('a[href="/settings/adult#adult-content"]')).toBeNull();
   });
 
-  // Promise-of-absence: an admin the module is not visible to gets no card at
-  // all — not an empty one, and no request that would 404.
-  it('omits the Stash-box card entirely for a session without the module', async () => {
+  it('keeps the Stash-box card off the Metadata page for a member', async () => {
+    session.user = { username: 'ada', role: 'member', open: false, adult: false };
     const calls = stubMetadata(() => jsonResponse({ status: 'ok' }));
     app = mount(Settings, { target: host, props: { section: 'metadata' } });
     await settle();
