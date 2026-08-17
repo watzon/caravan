@@ -264,6 +264,51 @@ describe('SeriesDetail season inventory', () => {
     expect(importedFileCells[5]?.textContent?.trim()).toBe('1 B');
   });
 
+  it('marks a future episode so it does not read as available', async () => {
+    stubFetch(0, {
+      ...SERIES_WITH_FILES,
+      seasons: [
+        {
+          ...SERIES_WITH_FILES.seasons[0],
+          episodes: [
+            { ...episode(1, false), title: 'Aired', air_date: '2020-01-15', monitored: false },
+            { ...episode(2, false), title: 'Upcoming', air_date: '2099-06-15', monitored: false },
+            { ...episode(3, true), title: 'Imported early', air_date: '2099-06-22' },
+          ],
+        },
+      ],
+    });
+    app = mount(SeriesDetail, { target: host, props: { id: 3 } });
+    await settle();
+
+    const rows = [...host.querySelectorAll('tbody tr')];
+    const aired = rows.find((row) => row.textContent?.includes('Aired'));
+    const upcoming = rows.find((row) => row.textContent?.includes('Upcoming'));
+    const imported = rows.find((row) => row.textContent?.includes('Imported early'));
+    expect(aired, 'aired episode').toBeDefined();
+    expect(upcoming, 'upcoming episode').toBeDefined();
+    expect(imported, 'imported future episode').toBeDefined();
+
+    const airedDate = aired!.querySelectorAll('td')[2];
+    const upcomingDate = upcoming!.querySelectorAll('td')[2];
+    const importedDate = imported!.querySelectorAll('td')[2];
+
+    expect(airedDate?.querySelector('svg')).toBeNull();
+    expect(airedDate?.textContent?.trim()).toBe('15 Jan 2020');
+    expect(aired?.querySelectorAll('td')[3]?.textContent).toContain('Unmonitored');
+    expect(aired?.className).not.toContain('bg-danger/15');
+
+    expect(upcomingDate?.querySelector('svg'), 'clock on an unaired date').not.toBeNull();
+    expect(upcomingDate?.textContent?.trim()).toBe('15 Jun 2099');
+    expect(upcomingDate?.querySelector('[title]')?.getAttribute('title')).toMatch(/^Airs in /);
+    expect(upcoming?.querySelectorAll('td')[3]?.textContent).toContain('Unaired');
+    expect(upcoming?.className).toContain('bg-danger/15');
+
+    // A file already on disk is available even when the air date is still ahead.
+    expect(importedDate?.querySelector('svg')).toBeNull();
+    expect(imported?.className).not.toContain('bg-danger/15');
+  });
+
   it('keeps full folder and episode titles on truncated values', async () => {
     const folder = 'library/TV/Severance (2022)/A deliberately long series folder';
     const episodeTitle = 'The Very Long and Important Episode Title That Must Remain Available';

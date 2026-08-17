@@ -145,6 +145,7 @@
   "route.seriesDetail.episode": "Episode",
   "route.seriesDetail.title": "Title",
   "route.seriesDetail.airDate": "Air date",
+  "route.seriesDetail.airsIn": "Airs {wait}",
   "route.seriesDetail.status": "Status",
   "route.seriesDetail.quality": "Quality",
   "route.seriesDetail.size": "Size",

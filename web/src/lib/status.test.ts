@@ -131,7 +131,14 @@ describe('episodeStatus', () => {
     expect(episodeStatus(episode({ air_date: '' }), now)).toBe('unaired');
   });
 
-  it('is unmonitored before any air-date reasoning', () => {
+  it('is unaired even when the episode is not monitored', () => {
+    expect(episodeStatus(episode({ air_date: '2027-01-01', monitored: false }), now)).toBe(
+      'unaired',
+    );
+    expect(episodeStatus(episode({ air_date: '', monitored: false }), now)).toBe('unaired');
+  });
+
+  it('is unmonitored after the episode has aired with no file', () => {
     expect(episodeStatus(episode({ monitored: false }), now)).toBe('unmonitored');
   });
 });

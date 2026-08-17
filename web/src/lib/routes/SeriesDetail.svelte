@@ -28,6 +28,8 @@
     episodeCode,
     formatBytes,
     formatDate,
+    formatUntil,
+    isFuture,
     seasonLabel,
     titleWithYear,
   } from '../format';
@@ -351,8 +353,11 @@
                           episode.season_number,
                           episode.episode_number,
                         )}
+                        {@const upcoming = !episode.file && isFuture(episode.air_date)}
                         <tr
-                          class="h-10 border-t border-border transition-colors duration-150 hover:bg-raised">
+                          class="h-10 border-t border-border transition-colors duration-150 {upcoming
+                            ? 'bg-danger/15 hover:bg-danger/20'
+                            : 'hover:bg-raised'}">
                           <td class="px-3 py-2 font-mono text-ink-secondary">
                             {episodeCode(episode.season_number, episode.episode_number)}
                           </td>
@@ -370,7 +375,18 @@
                             {/if}
                           </td>
                           <td class="px-3 py-2 text-ink-secondary">
-                            {formatDate(episode.air_date)}
+                            {#if upcoming}
+                              <span
+                                class="inline-flex items-center gap-1.5 text-danger"
+                                title={t('route.seriesDetail.airsIn', {
+                                  wait: formatUntil(episode.air_date),
+                                })}>
+                                <Icon name="clock" size={12} class="shrink-0" />
+                                {formatDate(episode.air_date)}
+                              </span>
+                            {:else}
+                              {formatDate(episode.air_date)}
+                            {/if}
                           </td>
                           <td class="px-3 py-2">
                             <StatusDot status={episodeStatus(episode)} />

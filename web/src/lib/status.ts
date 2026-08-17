@@ -76,8 +76,8 @@ export function episodeStatus(
   now: number = Date.now(),
 ): StatusKey {
   if (episode.file) return 'downloaded';
-  if (!episode.monitored) return 'unmonitored';
   if (!episode.air_date || isFuture(episode.air_date, now)) return 'unaired';
+  if (!episode.monitored) return 'unmonitored';
   return 'missing';
 }
 
