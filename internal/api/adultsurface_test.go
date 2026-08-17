@@ -162,7 +162,8 @@ func seedSiteOn(t *testing.T, st *store.Store, providerID, siteID, sceneID, titl
 		Provider: providerID, ProviderRef: siteID,
 		StashID: siteID, Title: title, SortTitle: strings.ToLower(title),
 		Kind: core.SeriesKindAdult, Monitored: true,
-		Path: store.AdultLibraryRoot + "/" + title,
+		LibraryID: defaultLibraryID(t, st, core.LibraryKindAdult),
+		Path:      store.AdultLibraryRoot + "/" + title,
 	}
 	if err := st.UpsertSeries(ctx, sr); err != nil {
 		t.Fatalf("UpsertSeries: %v", err)
@@ -729,14 +730,19 @@ func TestCreatingAnAdultLibraryOpensTheModuleAndThenItsInstanceRoutes(t *testing
 	// rule, and a household member acquiring a shelf for everybody is precisely
 	// what that rule is for.
 	wantStatus(t, doAuth(t, h, http.MethodPost, "/api/v1/libraries",
-		`{"kind":"adult","name":"Adult","root_path":"library/Adult"}`,
+		`{"kind":"adult","name":"Scenes","root_path":"library/Scenes"}`,
 		withCookie(memberCookie)), http.StatusForbidden)
 
+	// A SECOND adult library, beside the dormant one migration 0011 seeds: the
+	// seeded row's own on-switch is `active`, and this covers the other door —
+	// creating one, which still opens the module because CreateLibrary forces a
+	// new library active.
+	//
 	// No stash-box instance is configured, and the create is not refused for it:
 	// the chain defaults to the bare legacy id, which is the id the first
 	// instance ever created is minted with, so it resolves the moment one is.
 	rec := doAuth(t, h, http.MethodPost, "/api/v1/libraries",
-		`{"kind":"adult","name":"Adult","root_path":"library/Adult"}`, withCookie(adminCookie))
+		`{"kind":"adult","name":"Scenes","root_path":"library/Scenes"}`, withCookie(adminCookie))
 	wantStatus(t, rec, http.StatusCreated)
 	var created libraryJSON
 	decodeBody(t, rec, &created)
@@ -2275,6 +2281,7 @@ func TestSiteDetailIgnoresAnotherSitesWalk(t *testing.T) {
 	other := &core.Series{
 		StashID: "site-other", Title: "Other", SortTitle: "other",
 		Kind: core.SeriesKindAdult, Monitored: true,
+		LibraryID: defaultLibraryID(t, st, core.LibraryKindAdult),
 	}
 	if err := st.UpsertSeries(ctx, other); err != nil {
 		t.Fatalf("UpsertSeries: %v", err)

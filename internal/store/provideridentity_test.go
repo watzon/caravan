@@ -156,8 +156,8 @@ func TestLibraryChainAndHeadStayInSync(t *testing.T) {
 	ctx := context.Background()
 	st, _ := openTemp(t)
 
-	headOnly := &core.Library{Kind: core.LibraryKindTV, Name: "Anime",
-		RootPath: "library/Anime", Provider: core.ProviderTMDB}
+	headOnly := &core.Library{Kind: core.LibraryKindTV, Name: "Kids",
+		RootPath: "library/Kids", Provider: core.ProviderTMDB}
 	if err := st.CreateLibrary(ctx, headOnly); err != nil {
 		t.Fatalf("CreateLibrary: %v", err)
 	}

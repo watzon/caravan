@@ -91,8 +91,8 @@ func TestMoveSeriesKeepsSeasonsAndRefusesCrossKind(t *testing.T) {
 		t.Fatalf("seed scan: %+v", res)
 	}
 
-	anime := &core.Library{Kind: core.LibraryKindTV, Name: "Anime",
-		RootPath: "library/Anime", Provider: core.ProviderTMDB}
+	anime := &core.Library{Kind: core.LibraryKindTV, Name: "Kids",
+		RootPath: "library/Kids", Provider: core.ProviderTMDB}
 	if err := h.st.CreateLibrary(ctx, anime); err != nil {
 		t.Fatalf("CreateLibrary: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestMoveSeriesKeepsSeasonsAndRefusesCrossKind(t *testing.T) {
 	if err := h.mgr.MoveSeries(ctx, sr.ID, anime.ID); err != nil {
 		t.Fatalf("MoveSeries: %v", err)
 	}
-	moved := "library/Anime/Planet Earth II (2016)/Season 01/Planet Earth II (2016) - S01E01 - Islands.mkv"
+	moved := "library/Kids/Planet Earth II (2016)/Season 01/Planet Earth II (2016) - S01E01 - Islands.mkv"
 	if got := h.read(moved); got != "episode bytes" {
 		t.Fatalf("moved episode missing at %q (content %q)", moved, got)
 	}
@@ -120,7 +120,7 @@ func TestMoveSeriesKeepsSeasonsAndRefusesCrossKind(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSeries: %v", err)
 	}
-	if row.LibraryID != anime.ID || row.Path != "library/Anime/Planet Earth II (2016)" {
-		t.Errorf("row = {library %d, path %q}, want it in Anime", row.LibraryID, row.Path)
+	if row.LibraryID != anime.ID || row.Path != "library/Kids/Planet Earth II (2016)" {
+		t.Errorf("row = {library %d, path %q}, want it in Kids", row.LibraryID, row.Path)
 	}
 }

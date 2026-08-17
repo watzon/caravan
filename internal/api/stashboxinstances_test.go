@@ -450,12 +450,12 @@ func TestItemRefRefusesAnUnconfiguredInstance(t *testing.T) {
 	ctx := context.Background()
 
 	if _, ok := s.itemRefFrom(ctx, httptest.NewRecorder(), core.ProviderStashbox, "uuid-1", 0,
-		core.LibraryKindAdult); !ok {
+		MediaTypeScene); !ok {
 		t.Error("a ref naming the configured instance was refused")
 	}
 	w := httptest.NewRecorder()
 	if _, ok := s.itemRefFrom(ctx, w, core.ProviderStashbox+":fansdb", "uuid-1", 0,
-		core.LibraryKindAdult); ok {
+		MediaTypeScene); ok {
 		t.Error("a ref naming an unconfigured instance was accepted")
 	}
 	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "fansdb") {
@@ -464,7 +464,7 @@ func TestItemRefRefusesAnUnconfiguredInstance(t *testing.T) {
 	// The non-instanced providers keep their old behaviour: no store read, no
 	// new way to fail.
 	if _, ok := s.itemRefFrom(ctx, httptest.NewRecorder(), core.ProviderTMDB, "603", 0,
-		core.LibraryKindMovie); !ok {
+		MediaTypeMovie); !ok {
 		t.Error("a TMDB ref was refused")
 	}
 }

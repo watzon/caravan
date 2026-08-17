@@ -14,7 +14,7 @@ func FS() fs.FS { return files }
 
 const (
 	// LatestVersion is Caravan's current public database version.
-	LatestVersion int64 = 10
+	LatestVersion int64 = 11
 	// VersionTable is deliberately Caravan-specific so unrelated Goose users
 	// cannot make another SQLite database look restorable here.
 	VersionTable = "caravan_schema_migrations"

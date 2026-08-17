@@ -41,9 +41,13 @@ func libraryOfKind(t *testing.T, body libraryListBody, kind string) libraryJSON 
 	return libraryJSON{}
 }
 
-// A freshly migrated install answers with the two seeded libraries, no
+// A freshly migrated install answers with the FOUR seeded libraries, no
 // overrides anywhere, and every configured indexer searched with its own
 // categories — the JSON shape of "nothing has changed yet".
+//
+// This is the management surface, so the two dormant rows are here: an admin
+// has to be able to see Anime and Adult in order to switch either on. Every
+// content route still answers 404 for them, and /auth/me still lists neither.
 func TestListLibrariesReportsSeededDefaults(t *testing.T) {
 	h, st, _ := newTestServer(t)
 	seedIndexer(t, st, "jackett", []int{2000, 5000}, true)
@@ -53,8 +57,17 @@ func TestListLibrariesReportsSeededDefaults(t *testing.T) {
 	var body libraryListBody
 	decodeBody(t, rec, &body)
 
-	if len(body.Libraries) != 2 {
-		t.Fatalf("libraries = %+v, want the two seeded rows", body.Libraries)
+	if len(body.Libraries) != 4 {
+		t.Fatalf("libraries = %+v, want the four seeded rows", body.Libraries)
+	}
+	for _, kind := range []string{core.LibraryKindAnime, core.LibraryKindAdult} {
+		lib := libraryOfKind(t, body, kind)
+		if lib.Active || !lib.IsDefault {
+			t.Errorf("seeded %s library = %+v, want a dormant default", kind, lib)
+		}
+		if lib.Icon != "" {
+			t.Errorf("seeded %s library icon = %q, want the kind default", kind, lib.Icon)
+		}
 	}
 	movies := libraryOfKind(t, body, core.LibraryKindMovie)
 	if movies.Name != "Movies" || movies.RootPath == "" {
@@ -431,7 +444,7 @@ func TestCreateLibraryValidatesAndCreates(t *testing.T) {
 	h, st, _ := newTestServer(t)
 
 	rec := do(t, h, http.MethodPost, "/api/v1/libraries",
-		`{"kind":"tv","name":"Anime","root_path":"library/Anime"}`)
+		`{"kind":"tv","name":"Kids","root_path":"library/Kids"}`)
 	wantStatus(t, rec, http.StatusCreated)
 	var created libraryJSON
 	decodeBody(t, rec, &created)
@@ -442,8 +455,8 @@ func TestCreateLibraryValidatesAndCreates(t *testing.T) {
 	for name, body := range map[string]string{
 		"root outside library/": `{"kind":"tv","name":"X","root_path":"media/X"}`,
 		"root is library/":      `{"kind":"tv","name":"X","root_path":"library"}`,
-		"nested root":           `{"kind":"tv","name":"X","root_path":"library/Anime/Sub"}`,
-		"duplicate root":        `{"kind":"movie","name":"X","root_path":"library/Anime"}`,
+		"nested root":           `{"kind":"tv","name":"X","root_path":"library/Kids/Sub"}`,
+		"duplicate root":        `{"kind":"movie","name":"X","root_path":"library/Kids"}`,
 		"dotdot root":           `{"kind":"tv","name":"X","root_path":"library/../etc"}`,
 		"wrong provider":        `{"kind":"movie","name":"X","root_path":"library/X","provider":"stashbox"}`,
 		"unknown kind":          `{"kind":"music","name":"X","root_path":"library/X"}`,
@@ -480,7 +493,7 @@ func TestLibraryDefaultHandoffAndGuards(t *testing.T) {
 	h, st, _ := newTestServer(t)
 
 	rec := do(t, h, http.MethodPost, "/api/v1/libraries",
-		`{"kind":"tv","name":"Anime","root_path":"library/Anime"}`)
+		`{"kind":"tv","name":"Kids","root_path":"library/Kids"}`)
 	wantStatus(t, rec, http.StatusCreated)
 	var anime libraryJSON
 	decodeBody(t, rec, &anime)
@@ -547,9 +560,10 @@ func TestListProvidersOmitsAdultWithoutTheModule(t *testing.T) {
 }
 
 // AniList is a non-adult provider, so the create form offers it to everybody —
-// and it offers it for television ONLY, which is what stops a movie library
-// being chained to a provider that refuses every movie lookup.
-func TestListProvidersOffersAniListForTV(t *testing.T) {
+// for the anime kind and for that kind alone. The registry partitions strictly
+// by library kind, so the chain editor of a Movies or a Series library never
+// names it, whatever AniList can look up (core.ProviderLooksUp).
+func TestListProvidersOffersAniListForItsKinds(t *testing.T) {
 	h, _, _ := newTestServer(t)
 	rec := do(t, h, http.MethodGet, "/api/v1/libraries/providers", "")
 	wantStatus(t, rec, http.StatusOK)
@@ -564,8 +578,9 @@ func TestListProvidersOffersAniListForTV(t *testing.T) {
 		if p.ID != core.ProviderAniList {
 			continue
 		}
-		if !reflect.DeepEqual(p.Kinds, []string{core.LibraryKindTV}) {
-			t.Errorf("anilist kinds = %v, want [tv]", p.Kinds)
+		want := []string{core.LibraryKindAnime}
+		if !reflect.DeepEqual(p.Kinds, want) {
+			t.Errorf("anilist kinds = %v, want %v", p.Kinds, want)
 		}
 		return
 	}
@@ -579,7 +594,7 @@ func TestCreateLibraryAcceptsAProviderChain(t *testing.T) {
 	h, _, _ := newTestServer(t)
 
 	rec := do(t, h, http.MethodPost, "/api/v1/libraries",
-		`{"kind":"tv","name":"Anime","root_path":"library/Anime","providers":["tmdb"]}`)
+		`{"kind":"tv","name":"Kids","root_path":"library/Kids","providers":["tmdb"]}`)
 	wantStatus(t, rec, http.StatusCreated)
 	var created libraryJSON
 	decodeBody(t, rec, &created)
@@ -673,4 +688,72 @@ func TestProviderChainForAdultNamesConfiguredInstancesAlone(t *testing.T) {
 				c.chain, got, c.want, w.Body.String())
 		}
 	}
+}
+
+// The registry partitions strictly by library kind, and the create endpoint is
+// where an owner feels it: a shelf may only be chained to the catalogue that
+// kind is filed under.
+//
+// The anime kind is the case the partition exists for. An anime shelf whose
+// chain mixed AniList's flat records with TMDB's or TheTVDB's seasons would
+// renumber episodes rather than fill a gap — a rung that answers WRONG is worse
+// than a rung that answers nothing — so the anime kind is AniList's alone and
+// AniList reaches no other kind.
+func TestProviderChainsPartitionStrictlyByLibraryKind(t *testing.T) {
+	cases := []struct {
+		name, body string
+		want       int
+	}{
+		{"anime on anilist", `{"kind":"anime","name":"A","root_path":"library/A","providers":["anilist"]}`,
+			http.StatusCreated},
+		{"anime on tmdb", `{"kind":"anime","name":"B","root_path":"library/B","providers":["tmdb"]}`,
+			http.StatusBadRequest},
+		{"anime on thetvdb", `{"kind":"anime","name":"C","root_path":"library/C","providers":["thetvdb"]}`,
+			http.StatusBadRequest},
+		{"anime chaining anilist then tmdb", `{"kind":"anime","name":"D","root_path":"library/D","providers":["anilist","tmdb"]}`,
+			http.StatusBadRequest},
+		{"tv on anilist", `{"kind":"tv","name":"E","root_path":"library/E","providers":["anilist"]}`,
+			http.StatusBadRequest},
+		{"movie on anilist", `{"kind":"movie","name":"F","root_path":"library/F","providers":["anilist"]}`,
+			http.StatusBadRequest},
+		// The television kind keeps its three catalogues: they file the same
+		// vocabulary, so a chain of them is a fallback rather than a conflict.
+		{"tv on tmdb, tvmaze and thetvdb",
+			`{"kind":"tv","name":"G","root_path":"library/G","providers":["tmdb","tvmaze","thetvdb"]}`,
+			http.StatusCreated},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h, _, _ := newTestServer(t)
+			rec := do(t, h, http.MethodPost, "/api/v1/libraries", c.body)
+			wantStatus(t, rec, c.want)
+		})
+	}
+}
+
+// The other half of the split: what a provider may be CHAINED on says nothing
+// about what it may be asked to look up.
+//
+// An AniList film ref is accepted on POST /library/movies even though AniList
+// chains onto no movie library, because a ref pasted off a search hit is the
+// user naming the title outright — the chain governs identification, which is
+// the question nobody is asking here. Before the split this add could only be
+// made to work by widening AniList's chain kinds, which put it in every Movies
+// library's chain editor.
+func TestAddAcceptsARefFromAProviderThatChainsOnNoSuchLibrary(t *testing.T) {
+	h, _, _ := newTestServer(t)
+
+	rec := do(t, h, http.MethodPost, "/api/v1/library/movies",
+		`{"provider":"anilist","provider_ref":"21519"}`)
+	wantStatus(t, rec, http.StatusCreated)
+	if core.ProviderServes(core.ProviderAniList, core.LibraryKindMovie) {
+		t.Error("AniList chains onto the movie kind again; the two questions have re-merged")
+	}
+
+	// A provider whose catalogue genuinely files no films is still refused, and
+	// refused at the door rather than on the next refresh: TheTVDB answers
+	// GetMovie with ErrProviderKindUnsupported.
+	rec = do(t, h, http.MethodPost, "/api/v1/library/movies",
+		`{"provider":"thetvdb","provider_ref":"70327"}`)
+	wantStatus(t, rec, http.StatusBadRequest)
 }

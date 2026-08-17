@@ -40,6 +40,15 @@ func newTestService(t *testing.T) (*Service, *store.Store, string) {
 	return svc, st, root
 }
 
+// The two libraries 0001_baseline seeds, which is where every fixture row below
+// is filed. Every item row names its shelf — the DLNA tree resolves ownership by
+// id alone — so a fixture that left library_id at zero would hang under no
+// container at all.
+const (
+	seededMovieLibrary = 1
+	seededTVLibrary    = 2
+)
+
 // seedLibrary writes the fixture every hierarchy test browses: one movie with
 // one file, and one series with two seasons where only season 1 has files —
 // including a double-episode file, which is the case the object-id scheme has
@@ -51,6 +60,7 @@ func seedLibrary(t *testing.T, st *store.Store) {
 	movie := &core.Movie{
 		TMDBID: 10378, Title: "Big Buck Bunny", SortTitle: "big buck bunny", Year: 2008,
 		Path: "Movies/Big Buck Bunny (2008)", PosterPath: "Movies/Big Buck Bunny (2008)/poster.jpg",
+		LibraryID: seededMovieLibrary,
 	}
 	if err := st.UpsertMovie(ctx, movie); err != nil {
 		t.Fatalf("UpsertMovie: %v", err)
@@ -67,6 +77,7 @@ func seedLibrary(t *testing.T, st *store.Store) {
 	series := &core.Series{
 		TMDBID: 68507, Title: "Planet Earth II", SortTitle: "planet earth ii", Year: 2016,
 		Path: "TV/Planet Earth II (2016)", PosterPath: "TV/Planet Earth II (2016)/poster.jpg",
+		LibraryID: seededTVLibrary,
 	}
 	if err := st.UpsertSeries(ctx, series); err != nil {
 		t.Fatalf("UpsertSeries: %v", err)

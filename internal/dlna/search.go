@@ -206,7 +206,20 @@ func (s *Service) libraryScope(ctx context.Context, u urls, lib core.Library, ou
 	if !ok {
 		return nil
 	}
-	return s.shelfScope(ctx, u, sh, out)
+	if err := s.shelfScope(ctx, u, sh, out); err != nil {
+		return err
+	}
+	// An anime library holds films beside its series, so a search scoped to it
+	// has to walk both halves or it would answer about half the shelf.
+	if lib.Kind != core.LibraryKindAnime {
+		return nil
+	}
+	films, err := s.movieChildren(ctx, u, lib)
+	if err != nil {
+		return err
+	}
+	out.Items = append(out.Items, films.Items...)
+	return nil
 }
 
 // shelfScope appends one shelf's series containers, season containers, and

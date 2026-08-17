@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/watzon/caravan/internal/core"
 	"github.com/watzon/caravan/internal/library"
@@ -30,34 +31,34 @@ func createLibrary(t *testing.T, h http.Handler, body string) libraryJSON {
 // looking at rather than the kind's default.
 func TestSearchThroughANamedLibrary(t *testing.T) {
 	h, _, mgr := newTestServer(t)
-	anime := createLibrary(t, h,
-		`{"kind":"tv","name":"Anime","root_path":"library/Anime","providers":["tmdb","anilist"]}`)
+	kids := createLibrary(t, h,
+		`{"kind":"tv","name":"Kids","root_path":"library/Kids","providers":["tmdb","tvmaze"]}`)
 
 	mgr.searchHits = &library.SearchHits{
 		Series: []core.SeriesMeta{
 			{TMDBID: 209867, Provider: core.ProviderTMDB, ProviderRef: "209867", Title: "Frieren"},
-			{Provider: core.ProviderAniList, ProviderRef: "154587", Title: "Sousou no Frieren"},
+			{Provider: core.ProviderTVmaze, ProviderRef: "154587", Title: "Sousou no Frieren"},
 		},
-		Providers: []string{core.ProviderTMDB, core.ProviderAniList},
+		Providers: []string{core.ProviderTMDB, core.ProviderTVmaze},
 	}
 
-	rec := do(t, h, http.MethodGet, "/api/v1/search?q=frieren&library_id="+itoa(anime.ID), "")
+	rec := do(t, h, http.MethodGet, "/api/v1/search?q=frieren&library_id="+itoa(kids.ID), "")
 	wantStatus(t, rec, http.StatusOK)
 	var body searchResponse
 	decodeBody(t, rec, &body)
 
-	if body.LibraryID != anime.ID {
-		t.Errorf("library_id = %d, want %d", body.LibraryID, anime.ID)
+	if body.LibraryID != kids.ID {
+		t.Errorf("library_id = %d, want %d", body.LibraryID, kids.ID)
 	}
-	if !slices.Equal(body.Providers, []string{core.ProviderTMDB, core.ProviderAniList}) {
+	if !slices.Equal(body.Providers, []string{core.ProviderTMDB, core.ProviderTVmaze}) {
 		t.Errorf("providers = %v, want the chain that ran", body.Providers)
 	}
 	if len(body.Series) != 2 {
 		t.Fatalf("series = %+v, want both providers' hits", body.Series)
 	}
-	// The AniList hit has no TMDB id and does not pretend to: the pair beside
+	// The TVmaze hit has no TMDB id and does not pretend to: the pair beside
 	// it is the only thing that identifies it.
-	if got := body.Series[1]; got.Provider != core.ProviderAniList || got.ProviderRef != "154587" || got.TMDBID != 0 {
+	if got := body.Series[1]; got.Provider != core.ProviderTVmaze || got.ProviderRef != "154587" || got.TMDBID != 0 {
 		t.Errorf("anilist hit = %+v, want the anilist ref and no tmdb id", got)
 	}
 	if got := body.Series[0]; got.Provider != core.ProviderTMDB || got.ProviderRef != "209867" {
@@ -73,7 +74,7 @@ func TestSearchThroughANamedLibrary(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("search calls = %+v, want only the series half", calls)
 	}
-	if calls[0].libraryID != anime.ID || calls[0].mediaType != MediaTypeSeries || calls[0].q != "frieren" {
+	if calls[0].libraryID != kids.ID || calls[0].mediaType != MediaTypeSeries || calls[0].q != "frieren" {
 		t.Errorf("search call = %+v, want the named library's series half", calls[0])
 	}
 }
@@ -173,8 +174,11 @@ func TestARejectedTMDBKeyLeavesAnAniListLibrarySearchable(t *testing.T) {
 	wantStatus(t, rec, http.StatusServiceUnavailable)
 	wantCode(t, rec, CodeMetadataCredentialInvalid)
 
+	// An ANIME library, because AniList serves that kind and no other: the
+	// registry partitions strictly, so this is the only shelf whose chain can
+	// name the keyless provider this test needs.
 	anime := createLibrary(t, h,
-		`{"kind":"tv","name":"Anime","root_path":"library/Anime","providers":["anilist"]}`)
+		`{"kind":"anime","name":"Shonen","root_path":"library/Shonen","providers":["anilist"]}`)
 	mgr.searchHits = &library.SearchHits{
 		Series:    []core.SeriesMeta{{Provider: core.ProviderAniList, ProviderRef: "154587", Title: "Frieren"}},
 		Providers: []string{core.ProviderAniList},
@@ -213,7 +217,7 @@ func TestARejectedTheTVDBKeyRefusesOnlyItsOwnChain(t *testing.T) {
 	wantStatus(t, rec, http.StatusBadGateway)
 
 	tvdbLib := createLibrary(t, h,
-		`{"kind":"tv","name":"Anime","root_path":"library/Anime","providers":["thetvdb"]}`)
+		`{"kind":"tv","name":"Kids","root_path":"library/Kids","providers":["thetvdb"]}`)
 	mazeLib := createLibrary(t, h,
 		`{"kind":"tv","name":"Shows","root_path":"library/Shows","providers":["tvmaze"]}`)
 
@@ -242,22 +246,22 @@ func TestARejectedTheTVDBKeyRefusesOnlyItsOwnChain(t *testing.T) {
 // nothing to say.
 func TestSearchReportsAPartialChainFailure(t *testing.T) {
 	h, _, mgr := newTestServer(t)
-	anime := createLibrary(t, h,
-		`{"kind":"tv","name":"Anime","root_path":"library/Anime","providers":["tmdb","anilist"]}`)
+	kids := createLibrary(t, h,
+		`{"kind":"tv","name":"Kids","root_path":"library/Kids","providers":["tmdb","tvmaze"]}`)
 	mgr.searchHits = &library.SearchHits{
 		Series:    []core.SeriesMeta{{TMDBID: 1, Provider: core.ProviderTMDB, ProviderRef: "1", Title: "Frieren"}},
-		Providers: []string{core.ProviderTMDB, core.ProviderAniList},
-		Failures:  []library.ProviderFailure{{Provider: core.ProviderAniList, Message: "anilist: http 429"}},
+		Providers: []string{core.ProviderTMDB, core.ProviderTVmaze},
+		Failures:  []library.ProviderFailure{{Provider: core.ProviderTVmaze, Message: "tvmaze: http 429"}},
 	}
 
-	rec := do(t, h, http.MethodGet, "/api/v1/search?q=frieren&library_id="+itoa(anime.ID), "")
+	rec := do(t, h, http.MethodGet, "/api/v1/search?q=frieren&library_id="+itoa(kids.ID), "")
 	wantStatus(t, rec, http.StatusOK)
 	var body searchResponse
 	decodeBody(t, rec, &body)
 	if len(body.Series) != 1 {
 		t.Fatalf("series = %+v, want the surviving provider's hit", body.Series)
 	}
-	if len(body.Errors) != 1 || body.Errors[0].Provider != core.ProviderAniList {
+	if len(body.Errors) != 1 || body.Errors[0].Provider != core.ProviderTVmaze {
 		t.Fatalf("errors = %+v, want the failed provider named", body.Errors)
 	}
 }
@@ -277,4 +281,50 @@ func TestSearchRejectsABadLibraryID(t *testing.T) {
 	// A library that does not exist is the 404 every by-id route gives.
 	rec := do(t, h, http.MethodGet, "/api/v1/search?q=dune&library_id=99999", "")
 	wantStatus(t, rec, http.StatusNotFound)
+}
+
+// A search hit's date is a bare CALENDAR DAY on the wire, not a timestamp.
+//
+// This is a contract with the add dialog rather than a formatting preference:
+// AddItemModal reads "released on a known day" straight off the shape of this
+// string, so an RFC3339 spelling makes every hit from every provider read as
+// "release date unknown" and puts a confirmation in front of every add. The web
+// fixtures write bare days by hand, so only a Go test pinned to the real
+// serializer can catch the drift.
+func TestSearchSerializesDatesAsBareDays(t *testing.T) {
+	h, _, mgr := newTestServer(t)
+	mgr.provider = &stubProvider{
+		movies: []core.MovieMeta{{
+			TMDBID: 438631, Title: "Dune",
+			ReleaseDate: time.Date(2021, time.September, 15, 0, 0, 0, 0, time.UTC),
+		}},
+		series: []core.SeriesMeta{{
+			TMDBID: 1429, Title: "Attack on Titan",
+			FirstAirDate: time.Date(2013, time.April, 7, 0, 0, 0, 0, time.UTC),
+		}},
+	}
+
+	rec := do(t, h, http.MethodGet, "/api/v1/search?q=dune", "")
+	wantStatus(t, rec, http.StatusOK)
+	var body searchResponse
+	decodeBody(t, rec, &body)
+
+	if len(body.Movies) != 1 || body.Movies[0].ReleaseDate != "2021-09-15" {
+		t.Errorf("release_date = %+v, want the bare day 2021-09-15", body.Movies)
+	}
+	if len(body.Series) != 1 || body.Series[0].FirstAirDate != "2013-04-07" {
+		t.Errorf("first_air_date = %+v, want the bare day 2013-04-07", body.Series)
+	}
+
+	// A catalogue with no date says so with an empty string rather than with a
+	// zero instant, which the dialog would otherwise render as the year 1.
+	mgr.provider = &stubProvider{
+		movies: []core.MovieMeta{{TMDBID: 1, Title: "Undated"}},
+	}
+	rec = do(t, h, http.MethodGet, "/api/v1/search?q=undated&type=movie", "")
+	wantStatus(t, rec, http.StatusOK)
+	decodeBody(t, rec, &body)
+	if len(body.Movies) != 1 || body.Movies[0].ReleaseDate != "" {
+		t.Errorf("undated release_date = %+v, want the empty string", body.Movies)
+	}
 }

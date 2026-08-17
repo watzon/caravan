@@ -46,6 +46,12 @@ beforeEach(() => {
           headers: { 'Content-Type': 'application/json' },
         });
       }
+      if (url.includes('/auth/me')) {
+        return new Response(
+          JSON.stringify({ username: 'root', role: 'admin', open: false, libraries: [] }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
       throw new Error(`unexpected fetch: ${url}`);
     }),
   );
@@ -67,6 +73,15 @@ describe('applyInvalidation', () => {
     expect(urls.some((url) => url.includes('/downloads'))).toBe(true);
     expect(urls.some((url) => url.includes('/system/tasks'))).toBe(true);
     expect(urls.some((url) => url.includes('/jobs'))).toBe(true);
+  });
+
+  it('re-reads the identity on a library change, not only the counts', () => {
+    // The sidebar's shelf rows are built from /auth/me, so a library renamed,
+    // re-iconed or switched on in another browser has to reach this one's
+    // navigation and not just its badges.
+    applyInvalidation('library');
+    const urls = vi.mocked(fetch).mock.calls.map((call) => String(call[0]));
+    expect(urls.some((url) => url.includes('/auth/me'))).toBe(true);
   });
 
   it('ignores an unknown resource', () => {

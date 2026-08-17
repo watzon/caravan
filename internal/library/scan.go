@@ -313,6 +313,12 @@ func (m *Manager) scanFile(ctx context.Context, rel string, size int64, res *Sca
 	case !isScene && !isEpisode && !p.IsAbsoluteEpisode() && lib.Kind == core.LibraryKindTV:
 		// An absolute number is a season/episode claim the series has not
 		// answered yet, so it is not "no number in the filename".
+		//
+		// An ANIME library is deliberately not parked here: it holds films as
+		// well as series, so a name with no episode number is a film candidate
+		// rather than a failure, and the switch below sends it down the movie
+		// path. It still parks on the reasons every library shares — no title,
+		// low confidence, no provider.
 		park(reasonNoEpisodeNum)
 		return
 	}
@@ -342,12 +348,18 @@ func (m *Manager) scanFile(ctx context.Context, rel string, size int64, res *Sca
 	switch {
 	case isScene:
 		finalRel, err = m.matchAndImportScene(ctx, lib, rel, size, p, res, park)
-	// The library kind decides, exactly as it does above: only a TV library
-	// routes an absolute-looking name into the episode path. A movie whose
-	// title ends in a number is the shape the parser's own negative table
-	// guards against, and under a movie root it must stay a movie however the
-	// number reads.
-	case isEpisode || (lib.Kind == core.LibraryKindTV && p.IsAbsoluteEpisode()):
+	// The library kind decides, exactly as it does above: only a library that
+	// holds series routes an absolute-looking name into the episode path. A
+	// movie whose title ends in a number is the shape the parser's own negative
+	// table guards against, and under a movie root it must stay a movie however
+	// the number reads.
+	//
+	// An anime library holds both, and the order is episode-first: absolute
+	// numbering is how anime releases are named, so "Show - 112.mkv" under an
+	// anime root is episode 112 and not a film called "Show 112". A name that
+	// carries no number at all falls through to the movie path below, and that
+	// is the only shape the ordering has to decide about.
+	case isEpisode || (core.LibraryKindAccepts(lib.Kind, core.LibraryKindTV) && p.IsAbsoluteEpisode()):
 		finalRel, err = m.matchAndImportEpisode(ctx, lib, rel, size, p, res, park)
 	default:
 		finalRel, err = m.matchAndImportMovie(ctx, lib, rel, size, p, res, park)

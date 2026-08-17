@@ -115,6 +115,22 @@ describe('matchRoutes', () => {
     expect(memberAllowedRoute('/search')).toBe(false);
   });
 
+  /**
+   * The anime shelf is a shelf, so it is an admin screen exactly as /movies and
+   * /series are — the server answers a member 403 for all three. Its filter
+   * lives in the query string like every other filter over a screen.
+   */
+  it('resolves the anime shelf and keeps it an admin screen', () => {
+    expect(matchRoutes(ROUTES, '/anime')?.pattern).toBe('/anime');
+    expect(matchRoutes(ROUTES, '/anime?library=3')).toEqual({
+      pattern: '/anime',
+      params: {},
+    });
+    expect(memberAllowedRoute('/anime')).toBe(false);
+    expect(memberAllowedRoute('/movies')).toBe(false);
+    expect(memberAllowedRoute('/series')).toBe(false);
+  });
+
   // The index still matches so the brand mark can land on `/` and App can
   // forward it to Discover. It is not a redirect to the library.
   it('resolves the index and the discover screens', () => {

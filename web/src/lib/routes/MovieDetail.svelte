@@ -50,7 +50,7 @@
   $effect(() => {
     void libraries.load();
   });
-  let canMove = $derived(libraries.ofKind('movie').length > 1);
+  let canMove = $derived(libraries.accepting('movie').length > 1);
   let removing = $state(false);
   let cast = $state<CastMember[]>([]);
   let loadAbort: AbortController | null = null;

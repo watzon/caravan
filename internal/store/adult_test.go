@@ -130,13 +130,27 @@ func TestBaselineLeavesTheForeignKeysSound(t *testing.T) {
 	}
 }
 
-// The migration must not seed the Adult library. A shelf that exists on every
-// install the moment it upgrades is exactly the trace this phase forbids.
-func TestFreshInstallHasNoAdultLibrary(t *testing.T) {
+// Migration 0011 seeds the Adult library, and it must arrive DORMANT. The row
+// existing is not the trace this phase forbids — a shelf nobody can see is —
+// so what matters is that `active = 0` and `restricted = 1` make
+// core.LibraryVisible answer no to an admin as flatly as to a member. Switching
+// it on is the deliberate act that turns the module on, in place of the create
+// form that used to be the only door.
+func TestFreshInstallSeedsADormantAdultLibrary(t *testing.T) {
 	st, _ := openTemp(t)
 
-	if _, err := st.GetLibraryByKind(t.Context(), core.LibraryKindAdult); !errors.Is(err, ErrNotFound) {
-		t.Errorf("GetLibraryByKind(adult) on a fresh install = %v, want ErrNotFound", err)
+	lib, err := st.GetLibraryByKind(t.Context(), core.LibraryKindAdult)
+	if err != nil {
+		t.Fatalf("GetLibraryByKind(adult) on a fresh install: %v", err)
+	}
+	if lib.Active {
+		t.Errorf("seeded adult library is active, want it dormant")
+	}
+	if !lib.Restricted || lib.DLNAVisible || !lib.IsDefault {
+		t.Errorf("seeded adult library = %+v, want restricted, unshared and its kind's default", *lib)
+	}
+	if core.LibraryVisible(*lib, core.RoleAdmin, true) {
+		t.Errorf("the seeded adult library is visible to an admin, want the module off")
 	}
 }
 

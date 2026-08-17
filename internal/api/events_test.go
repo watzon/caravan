@@ -17,6 +17,7 @@ func TestEventsRespectAdultVisibility(t *testing.T) {
 
 	site := &core.Series{
 		Kind: core.SeriesKindAdult, StashID: "history-site", Title: "Adult Site", SortTitle: "adult site",
+		LibraryID: defaultLibraryID(t, st, core.LibraryKindAdult),
 	}
 	if err := st.UpsertSeries(ctx, site); err != nil {
 		t.Fatalf("UpsertSeries(adult): %v", err)

@@ -153,7 +153,10 @@ describe('password gate', () => {
 
     expect(host.textContent).not.toContain('This Caravan needs a password');
     expect(host.querySelector('aside')).not.toBeNull();
-    expect(host.querySelector('a[href="/movies"]')).not.toBeNull();
+    // An admin-only nav row rather than a shelf row: the shelves are built from
+    // /auth/me's `libraries`, which this stub deliberately omits so the deep
+    // equality on `session.user` below stays the whole answer.
+    expect(host.querySelector('a[href="/wanted"]')).not.toBeNull();
 
     expect(posted.map((p) => p.url)).toEqual([
       '/api/v1/auth/login',

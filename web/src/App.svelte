@@ -24,6 +24,7 @@
   import Adult from './lib/routes/Adult.svelte';
   import AdultScene from './lib/routes/AdultScene.svelte';
   import AdultSite from './lib/routes/AdultSite.svelte';
+  import Anime from './lib/routes/Anime.svelte';
   import Calendar from './lib/routes/Calendar.svelte';
   import Convert from './lib/routes/Convert.svelte';
   import Discover from './lib/routes/Discover.svelte';
@@ -79,6 +80,7 @@ import Search from './lib/routes/Search.svelte';
     '/series/:id/search': 'app.title.interactiveSearch',
     '/series/:id/search/:season': 'app.title.interactiveSearch',
     '/series/:id/search/:season/:episode': 'app.title.interactiveSearch',
+    '/anime': 'app.title.anime',
     '/adult': 'app.title.adult',
     '/adult/scenes': 'app.title.adult',
     '/adult/scenes/:provider/:stashId': 'app.title.adult',
@@ -101,7 +103,7 @@ import Search from './lib/routes/Search.svelte';
   let sidebarMenuButton = $state<HTMLButtonElement | undefined>(undefined);
 
   let addOpen = $state(false);
-  let addKind = $state<'movie' | 'series'>('movie');
+  let addKind = $state<'movie' | 'series' | 'anime'>('movie');
 
   function closeSidebar() {
     if (!sidebarOpen) return;
@@ -126,9 +128,22 @@ import Search from './lib/routes/Search.svelte';
   });
 
 
-  function openAdd(kind: 'movie' | 'series') {
+  function openAdd(kind: 'movie' | 'series' | 'anime') {
     addKind = kind;
     addOpen = true;
+  }
+
+  /**
+   * The shelf the reader is standing on, for the add dialog's opening tab.
+   *
+   * It names a KIND, not a library: the dialog turns it into that kind's
+   * default shelf, and a `?library=` on the URL — which is what every sidebar
+   * shelf row links with — is more specific and wins there.
+   */
+  function shelfAddKind(): 'movie' | 'series' | 'anime' {
+    if (router.path.startsWith('/series')) return 'series';
+    if (router.path.startsWith('/anime')) return 'anime';
+    return 'movie';
   }
 
   /**
@@ -304,7 +319,7 @@ import Search from './lib/routes/Search.svelte';
       // The dialog seeds the tab of the shelf you are standing on.
       if (!session.isAdmin) return;
       event.preventDefault();
-      openAdd(router.path.startsWith('/series') ? 'series' : 'movie');
+      openAdd(shelfAddKind());
     }
   }
 
@@ -347,7 +362,7 @@ import Search from './lib/routes/Search.svelte';
         {title}
         onadd={
           settingsSection === undefined && session.isAdmin
-            ? () => openAdd(router.path.startsWith('/series') ? 'series' : 'movie')
+            ? () => openAdd(shelfAddKind())
             : undefined
         }
         onmenu={toggleSidebar}
@@ -455,6 +470,11 @@ import Search from './lib/routes/Search.svelte';
           {#key router.path}
             <ReleaseSearch kind="movie" id={numericParam(match.params, 'id')} />
           {/key}
+        {:else if match.pattern === '/anime'}
+          <!-- The add opens on the Movies tab, as it does everywhere but the
+               series shelf: an anime library accepts both, so the tab is a
+               starting point rather than a decision. -->
+          <Anime onadd={() => openAdd('anime')} />
         {:else if match.pattern === '/series'}
           <Series onadd={() => openAdd('series')} />
         {:else if match.pattern === '/series/:id'}

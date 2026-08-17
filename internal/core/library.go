@@ -8,13 +8,65 @@ package core
 const (
 	LibraryKindMovie = "movie"
 	LibraryKindTV    = "tv"
+	// LibraryKindAnime is the one UNIFIED kind: an anime library owns films and
+	// series together, because the catalogue it identifies against does. AniList
+	// files a film and a thirteen-episode cour as two records of one vocabulary,
+	// and an owner who keeps "Anime" as a shelf means both. So this kind is the
+	// only one whose library holds two item tables at once, and
+	// LibraryKindAccepts is the single statement of that.
+	LibraryKindAnime = "anime"
 	// LibraryKindAdult is the adult module's library (PLAN phase 9). Unlike
-	// the other two it is not seeded by a migration: an install has one only
-	// once somebody creates it, because a library row is a shelf in the UI and
-	// a container in the DLNA tree, and neither may exist on an install that
-	// never asked for adult content. Creating one IS turning the module on.
+	// movie and tv it is not seeded ACTIVE: migration 0011 seeds the row so the
+	// shelf can be switched on from Libraries settings, and `active = 0` is what
+	// keeps an install that never asked for adult content free of it — a library
+	// row is a shelf in the UI and a container in the DLNA tree, and a dormant
+	// one is neither (see LibraryVisible). Switching it ON is turning the module
+	// on.
 	LibraryKindAdult = "adult"
 )
+
+// ValidLibraryKind reports whether s names a library kind Caravan stores. Like
+// ValidSeriesKind, an unknown kind is a caller mistake rejected at the edge
+// rather than defaulted: a library created under a kind nothing recognises
+// would answer no by-kind lookup and hold items nothing can file.
+func ValidLibraryKind(s string) bool {
+	switch s {
+	case LibraryKindMovie, LibraryKindTV, LibraryKindAnime, LibraryKindAdult:
+		return true
+	}
+	return false
+}
+
+// LibraryKindAccepts reports whether a library of libKind may hold an item
+// whose own vocabulary is itemKind — LibraryKindMovie for a film,
+// LibraryKindTV for a television series, LibraryKindAnime for a series already
+// filed as anime, LibraryKindAdult for a site.
+//
+// It is the ONE statement of the widening the anime kind introduced, so the
+// add validation, the move validation and the library resolver cannot disagree
+// about which shelves an item may sit on:
+//
+//   - a library always accepts its own vocabulary;
+//   - an anime library also accepts films and television series, because it is
+//     the one shelf that speaks two vocabularies at once;
+//   - a television library accepts a row already filed as anime, which is what
+//     makes the anime shelf a place a series can be moved OFF as well as onto.
+//     The move endpoint rewrites `series.kind` to match the destination, so the
+//     row and the shelf never disagree afterwards.
+//
+// Everything else is refused. In particular no widening reaches the adult kind
+// in either direction: a site's identity model is stash-box's, not a
+// catalogue's, and a shelf whose promise is absence is not a place an ordinary
+// series may drift into.
+func LibraryKindAccepts(libKind, itemKind string) bool {
+	if libKind == itemKind {
+		return true
+	}
+	if libKind == LibraryKindAnime {
+		return itemKind == LibraryKindMovie || itemKind == LibraryKindTV
+	}
+	return libKind == LibraryKindTV && itemKind == LibraryKindAnime
+}
 
 // LibraryKindForSeries maps a series kind onto the library it belongs to.
 //
@@ -25,10 +77,31 @@ const (
 // episode goes through it, so an adult episode cannot silently be graded
 // against the television library's settings.
 func LibraryKindForSeries(seriesKind string) string {
-	if seriesKind == SeriesKindAdult {
+	switch seriesKind {
+	case SeriesKindAdult:
 		return LibraryKindAdult
+	case SeriesKindAnime:
+		return LibraryKindAnime
 	}
 	return LibraryKindTV
+}
+
+// SeriesKindForLibrary is LibraryKindForSeries read the other way: the kind a
+// series row takes when the library it lands in is the only thing that says
+// what it is.
+//
+// It is what an add, an import and a move write into `series.kind`, and it is
+// deliberately total: a library kind with no series vocabulary of its own — a
+// movie library — answers television, because the only way a series reaches
+// one is a caller mistake the store then refuses loudly (store.UpsertSeries).
+func SeriesKindForLibrary(libraryKind string) string {
+	switch libraryKind {
+	case LibraryKindAdult:
+		return SeriesKindAdult
+	case LibraryKindAnime:
+		return SeriesKindAnime
+	}
+	return SeriesKindTV
 }
 
 // Library is one section of the media library — Movies, Series — as a row
@@ -48,6 +121,16 @@ type Library struct {
 	Kind string
 	// Name is the user-facing label.
 	Name string
+	// Icon is the name of the glyph the navigation draws for this library.
+	// Empty — the value every library is born with — means "use the kind's
+	// default", which is the client's decision to make and not the server's.
+	//
+	// The server is deliberately lenient about the value: it validates the
+	// SHAPE (letters, at most 32 of them) and nothing else. The alternative is a
+	// list of icon names duplicated in Go and in the SPA, where the two drift
+	// the first time somebody adds a glyph; instead the client renders the names
+	// it knows and falls back to the kind default for one it does not.
+	Icon string
 	// RootPath is the library's directory relative to the storage root, with
 	// forward slashes (SPEC §1.2 pillar 3).
 	RootPath string
@@ -126,53 +209,34 @@ func LibraryVisible(lib Library, role string, granted bool) bool {
 }
 
 // LibrarySet indexes a whole library list for the one question background work
-// asks of it: given a row's library_id and the kind it belongs to, is the
-// library that owns it switched on?
+// asks of it: given a row's library_id, is the library that owns it switched on?
 //
 // It exists so that a sweep with no caller and a request with one resolve
 // ownership the same way. The rules are api.libraryGate's, restated for callers
 // that have no identity to gate on — divergence between them would mean an item
 // the wanted list searches for and the screens refuse to show, or the reverse:
 //
-//   - a zero library_id resolves to the kind's DEFAULT library, exactly as a
-//     by-kind lookup would (pre-0022 rows, and every import that named no
-//     target, carry a zero);
-//   - a kind with no library at all is NOT active: a row belonging to a shelf
-//     that does not exist belongs nowhere, and nowhere is off. That is what
-//     keeps an adult series row on an install that never enabled the module
-//     from being wanted;
+//   - the id is the whole lookup. Migration 0011 stamped every movie and series
+//     that still carried a zero onto its kind's default, so there is no by-KIND
+//     spelling of ownership left to resolve and no kind to pass;
 //   - an id no row answers to stays active: ownership that cannot be
 //     established is not evidence of ownership.
 type LibrarySet struct {
-	byID     map[int64]Library
-	defaults map[string]int64
+	byID map[int64]Library
 }
 
 // NewLibrarySet indexes the list once, for callers that will ask about many
 // rows.
 func NewLibrarySet(libs []Library) LibrarySet {
-	s := LibrarySet{byID: make(map[int64]Library, len(libs)), defaults: map[string]int64{}}
+	s := LibrarySet{byID: make(map[int64]Library, len(libs))}
 	for _, l := range libs {
 		s.byID[l.ID] = l
-		// store.GetLibraryByKind's ordering, reproduced: is_default first, then
-		// id. Resolving a by-kind lookup differently here would answer about a
-		// different library than the one the rest of the server files rows under.
-		if cur, ok := s.defaults[l.Kind]; !ok || (l.IsDefault && !s.byID[cur].IsDefault) {
-			s.defaults[l.Kind] = l.ID
-		}
 	}
 	return s
 }
 
 // Active reports whether the library owning a row is switched on.
-func (s LibrarySet) Active(libraryID int64, kind string) bool {
-	if libraryID == 0 {
-		id, ok := s.defaults[kind]
-		if !ok {
-			return false
-		}
-		libraryID = id
-	}
+func (s LibrarySet) Active(libraryID int64) bool {
 	lib, ok := s.byID[libraryID]
 	if !ok {
 		return true

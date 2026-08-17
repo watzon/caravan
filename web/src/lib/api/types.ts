@@ -88,7 +88,7 @@ export interface Movie {
   poster_url: string;
   monitored: boolean;
   quality_profile_id: number;
-  /** The library that owns the movie; 0 on rows from before libraries were plural. */
+  /** The library that owns the movie. Every row names one. */
   library_id: number;
   release_date: string;
   /** The release stage the movie's automatic search waits for. */
@@ -150,9 +150,13 @@ export interface Series {
   poster_url: string;
   monitored: boolean;
   quality_profile_id: number;
-  /** The library that owns the series; 0 on rows from before libraries were plural. */
+  /** The library that owns the series. Every row names one. */
   library_id: number;
-  /** `tv` or `adult`. Adult series are sites; their seasons are release years. */
+  /**
+   * `tv`, `anime` or `adult`. Adult series are sites; their seasons are release
+   * years. An `anime` row lives on an anime shelf and appears on /anime rather
+   * than /series — the two lists ask GET /library/series for different kinds.
+   */
   kind?: string;
   first_aired: string;
   added_at: string;
@@ -277,6 +281,22 @@ export interface StatusCounts {
   converting?: number;
   /** Adult site count — present only when the module is visible to the caller. */
   sites?: number;
+  /**
+   * Per-library item counts, one entry per library the caller may see, which
+   * is what badges each sidebar shelf.
+   *
+   * A list rather than a map keyed by id, because JSON object keys are strings
+   * and the client would have to parse them back. Optional so a server older
+   * than the field, or a fixture written before it, reads as "no per-library
+   * badges" rather than crashing the shell.
+   */
+  libraries?: LibraryItemCount[];
+}
+
+/** One library's owned-item total (internal/api.libraryItemCountJSON). */
+export interface LibraryItemCount {
+  id: number;
+  items: number;
 }
 
 /**
@@ -493,6 +513,13 @@ export interface SessionLibrary {
   id: number;
   kind: LibraryKind;
   name: string;
+  /**
+   * See `Library.icon`. It rides on /auth/me rather than being looked up per
+   * row because this response IS the sidebar's source of data — a nav row that
+   * had to ask GET /libraries for its glyph would be asking an admin-only
+   * route on behalf of a member.
+   */
+  icon: string;
 }
 
 /**
@@ -2041,8 +2068,14 @@ export interface ApproveRequestResult {
  * server drops every row the caller may not see (internal/api.libraryGate),
  * which means a row's presence in a payload IS permission to render it, and
  * no screen needs an adult rule of its own.
+ *
+ * `anime` is the one UNIFIED kind: an anime library owns films AND series at
+ * once, because the catalogue it identifies against files both under one
+ * vocabulary. It is the reason `libraryKindAccepts` exists rather than a plain
+ * equality test — see web/src/lib/library.ts, which mirrors
+ * core.LibraryKindAccepts.
  */
-export type LibraryKind = 'movie' | 'tv' | 'adult';
+export type LibraryKind = 'movie' | 'tv' | 'anime' | 'adult';
 
 /**
  * One row of a library's indexer matrix (internal/api.libraryIndexerJSON).
@@ -2078,6 +2111,17 @@ export interface Library {
   id: number;
   kind: LibraryKind;
   name: string;
+  /**
+   * The glyph the navigation draws for this shelf, or `''` for "use the kind's
+   * default" (film, tv, sparkles, flame).
+   *
+   * The server stores any name matching `^[a-zA-Z]{0,32}$` without checking it
+   * against a list, so there is no icon vocabulary to keep in step across two
+   * languages. The SPA owns that vocabulary instead: `libraryIcon` in
+   * Icon.svelte draws the names it knows and falls back to the kind's default
+   * for everything else.
+   */
+  icon: string;
   /** Storage-root-relative and read-only: moving it is the Storage screen's job. */
   root_path: string;
   /**
@@ -2124,6 +2168,8 @@ export interface Library {
  */
 export interface LibraryPatch {
   name?: string;
+  /** See `Library.icon`. `''` resets the shelf to its kind's default glyph. */
+  icon?: string;
   /**
    * The pre-chain spelling, still accepted and read as a chain of one. New
    * writes send `providers`, which wins when both are present.

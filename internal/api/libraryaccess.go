@@ -28,10 +28,6 @@ type libraryGate struct {
 	// libraries is every row, in ListLibraries' order; byID indexes it.
 	libraries []core.Library
 	byID      map[int64]core.Library
-	// defaults is the library each kind's by-kind lookups resolve to, in
-	// GetLibraryByKind's order (is_default first, then id). It is what makes a
-	// row whose library_id is still 0 answerable.
-	defaults map[string]int64
 	// grants is the set of libraries this account holds an access row on.
 	// Empty for an admin, who bypasses restriction entirely.
 	grants map[int64]bool
@@ -87,15 +83,8 @@ func (g *libraryGate) load(ctx context.Context) error {
 	}
 	g.libraries = libs
 	g.byID = make(map[int64]core.Library, len(libs))
-	g.defaults = make(map[string]int64, 3)
 	for _, l := range libs {
 		g.byID[l.ID] = l
-		// GetLibraryByKind's ordering, reproduced: is_default first, then id.
-		// Resolving a by-kind lookup differently here would hide rows the rest
-		// of the server files under that library.
-		if cur, ok := g.defaults[l.Kind]; !ok || (l.IsDefault && !g.byID[cur].IsDefault) {
-			g.defaults[l.Kind] = l.ID
-		}
 	}
 
 	// `library_access` is the whole answer. users.adult_access was bridged onto
@@ -128,15 +117,17 @@ func (g *libraryGate) library(ctx context.Context, id int64) (core.Library, bool
 	return lib, ok, nil
 }
 
-// visible answers for a row that names its library by id.
+// visible answers for a row that names its library by id, which since
+// migration 0011 is every movie and every series: 0011 stamped the rows that
+// still carried a zero onto their kind's default, so there is no longer a
+// by-KIND spelling of ownership for this to resolve.
 //
-// Zero is "this row names no library", which is not a hiding place: an untied
-// grab, a parked file from a plain scan and every pre-0022 item carry it, and
-// they were visible before libraries had ids. A library id that resolves to no
+// Zero survives for the rows where naming no library is the truth rather than a
+// gap — an untied grab before its payload is filed, a file parked by a plain
+// scan — and it is not a hiding place: those were visible before libraries had
+// ids and nothing about them became secret. A library id that resolves to no
 // row is an orphan for the same reason the ownership filters preserve one —
 // ownership that cannot be established is not evidence of ownership.
-//
-// A row whose library is known only by KIND asks visibleKind instead.
 func (g *libraryGate) visible(ctx context.Context, libraryID int64) (bool, error) {
 	if libraryID == 0 {
 		return true, nil
@@ -179,27 +170,6 @@ func (g *libraryGate) manages(ctx context.Context, lib core.Library) (bool, erro
 	return g.allows(ctx, lib)
 }
 
-// visibleKind is visible for a row that may still be answering by kind: zero
-// resolves to the kind's default library rather than waving the row through.
-//
-// A kind with no library at all is invisible, not open. That is the whole
-// promise of absence in its general form: an adult series row on an install
-// that never enabled the module belongs to a shelf that does not exist, and a
-// shelf that does not exist shows nobody anything.
-func (g *libraryGate) visibleKind(ctx context.Context, libraryID int64, kind string) (bool, error) {
-	if err := g.load(ctx); err != nil {
-		return false, err
-	}
-	if libraryID == 0 {
-		id, ok := g.defaults[kind]
-		if !ok {
-			return false, nil
-		}
-		libraryID = id
-	}
-	return g.visible(ctx, libraryID)
-}
-
 // seesAdult reports whether this caller can see any active adult-kind library.
 //
 // It is the question the adult module's server-wide switch used to answer, and
@@ -237,13 +207,14 @@ func (g *libraryGate) visibleLibraries(ctx context.Context) ([]core.Library, err
 	return out, nil
 }
 
-// seesAll reports whether NOTHING is hidden from this caller.
+// seesAll reports whether NOTHING is hidden from this caller: every library row
+// is visible to it.
 //
-// Two conditions, and the second is the one that is easy to forget: every
-// library row must be visible, AND every kind a row can name must have a
-// library to name. A row is hidden by the ABSENCE of its shelf just as surely
-// as by a locked one — an adult series on an install with no adult library
-// belongs nowhere, and nowhere is visible to nobody (see visibleKind).
+// One condition, since every item row names its shelf by id (see visible). It
+// used to carry a second — that every kind must HAVE a library, because a row
+// resolving by kind was hidden by the absence of its shelf — and migration 0011
+// spent that: a row can only name a library that exists, so there is no kind
+// whose absence hides anything.
 //
 // It buys the ownership filters their fast path: when nothing is hidden, a
 // queue or history page needs no owner lookup per row at all, which is exactly
@@ -254,11 +225,6 @@ func (g *libraryGate) seesAll(ctx context.Context) (bool, error) {
 	}
 	for _, l := range g.libraries {
 		if !core.LibraryVisible(l, g.user.Role, g.grants[l.ID]) {
-			return false, nil
-		}
-	}
-	for _, kind := range []string{core.LibraryKindMovie, core.LibraryKindTV, core.LibraryKindAdult} {
-		if _, ok := g.defaults[kind]; !ok {
 			return false, nil
 		}
 	}

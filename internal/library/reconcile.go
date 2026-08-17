@@ -96,7 +96,7 @@ func (m *Manager) importEpisode(ctx context.Context, meta *core.SeriesMeta, rel 
 		warn("%v", err)
 	}
 
-	sr, created, err := m.upsertSeriesRow(ctx, meta, dir, posterRel, nil, lib.ID)
+	sr, created, err := m.upsertSeriesRow(ctx, meta, core.SeriesKindForLibrary(lib.Kind), dir, posterRel, nil, lib.ID)
 	if err != nil {
 		return "", 0, err
 	}
@@ -296,10 +296,10 @@ func (m *Manager) existingSeriesRow(ctx context.Context, ref core.ItemRef, tmdbI
 // the add's own choice for a new row and is ignored for an existing one — see
 // monitoredOrDefault.
 //
-// libraryID is the resolved owning library. Like monitored it decides a new
-// row only: an existing row keeps its own library (a refresh never moves an
-// item), except that a zero — a row from before 0022, or one whose library
-// vanished — is healed to the resolved value.
+// libraryID is the resolved owning library. Like monitored it decides a NEW row
+// only: an existing row keeps its own library, because a refresh never moves an
+// item. It used to carry an exception for a zero library_id; migration 0011
+// stamped those rows, so the rule is now the plain one it always read as.
 func (m *Manager) upsertMovieRow(ctx context.Context, meta *core.MovieMeta, dir, posterRel, minAvailability string, monitored *bool, libraryID int64) (*core.Movie, bool, error) {
 	mv := &core.Movie{
 		Provider:        meta.Provider,
@@ -331,9 +331,10 @@ func (m *Manager) upsertMovieRow(ctx context.Context, meta *core.MovieMeta, dir,
 		mv.Monitored = existing.Monitored
 		mv.QualityProfileID = existing.QualityProfileID
 		mv.AddedAt = existing.AddedAt
-		if existing.LibraryID != 0 {
-			mv.LibraryID = existing.LibraryID
-		}
+		// The row's own shelf wins outright: re-filing an item is the move
+		// endpoint's explicit job, never a side effect of a rescan. There is no
+		// zero left to heal — migration 0011 stamped them.
+		mv.LibraryID = existing.LibraryID
 		if posterRel == "" {
 			mv.PosterPath = existing.PosterPath
 		}
@@ -349,9 +350,18 @@ func (m *Manager) upsertMovieRow(ctx context.Context, meta *core.MovieMeta, dir,
 }
 
 // upsertSeriesRow is upsertMovieRow's series twin, with the same
-// preserve-user-intent rule (including libraryID's decide-new-heal-zero rule).
-func (m *Manager) upsertSeriesRow(ctx context.Context, meta *core.SeriesMeta, dir, posterRel string, monitored *bool, libraryID int64) (*core.Series, bool, error) {
+// preserve-user-intent rule: libraryID decides where a NEW row lands, and an
+// existing row keeps the shelf it is already on.
+//
+// seriesKind is what a NEW row is filed as, and it comes from the library the
+// row is landing in (core.SeriesKindForLibrary) because that is the only thing
+// that knows whether this is television or anime — the provider metadata does
+// not say. A row that already exists keeps its own kind for the same reason it
+// keeps its own library: re-filing an item is the move endpoint's explicit job,
+// never a side effect of an add or a rescan.
+func (m *Manager) upsertSeriesRow(ctx context.Context, meta *core.SeriesMeta, seriesKind, dir, posterRel string, monitored *bool, libraryID int64) (*core.Series, bool, error) {
 	sr := &core.Series{
+		Kind:        seriesKind,
 		Provider:    meta.Provider,
 		ProviderRef: meta.ProviderRef,
 		TMDBID:      meta.TMDBID,
@@ -377,12 +387,11 @@ func (m *Manager) upsertSeriesRow(ctx context.Context, meta *core.SeriesMeta, di
 	created := existing == nil
 	if existing != nil {
 		sr.ID = existing.ID
+		sr.Kind = existing.Kind
 		sr.Monitored = existing.Monitored
 		sr.QualityProfileID = existing.QualityProfileID
 		sr.AddedAt = existing.AddedAt
-		if existing.LibraryID != 0 {
-			sr.LibraryID = existing.LibraryID
-		}
+		sr.LibraryID = existing.LibraryID
 		if posterRel == "" {
 			sr.PosterPath = existing.PosterPath
 		}

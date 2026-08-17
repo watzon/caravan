@@ -1002,8 +1002,8 @@ func TestAddRefValidationRefusals(t *testing.T) {
 		"provider without a ref": {"/api/v1/library/series", `{"provider":"anilist"}`},
 		"ref without a provider": {"/api/v1/library/series", `{"provider_ref":"154587"}`},
 		"neither spelling":       {"/api/v1/library/movies", `{"quality_profile_id":0}`},
-		// AniList serves television only, so it may not identify a movie.
-		"provider of the wrong kind": {"/api/v1/library/movies", `{"provider":"anilist","provider_ref":"1"}`},
+		// TVmaze catalogues television only, so it may not identify a movie.
+		"provider of the wrong kind": {"/api/v1/library/movies", `{"provider":"tvmaze","provider_ref":"1"}`},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -1023,7 +1023,7 @@ func TestAddRefValidationRefusals(t *testing.T) {
 func TestAddAcceptsARefOffTheLibraryChain(t *testing.T) {
 	h, _, mgr := newTestServer(t)
 	rec := do(t, h, http.MethodPost, "/api/v1/libraries",
-		`{"kind":"tv","name":"Anime","root_path":"library/Anime","providers":["tmdb"]}`)
+		`{"kind":"tv","name":"Kids","root_path":"library/Kids","providers":["tmdb"]}`)
 	wantStatus(t, rec, http.StatusCreated)
 	var anime libraryJSON
 	decodeBody(t, rec, &anime)

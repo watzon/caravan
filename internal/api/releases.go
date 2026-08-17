@@ -611,10 +611,21 @@ func (s *server) handleMovieGrab(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A film has no kind column of its own — its library is the only thing that
+	// says whether it is an anime film — so the label costs a library read here
+	// where a series reads it off `series.kind`. The gate has the whole list
+	// cached for this request, so the read is free; a library the gate cannot
+	// resolve falls back to the movie label, which is what every film that names
+	// no shelf is.
+	category := engineCategoryMovies
+	if lib, ok, err := s.gate(r).library(r.Context(), m.LibraryID); err == nil && ok {
+		category = engineCategoryFor(lib.Kind)
+	}
+
 	s.grab(w, r, m.LibraryID, core.LibraryKindMovie, core.GrabInfo{
 		MovieID: m.ID, LibraryID: m.LibraryID,
 	}, core.AddOpts{
-		Category:  engineCategoryMovies,
+		Category:  category,
 		MovieID:   m.ID,
 		LibraryID: m.LibraryID,
 	})
@@ -686,10 +697,7 @@ func seriesGrabScope(episodes []core.Episode, season, episode int) ([]int64, int
 // importDownloadedEpisodes would then have to un-guess.
 func seriesGrabTarget(sr core.Series, seasonNum int, episodeIDs []int64) (core.GrabInfo, core.AddOpts) {
 	kind := core.LibraryKindForSeries(sr.Kind)
-	category := engineCategoryTV
-	if kind == core.LibraryKindAdult {
-		category = engineCategoryAdult
-	}
+	category := engineCategoryFor(kind)
 	return core.GrabInfo{
 			SeriesID:   sr.ID,
 			SeasonNum:  seasonNum,

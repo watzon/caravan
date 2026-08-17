@@ -16,17 +16,21 @@ import (
 // Well-known object ids. "0" is the root, fixed by the ContentDirectory
 // specification; "-1" is the parent every client expects the root to claim.
 //
-// moviesID, tvID and adultID name the DEFAULT library of their kind rather
-// than the kind itself: an install may hold several libraries per kind,
+// moviesID, tvID, animeID and adultID name the DEFAULT library of their kind
+// rather than the kind itself: an install may hold several libraries per kind,
 // and every one of them gets a container of its own. The default keeps the
 // legacy id because a television caches object ids for as long as it likes,
-// and an upgrade that renamed the three containers everybody already has would
-// empty every cached library on the LAN.
+// and an upgrade that renamed the containers everybody already has would empty
+// every cached library on the LAN.
 const (
 	rootID       = "0"
 	rootParentID = "-1"
 	moviesID     = "movies"
 	tvID         = "tv"
+	// animeID is the Anime shelf. It is the one container that holds two kinds
+	// of child at once — series containers and playable film items — because
+	// the library it stands for does (core.LibraryKindAnime).
+	animeID = "anime"
 	// adultID is the Adult shelf (PLAN phase 9 task 6). It reaches the tree
 	// through exactly the machinery the other two do — one row in `libraries`,
 	// one dlna_visible flag — and is absent from the tree for the ordinary
@@ -38,24 +42,27 @@ const (
 	libraryPrefix = "lib:"
 )
 
-// legacyContainerKind maps the three inherited container ids onto the kind
-// whose default library they name, and legacyContainerTitle onto the title
-// that library keeps regardless of what the row is called. Both directions of
-// the mapping live here so they cannot drift.
+// legacyContainerKind maps the well-known container ids onto the kind whose
+// default library they name, and legacyContainerTitle onto the title that
+// library keeps regardless of what the row is called. Both directions of the
+// mapping live here so they cannot drift.
 var (
 	legacyContainerKind = map[string]string{
 		moviesID: core.LibraryKindMovie,
 		tvID:     core.LibraryKindTV,
+		animeID:  core.LibraryKindAnime,
 		adultID:  core.LibraryKindAdult,
 	}
 	legacyContainerTitle = map[string]string{
 		core.LibraryKindMovie: "Movies",
 		core.LibraryKindTV:    "TV",
+		core.LibraryKindAnime: "Anime",
 		core.LibraryKindAdult: "Adult",
 	}
 	legacyContainerID = map[string]string{
 		core.LibraryKindMovie: moviesID,
 		core.LibraryKindTV:    tvID,
+		core.LibraryKindAnime: animeID,
 		core.LibraryKindAdult: adultID,
 	}
 )
@@ -78,17 +85,6 @@ func libraryTitle(lib core.Library) string {
 	return lib.Name
 }
 
-// ownedBy reports whether an item row belongs to this library. A zero
-// library_id is an item from before 0022, or one whose import never named a
-// target: it belongs wherever a by-kind lookup would send it, which is the
-// kind's default library (see core.Movie.LibraryID).
-func ownedBy(libraryID int64, lib core.Library) bool {
-	if libraryID == 0 {
-		return lib.IsDefault
-	}
-	return libraryID == lib.ID
-}
-
 // Object-id prefixes for the rows behind the tree. Ids are opaque strings to
 // the client, so they encode exactly what it takes to answer a BrowseMetadata
 // on them without a search: a movie item carries its file, an episode item
@@ -105,21 +101,24 @@ func ownedBy(libraryID int64, lib core.Library) bool {
 // keeps a client's cached id from outliving the owner's decision to stop
 // sharing.
 //
-// The adult shelf still carries prefixes of its own rather than reusing "s:"
-// and "e:". A site is a series row, so one id space would make "s:12"
-// ambiguous, and the two id spaces are an exposure boundary in their own right
-// (see insistShelfSeries). None of the five is a prefix of another, which is
-// what lets the switches below match in any order.
+// The adult and anime shelves each carry prefixes of their own rather than
+// reusing "s:" and "e:". Both hold `series` rows, so one id space would make
+// "s:12" ambiguous between shelves whose sharing flags are separate, and the id
+// spaces are an exposure boundary in their own right (see insistShelfSeries).
+// No prefix is a prefix of another, which is what lets the switches below match
+// in any order.
 const (
-	movieItemPrefix   = "m:"
-	seriesPrefix      = "s:"
-	episodeItemPrefix = "e:"
-	sitePrefix        = "as:"
-	sceneItemPrefix   = "ae:"
+	movieItemPrefix    = "m:"
+	seriesPrefix       = "s:"
+	episodeItemPrefix  = "e:"
+	sitePrefix         = "as:"
+	sceneItemPrefix    = "ae:"
+	animeSeriesPrefix  = "ns:"
+	animeEpisodePrefix = "ne:"
 )
 
-// shelf is one library's top-level container, holding series rows: a TV
-// library or an Adult one. Shelves differ in which library owns them, which
+// shelf is one library's top-level container, holding series rows: a TV, an
+// Anime or an Adult library. Shelves differ in which library owns them, which
 // series kind they list, how their object ids are spelled, and how a season
 // and an episode are named — and in nothing else, which is why they are one
 // code path parameterised rather than two that would drift.
@@ -142,7 +141,7 @@ type shelf struct {
 	episode func(*core.Series, core.Episode) string
 }
 
-// idSpaces are the two shelf templates: everything about a shelf that depends
+// idSpaces are the shelf templates: everything about a shelf that depends
 // on the library's KIND rather than on which library it is. shelfFor stamps a
 // library onto one of them; shelfSpaceOf recovers one from an object id, which
 // is the only thing that can be read out of the string alone.
@@ -154,6 +153,13 @@ var (
 		season:        seasonTitle,
 		episode:       episodeTitle,
 	}
+	animeIDSpace = shelf{
+		seriesKind:    core.SeriesKindAnime,
+		seriesPrefix:  animeSeriesPrefix,
+		episodePrefix: animeEpisodePrefix,
+		season:        seasonTitle,
+		episode:       episodeTitle,
+	}
 	adultIDSpace = shelf{
 		seriesKind:    core.SeriesKindAdult,
 		seriesPrefix:  sitePrefix,
@@ -161,17 +167,20 @@ var (
 		season:        yearTitle,
 		episode:       sceneTitle,
 	}
-	idSpaces = []shelf{tvIDSpace, adultIDSpace}
+	idSpaces = []shelf{tvIDSpace, animeIDSpace, adultIDSpace}
 )
 
-// shelfFor builds the shelf a tv or adult library is browsed through. A movie
-// library is not a shelf — it holds items directly, not series — so it is the
-// false return.
+// shelfFor builds the shelf a tv, anime or adult library is browsed through. A
+// movie library is not a shelf — it holds items directly, not series — so it is
+// the false return. An anime library is BOTH: it gets a shelf for its series
+// here, and its films are appended to the same container by libraryChildren.
 func shelfFor(lib core.Library) (shelf, bool) {
 	var sh shelf
 	switch lib.Kind {
 	case core.LibraryKindTV:
 		sh = tvIDSpace
+	case core.LibraryKindAnime:
+		sh = animeIDSpace
 	case core.LibraryKindAdult:
 		sh = adultIDSpace
 	default:
@@ -259,19 +268,14 @@ type visibility struct {
 	// its containers in a stable, seeded-first order.
 	libraries []core.Library
 	byID      map[int64]bool
-	// defaults is each kind's default library id, which is what an item's zero
-	// library_id resolves through.
-	defaults map[string]int64
 }
 
-// library answers for one item's owner. libID 0 means the item names no
-// library and belongs to its kind's default; a libID naming a row that is gone
-// answers false, which is the same fail-closed direction ownedBy takes — such
-// an item hangs under no container, so no id of it may be served either.
-func (v visibility) library(libID int64, kind string) bool {
-	if libID == 0 {
-		libID = v.defaults[kind]
-	}
+// library answers for one item's owner, by id: since migration 0011 every movie
+// and every series names its shelf outright. A libID naming a row that is gone —
+// or the zero an unowned file resolves to — answers false, which is fail-closed
+// in the one direction that matters here: such an item hangs under no container,
+// so no id of it may be served either.
+func (v visibility) library(libID int64) bool {
 	return v.byID[libID]
 }
 
@@ -312,13 +316,9 @@ func (s *Service) visibility(ctx context.Context) (visibility, error) {
 	v := visibility{
 		libraries: libraries,
 		byID:      make(map[int64]bool, len(libraries)),
-		defaults:  make(map[string]int64, len(legacyContainerID)),
 	}
 	for _, l := range libraries {
 		v.byID[l.ID] = l.Active && l.DLNAVisible
-		if l.IsDefault {
-			v.defaults[l.Kind] = l.ID
-		}
 	}
 	return v, nil
 }
@@ -329,9 +329,16 @@ func (s *Service) visibility(ctx context.Context) (visibility, error) {
 // that name nothing, neither of which belongs to a single library.
 func (s *Service) objectLibrary(ctx context.Context, objectID string) (libID int64, kind string, owned bool, err error) {
 	if kind, ok := legacyContainerKind[objectID]; ok {
-		// A legacy container names its kind's DEFAULT library, which is exactly
-		// what a zero library id resolves to.
-		return 0, kind, true, nil
+		// A legacy container id names a KIND rather than a row — "movies" is the
+		// id every client already has — so it is resolved to that kind's default
+		// library here. This is the one by-kind lookup the tree still makes, and
+		// it is about the ID SPACE rather than about any row: item rows all name
+		// their shelf outright.
+		lib, err := s.st.GetDefaultLibrary(ctx, kind)
+		if err != nil {
+			return 0, "", false, notFound(err)
+		}
+		return lib.ID, lib.Kind, true, nil
 	}
 	if strings.HasPrefix(objectID, libraryPrefix) {
 		id, err := strconv.ParseInt(strings.TrimPrefix(objectID, libraryPrefix), 10, 64)
@@ -387,7 +394,7 @@ func (s *Service) seriesOfObject(ctx context.Context, space shelf, objectID stri
 
 // hidden reports whether objectID belongs to a library that is not advertised.
 func (s *Service) hidden(ctx context.Context, objectID string) (bool, error) {
-	libID, kind, owned, err := s.objectLibrary(ctx, objectID)
+	libID, _, owned, err := s.objectLibrary(ctx, objectID)
 	if err != nil || !owned {
 		return false, err
 	}
@@ -395,23 +402,16 @@ func (s *Service) hidden(ctx context.Context, objectID string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return !v.library(libID, kind), nil
+	return !v.library(libID), nil
 }
 
-// libraryOf resolves the library row an item names. A zero library_id is an
-// item from before 0022 and resolves through the kind's default library, which
-// is what the zero means everywhere else (see core.Movie.LibraryID). A named
-// library that is gone is errNoObject, matching ownedBy: such an item hangs
-// under no container, so there is no container id to give it.
-func (s *Service) libraryOf(ctx context.Context, libraryID int64, kind string) (*core.Library, error) {
-	if libraryID != 0 {
-		lib, err := s.st.GetLibrary(ctx, libraryID)
-		if err != nil {
-			return nil, notFound(err)
-		}
-		return lib, nil
-	}
-	lib, err := s.st.GetDefaultLibrary(ctx, kind)
+// libraryOf resolves the library row an item names. Every movie and every
+// series names one since migration 0011, so this is a plain read: a library
+// that is gone — and the zero an item can no longer carry — is errNoObject,
+// because such an item hangs under no container and there is no container id to
+// give it.
+func (s *Service) libraryOf(ctx context.Context, libraryID int64) (*core.Library, error) {
+	lib, err := s.st.GetLibrary(ctx, libraryID)
 	if err != nil {
 		return nil, notFound(err)
 	}
@@ -457,7 +457,7 @@ func (s *Service) shelfOfSeries(ctx context.Context, space shelf, seriesID int64
 	if err != nil {
 		return shelf{}, nil, err
 	}
-	lib, err := s.libraryOf(ctx, sr.LibraryID, core.LibraryKindForSeries(sr.Kind))
+	lib, err := s.libraryOf(ctx, sr.LibraryID)
 	if err != nil {
 		return shelf{}, nil, err
 	}
@@ -488,14 +488,14 @@ func (s *Service) children(ctx context.Context, u urls, objectID string) (*didlL
 		return nil, err
 	}
 	if isContainer {
-		if lib.Kind == core.LibraryKindMovie {
-			return s.movieChildren(ctx, u, *lib)
+		kids, err := s.libraryChildren(ctx, u, *lib)
+		if err != nil {
+			return nil, err
 		}
-		sh, ok := shelfFor(*lib)
-		if !ok {
+		if kids == nil {
 			return nil, errNoObject
 		}
-		return s.seriesChildren(ctx, u, sh)
+		return kids, nil
 	}
 	space, ok := shelfSpaceOf(objectID)
 	if !ok {
@@ -605,26 +605,47 @@ func (s *Service) rootChildren(ctx context.Context, u urls) (*didlLite, error) {
 	}
 	out := newDIDL()
 	for _, lib := range v.visible() {
-		if lib.Kind == core.LibraryKindMovie {
-			movies, err := s.movieChildren(ctx, u, lib)
-			if err != nil {
-				return nil, err
-			}
-			out.Containers = append(out.Containers,
-				container(libraryContainerID(lib), rootID, libraryTitle(lib), movies.count(), ""))
-			continue
-		}
-		sh, ok := shelfFor(lib)
-		if !ok {
-			continue
-		}
-		kids, err := s.seriesChildren(ctx, u, sh)
+		kids, err := s.libraryChildren(ctx, u, lib)
 		if err != nil {
 			return nil, err
 		}
+		if kids == nil {
+			continue
+		}
 		out.Containers = append(out.Containers,
-			container(sh.containerID, rootID, sh.title, kids.count(), ""))
+			container(libraryContainerID(lib), rootID, libraryTitle(lib), kids.count(), ""))
 	}
+	return out, nil
+}
+
+// libraryChildren is what one library's top-level container holds, whatever
+// kind it is. It is one function so the root's child COUNT and the container's
+// own listing can never disagree — they are the same call.
+//
+// A movie library holds items, a tv or adult library holds series containers,
+// and an anime library holds both: its series first, then its films, which is
+// the reading order a remote control walks. A library of a kind this package
+// does not browse answers nil, and the root skips it.
+func (s *Service) libraryChildren(ctx context.Context, u urls, lib core.Library) (*didlLite, error) {
+	if lib.Kind == core.LibraryKindMovie {
+		return s.movieChildren(ctx, u, lib)
+	}
+	sh, ok := shelfFor(lib)
+	if !ok {
+		return nil, nil
+	}
+	out, err := s.seriesChildren(ctx, u, sh)
+	if err != nil {
+		return nil, err
+	}
+	if lib.Kind != core.LibraryKindAnime {
+		return out, nil
+	}
+	films, err := s.movieChildren(ctx, u, lib)
+	if err != nil {
+		return nil, err
+	}
+	out.Items = append(out.Items, films.Items...)
 	return out, nil
 }
 
@@ -658,7 +679,7 @@ func (s *Service) movieChildren(ctx context.Context, u urls, lib core.Library) (
 	parentID := libraryContainerID(lib)
 	out := newDIDL()
 	for _, m := range movies {
-		if !ownedBy(m.LibraryID, lib) {
+		if m.LibraryID != lib.ID {
 			continue
 		}
 		owned := byMovie[m.ID]
@@ -718,7 +739,7 @@ func (s *Service) shelfSeries(ctx context.Context, sh shelf) ([]core.Series, err
 	}
 	out := make([]core.Series, 0, len(all))
 	for _, sr := range all {
-		if ownedBy(sr.LibraryID, sh.library) {
+		if sr.LibraryID == sh.library.ID {
 			out = append(out, sr)
 		}
 	}
@@ -867,7 +888,7 @@ func (s *Service) movieItemMetadata(ctx context.Context, u urls, objectID string
 	}
 	// The parent is the movie's OWN library's container, so a BrowseMetadata
 	// answers with the container the item was actually browsed under.
-	lib, err := s.libraryOf(ctx, m.LibraryID, core.LibraryKindMovie)
+	lib, err := s.libraryOf(ctx, m.LibraryID)
 	if err != nil {
 		return nil, err
 	}

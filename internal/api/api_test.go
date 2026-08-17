@@ -292,11 +292,22 @@ func (m *stubManager) AddSite(ctx context.Context, ref core.ItemRef, monitored *
 		return nil, m.addSiteErr
 	}
 	stashID := ref.Ref
+	// The real AddSite resolves the target shelf before it writes, and the row
+	// it writes always names one. The stub does the same in miniature so its
+	// sites are placeable by the visibility gate.
+	if libraryID == 0 {
+		lib, err := m.st.GetDefaultLibrary(ctx, core.LibraryKindAdult)
+		if err != nil {
+			return nil, err
+		}
+		libraryID = lib.ID
+	}
 	sr := &core.Series{
 		Provider: ref.Provider, ProviderRef: stashID,
 		StashID: stashID, Title: "Stub Site", SortTitle: "stub site",
 		Kind: core.SeriesKindAdult, Monitored: monitored != nil && *monitored,
-		Path: store.AdultLibraryRoot + "/Stub Site",
+		LibraryID: libraryID,
+		Path:      store.AdultLibraryRoot + "/Stub Site",
 	}
 	if err := m.st.UpsertSeries(ctx, sr); err != nil {
 		return nil, err
@@ -625,6 +636,21 @@ func restrictedLibraryFixture(t *testing.T, st *store.Store) libraryFixture {
 // Idempotent: an adult library that already exists is switched back on rather
 // than duplicated, so a test may say "and now it is on again" without tracking
 // whether it once was.
+// defaultLibraryID is the shelf a fixture item of this kind is filed on.
+//
+// Every movie and every series names its library — migration 0011 stamped the
+// rows that carried a zero, and the visibility gate resolves ownership by id
+// alone — so a fixture that left library_id at zero would be a row no gate can
+// place, which is exactly what the adult surfaces must never contain.
+func defaultLibraryID(t *testing.T, st *store.Store, kind string) int64 {
+	t.Helper()
+	lib, err := st.GetDefaultLibrary(context.Background(), kind)
+	if err != nil {
+		t.Fatalf("GetDefaultLibrary(%s): %v", kind, err)
+	}
+	return lib.ID
+}
+
 func enableAdultLibrary(t *testing.T, st *store.Store) core.Library {
 	t.Helper()
 	ctx := context.Background()
@@ -1077,7 +1103,13 @@ func TestSystemStatus(t *testing.T) {
 		StorageRoot:   "/data",
 		SchemaVersion: got.SchemaVersion,
 		Scanning:      false,
-		Counts:        statusCounts{Movies: 1, Series: 1, MediaFiles: 1, Unmatched: 1},
+		// The per-library breakdown names the shelves this caller can see. On a
+		// fresh install that is the two ACTIVE seeded libraries — the dormant
+		// Anime and Adult rows are invisible to everyone, so they carry no badge
+		// either. Both items landed with library_id 0, so neither library counts
+		// them: the count is ownership, not attribution.
+		Counts: statusCounts{Movies: 1, Series: 1, MediaFiles: 1, Unmatched: 1,
+			Libraries: []libraryItemCountJSON{{ID: 1}, {ID: 2}}},
 		// "/data" does not exist on the test machine, so the disk stays
 		// unknown (zeros); no engine provider is wired, so unconfigured.
 		DiskFreeBytes:  0,

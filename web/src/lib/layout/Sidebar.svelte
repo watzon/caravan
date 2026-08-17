@@ -11,9 +11,15 @@
    * screens the server answers 403 for (SPEC §11). The one exception is the
    * Adult shelf, which a granted member may read — so their Library group
    * holds that row alone rather than being suppressed wholesale.
+   *
+   * The shelf rows themselves are DATA, not code: one row per library in
+   * `session.user.libraries`, which /auth/me has already narrowed to what this
+   * account may see. A second movie library is a row without an edit here, and
+   * — the bug that started this — each row links with its own `?library=` id,
+   * so the default shelf shows the default shelf rather than everything.
    */
   import { onMount } from 'svelte';
-  import { isActive } from '../router.svelte';
+  import { isActive, router } from '../router.svelte';
   import {
     SETTINGS_CATALOG,
     SETTINGS_CATEGORIES,
@@ -31,7 +37,8 @@
   import { system } from '../state/system.svelte';
   import Badge from '../components/Badge.svelte';
   import Button from '../components/Button.svelte';
-  import Icon, { type IconName } from '../components/Icon.svelte';
+  import Icon, { libraryIcon, type IconName } from '../components/Icon.svelte';
+  import { LIBRARY_KIND_ORDER, libraryPath } from '../library';
   import SafeShutdown from '../components/SafeShutdown.svelte';
   import type { Tone } from '../status';
   import {
@@ -104,11 +111,18 @@
     { href: '/requests', label: 'app.title.requests', icon: 'inbox' },
   ];
 
+  /**
+   * The Library group's FIXED rows — the ones no library row can express.
+   *
+   * The movie and series entries that used to head this list are gone: they are
+   * built from `session.user.libraries` now (see `libraryRows`). What is left is
+   * the adult shelf, which stays one row however many adult libraries exist
+   * because the module's semantics are per-account and not per-shelf, and the
+   * two cross-library lists.
+   */
   const LIBRARY: NavItem[] = [
-    { href: '/movies', label: 'app.title.movies', icon: 'film' },
-    { href: '/series', label: 'app.title.series', icon: 'tv' },
-    // Between Series and Wanted (the Paper design). It is a shelf, so it sits
-    // with the shelves rather than in Explore, even for the granted member
+    // Between the shelves and Wanted (the Paper design). It is a shelf, so it
+    // sits with the shelves rather than in Explore, even for the granted member
     // whose Library group holds nothing else.
     { href: '/adult', label: 'app.title.adult', icon: 'flame', adult: true },
     // Not the search icon any more: that belongs to the Activity group's
@@ -150,17 +164,99 @@
   let status = $derived(system.status);
 
   /**
-   * The Library group's rows for whoever is reading.
+   * One rendered row: everything the link needs, already decided.
+   *
+   * Library rows carry a library's NAME rather than a translation key, so the
+   * snippet takes resolved text. Deciding `active` and `badge` here too keeps
+   * one anchor in the template instead of one per source of rows.
+   */
+  interface NavRow {
+    href: string;
+    label: string;
+    icon: IconName;
+    active: boolean;
+    badge: NavBadge | null;
+  }
+
+  function rowOf(item: NavItem): NavRow {
+    return {
+      href: item.href,
+      label: t(item.label),
+      icon: item.icon,
+      active: isActive(item.href) || (item.alsoActiveOn ?? []).some((p) => isActive(p, true)),
+      badge: navBadge(item.href),
+    };
+  }
+
+  /**
+   * The shelves this session may see, one row each.
+   *
+   * Admin-only, and not because of the data: /auth/me sends a granted member
+   * their libraries too, but /movies, /series and /anime are admin screens
+   * (they are absent from MEMBER_ROUTES and from the server's own allowlist),
+   * so a member's row would be a door that answers 403. The adult shelf is the
+   * exception a member does get, and it is a FIXED row below rather than one of
+   * these.
+   *
+   * Grouped by kind in LIBRARY_KIND_ORDER, and within a kind in the order
+   * /auth/me sent — which is the order the libraries were created in. A kind
+   * absent from that list draws nothing, which is how this build behaves when a
+   * newer server sends it a shelf it has no screen for.
+   */
+  let libraryRows = $derived.by<NavRow[]>(() => {
+    if (!session.isAdmin) return [];
+    const shelves = session.user?.libraries ?? [];
+    const rows: NavRow[] = [];
+    for (const kind of LIBRARY_KIND_ORDER) {
+      for (const shelf of shelves) {
+        if (shelf.kind !== kind) continue;
+        const path = libraryPath(shelf.kind);
+        // Total rather than assumed: if LIBRARY_KIND_ORDER ever names a kind
+        // before its screen exists, that kind draws no row instead of a row
+        // linking to nowhere.
+        if (path === undefined) continue;
+        rows.push({
+          href: `${path}?library=${shelf.id}`,
+          label: shelf.name,
+          icon: libraryIcon(shelf.kind, shelf.icon),
+          // Both halves: the plain /movies URL still means "every visible
+          // movie", so it must light NO shelf row rather than the default one.
+          active: isActive(path) && router.params.get('library') === String(shelf.id),
+          badge: libraryBadge(shelf.id),
+        });
+      }
+    }
+    return rows;
+  });
+
+  /**
+   * The Library group's fixed rows for whoever is reading.
    *
    * An adult row needs the module to be visible to this account; every other
    * row needs the admin role. That is why the filter is per row rather than per
    * group: a granted member's Library group holds the Adult shelf and nothing
    * else, and an admin who switched the module off gets the group they had
    * before it existed.
+   *
+   * The adult row borrows the first adult library's chosen glyph, so an owner
+   * who renamed the shelf's mark sees it here as well — the row is still one
+   * row whatever the library count, because the module is what it names.
    */
-  let libraryItems = $derived(
-    LIBRARY.filter((item) => (item.adult ? session.adult : session.isAdmin)),
-  );
+  let libraryItems = $derived([
+    ...libraryRows,
+    ...LIBRARY.filter((item) => (item.adult ? session.adult : session.isAdmin)).map((item) =>
+      item.adult ? { ...rowOf(item), icon: adultIcon() } : rowOf(item),
+    ),
+  ]);
+
+  function adultIcon(): IconName {
+    const shelf = (session.user?.libraries ?? []).find((l) => l.kind === 'adult');
+    return libraryIcon('adult', shelf?.icon ?? '');
+  }
+
+  let exploreRows = $derived(EXPLORE.map(rowOf));
+  let activityRows = $derived(ACTIVITY.map(rowOf));
+  let manageRows = $derived(MANAGE.map(rowOf));
 
   /**
    * What each nav item counts, and how loudly (DESIGN.md §5/§6).
@@ -177,18 +273,6 @@
         const count = requests.pendingCount;
         return count
           ? { count, tone: 'warning', title: tp('sidebar.badge.pendingRequest', count) }
-          : null;
-      }
-      case '/movies': {
-        const count = counts?.movies ?? 0;
-        return count
-          ? { count, tone: 'neutral', title: tp('sidebar.badge.movie', count) }
-          : null;
-      }
-      case '/series': {
-        const count = counts?.series ?? 0;
-        return count
-          ? { count, tone: 'neutral', title: tp('sidebar.badge.series', count) }
           : null;
       }
       case '/adult': {
@@ -230,6 +314,19 @@
       default:
         return null;
     }
+  }
+
+  /**
+   * A shelf row's own inventory, from `status.counts.libraries`.
+   *
+   * Neutral for the same reason the whole-install counts were: inventory is
+   * information, not a summons. A library the server sent no entry for — one
+   * created since the last status read — badges nothing rather than 0, which is
+   * the same rule every other row follows.
+   */
+  function libraryBadge(id: number): NavBadge | null {
+    const count = status?.counts.libraries?.find((entry) => entry.id === id)?.items ?? 0;
+    return count ? { count, tone: 'neutral', title: tp('sidebar.badge.item', count) } : null;
   }
 
   let stack = $derived(
@@ -298,26 +395,23 @@
   </a>
 
   <nav class="flex flex-1 flex-col gap-6 overflow-y-auto px-2">
-    {#snippet navLink(item: NavItem)}
-      {@const active =
-        isActive(item.href) || (item.alsoActiveOn ?? []).some((p) => isActive(p, true))}
-      {@const badge = navBadge(item.href)}
+    {#snippet navLink(row: NavRow)}
       <!-- The accent is the box's own left border, so it wraps the rounded
            corners (the Paper mock). Inactive rows carry it transparent to
            keep every row's text on the same x. -->
       <a
-        href={item.href}
-        aria-current={active ? 'page' : undefined}
+        href={row.href}
+        aria-current={row.active ? 'page' : undefined}
         class="flex items-center gap-3 rounded-md border-l-2 py-2 pl-4 pr-3 text-base transition-colors duration-150 ease-out
-               {active
+               {row.active
           ? 'border-l-accent bg-accent-tint text-accent-text'
           : 'border-l-transparent text-ink-secondary hover:bg-raised hover:text-ink'}"
         onclick={closeForNavigation}>
-        <Icon name={item.icon} />
-        <span class="flex-1">{t(item.label)}</span>
-        {#if badge}
-          <Badge tone={badge.tone} title={badge.title} class="tabular-nums">
-            {badge.count}
+        <Icon name={row.icon} />
+        <span class="min-w-0 flex-1 truncate" title={row.label}>{row.label}</span>
+        {#if row.badge}
+          <Badge tone={row.badge.tone} title={row.badge.title} class="tabular-nums">
+            {row.badge.count}
           </Badge>
         {/if}
       </a>
@@ -383,16 +477,16 @@
     {:else}
       <div class="flex flex-col gap-1">
         <p class="micro-label px-2 pb-1">{t('sidebar.group.explore')}</p>
-        {#each EXPLORE as item (item.href)}
-          {@render navLink(item)}
+        {#each exploreRows as row (row.href)}
+          {@render navLink(row)}
         {/each}
       </div>
 
       {#if libraryItems.length > 0}
         <div class="flex flex-col gap-1">
           <p class="micro-label px-2 pb-1">{t('sidebar.group.library')}</p>
-          {#each libraryItems as item (item.href)}
-            {@render navLink(item)}
+          {#each libraryItems as row (row.href)}
+            {@render navLink(row)}
           {/each}
         </div>
       {/if}
@@ -400,15 +494,15 @@
       {#if session.isAdmin}
         <div class="flex flex-col gap-1">
           <p class="micro-label px-2 pb-1">{t('sidebar.group.activity')}</p>
-          {#each ACTIVITY as item (item.href)}
-            {@render navLink(item)}
+          {#each activityRows as row (row.href)}
+            {@render navLink(row)}
           {/each}
         </div>
 
         <div class="flex flex-col gap-1">
           <p class="micro-label px-2 pb-1">{t('sidebar.group.manage')}</p>
-          {#each MANAGE as item (item.href)}
-            {@render navLink(item)}
+          {#each manageRows as row (row.href)}
+            {@render navLink(row)}
           {/each}
         </div>
       {/if}

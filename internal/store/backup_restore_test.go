@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -461,55 +462,52 @@ func restoreBackupWithSetting(t *testing.T, value string) []byte {
 	return backup
 }
 
-func TestStageRestorePreservesOlderSchemaMigrationOnReopen(t *testing.T) {
+// versionEightBackup is a real v8 database as bytes: Goose applied up to 8 and
+// no further, one setting written, and the file snapshotted the way Store.Backup
+// snapshots one.
+//
+// It is built by MIGRATING UP rather than by editing a current database back
+// into shape. Un-migrating by hand only ever worked while every later migration
+// was trigger-shaped; 0011 rebuilds two tables and seeds two rows, and a fixture
+// that reverted the parts somebody remembered would be a v8 database in its
+// migration history and a v11 one in its schema — which is precisely the state
+// this test exists to prove is rejected.
+func versionEightBackup(t *testing.T) []byte {
+	t.Helper()
 	ctx := context.Background()
-	oldPath := filepath.Join(t.TempDir(), "v8.sqlite")
-	old, err := Open(oldPath)
+	dir := t.TempDir()
+	path := filepath.Join(dir, "v8.sqlite")
+	db, err := sql.Open("sqlite", dsn(path))
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, trigger := range []string{
-		"definition_pack_source_public_key_is_exact_on_insert",
-		"definition_pack_source_delete_is_immutable",
-		"definition_pack_revision_delete_is_immutable",
-		"definition_pack_entry_delete_is_immutable",
-		"indexer_definition_pin_matches_indexer_insert",
-		"indexer_definition_pin_matches_indexer_update",
-		"indexer_definition_update_matches_pin",
-		// 0010 replaced this trigger; the v8 fixture needs the 0008 body.
-		"definition_pack_source_public_key_is_immutable",
-	} {
-		if _, err := old.DB().Exec("DROP TRIGGER " + trigger); err != nil {
-			old.Close()
-			t.Fatalf("drop post-v8 trigger %s: %v", trigger, err)
-		}
-	}
-	if _, err := old.DB().Exec(`
-CREATE TRIGGER definition_pack_source_public_key_is_immutable
-BEFORE UPDATE OF owner_signer_key_id, owner_signer_key_fingerprint, owner_signer_public_key
-ON definition_pack_sources
-FOR EACH ROW
-WHEN OLD.owner_signer_key_id != NEW.owner_signer_key_id
-  OR OLD.owner_signer_key_fingerprint != NEW.owner_signer_key_fingerprint
-  OR OLD.owner_signer_public_key != NEW.owner_signer_public_key
-BEGIN
-    SELECT RAISE(ABORT, 'definition pack source trust key is immutable');
-END;`); err != nil {
-		old.Close()
+	defer db.Close()
+	provider, err := migrationProvider(db, storemigrations.FS())
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := old.DB().Exec("DELETE FROM caravan_schema_migrations WHERE version_id IN (9, 10)"); err != nil {
-		old.Close()
+	if _, err := provider.UpTo(ctx, 8); err != nil {
+		t.Fatalf("apply v8: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO settings (key, value, updated_at)
+		VALUES ('older-restore', 'preserved', '2026-08-17T00:00:00Z')`); err != nil {
 		t.Fatal(err)
 	}
-	if err := old.SetSetting(ctx, "older-restore", "preserved"); err != nil {
-		old.Close()
+	snapshot := filepath.Join(dir, "snapshot.sqlite")
+	if _, err := db.ExecContext(ctx, "VACUUM INTO ?", snapshot); err != nil {
+		t.Fatalf("snapshot v8 database: %v", err)
+	}
+	backup, err := os.ReadFile(snapshot)
+	if err != nil {
 		t.Fatal(err)
 	}
-	backup := storeBackup(t, old)
-	if err := old.Close(); err != nil {
-		t.Fatal(err)
-	}
+	return backup
+}
+
+func TestStageRestorePreservesOlderSchemaMigrationOnReopen(t *testing.T) {
+	ctx := context.Background()
+	backup := versionEightBackup(t)
 
 	targetPath := filepath.Join(t.TempDir(), "target.sqlite")
 	target, err := Open(targetPath)

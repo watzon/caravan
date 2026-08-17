@@ -69,16 +69,14 @@ func TestImportQueueListsParsedGuess(t *testing.T) {
 func TestImportQueueRepairsObfuscatedAdultParserGuess(t *testing.T) {
 	h, st, _ := newTestServer(t)
 	ctx := context.Background()
-	adult := &core.Library{
-		Kind:       core.LibraryKindAdult,
-		Name:       store.AdultLibraryName,
-		RootPath:   store.AdultLibraryRoot,
-		IsDefault:  true,
-		Restricted: true,
-		Active:     true,
+	// The Adult library migration 0011 seeds, switched on: `active` is the
+	// module's on-switch now that the row is always there.
+	adult, err := st.GetLibraryByKind(ctx, core.LibraryKindAdult)
+	if err != nil {
+		t.Fatalf("GetLibraryByKind(adult): %v", err)
 	}
-	if err := st.CreateLibrary(ctx, adult); err != nil {
-		t.Fatalf("CreateLibrary(adult): %v", err)
+	if err := st.SetLibraryActive(ctx, adult.ID, true); err != nil {
+		t.Fatalf("SetLibraryActive: %v", err)
 	}
 
 	const release = "AfricanCasting.20.01.26.Scarlet.XXX.1080p.MP4-WRB"
@@ -199,7 +197,7 @@ func TestImportMatchRefValidationRefusals(t *testing.T) {
 		"provider without a ref":     `{"type":"series","provider":"anilist"}`,
 		"ref without a provider":     `{"type":"series","provider_ref":"154587"}`,
 		"neither spelling":           `{"type":"movie"}`,
-		"provider of the wrong kind": `{"type":"movie","provider":"anilist","provider_ref":"1"}`,
+		"provider of the wrong kind": `{"type":"movie","provider":"tvmaze","provider_ref":"1"}`,
 	} {
 		rec := do(t, h, http.MethodPost, "/api/v1/import/queue/"+id+"/match", body)
 		if rec.Code != http.StatusBadRequest {

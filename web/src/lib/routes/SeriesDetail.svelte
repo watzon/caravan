@@ -61,7 +61,7 @@
   $effect(() => {
     void libraries.load();
   });
-  let canMove = $derived(libraries.ofKind('tv').length > 1);
+  let canMove = $derived(libraries.accepting('tv').length > 1);
   let removing = $state(false);
   let collapsed = $state<Record<number, boolean>>({});
 

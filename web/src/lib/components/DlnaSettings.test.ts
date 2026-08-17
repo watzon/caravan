@@ -8,6 +8,7 @@ const ADULT_LIBRARY: Library = {
   id: 3,
   kind: 'adult',
   name: 'Adult',
+  icon: '',
   root_path: 'library/Adult',
   provider: 'stashbox',
   providers: ['stashbox'],

@@ -52,7 +52,7 @@ func seedSecondTVLibrary(t *testing.T, st *store.Store, root string) (core.Libra
 	ctx := context.Background()
 
 	lib := &core.Library{
-		Kind: core.LibraryKindTV, Name: "Anime", RootPath: "library/Anime",
+		Kind: core.LibraryKindTV, Name: "Kids", RootPath: "library/Kids",
 		Provider: core.ProviderTMDB, DLNAVisible: true,
 	}
 	if err := st.CreateLibrary(ctx, lib); err != nil {
@@ -60,7 +60,7 @@ func seedSecondTVLibrary(t *testing.T, st *store.Store, root string) (core.Libra
 	}
 	series := &core.Series{
 		TMDBID: 209867, Title: "Frieren", SortTitle: "frieren", Year: 2023,
-		Path: "library/Anime/Frieren (2023)", LibraryID: lib.ID,
+		Path: "library/Kids/Frieren (2023)", LibraryID: lib.ID,
 	}
 	if err := st.UpsertSeries(ctx, series); err != nil {
 		t.Fatalf("UpsertSeries: %v", err)
@@ -72,7 +72,7 @@ func seedSecondTVLibrary(t *testing.T, st *store.Store, root string) (core.Libra
 	if err := st.UpsertEpisode(ctx, episode); err != nil {
 		t.Fatalf("UpsertEpisode: %v", err)
 	}
-	rel := "library/Anime/Frieren (2023)/Season 01/Frieren (2023) - S01E01.mkv"
+	rel := "library/Kids/Frieren (2023)/Season 01/Frieren (2023) - S01E01.mkv"
 	writeMedia(t, root, rel, []byte("anime-media-bytes"))
 	file := &core.MediaFile{Path: rel, Size: 17}
 	if err := st.UpsertMediaFile(ctx, file); err != nil {
@@ -104,7 +104,7 @@ func TestSecondLibraryGetsItsOwnContainer(t *testing.T) {
 	// The non-default library is named after the row; the default keeps the
 	// inherited title so existing clients see the shelf they already have.
 	titles := containerTitles(rootDoc)
-	if titles[1] != "TV" || titles[2] != "Anime" {
+	if titles[1] != "TV" || titles[2] != "Kids" {
 		t.Fatalf("root titles = %v, want the legacy TV title and the row's name", titles)
 	}
 

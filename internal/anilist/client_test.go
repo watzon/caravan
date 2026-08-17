@@ -416,29 +416,89 @@ func TestHealthyWindowAddsNoWait(t *testing.T) {
 	}
 }
 
-// AniList has films but this client maps everything onto SeriesMeta, so a chain
-// walker has to be able to skip it rather than fail on it.
-func TestMovieMethodsReportTheKindUnsupported(t *testing.T) {
-	c, s := newStub(t, nil)
+// An anime library holds films beside its series, so the film half has to come
+// out of the same catalogue. The search asks AniList for format MOVIE, and the
+// mapping is GetMovie's documented one.
+func TestSearchMoviesFiltersToFilmsAndMaps(t *testing.T) {
+	c, s := newStub(t, map[string][]response{
+		opSearchMovies: {okJSON(t, "search_movies.json")},
+	})
 
 	movies, err := c.SearchMovies(context.Background(), "your name")
-	if !errors.Is(err, core.ErrProviderKindUnsupported) {
-		t.Errorf("SearchMovies = %v, want ErrProviderKindUnsupported", err)
+	if err != nil {
+		t.Fatalf("SearchMovies: %v", err)
 	}
-	if movies != nil {
-		t.Errorf("SearchMovies returned %v, want a nil slice", movies)
+	if len(movies) != 1 {
+		t.Fatalf("SearchMovies returned %d results, want 1", len(movies))
 	}
+	got := movies[0]
+	// English is null on this record, so the romaji is the title — and with the
+	// title taken from romaji the original falls through to the native one.
+	want := core.MovieMeta{
+		Provider: ProviderID, ProviderRef: "21519",
+		Title: "Kimi no Na wa.", OriginalTitle: "君の名は。", Year: 2016,
+		ReleaseDate: time.Date(2016, 1, 1, 0, 0, 0, 0, time.UTC),
+		PosterURL:   "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx21519-1.jpg",
+	}
+	if got != want {
+		t.Errorf("SearchMovies[0] = %+v, want %+v", got, want)
+	}
+	// The filter is AniList's, not ours: nothing television-shaped may reach the
+	// picker, and asking for it in the document is what guarantees that.
+	if q := s.seen()[0].query; !strings.Contains(q, "format: MOVIE") {
+		t.Errorf("search document = %q, want it to ask for format MOVIE", q)
+	}
+}
+
+func TestGetMovieMapsTheFilmRecord(t *testing.T) {
+	c, _ := newStub(t, map[string][]response{
+		opGetMovie: {okJSON(t, "media_movie.json")},
+	})
 
 	movie, err := c.GetMovie(context.Background(), "21519")
-	if !errors.Is(err, core.ErrProviderKindUnsupported) {
-		t.Errorf("GetMovie = %v, want ErrProviderKindUnsupported", err)
+	if err != nil {
+		t.Fatalf("GetMovie: %v", err)
+	}
+	want := core.MovieMeta{
+		Provider: ProviderID, ProviderRef: "21519",
+		Title: "Your Name.", OriginalTitle: "Kimi no Na wa.", Year: 2016,
+		Overview:    "Mitsuha and Taki swap bodies across time.\n\n(Source: CoMix Wave)",
+		VoteAverage: 8.5, VoteCount: 7400,
+		ReleaseDate: time.Date(2016, 8, 26, 0, 0, 0, 0, time.UTC),
+		PosterURL:   "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21519-1.jpg",
+	}
+	if *movie != want {
+		t.Errorf("GetMovie = %+v, want %+v", *movie, want)
+	}
+}
+
+// A ref that names a real AniList record of any other format is ErrNotFound. It
+// exists, but not as a film, and answering with it would pin a movie row to a
+// television record that every later refresh would rewrite it from.
+func TestGetMovieRefusesANonFilmRecord(t *testing.T) {
+	c, _ := newStub(t, map[string][]response{
+		opGetMovie: {okJSON(t, "media_finished.json")},
+	})
+
+	movie, err := c.GetMovie(context.Background(), "98202")
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("GetMovie(tv record) = %v, want ErrNotFound", err)
 	}
 	if movie != nil {
-		t.Errorf("GetMovie returned %+v, want nil", movie)
+		t.Errorf("GetMovie(tv record) returned %+v, want nil", movie)
 	}
+}
 
+// A foreign ref is a wiring bug, and it must not cost a rate-limit token to
+// discover — the same rule GetSeries follows.
+func TestGetMovieRejectsForeignRefsWithoutAsking(t *testing.T) {
+	c, s := newStub(t, nil)
+
+	if _, err := c.GetMovie(context.Background(), "tt0903747"); !errors.Is(err, ErrInvalidRef) {
+		t.Errorf("GetMovie(imdb ref) = %v, want ErrInvalidRef", err)
+	}
 	if seen := s.seen(); len(seen) != 0 {
-		t.Errorf("an unsupported kind reached AniList as %+v", seen)
+		t.Errorf("a foreign ref reached AniList as %+v", seen)
 	}
 }
 

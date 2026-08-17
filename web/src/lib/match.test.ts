@@ -7,6 +7,7 @@ function library(overrides: Partial<Library> = {}): Library {
     id: 4,
     kind: 'movie',
     name: 'Movies',
+    icon: '',
     root_path: 'library/Movies',
     provider: 'tmdb',
     providers: ['tmdb'],

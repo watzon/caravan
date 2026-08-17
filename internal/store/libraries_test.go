@@ -23,8 +23,15 @@ func TestGetLibraryByKind(t *testing.T) {
 		t.Errorf("tv library root = %q, want %q", l.RootPath, "library/TV")
 	}
 
-	if _, err := st.GetLibraryByKind(ctx, "adult"); !errors.Is(err, ErrNotFound) {
-		t.Errorf("GetLibraryByKind(adult) error = %v, want ErrNotFound", err)
+	// Every one of the four seeded kinds answers, dormant ones included: this
+	// lookup is about which shelf a row belongs to, not about who may see it.
+	for _, kind := range []string{core.LibraryKindMovie, core.LibraryKindAnime, core.LibraryKindAdult} {
+		if _, err := st.GetLibraryByKind(ctx, kind); err != nil {
+			t.Errorf("GetLibraryByKind(%s): %v", kind, err)
+		}
+	}
+	if _, err := st.GetLibraryByKind(ctx, "nonesuch"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("GetLibraryByKind(nonesuch) error = %v, want ErrNotFound", err)
 	}
 }
 
@@ -81,12 +88,10 @@ func TestDeleteLibraryRefusesADefaultAdultLibrary(t *testing.T) {
 	ctx := context.Background()
 	st, _ := openTemp(t)
 
-	lib := &core.Library{
-		Kind: core.LibraryKindAdult, Name: AdultLibraryName, RootPath: AdultLibraryRoot,
-		Providers: []string{core.ProviderStashbox}, Restricted: true, IsDefault: true,
-	}
-	if err := st.CreateLibrary(ctx, lib); err != nil {
-		t.Fatalf("CreateLibrary(adult): %v", err)
+	// The seeded row, which is its kind's default (migration 0011).
+	lib, err := st.GetLibraryByKind(ctx, core.LibraryKindAdult)
+	if err != nil {
+		t.Fatalf("GetLibraryByKind(adult): %v", err)
 	}
 
 	if err := st.DeleteLibrary(ctx, lib.ID); !errors.Is(err, ErrLibraryIsDefault) {

@@ -40,8 +40,9 @@ type Movie struct {
 	// default profile".
 	QualityProfileID int64
 	// LibraryID references libraries.id — which movie library owns this row.
-	// Soft like QualityProfileID; 0 means "unknown", which resolves through
-	// the kind's default library until a rescan heals it from Path.
+	// Every stored row names one: migration 0011 stamped the rows that carried
+	// a zero onto their kind's default, and every write path resolves a library
+	// before it upserts. Readers therefore ask by id and nothing else.
 	LibraryID int64
 	// ReleaseDate is the theatrical release date, zero when unknown.
 	ReleaseDate time.Time
@@ -86,7 +87,15 @@ func ValidAvailability(s string) bool {
 // calendar, the import pipeline — is reused unchanged, which is the whole
 // reason a site is modelled as a series rather than as a new table.
 const (
-	SeriesKindTV    = "tv"
+	SeriesKindTV = "tv"
+	// SeriesKindAnime is a series that lives on an anime shelf. It is
+	// television in every mechanical sense — seasons, episodes, air dates, the
+	// wanted list, the calendar — and the discriminator exists for the two
+	// questions that differ: which shelf answers for it (an anime library, see
+	// LibraryKindForSeries) and which screen lists it. Without it the /anime and
+	// /series screens would have to tell the same rows apart by their library's
+	// kind, which is a join the listing endpoints do not have.
+	SeriesKindAnime = "anime"
 	SeriesKindAdult = "adult"
 )
 
@@ -95,7 +104,7 @@ const (
 // than defaulted: defaulting it either hides a television series or files an
 // adult one where everybody can see it.
 func ValidSeriesKind(s string) bool {
-	return s == SeriesKindTV || s == SeriesKindAdult
+	return s == SeriesKindTV || s == SeriesKindAnime || s == SeriesKindAdult
 }
 
 // Series is a library TV series, or — when Kind is SeriesKindAdult — a site.
@@ -141,9 +150,8 @@ type Series struct {
 	// default profile".
 	QualityProfileID int64
 	// LibraryID references libraries.id — which library owns this series. Its
-	// library's kind always agrees with Kind (UpsertSeries asserts it). Soft
-	// like QualityProfileID; 0 means "unknown", which resolves through the
-	// kind's default library until a rescan heals it from Path.
+	// library's kind always agrees with Kind (UpsertSeries asserts it), and
+	// every stored row names one, exactly as Movie.LibraryID does.
 	LibraryID int64
 	// FirstAired is the first air date, zero when unknown.
 	FirstAired time.Time

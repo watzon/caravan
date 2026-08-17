@@ -19,6 +19,7 @@ func addSite(t *testing.T, ctx context.Context, st *store.Store, title string, r
 	series := core.Series{
 		StashID: "site-" + title, Title: title, SortTitle: strings.ToLower(title),
 		Kind: core.SeriesKindAdult, Monitored: true,
+		LibraryID: defaultLibraryID(t, ctx, st, core.LibraryKindAdult),
 	}
 	if err := st.UpsertSeries(ctx, &series); err != nil {
 		t.Fatalf("upsert site: %v", err)

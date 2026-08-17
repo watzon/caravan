@@ -290,6 +290,7 @@ func TestSearchEpisodeNowHidesAnInvisibleAdultEpisode(t *testing.T) {
 
 	site := &core.Series{
 		Kind: core.SeriesKindAdult, StashID: "hidden-site", Title: "Hidden site", SortTitle: "hidden site",
+		LibraryID: defaultLibraryID(t, st, core.LibraryKindAdult),
 	}
 	if err := st.UpsertSeries(ctx, site); err != nil {
 		t.Fatalf("UpsertSeries: %v", err)

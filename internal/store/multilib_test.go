@@ -20,8 +20,8 @@ func TestMultipleLibrariesPerKind(t *testing.T) {
 	}
 	t.Cleanup(func() { st.Close() })
 
-	anime := &core.Library{Kind: core.LibraryKindTV, Name: "Anime",
-		RootPath: "library/Anime", DLNAVisible: true, Provider: core.ProviderTMDB}
+	anime := &core.Library{Kind: core.LibraryKindTV, Name: "Kids",
+		RootPath: "library/Kids", DLNAVisible: true, Provider: core.ProviderTMDB}
 	if err := st.CreateLibrary(ctx, anime); err != nil {
 		t.Fatalf("CreateLibrary: %v", err)
 	}
@@ -32,7 +32,7 @@ func TestMultipleLibrariesPerKind(t *testing.T) {
 	// A second root at the same path is the schema's refusal, not a guard
 	// anyone has to remember.
 	dup := &core.Library{Kind: core.LibraryKindMovie, Name: "Dup",
-		RootPath: "library/Anime", Provider: core.ProviderTMDB}
+		RootPath: "library/Kids", Provider: core.ProviderTMDB}
 	if err := st.CreateLibrary(ctx, dup); err == nil {
 		t.Error("CreateLibrary accepted a duplicate root_path")
 	}
@@ -68,7 +68,7 @@ func TestMultipleLibrariesPerKind(t *testing.T) {
 		t.Fatalf("GetDefaultLibrary after handoff: %v", err)
 	}
 	if def.ID != anime.ID {
-		t.Errorf("default tv library = %+v, want Anime", def)
+		t.Errorf("default tv library = %+v, want Kids", def)
 	}
 	if err := st.DeleteLibrary(ctx, anime.ID); !errors.Is(err, ErrLibraryIsDefault) {
 		t.Errorf("DeleteLibrary(default) = %v, want ErrLibraryIsDefault", err)

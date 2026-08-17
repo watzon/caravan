@@ -1,5 +1,12 @@
 <script lang="ts">
-  /** Library → Series. Same grid as Movies; the note line carries episode counts. */
+  /**
+   * Library → Series. Same grid as Movies; the note line carries episode counts,
+   * and `?library=<id>` narrows it to one shelf exactly as it does there.
+   *
+   * This screen lists television only. A series filed as anime lives on /anime
+   * — the server's `GET /library/series` defaults to `kind=tv` and the anime
+   * screen is the one that asks for the other vocabulary.
+   */
   import { onMount } from 'svelte';
   import { api, errorText } from '../api/client';
   import type { Series } from '../api/types';
@@ -18,6 +25,13 @@
   import { createSelection } from '../selection.svelte';
   import { navigate, router } from '../router.svelte';
   import {
+    filterByLibrary,
+    readLibraryFilter,
+    readShelfSort,
+    sortShelf,
+    type ShelfSortKey,
+  } from '../shelf';
+  import {
     SERIES_FILTERS,
     STATUS,
     seriesStatus,
@@ -32,9 +46,7 @@
   let { onadd }: Props = $props();
   const { t, tp } = useI18n();
 
-  type SortKey = 'title' | 'added' | 'status';
-
-  const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+  const SORT_OPTIONS: { key: ShelfSortKey; label: string }[] = [
     { key: 'added', label: t('route.library.sortAdded') },
     { key: 'title', label: t('route.library.sortTitle') },
     { key: 'status', label: t('route.library.sortStatus') },
@@ -64,20 +76,8 @@
 
   onMount(load);
 
-  function readSort(value: string | null): SortKey {
-    return value === 'title' || value === 'status' ? value : 'added';
-  }
-
-  function compareTitle(a: Series, b: Series): number {
-    return (
-      (a.sort_title || a.title).localeCompare(b.sort_title || b.title) ||
-      a.title.localeCompare(b.title) ||
-      a.id - b.id
-    );
-  }
-
   function applySort(value: string) {
-    const next = readSort(value);
+    const next = readShelfSort(value);
     const params = router.params;
     if (next === 'added') params.delete('sort');
     else params.set('sort', next);
@@ -85,9 +85,9 @@
     navigate(`${router.path}${search ? `?${search}` : ''}${router.hash}`);
   }
 
-  let sort = $derived(readSort(router.params.get('sort')));
+  let sort = $derived(readShelfSort(router.params.get('sort')));
 
-  let all = $derived(series ?? []);
+  let all = $derived(filterByLibrary(series ?? [], readLibraryFilter(router.params)));
 
   let chips = $derived<FilterChip[]>([
     { key: 'all', label: 'All', count: all.length },
@@ -105,18 +105,7 @@
       if (needle && !s.title.toLowerCase().includes(needle)) return false;
       return true;
     });
-    return [...filtered].sort((a, b) => {
-      if (sort === 'added') {
-        return b.added_at.localeCompare(a.added_at) || compareTitle(a, b);
-      }
-      if (sort === 'status') {
-        return (
-          SERIES_FILTERS.indexOf(seriesStatus(a)) - SERIES_FILTERS.indexOf(seriesStatus(b)) ||
-          compareTitle(a, b)
-        );
-      }
-      return compareTitle(a, b);
-    });
+    return sortShelf(filtered, sort, (s) => SERIES_FILTERS.indexOf(seriesStatus(s)));
   });
 
   function episodeNote(s: Series): string | null {

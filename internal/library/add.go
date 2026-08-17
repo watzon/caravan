@@ -95,7 +95,8 @@ func (m *Manager) AddSeries(ctx context.Context, ref core.ItemRef, monitored *bo
 		return nil, fmt.Errorf("library: series %s/%s not found", ref.Provider, ref.Ref)
 	}
 
-	sr, _, err := m.upsertSeriesRow(ctx, meta, m.seriesDir(lib, meta.Title, meta.Year), "", monitored, lib.ID)
+	sr, _, err := m.upsertSeriesRow(ctx, meta, core.SeriesKindForLibrary(lib.Kind),
+		m.seriesDir(lib, meta.Title, meta.Year), "", monitored, lib.ID)
 	if err != nil {
 		return nil, err
 	}

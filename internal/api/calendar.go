@@ -206,8 +206,7 @@ func (s *server) calendarEntries(ctx context.Context, gate *libraryGate, start, 
 
 	entries := make([]calendarEntry, 0, len(episodes)+len(movies))
 	for _, episode := range episodes {
-		visible, err := gate.visibleKind(ctx, episode.SeriesLibraryID,
-			core.LibraryKindForSeries(episode.SeriesKind))
+		visible, err := gate.visible(ctx, episode.SeriesLibraryID)
 		if err != nil {
 			return nil, err
 		}
@@ -230,7 +229,7 @@ func (s *server) calendarEntries(ctx context.Context, gate *libraryGate, start, 
 		})
 	}
 	for _, movie := range movies {
-		visible, err := gate.visibleKind(ctx, movie.Movie.LibraryID, core.LibraryKindMovie)
+		visible, err := gate.visible(ctx, movie.Movie.LibraryID)
 		if err != nil {
 			return nil, err
 		}

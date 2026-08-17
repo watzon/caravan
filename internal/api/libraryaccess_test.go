@@ -407,8 +407,8 @@ func TestLibraryGateReadsTheStoreOncePerRequest(t *testing.T) {
 		if _, err := gate.seesAdult(ctx); err != nil {
 			t.Fatalf("seesAdult: %v", err)
 		}
-		if _, err := gate.visibleKind(ctx, 0, core.LibraryKindTV); err != nil {
-			t.Fatalf("visibleKind: %v", err)
+		if _, err := gate.seesAll(ctx); err != nil {
+			t.Fatalf("seesAll: %v", err)
 		}
 	}
 	if !gate.loaded {

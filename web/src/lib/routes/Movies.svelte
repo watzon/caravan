@@ -1,5 +1,13 @@
 <script lang="ts">
-  /** Library → Movies. DESIGN.md §5 poster grid with status dots and quality badges. */
+  /**
+   * Library → Movies. DESIGN.md §5 poster grid with status dots and quality
+   * badges.
+   *
+   * `?library=<id>` narrows the grid to one shelf — the sidebar's movie rows
+   * all link that way — and the plain /movies URL keeps meaning "every visible
+   * movie". The narrowing happens before everything else, so the chips count
+   * and the search searches what is on screen rather than the whole install.
+   */
   import { onMount } from 'svelte';
   import { api, errorText } from '../api/client';
   import type { Movie } from '../api/types';
@@ -18,6 +26,13 @@
   import { createSelection } from '../selection.svelte';
   import { navigate, router } from '../router.svelte';
   import {
+    filterByLibrary,
+    readLibraryFilter,
+    readShelfSort,
+    sortShelf,
+    type ShelfSortKey,
+  } from '../shelf';
+  import {
     MOVIE_FILTERS,
     STATUS,
     movieStatus,
@@ -32,9 +47,7 @@
   let { onadd }: Props = $props();
   const { t } = useI18n();
 
-  type SortKey = 'title' | 'added' | 'status';
-
-  const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+  const SORT_OPTIONS: { key: ShelfSortKey; label: string }[] = [
     { key: 'added', label: t('route.library.sortAdded') },
     { key: 'title', label: t('route.library.sortTitle') },
     { key: 'status', label: t('route.library.sortStatus') },
@@ -64,20 +77,8 @@
 
   onMount(load);
 
-  function readSort(value: string | null): SortKey {
-    return value === 'title' || value === 'status' ? value : 'added';
-  }
-
-  function compareTitle(a: Movie, b: Movie): number {
-    return (
-      (a.sort_title || a.title).localeCompare(b.sort_title || b.title) ||
-      a.title.localeCompare(b.title) ||
-      a.id - b.id
-    );
-  }
-
   function applySort(value: string) {
-    const next = readSort(value);
+    const next = readShelfSort(value);
     const params = router.params;
     if (next === 'added') params.delete('sort');
     else params.set('sort', next);
@@ -85,9 +86,9 @@
     navigate(`${router.path}${search ? `?${search}` : ''}${router.hash}`);
   }
 
-  let sort = $derived(readSort(router.params.get('sort')));
+  let sort = $derived(readShelfSort(router.params.get('sort')));
 
-  let all = $derived(movies ?? []);
+  let all = $derived(filterByLibrary(movies ?? [], readLibraryFilter(router.params)));
 
   let chips = $derived<FilterChip[]>([
     { key: 'all', label: 'All', count: all.length },
@@ -105,18 +106,7 @@
       if (needle && !m.title.toLowerCase().includes(needle)) return false;
       return true;
     });
-    return [...filtered].sort((a, b) => {
-      if (sort === 'added') {
-        return b.added_at.localeCompare(a.added_at) || compareTitle(a, b);
-      }
-      if (sort === 'status') {
-        return (
-          MOVIE_FILTERS.indexOf(movieStatus(a)) - MOVIE_FILTERS.indexOf(movieStatus(b)) ||
-          compareTitle(a, b)
-        );
-      }
-      return compareTitle(a, b);
-    });
+    return sortShelf(filtered, sort, (m) => MOVIE_FILTERS.indexOf(movieStatus(m)));
   });
 </script>
 

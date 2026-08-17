@@ -180,9 +180,23 @@ func overrideLibraryIndexer(t *testing.T, ctx context.Context, st *store.Store, 
 	}
 }
 
+// defaultLibraryID is the shelf a fixture row of this kind is filed on. Every
+// item row names its library — the RSS matcher, the wanted list and the search
+// jobs all resolve ownership by id alone — so a fixture that left library_id at
+// zero would belong to no shelf and take part in nothing.
+func defaultLibraryID(t *testing.T, ctx context.Context, st *store.Store, kind string) int64 {
+	t.Helper()
+	lib, err := st.GetDefaultLibrary(ctx, kind)
+	if err != nil {
+		t.Fatalf("GetDefaultLibrary(%s): %v", kind, err)
+	}
+	return lib.ID
+}
+
 func addEpisode(t *testing.T, ctx context.Context, st *store.Store, title string) core.Episode {
 	t.Helper()
-	series := core.Series{TMDBID: 42, Title: title, SortTitle: title, Year: 2016, Monitored: true}
+	series := core.Series{TMDBID: 42, Title: title, SortTitle: title, Year: 2016, Monitored: true,
+		LibraryID: defaultLibraryID(t, ctx, st, core.LibraryKindTV)}
 	if err := st.UpsertSeries(ctx, &series); err != nil {
 		t.Fatalf("upsert series: %v", err)
 	}
@@ -521,8 +535,8 @@ func TestSameKindLibrariesSearchTheirOwnIndexers(t *testing.T) {
 	alpha := addTorznabIndexer(t, ctx, st, fake, "alpha", 5000)
 	beta := addTorznabIndexer(t, ctx, st, fake, "beta", 5000)
 
-	anime := &core.Library{Kind: core.LibraryKindTV, Name: "Anime",
-		RootPath: "library/Anime", Provider: core.ProviderTMDB}
+	anime := &core.Library{Kind: core.LibraryKindTV, Name: "Kids",
+		RootPath: "library/Kids", Provider: core.ProviderTMDB}
 	if err := st.CreateLibrary(ctx, anime); err != nil {
 		t.Fatalf("create anime library: %v", err)
 	}
@@ -640,7 +654,8 @@ func TestSearchJobsAreDroppedForAnInactiveLibrary(t *testing.T) {
 	overrideLibraryIndexer(t, ctx, st, core.LibraryKindTV, cfg.ID, true, []int{5000})
 
 	episode := addEpisode(t, ctx, st, "Example Series")
-	movie := core.Movie{TMDBID: 603, Title: "The Matrix", SortTitle: "matrix", Year: 1999, Monitored: true}
+	movie := core.Movie{TMDBID: 603, Title: "The Matrix", SortTitle: "matrix", Year: 1999, Monitored: true,
+		LibraryID: defaultLibraryID(t, ctx, st, core.LibraryKindMovie)}
 	if err := st.UpsertMovie(ctx, &movie); err != nil {
 		t.Fatalf("upsert movie: %v", err)
 	}

@@ -46,10 +46,6 @@ func (r *Runner) handleRSSSync(ctx context.Context, st *store.Store, payload jso
 	if err != nil {
 		return err
 	}
-	defaults, err := defaultLibraryIDs(ctx, st)
-	if err != nil {
-		return err
-	}
 	if r.indexers == nil {
 		return fmt.Errorf("no indexer client configured")
 	}
@@ -67,7 +63,7 @@ func (r *Runner) handleRSSSync(ctx context.Context, st *store.Store, payload jso
 			if err := st.UpsertRelease(ctx, &release); err != nil {
 				return fmt.Errorf("store: cache rss release: %w", err)
 			}
-			if err := r.matchRSSRelease(ctx, st, release, lists, feed.libsFor(release), defaults); err != nil {
+			if err := r.matchRSSRelease(ctx, st, release, lists, feed.libsFor(release)); err != nil {
 				return err
 			}
 		}
@@ -205,15 +201,11 @@ func unionCategories(feed *rssFeed) []int {
 // feed it came from answers for with this release. A library that disabled
 // the indexer, or that narrowed it to categories this release is not in, is
 // not among them — so its items never see the release even though the fetch
-// was shared. defaults maps each kind to its default library, which is what an
-// item whose library_id is still 0 belongs to.
-func (r *Runner) matchRSSRelease(ctx context.Context, st *store.Store, release core.Release, lists *wanted.Lists, libs map[int64]bool, defaults map[string]int64) error {
+// was shared. Every item names its library outright since migration 0011, so
+// the subscription is matched on that id alone.
+func (r *Runner) matchRSSRelease(ctx context.Context, st *store.Store, release core.Release, lists *wanted.Lists, libs map[int64]bool) error {
 	for _, target := range lists.Movies {
-		libID := target.Movie.LibraryID
-		if libID == 0 {
-			libID = defaults[core.LibraryKindMovie]
-		}
-		if !libs[libID] || !matchesMovie(release, target.Movie) {
+		if !libs[target.Movie.LibraryID] || !matchesMovie(release, target.Movie) {
 			continue
 		}
 		profile, err := st.ResolveItemQualityProfileByLibrary(ctx, target.Movie.LibraryID, core.LibraryKindMovie, target.QualityProfileID)
@@ -235,11 +227,7 @@ func (r *Runner) matchRSSRelease(ctx context.Context, st *store.Store, release c
 		// that shares the indexer — of the other kind or of the same one —
 		// sees the same fetch and never these releases.
 		kind := core.LibraryKindForSeries(target.SeriesKind)
-		libID := target.SeriesLibraryID
-		if libID == 0 {
-			libID = defaults[kind]
-		}
-		if !libs[libID] || !matchesRSSEpisode(release, target) {
+		if !libs[target.SeriesLibraryID] || !matchesRSSEpisode(release, target) {
 			continue
 		}
 		series, err := st.GetSeries(ctx, target.SeriesID)
@@ -259,24 +247,6 @@ func (r *Runner) matchRSSRelease(ctx context.Context, st *store.Store, release c
 		}
 	}
 	return nil
-}
-
-// defaultLibraryIDs maps each kind to its default library's id, so an item
-// whose library_id is still 0 can take part in the per-library RSS decision.
-// A kind with no library row at all is simply absent.
-func defaultLibraryIDs(ctx context.Context, st *store.Store) (map[string]int64, error) {
-	out := map[string]int64{}
-	for _, kind := range []string{core.LibraryKindMovie, core.LibraryKindTV, core.LibraryKindAdult} {
-		lib, err := st.GetDefaultLibrary(ctx, kind)
-		if errors.Is(err, store.ErrNotFound) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		out[kind] = lib.ID
-	}
-	return out, nil
 }
 
 func (r *Runner) handleBacklogSweep(ctx context.Context, st *store.Store, payload json.RawMessage) error {
@@ -327,7 +297,7 @@ func (r *Runner) handleSearchMovie(ctx context.Context, st *store.Store, payload
 	if err != nil {
 		return fmt.Errorf("store: list libraries: %w", err)
 	}
-	if !core.NewLibrarySet(libraries).Active(movie.LibraryID, core.LibraryKindMovie) {
+	if !core.NewLibrarySet(libraries).Active(movie.LibraryID) {
 		return nil
 	}
 	profile, err := st.ResolveItemQualityProfileByLibrary(ctx, movie.LibraryID, core.LibraryKindMovie, movie.QualityProfileID)
@@ -388,7 +358,7 @@ func (r *Runner) handleSearchEpisode(ctx context.Context, st *store.Store, paylo
 	if err != nil {
 		return fmt.Errorf("store: list libraries: %w", err)
 	}
-	if !core.NewLibrarySet(libraries).Active(series.LibraryID, kind) {
+	if !core.NewLibrarySet(libraries).Active(series.LibraryID) {
 		return nil
 	}
 	profile, err := st.ResolveItemQualityProfileByLibrary(ctx, series.LibraryID, kind, series.QualityProfileID)
@@ -697,8 +667,8 @@ type indexerResult struct {
 
 // searchIndexers fans one search out over the indexers the ITEM'S library
 // searches, each already carrying the categories that search must send (PLAN
-// phase 8 task 4). libraryID 0 — an item from before 0022 — resolves through
-// the kind's default library.
+// phase 8 task 4). libraryID 0 resolves through the kind's default library,
+// which is the fallback for a library that has vanished — every item names one.
 func (r *Runner) searchIndexers(ctx context.Context, st *store.Store, libraryID int64, kind string, search indexerSearch) ([]core.Release, error) {
 	settings, err := st.ResolveLibrarySettingsForItem(ctx, libraryID, kind)
 	if err != nil {
@@ -756,8 +726,25 @@ func (r *Runner) grabMovie(ctx context.Context, st *store.Store, movie core.Movi
 	} else if active {
 		return nil
 	}
-	return r.grab(ctx, st, movie.LibraryID, core.LibraryKindMovie, release, score, source, core.GrabInfo{MovieID: movie.ID}, core.AddOpts{
-		Category: "movies", MovieID: movie.ID,
+	// The shelf the film sits on decides the download route and the client-side
+	// label, exactly as grabEpisode's does — and a film is the case where the
+	// two can differ, because a movie row carries no kind of its own. An anime
+	// library's film sorts under "anime" beside that library's episodes rather
+	// than into the Movies library's download folder.
+	//
+	// The movie kind is the one library kind whose label is not its own name:
+	// "movies" is the folder every download client has always sorted, so it is
+	// spelled out where every other kind is already its own label.
+	kind := core.LibraryKindMovie
+	if lib, err := st.GetLibrary(ctx, movie.LibraryID); err == nil {
+		kind = lib.Kind
+	}
+	category := "movies"
+	if kind != core.LibraryKindMovie {
+		category = kind
+	}
+	return r.grab(ctx, st, movie.LibraryID, kind, release, score, source, core.GrabInfo{MovieID: movie.ID}, core.AddOpts{
+		Category: category, MovieID: movie.ID,
 	})
 }
 

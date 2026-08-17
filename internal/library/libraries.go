@@ -20,9 +20,12 @@ import (
 //  3. the library whose root contains the file answers for a scanned file;
 //  4. the kind's default library answers when nothing above did.
 //
-// Every step is kind-checked: a fallback that names a library of the wrong
-// kind is skipped rather than honored, because filing a movie under a tv root
-// (or an adult series anywhere else) is exactly the drift UpsertSeries refuses.
+// Every step is kind-checked through core.LibraryKindAccepts: a fallback that
+// names a library which cannot hold the item is skipped rather than honored,
+// because filing a movie under a tv root (or an adult series anywhere else) is
+// exactly the drift UpsertSeries refuses. The check is the acceptance rule
+// rather than equality because an anime library legitimately holds both films
+// and series — one shelf, two vocabularies.
 
 // libraryForPath returns the library whose root contains rel, or nil when no
 // library root does. Longest prefix wins, so if a root were ever nested inside
@@ -43,29 +46,31 @@ func libraryForPath(libs []core.Library, rel string) *core.Library {
 	return best
 }
 
-// libraryByIDOrDefault resolves id to a library of the given kind, falling
-// back to the kind's default when id is zero, names a vanished row, or names a
-// library of another kind.
+// libraryByIDOrDefault resolves id to a library that accepts the given kind,
+// falling back to the kind's default when id names a vanished row or a library
+// that cannot hold it.
+//
+// Zero takes the same fallback, and it is no longer a case with a meaning of its
+// own: migration 0011 stamped every item row that carried one, so a zero here is
+// a caller that had nothing to resolve rather than a row waiting to be healed.
 func (m *Manager) libraryByIDOrDefault(ctx context.Context, id int64, kind string) (*core.Library, error) {
-	if id != 0 {
-		lib, err := m.store.GetLibrary(ctx, id)
-		if err == nil && lib.Kind == kind {
-			return lib, nil
-		}
-		if err != nil && !errors.Is(err, store.ErrNotFound) {
-			return nil, err
-		}
+	lib, err := m.store.GetLibrary(ctx, id)
+	if err == nil && core.LibraryKindAccepts(lib.Kind, kind) {
+		return lib, nil
+	}
+	if err != nil && !errors.Is(err, store.ErrNotFound) {
+		return nil, err
 	}
 	return m.store.GetDefaultLibrary(ctx, kind)
 }
 
 // resolveLibrary applies the file-location and default steps shared by the
-// per-kind resolvers below: rel's containing library when it speaks the kind,
+// per-kind resolvers below: rel's containing library when it accepts the kind,
 // the kind's default otherwise.
 func (m *Manager) resolveLibrary(ctx context.Context, kind, rel string, targetID int64) (*core.Library, error) {
 	if targetID != 0 {
 		lib, err := m.store.GetLibrary(ctx, targetID)
-		if err == nil && lib.Kind == kind {
+		if err == nil && core.LibraryKindAccepts(lib.Kind, kind) {
 			return lib, nil
 		}
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
@@ -77,7 +82,7 @@ func (m *Manager) resolveLibrary(ctx context.Context, kind, rel string, targetID
 		if err != nil {
 			return nil, err
 		}
-		if lib := libraryForPath(libs, rel); lib != nil && lib.Kind == kind {
+		if lib := libraryForPath(libs, rel); lib != nil && core.LibraryKindAccepts(lib.Kind, kind) {
 			return lib, nil
 		}
 	}
@@ -93,7 +98,7 @@ func (m *Manager) movieLibrary(ctx context.Context, ref core.ItemRef, rel string
 	if err != nil {
 		return nil, err
 	}
-	if existing != nil && existing.LibraryID != 0 {
+	if existing != nil {
 		return m.libraryByIDOrDefault(ctx, existing.LibraryID, core.LibraryKindMovie)
 	}
 	return m.resolveLibrary(ctx, core.LibraryKindMovie, rel, targetID)
@@ -105,7 +110,7 @@ func (m *Manager) seriesLibrary(ctx context.Context, ref core.ItemRef, rel strin
 	if err != nil {
 		return nil, err
 	}
-	if existing != nil && existing.LibraryID != 0 {
+	if existing != nil {
 		return m.libraryByIDOrDefault(ctx, existing.LibraryID, core.LibraryKindTV)
 	}
 	return m.resolveLibrary(ctx, core.LibraryKindTV, rel, targetID)
@@ -121,7 +126,7 @@ func (m *Manager) seriesLibrary(ctx context.Context, ref core.ItemRef, rel strin
 func (m *Manager) siteLibrary(ctx context.Context, ref core.ItemRef, rel string, targetID int64) (*core.Library, error) {
 	if ref.Valid() {
 		existing, err := m.store.GetSeriesByProviderRef(ctx, ref.Provider, ref.Ref)
-		if err == nil && existing.LibraryID != 0 {
+		if err == nil {
 			return m.libraryByIDOrDefault(ctx, existing.LibraryID, core.LibraryKindAdult)
 		}
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
@@ -131,10 +136,9 @@ func (m *Manager) siteLibrary(ctx context.Context, ref core.ItemRef, rel string,
 	return m.resolveLibrary(ctx, core.LibraryKindAdult, rel, targetID)
 }
 
-// seriesLibraryOf resolves the library an existing series row belongs to,
-// healing a zero LibraryID through the kind's default. It is what the paths
-// that already hold a row (scene imports, site refreshes) use instead of the
-// id-based resolvers above.
+// seriesLibraryOf resolves the library an existing series row belongs to. It is
+// what the paths that already hold a row (scene imports, site refreshes) use
+// instead of the id-based resolvers above.
 func (m *Manager) seriesLibraryOf(ctx context.Context, sr *core.Series) (*core.Library, error) {
 	return m.libraryByIDOrDefault(ctx, sr.LibraryID, core.LibraryKindForSeries(sr.Kind))
 }

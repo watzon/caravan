@@ -82,12 +82,20 @@ func (m *Manager) RefreshLibrary(ctx context.Context) (*RefreshResult, error) {
 		res.Movies++
 	}
 
-	// Television series only: an adult series is refreshed from stash-box, and
-	// asking TMDB about a site would be both wrong and a request the module's
-	// switch is supposed to be able to stop.
-	series, err := m.store.ListSeriesByKind(ctx, core.SeriesKindTV)
-	if err != nil {
-		return nil, err
+	// Television and anime series: both are refreshed through the ordinary
+	// metadata seam, by the provider each row is pinned to, so the two sweep
+	// identically and an anime row's episode list stays as current as a
+	// television one's. An adult series is refreshed from stash-box instead, and
+	// asking a metadata provider about a site would be both wrong and a request
+	// the module's switch is supposed to be able to stop — so the adult kind is
+	// absent here and swept by adult.go.
+	var series []core.Series
+	for _, kind := range []string{core.SeriesKindTV, core.SeriesKindAnime} {
+		rows, err := m.store.ListSeriesByKind(ctx, kind)
+		if err != nil {
+			return nil, err
+		}
+		series = append(series, rows...)
 	}
 	for _, sr := range series {
 		if err := ctx.Err(); err != nil {
@@ -109,7 +117,7 @@ func (m *Manager) RefreshLibrary(ctx context.Context) (*RefreshResult, error) {
 		if meta == nil {
 			continue
 		}
-		row, _, err := m.upsertSeriesRow(ctx, meta, sr.Path, "", nil, sr.LibraryID)
+		row, _, err := m.upsertSeriesRow(ctx, meta, sr.Kind, sr.Path, "", nil, sr.LibraryID)
 		if err != nil {
 			return res, err
 		}

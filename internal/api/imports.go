@@ -156,11 +156,12 @@ func (s *server) handleImportMatch(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	kind := core.LibraryKindMovie
+	// body.Type is already the item vocabulary itemRefFrom validates a ref
+	// against, so the switch only has the scene gate left to do: naming a scene
+	// is adult vocabulary, and a caller who cannot see the module is answered
+	// as though the type did not exist.
 	switch body.Type {
-	case MediaTypeMovie:
-	case MediaTypeSeries:
-		kind = core.LibraryKindTV
+	case MediaTypeMovie, MediaTypeSeries:
 	case MediaTypeScene:
 		adult, err := s.gate(r).seesAdult(r.Context())
 		if err != nil {
@@ -171,12 +172,11 @@ func (s *server) handleImportMatch(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "not found")
 			return
 		}
-		kind = core.LibraryKindAdult
 	default:
 		writeError(w, http.StatusBadRequest, "type must be movie, series, or scene")
 		return
 	}
-	ref, ok := s.itemRefFrom(r.Context(), w, body.Provider, body.ProviderRef, body.TMDBID, kind)
+	ref, ok := s.itemRefFrom(r.Context(), w, body.Provider, body.ProviderRef, body.TMDBID, body.Type)
 	if !ok {
 		return
 	}

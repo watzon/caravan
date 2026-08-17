@@ -840,21 +840,21 @@ func TestScanSkipsAnInactiveLibraryAndKeepsItsRows(t *testing.T) {
 	h := newHarness(t)
 	seedSeries(h)
 
-	anime := &core.Library{Kind: core.LibraryKindTV, Name: "Anime",
-		RootPath: "library/Anime", Provider: core.ProviderTMDB}
+	anime := &core.Library{Kind: core.LibraryKindTV, Name: "Kids",
+		RootPath: "library/Kids", Provider: core.ProviderTMDB}
 	if err := h.st.CreateLibrary(ctx, anime); err != nil {
 		t.Fatalf("CreateLibrary: %v", err)
 	}
 
-	raw := "library/Anime/Planet.Earth.II.S01E01.720p.mkv"
+	raw := "library/Kids/Planet.Earth.II.S01E01.720p.mkv"
 	h.parser["Planet.Earth.II.S01E01.720p.mkv"] = episodeParse("Planet Earth II", 1, 1)
 	h.writeVideo(raw, "episode bytes")
 	if res := h.scan(); res.Added != 1 {
 		t.Fatalf("first scan: %+v", res)
 	}
-	const organized = "library/Anime/Planet Earth II (2016)/Season 01/Planet Earth II (2016) - S01E01 - Islands.mkv"
+	const organized = "library/Kids/Planet Earth II (2016)/Season 01/Planet Earth II (2016) - S01E01 - Islands.mkv"
 	if !h.exists(organized) {
-		t.Fatalf("first scan did not organize into the Anime library")
+		t.Fatalf("first scan did not organize into the Kids library")
 	}
 
 	if err := h.st.SetLibraryActive(ctx, anime.ID, false); err != nil {
@@ -863,7 +863,7 @@ func TestScanSkipsAnInactiveLibraryAndKeepsItsRows(t *testing.T) {
 	// A new file dropped into the dormant root while it is off, so the walk has
 	// something to find if it walks at all.
 	h.parser["Planet.Earth.II.S01E02.720p.mkv"] = episodeParse("Planet Earth II", 1, 2)
-	h.writeVideo("library/Anime/Planet.Earth.II.S01E02.720p.mkv", "second episode bytes")
+	h.writeVideo("library/Kids/Planet.Earth.II.S01E02.720p.mkv", "second episode bytes")
 
 	res := h.scan()
 	if res.Scanned != 0 || res.Added != 0 || res.Unmatched != 0 || res.Removed != 0 {
@@ -891,7 +891,7 @@ func TestScanSkipsAnInactiveLibraryAndKeepsItsRows(t *testing.T) {
 	if res.Added != 1 || res.Updated != 1 || len(res.Errors) != 0 {
 		t.Fatalf("rescan after reactivation: %+v", res)
 	}
-	const second = "library/Anime/Planet Earth II (2016)/Season 01/Planet Earth II (2016) - S01E02 - Mountains.mkv"
+	const second = "library/Kids/Planet Earth II (2016)/Season 01/Planet Earth II (2016) - S01E02 - Mountains.mkv"
 	if !h.exists(second) {
 		t.Errorf("reactivating did not find the file dropped while the library was off")
 	}

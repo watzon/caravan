@@ -150,7 +150,7 @@ func (f *libraryOwnershipFilter) seriesVisibleTo(ctx context.Context, seriesID i
 	case err != nil:
 		return false, err
 	default:
-		visible, err = f.gate.visibleKind(ctx, sr.LibraryID, core.LibraryKindForSeries(sr.Kind))
+		visible, err = f.gate.visible(ctx, sr.LibraryID)
 		if err != nil {
 			return false, err
 		}
@@ -173,7 +173,7 @@ func (f *libraryOwnershipFilter) movieVisibleTo(ctx context.Context, movieID int
 	case err != nil:
 		return false, err
 	default:
-		visible, err = f.gate.visibleKind(ctx, m.LibraryID, core.LibraryKindMovie)
+		visible, err = f.gate.visible(ctx, m.LibraryID)
 		if err != nil {
 			return false, err
 		}

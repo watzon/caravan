@@ -488,8 +488,9 @@ async function listOf<T>(
   path: string,
   key: string,
   signal?: AbortSignal,
+  query?: RequestOptions['query'],
 ): Promise<T[]> {
-  const payload = await request<Record<string, T[]>>(path, { signal });
+  const payload = await request<Record<string, T[]>>(path, { signal, query });
   return payload?.[key] ?? [];
 }
 
@@ -700,8 +701,17 @@ export const api = {
       query: { files: files ? 'true' : undefined },
     }),
 
-  listSeries: (signal?: AbortSignal) =>
-    listOf<Series>(endpoints.seriesList(), 'series', signal),
+  /**
+   * The television shelf, or the anime one.
+   *
+   * The kind is a query parameter rather than a second endpoint because it is a
+   * filter over one list (the router doctrine, applied to the API): the rows,
+   * the gate and the episode counts are identical, and only the vocabulary the
+   * caller wants differs. Omitting it asks for `tv`, so every existing caller
+   * keeps its answer byte for byte. Adult sites stay on their own endpoints.
+   */
+  listSeries: (options: { kind?: 'tv' | 'anime'; signal?: AbortSignal } = {}) =>
+    listOf<Series>(endpoints.seriesList(), 'series', options.signal, { kind: options.kind }),
 
   getSeries: (id: number, signal?: AbortSignal) =>
     request<Series>(endpoints.series(id), { signal }),

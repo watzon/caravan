@@ -82,7 +82,7 @@
   $effect(() => {
     void libraries.load();
   });
-  let canMove = $derived(libraries.ofKind('adult').length > 1);
+  let canMove = $derived(libraries.accepting('adult').length > 1);
   let removing = $state(false);
 
   /**

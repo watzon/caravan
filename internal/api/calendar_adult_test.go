@@ -21,6 +21,7 @@ func seedScene(t *testing.T, st *store.Store, title string, when time.Time) {
 	series := &core.Series{
 		StashID: "site-" + title, Title: title, SortTitle: strings.ToLower(title),
 		Kind: core.SeriesKindAdult, Monitored: true,
+		LibraryID: defaultLibraryID(t, st, core.LibraryKindAdult),
 	}
 	if err := st.UpsertSeries(ctx, series); err != nil {
 		t.Fatalf("UpsertSeries: %v", err)
@@ -234,12 +235,14 @@ func TestSeriesScreenAndStatusCountHoldNoSites(t *testing.T) {
 	rec = do(t, h, http.MethodGet, "/api/v1/system/status", "")
 	wantStatus(t, rec, http.StatusOK)
 	var status struct {
-		Counts map[string]int `json:"counts"`
+		Counts struct {
+			Series int `json:"series"`
+		} `json:"counts"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &status); err != nil {
 		t.Fatalf("decode status: %v", err)
 	}
-	if got := status.Counts["series"]; got != 1 {
+	if got := status.Counts.Series; got != 1 {
 		t.Errorf("status series count = %d, want 1 (the site must not be counted)", got)
 	}
 }

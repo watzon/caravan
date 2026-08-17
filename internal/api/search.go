@@ -35,35 +35,43 @@ type movieMetaJSON struct {
 	// this title's id in that provider's own numbering. The pair is the only
 	// thing that identifies a hit from a chain of more than one provider: two
 	// providers' ids are different numbers for different things.
-	Provider      string  `json:"provider"`
-	ProviderRef   string  `json:"provider_ref"`
-	IMDBID        string  `json:"imdb_id"`
-	Title         string  `json:"title"`
-	OriginalTitle string  `json:"original_title"`
-	Year          int     `json:"year"`
-	Overview      string  `json:"overview"`
-	ReleaseDate   string  `json:"release_date"`
-	VoteAverage   float64 `json:"vote_average"`
-	VoteCount     int     `json:"vote_count"`
-	PosterURL     string  `json:"poster_url"`
+	Provider      string `json:"provider"`
+	ProviderRef   string `json:"provider_ref"`
+	IMDBID        string `json:"imdb_id"`
+	Title         string `json:"title"`
+	OriginalTitle string `json:"original_title"`
+	Year          int    `json:"year"`
+	Overview      string `json:"overview"`
+	// ReleaseDate is a BARE day, "2013-04-07", empty when the catalogue has
+	// none. A search hit's date is a calendar fact rather than an instant —
+	// nobody publishes a cinema release at a time of day — and the add dialog
+	// tells "released on a known day" from "date unknown" by the shape of this
+	// string, so an RFC3339 spelling here reads as "unknown" for every hit from
+	// every provider. jsonDate rather than jsonTime, and pinned by
+	// TestSearchSerializesDatesAsBareDays.
+	ReleaseDate string  `json:"release_date"`
+	VoteAverage float64 `json:"vote_average"`
+	VoteCount   int     `json:"vote_count"`
+	PosterURL   string  `json:"poster_url"`
 }
 
 type seriesMetaJSON struct {
 	TMDBID int64 `json:"tmdb_id"`
 	// Provider and ProviderRef read exactly as movieMetaJSON's do.
-	Provider      string  `json:"provider"`
-	ProviderRef   string  `json:"provider_ref"`
-	TVDBID        int64   `json:"tvdb_id"`
-	IMDBID        string  `json:"imdb_id"`
-	Title         string  `json:"title"`
-	OriginalTitle string  `json:"original_title"`
-	Year          int     `json:"year"`
-	Overview      string  `json:"overview"`
-	Status        string  `json:"status"`
-	FirstAirDate  string  `json:"first_air_date"`
-	VoteAverage   float64 `json:"vote_average"`
-	VoteCount     int     `json:"vote_count"`
-	PosterURL     string  `json:"poster_url"`
+	Provider      string `json:"provider"`
+	ProviderRef   string `json:"provider_ref"`
+	TVDBID        int64  `json:"tvdb_id"`
+	IMDBID        string `json:"imdb_id"`
+	Title         string `json:"title"`
+	OriginalTitle string `json:"original_title"`
+	Year          int    `json:"year"`
+	Overview      string `json:"overview"`
+	Status        string `json:"status"`
+	// FirstAirDate is a bare day, exactly as movieMetaJSON.ReleaseDate is.
+	FirstAirDate string  `json:"first_air_date"`
+	VoteAverage  float64 `json:"vote_average"`
+	VoteCount    int     `json:"vote_count"`
+	PosterURL    string  `json:"poster_url"`
 }
 
 // searchResponse keeps the two media types in separate lists rather than one
@@ -128,17 +136,25 @@ func (s *server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A named library answers about ONE kind of thing, so only the half its
-	// kind speaks can run: a television library's chain has no vocabulary for a
-	// movie query, and asking it anyway would return whatever the chain's
-	// providers happen to say about films that are not going on that shelf.
+	// A named library answers only about the kinds of thing it can HOLD, so a
+	// half whose vocabulary the shelf does not speak is dropped: a television
+	// library's chain has no vocabulary for a movie query, and asking it anyway
+	// would return whatever the chain's providers happen to say about films that
+	// are not going on that shelf.
+	//
+	// core.LibraryKindAccepts rather than equality, for the reason the add
+	// validation uses it: an anime library holds films and series together, so
+	// BOTH halves run for one — and type=all on an anime library means both
+	// halves of that one shelf, which is exactly right. Equality here answered a
+	// named anime library with two empty lists whatever the caller asked for.
+	//
 	// With no library named, both halves run against their own defaults, which
 	// is what type=all has always meant.
 	runMovies := kind == TypeAll || kind == MediaTypeMovie
 	runSeries := kind == TypeAll || kind == MediaTypeSeries
 	if lib != nil {
-		runMovies = runMovies && lib.Kind == core.LibraryKindMovie
-		runSeries = runSeries && lib.Kind == core.LibraryKindTV
+		runMovies = runMovies && core.LibraryKindAccepts(lib.Kind, core.LibraryKindMovie)
+		runSeries = runSeries && core.LibraryKindAccepts(lib.Kind, core.LibraryKindTV)
 	}
 
 	ctx := r.Context()
@@ -283,7 +299,7 @@ func movieMetaDTO(m core.MovieMeta) movieMetaJSON {
 		OriginalTitle: m.OriginalTitle,
 		Year:          m.Year,
 		Overview:      m.Overview,
-		ReleaseDate:   jsonTime(m.ReleaseDate),
+		ReleaseDate:   jsonDate(m.ReleaseDate),
 		VoteAverage:   m.VoteAverage,
 		VoteCount:     m.VoteCount,
 		PosterURL:     m.PosterURL,
@@ -302,7 +318,7 @@ func seriesMetaDTO(sr core.SeriesMeta) seriesMetaJSON {
 		Year:          sr.Year,
 		Overview:      sr.Overview,
 		Status:        sr.Status,
-		FirstAirDate:  jsonTime(sr.FirstAirDate),
+		FirstAirDate:  jsonDate(sr.FirstAirDate),
 		VoteAverage:   sr.VoteAverage,
 		VoteCount:     sr.VoteCount,
 		PosterURL:     sr.PosterURL,

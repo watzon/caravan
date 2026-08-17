@@ -9,6 +9,7 @@
 
 import { downloads } from './downloads.svelte';
 import { requests } from './requests.svelte';
+import { session } from './session.svelte';
 import { system } from './system.svelte';
 import { tasks } from './tasks.svelte';
 
@@ -18,6 +19,11 @@ export function applyInvalidation(resource: string): void {
   switch (resource) {
     case 'library':
       void system.refresh();
+      // The identity as well as the counts: since the sidebar's shelf rows are
+      // built from /auth/me, a library renamed, re-iconed, switched on or
+      // created in ANOTHER browser has to reach this one's navigation, not just
+      // its badges. `library` is the resource every one of those writes emits.
+      void session.refresh();
       return;
     case 'requests':
       void requests.refresh();

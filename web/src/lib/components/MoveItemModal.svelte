@@ -5,8 +5,14 @@
    * The move itself is a durable background job — a series can be hundreds of
    * files — so confirming answers immediately and the caller shows a toast;
    * the activity feed carries the completion. The dropdown offers every
-   * library of the item's kind except the one it is already in: moving to
-   * where it lives is a no-op nobody needs a button for.
+   * library that ACCEPTS the item's kind except the one it is already in:
+   * moving to where it lives is a no-op nobody needs a button for.
+   *
+   * Accepts rather than matches, because an anime library holds films and
+   * series together — so a film may move onto an anime shelf and a series may
+   * move between the television and anime shelves. The server rewrites
+   * `series.kind` to match the destination, so the row and the shelf never
+   * disagree afterwards.
    */
   import { api, errorText } from '../api/client';
   import type { LibraryKind } from '../api/types';
@@ -22,6 +28,7 @@
     itemType: 'movie' | 'series';
     itemID: number;
     itemTitle: string;
+    /** The item's OWN vocabulary — 'movie', 'tv', 'adult' — not its shelf's. */
     kind: LibraryKind;
     /** The library the item is in now, excluded from the choices. */
     currentLibraryID: number;
@@ -34,7 +41,7 @@
   const { t } = useI18n();
 
   let busy = $state(false);
-  let choices = $derived(libraries.ofKind(kind).filter((l) => l.id !== currentLibraryID));
+  let choices = $derived(libraries.accepting(kind).filter((l) => l.id !== currentLibraryID));
   let targetID = $state(0);
   $effect(() => {
     if (targetID === 0 && choices.length > 0) targetID = choices[0]!.id;

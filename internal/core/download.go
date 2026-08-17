@@ -327,8 +327,11 @@ type GrabInfo struct {
 	// LibraryID is the library the grab's payload belongs to. On a grab tied
 	// to a movie or series it mirrors the item's own library; on a universal
 	// search grab tied to nothing it is the WHOLE target — the finished
-	// download parks in scan review scoped to this library. 0 on rows from
-	// before universal search existed.
+	// download parks in scan review scoped to this library.
+	//
+	// Zero is a grab that names no library, and unlike a movie's or a series'
+	// library_id it is a real state rather than a gap: the queue, a pause and a
+	// removal belong to no shelf. It is stored as SQL NULL for that reason.
 	LibraryID int64
 }
 

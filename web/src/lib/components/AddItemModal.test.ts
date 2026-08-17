@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import AddItemModal from './AddItemModal.svelte';
 import type { MovieMeta, SeriesMeta, SessionUser } from '../api/types';
+import { navigate } from '../router.svelte';
 import { session } from '../state/session.svelte';
 import { clearToasts, toasts } from '../state/toast.svelte';
 
@@ -1399,8 +1400,17 @@ describe('AddItemModal — metadata credential', () => {
   });
 });
 
+/**
+ * The target library (the user's decision: every library is a tab).
+ *
+ * The tabs at the top of the dialog ARE the target — there is no second
+ * control answering the same question underneath them — so what is asserted
+ * here is that the row is built from the library list, that the tab the dialog
+ * opens on is the shelf the reader was standing on, and that the tab the user
+ * pressed is the library the add lands in.
+ */
 describe('AddItemModal — target library', () => {
-  afterEach(() => {
+  afterEach(async () => {
     if (app) unmount(app);
     app = undefined;
     host?.remove();
@@ -1408,6 +1418,12 @@ describe('AddItemModal — target library', () => {
     vi.unstubAllGlobals();
     vi.useRealTimers();
     clearToasts();
+    session.user = null;
+    // The store is a session-wide singleton, so a list left behind would decide
+    // the tabs of the next describe.
+    const { libraries } = await import('../state/libraries.svelte');
+    libraries.all = [];
+    libraries.loaded = false;
   });
 
   function lib(over: Record<string, unknown>) {
@@ -1415,10 +1431,14 @@ describe('AddItemModal — target library', () => {
       id: 1,
       kind: 'tv',
       name: 'Series',
+      icon: '',
       root_path: 'library/TV',
       provider: 'tmdb',
+      providers: ['tmdb'],
       is_default: true,
       item_count: 0,
+      active: true,
+      restricted: false,
       dlna_visible: true,
       route_torrent: '',
       route_usenet: '',
@@ -1428,21 +1448,28 @@ describe('AddItemModal — target library', () => {
     };
   }
 
-  it('offers a library select when a kind has several and sends the pick', async () => {
-    vi.useFakeTimers();
-    const calls: { url: string; method: string; body: unknown }[] = [];
-    const series = [
-      {
-        tmdb_id: 2,
-        title: 'Frieren',
-        year: 2023,
-        overview: '',
-        first_air_date: '2023-09-29',
-        vote_average: 8.9,
-        vote_count: 1000,
-        poster_url: '',
-      },
-    ];
+  interface Call {
+    url: string;
+    method: string;
+    body: unknown;
+  }
+
+  /**
+   * Answers /libraries with `rows` and /search with `results`; any POST is a
+   * created item. Every request is recorded, so a test can assert both what was
+   * asked and what was never asked.
+   */
+  async function stubLibraries(
+    rows: Record<string, unknown>[],
+    results: (url: string) => { movies: unknown[]; series: unknown[] } = () => ({
+      movies: [],
+      series: [],
+    }),
+    // Non-200 makes GET /libraries fail, which is what a member reaching the
+    // admin-only route sees and what an admin sees when the request errors.
+    librariesStatus = 200,
+  ): Promise<Call[]> {
+    const calls: Call[] = [];
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -1453,56 +1480,486 @@ describe('AddItemModal — target library', () => {
           method,
           body: typeof init?.body === 'string' ? JSON.parse(init.body) : null,
         });
-        let payload: unknown = { movies: [], series };
-        let status = 200;
+        const json = (payload: unknown, status = 200) =>
+          new Response(JSON.stringify(payload), {
+            status,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        if (method === 'POST') return json({ id: 7, title: 'Added' }, 201);
+        if (url.includes('/libraries/providers')) return json({ providers: [] });
         if (url.includes('/libraries')) {
-          payload = {
-            libraries: [
-              lib({}),
-              lib({ id: 9, name: 'Anime', root_path: 'library/Anime', is_default: false }),
-            ],
-          };
-        } else if (method === 'POST') {
-          payload = { id: 7, title: 'Frieren' };
-          status = 201;
+          if (librariesStatus !== 200) return json({ error: 'forbidden' }, librariesStatus);
+          return json({ libraries: rows });
         }
-        return new Response(JSON.stringify(payload), {
-          status,
-          headers: { 'Content-Type': 'application/json' },
-        });
+        return json({ ...results(url), providers: ['tmdb'], library_id: 0, errors: [] });
       }),
     );
-
     const { libraries } = await import('../state/libraries.svelte');
     await libraries.load(true);
+    return calls;
+  }
 
-    mountModal({ initialKind: 'series' });
-    await vi.advanceTimersByTimeAsync(0);
+  function tabNames(): string[] {
+    return [...host!.querySelectorAll('[role="tab"]')].map((t) => t.textContent?.trim() ?? '');
+  }
+
+  function selected(): string | null {
+    return host!.querySelector('[role="tab"][aria-selected="true"]')?.textContent?.trim() ?? null;
+  }
+
+  function pressTabButton(name: string) {
+    const tab = [...host!.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(
+      (button) => button.textContent?.trim() === name,
+    );
+    expect(tab, `a tab named ${name}`).toBeTruthy();
+    tab!.click();
     flushSync();
+  }
 
-    const select = host!.querySelector(
-      'select[aria-label="Target library"]',
-    ) as HTMLSelectElement;
-    expect(select, 'library select').not.toBeNull();
-    select.value = '9';
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-    flushSync();
-
+  async function type(text: string) {
     const input = host!.querySelector('input[type="search"]') as HTMLInputElement;
-    input.value = 'frieren';
+    input.value = text;
     input.dispatchEvent(new Event('input', { bubbles: true }));
     flushSync();
     await vi.advanceTimersByTimeAsync(300);
     flushSync();
+  }
 
-    const add = host!.querySelector('ul button') as HTMLButtonElement;
-    add.click();
+  const SHELVES = [
+    lib({ id: 5, kind: 'movie', name: 'Kids', root_path: 'library/Kids', is_default: false }),
+    lib({ id: 1, kind: 'movie', name: 'Movies', root_path: 'library/Movies' }),
+    lib({ id: 2, kind: 'tv', name: 'Series' }),
+    // Dormant: the admin list still carries it, because the switch that undoes
+    // that lives on the admin screen.
+    lib({ id: 3, kind: 'anime', name: 'Anime', root_path: 'library/Anime', active: false }),
+    // Present, but the module is invisible to this session.
+    lib({ id: 9, kind: 'adult', name: 'Adult', root_path: 'library/Adult' }),
+  ];
+
+  it('draws one tab per active library, in shelf order, named by the library', async () => {
+    vi.useFakeTimers();
+    await stubLibraries(SHELVES);
+    mountModal();
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    // Films before television, the kind's default before the rest, and no tab
+    // at all for a dormant shelf or for a module this session cannot see.
+    expect(tabNames()).toEqual(['Movies', 'Kids', 'Series']);
+    expect(selected()).toBe('Movies');
+  });
+
+  it('offers no second control answering the same question', async () => {
+    vi.useFakeTimers();
+    await stubLibraries(SHELVES);
+    mountModal();
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    // The positive first, so the two absences below mean "no second control"
+    // rather than "no dialog".
+    expect(tabNames()).toEqual(['Movies', 'Kids', 'Series']);
+    // The tabs ARE the target; a select underneath them could disagree.
+    expect(host!.querySelector('select[aria-label="Target library"]')).toBeNull();
+    expect(host!.textContent).not.toContain('Target library');
+  });
+
+  it('sends the pressed tab’s library on the add, not the default shelf’s', async () => {
+    vi.useFakeTimers();
+    const calls = await stubLibraries(SHELVES, () => ({
+      movies: [
+        {
+          tmdb_id: 4,
+          title: 'Ponyo',
+          year: 2008,
+          overview: '',
+          release_date: '2008-07-19',
+          vote_average: 7.7,
+          vote_count: 4_000,
+          poster_url: '',
+        },
+      ],
+      series: [],
+    }));
+    mountModal();
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    pressTabButton('Kids');
+    await type('ponyo');
+    (host!.querySelector('ul button') as HTMLButtonElement).click();
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    // The chain that answered is the chain that files it: both the search and
+    // the add name the second movie shelf.
+    expect(calls.filter((c) => c.url.includes('/api/v1/search')).at(-1)!.url).toContain(
+      'library_id=5',
+    );
+    const post = calls.find((c) => c.method === 'POST');
+    expect(post?.url).toBe('/api/v1/library/movies');
+    expect(post?.body).toMatchObject({ tmdb_id: 4, library_id: 5 });
+  });
+
+  it('opens on the shelf the URL behind the dialog is filtered to', async () => {
+    vi.useFakeTimers();
+    await stubLibraries(SHELVES);
+    navigate('/movies?library=5', { replace: true });
+    mountModal();
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    expect(selected()).toBe('Kids');
+
+    // A shelf that is not a tab preselects nothing: back to the seeded kind's
+    // default, which is where an untargeted add lands anyway.
+    unmount(app!);
+    app = undefined;
+    host?.remove();
+    navigate('/adult?library=9', { replace: true });
+    mountModal();
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    expect(selected()).toBe('Movies');
+    navigate('/', { replace: true });
+  });
+
+  it('opens on the seeded kind’s default shelf', async () => {
+    vi.useFakeTimers();
+    await stubLibraries(SHELVES);
+    mountModal({ initialKind: 'series' });
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    expect(selected()).toBe('Series');
+  });
+
+  it('cycles Tab through every tab there is, however many that is', async () => {
+    vi.useFakeTimers();
+    await stubLibraries(SHELVES);
+    mountModal();
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    const input = host!.querySelector('input')!;
+    const cycle = () => {
+      input.dispatchEvent(
+        new KeyboardEvent('keydown', { key: 'Tab', cancelable: true, bubbles: true }),
+      );
+      flushSync();
+      return selected();
+    };
+    expect(cycle()).toBe('Kids');
+    expect(cycle()).toBe('Series');
+    expect(cycle()).toBe('Movies');
+  });
+
+  /**
+   * An anime library holds films AND series, so its tab is the one that shows
+   * both at once — the same rule the server's add validation applies
+   * (core.LibraryKindAccepts) and the /anime screen renders.
+   */
+  describe('an anime shelf', () => {
+    const ANIME_SHELVES = [
+      lib({ id: 1, kind: 'movie', name: 'Movies', root_path: 'library/Movies' }),
+      lib({
+        id: 3,
+        kind: 'anime',
+        name: 'Anime',
+        root_path: 'library/Anime',
+        provider: 'anilist',
+        providers: ['anilist'],
+      }),
+    ];
+
+    const FILM = {
+      tmdb_id: 0,
+      provider: 'anilist',
+      provider_ref: '199',
+      title: 'Spirited Away',
+      year: 2001,
+      overview: '',
+      release_date: '2001-07-20',
+      vote_average: 8.6,
+      vote_count: 5_000,
+      poster_url: '',
+    };
+    const SHOW = {
+      tmdb_id: 0,
+      provider: 'anilist',
+      provider_ref: '113415',
+      title: 'Jujutsu Kaisen',
+      year: 2020,
+      overview: '',
+      first_air_date: '2020-10-03',
+      vote_average: 8.6,
+      vote_count: 3_000,
+      poster_url: '',
+    };
+
+    /**
+     * The endpoint answers exactly the halves it was asked for: `type=all`
+     * against an anime shelf is both of them, `type=movie` is the film half
+     * alone (internal/api.handleSearch).
+     */
+    const halves = (url: string) => ({
+      movies: url.includes('type=movie') || url.includes('type=all') ? [FILM] : [],
+      series: url.includes('type=series') || url.includes('type=all') ? [SHOW] : [],
+    });
+
+    async function openAnimeTab(props: Parameters<typeof mountModal>[0] = {}) {
+      mountModal(props);
+      await vi.advanceTimersByTimeAsync(0);
+      flushSync();
+      pressTabButton('Anime');
+    }
+
+    it('asks both halves of the shelf’s chain and shows one list', async () => {
+      vi.useFakeTimers();
+      const calls = await stubLibraries(ANIME_SHELVES, halves);
+      await openAnimeTab();
+      await type('a');
+      await type('spirited');
+
+      // One question, not two: `type=all` named a shelf means both halves of
+      // that shelf, so the server walks the chain twice and merges the report.
+      const searches = calls.filter((c) => c.url.includes('/api/v1/search'));
+      expect(searches.map((c) => c.url)).toEqual([
+        '/api/v1/search?q=spirited&type=all&library_id=3',
+      ]);
+
+      // Both catalogues, each row saying which one it came from — without that
+      // badge the two halves are one indistinguishable list.
+      const rows = [...host!.querySelectorAll('ul li')];
+      expect(rows).toHaveLength(2);
+      expect(rows[0]!.textContent).toContain('Spirited Away');
+      expect(rows[0]!.textContent).toContain('Film');
+      expect(rows[1]!.textContent).toContain('Jujutsu Kaisen');
+      expect(rows[1]!.textContent).toContain('Series');
+    });
+
+    it('routes each add to its own endpoint, both on the anime shelf', async () => {
+      vi.useFakeTimers();
+      const calls = await stubLibraries(ANIME_SHELVES, halves);
+      // `onadded` keeps the dialog open, so both halves can be added in one go.
+      await openAnimeTab({ onadded: () => {} });
+      await type('spirited');
+
+      const buttons = [...host!.querySelectorAll<HTMLButtonElement>('ul button')];
+      expect(buttons).toHaveLength(2);
+      buttons[0]!.click();
+      await vi.advanceTimersByTimeAsync(0);
+      flushSync();
+      buttons[1]!.click();
+      await vi.advanceTimersByTimeAsync(0);
+      flushSync();
+
+      const posts = calls.filter((c) => c.method === 'POST');
+      expect(posts.map((c) => c.url)).toEqual([
+        '/api/v1/library/movies',
+        '/api/v1/library/series',
+      ]);
+      expect(posts[0]!.body).toMatchObject({ provider_ref: '199', library_id: 3 });
+      expect(posts[1]!.body).toMatchObject({ provider_ref: '113415', library_id: 3 });
+    });
+
+    it('does not claim TMDB for a shelf chained to AniList', async () => {
+      vi.useFakeTimers();
+      await stubLibraries(ANIME_SHELVES, halves);
+      await openAnimeTab();
+
+      const input = host!.querySelector('input[type="search"]')!;
+      expect(input.getAttribute('placeholder')).toBe(
+        'Search metadata providers for a film or series...',
+      );
+      expect(input.getAttribute('aria-label')).toBe('Search metadata providers');
+      expect(host!.textContent).not.toContain('TMDB');
+    });
+
+    it('offers the shelf to a caller that fixed a kind, searching that kind alone', async () => {
+      vi.useFakeTimers();
+      const calls = await stubLibraries(ANIME_SHELVES, halves);
+      mountModal({ kind: 'movie' });
+      await vi.advanceTimersByTimeAsync(0);
+      flushSync();
+
+      // Acceptance, not equality: an anime shelf takes a film. But the caller
+      // already knows it needs one, so the tab must not offer series as well.
+      expect(tabNames()).toEqual(['Movies', 'Anime']);
+      pressTabButton('Anime');
+      await type('spirited');
+
+      expect(calls.filter((c) => c.url.includes('/api/v1/search')).map((c) => c.url)).toEqual([
+        '/api/v1/search?q=spirited&type=movie&library_id=3',
+      ]);
+      expect(host!.querySelectorAll('ul li')).toHaveLength(1);
+    });
+  });
+
+  it('leaves the adult module its own tabs, and only where it is visible', async () => {
+    vi.useFakeTimers();
+    await stubLibraries([
+      lib({ id: 1, kind: 'movie', name: 'Movies', root_path: 'library/Movies' }),
+      lib({ id: 9, kind: 'adult', name: 'Adult', root_path: 'library/Adult' }),
+      lib({
+        id: 10,
+        kind: 'adult',
+        name: 'Vintage',
+        root_path: 'library/Vintage',
+        is_default: false,
+      }),
+    ]);
+    session.user = { username: 'root', role: 'admin', open: false, adult: true };
+    mountModal();
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    // Adult shelves sort last — LIBRARY_KIND_ORDER leaves the kind out because
+    // the sidebar collapses it — and nothing widens into or out of them.
+    expect(tabNames()).toEqual(['Movies', 'Adult', 'Vintage']);
+
+    pressTabButton('Vintage');
+    expect(host!.querySelector('input[type="search"]')?.getAttribute('placeholder')).toBe(
+      'Site name...',
+    );
+  });
+
+  it('hides every adult shelf from a session the module is invisible to', async () => {
+    vi.useFakeTimers();
+    const calls = await stubLibraries([
+      lib({ id: 1, kind: 'movie', name: 'Movies', root_path: 'library/Movies' }),
+      lib({ id: 9, kind: 'adult', name: 'Adult', root_path: 'library/Adult' }),
+    ]);
+    session.user = { username: 'root', role: 'admin', open: false, adult: false };
+    mountModal();
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    // One tab left, so no tab row at all — and no route to an adult request.
+    expect(tabNames()).toEqual([]);
+    await type('brazzers');
+    expect(calls.filter((c) => c.url.includes('/adult'))).toEqual([]);
+  });
+
+  /**
+   * A caller that already knows the library — the grab tie — gets that shelf
+   * and no other. Offering a second tab there would offer a path that ends in
+   * "does not belong to that library" (internal/api.itemInLibrary).
+   */
+  it('narrows the tabs to the one shelf a caller named', async () => {
+    vi.useFakeTimers();
+    const calls = await stubLibraries(SHELVES, () => ({
+      movies: [
+        {
+          tmdb_id: 4,
+          title: 'Ponyo',
+          year: 2008,
+          overview: '',
+          release_date: '2008-07-19',
+          vote_average: 7.7,
+          vote_count: 4_000,
+          poster_url: '',
+        },
+      ],
+      series: [],
+    }));
+    mountModal({ libraryID: 5, onadded: () => {} });
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    // One target is not a choice, so there is no tab row at all.
+    expect(tabNames()).toEqual([]);
+
+    await type('ponyo');
+    (host!.querySelector('ul button') as HTMLButtonElement).click();
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    expect(calls.filter((c) => c.url.includes('/api/v1/search')).at(-1)!.url).toContain(
+      'library_id=5',
+    );
+    expect(calls.find((c) => c.method === 'POST')?.body).toMatchObject({ library_id: 5 });
+  });
+
+  /**
+   * Pick mode is the flavour that names a title rather than filing one: the
+   * scan-review manual match. It keeps the bare Movies/Series pills it has
+   * always had, and the library list is not its business even when another
+   * surface has already loaded it.
+   */
+  /**
+   * The other half of the same fallback, and the one a member reaches: an admin
+   * whose /libraries request failed, and anybody the admin-only route refuses,
+   * both end up with an empty store — and must still get a dialog that searches
+   * and adds, rather than a tab row with nothing in it.
+   */
+  const PONYO = {
+    tmdb_id: 4,
+    provider: 'tmdb',
+    provider_ref: '4',
+    title: 'Ponyo',
+    year: 2008,
+    overview: '',
+    release_date: '2008-07-19',
+    vote_average: 7.7,
+    vote_count: 4_000,
+    poster_url: '',
+  };
+
+  it('falls back to the kind pills when the library list cannot be read', async () => {
+    vi.useFakeTimers();
+    session.user = { username: 'ada', role: 'member', open: false, adult: true, libraries: [] };
+    const calls = await stubLibraries([], undefined, 403);
+    mountModal();
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    // Bare kinds, not shelves: the tablist says so, and no pill wears a glyph.
+    expect(tabNames()).toEqual(['Movies', 'Series', 'Adult']);
+    expect(host!.querySelector('[role="tablist"]')?.getAttribute('aria-label')).toBe(
+      'Search type',
+    );
+    expect(host!.querySelector('[role="tab"] svg')).toBeNull();
+    // And the route really was asked and really did refuse, so what is on screen
+    // is the fallback rather than a list that happened to be empty.
+    expect(calls.some((c) => c.url.includes('/libraries'))).toBe(true);
+  });
+
+  it('adds without naming a library at all when the list could not be read', async () => {
+    vi.useFakeTimers();
+    const calls = await stubLibraries([], () => ({ movies: [PONYO], series: [] }), 403);
+    mountModal();
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    await type('ponyo');
+    const add = host!.querySelector<HTMLButtonElement>('ul button');
+    expect(add, 'an Add button on the one result').toBeTruthy();
+    add!.click();
     await vi.advanceTimersByTimeAsync(0);
     flushSync();
 
     const post = calls.find((c) => c.method === 'POST');
-    expect(post?.url).toBe('/api/v1/library/series');
-    expect(post?.body).toMatchObject({ tmdb_id: 2, library_id: 9 });
+    expect(post?.url).toContain('/library/movies');
+    // No library_id: the server files an untargeted add on the kind's default,
+    // which is exactly what a dialog with no shelf list can promise.
+    expect((post?.body as Record<string, unknown>)?.library_id).toBeUndefined();
+  });
+
+  it('leaves pick mode its kind pills, whatever the store holds', async () => {
+    vi.useFakeTimers();
+    await stubLibraries(SHELVES);
+    mountModal({ onpick: () => {} });
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+
+    expect(tabNames()).toEqual(['Movies', 'Series']);
+    expect(host!.querySelector('[role="tablist"]')?.getAttribute('aria-label')).toBe(
+      'Search type',
+    );
+    // No shelf glyphs either: a pill is a kind, not a library.
+    expect(host!.querySelector('[role="tab"] svg')).toBeNull();
   });
 });
 
@@ -1524,7 +1981,7 @@ describe('AddItemModal — target library', () => {
 describe('AddItemModal — provider chains', () => {
   const PROVIDERS = [
     { id: 'tmdb', name: 'TMDB', kinds: ['movie', 'tv'] },
-    { id: 'anilist', name: 'AniList', kinds: ['tv'] },
+    { id: 'anilist', name: 'AniList', kinds: ['anime'] },
   ];
 
   /** Two providers' hits in one list, the AniList ones with no TMDB id at all. */
@@ -1572,11 +2029,14 @@ describe('AddItemModal — provider chains', () => {
       id: 1,
       kind: 'tv',
       name: 'Series',
+      icon: '',
       root_path: 'library/TV',
       provider: 'tmdb',
       providers: ['tmdb'],
       is_default: true,
       item_count: 0,
+      active: true,
+      restricted: false,
       dlna_visible: true,
       route_torrent: '',
       route_usenet: '',
@@ -1664,10 +2124,13 @@ describe('AddItemModal — provider chains', () => {
     flushSync();
   }
 
-  function targetSelect(): HTMLSelectElement {
-    const found = host!.querySelector('select[aria-label="Target library"]');
-    expect(found, 'library select').not.toBeNull();
-    return found as HTMLSelectElement;
+  function pressTabButton(name: string) {
+    const tab = [...host!.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(
+      (button) => button.textContent?.trim() === name,
+    );
+    expect(tab, `a tab named ${name}`).toBeTruthy();
+    tab!.click();
+    flushSync();
   }
 
   afterEach(async () => {
@@ -1739,7 +2202,7 @@ describe('AddItemModal — provider chains', () => {
     );
   });
 
-  it('re-asks the search when the target library changes, naming the new one', async () => {
+  it('re-asks the search when the tab changes, naming the new library', async () => {
     vi.useFakeTimers();
     stubChain();
     await loadStores();
@@ -1748,13 +2211,11 @@ describe('AddItemModal — provider chains', () => {
     flushSync();
 
     await type('jujutsu');
-    // The default library needs no id: an absent library_id already means it.
-    expect(searches().at(-1)!.url).toBe('/api/v1/search?q=jujutsu&type=series');
+    // A tab is a library, so every search names one — the default shelf
+    // included, which used to travel as no library_id at all.
+    expect(searches().at(-1)!.url).toBe('/api/v1/search?q=jujutsu&type=series&library_id=1');
 
-    const select = targetSelect();
-    select.value = '9';
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-    flushSync();
+    pressTabButton('Anime');
     await vi.advanceTimersByTimeAsync(300);
     flushSync();
 

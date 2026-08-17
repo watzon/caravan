@@ -14,7 +14,10 @@ export default defineConfig(({ mode }) => ({
   },
   server: {
     host: '127.0.0.1',
-    port: 5173,
+    // One above the Go server's :8677 (SPEC §10), so the dev pair sits
+    // together — and off :5173, which every other Vite app on the machine
+    // fights over.
+    port: 8678,
     strictPort: true,
     // `caravan serve` default listen address (SPEC §10). Used when the
     // browser is pointed at Vite directly; `just dev` also reverse-proxies

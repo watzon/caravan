@@ -106,7 +106,7 @@ func Compute(ctx context.Context, st *store.Store) (*Lists, error) {
 
 	out := &Lists{Movies: []Movie{}, Episodes: []Episode{}}
 	for _, ms := range movieStates {
-		if !owners.Active(ms.Movie.LibraryID, core.LibraryKindMovie) {
+		if !owners.Active(ms.Movie.LibraryID) {
 			continue
 		}
 		// A movie that has not reached its minimum availability is never
@@ -126,7 +126,7 @@ func Compute(ctx context.Context, st *store.Store) (*Lists, error) {
 		out.Movies = append(out.Movies, Movie{Movie: ms.Movie, Reason: reason, FileQuality: ms.FileQuality})
 	}
 	for _, es := range episodeStates {
-		if !owners.Active(es.SeriesLibraryID, core.LibraryKindForSeries(es.SeriesKind)) {
+		if !owners.Active(es.SeriesLibraryID) {
 			continue
 		}
 		// An episode with no known air date is treated as aired: providers do

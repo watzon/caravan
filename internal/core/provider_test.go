@@ -9,7 +9,7 @@ import (
 // default that actually serves it — the create form and baseline seed both
 // lean on that agreement.
 func TestProviderRegistryAgreement(t *testing.T) {
-	kinds := []string{LibraryKindMovie, LibraryKindTV, LibraryKindAdult}
+	kinds := []string{LibraryKindMovie, LibraryKindTV, LibraryKindAnime, LibraryKindAdult}
 	for _, kind := range kinds {
 		def := DefaultProviderForKind(kind)
 		if def == "" {
@@ -21,8 +21,8 @@ func TestProviderRegistryAgreement(t *testing.T) {
 		}
 	}
 	for _, p := range Providers() {
-		if p.ID == "" || p.Name == "" || len(p.Kinds) == 0 {
-			t.Errorf("descriptor %+v is missing an id, name or kinds", p)
+		if p.ID == "" || p.Name == "" || len(p.Kinds) == 0 || len(p.Lookups) == 0 {
+			t.Errorf("descriptor %+v is missing an id, name, kinds or lookups", p)
 		}
 	}
 }
@@ -34,6 +34,7 @@ func TestProviderServesRejectsMismatches(t *testing.T) {
 	}{
 		{ProviderTMDB, LibraryKindMovie, true},
 		{ProviderTMDB, LibraryKindTV, true},
+		{ProviderTMDB, LibraryKindAnime, false},
 		{ProviderTMDB, LibraryKindAdult, false},
 		{ProviderStashbox, LibraryKindAdult, true},
 		{ProviderStashbox, LibraryKindMovie, false},
@@ -47,10 +48,13 @@ func TestProviderServesRejectsMismatches(t *testing.T) {
 		// no registry lookup can ever resolve to a client.
 		{ProviderStashbox + ":Bad", LibraryKindAdult, false},
 		{ProviderTMDB + ":anything", LibraryKindMovie, false},
-		{ProviderAniList, LibraryKindTV, true},
-		// AniList is television-only: internal/anilist refuses movie lookups
-		// with ErrProviderKindUnsupported, so a movie library must not be
-		// creatable against it.
+		// AniList is the anime kind's provider and serves NO other chain: the
+		// registry partitions strictly, so an ordinary Series library cannot be
+		// chained to it and an anime library cannot be chained to anything else.
+		// Its ability to look films and series UP is a separate question, asked
+		// of ProviderLooksUp below.
+		{ProviderAniList, LibraryKindAnime, true},
+		{ProviderAniList, LibraryKindTV, false},
 		{ProviderAniList, LibraryKindMovie, false},
 		{ProviderAniList, LibraryKindAdult, false},
 		{ProviderTVmaze, LibraryKindTV, true},
@@ -58,8 +62,13 @@ func TestProviderServesRejectsMismatches(t *testing.T) {
 		// lookups with ErrProviderKindUnsupported, so a movie library must not
 		// be creatable against it.
 		{ProviderTVmaze, LibraryKindMovie, false},
+		{ProviderTVmaze, LibraryKindAnime, false},
 		{ProviderTVmaze, LibraryKindAdult, false},
 		{ProviderTheTVDB, LibraryKindTV, true},
+		// The anime kind belongs to AniList alone: an anime shelf identified
+		// half by TheTVDB's seasons and half by AniList's flat records would
+		// renumber episodes rather than fill a gap.
+		{ProviderTheTVDB, LibraryKindAnime, false},
 		// TheTVDB DOES catalogue films, and the movie kind is refused anyway:
 		// MovieMeta.DigitalRelease gates minimum availability and TheTVDB's movie
 		// record has no typed release list to fill it from, so a movie library
@@ -183,5 +192,55 @@ func TestProvidersReturnsACopy(t *testing.T) {
 	first[0].ID = "mutated"
 	if again := Providers(); again[0].ID == "mutated" {
 		t.Error("Providers() exposed the backing slice")
+	}
+}
+
+// The two registry questions are deliberately different, and this is the table
+// that says so: a provider may look up a vocabulary it chains onto no library
+// kind for. AniList is the case that motivated the split — a film pasted from an
+// AniList search hit is a true ref, and validating it against the chain kinds
+// would have forced AniList to claim the movie LIBRARY kind and so offer itself
+// in every Movies library's chain editor.
+func TestProviderLooksUpIsNotProviderServes(t *testing.T) {
+	cases := []struct {
+		id, mediaType string
+		want          bool
+	}{
+		{ProviderTMDB, MediaTypeMovie, true},
+		{ProviderTMDB, MediaTypeSeries, true},
+		{ProviderTMDB, MediaTypeScene, false},
+		{ProviderAniList, MediaTypeMovie, true},
+		{ProviderAniList, MediaTypeSeries, true},
+		{ProviderAniList, MediaTypeScene, false},
+		// TVmaze and TheTVDB both answer GetMovie with
+		// ErrProviderKindUnsupported, so a film ref naming either is refused at
+		// the edge rather than pinned to a row nothing can refresh.
+		{ProviderTVmaze, MediaTypeSeries, true},
+		{ProviderTVmaze, MediaTypeMovie, false},
+		{ProviderTheTVDB, MediaTypeSeries, true},
+		{ProviderTheTVDB, MediaTypeMovie, false},
+		{ProviderStashbox, MediaTypeScene, true},
+		{ProviderStashbox, MediaTypeMovie, false},
+		{ProviderStashbox, MediaTypeSeries, false},
+		// Instance ids answer on their base, and a malformed one looks nothing
+		// up — ProviderServes' rules exactly.
+		{ProviderStashbox + ":stashdb", MediaTypeScene, true},
+		{ProviderStashbox + ":Bad", MediaTypeScene, false},
+		{ProviderTMDB + ":anything", MediaTypeMovie, false},
+		{"", MediaTypeMovie, false},
+		{ProviderTMDB, "music", false},
+	}
+	for _, c := range cases {
+		if got := ProviderLooksUp(c.id, c.mediaType); got != c.want {
+			t.Errorf("ProviderLooksUp(%q, %q) = %v, want %v", c.id, c.mediaType, got, c.want)
+		}
+	}
+
+	// The split has teeth: AniList looks a film up and chains onto no movie
+	// library. If these ever agree again, the registry has been widened to admit
+	// an add and the chain editor has grown an entry nobody chose.
+	if !ProviderLooksUp(ProviderAniList, MediaTypeMovie) ||
+		ProviderServes(ProviderAniList, LibraryKindMovie) {
+		t.Error("AniList must look films up without serving the movie library kind")
 	}
 }

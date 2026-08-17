@@ -63,6 +63,7 @@ function library(overrides: Partial<Library> = {}): Library {
     id: 1,
     kind: 'movie',
     name: 'Movies',
+    icon: '',
     root_path: 'library/Movies',
     provider: 'tmdb',
     providers: ['tmdb'],
@@ -102,9 +103,37 @@ beforeEach(() => {
         method: init?.method ?? 'GET',
         body: init?.body ? JSON.parse(String(init.body)) : undefined,
       });
+      // The add the "add new from metadata" dialog makes, before the list
+      // branches below: it is a POST to the same path the list is a GET of.
+      if (url.includes('/library/movies') && init?.method === 'POST') {
+        movies = [...movies, { id: 12, title: 'Ponyo', library_id: 3 }];
+        return jsonResponse({ id: 12, title: 'Ponyo' }, 201);
+      }
       if (url.includes('/library/movies')) return jsonResponse({ movies });
       if (url.includes('/library/series')) return jsonResponse({ series: seriesRows });
       if (url.includes('/search/grab')) return new Response(null, { status: 204 });
+      if (url.includes('/api/v1/search')) {
+        return jsonResponse({
+          movies: [
+            {
+              tmdb_id: 4,
+              provider: 'tmdb',
+              provider_ref: '4',
+              title: 'Ponyo',
+              year: 2008,
+              overview: '',
+              release_date: '2008-07-19',
+              vote_average: 7.7,
+              vote_count: 4_000,
+              poster_url: '',
+            },
+          ],
+          series: [],
+          providers: ['tmdb'],
+          library_id: 3,
+          errors: [],
+        });
+      }
       throw new Error(`unexpected fetch: ${url}`);
     }),
   );
@@ -157,6 +186,23 @@ describe('GrabTargetModal', () => {
     mountModal();
     const options = [...host.querySelectorAll('option')].map((o) => o.textContent?.trim());
     expect(options).toEqual(['Movies', 'TV']);
+  });
+
+  /**
+   * A dormant shelf refuses everyone, admins included (core.LibraryVisible), so
+   * every route this dialog uses answers 404 for one — the grab included. The
+   * admin list still carries it, because that is where the toggle reviving it
+   * lives, so the filter has to be here rather than in the response.
+   */
+  it('offers no dormant shelf, which every grab would 404 on', () => {
+    libraries.all = [
+      library(),
+      library({ id: 4, name: 'Archive', root_path: 'library/Archive', is_default: false, active: false }),
+    ];
+    mountModal();
+
+    const options = [...host.querySelectorAll('option')].map((o) => o.textContent?.trim());
+    expect(options).toEqual(['Movies']);
   });
 
   it('opens on download-only and says where the file will wait', () => {
@@ -219,6 +265,60 @@ describe('GrabTargetModal', () => {
       release_id: 42,
       library_id: 1,
       tie: { media_type: 'movie', media_id: 11 },
+    });
+  });
+
+  /**
+   * "Add this title, then tie this release to it" is a sentence about ONE
+   * library. The add dialog is told which, so the new row lands on the shelf
+   * the tie names — before this it targeted the kind's default, and a tie to a
+   * row that had gone somewhere else is what `itemInLibrary` refuses
+   * (internal/api/searchreleases.go).
+   */
+  it('adds a new title into the shelf the tie names, then ties it', async () => {
+    libraries.all = [
+      library(),
+      library({ id: 2, kind: 'tv', name: 'TV', is_default: true }),
+      library({ id: 3, name: 'Kids', root_path: 'library/Kids', is_default: false }),
+    ];
+    mountModal();
+
+    const select = host.querySelector<HTMLSelectElement>(
+      'select[aria-label="Target library"]',
+    )!;
+    select.selectedIndex = 2;
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    chooseMode('tie');
+    await settle();
+
+    button('Add new from metadata...').click();
+    flushSync();
+
+    // The nested dialog has no tab row: one shelf is not a choice.
+    const added = [...host.querySelectorAll('[role="dialog"]')].at(-1)!;
+    expect(added.querySelector('[role="tab"]')).toBeNull();
+
+    const input = added.querySelector<HTMLInputElement>('input[type="search"]')!;
+    input.value = 'ponyo';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    await settle();
+    (added.querySelector('ul button') as HTMLButtonElement).click();
+    await settle();
+
+    const add = calls.find((c) => c.method === 'POST' && c.url.includes('/library/movies'));
+    expect(add?.body).toMatchObject({ tmdb_id: 4, library_id: 3 });
+    // And the search that found it asked the same shelf's chain.
+    expect(calls.find((c) => c.url.includes('/api/v1/search'))?.url).toContain('library_id=3');
+
+    // The row came back owned by that shelf, so the tie is made rather than
+    // refused with "it went to another library".
+    button('Grab').click();
+    await settle();
+    expect(calls.find((c) => c.url.includes('/search/grab'))?.body).toEqual({
+      release_id: 42,
+      library_id: 3,
+      tie: { media_type: 'movie', media_id: 12 },
     });
   });
 

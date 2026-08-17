@@ -61,13 +61,23 @@ export function unmatchedMatchStrategy(
     };
   }
 
+  // A television library only ever holds series, so its kind decides. An ANIME
+  // library holds both, so there the parse decides — which is the same rule the
+  // scanner applies to a file under an anime root (internal/library/scan.go):
+  // episode numbers make it a series, and everything else is a film.
   const mediaType = library?.kind === 'tv' || (file.parsed.episodes?.length ?? 0) > 0
     ? 'series'
     : 'movie';
   return {
     kind: 'title',
     mediaType,
+    // The library's own chain is what should answer the manual search, so the
+    // id travels for every kind whose items this dialog can match. Adult is
+    // absent because a scene-shaped file left through the branch above.
+    libraryID:
+      library?.kind === 'movie' || library?.kind === 'tv' || library?.kind === 'anime'
+        ? file.library_id
+        : 0,
     query: file.parsed.title,
-    libraryID: library?.kind === 'movie' || library?.kind === 'tv' ? file.library_id : 0,
   };
 }

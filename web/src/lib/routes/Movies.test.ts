@@ -14,10 +14,16 @@ import { navigate, router } from '../router.svelte';
 function movie(
   id: number,
   title: string,
-  options: { addedAt?: string; monitored?: boolean; downloaded?: boolean } = {},
+  options: {
+    addedAt?: string;
+    monitored?: boolean;
+    downloaded?: boolean;
+    libraryID?: number;
+  } = {},
 ) {
   return {
     id,
+    library_id: options.libraryID ?? 0,
     tmdb_id: id,
     imdb_id: '',
     title,
@@ -376,5 +382,54 @@ describe('Movies grid', () => {
         .find((card) => card.getAttribute('aria-label') === 'Arrival (2021), Downloaded')
         ?.getAttribute('aria-pressed'),
     ).toBe('true');
+  });
+});
+
+/**
+ * The bug this whole shelf rework started from: with two movie libraries, every
+ * row showed every movie, so "Kids" and "Movies" were the same grid under two
+ * names. The sidebar links each shelf with its own `?library=`, and this is the
+ * screen half of that promise.
+ */
+describe('Movies library filter', () => {
+  const SHELVED = [
+    movie(3, 'Sicario', { addedAt: '2026-03-01T00:00:00Z', libraryID: 1 }),
+    movie(2, 'Dune', { addedAt: '2026-02-01T00:00:00Z', libraryID: 4 }),
+    movie(1, 'Arrival', { addedAt: '2026-01-01T00:00:00Z', libraryID: 1 }),
+  ];
+
+  it('shows only the named library, and lists everything without the parameter', async () => {
+    servedMovies = SHELVED;
+    await open('/movies?library=4');
+    expect(cardIDs()).toEqual([2]);
+
+    unmount(app!);
+    app = undefined;
+    await open('/movies?library=1');
+    expect(cardIDs()).toEqual([3, 1]);
+
+    unmount(app!);
+    app = undefined;
+    // The plain URL keeps meaning "every visible movie".
+    await open('/movies');
+    expect(cardIDs()).toEqual([3, 2, 1]);
+  });
+
+  it('counts the chips over the filtered shelf rather than the whole install', async () => {
+    servedMovies = SHELVED;
+    await open('/movies?library=1');
+
+    const chip = [...host.querySelectorAll('button')].find((b) =>
+      b.textContent?.trim().startsWith('All'),
+    );
+    expect(chip?.textContent?.replace(/\s+/g, ' ')).toContain('2');
+  });
+
+  it('ignores a library id nothing owns rather than showing the whole shelf', async () => {
+    servedMovies = SHELVED;
+    await open('/movies?library=99');
+
+    expect(cardIDs()).toEqual([]);
+    expect(host.textContent).toContain('No movies yet');
   });
 });

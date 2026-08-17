@@ -223,19 +223,6 @@ func New(hc *http.Client) *Client {
 	}
 }
 
-// SearchMovies reports that AniList does not serve films. AniList catalogues
-// anime films, but this client maps every record onto SeriesMeta and the anime
-// library is a TV library; a chain walker skips this rung rather than failing on
-// it (see core.ErrProviderKindUnsupported).
-func (c *Client) SearchMovies(ctx context.Context, q string) ([]core.MovieMeta, error) {
-	return nil, core.ErrProviderKindUnsupported
-}
-
-// GetMovie reports that AniList does not serve films; see SearchMovies.
-func (c *Client) GetMovie(ctx context.Context, ref string) (*core.MovieMeta, error) {
-	return nil, core.ErrProviderKindUnsupported
-}
-
 // gqlRequest is the standard GraphQL-over-HTTP request body.
 type gqlRequest struct {
 	Query         string         `json:"query"`

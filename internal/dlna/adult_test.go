@@ -93,10 +93,11 @@ func seedSite(t *testing.T, st *store.Store) *core.MediaFile {
 	t.Helper()
 	ctx := context.Background()
 
-	enableAdultLibrary(t, st)
+	adult := enableAdultLibrary(t, st)
 	series := &core.Series{
 		StashID: "site-1", Title: "Brazzers", SortTitle: "brazzers",
 		Kind: core.SeriesKindAdult, Monitored: true, Path: store.AdultLibraryRoot + "/Brazzers",
+		LibraryID: adult.ID,
 	}
 	if err := st.UpsertSeries(ctx, series); err != nil {
 		t.Fatalf("UpsertSeries: %v", err)

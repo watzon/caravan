@@ -163,6 +163,9 @@ func serve(cfg *config.Config, configDir, configFile, databasePath string, logge
 	logger.Info("database ready",
 		"path", cfg.DatabasePath(),
 		"schema_version", schemaVersion)
+	if err := warnOnUnseededShelves(context.Background(), st, logger); err != nil {
+		return err
+	}
 
 	seededRoot, err := seedSettings(context.Background(), st, cfg)
 	if err != nil {
@@ -435,6 +438,42 @@ func listenPort(addr string, logger *slog.Logger) int {
 		return 0
 	}
 	return port
+}
+
+// warnOnUnseededShelves reports a library kind that ended up with no library at
+// all, which after migration 0011 has exactly one cause worth naming.
+//
+// 0011 seeds a dormant shelf for every kind, and skips a seed only when both the
+// preferred root path and its suffixed fallback are already taken by some other
+// library. That skip is deliberate — a refused upgrade would be a worse answer
+// than a missing optional shelf — but it is otherwise silent, and a silent skip
+// leaves an owner looking for an Anime shelf that the release notes promised.
+// Nothing else produces the state: the seeded rows are their kind's default, and
+// the delete guard refuses to remove a default.
+//
+// It warns rather than repairing. Choosing a root path is the one decision here
+// that belongs to the person who owns the disk.
+func warnOnUnseededShelves(ctx context.Context, st *store.Store, logger *slog.Logger) error {
+	libs, err := st.ListLibraries(ctx)
+	if err != nil {
+		return err
+	}
+	seen := make(map[string]bool, len(libs))
+	for _, l := range libs {
+		seen[l.Kind] = true
+	}
+	for _, kind := range []string{
+		core.LibraryKindMovie, core.LibraryKindTV,
+		core.LibraryKindAnime, core.LibraryKindAdult,
+	} {
+		if seen[kind] {
+			continue
+		}
+		logger.Warn("no library of this kind exists; its default shelf could not be seeded "+
+			"because the root path it wanted was already taken. Create one in Settings → Libraries.",
+			"kind", kind)
+	}
+	return nil
 }
 
 // seedSettings reconciles the settings table with the bootstrap config

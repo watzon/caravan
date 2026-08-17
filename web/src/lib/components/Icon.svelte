@@ -61,10 +61,67 @@
     // when it is light (switch to dark). Same 24 stroke language as the rest.
     sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>',
     moon: '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>',
+    // The anime shelf's default mark. Two four-pointed stars — the big one on
+    // the diagonal, a small one tucked into the corner — because at 16px a
+    // single glyph reads as "star", which the set already spends on rating.
+    // Same 24x24 stroke language as everything above it.
+    sparkles:
+      '<path d="M12 3.5 13.7 8.3 18.5 10 13.7 11.7 12 16.5 10.3 11.7 5.5 10 10.3 8.3z"/><path d="M18 15.5 18.8 17.7 21 18.5 18.8 19.3 18 21.5 17.2 19.3 15 18.5 17.2 17.7z"/>',
   } as const;
 
   export type IconName = keyof typeof ICONS;
   export { ICONS };
+
+  /**
+   * The glyph a library shelf wears: its own `icon`, or its kind's default.
+   *
+   * The server stores whatever `^[a-zA-Z]{0,32}$` name a client sent and never
+   * checks it against a list — deliberately, so there is no icon vocabulary to
+   * keep in step across two languages. That makes THIS module the vocabulary.
+   * A name it draws is drawn; anything else — an empty string, a glyph from a
+   * newer build, a typo written straight through the API — falls back to the
+   * kind's own mark, so a shelf always has a face rather than a hole.
+   *
+   * `kind` is a plain string for the same reason: a library kind this build has
+   * never heard of must still resolve to something, and `folder` is the honest
+   * answer for "a shelf, contents unknown".
+   */
+  const LIBRARY_KIND_ICONS: Record<string, IconName> = {
+    movie: 'film',
+    tv: 'tv',
+    anime: 'sparkles',
+    adult: 'flame',
+  };
+
+  export function libraryIcon(kind: string, icon = ''): IconName {
+    if (icon !== '' && Object.hasOwn(ICONS, icon)) return icon as IconName;
+    return LIBRARY_KIND_ICONS[kind] ?? 'folder';
+  }
+
+  /**
+   * The glyphs the Libraries screen offers, in picker order.
+   *
+   * A curated subset rather than all of ICONS: `close`, `warning`, the chevrons
+   * and the theme pair are chrome, and a shelf wearing one of those would read
+   * as a control rather than as a name. The four kind defaults lead so the
+   * "put it back" choice is the first one on the grid.
+   */
+  export const LIBRARY_ICON_CHOICES: IconName[] = [
+    'film',
+    'tv',
+    'sparkles',
+    'flame',
+    'star',
+    'bookmark',
+    'compass',
+    'folder',
+    'disk',
+    'image',
+    'clock',
+    'download',
+    'pulse',
+    'play',
+  ];
 </script>
 
 <script lang="ts">

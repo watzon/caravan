@@ -24,9 +24,14 @@ import (
 // (SPEC §1.2 pillar 2); the reverse order would leave a row pointing at
 // nothing.
 
-// ErrCrossKindMove refuses a move between libraries of different kinds: a tv
+// ErrCrossKindMove refuses a move to a library that cannot hold the item: a tv
 // series and an adult site have different identity models, and a movie is not
-// a series at all. The item's kind is not a preference a move can change.
+// a series at all.
+//
+// What a move MAY change is where a series sits between the television and
+// anime shelves, because those two hold the same rows under two names —
+// core.LibraryKindAccepts says so once, and MoveSeries rewrites `series.kind`
+// to match the destination so the row and its shelf never disagree afterwards.
 var ErrCrossKindMove = errors.New("library: the target library holds a different kind of item")
 
 // MoveMovie moves one movie — its files, its sidecars, and finally its row —
@@ -45,7 +50,7 @@ func (m *Manager) MoveMovie(ctx context.Context, movieID, targetLibraryID int64)
 	if target.ID == mv.LibraryID {
 		return nil
 	}
-	if target.Kind != core.LibraryKindMovie {
+	if !core.LibraryKindAccepts(target.Kind, core.LibraryKindMovie) {
 		return ErrCrossKindMove
 	}
 
@@ -106,9 +111,15 @@ func (m *Manager) MoveSeries(ctx context.Context, seriesID, targetLibraryID int6
 	if target.ID == sr.LibraryID {
 		return nil
 	}
-	if target.Kind != core.LibraryKindForSeries(sr.Kind) {
+	if !core.LibraryKindAccepts(target.Kind, core.LibraryKindForSeries(sr.Kind)) {
 		return ErrCrossKindMove
 	}
+	// The destination decides what the row IS from here on. Only the
+	// television/anime pair can differ (nothing else is accepted above), and
+	// leaving `kind` behind would leave a row the store then refuses to write —
+	// store.UpsertSeries insists the two line up — and, if it did write, one
+	// that the Series screen and the Anime screen would both claim or both drop.
+	sr.Kind = core.SeriesKindForLibrary(target.Kind)
 
 	oldDir := sr.Path
 	var newDir string

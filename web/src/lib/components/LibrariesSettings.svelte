@@ -57,7 +57,7 @@
   import CategorySummary from './CategorySummary.svelte';
   import EmptyState from './EmptyState.svelte';
   import Field from './Field.svelte';
-  import Icon from './Icon.svelte';
+  import Icon, { LIBRARY_ICON_CHOICES, libraryIcon } from './Icon.svelte';
   import LoadError from './LoadError.svelte';
   import LocalizedText from './LocalizedText.svelte';
   import Modal from './Modal.svelte';
@@ -199,7 +199,7 @@
    * instead and the server accepts the bare legacy id on a boxless install.
    */
   let creatableKinds = $derived(
-    (['movie', 'tv', 'adult'] as LibraryKind[]).filter(
+    (['movie', 'tv', 'anime', 'adult'] as LibraryKind[]).filter(
       (k) => k === 'adult' || providers.some((p) => p.kinds.includes(k)),
     ),
   );
@@ -218,9 +218,30 @@
         return t('component.libraries.kindMovie');
       case 'tv':
         return t('component.libraries.kindSeries');
+      case 'anime':
+        return t('component.libraries.kindAnime');
       case 'adult':
         return t('component.libraries.kindAdult');
     }
+  }
+
+  /**
+   * Choose the shelf's glyph, or put it back to the kind's default.
+   *
+   * Pressing the icon that is already in force is what clears it: `''` is the
+   * stored value for "use the kind's default", and a picker with no way back to
+   * the default would make the first click permanent. The write goes through
+   * the same autosave `patch()` as the name beside it.
+   */
+  function saveIcon(lib: Library, name: string) {
+    const next = lib.icon === name ? '' : name;
+    void patch(
+      { icon: next },
+      next === ''
+        ? t('component.libraries.iconReset', { library: lib.name })
+        : t('component.libraries.iconChanged', { library: lib.name }),
+      autosaveKey(lib, 'icon'),
+    );
   }
 
   /**
@@ -384,12 +405,13 @@
   }
 
   /**
-   * The master switch, then the session.
+   * The master switch.
    *
-   * Switching a library off hides it from EVERYONE including the admin who
-   * did it, and the nav item, the Explore scopes and the request form all read
-   * that from /auth/me. Without the re-read they would keep offering a shelf
-   * that no longer answers until the next full page load.
+   * Switching a library off hides it from EVERYONE including the admin who did
+   * it, and the nav row, the Explore scopes and the request form all read that
+   * from /auth/me. The re-read that keeps them honest lives in `patch()`, which
+   * every field write goes through — this used to carry its own, and a rename
+   * that did not reach the sidebar is what showed that one switch was too few.
    */
   async function setActive(lib: Library, next: boolean) {
     await patch(
@@ -397,7 +419,6 @@
       next ? t('component.libraries.active', { library: lib.name }) : t('component.libraries.inactive', { library: lib.name }),
       autosaveKey(lib, 'active'),
     );
-    await session.refresh();
   }
 
   function toggleRestricted(lib: Library, next: boolean) {
@@ -510,6 +531,15 @@
     );
   }
 
+  /**
+   * Write one field, then re-read the identity.
+   *
+   * The session refresh is not bookkeeping: /auth/me is what the sidebar builds
+   * its shelf rows from, so a rename or a new icon that only landed in THIS
+   * screen's array would leave the navigation showing the old one until the
+   * next full page load. `setActive` has always refreshed for the same reason;
+   * this moves it to the one place every field write goes through.
+   */
   async function patch(body: LibraryPatch, note: string, statusKey: string) {
     const lib = selected;
     if (!lib) return;
@@ -519,6 +549,7 @@
       replace(await api.updateLibrary(lib.id, body));
       setAutosaveState(statusKey, 'saved');
       pushToast(note, 'success');
+      await session.refresh();
     } catch (err) {
       setAutosaveState(statusKey, 'error');
       pushToast(errorText(err), 'danger');
@@ -760,9 +791,7 @@
                caller may not manage, so this list needs no rule of its own —
                and an INACTIVE row still arrives, because the switch that
                undoes it lives on the card behind this pill. -->
-          <Icon
-            name={option.kind === 'movie' ? 'film' : option.kind === 'adult' ? 'flame' : 'tv'}
-            size={14} />
+          <Icon name={libraryIcon(option.kind, option.icon)} size={14} />
           <span>{option.name}</span>
           {#if option.is_default}
             <span class="micro-label" title={t('component.libraries.defaultKind', { kind: kindLabel(option.kind) })}>{t('component.libraries.default')}</span>
@@ -826,6 +855,40 @@
           onkeydown={(event) => {
             if (event.key === 'Enter') commitName();
           }} />
+      </Field>
+
+      <!-- No `for`: the control is a grid of buttons rather than one field, so
+           the group carries its own accessible name and each button says which
+           glyph it is. -->
+      <Field label={t('component.libraries.icon')} help={t('component.libraries.iconHelp')}>
+        {#snippet note()}
+          {@render autosaveStatus(autosaveKey(lib, 'icon'))}
+        {/snippet}
+        <div
+          data-library-icon-picker
+          role="group"
+          aria-label={t('component.libraries.iconFor', { library: lib.name })}
+          class="flex flex-wrap gap-2">
+          {#each LIBRARY_ICON_CHOICES as choice (choice)}
+            <!-- Accented when it is the glyph in force, INCLUDING when that is
+                 the kind's default and `icon` is still empty: the grid shows
+                 what the sidebar draws, not what the column happens to hold. -->
+            {@const current = libraryIcon(lib.kind, lib.icon) === choice}
+            <button
+              type="button"
+              data-library-icon={choice}
+              aria-pressed={current}
+              disabled={busy}
+              onclick={() => saveIcon(lib, choice)}
+              class="flex size-9 items-center justify-center rounded-md border transition-colors duration-150 ease-out disabled:opacity-50
+                     {current
+                ? 'border-accent bg-accent-tint text-accent-text'
+                : 'border-border bg-surface text-ink-secondary hover:bg-raised hover:text-ink'}">
+              <Icon name={choice} size={16} />
+              <span class="sr-only">{choice}</span>
+            </button>
+          {/each}
+        </div>
       </Field>
 
       <Field

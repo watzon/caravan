@@ -180,6 +180,13 @@ const (
 	// picked by hand or found by the backlog sweep — and never under "tv",
 	// which is the download folder the television library sorts.
 	engineCategoryAdult = core.LibraryKindAdult
+	// engineCategoryAnime labels everything grabbed for an anime shelf, films
+	// and episodes alike, for engineCategoryAdult's reason: the anime library is
+	// the one shelf that holds two item tables, and an owner who gave it its own
+	// download folder wants both halves in it. Splitting it back into "movies"
+	// and "tv" would sort an anime film into the Movies library's folder, which
+	// is the misfile the label exists to prevent.
+	engineCategoryAnime = core.LibraryKindAnime
 )
 
 // requireEngine resolves the download engine for an operation that belongs to

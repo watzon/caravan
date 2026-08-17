@@ -165,11 +165,11 @@ func TestAdultSubtreeIs404OnTheRealRouterWhenDisabled(t *testing.T) {
 	}
 }
 
-// Enabling the module has a consequence a key-value write cannot carry out —
-// the Adult library row is created on the first enable — so adult_enabled must
+// Enabling the module is a decision about a LIBRARY ROW — since 0011 the row is
+// seeded dormant and the switch is its `active` flag — so adult_enabled must
 // stay out of the PUT /settings allowlist, the way storage_root does. If it
-// ever leaks in, the module can be switched on with no library to put anything
-// in, and the enable flow's one invariant is gone.
+// ever leaks in, a key-value write would claim the module is on while every
+// gate still reads the dormant row and answers 404.
 func TestPutSettingsRefusesTheAdultSwitch(t *testing.T) {
 	h, st, _ := newTestServer(t)
 
@@ -183,8 +183,12 @@ func TestPutSettingsRefusesTheAdultSwitch(t *testing.T) {
 	if _, ok := settings[store.SettingAdultEnabled]; ok {
 		t.Error("a rejected PUT still wrote adult_enabled")
 	}
-	if _, err := st.GetLibraryByKind(t.Context(), core.LibraryKindAdult); err == nil {
-		t.Error("a rejected PUT created the adult library")
+	lib, err := st.GetLibraryByKind(t.Context(), core.LibraryKindAdult)
+	if err != nil {
+		t.Fatalf("GetLibraryByKind(adult): %v", err)
+	}
+	if lib.Active {
+		t.Error("a rejected PUT switched the seeded adult library on")
 	}
 }
 

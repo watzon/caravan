@@ -13,10 +13,12 @@ import (
 	"github.com/watzon/caravan/internal/store"
 )
 
-// addMovie stores a movie to search or grab for.
+// addMovie stores a movie to search or grab for, filed on the movie shelf the
+// way a real add files one — every item row names its library.
 func addMovie(t *testing.T, st *store.Store, title string, year int) core.Movie {
 	t.Helper()
-	m := core.Movie{TMDBID: 1234, Title: title, SortTitle: title, Year: year, Monitored: true}
+	m := core.Movie{TMDBID: 1234, Title: title, SortTitle: title, Year: year, Monitored: true,
+		LibraryID: defaultLibraryID(t, st, core.LibraryKindMovie)}
 	if err := st.UpsertMovie(context.Background(), &m); err != nil {
 		t.Fatalf("UpsertMovie: %v", err)
 	}
@@ -28,7 +30,8 @@ func addSeries(t *testing.T, st *store.Store, title string) (core.Series, []core
 	t.Helper()
 	ctx := context.Background()
 
-	sr := core.Series{TMDBID: 99, Title: title, SortTitle: title, Year: 2016, Monitored: true}
+	sr := core.Series{TMDBID: 99, Title: title, SortTitle: title, Year: 2016, Monitored: true,
+		LibraryID: defaultLibraryID(t, st, core.LibraryKindTV)}
 	if err := st.UpsertSeries(ctx, &sr); err != nil {
 		t.Fatalf("UpsertSeries: %v", err)
 	}

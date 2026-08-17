@@ -275,6 +275,7 @@ func TestConvertPendingRespectsAdultVisibility(t *testing.T) {
 	ctx := t.Context()
 	site := &core.Series{
 		Kind: core.SeriesKindAdult, StashID: "site-1", Title: "Site", SortTitle: "site",
+		LibraryID: defaultLibraryID(t, st, core.LibraryKindAdult),
 	}
 	if err := st.UpsertSeries(ctx, site); err != nil {
 		t.Fatalf("UpsertSeries: %v", err)

@@ -293,19 +293,22 @@ func (s *server) handleSearchGrab(w http.ResponseWriter, r *http.Request) {
 			s.writeStoreError(w, "get movie", err)
 			return
 		}
-		if !itemInLibrary(m.LibraryID, core.LibraryKindMovie, lib) {
+		if m.LibraryID != lib.ID {
 			writeError(w, http.StatusBadRequest, "movie does not belong to that library")
 			return
 		}
 		s.grabRelease(w, r, lib.ID, core.LibraryKindMovie, body.ReleaseID,
 			core.GrabInfo{MovieID: m.ID, LibraryID: lib.ID},
-			core.AddOpts{Category: engineCategoryMovies, MovieID: m.ID, LibraryID: lib.ID})
+			// lib.Kind, not the movie's own vocabulary: the check above has just
+			// proved the film sits on THIS shelf, and an anime shelf's films sort
+			// beside its episodes rather than into the Movies folder.
+			core.AddOpts{Category: engineCategoryFor(lib.Kind), MovieID: m.ID, LibraryID: lib.ID})
 	case core.MediaTypeSeries:
 		sr, ok := s.getVisibleSeries(w, r, body.Tie.MediaID)
 		if !ok {
 			return
 		}
-		if !itemInLibrary(sr.LibraryID, core.LibraryKindForSeries(sr.Kind), lib) {
+		if sr.LibraryID != lib.ID {
 			writeError(w, http.StatusBadRequest, "series does not belong to that library")
 			return
 		}
@@ -333,24 +336,25 @@ func (s *server) handleSearchGrab(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// itemInLibrary reports whether an item belongs to the chosen library. An
-// item whose library_id is still 0 belongs to its kind's default library,
-// which is what the check honours rather than refusing every pre-0022 row.
-func itemInLibrary(itemLibraryID int64, itemKind string, lib *core.Library) bool {
-	if itemLibraryID != 0 {
-		return itemLibraryID == lib.ID
-	}
-	return lib.IsDefault && lib.Kind == itemKind
-}
-
-// engineCategoryFor labels an untied grab by its library's kind, the same
-// three labels every tied grab uses. Per-library labels would churn every
-// existing user's download client for a cosmetic field, so kind stays the
-// vocabulary here; a per-library label would be a settings field, not this.
+// engineCategoryFor labels a grab by the SHELF its payload lands on — the kind
+// of the library it was made for — and it is the one labeller every grab goes
+// through, tied or untied.
+//
+// The shelf rather than the item table, and that is the whole rule: a film
+// added to an anime library is filed under "anime" beside that library's
+// episodes, because the download folder an owner sorts by is the shelf they
+// chose, not the table Caravan happens to store the row in. It is why the movie
+// tie asks its target library rather than answering "movies" outright.
+//
+// Per-LIBRARY labels are a different thing and deliberately not this: two anime
+// shelves share one label, because a label per row would be a settings field
+// the owner names, not a value derived here.
 func engineCategoryFor(kind string) string {
 	switch kind {
 	case core.LibraryKindMovie:
 		return engineCategoryMovies
+	case core.LibraryKindAnime:
+		return engineCategoryAnime
 	case core.LibraryKindAdult:
 		return engineCategoryAdult
 	}

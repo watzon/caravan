@@ -61,9 +61,11 @@ type seriesJSON struct {
 	Monitored        bool   `json:"monitored"`
 	QualityProfileID int64  `json:"quality_profile_id"`
 	LibraryID        int64  `json:"library_id"`
-	// Kind is core.SeriesKindTV or core.SeriesKindAdult. The picker seeds
-	// from it: an adult series is a site, and a television seed for one
-	// writes season/episode into the box until the search lands.
+	// Kind is core.SeriesKindTV, core.SeriesKindAnime or core.SeriesKindAdult.
+	// The picker seeds from it: an adult series is a site, and a television
+	// seed for one writes season/episode into the box until the search lands.
+	// It is also which screen the row belongs to — GET /library/series lists
+	// one kind at a time.
 	Kind       string `json:"kind"`
 	FirstAired string `json:"first_aired"`
 	AddedAt    string `json:"added_at"`
@@ -247,17 +249,19 @@ type addRequest struct {
 	// is series-only. Omitting it defaults a new movie to released and leaves
 	// a re-added movie's choice alone.
 	MinAvailability string `json:"min_availability"`
-	// LibraryID is the library a NEW item lands in. Zero — and every request
-	// from before libraries were plural — targets the kind's default. A
-	// re-added title stays in the library it already lives in whatever this
-	// says: a move is an explicit operation, never a side effect of an add.
+	// LibraryID is the library a NEW item lands in. Zero targets the kind's
+	// default, and that is a WIRE convention rather than a stored one: a body
+	// that names no shelf means "wherever this kind goes", and the row it
+	// creates always names its library outright. A re-added title stays in the
+	// library it already lives in whatever this says: a move is an explicit
+	// operation, never a side effect of an add.
 	LibraryID int64 `json:"library_id"`
 }
 
 // itemRefFrom resolves the two spellings of "which title" a body may carry
-// into one core.ItemRef, writing the refusal itself. kind is the LibraryKind
-// the ENDPOINT is about: LibraryKindMovie for the movie routes, LibraryKindTV
-// for the series ones.
+// into one core.ItemRef, writing the refusal itself. mediaType is the item
+// VOCABULARY the endpoint is about: MediaTypeMovie for the movie routes,
+// MediaTypeSeries for the series ones, MediaTypeScene for a scene match.
 //
 // tmdb_id is the compatibility spelling, and it is what every client written
 // before providers were plural still sends; provider + provider_ref is the
@@ -269,25 +273,31 @@ type addRequest struct {
 // title, not a failed lookup, so the item would be pinned to something real
 // and wrong.
 //
-// The provider is validated against the endpoint's kind and NOT against the
-// target library's chain. The chain governs IDENTIFICATION — which providers
-// are asked when Caravan has to work out what a file is — and this is the user
-// telling it the answer outright. A ref pasted from a provider that is not on
-// the chain is still a true ref, and refusing it would quietly turn the chain
-// into a second allow-list nobody asked for.
+// The provider is validated against the endpoint's VOCABULARY
+// (core.ProviderLooksUp) and NOT against the target library's chain, nor
+// against the library kinds the provider may be chained on. The chain governs
+// IDENTIFICATION — which providers are asked when Caravan has to work out what
+// a file is — and this is the user telling it the answer outright. A ref pasted
+// from a provider that is not on the chain is still a true ref, and refusing it
+// would quietly turn the chain into a second allow-list nobody asked for.
+//
+// Asking the registry's chain kinds instead is the mistake the two-function
+// split exists to prevent: a provider whose catalogue files films would have to
+// claim a movie LIBRARY kind to have its films added, and the claim would then
+// offer it in every Movies library's chain editor.
 //
 // EXISTENCE is a different question from membership, and it is asked: a ref
 // naming a stash-box instance this install does not hold is a ref nothing can
 // ever be refreshed against, so it is refused here rather than pinned to a row
 // and discovered on the next refresh (see knownProviderInstance). That is why
 // this takes a context and hangs off the server.
-func (s *server) itemRefFrom(ctx context.Context, w http.ResponseWriter, provider, providerRef string, tmdbID int64, kind string) (core.ItemRef, bool) {
+func (s *server) itemRefFrom(ctx context.Context, w http.ResponseWriter, provider, providerRef string, tmdbID int64, mediaType string) (core.ItemRef, bool) {
 	provider = strings.TrimSpace(provider)
 	providerRef = strings.TrimSpace(providerRef)
 
 	switch {
 	case provider != "" && providerRef != "":
-		if !core.ProviderServes(provider, kind) {
+		if !core.ProviderLooksUp(provider, mediaType) {
 			writeError(w, http.StatusBadRequest, "provider does not serve this kind of item")
 			return core.ItemRef{}, false
 		}
@@ -371,7 +381,11 @@ func (s *server) validMoveTarget(w http.ResponseWriter, r *http.Request, library
 	if !ok {
 		return false
 	}
-	if lib.Kind != kind {
+	// core.LibraryKindAccepts rather than equality: an anime library holds films
+	// and television series alike, and a television library takes a row back off
+	// the anime shelf. The job re-checks with the same rule (library.MoveSeries),
+	// which is where `series.kind` is rewritten to match the destination.
+	if !core.LibraryKindAccepts(lib.Kind, kind) {
 		writeError(w, http.StatusBadRequest, "library holds a different kind of item")
 		return false
 	}
@@ -389,8 +403,9 @@ func (s *server) enqueueMove(w http.ResponseWriter, r *http.Request, itemType st
 }
 
 // validAddLibraryID validates an add's library target, writing the refusal
-// itself. Zero names the default and is always fine; a real id must exist, be
-// visible to this caller, and hold items of the endpoint's kind.
+// itself. Zero names the kind's default and is always fine — the request
+// convention, see addRequest.LibraryID — while a real id must exist, be visible
+// to this caller, and hold items of the endpoint's kind.
 func (s *server) validAddLibraryID(w http.ResponseWriter, r *http.Request, libraryID int64, kind string) bool {
 	if libraryID < 0 {
 		writeError(w, http.StatusBadRequest, "invalid library_id")
@@ -403,7 +418,9 @@ func (s *server) validAddLibraryID(w http.ResponseWriter, r *http.Request, libra
 	if !ok {
 		return false
 	}
-	if lib.Kind != kind {
+	// The acceptance rule, not equality: a movie add may target a movie or an
+	// anime library, a series add a tv or an anime one (core.LibraryKindAccepts).
+	if !core.LibraryKindAccepts(lib.Kind, kind) {
 		writeError(w, http.StatusBadRequest, "library holds a different kind of item")
 		return false
 	}
@@ -440,7 +457,7 @@ func (s *server) handleListMovies(w http.ResponseWriter, r *http.Request) {
 	profile := s.activeTVProfile(ctx)
 	out := make([]movieJSON, 0, len(movies))
 	for _, m := range movies {
-		visible, err := gate.visibleKind(ctx, m.LibraryID, core.LibraryKindMovie)
+		visible, err := gate.visible(ctx, m.LibraryID)
 		if err != nil {
 			s.writeStoreError(w, "read library access", err)
 			return
@@ -460,7 +477,7 @@ func (s *server) handleAddMovie(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	ref, ok := s.itemRefFrom(r.Context(), w, body.Provider, body.ProviderRef, body.TMDBID, core.LibraryKindMovie)
+	ref, ok := s.itemRefFrom(r.Context(), w, body.Provider, body.ProviderRef, body.TMDBID, MediaTypeMovie)
 	if !ok {
 		return
 	}
@@ -876,16 +893,34 @@ func (s *server) cancelGrabs(w http.ResponseWriter, ctx context.Context, grabs [
 	return true
 }
 
-// handleListSeries answers the Series screen. It lists TELEVISION series only:
-// a site is stored as a series row (PLAN phase 9 task 3), and the Series screen
-// is not an adult surface — sites have their own, behind the /adult gate. An
-// unfiltered list would put them on the television shelf for every admin, and
-// on an install with the module switched off it would be a visible trace of a
-// module that is supposed to be absent.
+// handleListSeries answers the Series and Anime screens: ONE kind of series
+// per request, named by ?kind= and defaulting to television.
+//
+// The filter is not a convenience. A site is stored as a series row (PLAN phase
+// 9 task 3), and this route is not an adult surface — sites have their own,
+// behind the /adult gate — so an unfiltered list would put them on the
+// television shelf for every admin, and on an install with the module switched
+// off it would be a visible trace of a module that is supposed to be absent.
+// The anime kind joins on the same terms: it is its own screen, and a television
+// list that included anime would show every row twice across the two.
+//
+// Only `tv` and `anime` are spellable here. `adult` is refused rather than
+// gated, so this route can never become a second door to the adult shelf, and
+// an unknown kind is a client mistake rather than an empty list nobody can
+// explain.
 func (s *server) handleListSeries(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	series, err := s.st.ListSeriesByKind(ctx, core.SeriesKindTV)
+	kind := core.SeriesKindTV
+	if asked := r.URL.Query().Get("kind"); asked != "" {
+		if asked != core.SeriesKindTV && asked != core.SeriesKindAnime {
+			writeError(w, http.StatusBadRequest, "kind must be tv or anime")
+			return
+		}
+		kind = asked
+	}
+
+	series, err := s.st.ListSeriesByKind(ctx, kind)
 	if err != nil {
 		s.writeStoreError(w, "list series", err)
 		return
@@ -896,15 +931,14 @@ func (s *server) handleListSeries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The television filter above says which VOCABULARY belongs on this shelf;
-	// the gate says which shelves this caller has. Both, in that order: a site
-	// is not a television series however visible its library is, and a
-	// restricted television library is not this caller's however television it
-	// is.
+	// The kind filter above says which VOCABULARY belongs on this shelf; the
+	// gate says which shelves this caller has. Both, in that order: a site is
+	// not a television series however visible its library is, and a restricted
+	// television library is not this caller's however television it is.
 	gate := s.gate(r)
 	out := make([]seriesJSON, 0, len(series))
 	for _, sr := range series {
-		visible, err := gate.visibleKind(ctx, sr.LibraryID, core.LibraryKindForSeries(sr.Kind))
+		visible, err := gate.visible(ctx, sr.LibraryID)
 		if err != nil {
 			s.writeStoreError(w, "read library access", err)
 			return
@@ -925,7 +959,7 @@ func (s *server) handleAddSeries(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
-	ref, ok := s.itemRefFrom(r.Context(), w, body.Provider, body.ProviderRef, body.TMDBID, core.LibraryKindTV)
+	ref, ok := s.itemRefFrom(r.Context(), w, body.Provider, body.ProviderRef, body.TMDBID, MediaTypeSeries)
 	if !ok {
 		return
 	}
@@ -972,11 +1006,10 @@ func (s *server) getVisibleSeries(w http.ResponseWriter, r *http.Request, id int
 		s.writeStoreError(w, "get series", err)
 		return nil, false
 	}
-	// The row's own library answers, and its KIND is what a row still carrying
-	// library_id 0 resolves through — a site added before libraries had ids
-	// belongs to the adult shelf just as surely as one that names it.
-	visible, err := s.gate(r).visibleKind(r.Context(), sr.LibraryID,
-		core.LibraryKindForSeries(sr.Kind))
+	// The row's own library answers. A site and a television series ask the
+	// same question of the same gate: `series.kind` says what the row is, and
+	// the library it names says who may see it.
+	visible, err := s.gate(r).visible(r.Context(), sr.LibraryID)
 	if err != nil {
 		s.writeStoreError(w, "read library access", err)
 		return nil, false

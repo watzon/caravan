@@ -128,7 +128,8 @@ func addIndexer(t *testing.T, ctx context.Context, st *store.Store) {
 
 func addMovie(t *testing.T, ctx context.Context, st *store.Store, title string, year int, monitored bool) *core.Movie {
 	t.Helper()
-	movie := &core.Movie{Title: title, SortTitle: title, Year: year, Monitored: monitored}
+	movie := &core.Movie{Title: title, SortTitle: title, Year: year, Monitored: monitored,
+		LibraryID: defaultLibraryID(t, ctx, st, core.LibraryKindMovie)}
 	if err := st.UpsertMovie(ctx, movie); err != nil {
 		t.Fatalf("upsert movie: %v", err)
 	}

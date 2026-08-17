@@ -32,6 +32,7 @@ func TestWantedListCarriesSeriesKind(t *testing.T) {
 	site := &core.Series{
 		StashID: "site-transfixed", Title: "Transfixed", SortTitle: "transfixed",
 		Kind: core.SeriesKindAdult, Monitored: true,
+		LibraryID: defaultLibraryID(t, st, core.LibraryKindAdult),
 	}
 	if err := st.UpsertSeries(ctx, site); err != nil {
 		t.Fatalf("UpsertSeries(site): %v", err)

@@ -83,12 +83,14 @@ func (s *Store) GetMediaFile(ctx context.Context, id int64) (*core.MediaFile, er
 	return f, nil
 }
 
-// GetMediaFileLibrary resolves the one library that owns a media file: its
-// kind, and the `libraries` row the owning movie or series names. A zero
-// library id is the usual "names none", which callers resolve through the
-// kind's default library (see core.Movie.LibraryID) — the DLNA tree needs both
-// halves, because with several libraries per kind the kind alone no longer
-// says whose dlna_visible flag applies.
+// GetMediaFileLibrary resolves the one library that owns a media file: the
+// `libraries` row the owning movie or series names, and the owner's own kind.
+//
+// The ID is what decides anything — with several libraries per kind, the kind
+// alone does not say whose dlna_visible flag applies, and since migration 0011
+// every owning row names its library outright. The kind is reported beside it
+// as the owner's vocabulary, which is what makes an ownership conflict
+// (a file linked to both a movie and a series) legible to a caller.
 //
 // Files with no owner, or with conflicting movie/episode owners, or with
 // episode owners across two libraries, return ErrNotFound so callers fail
@@ -188,9 +190,9 @@ func (s *Store) ListMediaFiles(ctx context.Context) ([]core.MediaFile, error) {
 }
 
 // ConversionCandidate is a current library file with no queued or running
-// conversion. LibraryID and LibraryKind let shared API surfaces apply the
-// per-library visibility rule without an ownership query per file — the id when
-// the owning row names one, the kind for a row that still answers by kind.
+// conversion. LibraryID lets shared API surfaces apply the per-library
+// visibility rule without an ownership query per file; LibraryKind travels
+// beside it as the owner's vocabulary, the way GetMediaFileLibrary reports it.
 type ConversionCandidate struct {
 	File        core.MediaFile
 	LibraryID   int64

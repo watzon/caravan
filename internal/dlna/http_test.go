@@ -482,6 +482,7 @@ func seedMovieMedia(t *testing.T, st *store.Store, rel string, size int64) *core
 	t.Helper()
 	movie := &core.Movie{
 		TMDBID: 1, Title: "Film", SortTitle: "film", Path: "Movies/Film",
+		LibraryID: seededMovieLibrary,
 	}
 	if err := st.UpsertMovie(t.Context(), movie); err != nil {
 		t.Fatalf("UpsertMovie: %v", err)

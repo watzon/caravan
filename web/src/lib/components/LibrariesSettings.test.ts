@@ -30,6 +30,7 @@ function library(over: Partial<Library> = {}): Library {
     id: 1,
     kind: 'movie',
     name: 'Movies',
+    icon: '',
     root_path: 'library/Movies',
     provider: 'tmdb',
     providers: ['tmdb'],
@@ -112,9 +113,13 @@ beforeEach(() => {
   scanCounts = { media_files: 12, unmatched: 2 };
   providerList = [
     { id: 'tmdb', name: 'TMDB', kinds: ['movie', 'tv'] },
-    // Television only: it is what makes the chain editor's eligibility filter a
-    // real rule rather than a formality.
-    { id: 'anilist', name: 'AniList', kinds: ['tv'] },
+    // Anime only, mirroring the server's registry: providers partition strictly
+    // by library kind, which is what makes the chain editor's eligibility filter
+    // a real rule rather than a formality.
+    { id: 'anilist', name: 'AniList', kinds: ['anime'] },
+    // Television only, which is what gives a tv library a second eligible
+    // provider to chain.
+    { id: 'tvmaze', name: 'TVmaze', kinds: ['tv'] },
     // The adult descriptors are one per CONFIGURED stash-box instance (PLAN
     // Part 2 phase 3 merges them into this list), so an id here may be
     // instance-qualified and the chain editor names it from the same list as
@@ -404,63 +409,67 @@ describe('LibrariesSettings — provider chain', () => {
     return found as HTMLButtonElement;
   }
 
-  const ANIME = library({
+  // A second television library, because television is the one kind more than
+  // one catalogue files: the registry partitions strictly, so a chain of two is
+  // only expressible on a shelf whose vocabulary two providers speak.
+  const KIDS = library({
     id: 9,
     kind: 'tv',
-    name: 'Anime',
-    root_path: 'library/Anime',
+    name: 'Kids',
+    icon: '',
+    root_path: 'library/Kids',
     is_default: false,
-    provider: 'anilist',
-    providers: ['anilist', 'tmdb'],
+    provider: 'tvmaze',
+    providers: ['tvmaze', 'tmdb'],
   });
 
-  async function openAnime() {
-    libraries = [MOVIES, SERIES, ANIME];
+  async function openKids() {
+    libraries = [MOVIES, SERIES, KIDS];
     await mountLoaded();
-    button('Anime').click();
+    button('Kids').click();
     await settle();
   }
 
   it('renders the stored chain in its stored order, numbered', async () => {
-    await openAnime();
+    await openKids();
 
-    expect(chain()).toEqual(['anilist', 'tmdb']);
+    expect(chain()).toEqual(['tvmaze', 'tmdb']);
     // Named, and positioned: the order is the setting, so it is shown rather
     // than left to be counted off the rows.
     const rows = [...host.querySelectorAll('[data-provider-row]')];
-    expect(rows[0]!.textContent).toContain('AniList');
+    expect(rows[0]!.textContent).toContain('TVmaze');
     expect(rows[0]!.textContent).toContain('1');
     expect(rows[1]!.textContent).toContain('TMDB');
     expect(rows[1]!.textContent).toContain('2');
   });
 
   it('PATCHes the whole reordered chain when one entry moves up', async () => {
-    await openAnime();
-    writeReplies = [library({ ...ANIME, provider: 'tmdb', providers: ['tmdb', 'anilist'] })];
+    await openKids();
+    writeReplies = [library({ ...KIDS, provider: 'tmdb', providers: ['tmdb', 'tvmaze'] })];
 
     rowButton('tmdb', 'Move TMDB earlier').click();
     await settle();
 
     expect(writes).toEqual([
-      { method: 'PATCH', url: '/api/v1/libraries/9', body: { providers: ['tmdb', 'anilist'] } },
+      { method: 'PATCH', url: '/api/v1/libraries/9', body: { providers: ['tmdb', 'tvmaze'] } },
     ]);
-    expect(chain()).toEqual(['tmdb', 'anilist']);
+    expect(chain()).toEqual(['tmdb', 'tvmaze']);
   });
 
   it('PATCHes the whole reordered chain when one entry moves down', async () => {
-    await openAnime();
-    writeReplies = [library({ ...ANIME, provider: 'tmdb', providers: ['tmdb', 'anilist'] })];
+    await openKids();
+    writeReplies = [library({ ...KIDS, provider: 'tmdb', providers: ['tmdb', 'tvmaze'] })];
 
-    rowButton('anilist', 'Move AniList later').click();
+    rowButton('tvmaze', 'Move TVmaze later').click();
     await settle();
 
-    expect(write(0).body).toEqual({ providers: ['tmdb', 'anilist'] });
+    expect(write(0).body).toEqual({ providers: ['tmdb', 'tvmaze'] });
   });
 
   it('cannot move the ends off either end of the chain', async () => {
-    await openAnime();
+    await openKids();
 
-    expect(rowButton('anilist', 'Move AniList earlier').disabled).toBe(true);
+    expect(rowButton('tvmaze', 'Move TVmaze earlier').disabled).toBe(true);
     expect(rowButton('tmdb', 'Move TMDB later').disabled).toBe(true);
     // Not merely disabled controls: nothing was written either.
     expect(writes).toEqual([]);
@@ -475,30 +484,30 @@ describe('LibrariesSettings — provider chain', () => {
     await settle();
 
     const add = select('library-provider-add');
-    expect([...add.options].map((o) => o.value)).toEqual(['', 'anilist']);
+    expect([...add.options].map((o) => o.value)).toEqual(['', 'tvmaze']);
 
-    writeReplies = [library({ ...SERIES, provider: 'tmdb', providers: ['tmdb', 'anilist'] })];
-    pick(add, 'anilist');
+    writeReplies = [library({ ...SERIES, provider: 'tmdb', providers: ['tmdb', 'tvmaze'] })];
+    pick(add, 'tvmaze');
     await settle();
 
     expect(writes).toEqual([
-      { method: 'PATCH', url: '/api/v1/libraries/2', body: { providers: ['tmdb', 'anilist'] } },
+      { method: 'PATCH', url: '/api/v1/libraries/2', body: { providers: ['tmdb', 'tvmaze'] } },
     ]);
-    expect(chain()).toEqual(['tmdb', 'anilist']);
+    expect(chain()).toEqual(['tmdb', 'tvmaze']);
     // Nothing left to add, so the select goes away rather than offering the
     // duplicate the server would refuse.
     expect(host.querySelector('#library-provider-add')).toBeNull();
   });
 
   it('PATCHes the shortened chain when a provider is removed', async () => {
-    await openAnime();
-    writeReplies = [library({ ...ANIME, provider: 'anilist', providers: ['anilist'] })];
+    await openKids();
+    writeReplies = [library({ ...KIDS, provider: 'tvmaze', providers: ['tvmaze'] })];
 
     rowButton('tmdb', 'Remove').click();
     await settle();
 
-    expect(write(0).body).toEqual({ providers: ['anilist'] });
-    expect(chain()).toEqual(['anilist']);
+    expect(write(0).body).toEqual({ providers: ['tvmaze'] });
+    expect(chain()).toEqual(['tvmaze']);
   });
 
   it('refuses to remove the last provider, which would leave nothing to identify with', async () => {
@@ -511,8 +520,9 @@ describe('LibrariesSettings — provider chain', () => {
   });
 
   it('offers a library only the providers that serve its kind', async () => {
-    // AniList serves television, so it must not be offered to a movie library
-    // however many providers exist.
+    // TVmaze serves television and nothing else, so it is never offered to a
+    // movie library however many providers exist. The registry partitions
+    // strictly, which is what makes this a rule rather than a formality.
     await mountLoaded();
     expect(host.querySelector('#library-provider-add')).toBeNull();
 
@@ -520,7 +530,7 @@ describe('LibrariesSettings — provider chain', () => {
     await settle();
     expect([...select('library-provider-add').options].map((o) => o.value)).toEqual([
       '',
-      'anilist',
+      'tvmaze',
     ]);
   });
 });
@@ -758,6 +768,7 @@ describe('LibrariesSettings — switcher and reach', () => {
         id: 3,
         kind: 'adult',
         name: 'Adult',
+        icon: '',
         root_path: 'library/Adult',
         provider: 'stashbox',
         providers: ['stashbox'],
@@ -782,6 +793,7 @@ describe('LibrariesSettings — switcher and reach', () => {
         id: 3,
         kind: 'adult',
         name: 'Adult',
+        icon: '',
         root_path: 'library/Adult',
         provider: 'stashbox:stashdb',
         providers: ['stashbox:stashdb', 'stashbox'],
@@ -880,6 +892,7 @@ describe('LibrariesSettings — multiple libraries', () => {
         id: 9,
         kind: 'tv',
         name: 'Anime',
+        icon: '',
         root_path: 'library/Anime',
         is_default: false,
         item_count: 3,
@@ -1129,5 +1142,103 @@ describe('LibrariesSettings — the adult create flow', () => {
     // An empty chain, so the server picks the bare legacy stash-box id — the
     // one exception that makes the module bootstrappable.
     expect(post!.body).toMatchObject({ kind: 'adult', name: 'Adult', providers: [] });
+  });
+});
+
+/**
+ * The per-library icon (design D1).
+ *
+ * The server stores any name matching `^[a-zA-Z]{0,32}$` without checking it
+ * against a list, so the picker's job is to send one of the names this build can
+ * actually draw — and to offer the way back, because `''` is what "use the
+ * kind's default" is stored as.
+ */
+describe('LibrariesSettings — the icon picker', () => {
+  function iconButton(name: string): HTMLButtonElement {
+    const found = host.querySelector<HTMLButtonElement>(`[data-library-icon="${name}"]`);
+    expect(found, `the ${name} icon button`).not.toBeNull();
+    return found!;
+  }
+
+  it('PATCHes the chosen glyph and refreshes the session that draws the sidebar', async () => {
+    writeReplies = [library({ icon: 'star' })];
+    await mountLoaded();
+
+    iconButton('star').click();
+    await settle();
+
+    expect(writes).toEqual([
+      { method: 'PATCH', url: '/api/v1/libraries/1', body: { icon: 'star' } },
+    ]);
+    expect(autosaveStatus('1:icon')).toBe('Saved');
+    // A renamed or re-iconed library has to reach the navigation, which builds
+    // its shelf rows from /auth/me and nothing else.
+    expect(meReads).toBe(1);
+    expect(iconButton('star').getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('sends an empty icon to go back to the kind default', async () => {
+    libraries = [library({ icon: 'star' }), SERIES];
+    writeReplies = [library({ icon: '' })];
+    await mountLoaded();
+
+    // Pressing the glyph already in force is the way back; without it the first
+    // choice would be permanent.
+    iconButton('star').click();
+    await settle();
+
+    expect(writes).toEqual([
+      { method: 'PATCH', url: '/api/v1/libraries/1', body: { icon: '' } },
+    ]);
+    expect(iconButton('film').getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it("accents the kind's default while the column is still empty", async () => {
+    await mountLoaded();
+
+    // A movie library with no icon draws `film`, so that is what the grid shows
+    // as chosen — the picker mirrors the sidebar, not the column.
+    expect(iconButton('film').getAttribute('aria-pressed')).toBe('true');
+    expect(iconButton('star').getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('offers the anime shelf as a kind a new library can be', async () => {
+    providerList = [
+      { id: 'tmdb', name: 'TMDB', kinds: ['movie', 'tv'] },
+      { id: 'anilist', name: 'AniList', kinds: ['anime'] },
+    // Television only, which is what gives a tv library a second eligible
+    // provider to chain.
+    { id: 'tvmaze', name: 'TVmaze', kinds: ['tv'] },
+    ];
+    await mountLoaded();
+    button('Add library').click();
+    flushSync();
+
+    expect([...select('new-library-kind').options].map((o) => o.value)).toEqual([
+      'movie',
+      'tv',
+      'anime',
+      'adult',
+    ]);
+    // And the kind survives the round trip: asserting the select's own value
+    // back would only prove that `pick` works, so the POST is what is read.
+    pick(select('new-library-kind'), 'anime');
+    const name = host.querySelector('#new-library-name') as HTMLInputElement;
+    name.value = 'Anime';
+    name.dispatchEvent(new Event('input', { bubbles: true }));
+    flushSync();
+
+    writeReplies = [
+      library({ id: 9, kind: 'anime', name: 'Anime', root_path: 'library/Anime', is_default: false }),
+    ];
+    const submit = [...host.querySelectorAll('button')].find(
+      (b) => b.textContent?.includes('Add library') && b.closest('[role="dialog"], dialog, .fixed'),
+    );
+    submit!.click();
+    await settle();
+
+    const post = writes.find((w) => w.method === 'POST' && w.url.endsWith('/libraries'));
+    expect(post, 'POST /libraries').toBeDefined();
+    expect(post!.body).toMatchObject({ kind: 'anime', name: 'Anime', root_path: 'library/Anime' });
   });
 });

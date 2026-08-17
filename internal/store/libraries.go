@@ -236,7 +236,7 @@ func (s *Store) UpdateLibrary(ctx context.Context, l *core.Library) error {
 	}
 	model := libraryStoreModelFromCore(l, chain)
 	res, err := s.db.NewUpdate().Model(model).
-		Column("name", "root_path", "dlna_visible", "route_torrent", "route_usenet",
+		Column("name", "icon", "root_path", "dlna_visible", "route_torrent", "route_usenet",
 			"quality_profile_id", "provider", "providers", "active", "restricted").
 		WherePK().
 		Exec(ctx)
@@ -432,8 +432,12 @@ func DefaultLibraryCategories(kind string, own []int) []int {
 }
 
 // ResolveLibrarySettingsForItem resolves the effective settings of the library
-// an item names, falling back to the kind's default library when the item
-// names none — an item from before 0022 — or names one that has vanished.
+// an item names, falling back to the kind's default library when it names one
+// that has vanished, or names none at all.
+//
+// Naming none is no longer an item's state — migration 0011 stamped the rows
+// that carried a zero — but it is still a caller's: work that has a kind and no
+// row in hand passes 0 deliberately, which is what the fallback is for.
 func (s *Store) ResolveLibrarySettingsForItem(ctx context.Context, libraryID int64, kind string) (*core.LibrarySettings, error) {
 	if libraryID != 0 {
 		settings, err := s.ResolveLibrarySettings(ctx, libraryID)
@@ -471,9 +475,9 @@ func (s *Store) ResolveLibrarySettingsByKind(ctx context.Context, kind string) (
 // nobody reads is a setting that saves, renders as an override, and changes
 // nothing (PLAN phase 8 task 2).
 //
-// libraryID 0 — an item from before 0022, or one whose library vanished — and
-// kind fill the gap: the kind's default library answers, which is exactly what
-// the item's zero means everywhere else (see core.Movie.LibraryID).
+// libraryID 0 — a caller with a kind and no row in hand, see
+// ResolveItemQualityProfile below — or a library that has vanished falls
+// through to kind: the kind's default library answers.
 func (s *Store) ResolveItemQualityProfileByLibrary(ctx context.Context, libraryID int64, kind string, itemProfileID int64) (*core.QualityProfile, error) {
 	if itemProfileID > 0 {
 		p, err := s.GetQualityProfile(ctx, itemProfileID)
@@ -508,8 +512,8 @@ func (s *Store) ResolveItemQualityProfileByLibrary(ctx context.Context, libraryI
 
 // ResolveItemQualityProfile is the by-kind form of the resolution above, for
 // call sites that have no item row in hand (a kind-scoped sweep, a default).
-// It reads the kind's DEFAULT library, which is what every caller written
-// before 0022 meant.
+// It reads the kind's DEFAULT library, which is the whole of what "this kind's
+// settings" can mean with no row to ask.
 func (s *Store) ResolveItemQualityProfile(ctx context.Context, kind string, itemProfileID int64) (*core.QualityProfile, error) {
 	return s.ResolveItemQualityProfileByLibrary(ctx, 0, kind, itemProfileID)
 }
@@ -553,7 +557,7 @@ func normalizeChain(l *core.Library) (string, error) {
 
 func libraryStoreModelFromCore(l *core.Library, providers string) *libraryStoreModel {
 	return &libraryStoreModel{
-		ID: l.ID, Kind: l.Kind, Name: l.Name, RootPath: l.RootPath, DLNAVisible: l.DLNAVisible,
+		ID: l.ID, Kind: l.Kind, Name: l.Name, Icon: l.Icon, RootPath: l.RootPath, DLNAVisible: l.DLNAVisible,
 		RouteTorrent: stringPointer(l.RouteTorrent), RouteUsenet: stringPointer(l.RouteUsenet),
 		QualityProfileID: int64Pointer(l.QualityProfileID), Provider: l.Provider, Providers: providers,
 		IsDefault: l.IsDefault, Active: l.Active, Restricted: l.Restricted,
@@ -562,7 +566,7 @@ func libraryStoreModelFromCore(l *core.Library, providers string) *libraryStoreM
 
 func (m *libraryStoreModel) coreLibrary() core.Library {
 	l := core.Library{
-		ID: m.ID, Kind: m.Kind, Name: m.Name, RootPath: m.RootPath, DLNAVisible: m.DLNAVisible,
+		ID: m.ID, Kind: m.Kind, Name: m.Name, Icon: m.Icon, RootPath: m.RootPath, DLNAVisible: m.DLNAVisible,
 		Provider: m.Provider, IsDefault: m.IsDefault, Active: m.Active, Restricted: m.Restricted,
 	}
 	if m.RouteTorrent != nil {

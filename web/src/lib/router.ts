@@ -49,6 +49,12 @@ export const ROUTES = [
   '/series/:id/search',
   '/series/:id/search/:season',
   '/series/:id/search/:season/:episode',
+  // The anime shelf. One screen listing two item tables — an anime library owns
+  // films and series at once — so it has no detail route of its own: a card
+  // links to /movies/:id or /series/:id, which already render an anime row.
+  // Deliberately absent from MEMBER_ROUTES for the same reason /movies and
+  // /series are: the server answers a member 403 for all three.
+  '/anime',
   // The adult module (phase 9). Every one of these is behind `isAdultRoute`
   // as well as the member allowlist: the module is invisible to an account it
   // was not granted to, whatever that account's role is.

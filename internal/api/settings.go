@@ -585,6 +585,22 @@ type statusCounts struct {
 	// module is visible to — omitempty so a module-off response stays
 	// byte-identical to one from an install that never enabled it.
 	Sites int `json:"sites,omitempty"`
+	// Libraries is the per-library item count the navigation badges each shelf
+	// with, one entry per library this caller may see and none for the rest.
+	//
+	// It is a list rather than a map keyed by id because JSON object keys are
+	// strings and a client would have to parse them back; and it is its own
+	// field rather than a number on Movies/Series because those two are the
+	// whole-install totals every existing consumer already reads.
+	Libraries []libraryItemCountJSON `json:"libraries"`
+}
+
+// libraryItemCountJSON is one library's item count: the movies and series that
+// name it as theirs, the same number store.CountLibraryItems answers the delete
+// guard and the Libraries screen with, so a badge and a refusal never disagree.
+type libraryItemCountJSON struct {
+	ID    int64 `json:"id"`
+	Items int64 `json:"items"`
 }
 
 // handleSystemStatus reports what the UI needs to render the shell: build
@@ -635,10 +651,30 @@ func (s *server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 	// The adult shelf's count, only for a caller the module is visible to —
 	// the same predicate that decides whether the nav item this badge sits on
 	// exists at all.
-	adultVisible, err := s.gate(r).seesAdult(ctx)
+	gate := s.gate(r)
+	adultVisible, err := gate.seesAdult(ctx)
 	if err != nil {
 		s.writeStoreError(w, "read library access", err)
 		return
+	}
+	// One entry per shelf the caller may see, for the navigation's per-library
+	// badges. It is the same list /auth/me draws the rows from, so a badge can
+	// never describe a shelf the sidebar does not show — and a library this
+	// caller was not granted contributes no entry, which is the one thing an
+	// item count must not leak.
+	visibleLibraries, err := gate.visibleLibraries(ctx)
+	if err != nil {
+		s.writeStoreError(w, "read library access", err)
+		return
+	}
+	libraryCounts := make([]libraryItemCountJSON, 0, len(visibleLibraries))
+	for _, lib := range visibleLibraries {
+		n, err := s.st.CountLibraryItems(ctx, lib.ID)
+		if err != nil {
+			s.writeStoreError(w, "count library items", err)
+			return
+		}
+		libraryCounts = append(libraryCounts, libraryItemCountJSON{ID: lib.ID, Items: n})
 	}
 	sites := 0
 	if adultVisible {
@@ -717,6 +753,7 @@ func (s *server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 			// intentionally movie-only, so the two counts can differ.
 			Wanted:     len(wantedLists.Movies) + len(wantedLists.Episodes),
 			Converting: converting,
+			Libraries:  libraryCounts,
 		},
 		DiskFreeBytes:               diskFree,
 		DiskTotalBytes:              diskTotal,

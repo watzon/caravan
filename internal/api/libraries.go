@@ -25,6 +25,10 @@ type libraryJSON struct {
 	ID   int64  `json:"id"`
 	Kind string `json:"kind"`
 	Name string `json:"name"`
+	// Icon names the glyph the navigation draws for this library. Empty means
+	// "the kind's default", which the client resolves — see core.Library.Icon
+	// for why the server keeps no list of icon names.
+	Icon string `json:"icon"`
 	// RootPath is read-only here: it is where the organizer already put the
 	// files, and moving the library is POST /system/storage-root/migrate's job.
 	RootPath string `json:"root_path"`
@@ -99,6 +103,10 @@ type libraryIndexerJSON struct {
 // are absent because neither is editable.
 type libraryPatchRequest struct {
 	Name *string `json:"name"`
+	// Icon is the glyph name, empty to go back to the kind's default. It is
+	// validated for SHAPE only (validLibraryIcon), so a client can ship a new
+	// glyph without a server release.
+	Icon *string `json:"icon"`
 	// Provider and Providers are two spellings of the same setting: the
 	// singular one is still accepted (and read as a chain of one) because it is
 	// what every client written before chains sends. Providers wins when both
@@ -229,8 +237,8 @@ func (s *server) handleCreateLibrary(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 
-	if body.Kind != core.LibraryKindMovie && body.Kind != core.LibraryKindTV && body.Kind != core.LibraryKindAdult {
-		writeError(w, http.StatusBadRequest, "kind must be movie, tv or adult")
+	if !core.ValidLibraryKind(body.Kind) {
+		writeError(w, http.StatusBadRequest, "kind must be movie, tv, anime or adult")
 		return
 	}
 	name := strings.TrimSpace(body.Name)
@@ -545,6 +553,10 @@ func (s *server) handleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "name cannot be empty")
 		return
 	}
+	if body.Icon != nil && !validLibraryIcon(*body.Icon) {
+		writeError(w, http.StatusBadRequest, "icon must be up to 32 letters")
+		return
+	}
 	var chain []string
 	if body.Providers != nil || body.Provider != nil {
 		if body.Providers != nil {
@@ -586,6 +598,9 @@ func (s *server) handleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
 
 	if body.Name != nil {
 		lib.Name = strings.TrimSpace(*body.Name)
+	}
+	if body.Icon != nil {
+		lib.Icon = *body.Icon
 	}
 	if chain != nil {
 		// The head follows the list rather than being set beside it; the store
@@ -763,6 +778,7 @@ func (s *server) libraryDTO(ctx context.Context, l core.Library, indexers []core
 		ID:               l.ID,
 		Kind:             l.Kind,
 		Name:             l.Name,
+		Icon:             l.Icon,
 		RootPath:         l.RootPath,
 		Provider:         l.Provider,
 		Providers:        l.ProviderChain(),
@@ -776,6 +792,30 @@ func (s *server) libraryDTO(ctx context.Context, l core.Library, indexers []core
 		QualityProfileID: l.QualityProfileID,
 		Indexers:         rows,
 	}, nil
+}
+
+// validLibraryIcon checks the SHAPE of an icon name and nothing else: letters
+// only, at most 32 of them, and empty is fine because empty is how a library
+// goes back to its kind's default glyph.
+//
+// It deliberately does not check the name against a list. The glyphs live in
+// the SPA, and a server-side allow-list would be a second copy of that list
+// which goes stale the first time a glyph is added — the client already falls
+// back to the kind default for a name it does not recognise, so an unknown name
+// costs nothing. What the shape rule buys is that the value stays a bare
+// identifier: no markup, no path, no separator a future consumer could read as
+// structure.
+func validLibraryIcon(icon string) bool {
+	if len(icon) > 32 {
+		return false
+	}
+	for i := 0; i < len(icon); i++ {
+		c := icon[i]
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') {
+			return false
+		}
+	}
+	return true
 }
 
 // categoryList renders a category list as an array rather than null, which is

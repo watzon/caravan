@@ -149,10 +149,9 @@ func (s *server) handleListConversions(w http.ResponseWriter, r *http.Request) {
 	profile := s.activeTVProfile(r.Context())
 	pending := make([]mediaFileJSON, 0, len(candidates))
 	for _, candidate := range candidates {
-		// The candidate's own library, by kind when the owning row still
-		// answers by kind: a file the caller cannot reach through any screen
-		// must not turn up here as something to convert.
-		visible, err := gate.visibleKind(r.Context(), candidate.LibraryID, candidate.LibraryKind)
+		// The candidate's own library: a file the caller cannot reach through
+		// any screen must not turn up here as something to convert.
+		visible, err := gate.visible(r.Context(), candidate.LibraryID)
 		if err != nil {
 			s.writeStoreError(w, "read library access", err)
 			return

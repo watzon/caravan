@@ -222,7 +222,7 @@ func TestProviderUsageCounters(t *testing.T) {
 	ctx := context.Background()
 	st, _ := openTemp(t)
 
-	lib := &core.Library{Kind: core.LibraryKindAdult, Name: "Adult", RootPath: "library/Adult",
+	lib := &core.Library{Kind: core.LibraryKindAdult, Name: "Scenes", RootPath: "library/Scenes",
 		Providers: []string{core.ProviderStashbox + ":stashdb", core.ProviderStashbox}}
 	if err := st.CreateLibrary(ctx, lib); err != nil {
 		t.Fatalf("CreateLibrary: %v", err)
@@ -230,10 +230,12 @@ func TestProviderUsageCounters(t *testing.T) {
 
 	for id, want := range map[string]int{
 		core.ProviderStashbox + ":stashdb": 1,
-		// The tail, counted once. The base does NOT also claim its instance's
-		// library twice over: the match is on the whole quoted id, and
-		// "stashbox" does not occur inside "stashbox:stashdb".
-		core.ProviderStashbox: 1,
+		// The tail, plus the Adult library 0011 seeds — which is chained to the
+		// bare id too. Each library is counted once: the base does NOT also
+		// claim its instance's library twice over, because the match is on the
+		// whole quoted id and "stashbox" does not occur inside
+		// "stashbox:stashdb".
+		core.ProviderStashbox: 2,
 		// The two libraries 0012 seeds, both chained to TMDB.
 		core.ProviderTMDB: 2,
 		// Nor is the match a prefix: a truncated id claims nothing.

@@ -36,7 +36,18 @@ const STATUS: SystemStatus = {
   storage_root: '/data',
   schema_version: 1,
   scanning: false,
-  counts: { movies: 1, series: 0, media_files: 1, unmatched: 0 },
+  counts: {
+    movies: 1,
+    series: 0,
+    media_files: 1,
+    unmatched: 0,
+    // The sidebar badges each shelf from here, not from the whole-install
+    // movies/series totals beside it. One entry per visible library.
+    libraries: [
+      { id: 1, items: 1 },
+      { id: 2, items: 0 },
+    ],
+  },
   disk_free_bytes: 500 * 1024 ** 3,
   disk_total_bytes: 1024 ** 4,
   engine_health: 'ok',
@@ -212,8 +223,23 @@ function stubViewport(matches: boolean) {
 
 /** What /system/status answers this test; a test may swap it before mounting. */
 let statusBody: SystemStatus = STATUS;
-/** What /auth/me answers this test; a test may swap it before mounting. */
-let sessionBody = { username: '', role: 'admin', open: true };
+/**
+ * What /auth/me answers this test; a test may swap it before mounting.
+ *
+ * `libraries` is what the sidebar's shelf rows are built from — the two seeded
+ * defaults of a fresh install — so a session without it renders a Library group
+ * holding only Wanted and Calendar.
+ */
+const SEEDED_LIBRARIES = [
+  { id: 1, kind: 'movie', name: 'Movies', icon: '' },
+  { id: 2, kind: 'tv', name: 'Series', icon: '' },
+];
+let sessionBody: Record<string, unknown> = {
+  username: '',
+  role: 'admin',
+  open: true,
+  libraries: SEEDED_LIBRARIES,
+};
 /** What GET /requests answers; the sidebar badge counts the pending ones. */
 let requestRows: MediaRequest[] = [];
 /** What GET /system/tasks and GET /jobs answer for the footer rail. */
@@ -222,7 +248,7 @@ let jobRows: Job[] = [];
 
 beforeEach(() => {
   statusBody = STATUS;
-  sessionBody = { username: '', role: 'admin', open: true };
+  sessionBody = { username: '', role: 'admin', open: true, libraries: SEEDED_LIBRARIES };
   requestRows = [];
   taskRows = [];
   jobRows = [];
@@ -292,8 +318,10 @@ describe('App shell', () => {
     await settle();
 
     expect(host.textContent).toContain('CARAVAN');
-    expect(host.querySelector('a[href="/movies"]')).not.toBeNull();
-    expect(host.querySelector('a[href="/series"]')).not.toBeNull();
+    // One row per session library, each linking with its own id: the plain
+    // /movies URL is "every visible movie", which is not what a shelf row means.
+    expect(host.querySelector('a[href="/movies?library=1"]')).not.toBeNull();
+    expect(host.querySelector('a[href="/series?library=2"]')).not.toBeNull();
 
     // The library list rendered its one movie rather than an empty state.
     expect(host.textContent).toContain('Big Buck Bunny');
@@ -663,6 +691,10 @@ describe('App shell', () => {
         wanted: 4,
         converting: 5,
         unmatched: 6,
+        libraries: [
+          { id: 1, items: 2 },
+          { id: 2, items: 3 },
+        ],
       },
     };
     requestRows = [
@@ -688,8 +720,9 @@ describe('App shell', () => {
 
     const cases = [
       ['/requests', '1 pending request', 'bg-warning-tint'],
-      ['/movies', '2 movies in library', 'bg-raised'],
-      ['/series', '3 series in library', 'bg-raised'],
+      // Per shelf now, and counted per library rather than per kind.
+      ['/movies?library=1', '2 items in this library', 'bg-raised'],
+      ['/series?library=2', '3 items in this library', 'bg-raised'],
       ['/wanted', '4 movies and episodes waiting', 'bg-warning-tint'],
       ['/queue', '1 active download', 'bg-accent-tint'],
       ['/convert', '5 open conversions', 'bg-raised'],
@@ -717,14 +750,16 @@ describe('App shell', () => {
     expect(queueLink?.querySelector('[title="1 active download"]')).not.toBeNull();
   });
 
-  it('badges the library nav items with their counts', async () => {
+  it('badges each library shelf row with its own item count', async () => {
     app = mount(App, { target: host });
     await settle();
 
-    // The status fixture reports one movie and zero series: a zero renders
-    // nothing rather than an inactive badge.
-    expect(host.querySelector('a[href="/movies"] > span[title="1 movie in library"]')).not.toBeNull();
-    expect(host.querySelector('a[href="/series"] > span[title]')).toBeNull();
+    // The status fixture gives library 1 one item and library 2 none: a zero
+    // renders nothing rather than an inactive badge.
+    expect(
+      host.querySelector('a[href="/movies?library=1"] > span[title="1 item in this library"]'),
+    ).not.toBeNull();
+    expect(host.querySelector('a[href="/series?library=2"] > span.tabular-nums')).toBeNull();
   });
 
   it('shows live search progress in the sidebar footer instead of a toast', async () => {
@@ -1033,7 +1068,7 @@ describe('App shell', () => {
   });
 
   it('resumes first run after reload for a signed-in administrator whose account already exists', async () => {
-    sessionBody = { username: 'admin', role: 'admin', open: false };
+    sessionBody = { username: 'admin', role: 'admin', open: false, libraries: SEEDED_LIBRARIES };
     statusBody = { ...STATUS, storage_root: '', needs_setup: true, password_set: true };
     system.status = null;
     system.loading = true;

@@ -44,6 +44,12 @@
     title: string;
     /** 0 means "the kind's default library", exactly as it does server-side. */
     library_id: number;
+    /**
+     * Which endpoint the tie names. It travels on the row rather than being
+     * read off the library, because an anime library holds films AND series —
+     * so the library alone cannot say, and only the chosen row can.
+     */
+    media_type: 'movie' | 'series';
   }
 
   let mode = $state<'park' | 'tie'>('park');
@@ -57,10 +63,14 @@
 
   // /libraries is admin-only, so the store is loaded when a picker opens
   // rather than at startup. The server already omits libraries this account
-  // may not see, so `all` needs no further filtering here.
+  // may not see.
   $effect(() => void libraries.load());
 
-  let choices = $derived(libraries.all);
+  // Dormant shelves are the one thing that list still carries and this one may
+  // not offer: a grab named onto one is a 404, tie or no tie, because an
+  // inactive library refuses everyone (core.LibraryVisible). `targetable()`
+  // states that once, for every picker.
+  let choices = $derived(libraries.targetable());
   // The first library is the opening answer rather than a blank: a select with
   // no valid value would make Confirm fail on a question the user never saw.
   $effect(() => {
@@ -70,9 +80,25 @@
 
   let library = $derived<Library | undefined>(choices.find((l) => l.id === libraryID));
   let kind = $derived<LibraryKind>(library?.kind ?? 'movie');
-  /** An adult site is a series row, which is why a tie to one is a series tie. */
-  let tieMediaType = $derived<'movie' | 'series'>(kind === 'movie' ? 'movie' : 'series');
+  /**
+   * Which endpoint the tie names.
+   *
+   * The chosen row answers for itself where there is one, because an anime
+   * library offers both. Without one the library's own vocabulary stands in —
+   * and an adult site is a series row, which is why a tie to one is a series
+   * tie. Only the season inputs and the metadata add read this before a row is
+   * picked; `confirm` never does.
+   */
+  let tieMediaType = $derived<'movie' | 'series'>(
+    tied?.media_type ?? (kind === 'movie' ? 'movie' : 'series'),
+  );
   let seasonsApply = $derived(tieMediaType === 'series');
+  /**
+   * The scope the "add from metadata" dialog opens on, or null for "let the
+   * user choose". An anime library accepts a film and a series alike, so
+   * fixing the tab there would hide half of what the shelf holds.
+   */
+  let addScope = $derived<'movie' | 'series' | null>(kind === 'anime' ? null : tieMediaType);
 
   /**
    * The library's own items, fetched once per kind. A tie must name an item the
@@ -91,14 +117,32 @@
     void loadItems(wanted);
   });
 
+  function movieTie(m: { id: number; title: string; library_id: number }): TieItem {
+    return { id: m.id, title: m.title, library_id: m.library_id, media_type: 'movie' };
+  }
+
+  function seriesTie(s: { id: number; title: string; library_id: number }): TieItem {
+    return { id: s.id, title: s.title, library_id: s.library_id, media_type: 'series' };
+  }
+
   async function loadItems(wanted: LibraryKind) {
     try {
-      const rows: TieItem[] =
-        wanted === 'movie'
-          ? (await api.listMovies()).map((m) => ({ id: m.id, title: m.title, library_id: m.library_id }))
-          : wanted === 'tv'
-            ? (await api.listSeries()).map((s) => ({ id: s.id, title: s.title, library_id: s.library_id }))
-            : (await api.listSites()).map((s) => ({ id: s.id, title: s.title, library_id: s.library_id }));
+      let rows: TieItem[];
+      if (wanted === 'movie') {
+        rows = (await api.listMovies()).map(movieTie);
+      } else if (wanted === 'tv') {
+        rows = (await api.listSeries()).map(seriesTie);
+      } else if (wanted === 'anime') {
+        // Both tables: an anime library owns films and series together, and a
+        // release parked against it may be either.
+        const [films, shows] = await Promise.all([
+          api.listMovies(),
+          api.listSeries({ kind: 'anime' }),
+        ]);
+        rows = [...films.map(movieTie), ...shows.map(seriesTie)];
+      } else {
+        rows = (await api.listSites()).map(seriesTie);
+      }
       items = rows;
       itemsKind = wanted;
       itemsError = null;
@@ -146,16 +190,23 @@
   /**
    * Adopt an item the metadata dialog just created.
    *
-   * The list is refetched rather than the row being synthesised, because the
-   * add does not necessarily land where this dialog is pointing: the add
-   * dialog targets its kind's DEFAULT library unless told otherwise, and the
-   * server refuses a tie to an item another library owns. Reading the row back
-   * is what turns that from a confusing 400 at Confirm into a sentence here.
+   * The list is refetched rather than the row being synthesised, because this
+   * dialog's own list is what `confirm` ties against — a synthesised row would
+   * be a tie to something the list does not contain.
+   *
+   * The add IS told where to land (`libraryID` above), so landing elsewhere is
+   * no longer the ordinary case. The check below stays anyway: the server owns
+   * where a row ends up, and reading it back is what turns a disagreement into
+   * a sentence here rather than a confusing 400 at Confirm.
    */
-  async function onAdded(_kind: 'movie' | 'series', item: { id: number; title: string }) {
+  async function onAdded(addedKind: 'movie' | 'series', item: { id: number; title: string }) {
     adding = false;
     await loadItems(kind);
-    const row = items.find((candidate) => candidate.id === item.id);
+    // Matched on the pair, not the id: a film and a series may both be row 12,
+    // and on an anime shelf both are in this list at once.
+    const row = items.find(
+      (candidate) => candidate.id === item.id && candidate.media_type === addedKind,
+    );
     if (row && inChosenLibrary(row)) {
       tied = row;
       return;
@@ -284,7 +335,7 @@
             </p>
           {:else}
             <ul class="flex max-h-48 flex-col overflow-y-auto rounded-md border border-border">
-              {#each search.results as item (item.id)}
+              {#each search.results as item (`${item.media_type}:${item.id}`)}
                 <li>
                   <button
                     type="button"
@@ -349,13 +400,16 @@
 </Modal>
 
 {#if adding}
-  <!-- The kind is fixed to the library's, so the add cannot land somewhere the
-       tie would then be refused for. `onadded` is what keeps the user here:
-       without it the add navigates to the new item's page and abandons the
-       release they came in with. -->
+  <!-- Both the library and the kind are fixed to this tie's, so the add cannot
+       land somewhere the tie would then be refused for. The kind is the one
+       exception on an anime shelf, which holds films and series alike — there
+       the dialog shows both and each row says which it is. `onadded` is what
+       keeps the user here: without it the add navigates to the new item's page
+       and abandons the release they came in with. -->
   <AddItemModal
     title={t('component.grabTarget.addThenTie')}
-    kind={tieMediaType}
+    kind={addScope}
+    {libraryID}
     onadded={onAdded}
     onclose={() => (adding = false)} />
 {/if}

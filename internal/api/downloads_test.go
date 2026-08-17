@@ -399,6 +399,7 @@ func TestListDownloadsRespectsAdultVisibility(t *testing.T) {
 
 	site := &core.Series{
 		Kind: core.SeriesKindAdult, StashID: "queue-site", Title: "Adult Site", SortTitle: "adult site",
+		LibraryID: defaultLibraryID(t, st, core.LibraryKindAdult),
 	}
 	if err := st.UpsertSeries(ctx, site); err != nil {
 		t.Fatalf("UpsertSeries(adult): %v", err)
@@ -643,6 +644,7 @@ func TestDeleteAdultDownloadRecordsOwnershipForHistory(t *testing.T) {
 	ctx := context.Background()
 	site := &core.Series{
 		Kind: core.SeriesKindAdult, StashID: "removed-site", Title: "Removed Adult Site", SortTitle: "removed adult site",
+		LibraryID: defaultLibraryID(t, st, core.LibraryKindAdult),
 	}
 	if err := st.UpsertSeries(ctx, site); err != nil {
 		t.Fatalf("UpsertSeries: %v", err)

@@ -356,13 +356,16 @@ func (s *Service) handleMedia(w http.ResponseWriter, r *http.Request) {
 	// The owning library decides, not the owning kind: with several libraries
 	// per kind, a file in a library the owner stopped sharing must stop
 	// playing even while its sibling library is still on the LAN.
-	libID, kind, err := s.st.GetMediaFileLibrary(ctx, id)
+	// The kind the query also resolves is the OWNER's vocabulary and decides
+	// nothing here: the owning row names its library outright, and that row's
+	// own dlna_visible flag is the whole answer.
+	libID, _, err := s.st.GetMediaFileLibrary(ctx, id)
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
 	v, err := s.visibility(ctx)
-	if err != nil || !v.library(libID, kind) {
+	if err != nil || !v.library(libID) {
 		http.NotFound(w, r)
 		return
 	}

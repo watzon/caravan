@@ -9,8 +9,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import Sidebar from './Sidebar.svelte';
-import type { Job, SystemStatus, SystemTask } from '../api/types';
+import type { Job, SessionLibrary, SystemStatus, SystemTask } from '../api/types';
 import { saveDisplayPreferences } from '../displayPreferences';
+import { navigate } from '../router.svelte';
 import { session } from '../state/session.svelte';
 import { system } from '../state/system.svelte';
 import { tasks } from '../state/tasks.svelte';
@@ -106,9 +107,12 @@ afterEach(async () => {
   system.status = null;
   system.loading = true;
   tasks.stopSoon();
-  tasks.tasks = null;
   tasks.jobs = null;
+  tasks.tasks = null;
   session.forget();
+  // The router is a module singleton, so a shelf-row test that navigated has to
+  // hand the next one a clean path or it inherits an active row.
+  navigate('/', { replace: true });
 });
 
 async function settle() {
@@ -125,6 +129,165 @@ function activity(): HTMLAnchorElement[] {
   return [...host.querySelectorAll<HTMLAnchorElement>('[data-sidebar-activity-row]')];
 }
 
+/**
+ * A distinctive fragment of each glyph's markup, copied from Icon.svelte's
+ * table. The icon set is inline SVG with no name on the element, so this is how
+ * a test says WHICH mark a row is wearing rather than merely that it has one.
+ */
+const GLYPH = {
+  film: 'M7 2v20M17 2v20',
+  tv: 'm17 2-5 5-5-5',
+  sparkles: 'M12 3.5',
+  flame: 'M12 21a6 6 0 0 0 6-6',
+  star: 'm12 3 2.7 5.6',
+} as const;
+
+function row(href: string): HTMLAnchorElement | null {
+  return host.querySelector<HTMLAnchorElement>(`a[href="${href}"]`);
+}
+
+/** Every Library-group row's href, in the order they are drawn. */
+function libraryHrefs(): string[] {
+  const group = [...host.querySelectorAll('nav > div')].find((div) =>
+    div.querySelector('p')?.textContent?.trim() === 'Library',
+  );
+  return [...(group?.querySelectorAll('a') ?? [])].map((a) => a.getAttribute('href') ?? '');
+}
+
+function library(over: Partial<SessionLibrary> & { id: number }): SessionLibrary {
+  return { kind: 'movie', name: `Library ${over.id}`, icon: '', ...over };
+}
+
+describe('Sidebar library shelves', () => {
+  it('draws one row per session library, with its name, glyph, id and count', async () => {
+    session.user = {
+      username: 'root',
+      role: 'admin',
+      open: false,
+      adult: false,
+      libraries: [
+        library({ id: 1, kind: 'movie', name: 'Movies' }),
+        library({ id: 4, kind: 'movie', name: 'Kids', icon: 'star' }),
+        library({ id: 2, kind: 'tv', name: 'Series' }),
+        library({ id: 3, kind: 'anime', name: 'Anime' }),
+      ],
+    };
+    seedStatus({
+      counts: {
+        movies: 0,
+        series: 0,
+        media_files: 0,
+        unmatched: 0,
+        libraries: [
+          { id: 4, items: 7 },
+          { id: 1, items: 0 },
+        ],
+      },
+    });
+    await render();
+
+    // Grouped movie, tv, anime; inside a kind, the order /auth/me sent.
+    expect(libraryHrefs()).toEqual([
+      '/movies?library=1',
+      '/movies?library=4',
+      '/series?library=2',
+      '/anime?library=3',
+      '/wanted',
+      '/calendar',
+    ]);
+    expect(row('/movies?library=4')?.textContent).toContain('Kids');
+    // A chosen glyph is drawn; an empty one falls back to the kind's default.
+    expect(row('/movies?library=4')?.innerHTML).toContain(GLYPH.star);
+    expect(row('/movies?library=1')?.innerHTML).toContain(GLYPH.film);
+    expect(row('/series?library=2')?.innerHTML).toContain(GLYPH.tv);
+    expect(row('/anime?library=3')?.innerHTML).toContain(GLYPH.sparkles);
+    // The badge is this shelf's own inventory, not the install's, and a zero
+    // renders nothing.
+    expect(
+      row('/movies?library=4')?.querySelector('span[title="7 items in this library"]'),
+    ).not.toBeNull();
+    expect(row('/movies?library=1')?.querySelector('span.tabular-nums')).toBeNull();
+  });
+
+  it('falls back to the kind glyph for an icon name it cannot draw', async () => {
+    session.user = {
+      username: 'root',
+      role: 'admin',
+      open: false,
+      adult: false,
+      // The server stores any well-formed name without checking it against a
+      // list, so the SPA has to survive one it has never heard of.
+      libraries: [library({ id: 3, kind: 'anime', name: 'Anime', icon: 'nonesuch' })],
+    };
+    await render();
+
+    expect(row('/anime?library=3')?.innerHTML).toContain(GLYPH.sparkles);
+  });
+
+  it('lights the row the library id names, and no row on the plain path', async () => {
+    session.user = {
+      username: 'root',
+      role: 'admin',
+      open: false,
+      adult: false,
+      libraries: [
+        library({ id: 1, kind: 'movie', name: 'Movies' }),
+        library({ id: 4, kind: 'movie', name: 'Kids' }),
+      ],
+    };
+    navigate('/movies?library=4', { replace: true });
+    await render();
+
+    expect(row('/movies?library=4')?.getAttribute('aria-current')).toBe('page');
+    expect(row('/movies?library=1')?.getAttribute('aria-current')).toBeNull();
+
+    unmount(app);
+    navigate('/movies', { replace: true });
+    await render();
+
+    expect(row('/movies?library=1')?.getAttribute('aria-current')).toBeNull();
+    expect(row('/movies?library=4')?.getAttribute('aria-current')).toBeNull();
+  });
+
+  it('gives a granted member the adult row and no other shelf', async () => {
+    session.user = {
+      username: 'ada',
+      role: 'member',
+      open: false,
+      adult: true,
+      // The server sends a member their libraries too; the shelf SCREENS are
+      // still an admin's, so only the adult row may be drawn from them.
+      libraries: [
+        library({ id: 1, kind: 'movie', name: 'Movies' }),
+        library({ id: 3, kind: 'anime', name: 'Anime' }),
+        library({ id: 9, kind: 'adult', name: 'Adult', icon: 'star' }),
+      ],
+    };
+    await render();
+
+    expect(libraryHrefs()).toEqual(['/adult']);
+    // The adult row wears the adult library's own glyph when one was chosen.
+    expect(row('/adult')?.innerHTML).toContain(GLYPH.star);
+  });
+
+  it('keeps the adult row a single entry however many adult libraries exist', async () => {
+    session.user = {
+      username: 'root',
+      role: 'admin',
+      open: false,
+      adult: true,
+      libraries: [
+        library({ id: 9, kind: 'adult', name: 'Adult' }),
+        library({ id: 10, kind: 'adult', name: 'Vintage' }),
+      ],
+    };
+    await render();
+
+    expect(libraryHrefs()).toEqual(['/adult', '/wanted', '/calendar']);
+    expect(row('/adult')?.innerHTML).toContain(GLYPH.flame);
+  });
+});
+
 describe('Sidebar task rail', () => {
   it('stays quiet while nothing is running and nothing failed', async () => {
     await render();
@@ -135,7 +298,9 @@ describe('Sidebar task rail', () => {
     expect(host.textContent).not.toContain('500 GB free');
     expect(host.textContent).not.toContain('No TMDB key');
     expect(host.querySelector('[role="progressbar"]')).toBeNull();
-    expect(host.querySelector('a[href="/settings"] > span[title]')).toBeNull();
+    // The badge, not "any titled span": every nav row's label now carries its
+    // own title so a truncated library name is still readable on hover.
+    expect(host.querySelector('a[href="/settings"] > span.tabular-nums')).toBeNull();
   });
 
   it('stacks two named searches at once', async () => {

@@ -284,9 +284,7 @@ func (m *Manager) upsertSiteRow(ctx context.Context, providerID string, meta *co
 			sr.Monitored = existing.Monitored
 			sr.QualityProfileID = existing.QualityProfileID
 			sr.AddedAt = existing.AddedAt
-			if existing.LibraryID != 0 {
-				sr.LibraryID = existing.LibraryID
-			}
+			sr.LibraryID = existing.LibraryID
 			// The folder on disk is ground truth, exactly as it is for a movie
 			// refresh: a site renamed upstream must not point the row at a
 			// directory that does not exist.
@@ -723,7 +721,7 @@ func (m *Manager) refreshSites(ctx context.Context, res *RefreshResult) error {
 		if !sr.Monitored || sr.StashID == "" {
 			continue
 		}
-		if !owners.Active(sr.LibraryID, core.LibraryKindAdult) {
+		if !owners.Active(sr.LibraryID) {
 			continue
 		}
 		pinned := adultRef(core.ItemRef{Provider: sr.Provider, Ref: sr.StashID})

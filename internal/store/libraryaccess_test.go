@@ -35,7 +35,7 @@ func TestCreateLibraryIsBornActiveAndOpen(t *testing.T) {
 	ctx := context.Background()
 	st, _ := openTemp(t)
 
-	lib := newLibrary(t, st, core.LibraryKindTV, "Anime", "library/Anime")
+	lib := newLibrary(t, st, core.LibraryKindTV, "Kids", "library/Kids")
 	if !lib.Active || lib.Restricted {
 		t.Errorf("created library = {active:%t, restricted:%t}, want active and open",
 			lib.Active, lib.Restricted)
@@ -378,7 +378,7 @@ func TestAnyActiveLibraryOfKind(t *testing.T) {
 
 	// One library of a kind switched off, another still on: the kind is still
 	// reachable, because the question is about the install and not the row.
-	extra := newLibrary(t, st, core.LibraryKindTV, "Anime", "library/Anime")
+	extra := newLibrary(t, st, core.LibraryKindTV, "Kids", "library/Kids")
 	tv, err := st.GetLibraryByKind(ctx, core.LibraryKindTV)
 	if err != nil {
 		t.Fatalf("GetLibraryByKind(tv): %v", err)

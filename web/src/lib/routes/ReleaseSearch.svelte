@@ -146,8 +146,8 @@
 
   /**
    * The library whose quality profile scores a free-text re-search, so an
-   * edited query ranks rows the same way the derived one did. 0 — a row from
-   * before libraries were plural — falls back to the store-wide default.
+   * edited query ranks rows the same way the derived one did. 0 — an item the
+   * screen has not loaded yet — falls back to the store-wide default.
    */
   let libraryID = $derived((kind === 'movie' ? movie?.library_id : series?.library_id) ?? 0);
 

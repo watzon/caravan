@@ -12,21 +12,21 @@ import (
 )
 
 // With several libraries of one kind, a scan must attribute each file to the
-// library whose root holds it: a series found under the Anime root belongs to
-// the Anime library and organizes under it, while the default TV library keeps
+// library whose root holds it: a series found under the Kids root belongs to
+// the Kids library and organizes under it, while the default TV library keeps
 // answering for everything else.
 func TestScanAttributesFilesToTheirLibrary(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(t)
 	seedSeries(h)
 
-	anime := &core.Library{Kind: core.LibraryKindTV, Name: "Anime",
-		RootPath: "library/Anime", Provider: core.ProviderTMDB}
+	anime := &core.Library{Kind: core.LibraryKindTV, Name: "Kids",
+		RootPath: "library/Kids", Provider: core.ProviderTMDB}
 	if err := h.st.CreateLibrary(ctx, anime); err != nil {
 		t.Fatalf("CreateLibrary: %v", err)
 	}
 
-	raw := "library/Anime/Planet.Earth.II.S01E01.720p.mkv"
+	raw := "library/Kids/Planet.Earth.II.S01E01.720p.mkv"
 	h.parser["Planet.Earth.II.S01E01.720p.mkv"] = episodeParse("Planet Earth II", 1, 1)
 	h.writeVideo(raw, "episode bytes")
 
@@ -35,7 +35,7 @@ func TestScanAttributesFilesToTheirLibrary(t *testing.T) {
 		t.Fatalf("unexpected result: %+v", res)
 	}
 
-	organized := "library/Anime/Planet Earth II (2016)/Season 01/Planet Earth II (2016) - S01E01 - Islands.mkv"
+	organized := "library/Kids/Planet Earth II (2016)/Season 01/Planet Earth II (2016) - S01E01 - Islands.mkv"
 	if got := h.read(organized); got != "episode bytes" {
 		t.Fatalf("organized file %q missing (content %q)", organized, got)
 	}
@@ -45,10 +45,10 @@ func TestScanAttributesFilesToTheirLibrary(t *testing.T) {
 		t.Fatalf("GetSeriesByTMDBID: %v", err)
 	}
 	if sr.LibraryID != anime.ID {
-		t.Errorf("series library_id = %d, want the Anime library %d", sr.LibraryID, anime.ID)
+		t.Errorf("series library_id = %d, want the Kids library %d", sr.LibraryID, anime.ID)
 	}
-	if sr.Path != "library/Anime/Planet Earth II (2016)" {
-		t.Errorf("series path = %q, want it under library/Anime", sr.Path)
+	if sr.Path != "library/Kids/Planet Earth II (2016)" {
+		t.Errorf("series path = %q, want it under library/Kids", sr.Path)
 	}
 
 	// A rescan is idempotent and does not move the series anywhere.
@@ -94,8 +94,8 @@ func TestAddTargetsTheChosenLibrary(t *testing.T) {
 	h := newHarness(t)
 	seedSeries(h)
 
-	anime := &core.Library{Kind: core.LibraryKindTV, Name: "Anime",
-		RootPath: "library/Anime", Provider: core.ProviderTMDB}
+	anime := &core.Library{Kind: core.LibraryKindTV, Name: "Kids",
+		RootPath: "library/Kids", Provider: core.ProviderTMDB}
 	if err := h.st.CreateLibrary(ctx, anime); err != nil {
 		t.Fatalf("CreateLibrary: %v", err)
 	}
@@ -104,8 +104,8 @@ func TestAddTargetsTheChosenLibrary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AddSeries: %v", err)
 	}
-	if sr.LibraryID != anime.ID || sr.Path != "library/Anime/Planet Earth II (2016)" {
-		t.Errorf("added series = {library %d, path %q}, want the Anime library", sr.LibraryID, sr.Path)
+	if sr.LibraryID != anime.ID || sr.Path != "library/Kids/Planet Earth II (2016)" {
+		t.Errorf("added series = {library %d, path %q}, want the Kids library", sr.LibraryID, sr.Path)
 	}
 
 	def, err := h.st.GetDefaultLibrary(ctx, core.LibraryKindTV)
@@ -117,7 +117,7 @@ func TestAddTargetsTheChosenLibrary(t *testing.T) {
 		t.Fatalf("AddSeries(again): %v", err)
 	}
 	if again.LibraryID != anime.ID || again.Path != sr.Path {
-		t.Errorf("re-add moved the series to {library %d, path %q}, want it kept in Anime", again.LibraryID, again.Path)
+		t.Errorf("re-add moved the series to {library %d, path %q}, want it kept in Kids", again.LibraryID, again.Path)
 	}
 }
 
@@ -158,8 +158,8 @@ func TestAddResolvesTheRefsOwnProvider(t *testing.T) {
 	reg := &fakeRegistry{metadata: map[string]core.MetadataProvider{"other": other}}
 	h.mgr.providers = reg
 
-	anime := &core.Library{Kind: core.LibraryKindTV, Name: "Anime",
-		RootPath: "library/Anime", Provider: "other"}
+	anime := &core.Library{Kind: core.LibraryKindTV, Name: "Kids",
+		RootPath: "library/Kids", Provider: "other"}
 	if err := h.st.CreateLibrary(ctx, anime); err != nil {
 		t.Fatalf("CreateLibrary: %v", err)
 	}
@@ -310,7 +310,7 @@ func TestSeriesFromTwoProvidersSharingATVDBIDStayTwoRows(t *testing.T) {
 	}
 }
 
-// chainHarness builds a two-provider chain over a fresh Anime library: ids
+// chainHarness builds a two-provider chain over a fresh Kids library: ids
 // "first" and "second", in that order, resolved through a fake registry.
 func chainHarness(t *testing.T, first, second *stubProvider) (*harness, *core.Library) {
 	t.Helper()
@@ -318,8 +318,8 @@ func chainHarness(t *testing.T, first, second *stubProvider) (*harness, *core.Li
 	h.mgr.providers = &fakeRegistry{metadata: map[string]core.MetadataProvider{
 		"first": first, "second": second,
 	}}
-	anime := &core.Library{Kind: core.LibraryKindTV, Name: "Anime",
-		RootPath: "library/Anime", Providers: []string{"first", "second"}}
+	anime := &core.Library{Kind: core.LibraryKindTV, Name: "Kids",
+		RootPath: "library/Kids", Providers: []string{"first", "second"}}
 	if err := h.st.CreateLibrary(context.Background(), anime); err != nil {
 		t.Fatalf("CreateLibrary: %v", err)
 	}
@@ -348,8 +348,8 @@ func chainSeries(provider, ref, title string) *stubProvider {
 // provider failure, and a chain that answered without recognizing the title
 // parks it as no match.
 func TestScanWalksTheProviderChain(t *testing.T) {
-	rel := "library/Anime/Frieren.S01E01.1080p.WEB-DL.x265.mkv"
-	organized := "library/Anime/Frieren (2023)/Season 01/Frieren (2023) - S01E01 - The Journey's End.mkv"
+	rel := "library/Kids/Frieren.S01E01.1080p.WEB-DL.x265.mkv"
+	organized := "library/Kids/Frieren (2023)/Season 01/Frieren (2023) - S01E01 - The Journey's End.mkv"
 
 	t.Run("past a provider that errored", func(t *testing.T) {
 		broken := &stubProvider{searchErr: errors.New("upstream is down")}
@@ -497,8 +497,8 @@ func chainSeriesAbsolute(provider, ref, title string) *stubProvider {
 // one. Stopping at the first title match would park a file the chain could
 // place — which is the whole reason a chain is ordered rather than merged.
 func TestScanWalksTheChainForAnAbsoluteNumber(t *testing.T) {
-	rel := "library/Anime/[Group] Frieren - 5.mkv"
-	organized := "library/Anime/Frieren (2023)/Season 02/Frieren (2023) - S02E03 - Five.mkv"
+	rel := "library/Kids/[Group] Frieren - 5.mkv"
+	organized := "library/Kids/Frieren (2023)/Season 02/Frieren (2023) - S02E03 - Five.mkv"
 
 	// "first" matches the title and publishes no absolute numbers at all.
 	h, _ := chainHarness(t, chainSeries("first", "1", "Frieren"),

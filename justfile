@@ -15,9 +15,9 @@ ensure-web-dist:
         just web-build
     fi
 
-# Vite HMR on :5173, proxying /api to the Go server.
+# Vite HMR on :8678, proxying /api to the Go server.
 web-dev: web-install
-    cd web && npm run dev -- --host 127.0.0.1 --port 5173 --strictPort --clearScreen false
+    cd web && npm run dev -- --host 127.0.0.1 --port 8678 --strictPort --clearScreen false
 
 # Air live-reload for the Go API; proxies the SPA to Vite for HMR.
 go-dev: ensure-web-dist
@@ -25,7 +25,7 @@ go-dev: ensure-web-dist
     set -euo pipefail
     PATH="$(go env GOPATH)/bin:${PATH}"
     export PATH
-    export CARAVAN_DEV_UI="${CARAVAN_DEV_UI:-http://127.0.0.1:5173}"
+    export CARAVAN_DEV_UI="${CARAVAN_DEV_UI:-http://127.0.0.1:8678}"
     if ! command -v air >/dev/null 2>&1; then
         echo "air is required for just go-dev / just dev. Install it with:" >&2
         echo "  go install github.com/air-verse/air@latest" >&2
@@ -39,7 +39,7 @@ dev: web-install ensure-web-dist
     set -euo pipefail
     PATH="$(go env GOPATH)/bin:${PATH}"
     export PATH
-    export CARAVAN_DEV_UI="${CARAVAN_DEV_UI:-http://127.0.0.1:5173}"
+    export CARAVAN_DEV_UI="${CARAVAN_DEV_UI:-http://127.0.0.1:8678}"
 
     if ! command -v air >/dev/null 2>&1; then
         echo "air is required for just dev. Install it with:" >&2
@@ -50,11 +50,11 @@ dev: web-install ensure-web-dist
     echo
     echo "  Caravan dev"
     echo "    UI (HMR)  http://127.0.0.1:8677"
-    echo "    Vite      http://127.0.0.1:5173"
+    echo "    Vite      http://127.0.0.1:8678"
     echo "    API       http://127.0.0.1:8677/api/v1"
     echo
 
-    (cd web && npm run dev -- --host 127.0.0.1 --port 5173 --strictPort --clearScreen false) &
+    (cd web && npm run dev -- --host 127.0.0.1 --port 8678 --strictPort --clearScreen false) &
     vite_pid=$!
     air -c .air.toml &
     air_pid=$!

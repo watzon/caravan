@@ -1,0 +1,30 @@
+{
+  "data": {
+    "Media": {
+      "id": 21519,
+      "title": {
+        "romaji": "Kimi no Na wa.",
+        "english": "Your Name.",
+        "native": "君の名は。"
+      },
+      "startDate": { "year": 2016, "month": 8, "day": 26 },
+      "endDate": { "year": 2016, "month": 8, "day": 26 },
+      "description": "Mitsuha and Taki swap bodies across <i>time</i>.<br><br>(Source: CoMix Wave)",
+      "averageScore": 85,
+      "status": "FINISHED",
+      "episodes": 1,
+      "format": "MOVIE",
+      "coverImage": {
+        "extraLarge": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/large/bx21519-1.jpg",
+        "large": "https://s4.anilist.co/file/anilistcdn/media/anime/cover/medium/bx21519-1.jpg"
+      },
+      "stats": {
+        "scoreDistribution": [
+          { "amount": 40 },
+          { "amount": 260 },
+          { "amount": 7100 }
+        ]
+      }
+    }
+  }
+}

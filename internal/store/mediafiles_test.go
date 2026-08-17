@@ -17,7 +17,7 @@ func TestMediaFileLibraryKind(t *testing.T) {
 	// just a kind: the DLNA tree gates a media URL on the owning library's own
 	// dlna_visible flag.
 	anime := &core.Library{
-		Kind: core.LibraryKindTV, Name: "Anime", RootPath: "library/Anime",
+		Kind: core.LibraryKindTV, Name: "Kids", RootPath: "library/Kids",
 		Provider: core.ProviderTMDB,
 	}
 	if err := st.CreateLibrary(ctx, anime); err != nil {
