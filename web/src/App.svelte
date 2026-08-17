@@ -20,6 +20,7 @@
     ordinalParam,
     type RoutePattern,
   } from './lib/router';
+  import { sessionLibraryBySlug } from './lib/library';
   import { navigate, router, startRouter } from './lib/router.svelte';
   import Adult from './lib/routes/Adult.svelte';
   import AdultScene from './lib/routes/AdultScene.svelte';
@@ -81,6 +82,7 @@ import Search from './lib/routes/Search.svelte';
     '/series/:id/search/:season': 'app.title.interactiveSearch',
     '/series/:id/search/:season/:episode': 'app.title.interactiveSearch',
     '/anime': 'app.title.anime',
+    '/l/:slug': 'app.title.library',
     '/adult': 'app.title.adult',
     '/adult/scenes': 'app.title.adult',
     '/adult/scenes/:provider/:stashId': 'app.title.adult',
@@ -141,6 +143,12 @@ import Search from './lib/routes/Search.svelte';
    * shelf row links with — is more specific and wins there.
    */
   function shelfAddKind(): 'movie' | 'series' | 'anime' {
+    if (router.match?.pattern === '/l/:slug') {
+      const lib = sessionLibraryBySlug(session.user, router.match.params.slug ?? '');
+      if (lib?.kind === 'tv') return 'series';
+      if (lib?.kind === 'anime') return 'anime';
+      return 'movie';
+    }
     if (router.path.startsWith('/series')) return 'series';
     if (router.path.startsWith('/anime')) return 'anime';
     return 'movie';
@@ -300,6 +308,18 @@ import Search from './lib/routes/Search.svelte';
     navigate(ADULT_EXPLORE_HREF, { replace: true });
   });
 
+  /**
+   * Adult stays a module on /adult, not a per-library shelf. A slug that
+   * resolves to an adult library is a bookmark alias and lands on the module.
+   */
+  $effect(() => {
+    if (session.loading) return;
+    if (router.match?.pattern !== '/l/:slug') return;
+    const lib = sessionLibraryBySlug(session.user, router.match.params.slug ?? '');
+    if (lib?.kind !== 'adult') return;
+    navigate('/adult', { replace: true });
+  });
+
   function onKeydown(event: KeyboardEvent) {
     if (event.key === 'Escape' && sidebarOpen) {
       event.preventDefault();
@@ -330,8 +350,16 @@ import Search from './lib/routes/Search.svelte';
     }
     return match.params.section ?? '';
   });
-  let title = $derived(match ? t(TITLES[match.pattern]) : t('app.title.notFound'));
-  let document_title = $derived(match ? `${t(TITLES[match.pattern])} · Caravan` : 'Caravan');
+  let title = $derived.by(() => {
+    if (!match) return t('app.title.notFound');
+    if (match.pattern === '/l/:slug') {
+      return (
+        sessionLibraryBySlug(session.user, match.params.slug ?? '')?.name ?? t('app.title.library')
+      );
+    }
+    return t(TITLES[match.pattern]);
+  });
+  let document_title = $derived(match ? `${title} · Caravan` : 'Caravan');
 </script>
 
 <svelte:window onkeydown={onKeydown} />
@@ -475,6 +503,21 @@ import Search from './lib/routes/Search.svelte';
                series shelf: an anime library accepts both, so the tab is a
                starting point rather than a decision. -->
           <Anime onadd={() => openAdd('anime')} />
+        {:else if match.pattern === '/l/:slug'}
+          {@const lib = sessionLibraryBySlug(session.user, match.params.slug ?? '')}
+          {#if !lib}
+            <NotFound />
+          {:else if lib.kind === 'adult'}
+            {#if session.adult}
+              <Adult />
+            {/if}
+          {:else if lib.kind === 'tv'}
+            <Series onadd={() => openAdd('series')} libraryId={lib.id} />
+          {:else if lib.kind === 'anime'}
+            <Anime onadd={() => openAdd('anime')} libraryId={lib.id} />
+          {:else}
+            <Movies onadd={() => openAdd('movie')} libraryId={lib.id} />
+          {/if}
         {:else if match.pattern === '/series'}
           <Series onadd={() => openAdd('series')} />
         {:else if match.pattern === '/series/:id'}

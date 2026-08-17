@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import SeriesDetail from './SeriesDetail.svelte';
 import { tasks } from '../state/tasks.svelte';
+import { session } from '../state/session.svelte';
 import { clearToasts, toasts } from '../state/toast.svelte';
 
 const SERIES = {
@@ -24,6 +25,7 @@ const SERIES = {
   poster_url: '',
   monitored: true,
   quality_profile_id: 0,
+  library_id: 1,
   first_aired: '',
   added_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
@@ -177,6 +179,7 @@ afterEach(() => {
   host.remove();
   clearToasts();
   tasks.stopSoon();
+  session.forget();
   vi.unstubAllGlobals();
 });
 
@@ -239,6 +242,28 @@ function confirmButton(): HTMLButtonElement {
 function deletes(): { url: string; method: string }[] {
   return calls.filter((c) => c.method === 'DELETE').map(({ url, method }) => ({ url, method }));
 }
+
+describe('SeriesDetail back link', () => {
+  it('returns to the anime shelf when the series lives there', async () => {
+    session.user = {
+      username: 'root',
+      role: 'admin',
+      open: false,
+      adult: false,
+      libraries: [
+        { id: 1, kind: 'tv', name: 'Series', slug: 'series', icon: '' },
+        { id: 3, kind: 'anime', name: 'Anime', slug: 'anime', icon: '' },
+      ],
+    };
+    stubFetch(0, { ...SERIES, library_id: 3, kind: 'anime', title: 'Attack on Titan' });
+    app = mount(SeriesDetail, { target: host, props: { id: 3 } });
+    await settle();
+
+    const back = host.querySelector('a');
+    expect(back?.getAttribute('href')).toBe('/l/anime');
+    expect(back?.textContent).toContain('Anime');
+  });
+});
 
 describe('SeriesDetail season inventory', () => {
   it('states the on-disk count and names both missing-file cells', async () => {

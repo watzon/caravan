@@ -42,9 +42,11 @@
 
   interface Props {
     onadd: () => void;
+    /** When set, the grid is this shelf only — `/l/:slug` already named it. */
+    libraryId?: number;
   }
 
-  let { onadd }: Props = $props();
+  let { onadd, libraryId = 0 }: Props = $props();
   const { t } = useI18n();
 
   const SORT_OPTIONS: { key: ShelfSortKey; label: string }[] = [
@@ -88,7 +90,9 @@
 
   let sort = $derived(readShelfSort(router.params.get('sort')));
 
-  let all = $derived(filterByLibrary(movies ?? [], readLibraryFilter(router.params)));
+  let all = $derived(
+    filterByLibrary(movies ?? [], libraryId || readLibraryFilter(router.params)),
+  );
 
   let chips = $derived<FilterChip[]>([
     { key: 'all', label: 'All', count: all.length },

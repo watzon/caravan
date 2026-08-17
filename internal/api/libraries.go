@@ -25,6 +25,9 @@ type libraryJSON struct {
 	ID   int64  `json:"id"`
 	Kind string `json:"kind"`
 	Name string `json:"name"`
+	// Slug is the durable path segment for /l/{slug}. Minted from Name on
+	// create and kept across a rename.
+	Slug string `json:"slug"`
 	// Icon names the glyph the navigation draws for this library. Empty means
 	// "the kind's default", which the client resolves — see core.Library.Icon
 	// for why the server keeps no list of icon names.
@@ -778,6 +781,7 @@ func (s *server) libraryDTO(ctx context.Context, l core.Library, indexers []core
 		ID:               l.ID,
 		Kind:             l.Kind,
 		Name:             l.Name,
+		Slug:             l.Slug,
 		Icon:             l.Icon,
 		RootPath:         l.RootPath,
 		Provider:         l.Provider,

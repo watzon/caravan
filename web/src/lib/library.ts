@@ -7,7 +7,7 @@
  * draw IS that module.
  */
 
-import type { LibraryKind, SessionUser } from './api/types';
+import type { LibraryKind, SessionLibrary, SessionUser } from './api/types';
 
 /**
  * The screen that lists a shelf of this kind.
@@ -26,6 +26,51 @@ const KIND_PATHS: Record<string, string> = {
 
 export function libraryPath(kind: string): string | undefined {
   return KIND_PATHS[kind];
+}
+
+/** The shelf URL for one library: `/l/{slug}`, with adult staying on `/adult`. */
+export function shelfHref(
+  lib: Pick<SessionLibrary, 'id' | 'kind' | 'name' | 'slug'> | null | undefined,
+): string {
+  if (!lib) return '/movies';
+  if (lib.kind === 'adult') return KIND_PATHS.adult ?? '/adult';
+  if (lib.slug) return `/l/${encodeURIComponent(lib.slug)}`;
+  const path = libraryPath(lib.kind);
+  if (!path) return '/movies';
+  return lib.id > 0 ? `${path}?library=${lib.id}` : path;
+}
+
+export function sessionLibraryByID(
+  user: SessionUser | null,
+  id: number,
+): SessionLibrary | undefined {
+  if (id <= 0) return undefined;
+  return (user?.libraries ?? []).find((l) => l.id === id);
+}
+
+export function sessionLibraryBySlug(
+  user: SessionUser | null,
+  slug: string,
+): SessionLibrary | undefined {
+  if (!slug) return undefined;
+  return (user?.libraries ?? []).find((l) => l.slug === slug);
+}
+
+/**
+ * Where a detail page's back link should go, and what it should say.
+ *
+ * The item names a library; the session names that library. The fallback is
+ * the kind root the screen used to hard-code, used only when the session has
+ * not loaded the shelf yet.
+ */
+export function shelfBack(
+  user: SessionUser | null,
+  libraryID: number,
+  fallback: { href: string; label: string },
+): { href: string; label: string } {
+  const lib = sessionLibraryByID(user, libraryID);
+  if (!lib) return fallback;
+  return { href: shelfHref(lib), label: lib.name };
 }
 
 /**

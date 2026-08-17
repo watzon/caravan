@@ -36,6 +36,8 @@
   import MetadataLinks from '../components/MetadataLinks.svelte';
   import { episodeLink, seriesLinks } from '../metadataLinks';
   import { navigate } from '../router.svelte';
+  import { shelfBack } from '../library';
+  import { session } from '../state/session.svelte';
   import { libraryChanged, searchQueued } from '../state/activity';
   import { pushToast } from '../state/toast.svelte';
   import { episodeStatus, seriesStatus } from '../status';
@@ -150,21 +152,28 @@
           : t('route.seriesDetail.removed', { title: current.title }),
         'neutral',
       );
-      navigate('/series');
+      navigate(back.href);
     } catch (err) {
       pushToast(errorText(err), 'danger');
     } finally {
       removing = false;
     }
   }
+
+  let back = $derived(
+    shelfBack(session.user, series?.library_id ?? 0, {
+      href: '/series',
+      label: t('route.seriesDetail.back'),
+    }),
+  );
 </script>
 
 <div class="flex flex-col gap-6">
   <a
-    href="/series"
+    href={back.href}
     class="inline-flex w-fit items-center gap-2 text-base text-ink-secondary transition-colors duration-150 hover:text-ink">
     <Icon name="back" size={14} />
-    {t('route.seriesDetail.back')}
+    {back.label}
   </a>
 
   {#if error}

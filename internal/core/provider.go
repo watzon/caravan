@@ -201,7 +201,7 @@ func ValidProviderInstanceID(id string) bool {
 	if base != ProviderStashbox {
 		return false
 	}
-	return validProviderSlug(slug)
+	return ValidSlug(slug)
 }
 
 func providerExists(id string) bool {
@@ -213,54 +213,10 @@ func providerExists(id string) bool {
 	return false
 }
 
-func validProviderSlug(slug string) bool {
-	if slug == "" || len(slug) > 32 {
-		return false
-	}
-	for i := 0; i < len(slug); i++ {
-		c := slug[i]
-		switch {
-		case c >= 'a' && c <= 'z', c >= '0' && c <= '9':
-		case c == '-' && i > 0:
-		default:
-			return false
-		}
-	}
-	return true
-}
-
-// ProviderSlug derives an instance slug from a user-supplied display name:
-// lowercased, every character outside the slug alphabet folded to '-', runs of
-// '-' collapsed, the ends trimmed, and the result capped at 32 characters.
-//
-// It is a suggestion, not a guarantee. A name made entirely of characters the
-// alphabet has no room for ("日本") yields "", and the caller minting the
-// instance has to supply an id of its own rather than store an empty slug.
+// ProviderSlug derives an instance slug from a user-supplied display name.
+// See Slugify: the alphabet is shared with library URL slugs.
 func ProviderSlug(name string) string {
-	var b strings.Builder
-	b.Grow(len(name))
-	dash := false
-	for _, r := range strings.ToLower(strings.TrimSpace(name)) {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			b.WriteRune(r)
-			dash = false
-		default:
-			// Collapse on the way in, so the cap below counts real characters
-			// rather than a run of separators.
-			if !dash && b.Len() > 0 {
-				b.WriteByte('-')
-				dash = true
-			}
-		}
-	}
-	slug := b.String()
-	if len(slug) > 32 {
-		slug = slug[:32]
-	}
-	// The cap can land mid-separator, and trailing dashes were legal until the
-	// cut made them final.
-	return strings.TrimRight(slug, "-")
+	return Slugify(name)
 }
 
 // ProviderServes reports whether the provider named by id may be chained on a

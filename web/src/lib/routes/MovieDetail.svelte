@@ -22,6 +22,8 @@
   import MetadataLinks from '../components/MetadataLinks.svelte';
   import { movieLinks } from '../metadataLinks';
   import { navigate } from '../router.svelte';
+  import { shelfBack } from '../library';
+  import { session } from '../state/session.svelte';
   import { libraryChanged, searchQueued } from '../state/activity';
   import { pushToast } from '../state/toast.svelte';
   import { movieStatus } from '../status';
@@ -167,21 +169,28 @@
           : t('route.movieDetail.removedLibrary', { title: current.title }),
         'neutral',
       );
-      navigate('/movies');
+      navigate(back.href);
     } catch (err) {
       pushToast(errorText(err), 'danger');
     } finally {
       removing = false;
     }
   }
+
+  let back = $derived(
+    shelfBack(session.user, movie?.library_id ?? 0, {
+      href: '/movies',
+      label: t('route.movieDetail.back'),
+    }),
+  );
 </script>
 
 <div class="flex flex-col gap-6">
   <a
-    href="/movies"
+    href={back.href}
     class="inline-flex w-fit items-center gap-2 text-base text-ink-secondary transition-colors duration-150 hover:text-ink">
     <Icon name="back" size={14} />
-    {t('route.movieDetail.back')}
+    {back.label}
   </a>
 
   {#if error}

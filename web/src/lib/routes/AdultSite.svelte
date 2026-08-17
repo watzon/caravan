@@ -54,6 +54,7 @@
   import { UNKNOWN, formatDate } from '../format';
   import { siteLinks } from '../metadataLinks';
   import { navigate } from '../router.svelte';
+  import { shelfBack } from '../library';
   import { session } from '../state/session.svelte';
   import { libraryChanged, searchQueued } from '../state/activity';
   import { pushToast } from '../state/toast.svelte';
@@ -206,7 +207,7 @@
           : t('route.adultSite.removedLibrary', { title: current.title }),
         'neutral',
       );
-      navigate('/adult');
+      navigate(back.href);
     } catch (err) {
       pushToast(errorText(err), 'danger');
     } finally {
@@ -221,14 +222,21 @@
       air_date: scene.release_date,
     });
   }
+
+  let back = $derived(
+    shelfBack(session.user, site?.library_id ?? 0, {
+      href: '/adult',
+      label: t('route.adultSite.back'),
+    }),
+  );
 </script>
 
 <div class="flex flex-col gap-6">
   <a
-    href="/adult"
+    href={back.href}
     class="inline-flex w-fit items-center gap-2 text-base text-ink-secondary transition-colors duration-150 hover:text-ink">
     <Icon name="back" size={14} />
-    {t('route.adultSite.back')}
+    {back.label}
   </a>
 
   {#if error}

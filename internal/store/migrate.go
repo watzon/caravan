@@ -36,6 +36,7 @@ var schemaFingerprints = map[int][]string{
 	9:  {"103770fedde7b2bbf5ed746c5034abb85c873dba5652d48704b4a917fb4c0631"},
 	10: {"53e3f69c7e10718a08b33fa7f2ff702ef8984a5d06f4df8577cd4161a0c02e1b"},
 	11: {"90f478943ed95a1bb9f4530dc9d4ec6180fa454122c9b41ad6c11f6c1f764464"},
+	12: {"97adf95eeac4412be0092cbf9b7015464849e01cfa2c4a3ec1e3652285dbd264"},
 }
 
 func (s *Store) migrate() error {

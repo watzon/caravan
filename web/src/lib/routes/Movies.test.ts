@@ -432,4 +432,14 @@ describe('Movies library filter', () => {
     expect(cardIDs()).toEqual([]);
     expect(host.textContent).toContain('No movies yet');
   });
+
+  it('filters by the libraryId the /l/:slug route supplies', async () => {
+    servedMovies = SHELVED;
+    window.history.replaceState({}, '', '/l/kids');
+    navigate('/l/kids', { replace: true });
+    app = mount(Movies, { target: host, props: { onadd: () => {}, libraryId: 4 } });
+    await settle();
+
+    expect(cardIDs()).toEqual([2]);
+  });
 });

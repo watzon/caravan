@@ -1,9 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { LIBRARY_KIND_ORDER, libraryKindAccepts, libraryPath, sessionLibraryIDs } from './library';
-import type { SessionUser } from './api/types';
+import {
+  LIBRARY_KIND_ORDER,
+  libraryKindAccepts,
+  libraryPath,
+  sessionLibraryByID,
+  sessionLibraryBySlug,
+  sessionLibraryIDs,
+  shelfBack,
+  shelfHref,
+} from './library';
+import type { SessionLibrary, SessionUser } from './api/types';
 
 function user(libraries: SessionUser['libraries']): SessionUser {
   return { username: 'root', role: 'admin', open: false, adult: false, libraries };
+}
+
+function shelf(over: Partial<SessionLibrary> & { id: number }): SessionLibrary {
+  return { kind: 'movie', name: `Library ${over.id}`, icon: '', ...over };
 }
 
 describe('libraryKindAccepts', () => {
@@ -56,10 +69,10 @@ describe('LIBRARY_KIND_ORDER', () => {
 describe('sessionLibraryIDs', () => {
   it('picks out the ids of one kind', () => {
     const session = user([
-      { id: 1, kind: 'movie', name: 'Movies', icon: '' },
-      { id: 3, kind: 'anime', name: 'Anime', icon: '' },
-      { id: 5, kind: 'anime', name: 'Films', icon: 'star' },
-      { id: 2, kind: 'tv', name: 'Series', icon: '' },
+      { id: 1, kind: 'movie', name: 'Movies', slug: 'movies', icon: '' },
+      { id: 3, kind: 'anime', name: 'Anime', slug: 'anime', icon: '' },
+      { id: 5, kind: 'anime', name: 'Films', slug: 'films', icon: 'star' },
+      { id: 2, kind: 'tv', name: 'Series', slug: 'series', icon: '' },
     ]);
     expect(sessionLibraryIDs(session, 'anime')).toEqual([3, 5]);
     expect(sessionLibraryIDs(session, 'movie')).toEqual([1]);
@@ -68,5 +81,46 @@ describe('sessionLibraryIDs', () => {
   it('reads an unknown identity, and a server too old to send the list, as none', () => {
     expect(sessionLibraryIDs(null, 'anime')).toEqual([]);
     expect(sessionLibraryIDs(user(undefined), 'anime')).toEqual([]);
+  });
+});
+
+describe('shelfHref', () => {
+  it('addresses a named shelf as /l/{slug}', () => {
+    expect(shelfHref(shelf({ id: 3, kind: 'anime', name: 'Anime', slug: 'anime' }))).toBe(
+      '/l/anime',
+    );
+    expect(shelfHref(shelf({ id: 4, kind: 'movie', name: 'Kids', slug: 'kids' }))).toBe('/l/kids');
+  });
+
+  it('keeps the adult module on /adult, whatever the slug', () => {
+    expect(shelfHref(shelf({ id: 9, kind: 'adult', name: 'Adult', slug: 'adult' }))).toBe('/adult');
+  });
+
+  it('falls back to the kind path plus ?library= when the slug is missing', () => {
+    expect(shelfHref(shelf({ id: 4, kind: 'movie', name: 'Kids' }))).toBe('/movies?library=4');
+    expect(shelfHref(shelf({ id: 3, kind: 'anime', name: 'Anime' }))).toBe('/anime?library=3');
+  });
+});
+
+describe('shelfBack', () => {
+  const session = user([
+    shelf({ id: 1, kind: 'movie', name: 'Movies', slug: 'movies' }),
+    shelf({ id: 3, kind: 'anime', name: 'Anime', slug: 'anime' }),
+  ]);
+
+  it('points at the item\'s own library, by name', () => {
+    expect(shelfBack(session, 3, { href: '/series', label: 'Series' })).toEqual({
+      href: '/l/anime',
+      label: 'Anime',
+    });
+  });
+
+  it('keeps the kind-root fallback when the session does not know the shelf', () => {
+    expect(shelfBack(session, 99, { href: '/series', label: 'Series' })).toEqual({
+      href: '/series',
+      label: 'Series',
+    });
+    expect(sessionLibraryByID(session, 3)?.slug).toBe('anime');
+    expect(sessionLibraryBySlug(session, 'movies')?.id).toBe(1);
   });
 });

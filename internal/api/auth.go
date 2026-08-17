@@ -811,6 +811,10 @@ type meLibraryJSON struct {
 	ID   int64  `json:"id"`
 	Kind string `json:"kind"`
 	Name string `json:"name"`
+	// Slug is the durable path segment for /l/{slug}. The sidebar builds hrefs
+	// from this rather than from kind, so a second movie library is its own
+	// shelf rather than a query string on /movies.
+	Slug string `json:"slug"`
 	// Icon is the glyph the navigation draws for this shelf, empty for "the
 	// kind's default". It rides here rather than being looked up per row
 	// because this response IS the navigation's source of data — a sidebar that
@@ -886,7 +890,7 @@ func (s *server) handleMe(w http.ResponseWriter, r *http.Request) {
 	// no library at all is a real state on a fresh install.
 	shelves := make([]meLibraryJSON, 0, len(libs))
 	for _, l := range libs {
-		shelves = append(shelves, meLibraryJSON{ID: l.ID, Kind: l.Kind, Name: l.Name, Icon: l.Icon})
+		shelves = append(shelves, meLibraryJSON{ID: l.ID, Kind: l.Kind, Name: l.Name, Slug: l.Slug, Icon: l.Icon})
 	}
 	filters := s.sceneFilters(r.Context(), adult)
 	user := currentUser(r)

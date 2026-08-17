@@ -445,3 +445,74 @@ func TestResolveItemQualityProfilePrefersTheLibraryDefault(t *testing.T) {
 		t.Errorf("tv item naming %q resolved to %q", seeded[0].Name, got.Name)
 	}
 }
+
+func TestSeededLibrarySlugs(t *testing.T) {
+	st, _ := openTemp(t)
+	want := map[string]string{
+		core.LibraryKindMovie: "movies",
+		core.LibraryKindTV:    "series",
+		core.LibraryKindAnime: "anime",
+		core.LibraryKindAdult: "adult",
+	}
+	for kind, slug := range want {
+		lib, err := st.GetLibraryByKind(t.Context(), kind)
+		if err != nil {
+			t.Fatalf("GetLibraryByKind(%s): %v", kind, err)
+		}
+		if lib.Slug != slug {
+			t.Errorf("seeded %s slug = %q, want %q", kind, lib.Slug, slug)
+		}
+		got, err := st.GetLibraryBySlug(t.Context(), slug)
+		if err != nil {
+			t.Fatalf("GetLibraryBySlug(%q): %v", slug, err)
+		}
+		if got.ID != lib.ID {
+			t.Errorf("GetLibraryBySlug(%q).ID = %d, want %d", slug, got.ID, lib.ID)
+		}
+	}
+	if _, err := st.GetLibraryBySlug(t.Context(), "nonesuch"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("GetLibraryBySlug(nonesuch) = %v, want ErrNotFound", err)
+	}
+}
+
+func TestCreateLibraryAllocatesUniqueSlug(t *testing.T) {
+	st, _ := openTemp(t)
+	ctx := t.Context()
+
+	kids := &core.Library{
+		Kind: core.LibraryKindMovie, Name: "Kids", RootPath: "library/Kids",
+		Providers: []string{core.ProviderTMDB},
+	}
+	if err := st.CreateLibrary(ctx, kids); err != nil {
+		t.Fatalf("CreateLibrary(Kids): %v", err)
+	}
+	if kids.Slug != "kids" {
+		t.Errorf("Kids slug = %q, want %q", kids.Slug, "kids")
+	}
+
+	// The seeded movie library already owns "movies", so a second shelf of that
+	// name must not collide.
+	dup := &core.Library{
+		Kind: core.LibraryKindMovie, Name: "Movies", RootPath: "library/Movies2",
+		Providers: []string{core.ProviderTMDB},
+	}
+	if err := st.CreateLibrary(ctx, dup); err != nil {
+		t.Fatalf("CreateLibrary(Movies): %v", err)
+	}
+	if dup.Slug != "movies-2" {
+		t.Errorf("second Movies slug = %q, want %q", dup.Slug, "movies-2")
+	}
+
+	// A rename must not move the URL: bookmarks point at the slug.
+	kids.Name = "Family"
+	if err := st.UpdateLibrary(ctx, kids); err != nil {
+		t.Fatalf("UpdateLibrary rename: %v", err)
+	}
+	got, err := st.GetLibrary(ctx, kids.ID)
+	if err != nil {
+		t.Fatalf("GetLibrary: %v", err)
+	}
+	if got.Name != "Family" || got.Slug != "kids" {
+		t.Errorf("renamed library = name %q slug %q, want Family / kids", got.Name, got.Slug)
+	}
+}

@@ -156,6 +156,14 @@ describe('Anime shelf', () => {
     expect(host.textContent).toContain('No anime yet');
   });
 
+  it('filters by the libraryId the /l/:slug route supplies', async () => {
+    window.history.replaceState({}, '', '/l/anime');
+    navigate('/l/anime', { replace: true });
+    app = mount(Anime, { target: host, props: { onadd: () => {}, libraryId: 3 } });
+    await settle();
+    expect(cardHrefs()).toEqual(['/series/5', '/movies/7']);
+  });
+
   it('trusts an explicit library id over the kind, as the other two shelves do', async () => {
     // Nothing links here — the sidebar sends a movie shelf to /movies — but a
     // hand-typed id is a filter, and all three shelves read it the same way

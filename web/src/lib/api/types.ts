@@ -514,6 +514,11 @@ export interface SessionLibrary {
   kind: LibraryKind;
   name: string;
   /**
+   * Durable path segment for `/l/{slug}`. Absent on a server too old to send
+   * it — `shelfHref` then falls back to the kind path plus `?library=`.
+   */
+  slug?: string;
+  /**
    * See `Library.icon`. It rides on /auth/me rather than being looked up per
    * row because this response IS the sidebar's source of data — a nav row that
    * had to ask GET /libraries for its glyph would be asking an admin-only
@@ -2111,6 +2116,8 @@ export interface Library {
   id: number;
   kind: LibraryKind;
   name: string;
+  /** Durable path segment for `/l/{slug}`. See `SessionLibrary.slug`. */
+  slug?: string;
   /**
    * The glyph the navigation draws for this shelf, or `''` for "use the kind's
    * default" (film, tv, sparkles, flame).

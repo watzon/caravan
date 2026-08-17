@@ -131,6 +131,18 @@ describe('matchRoutes', () => {
     expect(memberAllowedRoute('/series')).toBe(false);
   });
 
+  it('resolves a library shelf by slug and keeps it an admin screen', () => {
+    expect(matchRoutes(ROUTES, '/l/anime')).toEqual({
+      pattern: '/l/:slug',
+      params: { slug: 'anime' },
+    });
+    expect(matchRoutes(ROUTES, '/l/kids')).toEqual({
+      pattern: '/l/:slug',
+      params: { slug: 'kids' },
+    });
+    expect(memberAllowedRoute('/l/:slug')).toBe(false);
+  });
+
   // The index still matches so the brand mark can land on `/` and App can
   // forward it to Discover. It is not a redirect to the library.
   it('resolves the index and the discover screens', () => {

@@ -25,7 +25,7 @@
   import { ratingPresentation } from '../discover';
   import { isFuture } from '../format';
   import { metadataFault, type CredentialFault } from '../credentials';
-  import { LIBRARY_KIND_ORDER, libraryKindAccepts } from '../library';
+  import { LIBRARY_KIND_ORDER, libraryKindAccepts, sessionLibraryBySlug } from '../library';
   import { navigate, router } from '../router.svelte';
   import { readLibraryFilter } from '../shelf';
   import { libraries } from '../state/libraries.svelte';
@@ -376,7 +376,14 @@
    * on one shelf and pressing Add says where the item should go at least as
    * clearly as picking a tab does, so it opens on that shelf's tab.
    */
-  let urlLibraryID = $derived(readLibraryFilter(router.params));
+  let urlLibraryID = $derived.by(() => {
+    const fromQuery = readLibraryFilter(router.params);
+    if (fromQuery > 0) return fromQuery;
+    if (router.match?.pattern === '/l/:slug') {
+      return sessionLibraryBySlug(session.user, router.match.params.slug ?? '')?.id ?? 0;
+    }
+    return 0;
+  });
   /** The kind the caller asked to open on; `site` is gated exactly as above. */
   let seedScope = $derived<Scope>(
     fixedScope ?? (initialKind === 'site' && !siteScope ? 'movie' : initialKind),

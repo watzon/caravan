@@ -231,8 +231,8 @@ let statusBody: SystemStatus = STATUS;
  * holding only Wanted and Calendar.
  */
 const SEEDED_LIBRARIES = [
-  { id: 1, kind: 'movie', name: 'Movies', icon: '' },
-  { id: 2, kind: 'tv', name: 'Series', icon: '' },
+  { id: 1, kind: 'movie', name: 'Movies', slug: 'movies', icon: '' },
+  { id: 2, kind: 'tv', name: 'Series', slug: 'series', icon: '' },
 ];
 let sessionBody: Record<string, unknown> = {
   username: '',
@@ -320,8 +320,8 @@ describe('App shell', () => {
     expect(host.textContent).toContain('CARAVAN');
     // One row per session library, each linking with its own id: the plain
     // /movies URL is "every visible movie", which is not what a shelf row means.
-    expect(host.querySelector('a[href="/movies?library=1"]')).not.toBeNull();
-    expect(host.querySelector('a[href="/series?library=2"]')).not.toBeNull();
+    expect(host.querySelector('a[href="/l/movies"]')).not.toBeNull();
+    expect(host.querySelector('a[href="/l/series"]')).not.toBeNull();
 
     // The library list rendered its one movie rather than an empty state.
     expect(host.textContent).toContain('Big Buck Bunny');
@@ -721,8 +721,8 @@ describe('App shell', () => {
     const cases = [
       ['/requests', '1 pending request', 'bg-warning-tint'],
       // Per shelf now, and counted per library rather than per kind.
-      ['/movies?library=1', '2 items in this library', 'bg-raised'],
-      ['/series?library=2', '3 items in this library', 'bg-raised'],
+      ['/l/movies', '2 items in this library', 'bg-raised'],
+      ['/l/series', '3 items in this library', 'bg-raised'],
       ['/wanted', '4 movies and episodes waiting', 'bg-warning-tint'],
       ['/queue', '1 active download', 'bg-accent-tint'],
       ['/convert', '5 open conversions', 'bg-raised'],
@@ -757,9 +757,9 @@ describe('App shell', () => {
     // The status fixture gives library 1 one item and library 2 none: a zero
     // renders nothing rather than an inactive badge.
     expect(
-      host.querySelector('a[href="/movies?library=1"] > span[title="1 item in this library"]'),
+      host.querySelector('a[href="/l/movies"] > span[title="1 item in this library"]'),
     ).not.toBeNull();
-    expect(host.querySelector('a[href="/series?library=2"] > span.tabular-nums')).toBeNull();
+    expect(host.querySelector('a[href="/l/series"] > span.tabular-nums')).toBeNull();
   });
 
   it('shows live search progress in the sidebar footer instead of a toast', async () => {

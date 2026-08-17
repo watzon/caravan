@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import MovieDetail from './MovieDetail.svelte';
 import { tasks } from '../state/tasks.svelte';
+import { session } from '../state/session.svelte';
 import { clearToasts, toasts } from '../state/toast.svelte';
 
 const MOVIE = {
@@ -23,6 +24,7 @@ const MOVIE = {
   poster_url: '',
   monitored: true,
   quality_profile_id: 0,
+  library_id: 1,
   release_date: '',
   min_availability: 'released',
   added_at: '2026-01-01T00:00:00Z',
@@ -167,6 +169,7 @@ afterEach(() => {
   host.remove();
   clearToasts();
   tasks.stopSoon();
+  session.forget();
   vi.unstubAllGlobals();
 });
 
@@ -228,6 +231,28 @@ function confirmButton(): HTMLButtonElement {
 function deletes(): { url: string; method: string }[] {
   return calls.filter((c) => c.method === 'DELETE').map(({ url, method }) => ({ url, method }));
 }
+
+describe('MovieDetail back link', () => {
+  it('returns to the library that owns the movie, not the movies kind root', async () => {
+    session.user = {
+      username: 'root',
+      role: 'admin',
+      open: false,
+      adult: false,
+      libraries: [
+        { id: 4, kind: 'anime', name: 'Anime', slug: 'anime', icon: '' },
+        { id: 1, kind: 'movie', name: 'Movies', slug: 'movies', icon: '' },
+      ],
+    };
+    stubFetch(0, { ...MOVIE, library_id: 4 });
+    app = mount(MovieDetail, { target: host, props: { id: 7 } });
+    await settle();
+
+    const back = host.querySelector('a');
+    expect(back?.getAttribute('href')).toBe('/l/anime');
+    expect(back?.textContent).toContain('Anime');
+  });
+});
 
 describe('MovieDetail facts', () => {
   it('renders one detail list without repeating the hero facts', async () => {

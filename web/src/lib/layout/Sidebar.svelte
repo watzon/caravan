@@ -15,8 +15,8 @@
    * The shelf rows themselves are DATA, not code: one row per library in
    * `session.user.libraries`, which /auth/me has already narrowed to what this
    * account may see. A second movie library is a row without an edit here, and
-   * — the bug that started this — each row links with its own `?library=` id,
-   * so the default shelf shows the default shelf rather than everything.
+   * — the bug that started this — each row links to `/l/{slug}`, so the
+   * default shelf shows the default shelf rather than everything.
    */
   import { onMount } from 'svelte';
   import { isActive, router } from '../router.svelte';
@@ -38,7 +38,7 @@
   import Badge from '../components/Badge.svelte';
   import Button from '../components/Button.svelte';
   import Icon, { libraryIcon, type IconName } from '../components/Icon.svelte';
-  import { LIBRARY_KIND_ORDER, libraryPath } from '../library';
+  import { LIBRARY_KIND_ORDER, libraryPath, shelfHref } from '../library';
   import SafeShutdown from '../components/SafeShutdown.svelte';
   import type { Tone } from '../status';
   import {
@@ -215,13 +215,17 @@
         // before its screen exists, that kind draws no row instead of a row
         // linking to nowhere.
         if (path === undefined) continue;
+        const href = shelfHref(shelf);
         rows.push({
-          href: `${path}?library=${shelf.id}`,
+          href,
           label: shelf.name,
           icon: libraryIcon(shelf.kind, shelf.icon),
-          // Both halves: the plain /movies URL still means "every visible
-          // movie", so it must light NO shelf row rather than the default one.
-          active: isActive(path) && router.params.get('library') === String(shelf.id),
+          // The slug URL is the shelf. The kind path plus ?library= is the
+          // older spelling and still lights the same row so a bookmark does
+          // not leave the nav looking lost.
+          active:
+            isActive(href, true) ||
+            (isActive(path) && router.params.get('library') === String(shelf.id)),
           badge: libraryBadge(shelf.id),
         });
       }

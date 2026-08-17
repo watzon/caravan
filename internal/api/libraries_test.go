@@ -73,6 +73,9 @@ func TestListLibrariesReportsSeededDefaults(t *testing.T) {
 	if movies.Name != "Movies" || movies.RootPath == "" {
 		t.Errorf("movie library = %+v, want the seeded name and root path", movies)
 	}
+	if movies.Slug != "movies" {
+		t.Errorf("movie library slug = %q, want %q", movies.Slug, "movies")
+	}
 	if !movies.DLNAVisible {
 		t.Error("movie library is not shared over DLNA on a fresh install")
 	}

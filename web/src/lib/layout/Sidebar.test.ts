@@ -155,7 +155,14 @@ function libraryHrefs(): string[] {
 }
 
 function library(over: Partial<SessionLibrary> & { id: number }): SessionLibrary {
-  return { kind: 'movie', name: `Library ${over.id}`, icon: '', ...over };
+  const name = over.name ?? `Library ${over.id}`;
+  return {
+    kind: 'movie',
+    name,
+    icon: '',
+    slug: name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || `lib-${over.id}`,
+    ...over,
+  };
 }
 
 describe('Sidebar library shelves', () => {
@@ -188,25 +195,25 @@ describe('Sidebar library shelves', () => {
 
     // Grouped movie, tv, anime; inside a kind, the order /auth/me sent.
     expect(libraryHrefs()).toEqual([
-      '/movies?library=1',
-      '/movies?library=4',
-      '/series?library=2',
-      '/anime?library=3',
+      '/l/movies',
+      '/l/kids',
+      '/l/series',
+      '/l/anime',
       '/wanted',
       '/calendar',
     ]);
-    expect(row('/movies?library=4')?.textContent).toContain('Kids');
+    expect(row('/l/kids')?.textContent).toContain('Kids');
     // A chosen glyph is drawn; an empty one falls back to the kind's default.
-    expect(row('/movies?library=4')?.innerHTML).toContain(GLYPH.star);
-    expect(row('/movies?library=1')?.innerHTML).toContain(GLYPH.film);
-    expect(row('/series?library=2')?.innerHTML).toContain(GLYPH.tv);
-    expect(row('/anime?library=3')?.innerHTML).toContain(GLYPH.sparkles);
+    expect(row('/l/kids')?.innerHTML).toContain(GLYPH.star);
+    expect(row('/l/movies')?.innerHTML).toContain(GLYPH.film);
+    expect(row('/l/series')?.innerHTML).toContain(GLYPH.tv);
+    expect(row('/l/anime')?.innerHTML).toContain(GLYPH.sparkles);
     // The badge is this shelf's own inventory, not the install's, and a zero
     // renders nothing.
     expect(
-      row('/movies?library=4')?.querySelector('span[title="7 items in this library"]'),
+      row('/l/kids')?.querySelector('span[title="7 items in this library"]'),
     ).not.toBeNull();
-    expect(row('/movies?library=1')?.querySelector('span.tabular-nums')).toBeNull();
+    expect(row('/l/movies')?.querySelector('span.tabular-nums')).toBeNull();
   });
 
   it('falls back to the kind glyph for an icon name it cannot draw', async () => {
@@ -221,10 +228,10 @@ describe('Sidebar library shelves', () => {
     };
     await render();
 
-    expect(row('/anime?library=3')?.innerHTML).toContain(GLYPH.sparkles);
+    expect(row('/l/anime')?.innerHTML).toContain(GLYPH.sparkles);
   });
 
-  it('lights the row the library id names, and no row on the plain path', async () => {
+  it('lights the row the library slug names, and no row on the plain kind path', async () => {
     session.user = {
       username: 'root',
       role: 'admin',
@@ -235,18 +242,26 @@ describe('Sidebar library shelves', () => {
         library({ id: 4, kind: 'movie', name: 'Kids' }),
       ],
     };
+    navigate('/l/kids', { replace: true });
+    await render();
+
+    expect(row('/l/kids')?.getAttribute('aria-current')).toBe('page');
+    expect(row('/l/movies')?.getAttribute('aria-current')).toBeNull();
+
+    unmount(app);
+    // The older ?library= spelling still lights the same shelf.
     navigate('/movies?library=4', { replace: true });
     await render();
 
-    expect(row('/movies?library=4')?.getAttribute('aria-current')).toBe('page');
-    expect(row('/movies?library=1')?.getAttribute('aria-current')).toBeNull();
+    expect(row('/l/kids')?.getAttribute('aria-current')).toBe('page');
+    expect(row('/l/movies')?.getAttribute('aria-current')).toBeNull();
 
     unmount(app);
     navigate('/movies', { replace: true });
     await render();
 
-    expect(row('/movies?library=1')?.getAttribute('aria-current')).toBeNull();
-    expect(row('/movies?library=4')?.getAttribute('aria-current')).toBeNull();
+    expect(row('/l/movies')?.getAttribute('aria-current')).toBeNull();
+    expect(row('/l/kids')?.getAttribute('aria-current')).toBeNull();
   });
 
   it('gives a granted member the adult row and no other shelf', async () => {

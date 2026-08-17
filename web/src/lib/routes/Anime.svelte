@@ -51,9 +51,11 @@
 
   interface Props {
     onadd: () => void;
+    /** When set, the grid is this shelf only — `/l/:slug` already named it. */
+    libraryId?: number;
   }
 
-  let { onadd }: Props = $props();
+  let { onadd, libraryId = 0 }: Props = $props();
   const { t, tp } = useI18n();
 
   /**
@@ -124,7 +126,7 @@
   }
 
   let sort = $derived(readShelfSort(router.params.get('sort')));
-  let libraryFilter = $derived(readLibraryFilter(router.params));
+  let libraryFilter = $derived(libraryId || readLibraryFilter(router.params));
 
   /**
    * The anime shelves this session has, for the unfiltered view.

@@ -121,6 +121,10 @@ type Library struct {
 	Kind string
 	// Name is the user-facing label.
 	Name string
+	// Slug is the durable path segment for this library (`/l/{slug}`). It is
+	// minted from Name on create and does not change when the library is
+	// renamed, so a bookmark survives a label edit. Unique across the install.
+	Slug string
 	// Icon is the name of the glyph the navigation draws for this library.
 	// Empty — the value every library is born with — means "use the kind's
 	// default", which is the client's decision to make and not the server's.

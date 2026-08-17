@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/watzon/caravan/internal/core"
 )
@@ -33,6 +34,20 @@ func (s *Store) GetLibrary(ctx context.Context, id int64) (*core.Library, error)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("store: get library %d: %w", id, err)
+	}
+	library := model.coreLibrary()
+	return &library, nil
+}
+
+// GetLibraryBySlug returns the library with the given slug, or ErrNotFound.
+func (s *Store) GetLibraryBySlug(ctx context.Context, slug string) (*core.Library, error) {
+	var model libraryStoreModel
+	err := s.db.NewSelect().Model(&model).Where("slug = ?", slug).Scan(ctx)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("store: library %q: %w", slug, ErrNotFound)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("store: get library %q: %w", slug, err)
 	}
 	library := model.coreLibrary()
 	return &library, nil
@@ -116,6 +131,13 @@ func (s *Store) CreateLibrary(ctx context.Context, l *core.Library) error {
 		return fmt.Errorf("store: create library %q: %w", l.Name, err)
 	}
 	l.Active = true
+	if !core.ValidLibrarySlug(l.Slug) {
+		slug, err := s.allocateSlug(ctx, l.Name, 0)
+		if err != nil {
+			return err
+		}
+		l.Slug = slug
+	}
 	model := libraryStoreModelFromCore(l, chain)
 	if err := s.db.NewInsert().Model(model).Returning("id").Scan(ctx); err != nil {
 		return fmt.Errorf("store: create library %q: %w", l.Name, err)
@@ -555,9 +577,57 @@ func normalizeChain(l *core.Library) (string, error) {
 	return string(b), nil
 }
 
+// allocateSlug mints a unique path segment from name. The first try is the
+// slugified name (or "library" when the name cannot become a slug). Later
+// tries append -2, -3, …, trimmed to stay inside the 32-character alphabet.
+func (s *Store) allocateSlug(ctx context.Context, name string, excludeID int64) (string, error) {
+	base := core.LibrarySlug(name)
+	if base == "" {
+		base = "library"
+	}
+	for n := 1; n <= 10000; n++ {
+		candidate := base
+		if n > 1 {
+			suffix := fmt.Sprintf("-%d", n)
+			keep := 32 - len(suffix)
+			if keep < 1 {
+				return "", fmt.Errorf("store: cannot allocate library slug")
+			}
+			trimmed := base
+			if len(trimmed) > keep {
+				trimmed = strings.TrimRight(trimmed[:keep], "-")
+			}
+			if trimmed == "" {
+				trimmed = "library"
+			}
+			candidate = trimmed + suffix
+		}
+		taken, err := s.slugTaken(ctx, candidate, excludeID)
+		if err != nil {
+			return "", err
+		}
+		if !taken {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("store: cannot allocate library slug")
+}
+
+func (s *Store) slugTaken(ctx context.Context, slug string, excludeID int64) (bool, error) {
+	q := s.db.NewSelect().Model((*libraryStoreModel)(nil)).Where("slug = ?", slug)
+	if excludeID > 0 {
+		q = q.Where("id != ?", excludeID)
+	}
+	ok, err := q.Exists(ctx)
+	if err != nil {
+		return false, fmt.Errorf("store: lookup library slug %q: %w", slug, err)
+	}
+	return ok, nil
+}
+
 func libraryStoreModelFromCore(l *core.Library, providers string) *libraryStoreModel {
 	return &libraryStoreModel{
-		ID: l.ID, Kind: l.Kind, Name: l.Name, Icon: l.Icon, RootPath: l.RootPath, DLNAVisible: l.DLNAVisible,
+		ID: l.ID, Kind: l.Kind, Name: l.Name, Slug: l.Slug, Icon: l.Icon, RootPath: l.RootPath, DLNAVisible: l.DLNAVisible,
 		RouteTorrent: stringPointer(l.RouteTorrent), RouteUsenet: stringPointer(l.RouteUsenet),
 		QualityProfileID: int64Pointer(l.QualityProfileID), Provider: l.Provider, Providers: providers,
 		IsDefault: l.IsDefault, Active: l.Active, Restricted: l.Restricted,
@@ -566,7 +636,7 @@ func libraryStoreModelFromCore(l *core.Library, providers string) *libraryStoreM
 
 func (m *libraryStoreModel) coreLibrary() core.Library {
 	l := core.Library{
-		ID: m.ID, Kind: m.Kind, Name: m.Name, Icon: m.Icon, RootPath: m.RootPath, DLNAVisible: m.DLNAVisible,
+		ID: m.ID, Kind: m.Kind, Name: m.Name, Slug: m.Slug, Icon: m.Icon, RootPath: m.RootPath, DLNAVisible: m.DLNAVisible,
 		Provider: m.Provider, IsDefault: m.IsDefault, Active: m.Active, Restricted: m.Restricted,
 	}
 	if m.RouteTorrent != nil {

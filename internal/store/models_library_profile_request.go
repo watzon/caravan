@@ -10,6 +10,7 @@ type libraryStoreModel struct {
 	ID               int64 `bun:",pk,autoincrement"`
 	Kind             string
 	Name             string
+	Slug             string
 	Icon             string
 	RootPath         string
 	DLNAVisible      bool `bun:"dlna_visible"`

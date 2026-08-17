@@ -55,6 +55,11 @@ export const ROUTES = [
   // Deliberately absent from MEMBER_ROUTES for the same reason /movies and
   // /series are: the server answers a member 403 for all three.
   '/anime',
+  // One shelf, addressed by the library's own slug. Custom libraries (a second
+  // movie shelf, a renamed anime library) cannot share /movies and /series, and
+  // a detail page's back link needs a place that IS that library. The kind
+  // paths above stay as aliases so a bookmark to /anime still works.
+  '/l/:slug',
   // The adult module (phase 9). Every one of these is behind `isAdultRoute`
   // as well as the member allowlist: the module is invisible to an account it
   // was not granted to, whatever that account's role is.
