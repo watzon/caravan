@@ -68,7 +68,7 @@ type Plan struct {
 
 // Decide picks remux, transcode or nothing for a probed file.
 //
-// The choice is the TV profile's verdict, not a second opinion: a container
+// The choice is the playback target's verdict, not a second opinion: a container
 // problem is a stream copy and a stream problem is a re-encode, which is
 // exactly the needs-remux/incompatible split core.TVProfile.Check already
 // draws. SPEC §8 wants the cheap path tried first, and this is what makes
@@ -139,7 +139,7 @@ func muxableAudio(profile core.TVProfile, p Probe) []int {
 	return keep
 }
 
-// ProbeTags turns a probe into the tag shape the TV profile judges. It is the
+// ProbeTags turns a probe into the tag shape the playback target judges. It is the
 // bridge between ffprobe's vocabulary and the release parser's, which is the
 // vocabulary the profiles are written in (SPEC §8 keeps audio tags verbatim).
 func ProbeTags(p Probe, container string) core.MediaTags {

@@ -83,8 +83,17 @@ func (s *Store) GetMediaFile(ctx context.Context, id int64) (*core.MediaFile, er
 	return f, nil
 }
 
-// GetMediaFileLibrary resolves the one library that owns a media file: the
-// `libraries` row the owning movie or series names, and the owner's own kind.
+// MediaFileProfileAssignment identifies the quality-profile assignment for an
+// owned file. Episode files inherit from their series because episodes carry
+// no profile of their own.
+type MediaFileProfileAssignment struct {
+	LibraryID        int64
+	LibraryKind      string
+	QualityProfileID int64
+}
+
+// GetMediaFileProfileAssignment resolves the one item assignment that owns a
+// media file: the library and quality profile named by its movie or series.
 //
 // The ID is what decides anything — with several libraries per kind, the kind
 // alone does not say whose dlna_visible flag applies, and since migration 0011
@@ -93,12 +102,15 @@ func (s *Store) GetMediaFile(ctx context.Context, id int64) (*core.MediaFile, er
 // (a file linked to both a movie and a series) legible to a caller.
 //
 // Files with no owner, or with conflicting movie/episode owners, or with
-// episode owners across two libraries, return ErrNotFound so callers fail
-// closed instead of choosing one link.
-func (s *Store) GetMediaFileLibrary(ctx context.Context, id int64) (int64, string, error) {
-	fail := func(err error) (int64, string, error) { return 0, "", err }
+// episode owners with different assignments, return ErrNotFound so callers
+// fail closed instead of choosing a playback target arbitrarily.
+func (s *Store) GetMediaFileProfileAssignment(ctx context.Context, id int64) (MediaFileProfileAssignment, error) {
+	fail := func(err error) (MediaFileProfileAssignment, error) {
+		return MediaFileProfileAssignment{}, err
+	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT DISTINCT mf.movie_id, m.library_id, s.kind, s.library_id
+		SELECT DISTINCT mf.movie_id, m.library_id, m.quality_profile_id,
+			s.kind, s.library_id, s.quality_profile_id
 		FROM media_files mf
 		LEFT JOIN movies m ON m.id = mf.movie_id
 		LEFT JOIN episode_files ef ON ef.media_file_id = mf.id
@@ -106,47 +118,88 @@ func (s *Store) GetMediaFileLibrary(ctx context.Context, id int64) (int64, strin
 		LEFT JOIN series s ON s.id = e.series_id
 		WHERE mf.id = ?`, id)
 	if err != nil {
-		return fail(fmt.Errorf("store: get media file %d library: %w", id, err))
+		return fail(fmt.Errorf("store: get media file %d profile assignment: %w", id, err))
 	}
 	defer rows.Close()
 
-	found := false
-	movieOwned := false
-	movieLibrary := int64(0)
-	episodeKind := ""
-	episodeLibrary := int64(0)
+	var found bool
+	var movieOwned bool
+	var movieAssignment MediaFileProfileAssignment
+	var episodeAssignment MediaFileProfileAssignment
 	for rows.Next() {
 		found = true
 		var (
-			movieID     int64
-			movieLibID  sql.NullInt64
-			seriesKind  sql.NullString
-			seriesLibID sql.NullInt64
+			movieID         int64
+			movieLibraryID  sql.NullInt64
+			movieProfileID  sql.NullInt64
+			seriesKind      sql.NullString
+			seriesLibraryID sql.NullInt64
+			seriesProfileID sql.NullInt64
 		)
-		if err := rows.Scan(&movieID, &movieLibID, &seriesKind, &seriesLibID); err != nil {
-			return fail(fmt.Errorf("store: scan media file %d library: %w", id, err))
+		if err := rows.Scan(
+			&movieID,
+			&movieLibraryID,
+			&movieProfileID,
+			&seriesKind,
+			&seriesLibraryID,
+			&seriesProfileID,
+		); err != nil {
+			return fail(fmt.Errorf("store: scan media file %d profile assignment: %w", id, err))
 		}
 		movieOwned = movieID != 0
-		movieLibrary = movieLibID.Int64
+		movieAssignment = MediaFileProfileAssignment{
+			LibraryID:        movieLibraryID.Int64,
+			LibraryKind:      core.LibraryKindMovie,
+			QualityProfileID: movieProfileID.Int64,
+		}
 		if !seriesKind.Valid {
 			continue
 		}
-		kind := core.LibraryKindForSeries(seriesKind.String)
-		if episodeKind != "" && (episodeKind != kind || episodeLibrary != seriesLibID.Int64) {
-			return fail(fmt.Errorf("store: media file %d library: %w", id, ErrNotFound))
+		assignment := MediaFileProfileAssignment{
+			LibraryID:        seriesLibraryID.Int64,
+			LibraryKind:      core.LibraryKindForSeries(seriesKind.String),
+			QualityProfileID: seriesProfileID.Int64,
 		}
-		episodeKind, episodeLibrary = kind, seriesLibID.Int64
+		if episodeAssignment.LibraryKind != "" && episodeAssignment != assignment {
+			return fail(fmt.Errorf("store: media file %d profile assignment: %w", id, ErrNotFound))
+		}
+		episodeAssignment = assignment
 	}
 	if err := rows.Err(); err != nil {
-		return fail(fmt.Errorf("store: get media file %d library: %w", id, err))
+		return fail(fmt.Errorf("store: get media file %d profile assignment: %w", id, err))
 	}
-	if !found || (movieOwned && episodeKind != "") || (!movieOwned && episodeKind == "") {
-		return fail(fmt.Errorf("store: media file %d library: %w", id, ErrNotFound))
+	episodeOwned := episodeAssignment.LibraryKind != ""
+	if !found || movieOwned == episodeOwned {
+		return fail(fmt.Errorf("store: media file %d profile assignment: %w", id, ErrNotFound))
 	}
 	if movieOwned {
-		return movieLibrary, core.LibraryKindMovie, nil
+		return movieAssignment, nil
 	}
-	return episodeLibrary, episodeKind, nil
+	return episodeAssignment, nil
+}
+
+// GetMediaFileLibrary resolves the exact library that owns a media file.
+func (s *Store) GetMediaFileLibrary(ctx context.Context, id int64) (int64, string, error) {
+	assignment, err := s.GetMediaFileProfileAssignment(ctx, id)
+	if err != nil {
+		return 0, "", err
+	}
+	return assignment.LibraryID, assignment.LibraryKind, nil
+}
+
+// ResolveMediaFilePlaybackTarget returns the playback target selected by the
+// effective quality profile of a file's owning movie or series.
+func (s *Store) ResolveMediaFilePlaybackTarget(ctx context.Context, id int64) (core.TVProfile, error) {
+	assignment, err := s.GetMediaFileProfileAssignment(ctx, id)
+	if err != nil {
+		return core.TVProfile{}, err
+	}
+	return s.ResolveItemPlaybackTargetByLibrary(
+		ctx,
+		assignment.LibraryID,
+		assignment.LibraryKind,
+		assignment.QualityProfileID,
+	)
 }
 
 // UpdateMediaFileConverted repoints a media file at the file ffmpeg produced
@@ -194,9 +247,10 @@ func (s *Store) ListMediaFiles(ctx context.Context) ([]core.MediaFile, error) {
 // visibility rule without an ownership query per file; LibraryKind travels
 // beside it as the owner's vocabulary, the way GetMediaFileLibrary reports it.
 type ConversionCandidate struct {
-	File        core.MediaFile
-	LibraryID   int64
-	LibraryKind string
+	File             core.MediaFile
+	LibraryID        int64
+	LibraryKind      string
+	QualityProfileID int64
 	// SeriesID, SeriesKind and the season/episode numbers name the library
 	// item an episode or scene file belongs to. Zero on a movie file. A
 	// multi-episode file reports the first episode by season and number, not
@@ -222,7 +276,9 @@ func (s *Store) ListConversionCandidates(ctx context.Context) ([]ConversionCandi
 			COUNT(ef.episode_id),
 			COUNT(DISTINCT CASE WHEN s.kind = ? THEN ? ELSE ? END),
 			MAX(CASE WHEN s.kind = ? THEN 1 ELSE 0 END),
+			COUNT(DISTINCT s.library_id), COUNT(DISTINCT s.quality_profile_id),
 			COALESCE(MAX(m.library_id), 0), COALESCE(MAX(s.library_id), 0),
+			COALESCE(MAX(m.quality_profile_id), 0), COALESCE(MAX(s.quality_profile_id), 0),
 			COALESCE(MAX(first_ep.series_id), 0), COALESCE(MAX(first_ep.series_kind), ''),
 			COALESCE(MAX(first_ep.episode_id), 0),
 			COALESCE(MAX(first_ep.season_number), 0), COALESCE(MAX(first_ep.episode_number), 0)
@@ -265,21 +321,26 @@ func (s *Store) ListConversionCandidates(ctx context.Context) ([]ConversionCandi
 	out := []ConversionCandidate{}
 	for rows.Next() {
 		var (
-			candidate        ConversionCandidate
-			addedAt          string
-			modifiedAt       string
-			episodeCount     int
-			libraryKindCount int
-			hasAdult         int
-			movieLibraryID   int64
-			seriesLibraryID  int64
+			candidate          ConversionCandidate
+			addedAt            string
+			modifiedAt         string
+			episodeCount       int
+			libraryKindCount   int
+			hasAdult           int
+			seriesLibraryCount int
+			seriesProfileCount int
+			movieLibraryID     int64
+			seriesLibraryID    int64
+			movieProfileID     int64
+			seriesProfileID    int64
 		)
 		err := rows.Scan(
 			&candidate.File.ID, &candidate.File.Path, &candidate.File.Size,
 			&candidate.File.MovieID, &candidate.File.Quality, &candidate.File.Source,
 			&candidate.File.Codec, &candidate.File.Audio, &candidate.File.ReleaseGroup,
 			&addedAt, &modifiedAt, &episodeCount, &libraryKindCount, &hasAdult,
-			&movieLibraryID, &seriesLibraryID,
+			&seriesLibraryCount, &seriesProfileCount,
+			&movieLibraryID, &seriesLibraryID, &movieProfileID, &seriesProfileID,
 			&candidate.SeriesID, &candidate.SeriesKind, &candidate.EpisodeID,
 			&candidate.SeasonNumber, &candidate.EpisodeNumber,
 		)
@@ -290,12 +351,15 @@ func (s *Store) ListConversionCandidates(ctx context.Context) ([]ConversionCandi
 		case candidate.File.MovieID != 0 && episodeCount == 0:
 			candidate.LibraryKind = core.LibraryKindMovie
 			candidate.LibraryID = movieLibraryID
-		case candidate.File.MovieID == 0 && episodeCount > 0 && libraryKindCount == 1:
+			candidate.QualityProfileID = movieProfileID
+		case candidate.File.MovieID == 0 && episodeCount > 0 &&
+			libraryKindCount == 1 && seriesLibraryCount == 1 && seriesProfileCount == 1:
 			candidate.LibraryKind = core.LibraryKindTV
 			if hasAdult != 0 {
 				candidate.LibraryKind = core.LibraryKindAdult
 			}
 			candidate.LibraryID = seriesLibraryID
+			candidate.QualityProfileID = seriesProfileID
 		default:
 			continue
 		}

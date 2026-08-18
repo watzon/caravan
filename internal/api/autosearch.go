@@ -14,19 +14,16 @@ import (
 // many search jobs the request actually added to the queue.
 //
 // Zero is a normal, successful answer, not a failure. It is what an item that
-// already meets its cutoff reports, and what a second click reports while the
-// first search is still queued — so the UI can say "nothing to search" rather
-// than pretending work started.
+// already has a file or active download reports, and what a second click
+// reports while the first search is still queued, so the UI can say "nothing
+// to search" rather than pretending work started.
 type searchQueuedResponse struct {
 	Queued int `json:"queued"`
 }
 
 // handleSearchMovieNow queues the automatic search for one movie (SPEC §9).
 //
-// Only a movie the wanted list actually names is queued. The search_movie
-// handler has no guard of its own against re-grabbing a file that already
-// meets the cutoff, so the decision of whether there is anything to look for
-// has to be made here rather than deferred to the worker.
+// Only a missing movie without an active download is queued.
 func (s *server) handleSearchMovieNow(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -38,7 +35,7 @@ func (s *server) handleSearchMovieNow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	lists, err := wanted.Compute(ctx, s.st)
+	lists, err := wanted.ComputeSearchable(ctx, s.st)
 	if err != nil {
 		s.writeStoreError(w, "compute wanted list", err)
 		return
@@ -61,8 +58,8 @@ func (s *server) handleSearchMovieNow(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, searchQueuedResponse{Queued: queued})
 }
 
-// handleSearchSeriesNow queues an automatic search for every wanted episode of
-// one series.
+// handleSearchSeriesNow queues an automatic search for every missing episode
+// of one series that has no active download.
 func (s *server) handleSearchSeriesNow(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -81,7 +78,8 @@ func (s *server) handleSearchSeriesNow(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, searchQueuedResponse{Queued: queued})
 }
 
-// handleSearchEpisodeNow queues the automatic search for one wanted episode.
+// handleSearchEpisodeNow queues the automatic search for one missing episode
+// that has no active download.
 func (s *server) handleSearchEpisodeNow(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -97,7 +95,7 @@ func (s *server) handleSearchEpisodeNow(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	lists, err := wanted.Compute(ctx, s.st)
+	lists, err := wanted.ComputeSearchable(ctx, s.st)
 	if err != nil {
 		s.writeStoreError(w, "compute wanted list", err)
 		return
@@ -120,12 +118,11 @@ func (s *server) handleSearchEpisodeNow(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusAccepted, searchQueuedResponse{Queued: queued})
 }
 
-// handleSearchWanted queues an automatic search for the whole wanted list. It
-// is the backlog sweep on demand, and shares its dedupe: an item the sweep has
-// already queued is not queued twice.
+// handleSearchWanted queues an automatic search for every missing item without
+// an active download. It is the backlog sweep on demand and shares its dedupe.
 func (s *server) handleSearchWanted(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	lists, err := wanted.Compute(ctx, s.st)
+	lists, err := wanted.ComputeSearchable(ctx, s.st)
 	if err != nil {
 		s.writeStoreError(w, "compute wanted list", err)
 		return
@@ -150,13 +147,12 @@ func (s *server) handleSearchWanted(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, searchQueuedResponse{Queued: queued + added})
 }
 
-// queueSeriesSearch queues a search for every wanted episode of one series and
-// reports how many jobs it added. Shared by POST /library/series/{id}/search
-// and the search_missing flag on add, so both agree on what "missing" means:
-// the wanted list, which excludes episodes that have not aired yet. Searching
-// for an unaired episode can only ever record "no acceptable release found".
+// queueSeriesSearch queues a search for every searchable episode of one series
+// and reports how many jobs it added. Shared by POST /library/series/{id}/search
+// and the search_missing flag on add, so both exclude episodes that have not
+// aired, already have a file, or have an active download.
 func (s *server) queueSeriesSearch(ctx context.Context, seriesID int64) (int, error) {
-	lists, err := wanted.Compute(ctx, s.st)
+	lists, err := wanted.ComputeSearchable(ctx, s.st)
 	if err != nil {
 		return 0, err
 	}

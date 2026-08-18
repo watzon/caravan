@@ -91,22 +91,12 @@ describe('endpoints', () => {
   });
 });
 
-describe('tv profiles', () => {
+describe('playback targets', () => {
   it('unwraps the profiles envelope', async () => {
-    stubFetch({ profiles: [{ id: 'safe', active: true }] });
+    stubFetch({ profiles: [{ id: 'safe' }] });
     const list = await api.listTVProfiles();
     expect(list).toHaveLength(1);
     expect(only().url).toBe('/api/v1/tv-profiles');
-  });
-
-  it('saves the active profile through the settings endpoint, not its own', async () => {
-    stubFetch({ tv_profile: 'capable' });
-    await api.putSettings({ tv_profile: 'capable' });
-    expect(only()).toMatchObject({
-      method: 'PUT',
-      url: '/api/v1/settings',
-      body: { tv_profile: 'capable' },
-    });
   });
 });
 

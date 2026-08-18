@@ -52,15 +52,15 @@ func SyncSiteHandler(walk SiteWalker) Handler {
 	}
 }
 
-// EnqueueSeriesSearches queues one search_episode job per WANTED episode of a
-// series, deduped against the jobs already open.
+// EnqueueSeriesSearches queues one search_episode job per missing episode of a
+// series that has no active download, deduped against jobs already open.
 //
-// Wanted is the filter, not "every episode": an unmonitored site has no wanted
-// scenes, so "start searching immediately" on an unmonitored add correctly
-// queues nothing rather than erroring. That combination is not offered in the
-// UI, but the queue is not the place to find out.
+// Searchable is the filter, not "every episode": an unmonitored site has no
+// searchable scenes, so "start searching immediately" on an unmonitored add
+// correctly queues nothing rather than erroring. That combination is not
+// offered in the UI, but the queue is not the place to find out.
 func EnqueueSeriesSearches(ctx context.Context, st *store.Store, seriesID int64) error {
-	lists, err := wanted.Compute(ctx, st)
+	lists, err := wanted.ComputeSearchable(ctx, st)
 	if err != nil {
 		return fmt.Errorf("compute wanted releases: %w", err)
 	}

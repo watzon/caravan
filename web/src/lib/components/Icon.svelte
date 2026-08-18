@@ -49,6 +49,7 @@
     // Monitoring, on the detail pages: a bookmark is "watch this one", which is
     // what monitored means, and it reads at 14px where an eye does not.
     bookmark: '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>',
+    edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L8 18l-4 1 1-4Z"/>',
     // The overflow trigger. Filled dots rather than stroked circles: at 2px
     // stroke and this size, rings read as smudges.
     more: '<circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.4" fill="currentColor" stroke="none"/>',

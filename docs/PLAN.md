@@ -80,7 +80,7 @@ A standing principle sharpened after phase 6: **Caravan is completely standalone
 1. **Quality profiles:** ladder, cutoff, per-item assignment; profile CRUD UI.
 2. **Wanted semantics:** monitored flags with downward-cascade bulk updates; wanted list views (missing / below-cutoff).
 3. **Release scoring:** score parsed releases against the profile; rejection reasons recorded on `grabs` for the "why was this skipped" question.
-4. **Backlog search job** per wanted item, and **RSS sync** polling enabled indexers on an interval; dedup against seen `releases`.
+4. **Backlog search job** per missing item without an active download, and **RSS sync** polling enabled indexers on an interval; dedup against seen `releases`.
 5. **Automatic grab decisioning:** best-candidate selection, no duplicate grabs across restarts (idempotent jobs against the lease queue).
 6. **Upgrade-until-cutoff:** below-cutoff items stay wanted; a better import replaces the file (and the old file is removed only after the new one is verified in place).
 7. **Season pack handling:** a single download satisfying many episodes imports as multiple linked files.
@@ -92,7 +92,7 @@ A standing principle sharpened after phase 6: **Caravan is completely standalone
 
 - A monitored series acquires new and backlog episodes with zero user interaction.
 - The calendar shows upcoming and recent movies and episodes together, each entry reflecting its live status, and the iCal feed subscribes cleanly in an external calendar app.
-- A file below cutoff is replaced automatically when a better release appears, and the old file is gone afterward.
+- A file below cutoff is replaced automatically when RSS finds a better release, and the old file is gone afterward.
 - Restarting mid-search/mid-grab never produces duplicate downloads.
 - Every automatic decision (grab, skip, upgrade) is explainable from the events/grabs history in the UI.
 
@@ -107,14 +107,14 @@ A standing principle sharpened after phase 6: **Caravan is completely standalone
 
 1. **Jellyfin integration:** config + test connection; library-scan trigger on import.
 2. **DLNA DMS:** SSDP advertisement + ContentDirectory browse over the library, serving files directly (no transcoding).
-3. **TV profiles:** target-set capability descriptions (safe default: H.264 8-bit + AAC in MP4 ≤1080p); parser-tagged codec/audio/container surfaced as compatibility flags in the release picker and library.
+3. **Playback targets:** capability descriptions selected by each quality profile (safe default: H.264 8-bit and AAC in MP4 up to 1080p); parsed codec, audio, and container tags surface as compatibility flags in the release picker and library.
 4. **Convert-for-TV queue:** ffmpeg detection, remux-first strategy, explicit transcode fallback, queue UI; graceful degradation when ffmpeg is absent.
 
 ### Acceptance criteria
 
 - An import triggers a Jellyfin library scan automatically.
 - A smart TV on the LAN browses and plays library files via DLNA.
-- A DTS/HEVC release is visibly flagged against the active TV profile in the release picker.
+- A DTS/HEVC release is visibly flagged against the title's playback target in the release picker.
 - Remuxing an incompatible file produces a TV-safe file and the library record updates to it.
 
 ---

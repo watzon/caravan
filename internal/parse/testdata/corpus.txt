@@ -128,7 +128,7 @@ The.Office.S01-S09.COMPLETE.1080p.BluRay.x265-GROUP | title=The Office; season=1
 The.Daily.Show.2024.01.15.Guest.Name.1080p.WEB.h264-GROUP | title=The Daily Show; year=2024; quality=1080p; source=webdl; codec=h264; group=GROUP; minconf=0.9
 
 # ----------------------------------------------------------- bit depth ------
-# SPEC §8: the TV profile check needs to tell 10-bit video from 8-bit, because
+# SPEC §8: the playback-target check needs to tell 10-bit video from 8-bit, because
 # a Main10 stream is exactly what an older set refuses to decode.
 Some.Movie.2021.2160p.WEB-DL.HEVC.10bit.DDP5.1-GRP | title=Some Movie; year=2021; quality=2160p; source=webdl; codec=hevc; audio=EAC3; bitdepth=10; group=GRP; minconf=1
 Another.Movie.2019.1080p.BluRay.x264.8bit.AAC-GRP | title=Another Movie; year=2019; quality=1080p; source=bluray; codec=x264; audio=AAC; bitdepth=8; group=GRP; minconf=1

@@ -1,8 +1,7 @@
 /**
- * The detail-page action pair (SPEC §9): "Search now" queues the automatic
- * search through the API, while "Interactive search" stays a link to the
- * picker screen. A queued count of zero is reported honestly rather than
- * dressed up as a started search.
+ * Acquisition actions live with the file state they change. Automatic search
+ * queues through the API, while choosing a release stays a link to the picker.
+ * A queued count of zero is reported honestly.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
@@ -39,6 +38,7 @@ const PROFILES = [
     cutoff: '1080p',
     items: ['1080p'],
     upgrade_allowed: true,
+    tv_profile: 'safe',
     is_default: true,
     assignments: { libraries: 0, movies: 0, series: 0 },
     created_at: '',
@@ -50,6 +50,7 @@ const PROFILES = [
     cutoff: '2160p',
     items: ['2160p', '1080p'],
     upgrade_allowed: true,
+    tv_profile: 'capable',
     is_default: false,
     assignments: { libraries: 0, movies: 0, series: 0 },
     created_at: '',
@@ -149,6 +150,12 @@ function stubFetch(
           headers: { 'Content-Type': 'application/json' },
         });
       }
+      if (body?.monitored !== undefined) {
+        return new Response(JSON.stringify({ ...(movie as object), monitored: body.monitored }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
       return new Response(JSON.stringify(movie), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -210,13 +217,28 @@ function removeTrigger(): HTMLButtonElement {
   return item as HTMLButtonElement;
 }
 
-/** The header's monitored control, now an icon toggle rather than a switch. */
-function monitorButton(): HTMLButtonElement {
-  const button = [...host.querySelectorAll<HTMLButtonElement>('button[aria-pressed]')].find((b) =>
-    b.getAttribute('aria-label')?.includes('monitor'),
+function editButton(): HTMLButtonElement {
+  const button = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+    (candidate) => candidate.textContent?.trim() === 'Edit',
   );
-  expect(button, 'monitor toggle').toBeDefined();
+  expect(button, 'Edit button').toBeDefined();
   return button as HTMLButtonElement;
+}
+
+async function openEditor(): Promise<HTMLElement> {
+  editButton().click();
+  await settle();
+  const dialog = host.querySelector<HTMLElement>('[role="dialog"]');
+  expect(dialog, 'edit dialog').not.toBeNull();
+  return dialog!;
+}
+
+function saveChangesButton(dialog: HTMLElement): HTMLButtonElement {
+  const button = [...dialog.querySelectorAll<HTMLButtonElement>('button')].find(
+    (candidate) => candidate.textContent?.trim() === 'Save changes',
+  );
+  expect(button, 'Save changes button').toBeDefined();
+  return button!;
 }
 
 /** The confirm dialog's own Remove button, whose label is exactly "Remove". */
@@ -260,21 +282,16 @@ describe('MovieDetail facts', () => {
     app = mount(MovieDetail, { target: host, props: { id: 7 } });
     await settle();
 
-    const heroFacts = host.querySelector('h2')?.nextElementSibling;
+    const heroFacts = host.querySelector('h2')?.parentElement?.nextElementSibling;
     expect(heroFacts?.textContent).toContain('2021');
     expect(heroFacts?.textContent).toContain('Released');
 
     const labels = [...host.querySelectorAll('dt')].map((term) => term.textContent?.trim());
     expect(host.querySelectorAll('dl')).toHaveLength(1);
-    expect(labels).toEqual([
-      'Folder',
-      'TMDB id',
-      'Added',
-      'Minimum availability',
-      'Quality profile',
-    ]);
+    expect(labels).toEqual(['Folder', 'TMDB id', 'Added']);
     expect(new Set(labels).size).toBe(labels.length);
     expect(labels).not.toEqual(expect.arrayContaining(['Year', 'Status', 'Release date']));
+    expect(host.querySelector('select')).toBeNull();
   });
   it('keeps full folder and file paths on truncated values', async () => {
     const folder = 'library/Movies/Dune (2021)/A deliberately long folder name';
@@ -437,14 +454,20 @@ describe('MovieDetail remove', () => {
 });
 
 describe('MovieDetail search actions', () => {
-  it('queues the automatic search and keeps the interactive picker a link', async () => {
+  it('puts automatic and release-picker actions inside the empty file state', async () => {
     stubFetch(1);
     app = mount(MovieDetail, { target: host, props: { id: 7 } });
     await settle();
 
-    // The picker is still a linkable screen, not a second button.
+    const fileSection = [...host.querySelectorAll('h3')].find(
+      (heading) => heading.textContent?.trim() === 'File',
+    )?.closest('section');
+    expect(fileSection).not.toBeNull();
+    expect(fileSection?.contains(searchNowButton())).toBe(true);
+
     const picker = host.querySelector('a[href="/movies/7/search"]');
-    expect(picker?.textContent).toContain('Interactive search');
+    expect(picker?.textContent).toContain('Choose a release');
+    expect(fileSection?.contains(picker)).toBe(true);
 
     searchNowButton().click();
     await settle();
@@ -455,7 +478,7 @@ describe('MovieDetail search actions', () => {
     expect(toasts.items).toHaveLength(0);
   });
 
-  it('says nothing was queued when the file already meets the cutoff', async () => {
+  it('says nothing was queued when the movie is not searchable', async () => {
     stubFetch(0);
     app = mount(MovieDetail, { target: host, props: { id: 7 } });
     await settle();
@@ -467,15 +490,74 @@ describe('MovieDetail search actions', () => {
     expect(toasts.items[0]!.message).toContain('Nothing to search');
     expect(toasts.items[0]!.tone).toBe('info');
   });
+
+  it('monitors an unmonitored movie before starting its automatic search', async () => {
+    stubFetch(1, { ...MOVIE, monitored: false });
+    app = mount(MovieDetail, { target: host, props: { id: 7 } });
+    await settle();
+
+    expect(host.textContent).toContain('Monitor this movie to search automatically');
+    expect([...host.querySelectorAll('button')].some((button) =>
+      button.textContent?.includes('Search now'),
+    )).toBe(false);
+    const monitorAndSearch = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent?.includes('Monitor and search'),
+    );
+    expect(monitorAndSearch).toBeDefined();
+
+    monitorAndSearch!.click();
+    await settle();
+
+    expect(calls.filter((call) => call.method === 'PATCH' || call.method === 'POST')).toEqual([
+      {
+        url: '/api/v1/library/movies/7',
+        method: 'PATCH',
+        body: { monitored: true },
+        signal: undefined,
+      },
+      {
+        url: '/api/v1/library/movies/7/search',
+        method: 'POST',
+        body: null,
+        signal: undefined,
+      },
+    ]);
+  });
+
+  it('replaces search controls with a queue action while downloading', async () => {
+    stubFetch(0, { ...MOVIE, downloading: true });
+    app = mount(MovieDetail, { target: host, props: { id: 7 } });
+    await settle();
+
+    expect(host.textContent).toContain('Download in progress');
+    expect(host.querySelector('a[href="/queue"]')?.textContent).toContain('View queue');
+    expect(host.querySelector('a[href="/movies/7/search"]')).toBeNull();
+    expect([...host.querySelectorAll('button')].some((button) =>
+      button.textContent?.includes('Search now'),
+    )).toBe(false);
+  });
+
+  it('offers an explicit replacement search beside an imported file', async () => {
+    stubFetch(0, MOVIE_WITH_FILE);
+    app = mount(MovieDetail, { target: host, props: { id: 7 } });
+    await settle();
+
+    const replacement = host.querySelector('a[href="/movies/7/search"]');
+    expect(replacement?.textContent).toContain('Choose another release');
+    expect([...host.querySelectorAll('button')].some((button) =>
+      button.textContent?.includes('Search now'),
+    )).toBe(false);
+  });
 });
 
 describe('minimum availability', () => {
-  it('shows the stored stage and PATCHes a new choice', async () => {
+  it('edits the stored stage in the modal and saves it with the other settings', async () => {
     stubFetch(0);
     app = mount(MovieDetail, { target: host, props: { id: 7 } });
     await settle();
 
-    const select = host.querySelector<HTMLSelectElement>(
+    const dialog = await openEditor();
+    const select = dialog.querySelector<HTMLSelectElement>(
       'select[aria-label="Minimum availability"]',
     );
     expect(select).not.toBeNull();
@@ -484,26 +566,44 @@ describe('minimum availability', () => {
     select!.value = 'in_cinemas';
     select!.dispatchEvent(new Event('change', { bubbles: true }));
     await settle();
+    expect(calls.some((call) => call.method === 'PATCH')).toBe(false);
+
+    saveChangesButton(dialog).click();
+    await settle();
 
     const patch = calls.find((c) => c.method === 'PATCH');
     expect(patch?.url.endsWith('/library/movies/7')).toBe(true);
-    expect(patch?.body).toEqual({ min_availability: 'in_cinemas' });
+    expect(patch?.body).toEqual({
+      monitored: true,
+      quality_profile_id: 0,
+      min_availability: 'in_cinemas',
+    });
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
   });
 });
 
 describe('quality profile assignment', () => {
-  it('saves an item override immediately', async () => {
+  it('shows the derived playback target and saves an item override on submit', async () => {
     const assignedMovie = { ...MOVIE, quality_profile_id: 1 };
     stubFetch(0, MOVIE, assignedMovie);
     app = mount(MovieDetail, { target: host, props: { id: 7 } });
     await settle();
 
-    const select = host.querySelector<HTMLSelectElement>('select[aria-label="Quality profile"]');
+    const dialog = await openEditor();
+    const select = dialog.querySelector<HTMLSelectElement>(
+      'select[aria-label="Quality profile"]',
+    );
     expect(select).not.toBeNull();
     expect(select!.value).toBe('0');
+    expect(dialog.textContent).toContain('Capable');
 
     select!.value = '1';
     select!.dispatchEvent(new Event('change', { bubbles: true }));
+    await settle();
+    expect(dialog.textContent).toContain('Safe');
+    expect(dialog.textContent).toContain('This title overrides its library with Balanced.');
+
+    saveChangesButton(dialog).click();
     await settle();
 
     expect(
@@ -513,10 +613,13 @@ describe('quality profile assignment', () => {
     ).toMatchObject({
       url: '/api/v1/library/movies/7',
       method: 'PATCH',
-      body: { quality_profile_id: 1 },
+      body: {
+        monitored: true,
+        quality_profile_id: 1,
+        min_availability: 'released',
+      },
     });
-    expect(select!.value).toBe('1');
-    expect(host.textContent).toContain('Override: Balanced');
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
   });
   it('keeps the detail visible when profile choices cannot load', async () => {
     stubFetch(0, MOVIE, MOVIE, 500);
@@ -524,40 +627,63 @@ describe('quality profile assignment', () => {
     await settle();
 
     expect(host.textContent).toContain('Dune');
-    expect(host.querySelector('[role="alert"]')?.textContent).toContain(
-      'Could not load profile choices: Profiles unavailable',
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+
+    const dialog = await openEditor();
+    expect(dialog.querySelector('[role="alert"]')?.textContent).toContain(
+      'Could not load title settings: Profiles unavailable',
     );
     expect(
-      [...host.querySelectorAll('button')].some((button) => button.textContent?.trim() === 'Retry'),
+      [...dialog.querySelectorAll('button')].some((button) => button.textContent?.trim() === 'Retry'),
     ).toBe(true);
   });
 });
 
-
 /**
- * The redesigned action row (Option A): the labeled switch became an icon
- * toggle and Remove moved behind the ⋯. What the controls DO is unchanged, so
- * these assert the same requests the old surface made.
+ * Title controls open one editor. Changes stay local until Save, while Remove
+ * remains behind the overflow menu.
  */
-describe('MovieDetail action row', () => {
-  it('sends the same monitored PATCH the switch used to', async () => {
+describe('MovieDetail title controls', () => {
+  it('keeps Edit and overflow beside the title', async () => {
     stubFetch(0);
     app = mount(MovieDetail, { target: host, props: { id: 7 } });
     await settle();
 
-    monitorButton().click();
+    const titleControls = host.querySelector('h2')?.parentElement;
+    expect(titleControls?.contains(editButton())).toBe(true);
+    expect(titleControls?.contains(menuTrigger())).toBe(true);
+  });
+
+  it('saves monitoring through the edit modal', async () => {
+    stubFetch(0);
+    app = mount(MovieDetail, { target: host, props: { id: 7 } });
+    await settle();
+
+    const dialog = await openEditor();
+    const monitor = dialog.querySelector<HTMLButtonElement>('button[role="switch"]');
+    expect(monitor?.getAttribute('aria-checked')).toBe('true');
+    monitor!.click();
+    await settle();
+    saveChangesButton(dialog).click();
     await settle();
 
     const patch = calls.find((c) => c.method === 'PATCH');
     expect(patch?.url).toBe('/api/v1/library/movies/7');
-    expect(patch?.body).toEqual({ monitored: false });
+    expect(patch?.body).toEqual({
+      monitored: false,
+      quality_profile_id: 0,
+      min_availability: 'released',
+    });
   });
 
-  it('announces the state it is in', async () => {
+  it('keeps unchanged settings from being submitted', async () => {
     stubFetch(0);
     app = mount(MovieDetail, { target: host, props: { id: 7 } });
     await settle();
-    expect(monitorButton().getAttribute('aria-pressed')).toBe('true');
+
+    const dialog = await openEditor();
+    expect(saveChangesButton(dialog).disabled).toBe(true);
+    expect(dialog.querySelector('button[role="switch"]')?.getAttribute('aria-checked')).toBe('true');
   });
 
   it('closes the menu on Escape without removing anything', async () => {

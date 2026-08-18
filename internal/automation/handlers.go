@@ -253,7 +253,7 @@ func (r *Runner) handleBacklogSweep(ctx context.Context, st *store.Store, payloa
 	if err := emptyPayload(payload); err != nil {
 		return err
 	}
-	lists, err := wanted.Compute(ctx, st)
+	lists, err := wanted.ComputeSearchable(ctx, st)
 	if err != nil {
 		return fmt.Errorf("compute wanted releases: %w", err)
 	}
@@ -289,6 +289,13 @@ func (r *Runner) handleSearchMovie(ctx context.Context, st *store.Store, payload
 	}
 	if err != nil {
 		return fmt.Errorf("store: get movie: %w", err)
+	}
+	missing, err := movieMissing(ctx, st, movie.ID)
+	if err != nil {
+		return err
+	}
+	if !missing {
+		return nil
 	}
 	// handleSearchEpisode's rule, for the other item kind: a job outlives the
 	// switch, so the library is re-read rather than trusted from when the job
@@ -326,7 +333,7 @@ func (r *Runner) handleSearchMovie(ctx context.Context, st *store.Store, payload
 		return recordNoRelease(ctx, st, movie.Title, len(candidates), movie.ID, 0)
 	}
 	score, _ := wanted.ScoreRelease(*best, profile)
-	return r.grabMovie(ctx, st, *movie, *best, score, "automatic search")
+	return r.grabSearchedMovie(ctx, st, *movie, *best, score)
 }
 
 func (r *Runner) handleSearchEpisode(ctx context.Context, st *store.Store, payload json.RawMessage) error {
@@ -340,6 +347,13 @@ func (r *Runner) handleSearchEpisode(ctx context.Context, st *store.Store, paylo
 	}
 	if err != nil {
 		return fmt.Errorf("store: get episode: %w", err)
+	}
+	missing, err := episodeMissing(ctx, st, episode.ID)
+	if err != nil {
+		return err
+	}
+	if !missing {
+		return nil
 	}
 	series, err := st.GetSeries(ctx, episode.SeriesID)
 	if errors.Is(err, store.ErrNotFound) {
@@ -411,7 +425,7 @@ func (r *Runner) handleSearchEpisode(ctx context.Context, st *store.Store, paylo
 		return recordNoRelease(ctx, st, episode.Title, len(automatic), 0, series.ID)
 	}
 	score, _ := wanted.ScoreRelease(*best, profile)
-	return r.grabEpisode(ctx, st, series.LibraryID, kind, *episode, *best, score, "automatic search")
+	return r.grabSearchedEpisode(ctx, st, series.LibraryID, kind, *episode, *best, score)
 }
 
 // searchScene is handleSearchEpisode's adult branch (PLAN phase 9 task 3).
@@ -486,7 +500,7 @@ func (r *Runner) searchScene(ctx context.Context, st *store.Store, series core.S
 		}
 		if best != nil {
 			score, _ := wanted.ScoreRelease(*best, profile)
-			return r.grabEpisode(ctx, st, series.LibraryID, core.LibraryKindAdult, episode, *best, score, "automatic search")
+			return r.grabSearchedEpisode(ctx, st, series.LibraryID, core.LibraryKindAdult, episode, *best, score)
 		}
 	}
 	return recordNoRelease(ctx, st, episode.Title, matched, 0, series.ID, tried...)
@@ -718,6 +732,48 @@ func (r *Runner) searchIndexers(ctx context.Context, st *store.Store, libraryID 
 		}
 	}
 	return candidates, nil
+}
+
+func movieMissing(ctx context.Context, st *store.Store, movieID int64) (bool, error) {
+	files, err := st.ListMediaFilesForMovie(ctx, movieID)
+	if err != nil {
+		return false, fmt.Errorf("store: list movie files: %w", err)
+	}
+	return len(files) == 0, nil
+}
+
+func episodeMissing(ctx context.Context, st *store.Store, episodeID int64) (bool, error) {
+	files, err := st.ListMediaFilesForEpisode(ctx, episodeID)
+	if err != nil {
+		return false, fmt.Errorf("store: list episode files: %w", err)
+	}
+	return len(files) == 0, nil
+}
+
+// grabSearchedMovie checks again after the indexer request. An import can
+// finish while that request is running, and the completed file wins that race.
+func (r *Runner) grabSearchedMovie(ctx context.Context, st *store.Store, movie core.Movie, release core.Release, score int) error {
+	missing, err := movieMissing(ctx, st, movie.ID)
+	if err != nil {
+		return err
+	}
+	if !missing {
+		return nil
+	}
+	return r.grabMovie(ctx, st, movie, release, score, "automatic search")
+}
+
+// grabSearchedEpisode is the episode and adult scene form of
+// grabSearchedMovie.
+func (r *Runner) grabSearchedEpisode(ctx context.Context, st *store.Store, libraryID int64, kind string, episode core.Episode, release core.Release, score int) error {
+	missing, err := episodeMissing(ctx, st, episode.ID)
+	if err != nil {
+		return err
+	}
+	if !missing {
+		return nil
+	}
+	return r.grabEpisode(ctx, st, libraryID, kind, episode, release, score, "automatic search")
 }
 
 func (r *Runner) grabMovie(ctx context.Context, st *store.Store, movie core.Movie, release core.Release, score int, source string) error {

@@ -71,9 +71,9 @@ type releaseJSON struct {
 	AgeDays int        `json:"age_days"`
 	Parsed  parsedJSON `json:"parsed"`
 	Flags   []string   `json:"flags"`
-	// Compatibility is the active TV profile's verdict on the parsed tags
-	// (SPEC §8). It remains grabbable, but an incompatible release sorts after
-	// releases with every other verdict.
+	// Compatibility is the effective quality profile's playback-target verdict
+	// on the parsed tags. It remains grabbable, but an incompatible release
+	// sorts after releases with every other verdict.
 	Compatibility compatibilityJSON `json:"compatibility"`
 	// ProfileDecision is the effective item, library, or system quality
 	// profile's scoring explanation. It is advisory in the picker: a user can
@@ -275,9 +275,9 @@ func (s *server) serveReleases(w http.ResponseWriter, r *http.Request, libraryID
 	}
 	indexers := settings.Indexers
 
-	// The TV profile is resolved once for the whole fan-out so every row's
-	// compatibility check uses the same playback capability.
-	tvProfile := s.activeTVProfile(r.Context())
+	// The effective quality profile already carries the item's playback target,
+	// so warnings and acquisition scoring cannot disagree.
+	tvProfile := playbackTarget(profile)
 
 	ctx, cancel := context.WithTimeout(r.Context(), releaseSearchTimeout)
 	defer cancel()
@@ -504,7 +504,7 @@ func searchIndexersOnce(ctx context.Context, newClient IndexerFactory, indexers 
 	return merged, failures
 }
 
-// releaseTags is what the TV-profile check judges a release on. The container
+// releaseTags is what the playback-target check judges a release on. The container
 // comes from the release name, which usually does not carry one — an absent
 // container is simply not judged (core.TVProfile.Check).
 func releaseTags(rel core.Release) core.MediaTags {
@@ -553,8 +553,8 @@ func ageDays(t time.Time) int {
 	return days
 }
 
-// releaseIsIncompatible reports whether rel cannot play natively on the active
-// TV profile. Other verdicts retain the normal picker ordering.
+// releaseIsIncompatible reports whether rel cannot play natively on the
+// item's playback target. Other verdicts retain the normal picker ordering.
 func releaseIsIncompatible(rel releaseJSON) bool {
 	return rel.Compatibility.Verdict == core.TVCompatIncompatible
 }

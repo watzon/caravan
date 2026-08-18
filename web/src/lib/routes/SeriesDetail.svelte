@@ -16,7 +16,9 @@
   import LoadError from '../components/LoadError.svelte';
   import Poster from '../components/Poster.svelte';
   import RemoveItemModal from '../components/RemoveItemModal.svelte';
-  import MonitorButton from '../components/MonitorButton.svelte';
+  import EditMediaModal, {
+    type MediaEditValues,
+  } from '../components/EditMediaModal.svelte';
   import MoveItemModal from '../components/MoveItemModal.svelte';
   import OverflowMenu from '../components/OverflowMenu.svelte';
   import { libraries } from '../state/libraries.svelte';
@@ -49,7 +51,6 @@
   import { pushToast } from '../state/toast.svelte';
   import { episodeStatus, seriesStatus } from '../status';
   import { compatBadge } from '../tvcompat';
-  import ItemQualityProfileSelect from '../components/ItemQualityProfileSelect.svelte';
   import { useI18n } from '../i18n.svelte';
 
   const { t, tp } = useI18n();
@@ -65,6 +66,7 @@
   let error = $state<string | null>(null);
   let busy = $state(false);
   let searching = $state(false);
+  let editing = $state(false);
   let confirmingRemove = $state(false);
   let movingLibrary = $state(false);
   $effect(() => {
@@ -112,6 +114,10 @@
   // The detail response carries every season's episodes with their files, so
   // the confirm can name a real count rather than a vague "its files".
   let fileCount = $derived(seasons.reduce((total, season) => total + ownedCount(season), 0));
+  let episodeCount = $derived(
+    seasons.reduce((total, season) => total + episodesOf(season).length, 0),
+  );
+  let allEpisodesOwned = $derived(episodeCount > 0 && fileCount >= episodeCount);
 
   async function run(action: () => Promise<unknown>, failureNote: string) {
     busy = true;
@@ -126,32 +132,56 @@
     }
   }
 
-  async function setQualityProfile(profileID: number) {
+  async function saveSettings(values: MediaEditValues) {
     const current = series;
     if (!current) return;
-    series = await api.setSeriesQualityProfile(current.id, profileID);
+    series = await api.updateSeries(current.id, {
+      monitored: values.monitored,
+      quality_profile_id: values.qualityProfileID,
+    });
+    libraryChanged();
+    pushToast(t('route.seriesDetail.updated'), 'success');
   }
 
   /**
    * Automatic search for the whole series (SPEC §9). The server queues one job
-   * per wanted episode and answers the count, so a series that is already
-   * complete says so rather than reporting work that was never queued.
+   * per missing episode without an active download and answers the count.
    */
   async function searchNow() {
     const current = series;
     if (!current) return;
     searching = true;
     try {
-      const { queued } = await api.searchSeriesNow(current.id);
-      if (queued > 0) {
-        searchQueued(queued);
-      } else {
-        pushToast(t('route.seriesDetail.nothingToSearch'), 'info');
-      }
+      await queueSearch(current);
     } catch (err) {
       pushToast(errorText(err), 'danger');
     } finally {
       searching = false;
+    }
+  }
+
+  async function monitorAndSearch() {
+    const current = series;
+    if (!current) return;
+    searching = true;
+    try {
+      const updated = await api.setSeriesMonitored(current.id, true);
+      series = updated;
+      libraryChanged();
+      await queueSearch(updated);
+    } catch (err) {
+      pushToast(errorText(err), 'danger');
+    } finally {
+      searching = false;
+    }
+  }
+
+  async function queueSearch(current: Series) {
+    const { queued } = await api.searchSeriesNow(current.id);
+    if (queued > 0) {
+      searchQueued(queued);
+    } else {
+      pushToast(t('route.seriesDetail.nothingToSearch'), 'info');
     }
   }
 
@@ -213,44 +243,15 @@
       </div>
 
       <div class="flex min-w-0 flex-1 flex-col gap-4">
-        <div class="flex flex-wrap items-start gap-4">
-          <div class="min-w-0 flex-1">
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
             <h2 class="font-display text-2xl font-semibold tracking-tight text-ink">
               {current.title}
             </h2>
-            <p class="mt-1 flex flex-wrap items-center gap-3 text-base text-ink-secondary">
-              <span>{current.year > 0 ? current.year : UNKNOWN}</span>
-              <span class="text-ink-muted">·</span>
-              <StatusDot status={seriesStatus(current)} />
-              {#if current.status}
-                <span class="text-ink-muted">·</span>
-                <span>{current.status}</span>
-              {/if}
-            </p>
-            <div class="mt-2">
-              <MetadataLinks links={seriesLinks(current)} />
-            </div>
-          </div>
-          <div class="flex w-full flex-wrap items-center gap-3 sm:w-auto">
-            <Button variant="primary" disabled={searching} onclick={searchNow}>
-              <Icon name="search" size={14} />
-              {searching ? t('route.seriesDetail.searching') : t('route.seriesDetail.searchNow')}
+            <Button variant="ghost" size="sm" onclick={() => (editing = true)}>
+              <Icon name="edit" size={14} />
+              {t('component.actions.edit')}
             </Button>
-            <Button variant="secondary" href="/series/{current.id}/search">
-              {t('route.seriesDetail.interactiveSearch')}
-            </Button>
-            <MonitorButton
-              monitored={current.monitored}
-              subject={current.title}
-              disabled={busy}
-              onchange={(next) =>
-                run(
-                  () => api.setSeriesMonitored(current.id, next),
-                  t('route.seriesDetail.updateFailed'),
-                )} />
-            <!-- Removal lives behind the ⋯ rather than one mis-click from the
-                 search buttons. There is no per-series metadata refresh route,
-                 so removal is the only item there is. -->
             <OverflowMenu
               subject={current.title}
               items={[
@@ -270,13 +271,25 @@
                 },
               ]} />
           </div>
+          <p class="mt-1 flex flex-wrap items-center gap-3 text-base text-ink-secondary">
+            <span>{current.year > 0 ? current.year : UNKNOWN}</span>
+            <span class="text-ink-muted">·</span>
+            <StatusDot status={seriesStatus(current)} />
+            {#if current.status}
+              <span class="text-ink-muted">·</span>
+              <span>{current.status}</span>
+            {/if}
+          </p>
+          <div class="mt-2">
+            <MetadataLinks links={seriesLinks(current)} />
+          </div>
         </div>
 
         <p class="max-w-3xl text-md text-ink-secondary">
           {current.overview || t('route.seriesDetail.noOverview')}
         </p>
 
-        <dl class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <dl class="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div>
             <dt class="micro-label">{t('route.seriesDetail.folder')}</dt>
             <dd class="mt-1 truncate font-mono text-sm text-ink" title={current.path}>
@@ -293,25 +306,67 @@
             <dt class="micro-label">{t('route.seriesDetail.firstAired')}</dt>
             <dd class="mt-1 text-sm text-ink">{formatDate(current.first_aired)}</dd>
           </div>
-          <ItemQualityProfileSelect
-            profileID={current.quality_profile_id}
-            kind="tv"
-            onassign={setQualityProfile} />
         </dl>
       </div>
     </div>
 
-    {#if seasons.length === 0}
-      <EmptyState
-        icon="tv"
-        title={t('route.seriesDetail.noSeasonsTitle')}
-        message={t('route.seriesDetail.noSeasonsMessage')} />
-    {:else}
-      <div class="flex flex-col gap-4">
-        {#each seasons as season (season.season_number)}
-          {@const episodes = episodesOf(season)}
-          {@const isCollapsed = collapsed[season.season_number] ?? false}
-          <section class="overflow-hidden rounded-md border border-border">
+    <section class="flex flex-col gap-3" aria-labelledby="series-episodes-heading">
+      <div class="flex flex-wrap items-center gap-3">
+        <div class="min-w-0 flex-1">
+          <h3 id="series-episodes-heading" class="text-lg font-semibold text-ink">
+            {t('route.seriesDetail.episodes')}
+          </h3>
+          {#if episodeCount > 0}
+            <p class="mt-0.5 text-sm text-ink-secondary">
+              {t('route.seriesDetail.onDisk', { owned: fileCount, total: episodeCount })}
+            </p>
+          {/if}
+        </div>
+
+        <div class="ml-auto flex flex-wrap items-center gap-2">
+          {#if current.downloading}
+            <Button variant="primary" size="sm" href="/queue">
+              {t('route.seriesDetail.viewQueue')}
+            </Button>
+          {:else if allEpisodesOwned}
+            <Button variant="secondary" size="sm" href="/series/{current.id}/search">
+              {t('route.seriesDetail.chooseAnotherRelease')}
+            </Button>
+          {:else if episodeCount > 0}
+            <Button
+              variant="primary"
+              size="sm"
+              disabled={searching}
+              onclick={current.monitored ? searchNow : monitorAndSearch}>
+              <Icon name="search" size={14} />
+              {searching
+                ? t('route.seriesDetail.searching')
+                : current.monitored
+                  ? t('route.seriesDetail.searchNow')
+                  : t('route.seriesDetail.monitorAndSearch')}
+            </Button>
+            <Button variant="secondary" size="sm" href="/series/{current.id}/search">
+              {t('route.seriesDetail.chooseRelease')}
+            </Button>
+          {:else}
+            <Button variant="secondary" size="sm" href="/series/{current.id}/search">
+              {t('route.seriesDetail.chooseRelease')}
+            </Button>
+          {/if}
+        </div>
+      </div>
+
+      {#if seasons.length === 0}
+        <EmptyState
+          icon="tv"
+          title={t('route.seriesDetail.noSeasonsTitle')}
+          message={t('route.seriesDetail.noSeasonsMessage')} />
+      {:else}
+        <div class="flex flex-col gap-4">
+          {#each seasons as season (season.season_number)}
+            {@const episodes = episodesOf(season)}
+            {@const isCollapsed = collapsed[season.season_number] ?? false}
+            <section class="overflow-hidden rounded-md border border-border">
             <header class="flex flex-wrap items-center gap-3 bg-surface px-3 py-2">
               <button
                 type="button"
@@ -341,7 +396,7 @@
                 href="/series/{current.id}/search/{season.season_number}"
                 title={t('route.seriesDetail.searchSeasonPack', { season: seasonLabel(season.season_number) })}>
                 <Icon name="search" size={14} />
-                {t('route.seriesDetail.search')}
+                {t('route.seriesDetail.chooseReleaseShort')}
               </Button>
 
               <Toggle
@@ -373,7 +428,7 @@
                         <th class="micro-label px-3 py-2 font-semibold">{t('route.seriesDetail.quality')}</th>
                         <th class="micro-label px-3 py-2 text-right font-semibold">{t('route.seriesDetail.size')}</th>
                         <th class="micro-label px-3 py-2 text-right font-semibold">{t('route.seriesDetail.monitored')}</th>
-                        <th class="micro-label px-3 py-2 text-right font-semibold">{t('route.seriesDetail.search')}</th>
+                        <th class="micro-label px-3 py-2 text-right font-semibold">{t('route.seriesDetail.actions')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -465,16 +520,32 @@
                               {#if episode.file}
                                 <ConvertFileButton file={episode.file} compact />
                               {/if}
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                href="/series/{current.id}/search/{episode.season_number}/{episode.episode_number}"
-                                title={t('route.seriesDetail.searchEpisode', { episode: episodeCode(episode.season_number, episode.episode_number) })}>
-                                <Icon name="search" size={14} />
-                                <span class="sr-only">
-                                  {t('route.seriesDetail.searchEpisode', { episode: episodeCode(episode.season_number, episode.episode_number) })}
-                                </span>
-                              </Button>
+                              {#if episode.downloading && !episode.file}
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  href="/queue"
+                                  title={t('route.seriesDetail.viewQueue')}>
+                                  <Icon name="download" size={14} />
+                                  <span class="sr-only">{t('route.seriesDetail.viewQueue')}</span>
+                                </Button>
+                              {:else}
+                                {@const releaseAction = episode.file
+                                  ? t('route.seriesDetail.chooseAnotherEpisodeRelease', {
+                                      episode: episodeCode(episode.season_number, episode.episode_number),
+                                    })
+                                  : t('route.seriesDetail.chooseEpisodeRelease', {
+                                      episode: episodeCode(episode.season_number, episode.episode_number),
+                                    })}
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  href="/series/{current.id}/search/{episode.season_number}/{episode.episode_number}"
+                                  title={releaseAction}>
+                                  <Icon name="search" size={14} />
+                                  <span class="sr-only">{releaseAction}</span>
+                                </Button>
+                              {/if}
                             </div>
                           </td>
                         </tr>
@@ -484,10 +555,11 @@
                 </div>
               {/if}
             {/if}
-          </section>
-        {/each}
-      </div>
-    {/if}
+            </section>
+          {/each}
+        </div>
+      {/if}
+    </section>
 
     {#if confirmingRemove}
       <RemoveItemModal
@@ -497,6 +569,16 @@
         busy={removing}
         onconfirm={remove}
         onclose={() => (confirmingRemove = false)} />
+    {/if}
+    {#if editing}
+      <EditMediaModal
+        title={current.title}
+        kind="series"
+        libraryID={current.library_id}
+        monitored={current.monitored}
+        qualityProfileID={current.quality_profile_id}
+        onsave={saveSettings}
+        onclose={() => (editing = false)} />
     {/if}
     {#if movingLibrary}
       <MoveItemModal

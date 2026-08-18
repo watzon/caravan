@@ -44,6 +44,8 @@ const SITE = {
   poster_path: '',
   poster_url: '',
   monitored: true,
+  quality_profile_id: 0,
+  library_id: 4,
   scene_count: 3,
   scene_file_count: 1,
   added_at: '2024-01-01T00:00:00Z',
@@ -100,7 +102,7 @@ const SITE = {
             modified_at: '2024-01-01T00:00:00Z',
             compatibility: {
               verdict: 'incompatible',
-              reasons: ['HEVC video (profile allows H.264)'],
+              reasons: ['HEVC video (target allows H.264)'],
             },
           },
         },
@@ -126,6 +128,44 @@ const SITE = {
   ],
 };
 
+const COMPLETE_SITE = {
+  ...SITE,
+  scene_file_count: 3,
+  years: SITE.years.map((year) => ({
+    ...year,
+    scenes: year.scenes.map((scene) => ({
+      ...scene,
+      file: scene.file ?? SITE.years[0]!.scenes[1]!.file,
+    })),
+  })),
+};
+
+const PROFILES = [
+  {
+    id: 1,
+    name: 'Adult Archive',
+    is_default: false,
+    tv_profile: 'capable',
+  },
+  {
+    id: 2,
+    name: 'System Standard',
+    is_default: true,
+    tv_profile: 'safe',
+  },
+];
+
+const LIBRARIES = [
+  {
+    id: 4,
+    kind: 'adult',
+    name: 'Adult',
+    active: true,
+    is_default: true,
+    quality_profile_id: 1,
+  },
+];
+
 let host: HTMLElement | undefined;
 let app: Record<string, unknown> | undefined;
 let calls: Call[] = [];
@@ -134,22 +174,46 @@ function user(role: 'admin' | 'member'): SessionUser {
   return { username: 'someone', role, open: false, adult: true };
 }
 
-function stubFetch(site: unknown = SITE): void {
+function stubFetch(site: unknown = SITE, queued = 4): void {
   calls = [];
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       const method = init?.method ?? 'GET';
+      const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
       calls.push({
         url,
         method,
-        body: typeof init?.body === 'string' ? JSON.parse(init.body) : null,
+        body,
       });
+      if (url.endsWith('/quality-profiles')) {
+        return new Response(JSON.stringify({ profiles: PROFILES }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.endsWith('/libraries')) {
+        return new Response(JSON.stringify({ libraries: LIBRARIES }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (
+        method === 'PATCH' &&
+        url.endsWith('/library/series/7') &&
+        body?.monitored !== undefined &&
+        body?.quality_profile_id === undefined
+      ) {
+        return new Response(JSON.stringify({ ...(site as object), monitored: body.monitored }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
       if (method === 'PATCH' || method === 'DELETE') {
         return new Response(null, { status: 204 });
       }
-      const payload = method === 'POST' ? { queued: 4 } : site;
+      const payload = method === 'POST' ? { queued } : site;
       return new Response(JSON.stringify(payload), {
         status: method === 'POST' ? 202 : 200,
         headers: { 'Content-Type': 'application/json' },
@@ -201,12 +265,21 @@ afterEach(() => {
 });
 
 describe('AdultSite actions', () => {
-  it('searches every monitored scene from the header', async () => {
+  it('puts site-wide acquisition actions above the scene inventory', async () => {
     stubFetch();
     await mountSite();
 
-    const button = buttonLabelled('Search monitored');
+    const inventory = host!.querySelector('section[aria-labelledby="adult-scenes-heading"]');
+    expect(inventory).not.toBeNull();
+
+    const button = buttonLabelled('Search missing');
     expect(button, 'a site-wide search action').toBeTruthy();
+    expect(inventory?.contains(button!)).toBe(true);
+
+    const picker = host!.querySelector('a[href="/adult/sites/7/search"]');
+    expect(picker?.textContent).toContain('Choose a release');
+    expect(inventory?.contains(picker)).toBe(true);
+
     button!.click();
     await vi.waitFor(() => {
       if (!calls.some((c) => c.method === 'POST')) throw new Error('no search yet');
@@ -215,6 +288,65 @@ describe('AdultSite actions', () => {
     const post = calls.find((c) => c.method === 'POST');
     // A site is a series row, and this is the same route SeriesDetail uses.
     expect(post?.url).toBe('/api/v1/library/series/7/search');
+  });
+
+  it('monitors an unmonitored site before starting its automatic search', async () => {
+    stubFetch({ ...SITE, monitored: false }, 2);
+    await mountSite();
+
+    expect(buttonLabelled('Search missing')).toBeUndefined();
+    const monitorAndSearch = buttonLabelled('Monitor and search');
+    expect(monitorAndSearch).toBeDefined();
+
+    monitorAndSearch!.click();
+    await vi.waitFor(() => {
+      if (calls.filter((call) => call.method === 'PATCH' || call.method === 'POST').length < 2) {
+        throw new Error('monitor and search did not finish');
+      }
+    });
+
+    expect(calls.filter((call) => call.method === 'PATCH' || call.method === 'POST')).toEqual([
+      {
+        url: '/api/v1/library/series/7',
+        method: 'PATCH',
+        body: { monitored: true },
+      },
+      {
+        url: '/api/v1/library/series/7/search',
+        method: 'POST',
+        body: null,
+      },
+    ]);
+  });
+
+  it('replaces site-wide search with queue actions while downloading', async () => {
+    const downloading = {
+      ...SITE,
+      years: SITE.years.map((year) => ({
+        ...year,
+        scenes: year.scenes.map((scene) =>
+          scene.id === 11 ? { ...scene, downloading: true } : scene,
+        ),
+      })),
+    };
+    stubFetch(downloading);
+    await mountSite();
+
+    expect(buttonLabelled('Search missing')).toBeUndefined();
+    expect(host!.querySelector('a[href="/adult/sites/7/search"]')).toBeNull();
+    const queueLinks = host!.querySelectorAll('a[href="/queue"]');
+    expect(queueLinks.length).toBeGreaterThanOrEqual(2);
+    expect(queueLinks[0]?.textContent).toContain('View queue');
+  });
+
+  it('offers an explicit replacement search when every scene is imported', async () => {
+    stubFetch(COMPLETE_SITE);
+    await mountSite();
+
+    expect(host!.querySelector('a[href="/adult/sites/7/search"]')?.textContent).toContain(
+      'Choose another release',
+    );
+    expect(buttonLabelled('Search missing')).toBeUndefined();
   });
 
   it('offers the picker at the site, year and scene levels', async () => {
@@ -312,7 +444,7 @@ describe('AdultSite for a granted member', () => {
     stubFetch();
     await mountSite('member');
 
-    expect(buttonLabelled('Search monitored')).toBeUndefined();
+    expect(buttonLabelled('Search missing')).toBeUndefined();
     expect(buttonLabelled('Convert for TV')).toBeUndefined();
     expect(hrefs().some((href) => href.includes('/search'))).toBe(false);
     // Nothing was written, and nothing was even asked for beyond the page load.
@@ -361,7 +493,7 @@ describe('AdultSite scene rows', () => {
       'Released',
       'Status',
       'Monitored',
-      'Search',
+      'Actions',
     ]);
   });
 
@@ -481,15 +613,27 @@ describe('AdultSite monitoring and removal', () => {
     );
   }
 
-  /**
-   * The header's monitored control, which is now an icon toggle button rather
-   * than a labeled switch: it reports state with aria-pressed and names the
-   * ACTION, not the state, so the label says what a click will do.
-   */
-  function monitorButton(): HTMLElement | undefined {
-    return [...host!.querySelectorAll<HTMLElement>('button[aria-pressed]')].find((el) =>
-      el.getAttribute('aria-label')?.includes('monitor'),
+  function editButton(): HTMLButtonElement | undefined {
+    return [...host!.querySelectorAll<HTMLButtonElement>('button')].find(
+      (candidate) => candidate.textContent?.trim() === 'Edit',
     );
+  }
+
+  async function openEditor(): Promise<HTMLElement> {
+    editButton()?.click();
+    flushSync();
+    await vi.waitFor(() => {
+      if (!host!.querySelector('[role="dialog"]')?.textContent?.includes('Playback target')) {
+        throw new Error('edit dialog not ready');
+      }
+    });
+    return host!.querySelector<HTMLElement>('[role="dialog"]')!;
+  }
+
+  function saveChanges(dialog: HTMLElement): HTMLButtonElement {
+    return [...dialog.querySelectorAll<HTMLButtonElement>('button')].find(
+      (candidate) => candidate.textContent?.trim() === 'Save changes',
+    )!;
   }
 
   /** The header's ⋯ trigger. */
@@ -508,8 +652,17 @@ describe('AdultSite monitoring and removal', () => {
     );
   }
 
+  it('keeps Edit and overflow beside the title', async () => {
+    stubFetch();
+    await mountSite();
+
+    const titleControls = host!.querySelector('h2')?.parentElement;
+    expect(titleControls?.contains(editButton()!)).toBe(true);
+    expect(titleControls?.contains(menuTrigger()!)).toBe(true);
+  });
+
   async function flip(label: string) {
-    const control = label === 'Monitored' ? monitorButton() : toggle(label);
+    const control = toggle(label);
     expect(control, `a control for ${label}`).toBeTruthy();
     control!.click();
     await vi.waitFor(() => {
@@ -521,10 +674,18 @@ describe('AdultSite monitoring and removal', () => {
     stubFetch();
     await mountSite();
 
-    await flip('Monitored');
+    const dialog = await openEditor();
+    expect(dialog.textContent).toContain('Adult Archive');
+    expect(dialog.textContent).toContain('Capable');
+    dialog.querySelector<HTMLButtonElement>('button[role="switch"]')!.click();
+    flushSync();
+    saveChanges(dialog).click();
+    await vi.waitFor(() => {
+      if (!calls.some((call) => call.method === 'PATCH')) throw new Error('no write yet');
+    });
     const patch = calls.find((c) => c.method === 'PATCH');
     expect(patch?.url).toBe('/api/v1/library/series/7');
-    expect(patch?.body).toEqual({ monitored: false });
+    expect(patch?.body).toEqual({ monitored: false, quality_profile_id: 0 });
   });
 
   it('turns one release year off through the season route', async () => {
@@ -553,7 +714,10 @@ describe('AdultSite monitoring and removal', () => {
     await mountSite();
     const before = calls.filter((c) => c.method === 'GET').length;
 
-    await flip('Monitored');
+    const dialog = await openEditor();
+    dialog.querySelector<HTMLButtonElement>('button[role="switch"]')!.click();
+    flushSync();
+    saveChanges(dialog).click();
     await vi.waitFor(() => {
       if (calls.filter((c) => c.method === 'GET').length <= before) {
         throw new Error('no reload yet');
@@ -627,7 +791,7 @@ describe('AdultSite monitoring and removal', () => {
     stubFetch();
     await mountSite('member');
 
-    expect(monitorButton()).toBeUndefined();
+    expect(editButton()).toBeUndefined();
     expect(menuTrigger()).toBeUndefined();
     expect(host!.querySelector('[role="menu"]')).toBeNull();
     expect(toggle('Monitor 2022')).toBeUndefined();

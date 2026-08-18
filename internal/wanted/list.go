@@ -157,6 +157,57 @@ func Compute(ctx context.Context, st *store.Store) (*Lists, error) {
 	return out, nil
 }
 
+// ComputeSearchable returns the monitored items that an automatic search may
+// look for now. Upgrade candidates stay in Compute for RSS matching and the
+// wanted screen, but an explicit or scheduled search only covers missing
+// items. An in-flight grab also removes its targets until it fails.
+func ComputeSearchable(ctx context.Context, st *store.Store) (*Lists, error) {
+	lists, err := Compute(ctx, st)
+	if err != nil {
+		return nil, err
+	}
+
+	movieIDs := make([]int64, 0, len(lists.Movies))
+	episodeIDs := make([]int64, 0, len(lists.Episodes))
+	missing := &Lists{Movies: []Movie{}, Episodes: []Episode{}}
+	for _, movie := range lists.Movies {
+		if movie.Reason != ReasonMissing {
+			continue
+		}
+		missing.Movies = append(missing.Movies, movie)
+		movieIDs = append(movieIDs, movie.ID)
+	}
+	for _, episode := range lists.Episodes {
+		if episode.Reason != ReasonMissing {
+			continue
+		}
+		missing.Episodes = append(missing.Episodes, episode)
+		episodeIDs = append(episodeIDs, episode.ID)
+	}
+
+	grabs, err := st.ListCalendarGrabs(ctx, movieIDs, episodeIDs)
+	if err != nil {
+		return nil, err
+	}
+	active, err := st.ActiveTargetsFromGrabs(ctx, grabs)
+	if err != nil {
+		return nil, err
+	}
+
+	out := &Lists{Movies: []Movie{}, Episodes: []Episode{}}
+	for _, movie := range missing.Movies {
+		if !active.Movies[movie.ID] {
+			out.Movies = append(out.Movies, movie)
+		}
+	}
+	for _, episode := range missing.Episodes {
+		if !active.Episodes[episode.ID] {
+			out.Episodes = append(out.Episodes, episode)
+		}
+	}
+	return out, nil
+}
+
 // cinemaWindow is how long after the theatrical date a movie with no known
 // home-release date is assumed to have reached one. It is Radarr's number: by
 // three months out, a movie that is going to get a home release has had it.

@@ -273,7 +273,9 @@ func (s *Service) run(ctx context.Context, conv *core.Conversion, file *core.Med
 	}
 	sourceAbs := abs(root, file.Path)
 
-	profile := s.profile(ctx)
+	// The queue records the owning item's target. Use that durable choice so a
+	// later quality-profile edit cannot change a conversion already in flight.
+	profile := core.ResolveTVProfile(conv.ProfileID)
 	conv.ProfileID = profile.ID
 
 	sourceProbe, err := s.tools.Probe(ctx, sourceAbs)
@@ -302,7 +304,7 @@ func (s *Service) run(ctx context.Context, conv *core.Conversion, file *core.Med
 			return err
 		}
 		return s.event(ctx, core.EventLevelInfo, file,
-			fmt.Sprintf("Nothing to convert: %s already plays on the %s profile", path.Base(file.Path), profile.Name), "")
+			fmt.Sprintf("Nothing to convert: %s already matches %s", path.Base(file.Path), profile.Name), "")
 	}
 
 	// Persist the chosen strategy before the long-running command starts, so
@@ -400,7 +402,7 @@ func (s *Service) run(ctx context.Context, conv *core.Conversion, file *core.Med
 		verb = "Transcoded"
 	}
 	return s.event(ctx, core.EventLevelInfo, file,
-		fmt.Sprintf("%s %s for the %s profile", verb, path.Base(file.Path), profile.Name),
+		fmt.Sprintf("%s %s for playback target %s", verb, path.Base(file.Path), profile.Name),
 		strings.Join(append([]string{"now at " + targetRel}, plan.Reasons...), "; "))
 }
 
@@ -452,17 +454,6 @@ func (s *Service) fail(ctx context.Context, conv *core.Conversion, cause error) 
 func (s *Service) abandon(ctx context.Context, conv *core.Conversion, cause error) error {
 	_ = s.fail(ctx, conv, cause)
 	return nil
-}
-
-// profile resolves the active TV profile, falling back to the safe default.
-// A conversion aimed at the wrong profile is recoverable; one that refuses to
-// run because a preference row is missing is just broken.
-func (s *Service) profile(ctx context.Context) core.TVProfile {
-	id, err := s.st.GetSetting(ctx, store.SettingTVProfile)
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
-		s.log.Error("convert: read tv profile", "error", err)
-	}
-	return core.ResolveTVProfile(id)
 }
 
 func (s *Service) event(ctx context.Context, level string, file *core.MediaFile, message, detail string) error {

@@ -137,16 +137,12 @@ const (
 	// a grab is therefore a recorded rejection rather than a misroute.
 	SettingRouteTorrent = "route_torrent"
 	SettingRouteUsenet  = "route_usenet"
-	// SettingTVProfile is the id of the active core.TVProfile — the target set
-	// releases and imported files are described against (SPEC §8, PLAN phase 4
-	// task 3). Unset resolves to the safe default, so this key is a preference
-	// and never a required row.
-	SettingTVProfile = "tv_profile"
 	// SettingConvertVideoPreset, SettingConvertVideoCRF and
 	// SettingConvertAudioBitrateKbps control how ffmpeg produces output when
-	// the active TV profile requires a re-encode. They do not change the
-	// profile's compatibility target, and they have code defaults so a fresh
-	// install keeps the original veryfast/CRF 20/192 kbps behaviour.
+	// an item's playback target requires a re-encode. They do not change the
+	// compatibility target selected by its quality profile, and they have code
+	// defaults so a fresh install keeps the original veryfast/CRF 20/192 kbps
+	// behaviour.
 	SettingConvertVideoPreset      = "convert_video_preset"
 	SettingConvertVideoCRF         = "convert_video_crf"
 	SettingConvertAudioBitrateKbps = "convert_audio_bitrate_kbps"

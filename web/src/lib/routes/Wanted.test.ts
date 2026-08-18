@@ -152,15 +152,14 @@ describe('Wanted', () => {
     expect(host.querySelector('a[href="/movies/8/search"]')).not.toBeNull();
   });
 
-  // The sweep covers both tabs, so it must not be scoped to the active filter,
-  // and the count comes from the server: it deduplicates against searches
-  // already on the queue.
-  it('queues the whole wanted list from Search all', async () => {
+  // The action always searches missing items, even when the cutoff tab is open.
+  // The server count also accounts for searches that are already queued.
+  it('queues missing items from Search missing', async () => {
     app = mount(Wanted, { target: host });
     await settle();
 
     const button = [...host.querySelectorAll('button')].find((b) =>
-      b.textContent?.includes('Search all'),
+      b.textContent?.includes('Search missing'),
     ) as HTMLButtonElement | undefined;
     expect(button).toBeDefined();
 

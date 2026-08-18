@@ -97,7 +97,7 @@ func TestTVProfileCheck(t *testing.T) {
 			profile:     TVProfileSafe,
 			tags:        MediaTags{Codec: "hevc", Audio: "AAC", Container: "mp4", Quality: Quality1080p},
 			wantVerdict: TVCompatIncompatible,
-			wantReason:  "HEVC video (profile allows H.264)",
+			wantReason:  "HEVC video (target allows H.264)",
 		},
 		{
 			name:        "x265 is the same family as HEVC",
@@ -130,7 +130,7 @@ func TestTVProfileCheck(t *testing.T) {
 			profile:     TVProfileSafe,
 			tags:        MediaTags{Codec: "x264", BitDepth: 10, Audio: "AAC", Container: "mp4"},
 			wantVerdict: TVCompatIncompatible,
-			wantReason:  "10-bit video (profile allows 8-bit)",
+			wantReason:  "10-bit video (target allows 8-bit)",
 		},
 		{
 			name:        "10-bit clears the capable profile",
@@ -149,7 +149,7 @@ func TestTVProfileCheck(t *testing.T) {
 			profile:      TVProfileSafe,
 			tags:         MediaTags{Codec: "x264", BitDepth: 8, Audio: "AAC", Container: "mkv", Quality: Quality720p},
 			wantVerdict:  TVCompatNeedsRemux,
-			wantReason:   "MKV container (profile allows MP4/M4V)",
+			wantReason:   "MKV container (target allows MP4/M4V)",
 			wantNoReason: "video",
 		},
 		{
@@ -170,7 +170,7 @@ func TestTVProfileCheck(t *testing.T) {
 			profile:     TVProfileSafe,
 			tags:        MediaTags{Codec: "x264", Audio: "AAC", Container: "mp4", Quality: Quality2160p},
 			wantVerdict: TVCompatIncompatible,
-			wantReason:  "2160p video (profile allows up to 1080p)",
+			wantReason:  "2160p video (target allows up to 1080p)",
 		},
 		{
 			name:        "a lower resolution than the maximum is fine",

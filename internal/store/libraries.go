@@ -540,6 +540,23 @@ func (s *Store) ResolveItemQualityProfile(ctx context.Context, kind string, item
 	return s.ResolveItemQualityProfileByLibrary(ctx, 0, kind, itemProfileID)
 }
 
+// ResolveItemPlaybackTargetByLibrary returns the playback target selected by
+// an item's effective quality profile. This is the one compatibility resolver
+// for release warnings, library files and conversions: an item override wins,
+// followed by its library default and then the system default.
+func (s *Store) ResolveItemPlaybackTargetByLibrary(
+	ctx context.Context,
+	libraryID int64,
+	kind string,
+	itemProfileID int64,
+) (core.TVProfile, error) {
+	profile, err := s.ResolveItemQualityProfileByLibrary(ctx, libraryID, kind, itemProfileID)
+	if err != nil {
+		return core.TVProfile{}, err
+	}
+	return core.ResolveTVProfile(profile.TVProfile), nil
+}
+
 // overrideOrGlobal is the whole fallback rule: the library answers when it has
 // an answer, the global setting answers when it does not.
 func overrideOrGlobal(library, global string) string {

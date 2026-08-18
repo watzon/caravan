@@ -14,10 +14,9 @@ type tvProfilesResponse struct {
 	Profiles []tvProfileJSON `json:"profiles"`
 }
 
-func TestListTVProfilesMarksTheActiveOne(t *testing.T) {
-	h, st, _ := newTestServer(t)
+func TestListTVProfilesReturnsPlaybackTargets(t *testing.T) {
+	h, _, _ := newTestServer(t)
 
-	// A fresh database has never been told, so the safe default is active.
 	rec := do(t, h, http.MethodGet, "/api/v1/tv-profiles", "")
 	wantStatus(t, rec, http.StatusOK)
 	var body tvProfilesResponse
@@ -26,66 +25,39 @@ func TestListTVProfilesMarksTheActiveOne(t *testing.T) {
 	if len(body.Profiles) < 2 {
 		t.Fatalf("profiles = %d, want the safe and capable presets", len(body.Profiles))
 	}
-	active := activeProfileID(t, body.Profiles)
-	if active != core.TVProfileSafe {
-		t.Fatalf("active profile = %q, want %q on a fresh database", active, core.TVProfileSafe)
-	}
 	safe := body.Profiles[0]
 	if safe.MaxQuality != core.Quality1080p || safe.MaxBitDepth != 8 {
 		t.Fatalf("safe profile = %+v, want 1080p / 8-bit (SPEC §8)", safe)
 	}
-
-	if err := st.SetSetting(context.Background(), store.SettingTVProfile, core.TVProfileCapable); err != nil {
-		t.Fatalf("SetSetting: %v", err)
-	}
-	rec = do(t, h, http.MethodGet, "/api/v1/tv-profiles", "")
-	wantStatus(t, rec, http.StatusOK)
-	decodeBody(t, rec, &body)
-	if got := activeProfileID(t, body.Profiles); got != core.TVProfileCapable {
-		t.Fatalf("active profile = %q, want %q", got, core.TVProfileCapable)
-	}
 }
 
-func activeProfileID(t *testing.T, profiles []tvProfileJSON) string {
+func assignMoviePlaybackTarget(t *testing.T, st *store.Store, movieID int64, target string) *core.QualityProfile {
 	t.Helper()
-	active := ""
-	for _, p := range profiles {
-		if !p.Active {
-			continue
-		}
-		if active != "" {
-			t.Fatalf("profiles %+v mark more than one active", profiles)
-		}
-		active = p.ID
+	profile := &core.QualityProfile{
+		Name:           "Movie " + target,
+		Cutoff:         core.Quality2160p,
+		Items:          []string{core.Quality2160p, core.Quality1080p},
+		UpgradeAllowed: true,
+		TVProfile:      target,
 	}
-	if active == "" {
-		t.Fatalf("profiles %+v mark none active", profiles)
+	if err := st.CreateQualityProfile(context.Background(), profile); err != nil {
+		t.Fatalf("CreateQualityProfile: %v", err)
 	}
-	return active
+	if err := st.SetMovieQualityProfile(context.Background(), movieID, profile.ID); err != nil {
+		t.Fatalf("SetMovieQualityProfile: %v", err)
+	}
+	return profile
 }
 
-func TestSettingsAcceptsKnownTVProfileAndRejectsOthers(t *testing.T) {
+func TestSettingsRejectsGlobalPlaybackTarget(t *testing.T) {
 	h, _, _ := newTestServer(t)
 
 	rec := do(t, h, http.MethodPut, "/api/v1/settings", `{"tv_profile":"capable"}`)
-	wantStatus(t, rec, http.StatusOK)
-	var settings map[string]string
-	decodeBody(t, rec, &settings)
-	if settings[store.SettingTVProfile] != core.TVProfileCapable {
-		t.Fatalf("tv_profile = %q, want %q", settings[store.SettingTVProfile], core.TVProfileCapable)
-	}
-
-	// An id nothing implements would be stored and then silently ignored by
-	// the resolver, so it is refused instead (SPEC §13).
-	rec = do(t, h, http.MethodPut, "/api/v1/settings", `{"tv_profile":"plasma"}`)
 	wantStatus(t, rec, http.StatusBadRequest)
 	wantErrorBody(t, rec)
 }
 
-// The phase-4 acceptance criterion: a DTS/HEVC release is visibly flagged
-// against the active TV profile in the release picker, and a plain H.264/AAC
-// one is not.
-func TestReleasePickerFlagsAgainstTheActiveTVProfile(t *testing.T) {
+func TestReleasePickerFlagsAgainstTheItemPlaybackTarget(t *testing.T) {
 	h, st, _, fake := newAcquisitionServer(t)
 	m := addMovie(t, st, "Big Buck Bunny", 2008)
 	addIndexer(t, st, fake, "alpha")
@@ -135,7 +107,7 @@ func TestReleasePickerFlagsAgainstTheActiveTVProfile(t *testing.T) {
 	}
 }
 
-func TestReleasePickerPrefersNativeResolutionForActiveTVProfile(t *testing.T) {
+func TestReleasePickerUsesTheItemPlaybackTarget(t *testing.T) {
 	h, st, _, fake := newAcquisitionServer(t)
 	m := addMovie(t, st, "Big Buck Bunny", 2008)
 	addIndexer(t, st, fake, "alpha")
@@ -180,14 +152,7 @@ func TestReleasePickerPrefersNativeResolutionForActiveTVProfile(t *testing.T) {
 		t.Fatalf("2160p compatibility = %+v, want incompatible on safe profile", safe.Releases[1].Compatibility)
 	}
 
-	rec := do(
-		t,
-		h,
-		http.MethodPut,
-		"/api/v1/settings",
-		`{"tv_profile":"capable"}`,
-	)
-	wantStatus(t, rec, http.StatusOK)
+	assignMoviePlaybackTarget(t, st, m.ID, core.TVProfileCapable)
 
 	capable := search()
 	if capable.Releases[0].GUID != "uhd" {
@@ -198,7 +163,7 @@ func TestReleasePickerPrefersNativeResolutionForActiveTVProfile(t *testing.T) {
 	}
 }
 
-func TestMovieFileCarriesTVCompatibility(t *testing.T) {
+func TestMovieFileCarriesPlaybackCompatibility(t *testing.T) {
 	h, st, _ := newTestServer(t)
 	ctx := context.Background()
 
@@ -235,10 +200,8 @@ func TestMovieFileCarriesTVCompatibility(t *testing.T) {
 		}
 	}
 
-	// The capable profile decodes HEVC in MKV, so only the DTS survives.
-	if err := st.SetSetting(ctx, store.SettingTVProfile, core.TVProfileCapable); err != nil {
-		t.Fatalf("SetSetting: %v", err)
-	}
+	// The capable target decodes HEVC in MKV, so only the DTS survives.
+	assignMoviePlaybackTarget(t, st, m.ID, core.TVProfileCapable)
 	rec = do(t, h, http.MethodGet, "/api/v1/library/movies/"+itoa(m.ID), "")
 	wantStatus(t, rec, http.StatusOK)
 	decodeBody(t, rec, &body)

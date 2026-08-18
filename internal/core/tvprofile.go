@@ -5,16 +5,14 @@ import (
 	"strings"
 )
 
-// TV profiles (SPEC §8) describe what the set on the other end of the library
-// can actually decode. Playback display remains descriptive by default: the
-// verdict is shown next to a release and next to an imported file. An explicit
-// quality-profile policy may also use this verdict while it scores or requires
+// Playback targets describe what the device on the other end of the library
+// can actually decode. The verdict is shown next to a release and imported
+// file. A quality-profile policy may also use it while scoring or requiring
 // acquisition compatibility.
 //
-// The profiles are built in and code-owned rather than rows in a table: they
-// are a fixed vocabulary in v1 (same reasoning as QualityLadder), and the
-// active choice is a single settings key, so "delete caravan.db, rescan" costs
-// at most the profile selection.
+// Targets are built in and code-owned rather than rows in a table. They are a
+// fixed vocabulary in v1, following the same reasoning as QualityLadder, and
+// quality profiles reference their stable ids.
 
 // TV-compatibility verdicts, returned by TVProfile.Check.
 const (
@@ -78,9 +76,10 @@ func VideoCodecFamily(tag string) string {
 	return videoCodecFamilies[strings.ToLower(strings.TrimSpace(tag))]
 }
 
-// TVProfile is one named target-set capability description.
+// TVProfile is one named playback-target capability description. The type name
+// remains stable with the persisted quality_profiles.tv_profile field.
 type TVProfile struct {
-	// ID is the stable slug persisted in settings.
+	// ID is the stable slug persisted by a quality profile.
 	ID string
 	// Name is the picker label.
 	Name string
@@ -140,9 +139,10 @@ const TVProfileCapable = "capable"
 
 var tvProfiles = []TVProfile{
 	{
-		ID:          TVProfileSafe,
-		Name:        "Safe — H.264 8-bit + AAC in MP4, up to 1080p",
-		Description: "The common denominator every current TV decodes without help. Pick this when you do not know what the set can do.",
+		ID:   TVProfileSafe,
+		Name: "Safe playback: H.264 8-bit and AAC in MP4, up to 1080p",
+		Description: "The common denominator for current playback devices. " +
+			"Use this when you do not know what the device can decode.",
 		VideoCodecs: []string{VideoCodecH264},
 		MaxBitDepth: 8,
 		AudioCodecs: []string{"AAC"},
@@ -151,8 +151,8 @@ var tvProfiles = []TVProfile{
 	},
 	{
 		ID:          TVProfileCapable,
-		Name:        "Capable — HEVC Main10 / AV1 + AC3, up to 2160p",
-		Description: "A modern set: 10-bit HEVC, AV1 and Dolby Digital in MKV or MP4. DTS is still flagged — current Samsung sets cannot decode it.",
+		Name:        "Capable playback: HEVC Main10, AV1 and AC3, up to 2160p",
+		Description: "A modern target with 10-bit HEVC, AV1 and Dolby Digital in MKV or MP4. DTS remains unsupported.",
 		VideoCodecs: []string{VideoCodecH264, VideoCodecHEVC, VideoCodecAV1},
 		MaxBitDepth: 10,
 		AudioCodecs: []string{"AAC", "AC3", "EAC3"},
@@ -168,9 +168,9 @@ func TVProfiles() []TVProfile {
 	return out
 }
 
-// ResolveTVProfile returns the profile with the given id. An unset or unknown
-// id resolves to the safe default rather than to an error: a settings row that
-// names a profile a later build removed must not break the release picker.
+// ResolveTVProfile returns the playback target with the given id. An unset or
+// unknown id resolves to the safe default so an old quality profile cannot
+// break the release picker after a target is removed.
 func ResolveTVProfile(id string) TVProfile {
 	for _, p := range tvProfiles {
 		if p.ID == id {
@@ -180,7 +180,7 @@ func ResolveTVProfile(id string) TVProfile {
 	return tvProfiles[0]
 }
 
-// Check reports whether tags would play natively on this profile.
+// Check reports whether tags would play natively on this target.
 //
 // Only stated tags are judged; a missing tag is never held against a release.
 // Container problems are separated from stream problems because they have
@@ -192,20 +192,20 @@ func (p TVProfile) Check(tags MediaTags) TVCompatibility {
 	if family := VideoCodecFamily(tags.Codec); family != "" && len(p.VideoCodecs) > 0 {
 		judged++
 		if !containsFold(p.VideoCodecs, family) {
-			hard = append(hard, fmt.Sprintf("%s video (profile allows %s)",
+			hard = append(hard, fmt.Sprintf("%s video (target allows %s)",
 				videoCodecLabel(family), joinLabels(p.VideoCodecs, videoCodecLabel)))
 		}
 	}
 	if tags.BitDepth > 0 && p.MaxBitDepth > 0 {
 		judged++
 		if tags.BitDepth > p.MaxBitDepth {
-			hard = append(hard, fmt.Sprintf("%d-bit video (profile allows %d-bit)", tags.BitDepth, p.MaxBitDepth))
+			hard = append(hard, fmt.Sprintf("%d-bit video (target allows %d-bit)", tags.BitDepth, p.MaxBitDepth))
 		}
 	}
 	if audio := strings.TrimSpace(tags.Audio); audio != "" && len(p.AudioCodecs) > 0 {
 		judged++
 		if !containsFold(p.AudioCodecs, audio) {
-			hard = append(hard, fmt.Sprintf("%s audio (profile allows %s)",
+			hard = append(hard, fmt.Sprintf("%s audio (target allows %s)",
 				audio, strings.Join(p.AudioCodecs, "/")))
 		}
 	}
@@ -214,12 +214,12 @@ func (p TVProfile) Check(tags MediaTags) TVCompatibility {
 	// can condemn a release without being able to clear one.
 	if tags.Quality != "" && tags.Quality != QualityUnknown && p.MaxQuality != "" &&
 		QualityRank(tags.Quality) < QualityRank(p.MaxQuality) {
-		hard = append(hard, fmt.Sprintf("%s video (profile allows up to %s)", tags.Quality, p.MaxQuality))
+		hard = append(hard, fmt.Sprintf("%s video (target allows up to %s)", tags.Quality, p.MaxQuality))
 	}
 	if container := strings.ToLower(strings.TrimSpace(tags.Container)); container != "" && len(p.Containers) > 0 {
 		judged++
 		if !containsFold(p.Containers, container) {
-			remux = append(remux, fmt.Sprintf("%s container (profile allows %s)",
+			remux = append(remux, fmt.Sprintf("%s container (target allows %s)",
 				strings.ToUpper(container), joinLabels(p.Containers, strings.ToUpper)))
 		}
 	}

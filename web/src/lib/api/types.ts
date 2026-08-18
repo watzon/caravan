@@ -30,8 +30,8 @@ export interface ParsedRelease {
 }
 
 /**
- * internal/core.TVCompatibility — the active TV profile's verdict on a release
- * or an imported file (SPEC §8).
+ * internal/core.TVCompatibility: the owning item's playback-target verdict on
+ * a release or imported file.
  *
  * Advisory only: nothing is hidden, refused or reordered because of it. An
  * "unknown" verdict means the tags carried nothing to judge, never that the
@@ -43,7 +43,7 @@ export interface TVCompatibility {
   reasons: string[];
 }
 
-/** internal/api.tvProfileJSON — one built-in target-set description. */
+/** internal/api.tvProfileJSON: one built-in playback-target description. */
 export interface TVProfile {
   id: string;
   name: string;
@@ -53,8 +53,6 @@ export interface TVProfile {
   audio_codecs: string[];
   containers: string[];
   max_quality: string;
-  /** True for the profile the compatibility fields were computed against. */
-  active: boolean;
 }
 
 /** internal/core.MediaFile */
@@ -114,6 +112,13 @@ export interface Movie {
  * gate on their air date instead.
  */
 export type MinAvailability = 'announced' | 'in_cinemas' | 'released';
+
+/** Mutable movie fields accepted by PATCH /library/movies/{id}. */
+export interface MovieUpdate {
+  monitored?: boolean;
+  quality_profile_id?: number;
+  min_availability?: MinAvailability;
+}
 
 /** internal/core.Episode plus its imported file, when there is one. */
 export interface Episode {
@@ -180,6 +185,12 @@ export interface Series {
   seasons?: Season[];
   /** True while an in-flight grab is fetching any episode of this series. */
   downloading?: boolean;
+}
+
+/** Mutable series fields accepted by PATCH /library/series/{id}. */
+export interface SeriesUpdate {
+  monitored?: boolean;
+  quality_profile_id?: number;
 }
 
 /** internal/core.UnmatchedFile — the scan-review queue (SPEC §10.1, §13). */
@@ -721,9 +732,6 @@ export const SETTING_ROUTE_USENET = 'route_usenet';
 /** The SETTING_ROUTE_TORRENT value that selects the built-in torrent engine. */
 export const ROUTE_EMBEDDED = 'embedded';
 
-/** Active core.TVProfile id (SPEC §8). Unset resolves to the safe default. */
-export const SETTING_TV_PROFILE = 'tv_profile';
-
 /** Defaults for required video/audio re-encoding (internal/store/settings.go). */
 export const SETTING_CONVERT_VIDEO_PRESET = 'convert_video_preset';
 export const SETTING_CONVERT_VIDEO_CRF = 'convert_video_crf';
@@ -840,7 +848,7 @@ export interface AddItemRequest {
   quality_profile_id?: number;
   /** Movies only: queue the automatic search as soon as the add succeeds. */
   search_now?: boolean;
-  /** Series only: queue a search for every wanted episode after the add. */
+  /** Series only: queue a search for every missing episode after the add. */
   search_missing?: boolean;
   /**
    * Series only: the seasons this add is going after. Omitting it adds the
@@ -870,7 +878,7 @@ export interface AddSiteRequest {
   /** Reads exactly as AddItemRequest.monitored does. */
   monitored?: boolean;
   /**
-   * Queue a search for every wanted scene. It happens after the catalogue walk
+   * Queue a search for every missing scene. It happens after the catalogue walk
    * the add defers to a background job, because before the walk the site has no
    * scenes to search for.
    */
@@ -1798,7 +1806,7 @@ export interface Conversion {
   /** Storage-root-relative path the library now points at; empty until done. */
   output_path: string;
   strategy: ConversionStrategy;
-  /** The TV profile this conversion targets, recorded at queue time. */
+  /** The playback target this conversion uses, recorded at queue time. */
   profile_id: string;
   status: ConversionStatus;
   error: string;

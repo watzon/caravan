@@ -236,8 +236,8 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("GET /wanted", s.handleWanted)
 	api.HandleFunc("POST /wanted/search", s.handleSearchWanted)
 
-	// The built-in TV profiles (SPEC §8, PLAN phase 4 task 3). Read-only: the
-	// active choice is a settings key, not a row.
+	// Built-in playback targets. A quality profile selects one, and the item
+	// assigned that quality profile uses it everywhere compatibility matters.
 	api.HandleFunc("GET /tv-profiles", s.handleListTVProfiles)
 
 	// The convert-for-TV queue (SPEC §8, PLAN phase 4 task 4). Listing works

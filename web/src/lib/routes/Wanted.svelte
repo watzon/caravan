@@ -78,9 +78,9 @@
   }
 
   /**
-   * Queue an automatic search for the whole wanted list — the backlog sweep on
-   * demand. The count comes back from the server because it deduplicates
-   * against searches already on the queue, so it is not simply `count`.
+   * Queue an automatic search for missing items without active downloads. The
+   * count comes back from the server because it deduplicates against searches
+   * already on the queue, so it is not simply `count`.
    */
   async function searchAll() {
     searching = true;
@@ -97,7 +97,7 @@
 
   /**
    * Search exactly the selected rows. Episode ids deliberately use the episode
-   * endpoint: the series endpoint would expand one selection to every wanted
+   * endpoint: the series endpoint would expand one selection to every missing
    * episode in that series.
    */
   async function searchSelected() {
@@ -202,8 +202,7 @@
       onchange={(key) => (tab = key)}
       ariaLabel={t('route.wanted.filter')} />
     <div class="ml-auto">
-      <!-- The whole list, both tabs: the sweep is not scoped to the filter the
-           user happens to be looking at. -->
+      <!-- This always searches missing items, even while the cutoff tab is open. -->
       <Button variant="primary" size="sm" disabled={searching} onclick={searchAll}>
         <Icon name="search" size={14} />
         {searching ? t('route.wanted.searching') : t('route.wanted.searchAll')}

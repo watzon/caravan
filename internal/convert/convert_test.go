@@ -193,6 +193,43 @@ func TestRemuxReplacesTheLibraryFile(t *testing.T) {
 	}
 }
 
+func TestHandleUsesPlaybackTargetRecordedAtQueueTime(t *testing.T) {
+	tools := &fakeFFmpeg{probes: map[string]Probe{}}
+	svc, st, root := newTestService(t, tools)
+
+	const rel = "library/Movies/Modern/Modern.mkv"
+	file := seedFile(t, st, root, rel, core.MediaFile{
+		MovieID: 8, Quality: core.Quality2160p, Codec: "x265", Audio: "AAC",
+	})
+	sourceAbs := filepath.Join(root, filepath.FromSlash(rel))
+	tools.probes[sourceAbs] = Probe{
+		Duration: 600, VideoCodec: "hevc", BitDepth: 10,
+		Width: 3840, Height: 2160, AudioCodecs: []string{"aac"},
+	}
+	conv := queue(t, st, file.ID, file.Path)
+	conv.ProfileID = core.TVProfileCapable
+	if err := st.UpdateConversion(context.Background(), conv); err != nil {
+		t.Fatalf("UpdateConversion: %v", err)
+	}
+
+	if err := handle(t, svc, conv); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if len(tools.runs) != 0 {
+		t.Fatalf("ffmpeg runs = %d, want none for capable playback", len(tools.runs))
+	}
+	stored, err := st.GetConversion(context.Background(), conv.ID)
+	if err != nil {
+		t.Fatalf("GetConversion: %v", err)
+	}
+	if stored.Status != core.ConversionDone || stored.Strategy != core.ConvertStrategyNone {
+		t.Fatalf("conversion = %+v, want done with no conversion", stored)
+	}
+	if stored.ProfileID != core.TVProfileCapable {
+		t.Fatalf("playback target = %q, want %q", stored.ProfileID, core.TVProfileCapable)
+	}
+}
+
 func TestConversionReportsLiveProgress(t *testing.T) {
 	tools := &fakeFFmpeg{
 		probes:          map[string]Probe{},

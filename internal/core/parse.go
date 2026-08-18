@@ -41,7 +41,7 @@ type ParsedRelease struct {
 	Audio string
 	// BitDepth is the video bit depth the name claims (8 or 10), or 0 when it
 	// claimed none. SPEC §8: a Main10 stream is exactly what an older set
-	// refuses, so the TV-profile check needs this separate from Codec.
+	// refuses, so the playback-target check needs this separate from Codec.
 	BitDepth int
 	// Group is the release group, or empty.
 	Group string

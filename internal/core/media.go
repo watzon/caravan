@@ -262,7 +262,8 @@ const (
 	ProperRepackPreferenceNeutral = "neutral"
 )
 
-// TVCompatibilityPolicy controls how a quality profile uses its TV profile.
+// TVCompatibilityPolicy controls how acquisition uses a profile's playback
+// target.
 const (
 	TVCompatibilityPolicyIgnore  = "ignore"
 	TVCompatibilityPolicyPrefer  = "prefer"
@@ -304,7 +305,7 @@ type QualityProfile struct {
 	MaxSizeMB int64
 	// CustomFormats contributes the summed score of every matching rule.
 	CustomFormats []CustomFormat
-	// TVProfile names the target playback profile. Empty reads as "safe".
+	// TVProfile names the playback target. Empty reads as "safe".
 	TVProfile string
 	// TVCompatibilityPolicy controls whether TV compatibility is ignored,
 	// preferred, or required. Empty reads as "ignore".

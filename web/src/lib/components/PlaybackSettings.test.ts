@@ -11,7 +11,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import PlaybackSettings from './PlaybackSettings.svelte';
-import type { DlnaStatus, Settings, StashConfig, TVProfile } from '../api/types';
+import type { DlnaStatus, Settings, StashConfig } from '../api/types';
 import { session } from '../state/session.svelte';
 
 const DLNA: DlnaStatus = {
@@ -22,23 +22,9 @@ const DLNA: DlnaStatus = {
   error: '',
 };
 
-const PROFILES: TVProfile[] = [
-  {
-    id: 'safe',
-    name: 'Safe — H.264 8-bit + AAC in MP4, up to 1080p',
-    description: 'The common denominator every current TV decodes without help.',
-    video_codecs: ['h264'],
-    max_bit_depth: 8,
-    audio_codecs: ['AAC'],
-    containers: ['mp4', 'm4v'],
-    max_quality: '1080p',
-    active: true,
-  },
-];
-
 const STASH: StashConfig = { url: 'http://stash.lan:9999', api_key: 'k', enabled: true };
 
-const SETTINGS: Settings = { tv_profile: 'safe' };
+const SETTINGS: Settings = {};
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -60,7 +46,6 @@ beforeEach(() => {
       fetched.push(url);
       if (url.endsWith('/dlna')) return jsonResponse(DLNA);
       if (url.endsWith('/libraries')) return jsonResponse({ libraries: [] });
-      if (url.endsWith('/tv-profiles')) return jsonResponse({ profiles: PROFILES });
       if (url.endsWith('/handoff/jellyfin')) return jsonResponse({ url: '', api_key: '', enabled: false });
       if (url.endsWith('/adult/stash')) return jsonResponse(STASH);
       throw new Error(`unexpected fetch: ${url}`);

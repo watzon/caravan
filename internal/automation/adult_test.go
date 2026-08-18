@@ -201,9 +201,9 @@ func TestDisabledAdultItemsNeverEnterTheWantedList(t *testing.T) {
 	}
 }
 
-// The backlog sweep enqueues one search job per wanted item. With the module
-// off there is no scene among them, so nothing is ever scheduled that could
-// reach an indexer or the stash-box endpoint on a scene's behalf.
+// The backlog sweep enqueues one search job per searchable item. With the
+// module off there is no scene among them, so nothing is ever scheduled that
+// could reach an indexer or the stash-box endpoint on a scene's behalf.
 func TestBacklogSweepEnqueuesNoSceneSearchWhenDisabled(t *testing.T) {
 	ctx := context.Background()
 	st := openStore(t)

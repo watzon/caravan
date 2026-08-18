@@ -107,7 +107,6 @@ function stubFetch() {
     if (url.endsWith('/handoff/jellyfin')) {
       return jsonResponse({ url: '', api_key: '', enabled: false });
     }
-    if (url.endsWith('/tv-profiles')) return jsonResponse({ tv_profiles: [] });
     // The DLNA card asks for the libraries to find out whether the adult
     // module is on: no adult row means no "share the Adult library" sub-toggle.
     if (url.endsWith('/libraries')) return jsonResponse({ libraries: [] });

@@ -308,6 +308,26 @@ func TestRunnerHandleBacklogSweepEnqueuesMissingSearchesOnce(t *testing.T) {
 	st := openStore(t)
 	first := addMovie(t, ctx, st, "First", 2020, true)
 	second := addMovie(t, ctx, st, "Second", 2021, true)
+	downloaded := addMovie(t, ctx, st, "Downloaded", 2022, true)
+	downloading := addMovie(t, ctx, st, "Downloading", 2023, true)
+	if err := st.UpsertMediaFile(ctx, &core.MediaFile{
+		Path: "Movies/Downloaded/file.mkv", MovieID: downloaded.ID, Quality: core.Quality720p,
+	}); err != nil {
+		t.Fatalf("upsert downloaded movie file: %v", err)
+	}
+	grab := &core.Grab{
+		GrabInfo: core.GrabInfo{MovieID: downloading.ID, ReleaseTitle: "Downloading.2023.1080p"},
+		Status:   core.GrabStatusGrabbed,
+	}
+	if err := st.InsertGrab(ctx, grab); err != nil {
+		t.Fatalf("insert active grab: %v", err)
+	}
+	if err := st.UpsertDownload(ctx, &core.Download{
+		GrabID: grab.GrabID, Engine: "embedded", EngineID: "backlog-downloading",
+		Title: grab.ReleaseTitle, State: core.DownloadDownloading,
+	}); err != nil {
+		t.Fatalf("upsert active download: %v", err)
+	}
 	firstPayload, _ := json.Marshal(core.JobSearchMoviePayload{MovieID: first.ID})
 	if err := st.EnqueueJob(ctx, &core.Job{Kind: core.JobSearchMovie, Payload: string(firstPayload)}); err != nil {
 		t.Fatalf("enqueue existing movie job: %v", err)
@@ -333,7 +353,93 @@ func TestRunnerHandleBacklogSweepEnqueuesMissingSearchesOnce(t *testing.T) {
 		movieJobs[payload.MovieID]++
 	}
 	if movieJobs[first.ID] != 1 || movieJobs[second.ID] != 1 {
-		t.Fatalf("movie search jobs = %#v, want one per wanted movie", movieJobs)
+		t.Fatalf("movie search jobs = %#v, want one per missing movie", movieJobs)
+	}
+	if movieJobs[downloaded.ID] != 0 || movieJobs[downloading.ID] != 0 {
+		t.Fatalf("movie search jobs = %#v, downloaded and downloading movies must be absent", movieJobs)
+	}
+}
+
+func TestRunnerHandleSearchMovieDropsAQueuedJobAfterImport(t *testing.T) {
+	ctx := context.Background()
+	st := openStore(t)
+	addIndexer(t, ctx, st)
+	movie := addMovie(t, ctx, st, "Already Here", 2024, true)
+	if err := st.UpsertMediaFile(ctx, &core.MediaFile{
+		Path: "Movies/Already Here/file.mkv", MovieID: movie.ID, Quality: core.Quality720p,
+	}); err != nil {
+		t.Fatalf("upsert movie file: %v", err)
+	}
+	indexer := &fakeIndexer{movies: []core.Release{{
+		GUID: "upgrade", Title: "Already Here 2024 1080p", Protocol: core.ProtocolTorrent,
+		Parsed: core.ParsedRelease{Quality: core.Quality1080p, Source: core.SourceWebDL},
+	}}}
+	engine := &fakeEngine{}
+	runner := newRunner(st, indexer, engine)
+	payload, _ := json.Marshal(core.JobSearchMoviePayload{MovieID: movie.ID})
+
+	if err := runner.handleSearchMovie(ctx, st, payload); err != nil {
+		t.Fatalf("handle search movie: %v", err)
+	}
+	if engine.adds != 0 {
+		t.Fatalf("engine Add calls = %d, want none after the movie was imported", engine.adds)
+	}
+	grabs, err := st.ListGrabs(ctx, 0)
+	if err != nil {
+		t.Fatalf("list grabs: %v", err)
+	}
+	if len(grabs) != 0 {
+		t.Fatalf("grab history = %+v, want no search decision for an imported movie", grabs)
+	}
+}
+
+func TestRunnerHandleSearchEpisodeDropsAQueuedJobAfterImport(t *testing.T) {
+	ctx := context.Background()
+	st := openStore(t)
+	addIndexer(t, ctx, st)
+	series := &core.Series{
+		TMDBID: 901, Title: "Already Here", SortTitle: "already here", Monitored: true,
+		LibraryID: defaultLibraryID(t, ctx, st, core.LibraryKindTV),
+	}
+	if err := st.UpsertSeries(ctx, series); err != nil {
+		t.Fatalf("upsert series: %v", err)
+	}
+	episode := &core.Episode{
+		SeriesID: series.ID, SeasonNumber: 1, EpisodeNumber: 1, Title: "Pilot",
+		AirDate: time.Now().UTC().AddDate(0, 0, -1), Monitored: true,
+	}
+	if err := st.UpsertEpisode(ctx, episode); err != nil {
+		t.Fatalf("upsert episode: %v", err)
+	}
+	file := &core.MediaFile{Path: "TV/Already Here/S01E01.mkv", Quality: core.Quality720p}
+	if err := st.UpsertMediaFile(ctx, file); err != nil {
+		t.Fatalf("upsert episode file: %v", err)
+	}
+	if err := st.LinkEpisodeFile(ctx, episode.ID, file.ID); err != nil {
+		t.Fatalf("link episode file: %v", err)
+	}
+	indexer := &fakeIndexer{tv: []core.Release{{
+		GUID: "upgrade", Title: "Already Here S01E01 1080p", Protocol: core.ProtocolTorrent,
+		Parsed: core.ParsedRelease{
+			Season: 1, Episodes: []int{1}, Quality: core.Quality1080p, Source: core.SourceWebDL,
+		},
+	}}}
+	engine := &fakeEngine{}
+	runner := newRunner(st, indexer, engine)
+	payload, _ := json.Marshal(core.JobSearchEpisodePayload{EpisodeID: episode.ID})
+
+	if err := runner.handleSearchEpisode(ctx, st, payload); err != nil {
+		t.Fatalf("handle search episode: %v", err)
+	}
+	if engine.adds != 0 {
+		t.Fatalf("engine Add calls = %d, want none after the episode was imported", engine.adds)
+	}
+	grabs, err := st.ListGrabs(ctx, 0)
+	if err != nil {
+		t.Fatalf("list grabs: %v", err)
+	}
+	if len(grabs) != 0 {
+		t.Fatalf("grab history = %+v, want no search decision for an imported episode", grabs)
 	}
 }
 

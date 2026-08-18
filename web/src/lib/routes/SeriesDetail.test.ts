@@ -1,7 +1,7 @@
 /**
- * The series-level action pair (SPEC §9). "Search now" queues one job per
- * wanted episode and reports the count the server actually queued; the
- * per-season and per-episode links stay the interactive picker.
+ * Series acquisition actions live with the episode inventory. Whole-series
+ * search queues missing episodes, while season and episode links open the
+ * release picker for that exact target.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
@@ -40,6 +40,7 @@ const PROFILES = [
     cutoff: '1080p',
     items: ['1080p'],
     upgrade_allowed: true,
+    tv_profile: 'safe',
     is_default: true,
     assignments: { libraries: 0, movies: 0, series: 0 },
     created_at: '',
@@ -57,6 +58,19 @@ const LIBRARIES = [
     route_torrent: '',
     route_usenet: '',
     quality_profile_id: 0,
+    indexers: [],
+  },
+  {
+    id: 3,
+    kind: 'anime',
+    name: 'Anime',
+    root_path: 'anime',
+    active: true,
+    is_default: true,
+    dlna_visible: true,
+    route_torrent: '',
+    route_usenet: '',
+    quality_profile_id: 1,
     indexers: [],
   },
 ];
@@ -93,6 +107,17 @@ const SERIES_WITH_FILES = {
       episodes: [episode(1, true), episode(2, false)],
     },
   ],
+};
+
+const COMPLETE_SERIES = {
+  ...SERIES_WITH_FILES,
+  seasons: SERIES_WITH_FILES.seasons.map((season) => ({
+    ...season,
+    episodes: season.episodes.map((row) => ({
+      ...row,
+      file: row.file ?? episode(row.episode_number, true).file,
+    })),
+  })),
 };
 
 function episode(number: number, withFile: boolean) {
@@ -160,6 +185,12 @@ function stubFetch(queued: number, series: unknown = SERIES, qualityProfileStatu
           headers: { 'Content-Type': 'application/json' },
         });
       }
+      if (body?.monitored !== undefined) {
+        return new Response(JSON.stringify({ ...(series as object), monitored: body.monitored }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
       return new Response(JSON.stringify(series), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -222,13 +253,28 @@ function removeTrigger(): HTMLButtonElement {
   return item as HTMLButtonElement;
 }
 
-/** The header's monitored control, now an icon toggle rather than a switch. */
-function monitorButton(): HTMLButtonElement {
-  const button = [...host.querySelectorAll<HTMLButtonElement>('button[aria-pressed]')].find((b) =>
-    b.getAttribute('aria-label')?.includes('monitor'),
+function editButton(): HTMLButtonElement {
+  const button = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+    (candidate) => candidate.textContent?.trim() === 'Edit',
   );
-  expect(button, 'monitor toggle').toBeDefined();
+  expect(button, 'Edit button').toBeDefined();
   return button as HTMLButtonElement;
+}
+
+async function openEditor(): Promise<HTMLElement> {
+  editButton().click();
+  await settle();
+  const dialog = host.querySelector<HTMLElement>('[role="dialog"]');
+  expect(dialog, 'edit dialog').not.toBeNull();
+  return dialog!;
+}
+
+function saveChangesButton(dialog: HTMLElement): HTMLButtonElement {
+  const button = [...dialog.querySelectorAll<HTMLButtonElement>('button')].find(
+    (candidate) => candidate.textContent?.trim() === 'Save changes',
+  );
+  expect(button, 'Save changes button').toBeDefined();
+  return button!;
 }
 
 function confirmButton(): HTMLButtonElement {
@@ -264,6 +310,22 @@ describe('SeriesDetail back link', () => {
     const back = host.querySelector('a');
     expect(back?.getAttribute('href')).toBe('/l/anime');
     expect(back?.textContent).toContain('Anime');
+
+    const dialog = await openEditor();
+    expect(dialog.textContent).toContain('Inherited from Anime: Balanced.');
+    expect(dialog.textContent).toContain('Safe');
+  });
+});
+
+describe('SeriesDetail facts', () => {
+  it('keeps configuration controls out of the hero', async () => {
+    stubFetch(0);
+    app = mount(SeriesDetail, { target: host, props: { id: 3 } });
+    await settle();
+
+    const labels = [...host.querySelectorAll('dt')].map((term) => term.textContent?.trim());
+    expect(labels).toEqual(['Folder', 'TMDB id', 'First aired']);
+    expect(host.querySelector('select')).toBeNull();
   });
 });
 
@@ -459,14 +521,19 @@ describe('SeriesDetail remove', () => {
 });
 
 describe('SeriesDetail search actions', () => {
-  it('queues every wanted episode and reports the count', async () => {
-    stubFetch(4);
+  it('puts whole-series acquisition actions above the season inventory', async () => {
+    stubFetch(4, SERIES_WITH_FILES);
     app = mount(SeriesDetail, { target: host, props: { id: 3 } });
     await settle();
 
-    expect(host.querySelector('a[href="/series/3/search"]')?.textContent).toContain(
-      'Interactive search',
-    );
+    const inventory = host.querySelector('section[aria-labelledby="series-episodes-heading"]');
+    expect(inventory).not.toBeNull();
+    expect(inventory?.contains(searchNowButton())).toBe(true);
+    expect(inventory?.textContent).toContain('3 of 4 on disk');
+
+    const picker = host.querySelector('a[href="/series/3/search"]');
+    expect(picker?.textContent).toContain('Choose a release');
+    expect(inventory?.contains(picker)).toBe(true);
 
     searchNowButton().click();
     await settle();
@@ -480,7 +547,7 @@ describe('SeriesDetail search actions', () => {
   });
 
   it('says nothing was queued when the series is already covered', async () => {
-    stubFetch(0);
+    stubFetch(0, SERIES_WITH_FILES);
     app = mount(SeriesDetail, { target: host, props: { id: 3 } });
     await settle();
 
@@ -492,7 +559,7 @@ describe('SeriesDetail search actions', () => {
   });
 
   it('singularizes a lone queued search', async () => {
-    stubFetch(1);
+    stubFetch(1, SERIES_WITH_FILES);
     app = mount(SeriesDetail, { target: host, props: { id: 3 } });
     await settle();
 
@@ -501,58 +568,149 @@ describe('SeriesDetail search actions', () => {
 
     expect(toasts.items).toHaveLength(0);
   });
+
+  it('monitors an unmonitored series before starting its automatic search', async () => {
+    stubFetch(2, { ...SERIES_WITH_FILES, monitored: false });
+    app = mount(SeriesDetail, { target: host, props: { id: 3 } });
+    await settle();
+
+    expect([...host.querySelectorAll('button')].some((button) =>
+      button.textContent?.includes('Search now'),
+    )).toBe(false);
+    const monitorAndSearch = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+      (button) => button.textContent?.includes('Monitor and search'),
+    );
+    expect(monitorAndSearch).toBeDefined();
+
+    monitorAndSearch!.click();
+    await settle();
+
+    expect(calls.filter((call) => call.method === 'PATCH' || call.method === 'POST')).toEqual([
+      {
+        url: '/api/v1/library/series/3',
+        method: 'PATCH',
+        body: { monitored: true },
+      },
+      {
+        url: '/api/v1/library/series/3/search',
+        method: 'POST',
+        body: null,
+      },
+    ]);
+  });
+
+  it('replaces whole-series search with a queue action while downloading', async () => {
+    const downloading = {
+      ...SERIES_WITH_FILES,
+      downloading: true,
+      seasons: SERIES_WITH_FILES.seasons.map((season, index) => ({
+        ...season,
+        episodes: season.episodes.map((row, rowIndex) =>
+          index === 1 && rowIndex === 1 ? { ...row, downloading: true } : row,
+        ),
+      })),
+    };
+    stubFetch(0, downloading);
+    app = mount(SeriesDetail, { target: host, props: { id: 3 } });
+    await settle();
+
+    const queueLinks = host.querySelectorAll('a[href="/queue"]');
+    expect(queueLinks.length).toBeGreaterThanOrEqual(2);
+    expect(queueLinks[0]?.textContent).toContain('View queue');
+    expect(host.querySelector('a[href="/series/3/search"]')).toBeNull();
+    expect([...host.querySelectorAll('button')].some((button) =>
+      button.textContent?.includes('Search now'),
+    )).toBe(false);
+  });
+
+  it('offers an explicit replacement search when every episode is imported', async () => {
+    stubFetch(0, COMPLETE_SERIES);
+    app = mount(SeriesDetail, { target: host, props: { id: 3 } });
+    await settle();
+
+    expect(host.querySelector('a[href="/series/3/search"]')?.textContent).toContain(
+      'Choose another release',
+    );
+    expect([...host.querySelectorAll('button')].some((button) =>
+      button.textContent?.includes('Search now'),
+    )).toBe(false);
+  });
 });
 
 describe('quality profile assignment', () => {
-  it('restores the stored series profile when the assignment fails', async () => {
+  it('keeps the edited profile visible when saving fails', async () => {
     const overriddenSeries = { ...SERIES, quality_profile_id: 1 };
     stubFetch(0, overriddenSeries, 500);
     app = mount(SeriesDetail, { target: host, props: { id: 3 } });
     await settle();
 
-    const select = host.querySelector<HTMLSelectElement>('select[aria-label="Quality profile"]');
+    const dialog = await openEditor();
+    const select = dialog.querySelector<HTMLSelectElement>(
+      'select[aria-label="Quality profile"]',
+    );
     expect(select).not.toBeNull();
     expect(select!.value).toBe('1');
 
     select!.value = '0';
     select!.dispatchEvent(new Event('change', { bubbles: true }));
     await settle();
+    saveChangesButton(dialog).click();
+    await settle();
 
     expect(calls.find((call) => call.body?.quality_profile_id === 0)).toMatchObject({
       url: '/api/v1/library/series/3',
       method: 'PATCH',
-      body: { quality_profile_id: 0 },
+      body: { monitored: true, quality_profile_id: 0 },
     });
-    expect(select!.value).toBe('1');
-    expect(toasts.items.map((toast) => toast.message)).toEqual(['Could not update quality profile']);
-    expect(toasts.items[0]?.tone).toBe('danger');
+    expect(select!.value).toBe('0');
+    expect(dialog.querySelector('[role="alert"]')?.textContent).toContain(
+      'Could not update quality profile',
+    );
+    expect(host.querySelector('[role="dialog"]')).not.toBeNull();
   });
 });
 
 /**
- * The redesigned action row (Option A): the labeled switch became an icon
- * toggle and Remove moved behind the ⋯. The requests are the ones the old
- * surface made.
+ * Title controls open one editor. Changes stay local until Save, while Remove
+ * remains behind the overflow menu.
  */
-describe('SeriesDetail action row', () => {
-  it('sends the same monitored PATCH the switch used to', async () => {
+describe('SeriesDetail title controls', () => {
+  it('keeps Edit and overflow beside the title', async () => {
     stubFetch(0);
     app = mount(SeriesDetail, { target: host, props: { id: 3 } });
     await settle();
 
-    monitorButton().click();
+    const titleControls = host.querySelector('h2')?.parentElement;
+    expect(titleControls?.contains(editButton())).toBe(true);
+    expect(titleControls?.contains(menuTrigger())).toBe(true);
+  });
+
+  it('saves monitoring and the profile in one PATCH', async () => {
+    stubFetch(0);
+    app = mount(SeriesDetail, { target: host, props: { id: 3 } });
+    await settle();
+
+    const dialog = await openEditor();
+    const monitor = dialog.querySelector<HTMLButtonElement>('button[role="switch"]');
+    expect(monitor?.getAttribute('aria-checked')).toBe('true');
+    monitor!.click();
+    await settle();
+    saveChangesButton(dialog).click();
     await settle();
 
     const patch = calls.find((c) => c.method === 'PATCH');
     expect(patch?.url).toBe('/api/v1/library/series/3');
-    expect(patch?.body).toEqual({ monitored: false });
+    expect(patch?.body).toEqual({ monitored: false, quality_profile_id: 0 });
   });
 
-  it('announces the state it is in', async () => {
+  it('keeps unchanged settings from being submitted', async () => {
     stubFetch(0);
     app = mount(SeriesDetail, { target: host, props: { id: 3 } });
     await settle();
-    expect(monitorButton().getAttribute('aria-pressed')).toBe('true');
+
+    const dialog = await openEditor();
+    expect(saveChangesButton(dialog).disabled).toBe(true);
+    expect(dialog.querySelector('button[role="switch"]')?.getAttribute('aria-checked')).toBe('true');
   });
 
   it('closes the menu on Escape without removing anything', async () => {

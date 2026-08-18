@@ -260,7 +260,7 @@ func TestScoreReleaseAppliesTVCompatibilityPolicy(t *testing.T) {
 		t.Fatalf("preferred compatibility = %d, %+v, %q", preferred, contributions, reject)
 	}
 	p.TVCompatibilityPolicy = core.TVCompatibilityPolicyRequire
-	if _, reject := ScoreRelease(r, p); reject != `release is incompatible for required TV profile "safe"` {
+	if _, reject := ScoreRelease(r, p); reject != `release is incompatible for required playback target "safe"` {
 		t.Fatalf("required compatibility rejection = %q", reject)
 	}
 

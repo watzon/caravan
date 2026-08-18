@@ -2,8 +2,7 @@
   /** Movie detail (DESIGN.md §4: 32px display item title, machine text in mono). */
   import { onDestroy, onMount } from 'svelte';
   import { api, errorText } from '../api/client';
-  import type { CastMember, MinAvailability, Movie } from '../api/types';
-  import { AVAILABILITY_OPTIONS } from '../discover';
+  import type { CastMember, Movie } from '../api/types';
   import Badge from '../components/Badge.svelte';
   import Button from '../components/Button.svelte';
   import EmptyState from '../components/EmptyState.svelte';
@@ -13,7 +12,9 @@
   import Poster from '../components/Poster.svelte';
   import RemoveItemModal from '../components/RemoveItemModal.svelte';
   import Skeleton from '../components/Skeleton.svelte';
-  import MonitorButton from '../components/MonitorButton.svelte';
+  import EditMediaModal, {
+    type MediaEditValues,
+  } from '../components/EditMediaModal.svelte';
   import MoveItemModal from '../components/MoveItemModal.svelte';
   import OverflowMenu from '../components/OverflowMenu.svelte';
   import { libraries } from '../state/libraries.svelte';
@@ -29,7 +30,6 @@
   import { movieStatus } from '../status';
   import { compatBadge } from '../tvcompat';
 
-  import ItemQualityProfileSelect from '../components/ItemQualityProfileSelect.svelte';
   import { useI18n } from '../i18n.svelte';
 
   const { t } = useI18n();
@@ -43,8 +43,8 @@
   let movie = $state<Movie | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
-  let savingMonitored = $state(false);
   let searching = $state(false);
+  let editing = $state(false);
   let confirmingRemove = $state(false);
   let movingLibrary = $state(false);
   // Loaded once per session; the menu offers a move only when there is
@@ -91,63 +91,58 @@
   onMount(() => void load());
   onDestroy(() => loadAbort?.abort());
 
-  async function setMonitored(next: boolean) {
+  async function saveSettings(values: MediaEditValues) {
     const current = movie;
     if (!current) return;
-    savingMonitored = true;
-    // Optimistic: the toggle is the whole point of the control, so it must
-    // respond immediately; a failure rolls it back and says so.
-    movie = { ...current, monitored: next };
-    try {
-      await api.setMovieMonitored(current.id, next);
-      libraryChanged();
-    } catch (err) {
-      movie = current;
-      pushToast(errorText(err), 'danger');
-    } finally {
-      savingMonitored = false;
-    }
-  }
-
-  async function setQualityProfile(profileID: number) {
-    const current = movie;
-    if (!current) return;
-    movie = await api.setMovieQualityProfile(current.id, profileID);
-  }
-
-  /** Same optimistic shape as the monitored toggle, for the same reason. */
-  async function setMinAvailability(next: MinAvailability) {
-    const current = movie;
-    if (!current || next === current.min_availability) return;
-    movie = { ...current, min_availability: next };
-    try {
-      await api.setMovieMinAvailability(current.id, next);
-    } catch (err) {
-      movie = current;
-      pushToast(errorText(err), 'danger');
-    }
+    movie = await api.updateMovie(current.id, {
+      monitored: values.monitored,
+      quality_profile_id: values.qualityProfileID,
+      min_availability: values.minAvailability ?? current.min_availability,
+    });
+    libraryChanged();
+    pushToast(t('route.movieDetail.updated'), 'success');
   }
 
   /**
    * Automatic search (SPEC §9): the server queues the job and answers how many
-   * it added, so a movie that already meets its cutoff says so instead of
-   * claiming a search started that would never grab anything.
+   * it added, so a movie with a file or active download does not claim that a
+   * search started.
    */
   async function searchNow() {
     const current = movie;
     if (!current) return;
     searching = true;
     try {
-      const { queued } = await api.searchMovieNow(current.id);
-      if (queued > 0) {
-        searchQueued(queued);
-      } else {
-        pushToast(t('route.movieDetail.searchNone'), 'info');
-      }
+      await queueSearch(current);
     } catch (err) {
       pushToast(errorText(err), 'danger');
     } finally {
       searching = false;
+    }
+  }
+
+  async function monitorAndSearch() {
+    const current = movie;
+    if (!current) return;
+    searching = true;
+    try {
+      const updated = await api.setMovieMonitored(current.id, true);
+      movie = updated;
+      libraryChanged();
+      await queueSearch(updated);
+    } catch (err) {
+      pushToast(errorText(err), 'danger');
+    } finally {
+      searching = false;
+    }
+  }
+
+  async function queueSearch(current: Movie) {
+    const { queued } = await api.searchMovieNow(current.id);
+    if (queued > 0) {
+      searchQueued(queued);
+    } else {
+      pushToast(t('route.movieDetail.searchNone'), 'info');
     }
   }
 
@@ -212,40 +207,15 @@
       </div>
 
       <div class="flex min-w-0 flex-1 flex-col gap-4">
-        <div class="flex flex-wrap items-start gap-4">
-          <div class="min-w-0 flex-1">
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
             <h2 class="font-display text-2xl font-semibold tracking-tight text-ink">
               {movie.title}
             </h2>
-            <p class="mt-1 flex flex-wrap items-center gap-3 text-base text-ink-secondary">
-              <span>{movie.year > 0 ? movie.year : UNKNOWN}</span>
-              <span class="text-ink-muted">·</span>
-              <StatusDot status={movieStatus(movie)} />
-              {#if movie.release_date}
-                <span class="text-ink-muted">·</span>
-                <span>{t('route.movieDetail.released', { date: formatDate(movie.release_date) })}</span>
-              {/if}
-            </p>
-            <div class="mt-2">
-              <MetadataLinks links={movieLinks(movie)} />
-            </div>
-          </div>
-          <div class="flex w-full flex-wrap items-center gap-3 sm:w-auto">
-            <Button variant="primary" disabled={searching} onclick={searchNow}>
-              <Icon name="search" size={14} />
-              {searching ? t('route.movieDetail.searching') : t('route.movieDetail.searchNow')}
+            <Button variant="ghost" size="sm" onclick={() => (editing = true)}>
+              <Icon name="edit" size={14} />
+              {t('component.actions.edit')}
             </Button>
-            <Button variant="secondary" href="/movies/{movie.id}/search">
-              {t('route.movieDetail.interactiveSearch')}
-            </Button>
-            <MonitorButton
-              monitored={movie.monitored}
-              subject={movie.title}
-              disabled={savingMonitored}
-              onchange={setMonitored} />
-            <!-- Removal lives behind the ⋯ rather than one mis-click from the
-                 search buttons. There is no per-movie metadata refresh route,
-                 so removal is the only item there is. -->
             <OverflowMenu
               subject={movie.title}
               items={[
@@ -264,6 +234,18 @@
                   onselect: () => (confirmingRemove = true),
                 },
               ]} />
+          </div>
+          <p class="mt-1 flex flex-wrap items-center gap-3 text-base text-ink-secondary">
+            <span>{movie.year > 0 ? movie.year : UNKNOWN}</span>
+            <span class="text-ink-muted">·</span>
+            <StatusDot status={movieStatus(movie)} />
+            {#if movie.release_date}
+              <span class="text-ink-muted">·</span>
+              <span>{t('route.movieDetail.released', { date: formatDate(movie.release_date) })}</span>
+            {/if}
+          </p>
+          <div class="mt-2">
+            <MetadataLinks links={movieLinks(movie)} />
           </div>
         </div>
 
@@ -294,7 +276,7 @@
           </section>
         {/if}
 
-        <dl class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <dl class="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <div>
             <dt class="micro-label">{t('route.movieDetail.folder')}</dt>
             <dd class="mt-1 truncate font-mono text-sm text-ink" title={movie.path}>
@@ -311,26 +293,6 @@
             <dt class="micro-label">{t('route.movieDetail.added')}</dt>
             <dd class="mt-1 text-sm text-ink">{formatDate(movie.added_at)}</dd>
           </div>
-          <div>
-            <dt class="micro-label">{t('route.movieDetail.minAvailability')}</dt>
-            <dd class="mt-1">
-              <select
-                aria-label={t('route.movieDetail.minAvailability')}
-                value={movie.min_availability}
-                onchange={(event) =>
-                  setMinAvailability(event.currentTarget.value as MinAvailability)}
-                class="h-8 w-full rounded-sm border border-border-strong bg-raised px-2 text-sm text-ink
-                       focus:border-accent focus:outline-none">
-                {#each AVAILABILITY_OPTIONS as option (option.value)}
-                  <option value={option.value}>{option.label}</option>
-                {/each}
-              </select>
-            </dd>
-          </div>
-          <ItemQualityProfileSelect
-            profileID={movie.quality_profile_id}
-            kind="movie"
-            onassign={setQualityProfile} />
         </dl>
       </div>
     </div>
@@ -339,17 +301,56 @@
       <div class="flex flex-wrap items-center gap-3">
         <h3 class="text-lg font-semibold text-ink">{t('route.movieDetail.file')}</h3>
         {#if file}
-          <div class="ml-auto"><ConvertFileButton {file} /></div>
+          <div class="ml-auto flex flex-wrap items-center gap-2">
+            <Button variant="secondary" size="sm" href="/movies/{movie.id}/search">
+              {t('route.movieDetail.chooseAnotherRelease')}
+            </Button>
+            <ConvertFileButton {file} />
+          </div>
         {/if}
       </div>
 
       {#if !file}
         <EmptyState
-          icon="folder"
-          title={t('route.movieDetail.noFileTitle')}
-          message={t('route.movieDetail.noFileMessage')}>
+          icon={movie.downloading ? 'download' : 'folder'}
+          title={movie.downloading
+            ? t('route.movieDetail.downloadingTitle')
+            : t('route.movieDetail.noFileTitle')}
+          message={movie.downloading
+            ? t('route.movieDetail.downloadingMessage')
+            : movie.monitored
+              ? t('route.movieDetail.noFileMonitoredMessage')
+              : t('route.movieDetail.noFileUnmonitoredMessage')}>
           {#snippet action()}
-            <Button variant="secondary" href="/scan-review">{t('route.movieDetail.openScanReview')}</Button>
+            {#if movie.downloading}
+              <Button variant="primary" href="/queue">
+                {t('route.movieDetail.viewQueue')}
+              </Button>
+            {:else}
+              <div class="flex flex-col items-center gap-3">
+                <div class="flex flex-wrap justify-center gap-2">
+                  <Button
+                    variant="primary"
+                    disabled={searching}
+                    onclick={movie.monitored ? searchNow : monitorAndSearch}>
+                    <Icon name="search" size={14} />
+                    {searching
+                      ? t('route.movieDetail.searching')
+                      : movie.monitored
+                        ? t('route.movieDetail.searchNow')
+                        : t('route.movieDetail.monitorAndSearch')}
+                  </Button>
+                  <Button variant="secondary" href="/movies/{movie.id}/search">
+                    {t('route.movieDetail.chooseRelease')}
+                  </Button>
+                </div>
+                <a
+                  href="/scan-review"
+                  class="text-sm text-ink-secondary underline-offset-4 transition-colors duration-150 hover:text-ink hover:underline">
+                  {t('route.movieDetail.alreadyCopied')}
+                </a>
+              </div>
+            {/if}
           {/snippet}
         </EmptyState>
       {:else}
@@ -405,6 +406,17 @@
         busy={removing}
         onconfirm={remove}
         onclose={() => (confirmingRemove = false)} />
+    {/if}
+    {#if editing}
+      <EditMediaModal
+        title={movie.title}
+        kind="movie"
+        libraryID={movie.library_id}
+        monitored={movie.monitored}
+        qualityProfileID={movie.quality_profile_id}
+        minAvailability={movie.min_availability}
+        onsave={saveSettings}
+        onclose={() => (editing = false)} />
     {/if}
     {#if movingLibrary}
       <MoveItemModal

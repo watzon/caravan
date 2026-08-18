@@ -929,7 +929,7 @@ describe('App shell', () => {
     expect(host.textContent).not.toContain('No releases found');
   });
 
-  it('flags a DTS/HEVC release against the active TV profile in the picker', async () => {
+  it("flags a DTS/HEVC release against the title's playback target in the picker", async () => {
     const clean = RELEASES[1]!;
     const flagged: Release = {
       ...clean,
@@ -937,7 +937,7 @@ describe('App shell', () => {
       title: 'Big.Buck.Bunny.2008.1080p.BluRay.x265.10bit.DTS-HD.MA.7.1-GRP',
       compatibility: {
         verdict: 'incompatible',
-        reasons: ['HEVC video (profile allows H.264)', 'DTS-HD audio (profile allows AAC)'],
+        reasons: ['HEVC video (target allows H.264)', 'DTS-HD audio (target allows AAC)'],
       },
     };
     vi.stubGlobal(

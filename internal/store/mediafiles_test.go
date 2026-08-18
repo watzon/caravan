@@ -155,14 +155,12 @@ func TestMediaFileLibraryKind(t *testing.T) {
 			}
 		}
 	}
-	// Conversion is not an exposure surface, so its ownership rule stays by
-	// kind: a file shared by two television libraries is still one television
-	// file to convert, even though GetMediaFileLibrary refuses to name an owner
-	// for it.
+	// A conversion now needs one exact quality-profile assignment. A file
+	// shared across libraries stays out rather than choosing either library's
+	// playback target arbitrarily.
 	allCandidates := []struct{ path, kind string }{
 		{"TV/show.mkv", core.LibraryKindTV},
 		{"Movies/movie.mkv", core.LibraryKindMovie},
-		{"mixed-library.mkv", core.LibraryKindTV},
 		{"Anime/frieren.mkv", core.LibraryKindTV},
 		{"Adult/double-scene.mkv", core.LibraryKindAdult},
 		{"Adult/scene.mkv", core.LibraryKindAdult},
@@ -240,6 +238,41 @@ func TestMediaFileTargetsNamesLibraryItems(t *testing.T) {
 	}
 	if target.SeasonNumber != 1 || target.EpisodeNumber != 1 || target.EpisodeID != ep1.ID {
 		t.Fatalf("episode target = %+v, want S01E01 (id %d), not a later row id", target, ep1.ID)
+	}
+}
+
+func TestResolveMediaFilePlaybackTargetUsesItemQualityProfile(t *testing.T) {
+	st, _ := openTemp(t)
+	ctx := context.Background()
+
+	profile := &core.QualityProfile{
+		Name:           "Capable playback",
+		Cutoff:         core.Quality2160p,
+		Items:          []string{core.Quality2160p},
+		UpgradeAllowed: true,
+		TVProfile:      core.TVProfileCapable,
+	}
+	if err := st.CreateQualityProfile(ctx, profile); err != nil {
+		t.Fatalf("CreateQualityProfile: %v", err)
+	}
+	movie := &core.Movie{TMDBID: 10, Title: "Movie", SortTitle: "movie"}
+	if err := st.UpsertMovie(ctx, movie); err != nil {
+		t.Fatalf("UpsertMovie: %v", err)
+	}
+	if err := st.SetMovieQualityProfile(ctx, movie.ID, profile.ID); err != nil {
+		t.Fatalf("SetMovieQualityProfile: %v", err)
+	}
+	file := &core.MediaFile{Path: "Movies/movie.mkv", MovieID: movie.ID}
+	if err := st.UpsertMediaFile(ctx, file); err != nil {
+		t.Fatalf("UpsertMediaFile: %v", err)
+	}
+
+	target, err := st.ResolveMediaFilePlaybackTarget(ctx, file.ID)
+	if err != nil {
+		t.Fatalf("ResolveMediaFilePlaybackTarget: %v", err)
+	}
+	if target.ID != core.TVProfileCapable {
+		t.Fatalf("playback target = %q, want %q", target.ID, core.TVProfileCapable)
 	}
 }
 

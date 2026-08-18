@@ -333,7 +333,15 @@ func (s *server) siteYears(ctx context.Context, sr *core.Series) ([]siteYearJSON
 		filesByEpisode[pair.EpisodeID] = append(filesByEpisode[pair.EpisodeID], pair.File)
 	}
 
-	profile := s.activeTVProfile(ctx)
+	profile, err := s.st.ResolveItemPlaybackTargetByLibrary(
+		ctx,
+		sr.LibraryID,
+		core.LibraryKindAdult,
+		sr.QualityProfileID,
+	)
+	if err != nil {
+		return nil, 0, 0, err
+	}
 	// The SITE's instance, read once for the whole page: every scene on it was
 	// minted by the same box the site was, so one lookup answers the lot.
 	// Tolerant for the reason siteProviderURL is — scenes with no provider link

@@ -27,8 +27,9 @@ var videoPresets = map[string]bool{
 }
 
 // EncodingSettings controls ffmpeg's cost/quality tradeoffs when a plan must
-// re-encode a stream. The TV profile still owns codecs, container and maximum
-// resolution; remuxes ignore these settings and copy every selected stream.
+// re-encode a stream. The playback target still owns codecs, container and
+// maximum resolution; remuxes ignore these settings and copy every selected
+// stream.
 type EncodingSettings struct {
 	VideoPreset      string
 	VideoCRF         int

@@ -135,8 +135,8 @@ describe('QualityProfiles', () => {
     expect(host.textContent).toContain('Allowed qualities plus this cutoff define which releases are accepted.');
     expect(host.textContent).toContain('Preferred sources affect ranking.');
     expect(host.textContent).toContain('Negative scores penalize matching releases.');
-    expect(host.textContent).toContain('Prefer adds a compatibility bonus.');
-    expect(host.textContent).toContain('Require rejects releases that do not match the selected TV target.');
+    expect(host.textContent).toContain('Prefer adds an acquisition bonus.');
+    expect(host.textContent).toContain('This target controls release warnings, file compatibility, and conversion.');
     expect(host.textContent).toContain('shows each score contribution below.');
 
     expect(describedText(host.querySelector('#quality-profile-cutoff')!)).toContain(
@@ -152,7 +152,7 @@ describe('QualityProfiles', () => {
       'Applies to torrent releases only',
     );
     expect(
-      describedText(host.querySelector('[aria-label="TV compatibility policy"]')!),
+      describedText(host.querySelector('[aria-label="Playback compatibility policy"]')!),
     ).toContain('Require rejects releases');
     expect(describedText(host.querySelector('#quality-format-score-0')!)).toContain(
       'Negative scores penalize matching releases',

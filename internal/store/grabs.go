@@ -124,6 +124,68 @@ func (s *Store) ActiveGrabForEpisode(ctx context.Context, episodeID int64) (*cor
 	return s.activeGrab(ctx, "EXISTS (SELECT 1 FROM json_each(grabs.episode_ids) WHERE value = ?)", episodeID)
 }
 
+// ActiveTargets is the set of library items covered by in-flight grabs.
+type ActiveTargets struct {
+	Movies   map[int64]bool
+	Episodes map[int64]bool
+	Series   map[int64]bool
+}
+
+// ActiveTargetsFromGrabs reduces grabbed history to the items that are still
+// downloading. The short gap before the first download row is written counts
+// as active. A grab with downloads counts as inactive only when all of them
+// have failed.
+func (s *Store) ActiveTargetsFromGrabs(ctx context.Context, grabs []core.Grab) (ActiveTargets, error) {
+	targets := ActiveTargets{
+		Movies:   make(map[int64]bool),
+		Episodes: make(map[int64]bool),
+		Series:   make(map[int64]bool),
+	}
+	grabIDs := make([]int64, 0, len(grabs))
+	for _, grab := range grabs {
+		grabIDs = append(grabIDs, grab.GrabID)
+	}
+	downloads, err := s.ListDownloadsForGrabs(ctx, grabIDs)
+	if err != nil {
+		return ActiveTargets{}, err
+	}
+
+	type downloadState struct {
+		hasAny bool
+		active bool
+	}
+	byGrabID := make(map[int64]downloadState, len(downloads))
+	for _, download := range downloads {
+		if download.GrabID == 0 {
+			continue
+		}
+		state := byGrabID[download.GrabID]
+		state.hasAny = true
+		state.active = state.active || download.State != core.DownloadFailed
+		byGrabID[download.GrabID] = state
+	}
+
+	for _, grab := range grabs {
+		if grab.Status != core.GrabStatusGrabbed {
+			continue
+		}
+		state := byGrabID[grab.GrabID]
+		if state.hasAny && !state.active {
+			continue
+		}
+		if grab.MovieID != 0 {
+			targets.Movies[grab.MovieID] = true
+		}
+		if grab.SeriesID != 0 {
+			targets.Series[grab.SeriesID] = true
+		}
+		for _, episodeID := range grab.EpisodeIDs {
+			targets.Episodes[episodeID] = true
+		}
+	}
+	return targets, nil
+}
+
 func (s *Store) activeGrab(ctx context.Context, target string, arg int64) (*core.Grab, bool, error) {
 	row := s.db.QueryRowContext(ctx, "SELECT "+grabColumns+`
 		FROM grabs

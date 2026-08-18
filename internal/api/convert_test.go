@@ -146,6 +146,49 @@ func TestConvertQueueRoundTrip(t *testing.T) {
 	}
 }
 
+func TestConvertQueueUsesItemPlaybackTarget(t *testing.T) {
+	h, st, _ := newTestServer(t, WithConverter(stubConverter{available: true}))
+	ctx := t.Context()
+	movie := &core.Movie{TMDBID: 20, Title: "Modern Movie", SortTitle: "modern movie"}
+	if err := st.UpsertMovie(ctx, movie); err != nil {
+		t.Fatalf("UpsertMovie: %v", err)
+	}
+	file := &core.MediaFile{
+		Path: "library/Movies/Modern Movie/Modern Movie.mkv", MovieID: movie.ID,
+		Codec: "x265", Audio: "AAC", Quality: core.Quality2160p,
+	}
+	if err := st.UpsertMediaFile(ctx, file); err != nil {
+		t.Fatalf("UpsertMediaFile: %v", err)
+	}
+
+	listPending := func() []mediaFileJSON {
+		t.Helper()
+		rec := do(t, h, http.MethodGet, "/api/v1/convert", "")
+		wantStatus(t, rec, http.StatusOK)
+		var body struct {
+			Pending []mediaFileJSON `json:"pending"`
+		}
+		decodeBody(t, rec, &body)
+		return body.Pending
+	}
+	if pending := listPending(); len(pending) != 1 || pending[0].ID != file.ID {
+		t.Fatalf("safe-target pending = %+v, want file %d", pending, file.ID)
+	}
+
+	assignMoviePlaybackTarget(t, st, movie.ID, core.TVProfileCapable)
+	if pending := listPending(); len(pending) != 0 {
+		t.Fatalf("capable-target pending = %+v, want none", pending)
+	}
+
+	rec := do(t, h, http.MethodPost, "/api/v1/convert", `{"media_file_id":`+itoa(file.ID)+`}`)
+	wantStatus(t, rec, http.StatusCreated)
+	var created conversionJSON
+	decodeBody(t, rec, &created)
+	if created.ProfileID != core.TVProfileCapable {
+		t.Fatalf("queued playback target = %q, want %q", created.ProfileID, core.TVProfileCapable)
+	}
+}
+
 func TestConvertQueueNamesEpisodeTargets(t *testing.T) {
 	h, st, _ := newTestServer(t, WithConverter(stubConverter{available: true}))
 	ctx := context.Background()

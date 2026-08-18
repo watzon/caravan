@@ -238,9 +238,9 @@ Everything path-like is relative to the storage root.
 
 | Table | Purpose |
 |---|---|
-| `settings` | Runtime config: storage root, quality defaults, naming templates, TV profile |
+| `settings` | Runtime config: storage root, quality defaults, naming templates |
 | `movies` / `series` / `seasons` / `episodes` | Library + wanted items, TMDB/TVDB IDs, monitored flags, profile ID |
-| `quality_profiles` | Quality ladder, cutoff, per-item assignment |
+| `quality_profiles` | Quality ladder, cutoff, playback target, per-item assignment |
 | `indexers` | Configured Torznab/Newznab sources + direct sources |
 | `releases` | Parsed search results, including bounded extended Torznab attributes (cache of what was seen) |
 | `grabs` | History: which release was grabbed for which item and why |
@@ -265,12 +265,13 @@ Recovery contract: `media_files`, `movies`, `series` are reconstructable from a 
 
 ---
 
-## 8. TV compatibility and the Convert-for-TV queue
+## 8. Playback compatibility and the Convert-for-TV queue
 
 No transcoding exists in TV-USB mode, so compatibility is an acquisition-time concern.
 
-- **TV profile setting:** describes the target set. Safe common denominator: H.264 8-bit + AAC-LC in MP4, up to 1080p. Capable sets: HEVC Main10, AV1, AC3. DTS is unsupported on current Samsung sets and flaky elsewhere; flag DTS audio in the picker.
-- **Release scoring:** parser tags codec/container/audio; the quality profile can prefer or penalize releases incompatible with the active TV profile.
+- **Playback target:** each quality profile describes what its target device can decode. The safe target accepts H.264 8-bit and AAC-LC in MP4 up to 1080p. The capable target also accepts HEVC Main10, AV1, AC3, MKV, and 2160p. DTS remains unsupported.
+- **Resolution:** a movie or series uses its assigned quality profile, then its library default, then the system default. Release warnings, file compatibility, and conversion all use that profile's playback target.
+- **Release scoring:** the parser tags codec, container, and audio. A quality profile can ignore compatibility, prefer matching releases, or require them.
 - **Convert-for-TV queue:** optional ffmpeg-backed jobs. Remux (container swap, stream copy) takes seconds and is tried first; full transcode is the explicit, slow fallback. Queue is exposed in the UI with a "run before eject" affordance in portable mode.
 - Portable mode's shutdown flow can warn: "N files in the library are not TV-compatible."
 
@@ -280,11 +281,11 @@ No transcoding exists in TV-USB mode, so compatibility is an acquisition-time co
 
 1. User searches in the UI (TMDB-backed, posters and metadata) or browses trending.
 2. "Add to library" creates the wanted item with a quality profile and monitored scope (movie, whole series, selected seasons).
-3. Automatic path: backlog search + RSS sync across enabled indexers → releases parsed → scored against profile → best candidate grabbed → sent to the default engine.
+3. Automatic path: backlog search covers missing items, while RSS sync covers missing and below-cutoff items across enabled indexers. Releases are parsed, scored against the profile, and the best candidate is sent to the default engine.
 4. Interactive path: per-item "Search" shows the parsed, scored release table; user picks; grab proceeds identically.
 5. On completion, the import pipeline takes over (§5.1).
 
-Upgrade logic: when a monitored item has a file below its cutoff, it stays wanted; a better release replaces the file on import.
+Upgrade logic: when a monitored item has a file below its cutoff, it stays wanted. RSS can replace it when a better release appears, while scheduled and "Search monitored" searches skip items that already have a file or active download.
 
 ---
 
@@ -397,7 +398,7 @@ Development is organized into phases, each absorbing one hat of the existing eco
 | 1 — Library manager | Library half of Sonarr/Radarr (tinyMediaManager/FileBot) | Scan existing media, TMDB match, rename to Jellyfin conventions, NFO/poster writing, library UI, rebuildable DB |
 | 2 — Search & download | Prowlarr + qBittorrent | Indexer config → interactive search → grab → embedded torrent → auto-import into library |
 | 3 — Automation | The Sonarr/Radarr brain | Wanted list, quality profiles, RSS + backlog search, automatic grab, upgrade-until-cutoff, stuck-import queue, combined calendar |
-| 4 — Playback handoff | — | Jellyfin scan trigger, DLNA server, TV profiles, Convert-for-TV queue |
+| 4: Playback handoff | None | Jellyfin scan trigger, DLNA server, playback targets, Convert-for-TV queue |
 | 5 — Deployment | — (Caravan's differentiator) | Docker image + compose, `prepare` command, launchers, portable dirty-eject integrity flow |
 | 6 — External clients | Download-client bridges | qBittorrent, SABnzbd, NZBGet engine implementations |
 | 7 — Embedded Usenet | SABnzbd/NZBGet natively | NNTP client, NZB/yEnc pipeline, par2 repair, extraction — standalone Usenet with no external client |

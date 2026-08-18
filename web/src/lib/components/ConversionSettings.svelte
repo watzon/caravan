@@ -1,5 +1,5 @@
 <script lang="ts">
-  /** Global output choices for conversions that the active TV profile requires. */
+  /** Global output choices for conversions that an item's playback target requires. */
   import {
     SETTING_CONVERT_AUDIO_BITRATE_KBPS,
     SETTING_CONVERT_VIDEO_CRF,

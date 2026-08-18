@@ -132,7 +132,7 @@ type mediaFileJSON struct {
 	ReleaseGroup  string `json:"release_group"`
 	AddedAt       string `json:"added_at"`
 	ModifiedAt    string `json:"modified_at"`
-	// Compatibility is the active TV profile's verdict on this file (SPEC §8).
+	// Compatibility is the owning item's playback-target verdict on this file.
 	// The row carries no bit depth — that is a probe's answer, not a
 	// filename's — so a 10-bit file imported from an untagged name reads as
 	// unstated rather than as 8-bit.
@@ -466,7 +466,6 @@ func (s *server) handleListMovies(w http.ResponseWriter, r *http.Request) {
 	// the shelf a movie sits on is now allowed to be somebody else's, and this
 	// list is where that has to be true before it can be true anywhere.
 	gate := s.gate(r)
-	profile := s.activeTVProfile(ctx)
 	out := make([]movieJSON, 0, len(movies))
 	for _, m := range movies {
 		visible, err := gate.visible(ctx, m.LibraryID)
@@ -476,6 +475,16 @@ func (s *server) handleListMovies(w http.ResponseWriter, r *http.Request) {
 		}
 		if !visible {
 			continue
+		}
+		profile, err := s.st.ResolveItemPlaybackTargetByLibrary(
+			ctx,
+			m.LibraryID,
+			core.LibraryKindMovie,
+			m.QualityProfileID,
+		)
+		if err != nil {
+			s.writeStoreError(w, "resolve movie playback target", err)
+			return
 		}
 		dto := movieDTO(m)
 		dto.File = firstFileDTO(byMovie[m.ID], profile)
@@ -724,7 +733,15 @@ func (s *server) movieDetail(ctx context.Context, id int64) (movieJSON, error) {
 	if err != nil {
 		return movieJSON{}, err
 	}
-	profile := s.activeTVProfile(ctx)
+	profile, err := s.st.ResolveItemPlaybackTargetByLibrary(
+		ctx,
+		m.LibraryID,
+		core.LibraryKindMovie,
+		m.QualityProfileID,
+	)
+	if err != nil {
+		return movieJSON{}, err
+	}
 	dto := movieDTO(*m)
 	dto.File = firstFileDTO(files, profile)
 	downloading, _, err := s.downloadingCalendarItems(ctx, []int64{id}, nil)
@@ -1111,7 +1128,7 @@ func (s *server) handleGetSeries(w http.ResponseWriter, r *http.Request) {
 // through getVisibleSeries to obtain one: a fetch inside here would be a second
 // path to the same data with no gate on it.
 func (s *server) seriesDetail(ctx context.Context, sr core.Series) (seriesDetailJSON, error) {
-	seasons, err := s.seasonDetail(ctx, sr.ID)
+	seasons, err := s.seasonDetail(ctx, sr)
 	if err != nil {
 		return seriesDetailJSON{}, err
 	}
@@ -1333,16 +1350,16 @@ func (s *server) handlePatchEpisode(w http.ResponseWriter, r *http.Request) {
 // is how core models them), and an episode whose season row is missing is
 // surfaced under a placeholder season instead of being dropped: a partially
 // reconciled database must not hide files from the user.
-func (s *server) seasonDetail(ctx context.Context, seriesID int64) ([]seasonJSON, error) {
-	seasons, err := s.st.ListSeasons(ctx, seriesID)
+func (s *server) seasonDetail(ctx context.Context, series core.Series) ([]seasonJSON, error) {
+	seasons, err := s.st.ListSeasons(ctx, series.ID)
 	if err != nil {
 		return nil, err
 	}
-	episodes, err := s.st.ListEpisodes(ctx, seriesID)
+	episodes, err := s.st.ListEpisodes(ctx, series.ID)
 	if err != nil {
 		return nil, err
 	}
-	filePairs, err := s.st.ListEpisodeMediaFilesForSeries(ctx, seriesID)
+	filePairs, err := s.st.ListEpisodeMediaFilesForSeries(ctx, series.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -1360,7 +1377,15 @@ func (s *server) seasonDetail(ctx context.Context, seriesID int64) ([]seasonJSON
 		return nil, err
 	}
 
-	profile := s.activeTVProfile(ctx)
+	profile, err := s.st.ResolveItemPlaybackTargetByLibrary(
+		ctx,
+		series.LibraryID,
+		core.LibraryKindForSeries(series.Kind),
+		series.QualityProfileID,
+	)
+	if err != nil {
+		return nil, err
+	}
 	byNumber := make(map[int][]episodeJSON)
 	for _, e := range episodes {
 		files := filesByEpisode[e.ID]
@@ -1398,7 +1423,7 @@ func (s *server) seasonDetail(ctx context.Context, seriesID int64) ([]seasonJSON
 	for number := range byNumber {
 		if !haveRow[number] {
 			out = append(out, seasonJSON{
-				SeriesID:     seriesID,
+				SeriesID:     series.ID,
 				SeasonNumber: number,
 				Episodes:     byNumber[number],
 			})

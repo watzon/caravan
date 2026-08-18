@@ -97,7 +97,11 @@ func ScoreReleaseWithContributions(r core.Release, p *core.QualityProfile) (scor
 	}
 	if tvPolicy == core.TVCompatibilityPolicyRequire &&
 		(compatibility.Verdict == core.TVCompatNeedsRemux || compatibility.Verdict == core.TVCompatIncompatible) {
-		return 0, fmt.Sprintf("release is %s for required TV profile %q", compatibility.Verdict, effectiveTVProfile(p)), ScoreContributions{}
+		return 0, fmt.Sprintf(
+			"release is %s for required playback target %q",
+			compatibility.Verdict,
+			effectiveTVProfile(p),
+		), ScoreContributions{}
 	}
 
 	// Earlier items are better, so invert the position: the first item scores

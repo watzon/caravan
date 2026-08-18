@@ -86,10 +86,9 @@ func TestSearchMovieNowQueuesOneJobAndDedupes(t *testing.T) {
 	}
 }
 
-// A movie whose file already meets the profile cutoff is not wanted, and the
-// search_movie handler has no guard against re-grabbing one — so the endpoint
-// must refuse to queue it rather than hand the worker something to upgrade.
-func TestSearchMovieNowSkipsAnAtCutoffMovie(t *testing.T) {
+// Any imported file removes a movie from automatic search, even when that file
+// would otherwise remain wanted for an RSS upgrade.
+func TestSearchMovieNowSkipsADownloadedMovie(t *testing.T) {
 	h, st, _ := newTestServer(t)
 	ctx := context.Background()
 
@@ -98,14 +97,14 @@ func TestSearchMovieNowSkipsAnAtCutoffMovie(t *testing.T) {
 		t.Fatalf("UpsertMovie: %v", err)
 	}
 	if err := st.UpsertMediaFile(ctx, &core.MediaFile{
-		Path: "Movies/Dune (2021)/Dune (2021).mkv", Size: 42, MovieID: m.ID, Quality: core.Quality1080p,
+		Path: "Movies/Dune (2021)/Dune (2021).mkv", Size: 42, MovieID: m.ID, Quality: core.Quality720p,
 	}); err != nil {
 		t.Fatalf("UpsertMediaFile: %v", err)
 	}
 
 	wantQueued(t, h, "/api/v1/library/movies/"+itoa(m.ID)+"/search", 0)
 	if jobs := openJobs(t, st, core.JobSearchMovie); len(jobs) != 0 {
-		t.Fatalf("search_movie jobs = %d, want none for an at-cutoff movie", len(jobs))
+		t.Fatalf("search_movie jobs = %d, want none for a downloaded movie", len(jobs))
 	}
 }
 
@@ -369,6 +368,89 @@ func TestSearchWantedQueuesTheWholeList(t *testing.T) {
 
 	// Everything is already queued, so a second sweep queues nothing.
 	wantQueued(t, h, "/api/v1/wanted/search", 0)
+}
+
+func TestSearchWantedSkipsDownloadingAndDownloadedItemsAcrossLibraries(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	ctx := context.Background()
+
+	missingMovie := &core.Movie{TMDBID: 310, Title: "Missing movie", Monitored: true}
+	downloadedMovie := &core.Movie{TMDBID: 311, Title: "Downloaded movie", Monitored: true}
+	downloadingMovie := &core.Movie{TMDBID: 312, Title: "Downloading movie", Monitored: true}
+	for _, movie := range []*core.Movie{missingMovie, downloadedMovie, downloadingMovie} {
+		if err := st.UpsertMovie(ctx, movie); err != nil {
+			t.Fatalf("UpsertMovie(%s): %v", movie.Title, err)
+		}
+	}
+	if err := st.UpsertMediaFile(ctx, &core.MediaFile{
+		Path: "Movies/Downloaded movie/file.mkv", MovieID: downloadedMovie.ID,
+		Quality: core.Quality720p,
+	}); err != nil {
+		t.Fatalf("UpsertMediaFile(movie): %v", err)
+	}
+	seedActiveGrab(t, st, core.GrabInfo{MovieID: downloadingMovie.ID}, "search-wanted-movie")
+
+	wantEpisodePayloads := map[string]bool{}
+	for i, fixture := range []struct {
+		kind        string
+		libraryKind string
+	}{
+		{kind: core.SeriesKindTV, libraryKind: core.LibraryKindTV},
+		{kind: core.SeriesKindAnime, libraryKind: core.LibraryKindAnime},
+		{kind: core.SeriesKindAdult, libraryKind: core.LibraryKindAdult},
+	} {
+		library, err := st.GetLibraryByKind(ctx, fixture.libraryKind)
+		if err != nil {
+			t.Fatalf("GetLibraryByKind(%s): %v", fixture.libraryKind, err)
+		}
+		if err := st.SetLibraryActive(ctx, library.ID, true); err != nil {
+			t.Fatalf("SetLibraryActive(%s): %v", fixture.libraryKind, err)
+		}
+		series := &core.Series{
+			Kind: fixture.kind, Title: "Search fixture " + fixture.kind,
+			Monitored: true, LibraryID: library.ID,
+		}
+		if fixture.kind == core.SeriesKindAdult {
+			series.StashID = "site-" + itoa(int64(i))
+		} else {
+			series.TMDBID = int64(400 + i)
+		}
+		if err := st.UpsertSeries(ctx, series); err != nil {
+			t.Fatalf("UpsertSeries(%s): %v", fixture.kind, err)
+		}
+
+		missing := airedEpisode(t, st, series.ID, 1, 1)
+		downloaded := airedEpisode(t, st, series.ID, 1, 2)
+		downloading := airedEpisode(t, st, series.ID, 1, 3)
+		file := &core.MediaFile{
+			Path: "Series/" + fixture.kind + "/downloaded.mkv", Quality: core.Quality720p,
+		}
+		if err := st.UpsertMediaFile(ctx, file); err != nil {
+			t.Fatalf("UpsertMediaFile(%s): %v", fixture.kind, err)
+		}
+		if err := st.LinkEpisodeFile(ctx, downloaded.ID, file.ID); err != nil {
+			t.Fatalf("LinkEpisodeFile(%s): %v", fixture.kind, err)
+		}
+		seedActiveGrab(t, st, core.GrabInfo{
+			SeriesID: series.ID, EpisodeIDs: []int64{downloading.ID},
+		}, core.DownloadID("search-wanted-"+fixture.kind))
+		wantEpisodePayloads[`{"episode_id":`+itoa(missing.ID)+`}`] = true
+	}
+
+	wantQueued(t, h, "/api/v1/wanted/search", 4)
+	movieJobs := openJobs(t, st, core.JobSearchMovie)
+	if len(movieJobs) != 1 || movieJobs[0].Payload != `{"movie_id":`+itoa(missingMovie.ID)+`}` {
+		t.Fatalf("movie search jobs = %+v, want only the missing movie", movieJobs)
+	}
+	episodeJobs := openJobs(t, st, core.JobSearchEpisode)
+	if len(episodeJobs) != len(wantEpisodePayloads) {
+		t.Fatalf("episode search jobs = %d, want %d", len(episodeJobs), len(wantEpisodePayloads))
+	}
+	for _, job := range episodeJobs {
+		if !wantEpisodePayloads[job.Payload] {
+			t.Errorf("unexpected episode search payload %q", job.Payload)
+		}
+	}
 }
 
 func TestAddMovieSearchesOnlyWhenAsked(t *testing.T) {

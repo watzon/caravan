@@ -68,7 +68,6 @@ var writableSettings = map[string]bool{
 	store.SettingEmbeddedUsenetMaxConcurrent:  true,
 	store.SettingRouteTorrent:                 true,
 	store.SettingRouteUsenet:                  true,
-	store.SettingTVProfile:                    true,
 	store.SettingConvertVideoPreset:           true,
 	store.SettingConvertVideoCRF:              true,
 	store.SettingConvertAudioBitrateKbps:      true,
@@ -131,7 +130,6 @@ var publicSettingKeys = map[string]bool{
 	store.SettingEmbeddedUsenetMaxConcurrent:  true,
 	store.SettingRouteTorrent:                 true,
 	store.SettingRouteUsenet:                  true,
-	store.SettingTVProfile:                    true,
 	store.SettingConvertVideoPreset:           true,
 	store.SettingConvertVideoCRF:              true,
 	store.SettingConvertAudioBitrateKbps:      true,
@@ -242,10 +240,6 @@ func (s *server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := convert.ResolveEncodingSettings(body); err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if err := validateTVProfileSetting(body); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -412,23 +406,6 @@ func (s *server) validateRouteSettings(ctx context.Context, settings map[string]
 		}
 	}
 	return nil
-}
-
-// validateTVProfileSetting refuses a profile id nothing implements. The
-// resolver falls back to the safe default at read time, so an unknown id would
-// otherwise be stored and silently ignored — the opposite of SPEC §13.
-func validateTVProfileSetting(settings map[string]string) error {
-	id, ok := settings[store.SettingTVProfile]
-	if !ok {
-		return nil
-	}
-	id = strings.TrimSpace(id)
-	for _, p := range core.TVProfiles() {
-		if p.ID == id {
-			return nil
-		}
-	}
-	return fmt.Errorf("invalid %s", store.SettingTVProfile)
 }
 
 func validateEngineSettings(settings map[string]string) error {

@@ -51,7 +51,7 @@ type conversionJSON struct {
 	// Strategy is "", "none", "remux" or "transcode" — empty until the file
 	// has been probed, because the choice is the probe's, not the queue's.
 	Strategy string `json:"strategy"`
-	// ProfileID is the TV profile this conversion targets, recorded at queue
+	// ProfileID is the playback target this conversion uses, recorded at queue
 	// time so a later profile change does not rewrite history.
 	ProfileID        string                `json:"profile_id"`
 	Status           string                `json:"status"`
@@ -120,8 +120,8 @@ func (s *server) requireFFmpeg(w http.ResponseWriter) bool {
 }
 
 // handleListConversions returns pending files plus conversion jobs, newest
-// first. Pending files use the same active-profile verdict as library rows and
-// exclude anything already queued or running.
+// first. Each pending file uses its owning item's playback target and excludes
+// anything already queued or running.
 //
 // It is readable without ffmpeg on purpose: uninstalling ffmpeg must not erase
 // the record of what it did while it was there or hide files that still need
@@ -170,7 +170,6 @@ func (s *server) handleListConversions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	gate := s.gate(r)
-	profile := s.activeTVProfile(r.Context())
 	pending := make([]mediaFileJSON, 0, len(candidates))
 	for _, candidate := range candidates {
 		// The candidate's own library: a file the caller cannot reach through
@@ -182,6 +181,16 @@ func (s *server) handleListConversions(w http.ResponseWriter, r *http.Request) {
 		}
 		if !visible {
 			continue
+		}
+		profile, err := s.st.ResolveItemPlaybackTargetByLibrary(
+			r.Context(),
+			candidate.LibraryID,
+			candidate.LibraryKind,
+			candidate.QualityProfileID,
+		)
+		if err != nil {
+			s.writeStoreError(w, "resolve file playback target", err)
+			return
 		}
 		file := mediaFileDTO(candidate.File, profile)
 		file.SeriesID = candidate.SeriesID
@@ -231,10 +240,16 @@ func (s *server) handleCreateConversion(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	profile, err := s.st.ResolveMediaFilePlaybackTarget(r.Context(), file.ID)
+	if err != nil {
+		s.writeStoreError(w, "resolve file playback target", err)
+		return
+	}
+
 	conv := &core.Conversion{
 		MediaFileID: file.ID,
 		SourcePath:  file.Path,
-		ProfileID:   s.activeTVProfile(r.Context()).ID,
+		ProfileID:   profile.ID,
 		Status:      core.ConversionQueued,
 	}
 	if err := s.st.CreateConversion(r.Context(), conv); err != nil {
@@ -316,7 +331,12 @@ func (s *server) handleRetryConversion(w http.ResponseWriter, r *http.Request) {
 
 	conv.Status = core.ConversionQueued
 	conv.Error = ""
-	conv.ProfileID = s.activeTVProfile(r.Context()).ID
+	profile, err := s.st.ResolveMediaFilePlaybackTarget(r.Context(), conv.MediaFileID)
+	if err != nil {
+		s.writeStoreError(w, "resolve file playback target", err)
+		return
+	}
+	conv.ProfileID = profile.ID
 	if err := s.st.UpdateConversion(r.Context(), conv); err != nil {
 		if errors.Is(err, store.ErrConversionOpen) {
 			writeError(w, http.StatusConflict, "this file already has a conversion in the queue")

@@ -170,7 +170,7 @@ func (s *server) handleSearchReleases(w http.ResponseWriter, r *http.Request) {
 	releases, failures := searchIndexers(searchCtx, newClient, chosen, upstream)
 	s.noteIndexerSearchFailures(ctx, chosen, failures)
 
-	tvProfile := s.activeTVProfile(ctx)
+	tvProfile := playbackTarget(profile)
 	out := releasesResponse{
 		// Query echoes the expression exactly as it was typed, so the box the
 		// user is looking at and the answer they got agree. Queries is what the

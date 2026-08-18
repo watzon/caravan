@@ -36,7 +36,9 @@
   import Icon from '../components/Icon.svelte';
   import LoadError from '../components/LoadError.svelte';
   import MetadataLinks from '../components/MetadataLinks.svelte';
-  import MonitorButton from '../components/MonitorButton.svelte';
+  import EditMediaModal, {
+    type MediaEditValues,
+  } from '../components/EditMediaModal.svelte';
   import MoveItemModal from '../components/MoveItemModal.svelte';
   import OverflowMenu from '../components/OverflowMenu.svelte';
   import { libraries } from '../state/libraries.svelte';
@@ -84,8 +86,9 @@
   let error = $state<string | null>(null);
   let collapsed = $state<Record<number, boolean>>({});
   let searching = $state(false);
-  /** A monitor write is in flight; every toggle on the page waits for it. */
+  /** A year or scene monitor write is in flight. */
   let busy = $state(false);
+  let editing = $state(false);
   let confirmingRemove = $state(false);
   let movingLibrary = $state(false);
   $effect(() => {
@@ -164,6 +167,17 @@
   let fileCount = $derived(
     years.reduce((total, year) => total + year.scenes.filter((scene) => scene.file).length, 0),
   );
+  let sceneCount = $derived(
+    years.reduce((total, year) => total + year.scenes.length, 0),
+  );
+  let anyDownloading = $derived(
+    years.some((year) => year.scenes.some((scene) => scene.downloading && !scene.file)),
+  );
+  let allScenesOwned = $derived(
+    !site?.cataloguing &&
+      (site?.scene_count ?? 0) > 0 &&
+      (site?.scene_file_count ?? 0) >= (site?.scene_count ?? 0),
+  );
 
   function ownedCount(year: SiteYear): number {
     return year.scenes.filter((scene) => scene.file).length;
@@ -177,25 +191,44 @@
    */
   /**
    * Automatic search for the whole site, which is SeriesDetail's searchNow
-   * against the same route: the server queues one job per wanted scene and
-   * answers the count, so a site that is already complete says so rather than
-   * reporting work nobody started.
+   * against the same route. The server queues one job per missing scene that
+   * has no active download and answers the count.
    */
   async function searchNow() {
     const current = site;
     if (!current) return;
     searching = true;
     try {
-      const { queued } = await api.searchSeriesNow(current.id);
-      if (queued > 0) {
-        searchQueued(queued);
-      } else {
-        pushToast(t('route.adultSite.searchNone'), 'info');
-      }
+      await queueSearch(current);
     } catch (err) {
       pushToast(errorText(err), 'danger');
     } finally {
       searching = false;
+    }
+  }
+
+  async function monitorAndSearch() {
+    const current = site;
+    if (!current) return;
+    searching = true;
+    try {
+      const updated = await api.setSeriesMonitored(current.id, true);
+      site = { ...current, monitored: updated.monitored };
+      libraryChanged();
+      await queueSearch(current);
+    } catch (err) {
+      pushToast(errorText(err), 'danger');
+    } finally {
+      searching = false;
+    }
+  }
+
+  async function queueSearch(current: SiteDetail) {
+    const { queued } = await api.searchSeriesNow(current.id);
+    if (queued > 0) {
+      searchQueued(queued);
+    } else {
+      pushToast(t('route.adultSite.searchNone'), 'info');
     }
   }
 
@@ -216,6 +249,18 @@
     } finally {
       busy = false;
     }
+  }
+
+  async function saveSettings(values: MediaEditValues) {
+    const current = site;
+    if (!current) return;
+    await api.updateSeries(current.id, {
+      monitored: values.monitored,
+      quality_profile_id: values.qualityProfileID,
+    });
+    libraryChanged();
+    await load();
+    pushToast(t('route.adultSite.updated'), 'success');
   }
 
   /** See SeriesDetail.remove: a successful removal leaves the page it emptied. */
@@ -294,42 +339,16 @@
       </div>
 
       <div class="flex min-w-0 flex-1 flex-col gap-4">
-        <div class="flex flex-wrap items-start gap-4">
-          <div class="min-w-0 flex-1">
+        <div class="min-w-0">
+          <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
             <h2 class="font-display text-2xl font-semibold tracking-tight text-ink">
               {current.title}
             </h2>
-            <p class="mt-1 flex flex-wrap items-center gap-3 text-base text-ink-secondary">
-              <span>{current.scene_file_count} / {tp('route.adultSite.scenes', current.scene_count)}</span>
-              <span class="text-ink-muted">·</span>
-              <span>{tp('route.adultSite.years', years.length)}</span>
-              {#if !current.monitored}
-                <span class="text-ink-muted">·</span>
-                <Badge tone="neutral">{t('route.adultSite.unmonitored')}</Badge>
-              {/if}
-            </p>
-            <div class="mt-2">
-              <MetadataLinks links={siteLinks(current)} />
-            </div>
-          </div>
-          {#if session.isAdmin}
-            <div class="flex w-full flex-wrap items-center gap-3 sm:w-auto">
-              <Button variant="primary" disabled={searching} onclick={searchNow}>
-                <Icon name="search" size={14} />
-                {searching ? t('route.adultSite.searching') : t('route.adultSite.searchMonitored')}
+            {#if session.isAdmin}
+              <Button variant="ghost" size="sm" onclick={() => (editing = true)}>
+                <Icon name="edit" size={14} />
+                {t('component.actions.edit')}
               </Button>
-              <Button variant="secondary" href="/adult/sites/{current.id}/search">
-                {t('route.adultSite.interactiveSearch')}
-              </Button>
-              <MonitorButton
-                monitored={current.monitored}
-                subject={current.title}
-                disabled={busy}
-                onchange={(next) =>
-                  run(() => api.setSeriesMonitored(current.id, next), t('route.adultSite.updateSiteFailed'))} />
-              <!-- Removal lives behind the ⋯ rather than one mis-click from the
-                   search buttons. There is no per-site metadata refresh route,
-                   so removal is the only item there is. -->
               <OverflowMenu
                 subject={current.title}
                 items={[
@@ -348,8 +367,20 @@
                     onselect: () => (confirmingRemove = true),
                   },
                 ]} />
-            </div>
-          {/if}
+            {/if}
+          </div>
+          <p class="mt-1 flex flex-wrap items-center gap-3 text-base text-ink-secondary">
+            <span>{current.scene_file_count} / {tp('route.adultSite.scenes', current.scene_count)}</span>
+            <span class="text-ink-muted">·</span>
+            <span>{tp('route.adultSite.years', years.length)}</span>
+            {#if !current.monitored}
+              <span class="text-ink-muted">·</span>
+              <Badge tone="neutral">{t('route.adultSite.unmonitored')}</Badge>
+            {/if}
+          </p>
+          <div class="mt-2">
+            <MetadataLinks links={siteLinks(current)} />
+          </div>
         </div>
 
         <p class="max-w-3xl text-md text-ink-secondary">
@@ -391,24 +422,65 @@
         message={t('route.adultSite.cataloguingProgress', { count: current.scene_count })} />
     {/if}
 
-    {#if years.length === 0}
-      {#if current.cataloguing}
-        <EmptyState
-          icon="refresh"
-          title={t('route.adultSite.cataloguingTitle')}
-          message={t('route.adultSite.cataloguingEmpty')} />
+    <section class="flex flex-col gap-3" aria-labelledby="adult-scenes-heading">
+      <div class="flex flex-wrap items-center gap-3">
+        <h3 id="adult-scenes-heading" class="min-w-0 flex-1 text-lg font-semibold text-ink">
+          {t('route.adultSite.sceneInventory')}
+        </h3>
+
+        {#if session.isAdmin}
+          <div class="ml-auto flex flex-wrap items-center gap-2">
+            {#if anyDownloading}
+              <Button variant="primary" size="sm" href="/queue">
+                {t('route.adultSite.viewQueue')}
+              </Button>
+            {:else if allScenesOwned}
+              <Button variant="secondary" size="sm" href="/adult/sites/{current.id}/search">
+                {t('route.adultSite.chooseAnotherRelease')}
+              </Button>
+            {:else if sceneCount > 0}
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={searching}
+                onclick={current.monitored ? searchNow : monitorAndSearch}>
+                <Icon name="search" size={14} />
+                {searching
+                  ? t('route.adultSite.searching')
+                  : current.monitored
+                    ? t('route.adultSite.searchMissing')
+                    : t('route.adultSite.monitorAndSearch')}
+              </Button>
+              <Button variant="secondary" size="sm" href="/adult/sites/{current.id}/search">
+                {t('route.adultSite.chooseRelease')}
+              </Button>
+            {:else if !current.cataloguing}
+              <Button variant="secondary" size="sm" href="/adult/sites/{current.id}/search">
+                {t('route.adultSite.chooseRelease')}
+              </Button>
+            {/if}
+          </div>
+        {/if}
+      </div>
+
+      {#if years.length === 0}
+        {#if current.cataloguing}
+          <EmptyState
+            icon="refresh"
+            title={t('route.adultSite.cataloguingTitle')}
+            message={t('route.adultSite.cataloguingEmpty')} />
+        {:else}
+          <EmptyState
+            icon="flame"
+            title={t('route.adultSite.noScenesTitle')}
+            message={t('route.adultSite.noScenesMessage')} />
+        {/if}
       {:else}
-        <EmptyState
-          icon="flame"
-          title={t('route.adultSite.noScenesTitle')}
-          message={t('route.adultSite.noScenesMessage')} />
-      {/if}
-    {:else}
-      <div class="flex flex-col gap-4">
-        {#each years as year (year.year)}
-          {@const isCollapsed = collapsed[year.year] ?? false}
-          <section class="overflow-hidden rounded-md border border-border">
-            <header class="flex flex-wrap items-center gap-3 bg-surface px-3 py-2">
+        <div class="flex flex-col gap-4">
+          {#each years as year (year.year)}
+            {@const isCollapsed = collapsed[year.year] ?? false}
+            <section class="overflow-hidden rounded-md border border-border">
+              <header class="flex flex-wrap items-center gap-3 bg-surface px-3 py-2">
               <button
                 type="button"
                 class="flex w-full min-w-0 items-center gap-2 text-left sm:w-auto sm:flex-1"
@@ -438,7 +510,7 @@
                   href="/adult/sites/{current.id}/search/{year.year}"
                   title={t('route.adultSite.searchPackTitle', { year: year.year })}>
                   <Icon name="search" size={14} />
-                  {t('route.adultSite.search')}
+                  {t('route.adultSite.chooseReleaseShort')}
                 </Button>
 
                 <Toggle
@@ -452,9 +524,9 @@
                       t('route.adultSite.updateYearFailed'),
                     )} />
               {/if}
-            </header>
+              </header>
 
-            {#if !isCollapsed}
+              {#if !isCollapsed}
               {#if year.scenes.length === 0}
                 <p class="px-3 py-6 text-center text-sm text-ink-secondary">
                   {t('route.adultSite.noYearScenes')}
@@ -476,7 +548,7 @@
                         <th class="micro-label px-3 py-2 font-semibold">{t('route.adultSite.status')}</th>
                         {#if session.isAdmin}
                           <th class="micro-label px-3 py-2 text-right font-semibold">{t('route.adultSite.monitored')}</th>
-                          <th class="micro-label px-3 py-2 text-right font-semibold">{t('route.adultSite.search')}</th>
+                          <th class="micro-label px-3 py-2 text-right font-semibold">{t('route.adultSite.actions')}</th>
                         {/if}
                       </tr>
                     </thead>
@@ -571,20 +643,32 @@
                                 {#if scene.file}
                                   <ConvertFileButton file={scene.file} compact />
                                 {/if}
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  href="/adult/sites/{current.id}/search/{year.year}/{scene.number}"
-                                  title={t('route.adultSite.searchSceneTitle', {
-                                    scene: sceneNumber(scene.number),
-                                  })}>
-                                  <Icon name="search" size={14} />
-                                  <span class="sr-only">
-                                    {t('route.adultSite.searchScene', {
-                                      scene: sceneNumber(scene.number),
-                                    })}
-                                  </span>
-                                </Button>
+                                {#if scene.downloading && !scene.file}
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    href="/queue"
+                                    title={t('route.adultSite.viewQueue')}>
+                                    <Icon name="download" size={14} />
+                                    <span class="sr-only">{t('route.adultSite.viewQueue')}</span>
+                                  </Button>
+                                {:else}
+                                  {@const releaseAction = scene.file
+                                    ? t('route.adultSite.chooseAnotherSceneRelease', {
+                                        scene: sceneNumber(scene.number),
+                                      })
+                                    : t('route.adultSite.chooseSceneRelease', {
+                                        scene: sceneNumber(scene.number),
+                                      })}
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    href="/adult/sites/{current.id}/search/{year.year}/{scene.number}"
+                                    title={releaseAction}>
+                                    <Icon name="search" size={14} />
+                                    <span class="sr-only">{releaseAction}</span>
+                                  </Button>
+                                {/if}
                               </div>
                             </td>
                           {/if}
@@ -594,11 +678,12 @@
                   </table>
                 </div>
               {/if}
-            {/if}
-          </section>
-        {/each}
-      </div>
-    {/if}
+              {/if}
+            </section>
+          {/each}
+        </div>
+      {/if}
+    </section>
 
     {#if confirmingRemove}
       <RemoveItemModal
@@ -608,6 +693,16 @@
         busy={removing}
         onconfirm={remove}
         onclose={() => (confirmingRemove = false)} />
+    {/if}
+    {#if editing}
+      <EditMediaModal
+        title={current.title}
+        kind="adult"
+        libraryID={current.library_id}
+        monitored={current.monitored}
+        qualityProfileID={current.quality_profile_id}
+        onsave={saveSettings}
+        onclose={() => (editing = false)} />
     {/if}
     {#if movingLibrary}
       <MoveItemModal

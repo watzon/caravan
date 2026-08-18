@@ -1,11 +1,11 @@
 /**
- * Rendering the TV-profile verdict (SPEC §8).
+ * Rendering the playback-target verdict.
  *
- * The verdict itself is the server's — it knows which profile is active and
- * owns the capability tables (internal/core/tvprofile.go). This module only
- * decides what a human sees: a badge for the two states worth acting on, and
- * nothing at all for "fine" or "cannot tell". A badge that appears on every
- * row teaches the user to ignore badges.
+ * The verdict itself is the server's. It resolves the owning item's quality
+ * profile and owns the capability tables (internal/core/tvprofile.go). This
+ * module only decides what a human sees: a badge for the two states worth
+ * acting on, and nothing at all for "fine" or "cannot tell". A badge that
+ * appears on every row teaches the user to ignore badges.
  *
  * Pure — unit-tested in tvcompat.test.ts.
  */

@@ -62,6 +62,7 @@ import type {
   MinAvailability,
   MediaType,
   Movie,
+  MovieUpdate,
   QualityProfile,
   QualityProfileInput,
   QualityProfileTestRequest,
@@ -84,6 +85,7 @@ import type {
   SceneMeta,
   ScenePerformerMeta,
   Series,
+  SeriesUpdate,
   SessionUser,
   Settings,
   Site,
@@ -615,10 +617,7 @@ export const api = {
       body: pin === '' ? { api_key: apiKey, provider } : { api_key: apiKey, provider, pin },
     }),
 
-  /**
-   * The built-in TV profiles (SPEC §8). Read-only: the active choice is the
-   * `tv_profile` settings key, saved through putSettings like every other one.
-   */
+  /** Built-in playback targets selectable from a quality profile. */
   listTVProfiles: (signal?: AbortSignal) =>
     listOf<TVProfile>(endpoints.tvProfiles(), 'profiles', signal),
 
@@ -689,6 +688,10 @@ export const api = {
   setMovieMonitored: (id: number, monitored: boolean) =>
     request<Movie>(endpoints.movie(id), { method: 'PATCH', body: { monitored } }),
 
+  /** Save any combination of editable movie settings in one request. */
+  updateMovie: (id: number, body: MovieUpdate) =>
+    request<Movie>(endpoints.movie(id), { method: 'PATCH', body }),
+
   /**
    * Stop tracking a movie. With `files` the movie's files are deleted from
    * disk as well; without it the filesystem is untouched and a rescan re-adds
@@ -721,6 +724,10 @@ export const api = {
 
   setSeriesMonitored: (id: number, monitored: boolean) =>
     request<Series>(endpoints.series(id), { method: 'PATCH', body: { monitored } }),
+
+  /** Save any combination of editable series settings in one request. */
+  updateSeries: (id: number, body: SeriesUpdate) =>
+    request<Series>(endpoints.series(id), { method: 'PATCH', body }),
 
   /** deleteMovie's series twin; `files` deletes every episode file too. */
   deleteSeries: (id: number, files = false) =>
@@ -1120,21 +1127,21 @@ export const api = {
 
   /**
    * Queue the automatic search for one movie. Answers how many jobs it added:
-   * 0 when the movie already meets its cutoff, or when the same search is
-   * still on the queue.
+   * 0 when the movie has a file or active download, is unavailable, or the
+   * same search is still on the queue.
    */
   searchMovieNow: (id: number) =>
     request<SearchQueued>(endpoints.movieSearchNow(id), { method: 'POST' }),
 
-  /** Queue a search for every wanted episode of one series. */
+  /** Queue a search for every missing episode without an active download. */
   searchSeriesNow: (id: number) =>
     request<SearchQueued>(endpoints.seriesSearchNow(id), { method: 'POST' }),
 
-  /** Queue an automatic search for exactly one wanted episode. */
+  /** Queue an automatic search for exactly one missing episode. */
   searchEpisodeNow: (id: number) =>
     request<SearchQueued>(endpoints.episodeSearchNow(id), { method: 'POST' }),
 
-  /** Queue a search for the whole wanted list — the backlog sweep on demand. */
+  /** Queue a search for every missing item without an active download. */
   searchWanted: () =>
     request<SearchQueued>(endpoints.wantedSearch(), { method: 'POST' }),
   listEventsPage: (limit = 100, cursor?: string, signal?: AbortSignal) =>
