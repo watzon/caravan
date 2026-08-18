@@ -25,13 +25,18 @@ type calendarResponse struct {
 // and render a single timeline. Fields that do not apply to a movie are absent
 // rather than overloaded with zero values.
 type calendarEntry struct {
-	ID            int64  `json:"-"`
-	Year          int    `json:"-"`
-	Kind          string `json:"kind"`
-	Date          string `json:"date"`
-	Title         string `json:"title"`
-	SeriesID      int64  `json:"series_id,omitempty"`
+	ID       int64  `json:"-"`
+	Year     int    `json:"-"`
+	Kind     string `json:"kind"`
+	Date     string `json:"date"`
+	Title    string `json:"title"`
+	SeriesID int64  `json:"series_id,omitempty"`
+	// SeriesKind is the series' core.SeriesKind* value. The calendar is a
+	// shared surface, so the client needs it to send a scene to /adult/sites
+	// rather than to /series.
+	SeriesKind    string `json:"series_kind,omitempty"`
 	MovieID       int64  `json:"movie_id,omitempty"`
+	EpisodeID     int64  `json:"episode_id,omitempty"`
 	SeasonNumber  int    `json:"season_number,omitempty"`
 	EpisodeNumber int    `json:"episode_number,omitempty"`
 	EpisodeTitle  string `json:"episode_title,omitempty"`
@@ -219,6 +224,8 @@ func (s *server) calendarEntries(ctx context.Context, gate *libraryGate, start, 
 			Date:          episode.Episode.AirDate.Format(calendarDateFormat),
 			Title:         episode.SeriesTitle,
 			SeriesID:      episode.Episode.SeriesID,
+			SeriesKind:    episode.SeriesKind,
+			EpisodeID:     episode.Episode.ID,
 			SeasonNumber:  episode.Episode.SeasonNumber,
 			EpisodeNumber: episode.Episode.EpisodeNumber,
 			EpisodeTitle:  episode.Episode.Title,

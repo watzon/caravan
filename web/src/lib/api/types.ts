@@ -63,6 +63,13 @@ export interface MediaFile {
   path: string;
   size: number;
   movie_id: number;
+  /** Set on an episode or scene file. Absent on a movie file. */
+  series_id?: number;
+  /** `tv`, `anime` or `adult`. Absent on a movie file. */
+  series_kind?: string;
+  /** The first episode or scene this file covers, by season and number. */
+  season_number?: number;
+  episode_number?: number;
   quality: string;
   source: string;
   codec: string;
@@ -1346,19 +1353,17 @@ export interface SearchGrabRequest {
 }
 
 /**
- * Body for POST /library/movies/{id}/grab and /library/series/{id}/grab.
+ * Request for POST /library/movies/{id}/grab and /library/series/{id}/grab.
  *
- * The release is identified by its cached row id: the search that produced it
- * wrote it to the `releases` seen-cache, so the server does not have to trust a
- * client-supplied download URL. Season/episode targeting mirrors
- * internal/core.AddOpts.
+ * The release id is sent in the body. Series scope is sent in the query, where
+ * the API validates the displayed season and episode against the target item.
  */
 export interface GrabRequest {
   release_id: number;
-  /** Season number for a season-pack grab. */
+  /** Series only: displayed season number. */
   season?: number;
-  /** `episodes.id` values the grab is expected to satisfy. */
-  episode_ids?: number[];
+  /** Series only: displayed episode or scene number. */
+  episode?: number;
 }
 
 /** internal/core.DownloadState — the vocabulary the queue colours by. */
@@ -1431,6 +1436,18 @@ export interface DownloadStatus {
    * "embedded" rather than showing a blank badge.
    */
   engine?: string;
+  /**
+   * What the grab was for, when Caravan matched this download. Absent on an
+   * unmatched or out-of-band row — the queue can still show the transfer, but
+   * there is no library item to open.
+   */
+  movie_id?: number;
+  series_id?: number;
+  /** `tv`, `anime` or `adult`. Missing is treated as television. */
+  series_kind?: string;
+  episode_ids?: number[];
+  season_number?: number;
+  episode_number?: number;
 }
 
 export interface DownloadPage {
@@ -1646,7 +1663,10 @@ export interface CalendarEntry {
   date: string;
   title: string;
   series_id?: number;
+  /** `tv`, `anime` or `adult`. Missing is treated as television. */
+  series_kind?: string;
   movie_id?: number;
+  episode_id?: number;
   season_number?: number;
   episode_number?: number;
   episode_title?: string;
@@ -1767,6 +1787,12 @@ export type ConversionStage = 'probing' | 'converting' | 'verifying' | 'installi
 export interface Conversion {
   id: number;
   media_file_id: number;
+  /** Library item this file belongs to, when the file is still in the library. */
+  movie_id?: number;
+  series_id?: number;
+  series_kind?: string;
+  season_number?: number;
+  episode_number?: number;
   /** Storage-root-relative path as it was when the conversion was queued. */
   source_path: string;
   /** Storage-root-relative path the library now points at; empty until done. */

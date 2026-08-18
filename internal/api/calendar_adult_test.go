@@ -94,6 +94,16 @@ func TestCalendarHidesScenesFromEveryoneWithoutTheGrant(t *testing.T) {
 	if got := entriesFor(admin); !hasTitle(got, "Brazzers") || !hasTitle(got, "Calendar Show") {
 		t.Fatalf("admin calendar = %+v, want both the scene and the episode", got)
 	}
+	var scene calendarEntry
+	for _, entry := range entriesFor(admin) {
+		if entry.Title == "Brazzers" {
+			scene = entry
+			break
+		}
+	}
+	if scene.SeriesKind != core.SeriesKindAdult || scene.EpisodeID == 0 || scene.SeriesID == 0 {
+		t.Fatalf("scene identity = %+v, want an adult series and episode id", scene)
+	}
 	if got := entriesFor(granted); !hasTitle(got, "Brazzers") {
 		t.Errorf("a granted member's calendar has no scene: %+v", got)
 	}

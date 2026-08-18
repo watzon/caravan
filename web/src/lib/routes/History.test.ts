@@ -72,6 +72,15 @@ async function settle() {
 }
 
 describe('History', () => {
+  it('uses the full content column', async () => {
+    app = mount(History, { target: host });
+    await settle();
+
+    const root = host.firstElementChild as HTMLElement;
+    expect(root.classList.contains('flex')).toBe(true);
+    expect([...root.classList].some((name) => name.startsWith('max-w-'))).toBe(false);
+  });
+
   it('coalesces only consecutive recovery confirmations', async () => {
     app = mount(History, { target: host });
     await settle();

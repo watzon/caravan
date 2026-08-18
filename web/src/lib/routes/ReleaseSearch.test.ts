@@ -426,6 +426,20 @@ describe('ReleaseSearch', () => {
     expect(queryBox().value).toBe(SITE_EXPRESSION);
   });
 
+  it('grabs only the scene named by the site route', async () => {
+    (itemAnswer.body as Record<string, unknown>).search_expression = SITE_EXPRESSION;
+    mountSitePicker();
+    await settle();
+    calls.length = 0;
+
+    host.querySelector<HTMLButtonElement>('tbody button')!.click();
+    await settle();
+
+    const grab = calls.find((call) => call.method === 'POST');
+    expect(grab?.url).toBe('/api/v1/library/series/9/grab?season=2026&episode=24');
+    expect(grab?.body).toEqual({ release_id: 7 });
+  });
+
   it('treats an adult series row as a site even when the route said series', async () => {
     // Wanted used to open /series/:id/search/:season/:episode for a scene.
     // The item is a site; the television seed must never reach the box.

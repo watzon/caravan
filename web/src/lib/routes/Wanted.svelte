@@ -14,6 +14,7 @@
   import { pushToast } from '../state/toast.svelte';
   import { episodeCode, formatDate, titleWithYear } from '../format';
   import { sceneNumber } from '../adult';
+  import { libraryItemHref } from '../library';
   import { createSelection } from '../selection.svelte';
   import { useI18n } from '../i18n.svelte';
 
@@ -178,10 +179,22 @@
     }
     return `/movies/${item.id}/search`;
   }
+
+  function itemHref(item: WantedMovie | WantedEpisode): string | undefined {
+    if ('series_id' in item) {
+      return libraryItemHref({
+        series_id: item.series_id,
+        series_kind: item.series_kind,
+        season_number: item.season_number,
+        episode_number: item.episode_number,
+      });
+    }
+    return libraryItemHref({ movie_id: item.id });
+  }
 </script>
 <svelte:window {onkeydown} />
 
-<div class="flex max-w-5xl flex-col gap-6">
+<div class="flex flex-col gap-6">
   <div class="flex flex-wrap items-center gap-3">
     <PageTabs
       {tabs}
@@ -263,7 +276,10 @@
                     <Poster path={movie.poster_path} fallback={movie.poster_url} alt={movie.title} />
                   </div>
                   <div class="min-w-0 basis-40 flex-1">
-                    <p class="truncate font-medium text-ink" title={titleWithYear(movie.title, movie.year)}>{titleWithYear(movie.title, movie.year)}</p>
+                    <a
+                      href={itemHref(movie)}
+                      class="block truncate font-medium text-ink hover:text-accent-text hover:underline"
+                      title={titleWithYear(movie.title, movie.year)}>{titleWithYear(movie.title, movie.year)}</a>
                     <p class="mt-0.5 truncate text-sm text-ink-secondary" title={detail(movie)}>{detail(movie)}</p>
                   </div>
                   <Badge tone={movie.reason === 'missing' ? 'danger' : 'warning'}>{movie.reason === 'missing' ? t('route.wanted.missing') : t('route.wanted.belowCutoff')}</Badge>
@@ -327,11 +343,12 @@
                       fallbackIcon="tv" />
                   </div>
                   <div class="min-w-0 basis-40 flex-1">
-                    <p
-                      class="truncate font-medium text-ink"
+                    <a
+                      href={itemHref(episode)}
+                      class="block truncate font-medium text-ink hover:text-accent-text hover:underline"
                       title={t('route.wanted.episodeTitle', { series: episode.series_title, episode: episodeLabel(episode), title: episode.title })}>
                       {t('route.wanted.episodeTitle', { series: episode.series_title, episode: episodeLabel(episode), title: episode.title })}
-                    </p>
+                    </a>
                     <p class="mt-0.5 truncate text-sm text-ink-secondary" title={detail(episode)}>{detail(episode)}</p>
                   </div>
                   <Badge tone={episode.reason === 'missing' ? 'danger' : 'warning'}>{episode.reason === 'missing' ? t('route.wanted.missing') : t('route.wanted.belowCutoff')}</Badge>

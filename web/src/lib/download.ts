@@ -20,7 +20,11 @@ import { translate, translatePlural } from './i18n.svelte';
 export interface DownloadStateMeta {
   label: string;
   tone: Tone;
-  /** True while the engine is still working on it, or still seeding it. */
+  /**
+   * True while the engine is still transferring — downloading or seeding —
+   * so the queue can offer pause. The sidebar badge does not use this: a
+   * seeder is no longer work the user is waiting on.
+   */
   active: boolean;
 }
 
@@ -75,13 +79,18 @@ export function downloadStateMeta(state: string): DownloadStateMeta {
 }
 
 /**
- * What the sidebar badge counts: downloads the engine is still doing something
- * about. Paused is deliberately excluded — a paused download is waiting on the
- * user, not on the engine, and a badge that never clears is a badge nobody
- * reads.
+ * What the sidebar badge and the Active tab count: downloads still being
+ * acquired. Seeding is a different state — the file is already here — so it
+ * does not keep the badge lit for days. Paused is excluded for the same
+ * reason: a paused download waits on the user, not on the engine.
  */
 export function isActiveDownload(status: DownloadStatus): boolean {
-  return downloadStateMeta(status.state).active;
+  return status.state === 'queued' || status.state === 'downloading';
+}
+
+/** A torrent whose download finished and that is still uploading. */
+export function isSeedingDownload(status: DownloadStatus): boolean {
+  return status.state === 'seeding';
 }
 
 export function countActiveDownloads(downloads: readonly DownloadStatus[]): number {
@@ -93,7 +102,7 @@ export function countActiveDownloads(downloads: readonly DownloadStatus[]): numb
  * completed, or a torrent that finished its download and sits paused rather
  * than seeding. The queue's default view hides these — they are history, not
  * work — while a mid-download pause stays visible because it is waiting on
- * the user. Seeding stays visible too: the engine is still doing something.
+ * the user. Seeding has its own tab: the transfer is done, the upload is not.
  */
 export function isFinishedDownload(status: DownloadStatus): boolean {
   return status.state === 'completed' || (status.state === 'paused' && status.progress >= 1);

@@ -197,6 +197,15 @@ type ConversionCandidate struct {
 	File        core.MediaFile
 	LibraryID   int64
 	LibraryKind string
+	// SeriesID, SeriesKind and the season/episode numbers name the library
+	// item an episode or scene file belongs to. Zero on a movie file. A
+	// multi-episode file reports the first episode by season and number, not
+	// the lowest row id.
+	SeriesID      int64
+	SeriesKind    string
+	EpisodeID     int64
+	SeasonNumber  int
+	EpisodeNumber int
 }
 
 // ListConversionCandidates returns owned media files that are free to queue,
@@ -213,12 +222,32 @@ func (s *Store) ListConversionCandidates(ctx context.Context) ([]ConversionCandi
 			COUNT(ef.episode_id),
 			COUNT(DISTINCT CASE WHEN s.kind = ? THEN ? ELSE ? END),
 			MAX(CASE WHEN s.kind = ? THEN 1 ELSE 0 END),
-			COALESCE(MAX(m.library_id), 0), COALESCE(MAX(s.library_id), 0)
+			COALESCE(MAX(m.library_id), 0), COALESCE(MAX(s.library_id), 0),
+			COALESCE(MAX(first_ep.series_id), 0), COALESCE(MAX(first_ep.series_kind), ''),
+			COALESCE(MAX(first_ep.episode_id), 0),
+			COALESCE(MAX(first_ep.season_number), 0), COALESCE(MAX(first_ep.episode_number), 0)
 		FROM media_files mf
 		LEFT JOIN movies m ON m.id = mf.movie_id
 		LEFT JOIN episode_files ef ON ef.media_file_id = mf.id
 		LEFT JOIN episodes e ON e.id = ef.episode_id
 		LEFT JOIN series s ON s.id = e.series_id
+		LEFT JOIN (
+			SELECT media_file_id, episode_id, series_id, season_number, episode_number, series_kind
+			FROM (
+				SELECT ef2.media_file_id AS media_file_id,
+					e2.id AS episode_id, e2.series_id AS series_id,
+					e2.season_number AS season_number, e2.episode_number AS episode_number,
+					s2.kind AS series_kind,
+					ROW_NUMBER() OVER (
+						PARTITION BY ef2.media_file_id
+						ORDER BY e2.season_number, e2.episode_number, e2.id
+					) AS rn
+				FROM episode_files ef2
+				JOIN episodes e2 ON e2.id = ef2.episode_id
+				JOIN series s2 ON s2.id = e2.series_id
+			)
+			WHERE rn = 1
+		) first_ep ON first_ep.media_file_id = mf.id
 		WHERE NOT EXISTS (
 			SELECT 1
 			FROM conversions c
@@ -251,6 +280,8 @@ func (s *Store) ListConversionCandidates(ctx context.Context) ([]ConversionCandi
 			&candidate.File.Codec, &candidate.File.Audio, &candidate.File.ReleaseGroup,
 			&addedAt, &modifiedAt, &episodeCount, &libraryKindCount, &hasAdult,
 			&movieLibraryID, &seriesLibraryID,
+			&candidate.SeriesID, &candidate.SeriesKind, &candidate.EpisodeID,
+			&candidate.SeasonNumber, &candidate.EpisodeNumber,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("store: scan conversion candidate: %w", err)
@@ -274,6 +305,73 @@ func (s *Store) ListConversionCandidates(ctx context.Context) ([]ConversionCandi
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("store: list conversion candidates: %w", err)
+	}
+	return out, nil
+}
+
+// MediaFileTarget is the library item a media file belongs to, so a convert
+// row can link to the movie, series or site without a second round trip.
+type MediaFileTarget struct {
+	MovieID       int64
+	SeriesID      int64
+	SeriesKind    string
+	EpisodeID     int64
+	SeasonNumber  int
+	EpisodeNumber int
+}
+
+// MediaFileTargets resolves the library item for each media file id. Missing
+// ids are omitted. A multi-episode file reports the first episode it covers.
+func (s *Store) MediaFileTargets(ctx context.Context, ids []int64) (map[int64]MediaFileTarget, error) {
+	out := map[int64]MediaFileTarget{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT mf.id, mf.movie_id,
+			COALESCE(first_ep.series_id, 0), COALESCE(first_ep.series_kind, ''),
+			COALESCE(first_ep.episode_id, 0),
+			COALESCE(first_ep.season_number, 0), COALESCE(first_ep.episode_number, 0)
+		FROM media_files mf
+		LEFT JOIN (
+			SELECT media_file_id, episode_id, series_id, season_number, episode_number, series_kind
+			FROM (
+				SELECT ef.media_file_id AS media_file_id,
+					e.id AS episode_id, e.series_id AS series_id,
+					e.season_number AS season_number, e.episode_number AS episode_number,
+					s.kind AS series_kind,
+					ROW_NUMBER() OVER (
+						PARTITION BY ef.media_file_id
+						ORDER BY e.season_number, e.episode_number, e.id
+					) AS rn
+				FROM episode_files ef
+				JOIN episodes e ON e.id = ef.episode_id
+				JOIN series s ON s.id = e.series_id
+			)
+			WHERE rn = 1
+		) first_ep ON first_ep.media_file_id = mf.id
+		WHERE mf.id IN (`+placeholders(len(ids))+`)`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("store: list media file targets: %w", err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var (
+			id     int64
+			target MediaFileTarget
+		)
+		if err := rows.Scan(&id, &target.MovieID, &target.SeriesID, &target.SeriesKind, &target.EpisodeID, &target.SeasonNumber, &target.EpisodeNumber); err != nil {
+			return nil, fmt.Errorf("store: scan media file target: %w", err)
+		}
+		out[id] = target
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list media file targets: %w", err)
 	}
 	return out, nil
 }

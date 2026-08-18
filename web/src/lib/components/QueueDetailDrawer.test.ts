@@ -91,6 +91,16 @@ function usenetInsight(overrides: Record<string, unknown> = {}) {
 }
 
 describe('QueueDetailDrawer', () => {
+  it('offers a library link when the download is matched', () => {
+    mountDrawer({ movie_id: 7 });
+    expect(host.querySelector('a[href="/movies/7"]')?.textContent).toBe('Open movie');
+  });
+
+  it('sends an adult grab to the site page', () => {
+    mountDrawer({ series_id: 9, series_kind: 'adult', season_number: 2026, episode_number: 24 });
+    expect(host.querySelector('a[href="/adult/sites/9#y2026n24"]')?.textContent).toBe('Open site');
+  });
+
   it('opens with mapped peer, tracker and availability insight', async () => {
     vi.stubGlobal('fetch', vi.fn(async () =>
       jsonResponse({
@@ -284,6 +294,18 @@ describe('QueueDetailDrawer', () => {
     expect(host.textContent).toContain('Limits');
     expect(host.textContent).not.toContain('Peers');
     expect(host.textContent).not.toContain('Trackers');
+  });
+
+  it('replaces the download ETA with the share ratio while seeding', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse({ insight: { availability: 1, peers: [], trackers: [] } })),
+    );
+    mountDrawer({ state: 'seeding', progress: 1, ratio: 1.25, eta_seconds: 0 });
+    await settle();
+
+    expect(host.textContent).toContain('Ratio 1.25');
+    expect(host.querySelector('[aria-label="Transfer status"]')?.textContent).not.toContain('ETA');
   });
 });
 

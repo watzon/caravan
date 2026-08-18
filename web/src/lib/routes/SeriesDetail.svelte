@@ -35,8 +35,15 @@
   } from '../format';
   import MetadataLinks from '../components/MetadataLinks.svelte';
   import { episodeLink, seriesLinks } from '../metadataLinks';
-  import { navigate } from '../router.svelte';
-  import { shelfBack } from '../library';
+  import { navigate, router } from '../router.svelte';
+  import {
+    LIBRARY_ITEM_TARGET_CLASS,
+    isLibraryItemTarget,
+    libraryItemAnchor,
+    parseLibraryItemHash,
+    revealHashTarget,
+    shelfBack,
+  } from '../library';
   import { session } from '../state/session.svelte';
   import { libraryChanged, searchQueued } from '../state/activity';
   import { pushToast } from '../state/toast.svelte';
@@ -82,6 +89,17 @@
   onMount(load);
 
   let seasons = $derived<Season[]>(series?.seasons ?? []);
+
+  $effect(() => {
+    if (loading || !series) return;
+    const target = parseLibraryItemHash(router.hash);
+    if (!target || target.adult) return;
+    const season = seasons.find((row) => row.season_number === target.season);
+    if (season && collapsed[season.season_number]) {
+      collapsed = { ...collapsed, [season.season_number]: false };
+    }
+    void revealHashTarget(router.hash.slice(1));
+  });
 
   function episodesOf(season: Season): Episode[] {
     return season.episodes ?? [];
@@ -367,9 +385,18 @@
                         )}
                         {@const upcoming = !episode.file && isFuture(episode.air_date)}
                         <tr
-                          class="h-10 border-t border-border transition-colors duration-150 {upcoming
-                            ? 'bg-danger/15 hover:bg-danger/20'
-                            : 'hover:bg-raised'}">
+                          id={libraryItemAnchor({
+                            season_number: episode.season_number,
+                            episode_number: episode.episode_number,
+                          })}
+                          class="h-10 scroll-mt-16 border-t border-border transition-colors duration-150 {isLibraryItemTarget(
+                            router.hash,
+                            episode,
+                          )
+                            ? LIBRARY_ITEM_TARGET_CLASS
+                            : upcoming
+                              ? 'bg-danger/15 hover:bg-danger/20'
+                              : 'hover:bg-raised'}">
                           <td class="px-3 py-2 font-mono text-ink-secondary">
                             {episodeCode(episode.season_number, episode.episode_number)}
                           </td>

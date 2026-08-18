@@ -186,6 +186,63 @@ func TestMediaFileLibraryKind(t *testing.T) {
 	assertCandidates(allCandidates)
 }
 
+func TestMediaFileTargetsNamesLibraryItems(t *testing.T) {
+	st, _ := openTemp(t)
+	ctx := context.Background()
+
+	movie := &core.Movie{TMDBID: 1, Title: "Movie", SortTitle: "movie"}
+	if err := st.UpsertMovie(ctx, movie); err != nil {
+		t.Fatalf("UpsertMovie: %v", err)
+	}
+	movieFile := &core.MediaFile{Path: "Movies/movie.mkv", Size: 1, MovieID: movie.ID}
+	if err := st.UpsertMediaFile(ctx, movieFile); err != nil {
+		t.Fatalf("UpsertMediaFile movie: %v", err)
+	}
+
+	series := &core.Series{TMDBID: 2, Title: "Show", SortTitle: "show"}
+	if err := st.UpsertSeries(ctx, series); err != nil {
+		t.Fatalf("UpsertSeries: %v", err)
+	}
+	// Insert E02 first so it gets the lower row id. MIN(e.id) would then
+	// name S01E02; the target must still be S01E01.
+	ep2 := &core.Episode{SeriesID: series.ID, SeasonNumber: 1, EpisodeNumber: 2}
+	ep1 := &core.Episode{SeriesID: series.ID, SeasonNumber: 1, EpisodeNumber: 1}
+	if err := st.UpsertEpisode(ctx, ep2); err != nil {
+		t.Fatalf("UpsertEpisode 2: %v", err)
+	}
+	if err := st.UpsertEpisode(ctx, ep1); err != nil {
+		t.Fatalf("UpsertEpisode 1: %v", err)
+	}
+	double := &core.MediaFile{Path: "TV/Show/S01E01E02.mkv", Size: 2}
+	if err := st.UpsertMediaFile(ctx, double); err != nil {
+		t.Fatalf("UpsertMediaFile double: %v", err)
+	}
+	if err := st.LinkEpisodeFile(ctx, ep1.ID, double.ID); err != nil {
+		t.Fatalf("LinkEpisodeFile 1: %v", err)
+	}
+	if err := st.LinkEpisodeFile(ctx, ep2.ID, double.ID); err != nil {
+		t.Fatalf("LinkEpisodeFile 2: %v", err)
+	}
+
+	got, err := st.MediaFileTargets(ctx, []int64{movieFile.ID, double.ID, 404})
+	if err != nil {
+		t.Fatalf("MediaFileTargets: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("targets = %+v, want two known files", got)
+	}
+	if target := got[movieFile.ID]; target.MovieID != movie.ID || target.SeriesID != 0 {
+		t.Fatalf("movie target = %+v, want movie %d", target, movie.ID)
+	}
+	target := got[double.ID]
+	if target.SeriesID != series.ID || target.SeriesKind != core.SeriesKindTV || target.MovieID != 0 {
+		t.Fatalf("episode target = %+v, want series %d", target, series.ID)
+	}
+	if target.SeasonNumber != 1 || target.EpisodeNumber != 1 || target.EpisodeID != ep1.ID {
+		t.Fatalf("episode target = %+v, want S01E01 (id %d), not a later row id", target, ep1.ID)
+	}
+}
+
 // A multi-episode file has to come back once per episode it covers: the DLNA
 // browse counts these rows as "playable things under this season", and
 // collapsing them would hide S01E02 from a client entirely (SPEC §7).

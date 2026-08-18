@@ -13,6 +13,7 @@ import { CATALOGUING_POLL_MS } from '../adult';
 import type { SessionUser, SystemStatus } from '../api/types';
 import { session } from '../state/session.svelte';
 import { system } from '../state/system.svelte';
+import { applyInvalidation } from '../state/live';
 import { clearToasts } from '../state/toast.svelte';
 
 interface Call {
@@ -258,6 +259,8 @@ describe('AdultSite actions', () => {
     );
     expect(scene, 'the scene title as a link').toBeTruthy();
     expect(scene!.textContent).toContain('Deep Impact');
+    expect(host!.querySelector('#y2022n3')).not.toBeNull();
+    expect(host!.querySelector('#y2022n5')).not.toBeNull();
     expect(scene!.getAttribute('rel')).toBe('noopener noreferrer');
     // The scene's own site url is metadata, not a destination.
     expect(hrefs().some((href) => href.includes('brazzers.com'))).toBe(false);
@@ -330,6 +333,13 @@ describe('AdultSite for a granted member', () => {
 });
 
 describe('AdultSite scene rows', () => {
+  function rowText(title: string): string {
+    return (
+      [...host!.querySelectorAll('tr')].find((row) => row.textContent?.includes(title))
+        ?.textContent ?? ''
+    );
+  }
+
   function headers(): string[] {
     return [...host!.querySelectorAll('th')].map((th) => th.textContent?.trim() ?? '');
   }
@@ -400,6 +410,63 @@ describe('AdultSite scene rows', () => {
     );
     expect(row, 'the row for the scene with a file').toBeTruthy();
     expect(row!.textContent).toContain('1080p');
+  });
+
+  it('refreshes scene statuses when grabs and imports change the library', async () => {
+    let served = SITE;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        let body: unknown;
+        if (url.endsWith('/adult/sites/7')) body = served;
+        else if (url.includes('/system/status')) body = STATUS;
+        else if (url.includes('/auth/me')) body = user('admin');
+        else if (url.includes('/libraries')) body = { libraries: [] };
+        else throw new Error(`unexpected fetch: ${url}`);
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    );
+    await mountSite();
+
+    expect(rowText('Deep Impact')).toContain('Missing');
+    expect(rowText('Shallow Impact')).toContain('Missing');
+
+    served = {
+      ...SITE,
+      years: SITE.years.map((year) => ({
+        ...year,
+        scenes: year.scenes.map((scene) =>
+          scene.id === 11 ? { ...scene, downloading: true } : scene,
+        ),
+      })),
+    };
+    applyInvalidation('library');
+    await vi.waitFor(() => {
+      if (!rowText('Deep Impact').includes('Downloading')) throw new Error('not downloading');
+    });
+    expect(rowText('Shallow Impact')).toContain('Missing');
+
+    served = {
+      ...served,
+      scene_file_count: 2,
+      years: served.years.map((year) => ({
+        ...year,
+        scenes: year.scenes.map((scene) =>
+          scene.id === 11
+            ? { ...scene, downloading: false, file: SITE.years[0]!.scenes[1]!.file }
+            : scene,
+        ),
+      })),
+    };
+    applyInvalidation('library');
+    await vi.waitFor(() => {
+      if (!rowText('Deep Impact').includes('Downloaded')) throw new Error('not downloaded');
+    });
+    expect(rowText('Shallow Impact')).toContain('Missing');
   });
 });
 

@@ -9,6 +9,7 @@
   import Modal from '../components/Modal.svelte';
   import Skeleton from '../components/Skeleton.svelte';
   import { episodeCode } from '../format';
+  import { libraryItemHref } from '../library';
   import { TONE_DOT, TONE_TEXT, TONE_TINT, type Tone } from '../status';
   import { page } from '../state/page.svelte';
   import { pushToast } from '../state/toast.svelte';
@@ -83,6 +84,16 @@
     const title = entryTitle(entry);
     if (entry.kind === 'movie' || !entry.series_id || title.startsWith(entry.title)) return title;
     return `${entry.title} - ${title}`;
+  }
+
+  function entryHref(entry: CalendarEntry): string | undefined {
+    return libraryItemHref({
+      movie_id: entry.movie_id,
+      series_id: entry.series_id,
+      series_kind: entry.series_kind,
+      season_number: entry.kind === 'episode' ? (entry.season_number ?? 0) : undefined,
+      episode_number: entry.episode_number,
+    });
   }
 
   let month = $state(todayMonth());
@@ -223,14 +234,24 @@
               <div class="flex flex-col gap-1">
                 {#each cellEntries.slice(0, 3) as entry (entry.kind + entry.title + entry.date)}
                   {@const meta = STATUS[entry.status]}
-                  <a
-                    href={entry.kind === 'movie' && entry.movie_id ? `/movies/${entry.movie_id}` : entry.series_id ? `/series/${entry.series_id}` : undefined}
-                    class="flex min-w-0 items-center gap-1.5 rounded-sm px-1.5 py-0.5 text-xs {TONE_TINT[meta.tone]} {TONE_TEXT[meta.tone]}"
-                    title={entryTitle(entry)}
-                    aria-label={entryLabel(entry, meta.label)}>
-                    <span class="min-w-0 truncate">{entryTitle(entry)}</span>
-                    <span class="shrink-0 font-medium">{meta.label}</span>
-                  </a>
+                  {@const href = entryHref(entry)}
+                  {#if href}
+                    <a
+                      {href}
+                      class="flex min-w-0 items-center gap-1.5 rounded-sm px-1.5 py-0.5 text-xs {TONE_TINT[meta.tone]} {TONE_TEXT[meta.tone]}"
+                      title={entryTitle(entry)}
+                      aria-label={entryLabel(entry, meta.label)}>
+                      <span class="min-w-0 truncate">{entryTitle(entry)}</span>
+                      <span class="shrink-0 font-medium">{meta.label}</span>
+                    </a>
+                  {:else}
+                    <span
+                      class="flex min-w-0 items-center gap-1.5 rounded-sm px-1.5 py-0.5 text-xs {TONE_TINT[meta.tone]} {TONE_TEXT[meta.tone]}"
+                      title={entryTitle(entry)}>
+                      <span class="min-w-0 truncate">{entryTitle(entry)}</span>
+                      <span class="shrink-0 font-medium">{meta.label}</span>
+                    </span>
+                  {/if}
                 {/each}
                 {#if cellEntries.length > 3}
                   <span class="px-1.5 text-xs text-ink-muted">{tp('route.calendar.more', cellEntries.length - 3)}</span>
@@ -251,10 +272,15 @@
           <ul class="overflow-hidden rounded-md border border-border bg-surface">
             {#each dayEntries as entry (entry.kind + entry.title + entry.date)}
               {@const meta = STATUS[entry.status]}
+              {@const href = entryHref(entry)}
               <li class="flex items-center gap-3 border-b border-border px-3 py-3 last:border-b-0">
                 <span class="size-2 shrink-0 rounded-full {TONE_DOT[meta.tone]}" title={meta.label}></span>
                 <Badge tone={entry.kind === 'movie' ? 'neutral' : 'info'}>{entry.kind === 'movie' ? t('route.calendar.movie') : t('route.calendar.episode')}</Badge>
-                <a href={entry.kind === 'movie' && entry.movie_id ? `/movies/${entry.movie_id}` : entry.series_id ? `/series/${entry.series_id}` : undefined} class="min-w-0 flex-1 truncate font-medium text-ink hover:text-accent-text" title={agendaTitle(entry)}>{agendaTitle(entry)}</a>
+                {#if href}
+                  <a {href} class="min-w-0 flex-1 truncate font-medium text-ink hover:text-accent-text" title={agendaTitle(entry)}>{agendaTitle(entry)}</a>
+                {:else}
+                  <span class="min-w-0 flex-1 truncate font-medium text-ink" title={agendaTitle(entry)}>{agendaTitle(entry)}</span>
+                {/if}
                 <span class="text-sm {TONE_TEXT[meta.tone]}">{meta.label}</span>
               </li>
             {/each}

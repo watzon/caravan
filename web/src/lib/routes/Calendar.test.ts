@@ -31,9 +31,10 @@ beforeEach(() => {
         { kind: 'movie', date, title: 'On Disk', movie_id: 1, monitored: true, has_file: true, status: 'downloaded' },
         { kind: 'movie', date, title: 'In Progress', movie_id: 2, monitored: true, has_file: false, status: 'downloading' },
         { kind: 'movie', date, title: 'Still Missing', movie_id: 3, monitored: true, has_file: false, status: 'missing' },
-        { kind: 'episode', date: tomorrow, title: 'Future', series_id: 4, season_number: 1, episode_number: 2, episode_title: 'Future', monitored: true, has_file: false, status: 'unaired' },
-        { kind: 'episode', date: tomorrow, title: 'Chainsmoker Cat', series_id: 5, season_number: 1, episode_number: 6, episode_title: 'Episode 6', monitored: true, has_file: false, status: 'unaired' },
-        { kind: 'episode', date: tomorrow, title: 'Series Name', series_id: 6, episode_number: 4, episode_title: 'Episode 4', monitored: true, has_file: false, status: 'unaired' },
+        { kind: 'episode', date: tomorrow, title: 'Future', series_id: 4, episode_id: 40, season_number: 1, episode_number: 2, episode_title: 'Future', monitored: true, has_file: false, status: 'unaired' },
+        { kind: 'episode', date: tomorrow, title: 'Chainsmoker Cat', series_id: 5, episode_id: 56, season_number: 1, episode_number: 6, episode_title: 'Episode 6', monitored: true, has_file: false, status: 'unaired' },
+        { kind: 'episode', date: tomorrow, title: 'Series Name', series_id: 6, episode_id: 64, episode_number: 4, episode_title: 'Episode 4', monitored: true, has_file: false, status: 'unaired' },
+        { kind: 'episode', date, title: 'Vixen', series_id: 9, series_kind: 'adult', episode_id: 24, season_number: 2026, episode_number: 1, episode_title: 'A Scene', monitored: true, has_file: false, status: 'missing' },
       ] });
     }
     throw new Error(`unexpected fetch: ${String(input)}`);
@@ -129,9 +130,9 @@ describe('Calendar', () => {
     flushSync();
 
     const agenda = host.querySelector('[aria-label="Calendar agenda"]');
-    expect(agenda?.querySelector('a[href="/series/5"]')?.textContent).toBe('Chainsmoker Cat S01E06');
-    expect(agenda?.querySelector('a[href="/series/5"]')?.getAttribute('title')).toBe('Chainsmoker Cat S01E06');
-    const specialEntries = Array.from(agenda?.querySelectorAll('a[href="/series/6"]') ?? []);
+    expect(agenda?.querySelector('a[href="/series/5#s1e6"]')?.textContent).toBe('Chainsmoker Cat S01E06');
+    expect(agenda?.querySelector('a[href="/series/5#s1e6"]')?.getAttribute('title')).toBe('Chainsmoker Cat S01E06');
+    const specialEntries = Array.from(agenda?.querySelectorAll('a[href="/series/6#s0e4"]') ?? []);
     expect(specialEntries).toHaveLength(1);
     expect(specialEntries[0]?.textContent).toBe('Series Name S00E04');
     expect(specialEntries[0]?.getAttribute('title')).toBe('Series Name S00E04');
@@ -148,5 +149,24 @@ describe('Calendar', () => {
     expect(today?.querySelector('[aria-current="date"]')?.className).toContain('relative');
     expect(today?.className).not.toContain('ring-');
     expect(today?.querySelector('p')?.className).toContain('rounded-full');
+  });
+
+  it('links movies, episodes and adult scenes to their library pages', async () => {
+    app = mount(Calendar, { target: host });
+    await settle();
+    topbar = mount(TopBar, { target: host, props: { title: 'Calendar' } });
+    flushSync();
+
+    expect(host.querySelector('a[href="/movies/1"]')).not.toBeNull();
+    expect(host.querySelector('a[href="/series/4#s1e2"]')).not.toBeNull();
+
+    const agendaButton = Array.from(host.querySelectorAll('button')).find((button) => button.textContent === 'Agenda');
+    expect(agendaButton).toBeDefined();
+    agendaButton!.click();
+    flushSync();
+
+    expect(host.querySelector('a[href="/movies/2"]')).not.toBeNull();
+    expect(host.querySelector('a[href="/series/5#s1e6"]')).not.toBeNull();
+    expect(host.querySelector('a[href="/adult/sites/9#y2026n1"]')?.textContent).toContain('Vixen');
   });
 });

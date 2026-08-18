@@ -3,6 +3,7 @@
   import { onMount } from 'svelte';
   import type { Conversion, ConversionStage } from '../api/types';
   import { useI18n } from '../i18n.svelte';
+  import { libraryItemHref } from '../library';
   import { conversionStateMeta, strategyLabel } from '../conversion';
   import { UNKNOWN, formatAge, formatDate, formatDuration } from '../format';
   import Badge from './Badge.svelte';
@@ -46,6 +47,14 @@
   let now = $state(Date.now());
   let meta = $derived(conversionStateMeta(conversion.status));
   let filename = $derived(conversion.source_path.split('/').pop() || UNKNOWN);
+  let itemHref = $derived(libraryItemHref(conversion));
+  let itemLabel = $derived(
+    conversion.movie_id
+      ? t('component.conversionDetail.openMovie')
+      : conversion.series_kind === 'adult'
+        ? t('component.conversionDetail.openSite')
+        : t('component.conversionDetail.openSeries'),
+  );
   let stageLabel = $derived(conversion.stage ? STAGE_LABELS[conversion.stage] : null);
   let showProgress = $derived(
     conversion.progress !== undefined && (conversion.duration_seconds ?? 0) > 0,
@@ -146,6 +155,13 @@
           title={conversion.source_path || UNKNOWN}>
           {conversion.source_path || UNKNOWN}
         </p>
+        {#if itemHref}
+          <a
+            href={itemHref}
+            class="mt-2 inline-flex text-sm font-medium text-accent-text hover:underline">
+            {itemLabel}
+          </a>
+        {/if}
       </div>
       <Button variant="ghost" size="sm" title={t('component.conversionDetail.close')} onclick={onclose}>
         <Icon name="x" size={16} />

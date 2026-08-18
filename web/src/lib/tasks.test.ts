@@ -174,7 +174,7 @@ describe('footerStack', () => {
     });
     expect(rows.map((row) => ({ label: row.label, href: row.href }))).toEqual([
       { label: 'Searching Arrival', href: '/movies/7' },
-      { label: 'Queuing Arrival.2016.1080p.BluRay-GROUP', href: '/queue' },
+      { label: 'Waiting to download Arrival.2016.1080p.BluRay-GROUP', href: '/queue' },
       { label: 'Converting 2', href: '/convert' },
     ]);
   });
@@ -185,7 +185,7 @@ describe('footerStack', () => {
       jobs: [],
       downloads: [download(), download({ id: 'hash-b', name: 'Other' })],
     });
-    expect(rows).toMatchObject([{ label: 'Queuing 2 downloads', href: '/queue' }]);
+    expect(rows).toMatchObject([{ label: '2 downloads waiting', href: '/queue' }]);
   });
 
   it('ignores a download that has already started', () => {

@@ -15,6 +15,28 @@ import { tasks } from './tasks.svelte';
 
 const STREAM = '/api/v1/events/stream';
 
+export type InvalidationResource = 'library' | 'requests' | 'downloads' | 'jobs';
+
+const invalidationSubscribers = new Map<InvalidationResource, Set<() => void>>();
+
+/** Run callback whenever the live stream says this REST snapshot changed. */
+export function subscribeInvalidation(
+  resource: InvalidationResource,
+  callback: () => void,
+): () => void {
+  const subscribers = invalidationSubscribers.get(resource) ?? new Set<() => void>();
+  subscribers.add(callback);
+  invalidationSubscribers.set(resource, subscribers);
+  return () => {
+    subscribers.delete(callback);
+    if (subscribers.size === 0) invalidationSubscribers.delete(resource);
+  };
+}
+
+function notifyInvalidation(resource: InvalidationResource): void {
+  for (const callback of [...(invalidationSubscribers.get(resource) ?? [])]) callback();
+}
+
 export function applyInvalidation(resource: string): void {
   switch (resource) {
     case 'library':
@@ -24,25 +46,33 @@ export function applyInvalidation(resource: string): void {
       // created in ANOTHER browser has to reach this one's navigation, not just
       // its badges. `library` is the resource every one of those writes emits.
       void session.refresh();
+      notifyInvalidation(resource);
       return;
     case 'requests':
       void requests.refresh();
+      notifyInvalidation(resource);
       return;
     case 'downloads':
       void downloads.refresh();
+      notifyInvalidation(resource);
       return;
     case 'jobs':
       void tasks.refresh();
+      notifyInvalidation(resource);
       return;
   }
 }
 
-/** Re-read every sidebar store. Used when a tab becomes visible again. */
+/** Re-read every snapshot. Used when a tab becomes visible again. */
 export function refreshSidebarStores(): void {
   void system.refresh();
   void requests.refresh();
   void downloads.refresh();
   void tasks.refresh();
+  notifyInvalidation('library');
+  notifyInvalidation('requests');
+  notifyInvalidation('downloads');
+  notifyInvalidation('jobs');
 }
 
 export function startLiveUpdates(): () => void {

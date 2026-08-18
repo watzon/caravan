@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   LIBRARY_KIND_ORDER,
+  downloadItemHref,
+  isLibraryItemTarget,
+  libraryItemAnchor,
+  libraryItemHref,
+  parseLibraryItemHash,
   libraryKindAccepts,
   libraryPath,
   sessionLibraryByID,
@@ -122,5 +127,53 @@ describe('shelfBack', () => {
     });
     expect(sessionLibraryByID(session, 3)?.slug).toBe('anime');
     expect(sessionLibraryBySlug(session, 'movies')?.id).toBe(1);
+  });
+});
+
+describe('libraryItemHref', () => {
+  it('routes movies, television, anime and adult sites to their detail pages', () => {
+    expect(libraryItemHref({ movie_id: 7 })).toBe('/movies/7');
+    expect(libraryItemHref({ series_id: 3 })).toBe('/series/3');
+    expect(libraryItemHref({ series_id: 3, series_kind: 'tv' })).toBe('/series/3');
+    expect(libraryItemHref({ series_id: 4, series_kind: 'anime' })).toBe('/series/4');
+    expect(libraryItemHref({ series_id: 9, series_kind: 'adult' })).toBe('/adult/sites/9');
+  });
+
+  it('hashes a single episode or scene by season and number, never by row id', () => {
+    expect(libraryItemHref({ series_id: 3, season_number: 1, episode_number: 1 })).toBe(
+      '/series/3#s1e1',
+    );
+    expect(
+      libraryItemHref({ series_id: 9, series_kind: 'adult', season_number: 2026, episode_number: 24 }),
+    ).toBe('/adult/sites/9#y2026n24');
+    expect(libraryItemAnchor({ season_number: 1, episode_number: 1 })).toBe('s1e1');
+    expect(libraryItemAnchor({ series_kind: 'adult', season_number: 2026, episode_number: 24 })).toBe(
+      'y2026n24',
+    );
+    expect(libraryItemHref({ series_id: 3, episode_number: 15 })).toBe('/series/3');
+    expect(parseLibraryItemHash('#s1e1')).toEqual({ adult: false, season: 1, episode: 1 });
+    expect(parseLibraryItemHash('#y2026n24')).toEqual({ adult: true, season: 2026, episode: 24 });
+    expect(isLibraryItemTarget('#s1e1', { season_number: 1, episode_number: 1 })).toBe(true);
+    expect(isLibraryItemTarget('#s1e1', { season_number: 1, episode_number: 15 })).toBe(false);
+  });
+
+  it('treats a missing or zero id as unmatched', () => {
+    expect(libraryItemHref({})).toBeUndefined();
+    expect(libraryItemHref({ movie_id: 0, series_id: 0 })).toBeUndefined();
+  });
+
+  it('prefers the movie when both ids are present', () => {
+    expect(libraryItemHref({ movie_id: 7, series_id: 3 })).toBe('/movies/7');
+  });
+});
+
+describe('downloadItemHref', () => {
+  it('scrolls only when the grab named a season and episode', () => {
+    expect(
+      downloadItemHref({ series_id: 3, series_kind: 'tv', season_number: 1, episode_number: 1 }),
+    ).toBe('/series/3#s1e1');
+    expect(downloadItemHref({ series_id: 3, series_kind: 'tv' })).toBe('/series/3');
+    expect(downloadItemHref({ movie_id: 7 })).toBe('/movies/7');
+    expect(downloadItemHref({})).toBeUndefined();
   });
 });

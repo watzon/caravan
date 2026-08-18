@@ -37,10 +37,17 @@ func WithConverter(c Converter) Option {
 
 // conversionJSON is one row of the convert queue.
 type conversionJSON struct {
-	ID          int64  `json:"id"`
-	MediaFileID int64  `json:"media_file_id"`
-	SourcePath  string `json:"source_path"`
-	OutputPath  string `json:"output_path"`
+	ID          int64 `json:"id"`
+	MediaFileID int64 `json:"media_file_id"`
+	// Library item this file belongs to, when the file is still in the library.
+	// A conversion outlives its file, so these stay empty after a delete.
+	MovieID       int64  `json:"movie_id,omitempty"`
+	SeriesID      int64  `json:"series_id,omitempty"`
+	SeriesKind    string `json:"series_kind,omitempty"`
+	SeasonNumber  int    `json:"season_number,omitempty"`
+	EpisodeNumber int    `json:"episode_number,omitempty"`
+	SourcePath    string `json:"source_path"`
+	OutputPath    string `json:"output_path"`
 	// Strategy is "", "none", "remux" or "transcode" — empty until the file
 	// has been probed, because the choice is the probe's, not the queue's.
 	Strategy string `json:"strategy"`
@@ -135,9 +142,26 @@ func (s *server) handleListConversions(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreError(w, "list conversions", err)
 		return
 	}
+	fileIDs := make([]int64, 0, len(rows))
+	for _, c := range rows {
+		fileIDs = append(fileIDs, c.MediaFileID)
+	}
+	targets, err := s.st.MediaFileTargets(r.Context(), fileIDs)
+	if err != nil {
+		s.writeStoreError(w, "resolve conversion targets", err)
+		return
+	}
 	conversions := make([]conversionJSON, 0, len(rows))
 	for _, c := range rows {
-		conversions = append(conversions, s.conversionDTOWithProgress(c))
+		dto := s.conversionDTOWithProgress(c)
+		if target, ok := targets[c.MediaFileID]; ok {
+			dto.MovieID = target.MovieID
+			dto.SeriesID = target.SeriesID
+			dto.SeriesKind = target.SeriesKind
+			dto.SeasonNumber = target.SeasonNumber
+			dto.EpisodeNumber = target.EpisodeNumber
+		}
+		conversions = append(conversions, dto)
 	}
 
 	candidates, err := s.st.ListConversionCandidates(r.Context())
@@ -160,6 +184,10 @@ func (s *server) handleListConversions(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		file := mediaFileDTO(candidate.File, profile)
+		file.SeriesID = candidate.SeriesID
+		file.SeriesKind = candidate.SeriesKind
+		file.SeasonNumber = candidate.SeasonNumber
+		file.EpisodeNumber = candidate.EpisodeNumber
 		if file.Compatibility.Verdict == core.TVCompatNeedsRemux ||
 			file.Compatibility.Verdict == core.TVCompatIncompatible {
 			pending = append(pending, file)

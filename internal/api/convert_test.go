@@ -80,6 +80,10 @@ func TestConvertQueueRoundTrip(t *testing.T) {
 		empty.Pending[0].Compatibility.Verdict != core.TVCompatNeedsRemux {
 		t.Fatalf("pending[0] = %+v, want newer remux file %d", empty.Pending[0], remux.ID)
 	}
+	if empty.Pending[0].MovieID != remux.MovieID || empty.Pending[1].MovieID != file.MovieID {
+		t.Fatalf("pending movie ids = %d, %d, want %d, %d",
+			empty.Pending[0].MovieID, empty.Pending[1].MovieID, remux.MovieID, file.MovieID)
+	}
 	if empty.Pending[1].ID != file.ID ||
 		empty.Pending[1].Compatibility.Verdict != core.TVCompatIncompatible {
 		t.Fatalf("pending[1] = %+v, want older incompatible file %d", empty.Pending[1], file.ID)
@@ -136,6 +140,47 @@ func TestConvertQueueRoundTrip(t *testing.T) {
 	}
 	if len(listed.Pending) != 1 || listed.Pending[0].ID != remux.ID {
 		t.Fatalf("pending after queue = %+v, want only remux file %d", listed.Pending, remux.ID)
+	}
+	if listed.Conversions[0].MovieID != file.MovieID {
+		t.Fatalf("queued conversion movie_id = %d, want %d", listed.Conversions[0].MovieID, file.MovieID)
+	}
+}
+
+func TestConvertQueueNamesEpisodeTargets(t *testing.T) {
+	h, st, _ := newTestServer(t, WithConverter(stubConverter{available: true}))
+	ctx := context.Background()
+	series := &core.Series{TMDBID: 3, Title: "Severance", SortTitle: "severance"}
+	if err := st.UpsertSeries(ctx, series); err != nil {
+		t.Fatalf("UpsertSeries: %v", err)
+	}
+	episode := &core.Episode{SeriesID: series.ID, SeasonNumber: 1, EpisodeNumber: 2, Title: "Half Loop"}
+	if err := st.UpsertEpisode(ctx, episode); err != nil {
+		t.Fatalf("UpsertEpisode: %v", err)
+	}
+	file := core.MediaFile{
+		Path: "library/TV/Severance (2022)/Season 01/S01E02.mkv", Size: 1234,
+		Codec: "x265", Audio: "DTS", Quality: core.Quality2160p,
+	}
+	if err := st.UpsertMediaFile(ctx, &file); err != nil {
+		t.Fatalf("UpsertMediaFile: %v", err)
+	}
+	if err := st.LinkEpisodeFile(ctx, episode.ID, file.ID); err != nil {
+		t.Fatalf("LinkEpisodeFile: %v", err)
+	}
+
+	rec := do(t, h, "GET", "/api/v1/convert", "")
+	wantStatus(t, rec, http.StatusOK)
+	var body struct {
+		Pending []mediaFileJSON `json:"pending"`
+	}
+	decodeBody(t, rec, &body)
+	if len(body.Pending) != 1 {
+		t.Fatalf("pending = %+v, want the episode file", body.Pending)
+	}
+	got := body.Pending[0]
+	if got.SeriesID != series.ID || got.SeriesKind != core.SeriesKindTV ||
+		got.SeasonNumber != 1 || got.EpisodeNumber != 2 || got.MovieID != 0 {
+		t.Fatalf("pending target = %+v, want series %d S01E02", got, series.ID)
 	}
 }
 

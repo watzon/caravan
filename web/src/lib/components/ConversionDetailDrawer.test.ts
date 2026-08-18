@@ -58,6 +58,11 @@ function buttonWith(text: string): HTMLButtonElement | undefined {
 }
 
 describe('ConversionDetailDrawer', () => {
+  it('offers a library link when the file still belongs to an item', () => {
+    render({ ...RUNNING, movie_id: 7 });
+    expect(host.querySelector('a[href="/movies/7"]')?.textContent).toBe('Open movie');
+  });
+
   it('shows live ffmpeg progress, timing, and process details', () => {
     render(RUNNING);
 

@@ -10,6 +10,7 @@
    * — repair, unpack — that a torrent never enters. Showing a Usenet download a
    * Limits tab the embedded engine answers 400 for is the bug this split fixes.
    */
+  import { downloadItemHref } from '../library';
   import { api, ApiError, errorText } from '../api/client';
   import type { DownloadInsight, DownloadStatus } from '../api/types';
   import { UNKNOWN, formatBytes, formatDuration, formatRate, truncateMiddle } from '../format';
@@ -108,6 +109,7 @@
   });
   let meta = $derived(downloadStateMeta(download.state));
   let paused = $derived(download.state === 'paused');
+  let seeding = $derived(download.state === 'seeding');
   let retryable = $derived(canRetryDownload(download) && onretry !== undefined);
   // A server older than the protocol field only ever ran a torrent engine, so
   // its downloads read as torrents — which is exactly what they were.
@@ -228,6 +230,15 @@
   }
 
   const { t, tp } = useI18n();
+
+  let itemHref = $derived(downloadItemHref(download));
+  let itemLabel = $derived(
+    download.movie_id
+      ? t('component.queueDetailDrawer.openMovie')
+      : download.series_kind === 'adult'
+        ? t('component.queueDetailDrawer.openSite')
+        : t('component.queueDetailDrawer.openSeries'),
+  );
 </script>
 
 <svelte:window {onkeydown} />
@@ -261,6 +272,13 @@
         <p class="mt-1 truncate font-mono text-xs text-ink-muted" title={download.name || UNKNOWN}>
           {download.name || UNKNOWN}
         </p>
+        {#if itemHref}
+          <a
+            href={itemHref}
+            class="mt-2 inline-flex text-sm font-medium text-accent-text hover:underline">
+            {itemLabel}
+          </a>
+        {/if}
       </div>
       <button
         type="button"
@@ -282,9 +300,15 @@
               {formatBytes(download.bytes_done)} of {download.size > 0 ? formatBytes(download.size) : UNKNOWN}
             </p>
           </div>
-          <p class="font-mono text-sm text-ink-secondary">ETA {formatDuration(download.eta_seconds)}</p>
+          {#if seeding}
+            <p class="font-mono text-sm text-ink-secondary" title={t('component.queueDetailDrawer.ratio')}>
+              {t('component.queueDetailDrawer.ratio')} {download.ratio.toFixed(2)}
+            </p>
+          {:else}
+            <p class="font-mono text-sm text-ink-secondary">ETA {formatDuration(download.eta_seconds)}</p>
+          {/if}
         </div>
-        <ProgressBar value={download.progress} tone="info" label="{download.name || UNKNOWN} progress" />
+        <ProgressBar value={download.progress} tone={meta.tone} label="{download.name || UNKNOWN} progress" />
         <!-- A Usenet download has no upload half, no share ratio and no piece
              availability. Showing those as 0.00 would read as a torrent that is
              seeding nothing rather than as a protocol that has no such thing. -->

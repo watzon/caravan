@@ -7,6 +7,7 @@
  * draw IS that module.
  */
 
+import { tick } from 'svelte';
 import type { LibraryKind, SessionLibrary, SessionUser } from './api/types';
 
 /**
@@ -115,4 +116,121 @@ export function libraryKindAccepts(libKind: string, itemKind: string): boolean {
  */
 export function sessionLibraryIDs(user: SessionUser | null, kind: LibraryKind): number[] {
   return (user?.libraries ?? []).filter((l) => l.kind === kind).map((l) => l.id);
+}
+
+/**
+ * The library item a shared surface (Wanted, Calendar, Queue, Convert) can
+ * name. Zero and missing ids are the same: this download or file is not
+ * matched to that kind of row.
+ */
+export interface LibraryItemRef {
+  movie_id?: number;
+  series_id?: number;
+  /** `tv`, `anime` or `adult`. Missing is treated as television. */
+  series_kind?: string;
+  season_number?: number;
+  episode_number?: number;
+}
+
+export interface LibraryItemOrdinal {
+  adult: boolean;
+  season: number;
+  episode: number;
+}
+
+/**
+ * Element id a series episode or adult scene row wears so a hash can find it.
+ *
+ * Television uses season and episode numbers (`s1e1`), not the episode row
+ * id. A row id of 15 is not S01E15, and hashing it sent people to the wrong
+ * episode. Adult uses the release year and scene number (`y2026n24`).
+ */
+export function libraryItemAnchor(item: {
+  series_kind?: string;
+  season_number: number;
+  episode_number: number;
+}): string {
+  if (item.series_kind === 'adult') return `y${item.season_number}n${item.episode_number}`;
+  return `s${item.season_number}e${item.episode_number}`;
+}
+
+/** Parse a library-item hash, or null when it is not one. */
+export function parseLibraryItemHash(hash: string): LibraryItemOrdinal | null {
+  const raw = hash.startsWith('#') ? hash.slice(1) : hash;
+  const adult = /^y(\d+)n(\d+)$/i.exec(raw);
+  if (adult) {
+    return { adult: true, season: Number(adult[1]), episode: Number(adult[2]) };
+  }
+  const tv = /^s(\d+)e(\d+)$/i.exec(raw);
+  if (tv) {
+    return { adult: false, season: Number(tv[1]), episode: Number(tv[2]) };
+  }
+  return null;
+}
+
+export function isLibraryItemTarget(
+  hash: string,
+  item: { series_kind?: string; season_number: number; episode_number: number },
+): boolean {
+  const target = parseLibraryItemHash(hash);
+  if (!target) return false;
+  const adult = item.series_kind === 'adult';
+  return target.adult === adult && target.season === item.season_number && target.episode === item.episode_number;
+}
+
+/** Row treatment when this episode or scene is the hash target. */
+export const LIBRARY_ITEM_TARGET_CLASS = 'bg-accent-tint ring-2 ring-inset ring-accent';
+
+/**
+ * The detail URL for a library item. A movie goes to `/movies/:id`. A
+ * television or anime series goes to `/series/:id`. An adult site goes to
+ * `/adult/sites/:id`. An episode or scene hash is appended when the caller
+ * named the season and episode numbers, so the detail page can scroll to
+ * that row.
+ */
+export function libraryItemHref(item: LibraryItemRef): string | undefined {
+  const movieID = item.movie_id ?? 0;
+  if (movieID > 0) return `/movies/${movieID}`;
+
+  const seriesID = item.series_id ?? 0;
+  if (seriesID <= 0) return undefined;
+
+  const adult = item.series_kind === 'adult';
+  const base = adult ? `/adult/sites/${seriesID}` : `/series/${seriesID}`;
+  const season = item.season_number;
+  const episode = item.episode_number;
+  if (season === undefined || episode === undefined || season < 0 || episode < 0) return base;
+  return `${base}#${libraryItemAnchor({ series_kind: item.series_kind, season_number: season, episode_number: episode })}`;
+}
+
+/**
+ * Queue rows carry every episode a grab covers. A single-episode grab can
+ * scroll to that row when the server named its season and episode numbers.
+ * A season pack opens the series or site instead of guessing.
+ */
+export function downloadItemHref(item: {
+  movie_id?: number;
+  series_id?: number;
+  series_kind?: string;
+  season_number?: number;
+  episode_number?: number;
+}): string | undefined {
+  return libraryItemHref({
+    movie_id: item.movie_id,
+    series_id: item.series_id,
+    series_kind: item.series_kind,
+    season_number: item.season_number,
+    episode_number: item.episode_number,
+  });
+}
+
+/**
+ * Scroll to a hash target after the destination page has rendered. The router
+ * tries on navigate, but a series or site page loads its rows asynchronously,
+ * so the element is not there yet.
+ */
+export async function revealHashTarget(id: string): Promise<void> {
+  if (!id) return;
+  await tick();
+  document.getElementById(id)?.scrollIntoView?.({ block: 'center' });
 }

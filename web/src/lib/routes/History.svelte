@@ -156,7 +156,7 @@
   });
 
 </script>
-<div class="flex max-w-4xl flex-col gap-6">
+<div class="flex flex-col gap-6">
   <div class="flex items-center gap-2">
     <div class="flex-1">
       <PageTabs

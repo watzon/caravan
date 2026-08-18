@@ -88,7 +88,8 @@ func TestCalendarMergesEntriesAndAssignsStatuses(t *testing.T) {
 	assertCalendarEntry(t, body.Entries, "movie", "Movie Future", "unaired", false)
 
 	entry := findCalendarEntry(t, body.Entries, "episode", "Downloaded")
-	if entry.SeriesID != series.ID || entry.MovieID != 0 || entry.SeasonNumber != 1 || entry.EpisodeNumber != 1 ||
+	if entry.SeriesID != series.ID || entry.MovieID != 0 || entry.EpisodeID != downloaded.ID ||
+		entry.SeriesKind != core.SeriesKindTV || entry.SeasonNumber != 1 || entry.EpisodeNumber != 1 ||
 		entry.Title != "Calendar Show" || entry.EpisodeTitle != "Downloaded" || entry.Date != downloaded.AirDate.Format(calendarDateFormat) {
 		t.Fatalf("episode identity = %+v, want series and episode identifiers", entry)
 	}

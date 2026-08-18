@@ -493,10 +493,14 @@ describe('grab', () => {
     expect(call.body).toEqual({ release_id: 55 });
   });
 
-  it('POSTs a series grab with the episodes it should satisfy', async () => {
+  it('POSTs a series grab with its exact scope in the query', async () => {
     stubFetch(null, 202);
-    await api.grabForSeries(9, { release_id: 55, season: 2, episode_ids: [11, 12] });
-    expect(only().body).toEqual({ release_id: 55, season: 2, episode_ids: [11, 12] });
+    await api.grabForSeries(9, { release_id: 55, season: 2, episode: 4 });
+    expect(only()).toEqual({
+      url: '/api/v1/library/series/9/grab?season=2&episode=4',
+      method: 'POST',
+      body: { release_id: 55 },
+    });
   });
 });
 

@@ -1,7 +1,7 @@
 /**
- * Queue filtering: the default view hides finished work — completed imports
- * and torrents that finished downloading and sit paused — while Done and All
- * stay one click away.
+ * Queue filtering: Active is the acquiring queue, Seeding is the later
+ * torrent upload stage, and Done hides finished work — completed imports
+ * and torrents that finished downloading and sit paused.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
@@ -49,6 +49,8 @@ const QUEUE: DownloadStatus[] = [
     name: 'seeding-away',
     state: 'seeding',
     progress: 1,
+    up_rate: 50_000,
+    ratio: 1.5,
     created_at: '2026-01-03T00:00:00Z',
   }),
   download({
@@ -137,9 +139,53 @@ function pill(label: string): HTMLButtonElement {
 }
 
 describe('Queue filtering', () => {
-  it('hides finished items by default, including paused finished torrents', async () => {
+  it('hides finished items and seeders by default', async () => {
     await mountQueue();
-    expect(rowNames()).toEqual(['paused-mid-download', 'seeding-away', 'still-downloading']);
+    expect(rowNames()).toEqual(['paused-mid-download', 'still-downloading']);
+  });
+
+  it('keeps seeding torrents on their own tab', async () => {
+    await mountQueue();
+    pill('Seeding').click();
+    flushSync();
+    expect(rowNames()).toEqual(['seeding-away']);
+    expect(host.querySelector('[title="Pause seeding"]')).not.toBeNull();
+  });
+
+  it('shows upload rate and ratio on seeding rows, not a download ETA', async () => {
+    await mountQueue();
+    pill('Seeding').click();
+    flushSync();
+
+    const row = host.querySelector('li');
+    expect(row?.textContent).toContain('↑');
+    expect(row?.textContent).toContain('ratio 1.50');
+    expect(row?.textContent).not.toContain('ETA');
+    expect(row?.textContent).not.toContain('↓');
+    expect(row?.textContent).not.toContain('Download complete');
+  });
+
+  it('points the empty Active view at Seeding when only seeders remain', async () => {
+    queue = [
+      download({
+        name: 'seeding-away',
+        state: 'seeding',
+        progress: 1,
+        created_at: '2026-01-03T00:00:00Z',
+      }),
+    ];
+    await mountQueue();
+
+    expect(host.textContent).toContain('Nothing is downloading');
+    expect(host.textContent).toContain('1 torrent is seeding');
+
+    const showSeeding = [...host.querySelectorAll('button')].find((button) =>
+      button.textContent?.trim().startsWith('Show seeding'),
+    );
+    expect(showSeeding).toBeDefined();
+    showSeeding!.click();
+    flushSync();
+    expect(rowNames()).toEqual(['seeding-away']);
   });
 
   it('shows the finished bucket under Done', async () => {
@@ -234,6 +280,36 @@ describe('Queue detail drawer', () => {
     flushSync();
 
     expect(host.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('links a matched download to its library item from the row and the drawer', async () => {
+    queue = [
+      download({
+        name: 'Arrival.2016.1080p',
+        movie_id: 7,
+      }),
+      download({
+        name: 'Severance.S01E02',
+        series_id: 3,
+        series_kind: 'tv',
+        season_number: 1,
+        episode_number: 2,
+      }),
+    ];
+    await mountQueue();
+
+    expect(host.querySelector('a[href="/movies/7"]')?.textContent).toContain('Arrival.2016.1080p');
+    expect(host.querySelector('a[href="/series/3#s1e2"]')?.textContent).toContain(
+      'Severance.S01E02',
+    );
+
+    const open = [...host.querySelectorAll('button')].find((button) =>
+      button.getAttribute('aria-label')?.startsWith('Open details for Arrival.2016.1080p'),
+    );
+    open!.click();
+    flushSync();
+
+    expect(host.querySelector('[role="dialog"] a[href="/movies/7"]')?.textContent).toBe('Open movie');
   });
 });
 

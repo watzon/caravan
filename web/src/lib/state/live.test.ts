@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { applyInvalidation, refreshSidebarStores, startLiveUpdates } from './live';
+import {
+  applyInvalidation,
+  refreshSidebarStores,
+  startLiveUpdates,
+  subscribeInvalidation,
+} from './live';
 
 beforeEach(() => {
   vi.stubGlobal(
@@ -87,6 +92,18 @@ describe('applyInvalidation', () => {
   it('ignores an unknown resource', () => {
     applyInvalidation('nope');
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('notifies and removes resource subscribers', () => {
+    const listener = vi.fn();
+    const stop = subscribeInvalidation('library', listener);
+
+    applyInvalidation('library');
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    stop();
+    applyInvalidation('library');
+    expect(listener).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -178,5 +195,15 @@ describe('refreshSidebarStores', () => {
     expect(urls.some((url) => url.includes('/requests'))).toBe(true);
     expect(urls.some((url) => url.includes('/downloads'))).toBe(true);
     expect(urls.some((url) => url.includes('/jobs'))).toBe(true);
+  });
+
+  it('refreshes open screens after visibility recovery', () => {
+    const listener = vi.fn();
+    const stop = subscribeInvalidation('library', listener);
+
+    refreshSidebarStores();
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    stop();
   });
 });

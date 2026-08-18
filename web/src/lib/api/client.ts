@@ -1049,8 +1049,14 @@ export const api = {
   grabForMovie: (id: number, body: GrabRequest) =>
     request<void>(endpoints.movieGrab(id), { method: 'POST', body }),
 
-  grabForSeries: (id: number, body: GrabRequest) =>
-    request<void>(endpoints.seriesGrab(id), { method: 'POST', body }),
+  grabForSeries: (id: number, requestBody: GrabRequest) =>
+    request<void>(
+      withQuery(endpoints.seriesGrab(id), {
+        season: requestBody.season,
+        episode: requestBody.episode,
+      }),
+      { method: 'POST', body: { release_id: requestBody.release_id } },
+    ),
 
   listDownloadsPage: (limit = 100, cursor?: string, signal?: AbortSignal) =>
     request<DownloadPage>(endpoints.downloads(), { query: { limit, cursor }, signal }).then((payload) => ({

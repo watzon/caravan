@@ -8,6 +8,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import SeriesDetail from './SeriesDetail.svelte';
 import { tasks } from '../state/tasks.svelte';
 import { session } from '../state/session.svelte';
+import { navigate } from '../router.svelte';
 import { clearToasts, toasts } from '../state/toast.svelte';
 
 const SERIES = {
@@ -177,6 +178,7 @@ afterEach(() => {
   if (app) unmount(app);
   app = undefined;
   host.remove();
+  navigate('/');
   clearToasts();
   tasks.stopSoon();
   session.forget();
@@ -276,6 +278,13 @@ describe('SeriesDetail season inventory', () => {
     );
     expect(headers[0]).toContain('Season 01 2 of 2 on disk');
     expect(headers[1]).toContain('Season 02 1 of 2 on disk');
+    expect(host.querySelector('#s1e1')).not.toBeNull();
+    expect(host.querySelector('#s1e2')).not.toBeNull();
+
+    navigate('/series/3#s1e2');
+    flushSync();
+    expect(host.querySelector('#s1e2')?.className).toContain('ring-accent');
+    expect(host.querySelector('#s1e1')?.className).not.toContain('ring-accent');
 
     const rows = [...host.querySelectorAll('tbody tr')];
     const missingFileRow = rows.find((row) => row.textContent?.includes('No file'));

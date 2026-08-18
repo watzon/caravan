@@ -30,13 +30,16 @@
     downloadPhaseLabel,
     downloadStateMeta,
     engineLabel,
+    isActiveDownload,
     isFinishedDownload,
+    isSeedingDownload,
     sortDownloads,
   } from '../download';
   import { QUEUE_POLL_MS, downloads } from '../state/downloads.svelte';
   import { page } from '../state/page.svelte';
   import { pushToast } from '../state/toast.svelte';
   import { TONE_DOT } from '../status';
+  import { downloadItemHref } from '../library';
   import { useI18n } from '../i18n.svelte';
 
   const { t, tp } = useI18n();
@@ -114,21 +117,25 @@
   }
 
   /**
-   * The default view hides finished work: completed imports and torrents that
-   * finished downloading and sit paused. They are history, and burying the
-   * one active download under twenty done ones is how a stalled queue goes
-   * unnoticed. Done and All stay one click away.
+   * The default view is the acquiring queue: queued, downloading, failed, and
+   * a mid-download pause. Seeding is a later stage — the file is already
+   * here — so it has its own tab. Done hides completed imports and torrents
+   * that finished and sit paused.
    */
-  type QueueView = 'active' | 'done' | 'all';
+  type QueueView = 'active' | 'seeding' | 'done' | 'all';
   let view = $state<QueueView>('active');
 
   let all = $derived(sortDownloads(downloads.items ?? []));
+  let seedingRows = $derived(all.filter(isSeedingDownload));
   let doneRows = $derived(all.filter(isFinishedDownload));
-  let activeRows = $derived(all.filter((d) => !isFinishedDownload(d)));
-  let rows = $derived(view === 'all' ? all : view === 'done' ? doneRows : activeRows);
+  let activeRows = $derived(all.filter((d) => !isFinishedDownload(d) && !isSeedingDownload(d)));
+  let rows = $derived(
+    view === 'all' ? all : view === 'done' ? doneRows : view === 'seeding' ? seedingRows : activeRows,
+  );
 
   let views = $derived<{ key: QueueView; label: string; count: number }[]>([
     { key: 'active', label: t('route.queue.active'), count: activeRows.length },
+    { key: 'seeding', label: t('route.queue.seeding'), count: seedingRows.length },
     { key: 'done', label: t('route.queue.done'), count: doneRows.length },
     { key: 'all', label: t('route.queue.all'), count: all.length },
   ]);
@@ -141,9 +148,14 @@
       page.subtitle = null;
       return;
     }
+    const downloading = items.filter(isActiveDownload).length;
+    const seeding = items.filter(isSeedingDownload).length;
     const failed = items.filter((item) => item.state === 'failed').length;
+    const parts: string[] = [];
+    if (downloading > 0) parts.push(t('route.queue.downloadingSubtitle', { count: downloading }));
+    if (seeding > 0) parts.push(t('route.queue.seedingSubtitle', { count: seeding }));
     page.subtitle = t('route.queue.subtitle', {
-      active: downloads.activeCount,
+      summary: parts.length > 0 ? parts.join(', ') : t('route.queue.idleSubtitle'),
       failed: failed ? t('route.queue.failedSubtitle', { count: failed }) : '',
     });
     return () => (page.subtitle = null);
@@ -189,15 +201,37 @@
       icon="download"
       title={t('route.queue.emptyTitle')}
       message={t('route.queue.emptyMessage')} />
+  {:else if rows.length === 0 && view === 'seeding'}
+    <EmptyState
+      icon="download"
+      title={t('route.queue.emptySeedingTitle')}
+      message={t('route.queue.emptySeedingMessage')}>
+      {#snippet action()}
+        <Button variant="secondary" onclick={() => (view = 'all')}>{t('route.queue.showAll')}</Button>
+      {/snippet}
+    </EmptyState>
+  {:else if rows.length === 0 && view === 'done'}
+    <EmptyState
+      icon="download"
+      title={t('route.queue.emptyDoneTitle')}
+      message={t('route.queue.emptyDoneMessage')}>
+      {#snippet action()}
+        <Button variant="secondary" onclick={() => (view = 'all')}>{t('route.queue.showAll')}</Button>
+      {/snippet}
+    </EmptyState>
   {:else if rows.length === 0}
     <EmptyState
       icon="download"
-      title={view === 'done' ? t('route.queue.emptyDoneTitle') : t('route.queue.emptyActiveTitle')}
-      message={view === 'done'
-        ? t('route.queue.emptyDoneMessage')
+      title={t('route.queue.emptyActiveTitle')}
+      message={seedingRows.length > 0
+        ? tp('route.queue.emptyActiveSeedingMessage', seedingRows.length)
         : tp('route.queue.emptyActiveMessage', doneRows.length)}>
       {#snippet action()}
-        <Button variant="secondary" onclick={() => (view = 'all')}>{t('route.queue.showAll')}</Button>
+        {#if seedingRows.length > 0}
+          <Button variant="secondary" onclick={() => (view = 'seeding')}>{t('route.queue.showSeeding')}</Button>
+        {:else}
+          <Button variant="secondary" onclick={() => (view = 'all')}>{t('route.queue.showAll')}</Button>
+        {/if}
       {/snippet}
     </EmptyState>
   {:else}
@@ -207,6 +241,7 @@
         {@const paused = download.state === 'paused'}
         {@const phaseLabel = downloadPhaseLabel(download)}
         {@const finished = isFinishedDownload(download)}
+        {@const itemHref = downloadItemHref(download)}
         {@const seedingContext = download.state === 'seeding' || (paused && download.progress >= 1)}
         {@const pauseLabel = paused
           ? seedingContext
@@ -223,9 +258,18 @@
             onclick={() => (detailID = download.id)}></button>
           <div class="relative z-10 flex pointer-events-none flex-wrap items-center gap-3">
             <span class="size-2 shrink-0 rounded-full {TONE_DOT[meta.tone]}" aria-hidden="true"></span>
-            <span class="min-w-0 flex-1 font-mono text-ink" title={download.name}>
-              {truncateMiddle(download.name || UNKNOWN, 64)}
-            </span>
+            {#if itemHref}
+              <a
+                href={itemHref}
+                class="pointer-events-auto min-w-0 flex-1 font-mono text-ink hover:text-accent-text hover:underline"
+                title={download.name}>
+                {truncateMiddle(download.name || UNKNOWN, 64)}
+              </a>
+            {:else}
+              <span class="min-w-0 flex-1 font-mono text-ink" title={download.name}>
+                {truncateMiddle(download.name || UNKNOWN, 64)}
+              </span>
+            {/if}
             <Badge tone={meta.tone}>{meta.label}</Badge>
             {#if phaseLabel}
               <Badge tone="info" title={t('route.queue.downloadStage')}>
@@ -300,17 +344,22 @@
             <span>{Math.round(Math.max(0, Math.min(1, download.progress)) * 100)}%</span>
             {#if finished}
               <span title={t('route.queue.transferFinished')}>{t('route.queue.complete')}</span>
+            {:else if download.state === 'seeding'}
+              <span title={t('route.queue.uploadRate')}>↑ {formatRate(download.up_rate)}</span>
+              <span title={t('route.queue.shareRatio')}>
+                {t('route.queue.ratio', { ratio: download.ratio.toFixed(2) })}
+              </span>
             {:else}
               <span title={t('route.queue.downloadRate')}>↓ {formatRate(download.down_rate)}</span>
               <span title={t('route.queue.uploadRate')}>↑ {formatRate(download.up_rate)}</span>
               <span title={t('route.queue.timeRemaining')}>
                 {t('route.queue.eta', { time: formatDuration(download.eta_seconds) })}
               </span>
-            {/if}
-            {#if download.state === 'seeding' || download.ratio > 0}
-              <span title={t('route.queue.shareRatio')}>
-                {t('route.queue.ratio', { ratio: download.ratio.toFixed(2) })}
-              </span>
+              {#if download.ratio > 0}
+                <span title={t('route.queue.shareRatio')}>
+                  {t('route.queue.ratio', { ratio: download.ratio.toFixed(2) })}
+                </span>
+              {/if}
             {/if}
           </div>
 

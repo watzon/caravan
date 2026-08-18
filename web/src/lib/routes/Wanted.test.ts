@@ -99,6 +99,15 @@ function searchCalls(): { url: string; method: string }[] {
 }
 
 describe('Wanted', () => {
+  it('uses the full content column', async () => {
+    app = mount(Wanted, { target: host });
+    await settle();
+
+    const root = host.firstElementChild as HTMLElement;
+    expect(root.classList.contains('flex')).toBe(true);
+    expect([...root.classList].some((name) => name.startsWith('max-w-'))).toBe(false);
+  });
+
   it('renders grouped results and filters them by reason', async () => {
     app = mount(Wanted, { target: host });
     await settle();
@@ -109,6 +118,9 @@ describe('Wanted', () => {
     expect(host.textContent).toContain('Severance · S01E02 · Half Loop');
     expect(host.textContent).toContain('Severance · S01E03 · In Perpetuity');
     expect(host.textContent).toContain('Air date unknown');
+    expect(host.querySelector('a[href="/movies/7"]')).not.toBeNull();
+    expect(host.querySelector('a[href="/series/3#s1e2"]')).not.toBeNull();
+    expect(host.querySelector('a[href="/adult/sites/9#y2026n24"]')).not.toBeNull();
     expect(host.querySelector('a[href="/series/3/search/1/2"]')).not.toBeNull();
     expect(host.querySelector('a[href="/adult/sites/9/search/2026/24"]')).not.toBeNull();
     expect(host.textContent).toContain('Transfixed · 2026 · #024 · A Lesson');

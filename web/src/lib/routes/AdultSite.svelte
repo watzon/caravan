@@ -53,10 +53,18 @@
   } from '../adult';
   import { UNKNOWN, formatDate } from '../format';
   import { siteLinks } from '../metadataLinks';
-  import { navigate } from '../router.svelte';
-  import { shelfBack } from '../library';
+  import { navigate, router } from '../router.svelte';
+  import {
+    LIBRARY_ITEM_TARGET_CLASS,
+    isLibraryItemTarget,
+    libraryItemAnchor,
+    parseLibraryItemHash,
+    revealHashTarget,
+    shelfBack,
+  } from '../library';
   import { session } from '../state/session.svelte';
   import { libraryChanged, searchQueued } from '../state/activity';
+  import { subscribeInvalidation } from '../state/live';
   import { pushToast } from '../state/toast.svelte';
   import { episodeStatus } from '../status';
   import { compatBadge } from '../tvcompat';
@@ -120,6 +128,10 @@
    */
   onMount(() => {
     void load();
+    // Grabs and imports publish a library invalidation. Re-read the site so a
+    // scene can move from missing to downloading to downloaded while this page
+    // stays open.
+    const stopLibraryUpdates = subscribeInvalidation('library', () => void load(true));
     let wasCataloguing = false;
     const timer = setInterval(() => {
       const now = site?.cataloguing ?? false;
@@ -128,10 +140,24 @@
       if (now || wasCataloguing) void load(true);
       wasCataloguing = now;
     }, CATALOGUING_POLL_MS);
-    return () => clearInterval(timer);
+    return () => {
+      stopLibraryUpdates();
+      clearInterval(timer);
+    };
   });
 
   let years = $derived<SiteYear[]>(site?.years ?? []);
+
+  $effect(() => {
+    if (loading || !site) return;
+    const target = parseLibraryItemHash(router.hash);
+    if (!target || !target.adult) return;
+    const year = years.find((row) => row.year === target.season);
+    if (year && collapsed[year.year]) {
+      collapsed = { ...collapsed, [year.year]: false };
+    }
+    void revealHashTarget(router.hash.slice(1));
+  });
 
   // The detail response carries every year's scenes with their files, so the
   // confirm can name a real count rather than a vague "its files".
@@ -458,7 +484,21 @@
                       {#each year.scenes as scene (scene.id)}
                         {@const cast = scenePerformers(scene)}
                         <tr
-                          class="h-10 border-t border-border transition-colors duration-150 hover:bg-raised">
+                          id={libraryItemAnchor({
+                            series_kind: 'adult',
+                            season_number: year.year,
+                            episode_number: scene.number,
+                          })}
+                          class="h-10 scroll-mt-16 border-t border-border transition-colors duration-150 {isLibraryItemTarget(
+                            router.hash,
+                            {
+                              series_kind: 'adult',
+                              season_number: year.year,
+                              episode_number: scene.number,
+                            },
+                          )
+                            ? LIBRARY_ITEM_TARGET_CLASS
+                            : 'hover:bg-raised'}">
                           <td class="max-w-[420px] px-3 py-2 text-ink">
                             <span
                               class="block truncate"

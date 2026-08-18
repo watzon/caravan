@@ -117,16 +117,21 @@ type episodeJSON struct {
 }
 
 type mediaFileJSON struct {
-	ID           int64  `json:"id"`
-	Path         string `json:"path"`
-	Size         int64  `json:"size"`
-	Quality      string `json:"quality"`
-	Source       string `json:"source"`
-	Codec        string `json:"codec"`
-	Audio        string `json:"audio"`
-	ReleaseGroup string `json:"release_group"`
-	AddedAt      string `json:"added_at"`
-	ModifiedAt   string `json:"modified_at"`
+	ID            int64  `json:"id"`
+	Path          string `json:"path"`
+	Size          int64  `json:"size"`
+	MovieID       int64  `json:"movie_id"`
+	SeriesID      int64  `json:"series_id,omitempty"`
+	SeriesKind    string `json:"series_kind,omitempty"`
+	SeasonNumber  int    `json:"season_number,omitempty"`
+	EpisodeNumber int    `json:"episode_number,omitempty"`
+	Quality       string `json:"quality"`
+	Source        string `json:"source"`
+	Codec         string `json:"codec"`
+	Audio         string `json:"audio"`
+	ReleaseGroup  string `json:"release_group"`
+	AddedAt       string `json:"added_at"`
+	ModifiedAt    string `json:"modified_at"`
 	// Compatibility is the active TV profile's verdict on this file (SPEC §8).
 	// The row carries no bit depth — that is a probe's answer, not a
 	// filename's — so a 10-bit file imported from an untagged name reads as
@@ -185,6 +190,7 @@ func mediaFileDTO(f core.MediaFile, profile core.TVProfile) mediaFileJSON {
 		ID:           f.ID,
 		Path:         f.Path,
 		Size:         f.Size,
+		MovieID:      f.MovieID,
 		Quality:      f.Quality,
 		Source:       f.Source,
 		Codec:        f.Codec,

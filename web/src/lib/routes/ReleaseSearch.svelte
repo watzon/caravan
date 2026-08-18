@@ -109,19 +109,6 @@
     return `/series/${id}`;
   });
 
-  /**
-   * The episodes this grab is expected to satisfy (core.AddOpts.EpisodeIDs).
-   * A single episode search resolves to one id; a season search hands over the
-   * whole season so a pack imports in one go.
-   */
-  let episodeIDs = $derived.by((): number[] => {
-    if (!asSeries || season < 0) return [];
-    const found = series?.seasons?.find((s) => s.season_number === season);
-    const eps = found?.episodes ?? [];
-    if (episode < 0) return eps.map((e) => e.id);
-    return eps.filter((e) => e.episode_number === episode).map((e) => e.id);
-  });
-
   let heading = $derived.by((): string => {
     if (kind === 'movie') return movie?.title ?? t('route.releaseSearch.movie');
     const title = series?.title ?? (asSite ? t('route.releaseSearch.site') : t('route.releaseSearch.series'));
@@ -314,7 +301,7 @@
         await api.grabForSeries(id, {
           release_id: release.id,
           ...(season >= 0 ? { season } : {}),
-          ...(episodeIDs.length > 0 ? { episode_ids: episodeIDs } : {}),
+          ...(episode >= 0 ? { episode } : {}),
         });
       }
       pushToast(t('route.releaseSearch.grabbed', { title: release.title }), 'success');

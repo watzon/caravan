@@ -51,6 +51,15 @@ type downloadJSON struct {
 	Error      string  `json:"error"`
 	CreatedAt  string  `json:"created_at"`
 	UpdatedAt  string  `json:"updated_at"`
+	// What the grab was for, when Caravan matched this download. Zero and
+	// omitted mean the same thing: the transfer is visible, but there is no
+	// library item to open. A season pack lists every episode it covers.
+	MovieID       int64   `json:"movie_id,omitempty"`
+	SeriesID      int64   `json:"series_id,omitempty"`
+	SeriesKind    string  `json:"series_kind,omitempty"`
+	EpisodeIDs    []int64 `json:"episode_ids,omitempty"`
+	SeasonNumber  int     `json:"season_number,omitempty"`
+	EpisodeNumber int     `json:"episode_number,omitempty"`
 }
 
 // handleListDownloads renders the queue (PLAN phase 2, task 4).
@@ -179,6 +188,10 @@ func (s *server) handleListDownloads(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	if err := s.attachDownloadTargets(r.Context(), out); err != nil {
+		s.writeStoreError(w, "resolve download targets", err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"downloads": out, "next_cursor": nextCursor})
 }
 
@@ -238,7 +251,12 @@ func (s *server) writeLegacyDownloads(w http.ResponseWriter, r *http.Request) {
 	}
 	sort.Slice(orphans, func(i, j int) bool { return orphans[i].ID < orphans[j].ID })
 
-	writeJSON(w, http.StatusOK, map[string]any{"downloads": append(out, orphans...)})
+	merged := append(out, orphans...)
+	if err := s.attachDownloadTargets(r.Context(), merged); err != nil {
+		s.writeStoreError(w, "resolve download targets", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"downloads": merged})
 }
 
 func (s *server) pageOrphans(ctx context.Context, pager downloadPager, limit int, cursor string) ([]core.DownloadStatus, string, error) {
@@ -377,6 +395,55 @@ func (f *libraryOwnershipFilter) downloadVisible(ctx context.Context, download c
 		return visible, err
 	}
 	return f.ownerVisible(ctx, grab.MovieID, grab.SeriesID)
+}
+
+// attachDownloadTargets fills the library item each stored download was
+// grabbed for. An orphan, a vanished grab, or a grab that named no movie or
+// series stays unmatched: the queue can still show the transfer.
+func (s *server) attachDownloadTargets(ctx context.Context, rows []downloadJSON) error {
+	kinds := map[int64]string{}
+	for i := range rows {
+		if rows[i].GrabID == 0 {
+			continue
+		}
+		grab, err := s.st.GetGrab(ctx, rows[i].GrabID)
+		if errors.Is(err, store.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		rows[i].MovieID = grab.MovieID
+		rows[i].SeriesID = grab.SeriesID
+		rows[i].EpisodeIDs = grab.EpisodeIDs
+		if len(grab.EpisodeIDs) == 1 {
+			episode, err := s.st.GetEpisode(ctx, grab.EpisodeIDs[0])
+			if err != nil && !errors.Is(err, store.ErrNotFound) {
+				return err
+			}
+			if episode != nil {
+				rows[i].SeasonNumber = episode.SeasonNumber
+				rows[i].EpisodeNumber = episode.EpisodeNumber
+			}
+		}
+		if grab.SeriesID == 0 {
+			continue
+		}
+		if kind, ok := kinds[grab.SeriesID]; ok {
+			rows[i].SeriesKind = kind
+			continue
+		}
+		sr, err := s.st.GetSeries(ctx, grab.SeriesID)
+		if errors.Is(err, store.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		kinds[grab.SeriesID] = sr.Kind
+		rows[i].SeriesKind = sr.Kind
+	}
+	return nil
 }
 
 func storedDownloadDTO(d core.Download) downloadJSON {

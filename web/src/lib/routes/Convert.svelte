@@ -30,6 +30,7 @@
   import { pushToast } from '../state/toast.svelte';
   import { TONE_DOT } from '../status';
   import { compatBadge } from '../tvcompat';
+  import { libraryItemHref } from '../library';
   import { useI18n } from '../i18n.svelte';
 
   const { t, tp } = useI18n();
@@ -139,6 +140,16 @@
     if (event.key === 'Escape' && selection.active) selection.clear();
   }
 
+  function fileHref(
+    file: Pick<MediaFile, 'movie_id' | 'series_id' | 'series_kind' | 'season_number' | 'episode_number'>,
+  ): string | undefined {
+    return libraryItemHref(file);
+  }
+
+  function conversionHref(row: Conversion): string | undefined {
+    return libraryItemHref(row);
+  }
+
   async function act(row: Conversion, action: () => Promise<unknown>, note: string) {
     busyID = row.id;
     try {
@@ -220,6 +231,7 @@
       <ul class="flex flex-col gap-2" aria-label={t('route.convert.pendingAria')}>
         {#each pending as file (file.id)}
           {@const meta = compatBadge(file.compatibility)}
+          {@const href = fileHref(file)}
           <li
             class="group/row relative flex flex-col gap-2 rounded-md border border-border bg-surface
                    px-3 py-3 transition-colors duration-150 hover:border-border-strong
@@ -263,9 +275,18 @@
                 {/if}
               {/if}
               <span class="size-2 shrink-0 rounded-full {TONE_DOT.warning}" aria-hidden="true"></span>
-              <span class="min-w-0 flex-1 font-mono text-ink" title={file.path}>
-                {truncateMiddle(file.path || UNKNOWN, 64)}
-              </span>
+              {#if href}
+                <a
+                  {href}
+                  class="min-w-0 flex-1 font-mono text-ink hover:text-accent-text hover:underline"
+                  title={file.path}>
+                  {truncateMiddle(file.path || UNKNOWN, 64)}
+                </a>
+              {:else}
+                <span class="min-w-0 flex-1 font-mono text-ink" title={file.path}>
+                  {truncateMiddle(file.path || UNKNOWN, 64)}
+                </span>
+              {/if}
               {#if meta}
                 <Badge
                   mono
@@ -299,6 +320,7 @@
     <ul class="flex flex-col gap-2" aria-label={tab === 'active' ? t('route.convert.activeAria') : t('route.convert.finishedAria')}>
       {#each jobRows as row (row.id)}
         {@const meta = conversionStateMeta(row.status)}
+        {@const href = conversionHref(row)}
         <li
           class="relative flex flex-col gap-2 rounded-md border border-border bg-surface px-3 py-3
                  transition-colors duration-150 hover:border-border-strong">
@@ -311,9 +333,18 @@
             onclick={() => (detailID = row.id)}></button>
           <div class="pointer-events-none relative z-10 flex flex-wrap items-center gap-3">
             <span class="size-2 shrink-0 rounded-full {TONE_DOT[meta.tone]}" aria-hidden="true"></span>
-            <span class="min-w-0 flex-1 font-mono text-ink" title={row.source_path}>
-              {truncateMiddle(row.source_path || UNKNOWN, 64)}
-            </span>
+            {#if href}
+              <a
+                {href}
+                class="pointer-events-auto min-w-0 flex-1 font-mono text-ink hover:text-accent-text hover:underline"
+                title={row.source_path}>
+                {truncateMiddle(row.source_path || UNKNOWN, 64)}
+              </a>
+            {:else}
+              <span class="min-w-0 flex-1 font-mono text-ink" title={row.source_path}>
+                {truncateMiddle(row.source_path || UNKNOWN, 64)}
+              </span>
+            {/if}
             <Badge tone={meta.tone}>{meta.label}</Badge>
             <Badge mono tone="neutral" title={t('route.convert.strategyTitle')}>
               {row.strategy === 'remux' ? t('route.convert.copyStrategy') : strategyLabel(row.strategy)}

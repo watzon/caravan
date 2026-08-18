@@ -8,6 +8,7 @@ import {
   engineLabel,
   isActiveDownload,
   isFinishedDownload,
+  isSeedingDownload,
   sortDownloads,
   unreachableClientBanner,
 } from './download';
@@ -57,17 +58,27 @@ describe('downloadStateMeta', () => {
 });
 
 describe('isActiveDownload', () => {
-  it('counts work the engine is still doing', () => {
+  it('counts work the user is still waiting on', () => {
     expect(isActiveDownload(download({ state: 'downloading' }))).toBe(true);
     expect(isActiveDownload(download({ state: 'queued' }))).toBe(true);
-    expect(isActiveDownload(download({ state: 'seeding' }))).toBe(true);
   });
 
-  it('excludes states that are waiting on the user or finished', () => {
+  it('excludes seeding, pauses, and finished states', () => {
+    // A seeder is no longer being acquired; it belongs on the Seeding tab.
+    expect(isActiveDownload(download({ state: 'seeding' }))).toBe(false);
     // A paused download waits on a human, so a badge counting it never clears.
     expect(isActiveDownload(download({ state: 'paused' }))).toBe(false);
     expect(isActiveDownload(download({ state: 'completed' }))).toBe(false);
     expect(isActiveDownload(download({ state: 'failed' }))).toBe(false);
+  });
+});
+
+describe('isSeedingDownload', () => {
+  it('is only the live seeding state', () => {
+    expect(isSeedingDownload(download({ state: 'seeding', progress: 1 }))).toBe(true);
+    expect(isSeedingDownload(download({ state: 'paused', progress: 1 }))).toBe(false);
+    expect(isSeedingDownload(download({ state: 'completed', progress: 1 }))).toBe(false);
+    expect(isSeedingDownload(download({ state: 'downloading', progress: 0.9 }))).toBe(false);
   });
 });
 
@@ -88,13 +99,14 @@ describe('isFinishedDownload', () => {
 });
 
 describe('countActiveDownloads', () => {
-  it('counts only the active ones', () => {
+  it('counts only the ones still being acquired', () => {
     expect(
       countActiveDownloads([
         download({ id: '1', state: 'downloading' }),
         download({ id: '2', state: 'paused' }),
         download({ id: '3', state: 'seeding' }),
         download({ id: '4', state: 'completed' }),
+        download({ id: '5', state: 'queued' }),
       ]),
     ).toBe(2);
   });

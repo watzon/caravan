@@ -29,6 +29,7 @@ const ROWS: Conversion[] = [
   {
     id: 1,
     media_file_id: 10,
+    movie_id: 8,
     source_path: 'library/Movies/Arrival (2016)/Arrival (2016).mkv',
     output_path: 'library/Movies/Arrival (2016)/Arrival (2016).mp4',
     strategy: 'remux',
@@ -229,6 +230,8 @@ describe('Convert route', () => {
     await settle();
 
     expect(host.textContent).toContain('Blade Runner (1982).mkv');
+    expect(host.querySelector('a[href="/movies/20"]')?.textContent).toContain('Blade Runner (1982).mkv');
+    expect(host.querySelector('a[href="/movies/21"]')?.textContent).toContain('Alien (1979).mkv');
     expect(host.textContent).toContain('HEVC video');
     expect(host.textContent).not.toContain('Arrival (2016).mkv');
     expect(host.textContent).not.toContain('REMUX');
@@ -380,6 +383,7 @@ describe('Convert route', () => {
     tabWith('Finished')!.click();
     flushSync();
     expect(host.textContent).toContain('Arrival (2016).mkv');
+    expect(host.querySelector('a[href="/movies/8"]')?.textContent).toContain('Arrival (2016).mkv');
     expect(host.textContent).toContain('Convert (stream copy)');
     expect(host.textContent).toContain('Transcode (re-encode)');
     expect(host.textContent).not.toContain('Remux');

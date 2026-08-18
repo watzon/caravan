@@ -150,6 +150,96 @@ func TestListDownloadsMergesEngineAndStore(t *testing.T) {
 	}
 }
 
+func TestListDownloadsIncludesGrabTarget(t *testing.T) {
+	h, st, engine, _ := newAcquisitionServer(t)
+	ctx := context.Background()
+
+	movie := &core.Movie{TMDBID: 7, Title: "Arrival", SortTitle: "arrival"}
+	if err := st.UpsertMovie(ctx, movie); err != nil {
+		t.Fatalf("UpsertMovie: %v", err)
+	}
+	movieGrab := core.Grab{
+		GrabInfo: core.GrabInfo{MovieID: movie.ID, ReleaseTitle: "Arrival.2016"},
+		Status:   core.GrabStatusGrabbed,
+	}
+	if err := st.InsertGrab(ctx, &movieGrab); err != nil {
+		t.Fatalf("InsertGrab movie: %v", err)
+	}
+	if err := st.UpsertDownload(ctx, &core.Download{
+		GrabID: movieGrab.GrabID, Engine: "stub", EngineID: "movie-dl",
+		Title: "Arrival.2016", State: core.DownloadQueued,
+	}); err != nil {
+		t.Fatalf("UpsertDownload movie: %v", err)
+	}
+
+	series := &core.Series{TMDBID: 3, Title: "Severance", SortTitle: "severance"}
+	if err := st.UpsertSeries(ctx, series); err != nil {
+		t.Fatalf("UpsertSeries: %v", err)
+	}
+	episode := &core.Episode{SeriesID: series.ID, SeasonNumber: 1, EpisodeNumber: 2, Title: "Half Loop"}
+	if err := st.UpsertEpisode(ctx, episode); err != nil {
+		t.Fatalf("UpsertEpisode: %v", err)
+	}
+	adultLib := enableAdultLibrary(t, st)
+	site := &core.Series{
+		StashID: "site-transfixed", Title: "Transfixed", SortTitle: "transfixed",
+		Kind: core.SeriesKindAdult, LibraryID: adultLib.ID,
+	}
+	if err := st.UpsertSeries(ctx, site); err != nil {
+		t.Fatalf("UpsertSeries adult: %v", err)
+	}
+	scene := &core.Episode{SeriesID: site.ID, SeasonNumber: 2026, EpisodeNumber: 24, Title: "A Lesson"}
+	if err := st.UpsertEpisode(ctx, scene); err != nil {
+		t.Fatalf("UpsertEpisode scene: %v", err)
+	}
+
+	storeSeriesDownload(t, st, "series-dl", "Severance.S01E02", series.ID)
+	sceneGrab := core.Grab{
+		GrabInfo: core.GrabInfo{
+			SeriesID: site.ID, EpisodeIDs: []int64{scene.ID}, ReleaseTitle: "Transfixed.24",
+		},
+		Status: core.GrabStatusGrabbed,
+	}
+	if err := st.InsertGrab(ctx, &sceneGrab); err != nil {
+		t.Fatalf("InsertGrab scene: %v", err)
+	}
+	if err := st.UpsertDownload(ctx, &core.Download{
+		GrabID: sceneGrab.GrabID, Engine: "stub", EngineID: "scene-dl",
+		Title: "Transfixed.24", State: core.DownloadQueued,
+	}); err != nil {
+		t.Fatalf("UpsertDownload scene: %v", err)
+	}
+
+	engine.statuses = []core.DownloadStatus{
+		{ID: "movie-dl", State: core.DownloadDownloading, Name: "Arrival.2016", Engine: "stub"},
+		{ID: "series-dl", State: core.DownloadDownloading, Name: "Severance.S01E02", Engine: "stub"},
+		{ID: "scene-dl", State: core.DownloadDownloading, Name: "Transfixed.24", Engine: "stub"},
+	}
+
+	rec := do(t, h, http.MethodGet, "/api/v1/downloads", "")
+	wantStatus(t, rec, http.StatusOK)
+	var body struct {
+		Downloads []downloadJSON `json:"downloads"`
+	}
+	decodeBody(t, rec, &body)
+
+	byID := map[string]downloadJSON{}
+	for _, row := range body.Downloads {
+		byID[row.ID] = row
+	}
+	if got := byID["movie-dl"]; got.MovieID != movie.ID || got.SeriesID != 0 {
+		t.Fatalf("movie download = %+v, want movie %d", got, movie.ID)
+	}
+	if got := byID["series-dl"]; got.SeriesID != series.ID || got.SeriesKind != core.SeriesKindTV || got.MovieID != 0 {
+		t.Fatalf("series download = %+v, want series %d", got, series.ID)
+	}
+	if got := byID["scene-dl"]; got.SeriesID != site.ID || got.SeriesKind != core.SeriesKindAdult ||
+		len(got.EpisodeIDs) != 1 || got.EpisodeIDs[0] != scene.ID ||
+		got.SeasonNumber != 2026 || got.EpisodeNumber != 24 {
+		t.Fatalf("scene download = %+v, want site %d 2026 · #024", got, site.ID)
+	}
+}
+
 func TestListDownloadsUsesStableCursorPages(t *testing.T) {
 	h, st, engine, _ := newAcquisitionServer(t)
 	for _, id := range []core.DownloadID{"a", "b", "c"} {
