@@ -43,6 +43,8 @@ type movieJSON struct {
 	// has at most one current file in v1 (upgrades replace it, SPEC §9), so
 	// this is a single object rather than a list.
 	File *mediaFileJSON `json:"file"`
+	// Downloading is true while an in-flight grab is fetching this movie.
+	Downloading bool `json:"downloading"`
 }
 
 type seriesJSON struct {
@@ -76,6 +78,8 @@ type seriesJSON struct {
 	// poster grid.
 	EpisodeCount     int `json:"episode_count"`
 	EpisodeFileCount int `json:"episode_file_count"`
+	// Downloading is true while an in-flight grab is fetching any episode.
+	Downloading bool `json:"downloading"`
 }
 
 type seriesDetailJSON struct {
@@ -108,6 +112,8 @@ type episodeJSON struct {
 	// File is the imported file, null when the episode is missing. A
 	// multi-episode file (S01E01E02) appears on each episode it covers.
 	File *mediaFileJSON `json:"file"`
+	// Downloading is true while an in-flight grab is fetching this episode.
+	Downloading bool `json:"downloading"`
 }
 
 type mediaFileJSON struct {
@@ -469,6 +475,10 @@ func (s *server) handleListMovies(w http.ResponseWriter, r *http.Request) {
 		dto.File = firstFileDTO(byMovie[m.ID], profile)
 		out = append(out, dto)
 	}
+	if err := s.markDownloadingMovies(ctx, out); err != nil {
+		s.writeStoreError(w, "read grab history", err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"movies": out})
 }
 
@@ -711,7 +721,52 @@ func (s *server) movieDetail(ctx context.Context, id int64) (movieJSON, error) {
 	profile := s.activeTVProfile(ctx)
 	dto := movieDTO(*m)
 	dto.File = firstFileDTO(files, profile)
+	downloading, _, err := s.downloadingCalendarItems(ctx, []int64{id}, nil)
+	if err != nil {
+		return movieJSON{}, err
+	}
+	dto.Downloading = downloading[id]
 	return dto, nil
+}
+
+func (s *server) markDownloadingMovies(ctx context.Context, movies []movieJSON) error {
+	if len(movies) == 0 {
+		return nil
+	}
+	ids := make([]int64, 0, len(movies))
+	for _, movie := range movies {
+		ids = append(ids, movie.ID)
+	}
+	downloading, _, err := s.downloadingCalendarItems(ctx, ids, nil)
+	if err != nil {
+		return err
+	}
+	for i := range movies {
+		movies[i].Downloading = downloading[movies[i].ID]
+	}
+	return nil
+}
+
+func (s *server) markDownloadingSeries(ctx context.Context, series []seriesJSON) error {
+	if len(series) == 0 {
+		return nil
+	}
+	ids := make([]int64, 0, len(series))
+	for _, sr := range series {
+		ids = append(ids, sr.ID)
+	}
+	grabs, err := s.st.ListGrabsForSeriesIDs(ctx, ids)
+	if err != nil {
+		return err
+	}
+	_, _, bySeries, err := s.activeTargetsFromGrabs(ctx, grabs)
+	if err != nil {
+		return err
+	}
+	for i := range series {
+		series[i].Downloading = bySeries[series[i].ID]
+	}
+	return nil
 }
 
 // itemPatchRequest is the body of the movie and series PATCH endpoints. The
@@ -951,6 +1006,10 @@ func (s *server) handleListSeries(w http.ResponseWriter, r *http.Request) {
 		dto.EpisodeFileCount = counts[sr.ID].WithFile
 		out = append(out, dto)
 	}
+	if err := s.markDownloadingSeries(ctx, out); err != nil {
+		s.writeStoreError(w, "read grab history", err)
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"series": out})
 }
 
@@ -1057,6 +1116,9 @@ func (s *server) seriesDetail(ctx context.Context, sr core.Series) (seriesDetail
 		for _, e := range season.Episodes {
 			if e.File != nil {
 				dto.EpisodeFileCount++
+			}
+			if e.Downloading {
+				dto.Downloading = true
 			}
 		}
 	}
@@ -1283,6 +1345,15 @@ func (s *server) seasonDetail(ctx context.Context, seriesID int64) ([]seasonJSON
 		filesByEpisode[pair.EpisodeID] = append(filesByEpisode[pair.EpisodeID], pair.File)
 	}
 
+	episodeIDs := make([]int64, 0, len(episodes))
+	for _, e := range episodes {
+		episodeIDs = append(episodeIDs, e.ID)
+	}
+	_, downloading, err := s.downloadingCalendarItems(ctx, nil, episodeIDs)
+	if err != nil {
+		return nil, err
+	}
+
 	profile := s.activeTVProfile(ctx)
 	byNumber := make(map[int][]episodeJSON)
 	for _, e := range episodes {
@@ -1298,6 +1369,7 @@ func (s *server) seasonDetail(ctx context.Context, seriesID int64) ([]seasonJSON
 			AirDate:       jsonTime(e.AirDate),
 			Monitored:     e.Monitored,
 			File:          firstFileDTO(files, profile),
+			Downloading:   downloading[e.ID],
 		})
 	}
 

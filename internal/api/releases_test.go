@@ -532,6 +532,60 @@ func cacheRelease(t *testing.T, st *store.Store, title string) core.Release {
 	return rel
 }
 
+func TestMovieReleasesMarksGrabbedAndImportedRows(t *testing.T) {
+	h, st, _, fake := newAcquisitionServer(t)
+	m := addMovie(t, st, "Big Buck Bunny", 2008)
+	addIndexer(t, st, fake, "alpha")
+	fake.serve("alpha",
+		torrentRelease("BBB.2008.1080p", "guid-bbb", 10, core.ParsedRelease{
+			Title: "Big Buck Bunny", Year: 2008, Quality: core.Quality1080p,
+		}),
+	)
+
+	rec := do(t, h, http.MethodGet, "/api/v1/library/movies/"+itoa(m.ID)+"/releases", "")
+	wantStatus(t, rec, http.StatusOK)
+	var body releasesResponse
+	decodeBody(t, rec, &body)
+	if len(body.Releases) != 1 {
+		t.Fatalf("releases = %d, want 1", len(body.Releases))
+	}
+	if body.Releases[0].QueueState != "" {
+		t.Fatalf("queue_state = %q, want empty before any grab", body.Releases[0].QueueState)
+	}
+
+	g := &core.Grab{
+		GrabInfo:  core.GrabInfo{MovieID: m.ID, ReleaseTitle: body.Releases[0].Title},
+		ReleaseID: body.Releases[0].ID,
+		Status:    core.GrabStatusGrabbed,
+	}
+	if err := st.InsertGrab(t.Context(), g); err != nil {
+		t.Fatalf("InsertGrab: %v", err)
+	}
+	if err := st.UpsertDownload(t.Context(), &core.Download{
+		GrabID: g.GrabID, Engine: "stub", EngineID: "hash-bbb",
+		Title: g.ReleaseTitle, State: core.DownloadDownloading,
+	}); err != nil {
+		t.Fatalf("UpsertDownload: %v", err)
+	}
+
+	rec = do(t, h, http.MethodGet, "/api/v1/library/movies/"+itoa(m.ID)+"/releases", "")
+	wantStatus(t, rec, http.StatusOK)
+	decodeBody(t, rec, &body)
+	if body.Releases[0].QueueState != queueStateDownloading {
+		t.Fatalf("queue_state = %q, want %q", body.Releases[0].QueueState, queueStateDownloading)
+	}
+
+	if err := st.SetGrabStatus(t.Context(), g.GrabID, core.GrabStatusImported, "imported"); err != nil {
+		t.Fatalf("SetGrabStatus: %v", err)
+	}
+	rec = do(t, h, http.MethodGet, "/api/v1/library/movies/"+itoa(m.ID)+"/releases", "")
+	wantStatus(t, rec, http.StatusOK)
+	decodeBody(t, rec, &body)
+	if body.Releases[0].QueueState != queueStateDownloaded {
+		t.Fatalf("queue_state = %q, want %q", body.Releases[0].QueueState, queueStateDownloaded)
+	}
+}
+
 func TestMovieGrab(t *testing.T) {
 	h, st, engine, _ := newAcquisitionServer(t)
 	ctx := context.Background()

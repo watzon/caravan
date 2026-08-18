@@ -145,6 +145,95 @@ func (s *Store) activeGrab(ctx context.Context, target string, arg int64) (*core
 	return g, true, nil
 }
 
+// ListGrabsForReleaseIDs returns every grab that named one of the cached
+// releases, newest first. The interactive picker uses this to mark a row as
+// already downloading or already imported.
+func (s *Store) ListGrabsForReleaseIDs(ctx context.Context, ids []int64) ([]core.Grab, error) {
+	if len(ids) == 0 {
+		return []core.Grab{}, nil
+	}
+	byID := make(map[int64]core.Grab)
+	for start := 0; start < len(ids); start += sqliteIDQueryBatchSize {
+		end := min(start+sqliteIDQueryBatchSize, len(ids))
+		batch := ids[start:end]
+		args := make([]any, 0, len(batch))
+		for _, id := range batch {
+			args = append(args, id)
+		}
+		query := "SELECT " + grabColumns + " FROM grabs WHERE release_id IN (" +
+			placeholders(len(batch)) + ") ORDER BY id DESC"
+		rows, err := s.db.QueryContext(ctx, query, args...)
+		if err != nil {
+			return nil, fmt.Errorf("store: list grabs for releases: %w", err)
+		}
+		for rows.Next() {
+			g, err := scanGrab(rows)
+			if err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("store: scan grab for release: %w", err)
+			}
+			byID[g.GrabID] = *g
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("store: list grabs for releases: %w", err)
+		}
+	}
+	out := make([]core.Grab, 0, len(byID))
+	for _, g := range byID {
+		out = append(out, g)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].GrabID > out[j].GrabID
+	})
+	return out, nil
+}
+
+// ListGrabsForSeriesIDs returns grabbed rows targeting any of the series.
+// The series shelf uses it to mark a poster as downloading.
+func (s *Store) ListGrabsForSeriesIDs(ctx context.Context, ids []int64) ([]core.Grab, error) {
+	if len(ids) == 0 {
+		return []core.Grab{}, nil
+	}
+	byID := make(map[int64]core.Grab)
+	for start := 0; start < len(ids); start += sqliteIDQueryBatchSize {
+		end := min(start+sqliteIDQueryBatchSize, len(ids))
+		batch := ids[start:end]
+		args := []any{core.GrabStatusGrabbed}
+		for _, id := range batch {
+			args = append(args, id)
+		}
+		query := "SELECT " + grabColumns + " FROM grabs WHERE status = ? AND series_id IN (" +
+			placeholders(len(batch)) + ") ORDER BY id DESC"
+		rows, err := s.db.QueryContext(ctx, query, args...)
+		if err != nil {
+			return nil, fmt.Errorf("store: list grabs for series: %w", err)
+		}
+		for rows.Next() {
+			g, err := scanGrab(rows)
+			if err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("store: scan grab for series: %w", err)
+			}
+			byID[g.GrabID] = *g
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return nil, fmt.Errorf("store: list grabs for series: %w", err)
+		}
+	}
+	out := make([]core.Grab, 0, len(byID))
+	for _, g := range byID {
+		out = append(out, g)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].GrabID > out[j].GrabID
+	})
+	return out, nil
+}
+
 // ListGrabs returns the most recent grabs, newest first. A limit of zero or
 // less returns every grab. Ordering is by id for the same reason as events:
 // ids are monotonic where a timestamp can tie.

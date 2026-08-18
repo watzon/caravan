@@ -398,6 +398,18 @@ func TestGrabHistory(t *testing.T) {
 		t.Errorf("ListGrabs(1) = %d rows, want 1", len(limited))
 	}
 
+	byRelease, err := st.ListGrabsForReleaseIDs(ctx, []int64{5})
+	if err != nil {
+		t.Fatalf("ListGrabsForReleaseIDs: %v", err)
+	}
+	if len(byRelease) != 1 || byRelease[0].GrabID != g.GrabID {
+		t.Fatalf("ListGrabsForReleaseIDs(5) = %+v, want grab %d", byRelease, g.GrabID)
+	}
+	none, err := st.ListGrabsForReleaseIDs(ctx, nil)
+	if err != nil || len(none) != 0 {
+		t.Fatalf("ListGrabsForReleaseIDs(nil) = %v %v, want empty", none, err)
+	}
+
 	if err := st.SetGrabStatus(ctx, g.GrabID, core.GrabStatusImported, "imported"); err != nil {
 		t.Fatalf("SetGrabStatus: %v", err)
 	}

@@ -103,13 +103,22 @@ describe('ReleaseTable', () => {
     expect(host!.textContent).toContain('Nothing matched that query.');
   });
 
+  it('puts indexer, age and size under the name instead of in their own columns', () => {
+    mountTable({
+      releases: [release({ indexer: 'NZBgeek', published_at: '2026-08-12T00:00:00Z' })],
+    });
+    expect(host!.querySelector('th')?.textContent).toContain('Release');
+    expect(host!.textContent).toContain('NZBgeek');
+    expect(host!.textContent).not.toMatch(/\bPeers\b/);
+  });
+
   it('keeps the full release title in the row for responsive overflow', () => {
     const title =
       'A.Very.Long.Release.Title.2026.2160p.WEB-DL.DDP5.1.DV.HDR.HEVC-RELEASEGROUP';
     mountTable({ releases: [release({ title })] });
 
     const cell = host!.querySelector<HTMLTableCellElement>('tbody td[title]');
-    expect(cell?.textContent?.trim()).toBe(title);
+    expect(cell?.textContent).toContain(title);
     expect(cell?.title).toBe(title);
   });
 
@@ -172,6 +181,18 @@ describe('ReleaseTable', () => {
     // The busy row says Grabbing…; every other row keeps the verb.
     expect(host!.textContent).toContain('Grabbing…');
     expect(host!.textContent).not.toContain('Grab into…');
+  });
+
+  it('replaces Grab with Downloading when that release is already in flight', () => {
+    mountTable({ releases: [release({ queue_state: 'downloading' })] });
+    expect(host!.textContent).toContain('Downloading');
+    expect(host!.querySelector('tbody button')).toBeNull();
+  });
+
+  it('keeps a quiet Grab again on an already imported release', () => {
+    mountTable({ releases: [release({ queue_state: 'downloaded' })] });
+    expect(host!.textContent).toContain('Downloaded');
+    expect(host!.querySelector('tbody button')?.textContent).toContain('Grab again');
   });
 
   it('hands the clicked release back to its caller', () => {

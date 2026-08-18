@@ -220,6 +220,7 @@
       file: scene.file,
       monitored: scene.monitored,
       air_date: scene.release_date,
+      downloading: scene.downloading,
     });
   }
 

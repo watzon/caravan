@@ -12,6 +12,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import ReleaseSearch from './ReleaseSearch.svelte';
 import type { Movie, ParsedRelease, Release, Series } from '../api/types';
 import { session } from '../state/session.svelte';
+import { downloads } from '../state/downloads.svelte';
 import { clearToasts } from '../state/toast.svelte';
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -174,6 +175,17 @@ beforeEach(() => {
       if (url.includes('/movies/3/grab')) return jsonResponse({}, 204);
       if (url.includes('/movies/3')) return jsonResponse(MOVIE);
       if (url.includes('/series/9')) return jsonResponse(SITE);
+      if (url.includes('/system/status')) {
+        return jsonResponse({
+          version: '0.1.0',
+          mode: 'server',
+          storage_root: '/data',
+          schema_version: 12,
+          scanning: false,
+          counts: { movies: 0, series: 0, media_files: 0, unmatched: 0 },
+        });
+      }
+      if (url.includes('/downloads')) return jsonResponse({ downloads: [] });
       throw new Error(`unexpected fetch: ${url}`);
     }),
   );
@@ -184,6 +196,8 @@ afterEach(() => {
   app = undefined;
   host.remove();
   session.user = null;
+  downloads.stopSoon();
+  downloads.items = null;
   clearToasts();
   vi.unstubAllGlobals();
 });
@@ -295,6 +309,7 @@ describe('ReleaseSearch', () => {
     expect(grab?.body).toEqual({ release_id: 99 });
     // Nothing is posted to the universal grab: the item context never leaves.
     expect(calls.some((c) => c.url.includes('/search/grab'))).toBe(false);
+    expect(window.location.pathname).not.toBe('/queue');
   });
 
   it('seeds the box with the query-language spelling the server sent, not the raw query', async () => {

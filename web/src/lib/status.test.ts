@@ -89,6 +89,11 @@ describe('movieStatus', () => {
     expect(movieStatus(movie())).toBe('wanted');
   });
 
+  it('is downloading when a grab is in flight and no file exists yet', () => {
+    expect(movieStatus(movie({ downloading: true }))).toBe('downloading');
+    expect(movieStatus(movie({ downloading: true, file: FILE }))).toBe('downloaded');
+  });
+
   it('is unmonitored when unmonitored with no file', () => {
     expect(movieStatus(movie({ monitored: false }))).toBe('unmonitored');
   });
@@ -101,6 +106,15 @@ describe('seriesStatus', () => {
 
   it('is incomplete on a partial season', () => {
     expect(seriesStatus(series({ episode_count: 6, episode_file_count: 2 }))).toBe('incomplete');
+  });
+
+  it('is downloading when a grab is in flight and the series is not complete', () => {
+    expect(seriesStatus(series({ episode_count: 6, episode_file_count: 0, downloading: true }))).toBe(
+      'downloading',
+    );
+    expect(seriesStatus(series({ episode_count: 6, episode_file_count: 2, downloading: true }))).toBe(
+      'downloading',
+    );
   });
 
   it('falls back to wanted/unmonitored when nothing is owned', () => {
@@ -126,6 +140,10 @@ describe('episodeStatus', () => {
     expect(episodeStatus(episode(), now)).toBe('missing');
   });
 
+  it('is downloading when a grab is in flight', () => {
+    expect(episodeStatus(episode({ downloading: true }), now)).toBe('downloading');
+  });
+
   it('is unaired when the air date is in the future or unknown', () => {
     expect(episodeStatus(episode({ air_date: '2027-01-01' }), now)).toBe('unaired');
     expect(episodeStatus(episode({ air_date: '' }), now)).toBe('unaired');
@@ -146,6 +164,7 @@ describe('episodeStatus', () => {
 describe('status vocabulary', () => {
   it('maps colours the way DESIGN.md §2.3 specifies', () => {
     expect(STATUS.downloaded.tone).toBe('success'); // moss = present/healthy
+    expect(STATUS.downloading.tone).toBe('accent'); // rust = in progress
     expect(STATUS.wanted.tone).toBe('accent'); // rust = wanted/active
     expect(STATUS.incomplete.tone).toBe('warning'); // amber = warning
     expect(STATUS.missing.tone).toBe('danger'); // red = missing

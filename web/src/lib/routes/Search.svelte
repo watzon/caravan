@@ -23,6 +23,7 @@
   import ReleaseSearchControls from '../components/ReleaseSearchControls.svelte';
   import ReleaseTable from '../components/ReleaseTable.svelte';
   import { navigate, router } from '../router.svelte';
+  import { libraryChanged } from '../state/activity';
   import { parseReleaseSearch, releaseSearchHref } from '../search';
   import { useI18n } from '../i18n.svelte';
 
@@ -105,8 +106,13 @@
   }
 
   function grabbed() {
-    // The queue is where the answer to "did that work" lives.
-    navigate('/queue');
+    if (grabbing && releases) {
+      releases = releases.map((row) =>
+        row.guid === grabbing!.guid ? { ...row, queue_state: 'downloading' } : row,
+      );
+    }
+    grabbing = null;
+    libraryChanged({ expectDownload: true });
   }
 </script>
 

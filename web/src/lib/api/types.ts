@@ -97,6 +97,8 @@ export interface Movie {
   updated_at: string;
   /** Present when the movie has an imported file. */
   file?: MediaFile | null;
+  /** True while an in-flight grab is fetching this movie. */
+  downloading?: boolean;
 }
 
 /**
@@ -118,6 +120,8 @@ export interface Episode {
   air_date: string;
   monitored: boolean;
   file?: MediaFile | null;
+  /** True while an in-flight grab is fetching this episode. */
+  downloading?: boolean;
 }
 
 /** internal/core.Season; `episodes` is populated by the series detail endpoint. */
@@ -167,6 +171,8 @@ export interface Series {
   episode_file_count?: number;
   /** Populated by GET /library/series/{id} only. */
   seasons?: Season[];
+  /** True while an in-flight grab is fetching any episode of this series. */
+  downloading?: boolean;
 }
 
 /** internal/core.UnmatchedFile — the scan-review queue (SPEC §10.1, §13). */
@@ -1269,6 +1275,11 @@ export interface Release {
   compatibility: TVCompatibility;
   /** Active quality profile's score and accept/reject rationale when evaluated. */
   profile_decision?: ProfileDecision;
+  /**
+   * Whether this exact release is already in flight or already imported.
+   * Absent when Caravan has never grabbed it.
+   */
+  queue_state?: 'downloading' | 'downloaded';
 }
 
 /** One indexer that failed during a fan-out; partial results still come back. */
@@ -2329,6 +2340,8 @@ export interface Scene {
   release_date: string;
   monitored: boolean;
   file?: MediaFile | null;
+  /** True while an in-flight grab is fetching this scene. */
+  downloading?: boolean;
 }
 
 /** internal/api.siteYearJSON — a release year and its scenes. */

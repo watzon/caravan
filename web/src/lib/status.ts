@@ -15,6 +15,7 @@ export type Tone = 'success' | 'warning' | 'danger' | 'accent' | 'info' | 'neutr
 
 export type StatusKey =
   | 'downloaded'
+  | 'downloading'
   | 'incomplete'
   | 'wanted'
   | 'missing'
@@ -28,6 +29,7 @@ export interface StatusMeta {
 
 export const STATUS: Record<StatusKey, StatusMeta> = {
   downloaded: { get label() { return translate('status.downloaded'); }, tone: 'success' },
+  downloading: { get label() { return translate('status.downloading'); }, tone: 'accent' },
   incomplete: { get label() { return translate('status.incomplete'); }, tone: 'warning' },
   wanted: { get label() { return translate('status.wanted'); }, tone: 'accent' },
   missing: { get label() { return translate('status.missing'); }, tone: 'danger' },
@@ -43,9 +45,10 @@ export interface FilterChip {
 }
 
 /** Filter chips on the library grids map 1:1 onto status keys. */
-export const MOVIE_FILTERS: StatusKey[] = ['downloaded', 'wanted', 'unmonitored'];
+export const MOVIE_FILTERS: StatusKey[] = ['downloaded', 'downloading', 'wanted', 'unmonitored'];
 export const SERIES_FILTERS: StatusKey[] = [
   'downloaded',
+  'downloading',
   'incomplete',
   'wanted',
   'unmonitored',
@@ -53,6 +56,7 @@ export const SERIES_FILTERS: StatusKey[] = [
 
 export function movieStatus(movie: Movie): StatusKey {
   if (movie.file) return 'downloaded';
+  if (movie.downloading) return 'downloading';
   if (!movie.monitored) return 'unmonitored';
   return 'wanted';
 }
@@ -61,6 +65,7 @@ export function seriesStatus(series: Series): StatusKey {
   const total = series.episode_count ?? 0;
   const owned = series.episode_file_count ?? 0;
   if (total > 0 && owned >= total) return 'downloaded';
+  if (series.downloading) return 'downloading';
   if (owned > 0) return 'incomplete';
   if (!series.monitored) return 'unmonitored';
   return 'wanted';
@@ -72,10 +77,11 @@ export function seriesStatus(series: Series): StatusKey {
  * names — can be graded by this rule instead of by a copy of it.
  */
 export function episodeStatus(
-  episode: Pick<Episode, 'file' | 'monitored' | 'air_date'>,
+  episode: Pick<Episode, 'file' | 'monitored' | 'air_date' | 'downloading'>,
   now: number = Date.now(),
 ): StatusKey {
   if (episode.file) return 'downloaded';
+  if (episode.downloading) return 'downloading';
   if (!episode.air_date || isFuture(episode.air_date, now)) return 'unaired';
   if (!episode.monitored) return 'unmonitored';
   return 'missing';

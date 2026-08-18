@@ -79,6 +79,11 @@ type releaseJSON struct {
 	// profile's scoring explanation. It is advisory in the picker: a user can
 	// still grab any displayed release.
 	ProfileDecision profileDecisionJSON `json:"profile_decision"`
+	// QueueState is "downloading" when this exact release is in flight, or
+	// "downloaded" when a grab of it has already imported. Empty when Caravan
+	// has never grabbed the row. The picker shows it so a search does not
+	// look like a blank slate after a grab.
+	QueueState string `json:"queue_state,omitempty"`
 }
 
 // indexerErrorJSON reports an indexer that failed during a fan-out. Partial
@@ -298,7 +303,80 @@ func (s *server) serveReleases(w http.ResponseWriter, r *http.Request, libraryID
 		out.Releases = append(out.Releases, releaseDTO(rel, flags(rel), tvProfile, profile))
 	}
 	sortReleases(out.Releases)
+	if err := s.decorateReleaseQueueState(r.Context(), out.Releases); err != nil {
+		s.writeStoreError(w, "read grab history", err)
+		return
+	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+const (
+	queueStateDownloading = "downloading"
+	queueStateDownloaded  = "downloaded"
+)
+
+// decorateReleaseQueueState marks each cached release that this install has
+// already grabbed: imported wins over in-flight, and a failed grab is not a
+// reason to hide the Grab button.
+func (s *server) decorateReleaseQueueState(ctx context.Context, releases []releaseJSON) error {
+	ids := make([]int64, 0, len(releases))
+	for _, rel := range releases {
+		if rel.ID > 0 {
+			ids = append(ids, rel.ID)
+		}
+	}
+	grabs, err := s.st.ListGrabsForReleaseIDs(ctx, ids)
+	if err != nil {
+		return err
+	}
+	if len(grabs) == 0 {
+		return nil
+	}
+	grabIDs := make([]int64, 0, len(grabs))
+	for _, grab := range grabs {
+		grabIDs = append(grabIDs, grab.GrabID)
+	}
+	downloads, err := s.st.ListDownloadsForGrabs(ctx, grabIDs)
+	if err != nil {
+		return err
+	}
+	type downloadState struct {
+		hasAny bool
+		active bool
+	}
+	byGrabID := make(map[int64]downloadState, len(downloads))
+	for _, download := range downloads {
+		if download.GrabID == 0 {
+			continue
+		}
+		state := byGrabID[download.GrabID]
+		state.hasAny = true
+		state.active = state.active || download.State != core.DownloadFailed
+		byGrabID[download.GrabID] = state
+	}
+
+	best := make(map[int64]string, len(grabs))
+	for _, grab := range grabs {
+		switch grab.Status {
+		case core.GrabStatusImported:
+			best[grab.ReleaseID] = queueStateDownloaded
+		case core.GrabStatusGrabbed:
+			if best[grab.ReleaseID] == queueStateDownloaded {
+				continue
+			}
+			state := byGrabID[grab.GrabID]
+			if state.hasAny && !state.active {
+				continue
+			}
+			best[grab.ReleaseID] = queueStateDownloading
+		}
+	}
+	for i := range releases {
+		if state, ok := best[releases[i].ID]; ok {
+			releases[i].QueueState = state
+		}
+	}
+	return nil
 }
 
 // indexerSearch is one indexer's answer, carried back over a channel.

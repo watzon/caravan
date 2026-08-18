@@ -288,13 +288,21 @@ func (s *server) downloadingCalendarItems(ctx context.Context, movieIDs, episode
 	if err != nil {
 		return nil, nil, err
 	}
+	movies, episodes, _, err := s.activeTargetsFromGrabs(ctx, grabs)
+	return movies, episodes, err
+}
+
+// activeTargetsFromGrabs reports which movies, episodes and series still have
+// an in-flight grab. A grab with no download row yet still counts: the engine
+// has not persisted its first snapshot.
+func (s *server) activeTargetsFromGrabs(ctx context.Context, grabs []core.Grab) (map[int64]bool, map[int64]bool, map[int64]bool, error) {
 	grabIDs := make([]int64, 0, len(grabs))
 	for _, grab := range grabs {
 		grabIDs = append(grabIDs, grab.GrabID)
 	}
 	downloads, err := s.st.ListDownloadsForGrabs(ctx, grabIDs)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	type downloadState struct {
@@ -314,6 +322,7 @@ func (s *server) downloadingCalendarItems(ctx context.Context, movieIDs, episode
 
 	movies := make(map[int64]bool)
 	episodes := make(map[int64]bool)
+	series := make(map[int64]bool)
 	for _, grab := range grabs {
 		if grab.Status != core.GrabStatusGrabbed {
 			continue
@@ -325,11 +334,14 @@ func (s *server) downloadingCalendarItems(ctx context.Context, movieIDs, episode
 		if grab.MovieID != 0 {
 			movies[grab.MovieID] = true
 		}
+		if grab.SeriesID != 0 {
+			series[grab.SeriesID] = true
+		}
 		for _, episodeID := range grab.EpisodeIDs {
 			episodes[episodeID] = true
 		}
 	}
-	return movies, episodes, nil
+	return movies, episodes, series, nil
 }
 
 func calendarICS(entries []calendarEntry) string {

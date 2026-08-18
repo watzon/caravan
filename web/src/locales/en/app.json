@@ -185,6 +185,7 @@
   "download.client.unreachable.message.one": "{detail}Its queue is no longer updating, and Caravan will refuse new grabs for it until it reconnects. Other download clients keep working.",
   "download.client.unreachable.message.other": "{detail}Their queues are no longer updating, and Caravan will refuse new grabs for them until they reconnect. Other download clients keep working.",
   "status.downloaded": "Downloaded",
+  "status.downloading": "Downloading",
   "status.incomplete": "Incomplete",
   "status.wanted": "Wanted",
   "status.missing": "Missing",

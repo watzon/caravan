@@ -12,6 +12,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import Search from './Search.svelte';
 import type { Library, ParsedRelease, Release } from '../api/types';
 import { libraries } from '../state/libraries.svelte';
+import { downloads } from '../state/downloads.svelte';
 import { navigate } from '../router.svelte';
 import { clearToasts } from '../state/toast.svelte';
 import { DEBOUNCE_MS } from '../typeahead';
@@ -124,6 +125,17 @@ beforeEach(() => {
       }
       if (url.includes('/search/grab')) return new Response(null, { status: 204 });
       if (url.includes('/library/movies')) return jsonResponse({ movies: [{ id: 11, title: 'Dune', library_id: 1 }] });
+      if (url.includes('/system/status')) {
+        return jsonResponse({
+          version: '0.1.0',
+          mode: 'server',
+          storage_root: '/data',
+          schema_version: 12,
+          scanning: false,
+          counts: { movies: 0, series: 0, media_files: 0, unmatched: 0 },
+        });
+      }
+      if (url.includes('/downloads')) return jsonResponse({ downloads: [] });
       throw new Error(`unexpected fetch: ${url}`);
     }),
   );
@@ -136,6 +148,8 @@ afterEach(() => {
   navigate('/search', { replace: true });
   libraries.all = [];
   libraries.loaded = false;
+  downloads.stopSoon();
+  downloads.items = null;
   clearToasts();
   vi.unstubAllGlobals();
 });
@@ -247,7 +261,7 @@ describe('Search', () => {
     });
   });
 
-  it('sends the user to the queue once a grab is accepted', async () => {
+  it('stays on the search page once a grab is accepted', async () => {
     mountScreen();
     await settle();
     await searchAndOpenTarget();
@@ -255,6 +269,7 @@ describe('Search', () => {
     button('Grab').click();
     await settle();
 
-    expect(window.location.pathname).toBe('/queue');
+    expect(window.location.pathname).toBe('/search');
+    expect(host.textContent).toContain('Downloading');
   });
 });

@@ -120,6 +120,8 @@ type sceneJSON struct {
 	// shape and the same status vocabulary the episode rows use, deliberately:
 	// the Adult pages are the library's pages with different nouns.
 	File *mediaFileJSON `json:"file"`
+	// Downloading is true while an in-flight grab is fetching this scene.
+	Downloading bool `json:"downloading"`
 }
 
 // siteMetaJSON is a provider search hit: a site that may or may not be in the
@@ -337,6 +339,14 @@ func (s *server) siteYears(ctx context.Context, sr *core.Series) ([]siteYearJSON
 	// Tolerant for the reason siteProviderURL is — scenes with no provider link
 	// render fine.
 	endpoint := s.siteEndpoint(ctx, sr)
+	episodeIDs := make([]int64, 0, len(episodes))
+	for _, e := range episodes {
+		episodeIDs = append(episodeIDs, e.ID)
+	}
+	_, downloading, err := s.downloadingCalendarItems(ctx, nil, episodeIDs)
+	if err != nil {
+		return nil, 0, 0, err
+	}
 	byYear := map[int][]sceneJSON{}
 	total, withFile := 0, 0
 	for _, e := range episodes {
@@ -346,6 +356,7 @@ func (s *server) siteYears(ctx context.Context, sr *core.Series) ([]siteYearJSON
 			withFile++
 		}
 		scene := sceneDTO(e, firstFileDTO(files, profile))
+		scene.Downloading = downloading[e.ID]
 		if endpoint != "" {
 			scene.ProviderURL = stashbox.SceneWebURL(endpoint, e.StashID)
 		}

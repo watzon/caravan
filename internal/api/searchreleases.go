@@ -207,6 +207,10 @@ func (s *server) handleSearchReleases(w http.ResponseWriter, r *http.Request) {
 		out.Releases = out.Releases[:limit]
 		out.Truncated = true
 	}
+	if err := s.decorateReleaseQueueState(ctx, out.Releases); err != nil {
+		s.writeStoreError(w, "read grab history", err)
+		return
+	}
 	writeJSON(w, http.StatusOK, out)
 }
 

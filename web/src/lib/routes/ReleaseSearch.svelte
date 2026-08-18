@@ -34,7 +34,7 @@
   import ReleaseTable from '../components/ReleaseTable.svelte';
   import { episodeCode, seasonLabel } from '../format';
   import { sceneNumber } from '../adult';
-  import { navigate } from '../router.svelte';
+  import { libraryChanged } from '../state/activity';
   import { movieSeed, seriesSeed, sceneSeed } from '../searchseed';
   import { pushToast } from '../state/toast.svelte';
   import { useI18n, type TranslationKey } from '../i18n.svelte';
@@ -318,7 +318,12 @@
         });
       }
       pushToast(t('route.releaseSearch.grabbed', { title: release.title }), 'success');
-      navigate('/queue');
+      if (releases) {
+        releases = releases.map((row) =>
+          row.guid === release.guid ? { ...row, queue_state: 'downloading' } : row,
+        );
+      }
+      libraryChanged({ expectDownload: true });
     } catch (err) {
       pushToast(errorText(err), 'danger');
     } finally {

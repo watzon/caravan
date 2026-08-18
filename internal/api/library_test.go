@@ -360,6 +360,54 @@ func TestDeleteForwardsFilesSwitch(t *testing.T) {
 	}
 }
 
+func TestMovieDetailReportsActiveGrabAsDownloading(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	m := addMovie(t, st, "In Flight", 2021)
+	seedActiveGrab(t, st, core.GrabInfo{MovieID: m.ID}, "hash-movie-dl")
+
+	rec := do(t, h, http.MethodGet, "/api/v1/library/movies/"+itoa(m.ID), "")
+	wantStatus(t, rec, http.StatusOK)
+	var body movieJSON
+	decodeBody(t, rec, &body)
+	if !body.Downloading {
+		t.Fatalf("movie downloading = false, want true while a grab is in flight")
+	}
+
+	rec = do(t, h, http.MethodGet, "/api/v1/library/movies", "")
+	wantStatus(t, rec, http.StatusOK)
+	var list struct {
+		Movies []movieJSON `json:"movies"`
+	}
+	decodeBody(t, rec, &list)
+	var found *movieJSON
+	for i := range list.Movies {
+		if list.Movies[i].ID == m.ID {
+			found = &list.Movies[i]
+			break
+		}
+	}
+	if found == nil || !found.Downloading {
+		t.Fatalf("listed movie downloading = %+v, want true", found)
+	}
+}
+
+func TestSeriesDetailReportsActiveGrabAsDownloading(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	sr, episodes := addSeries(t, st, "In Flight")
+	seedActiveGrab(t, st, core.GrabInfo{SeriesID: sr.ID, EpisodeIDs: []int64{episodes[0].ID}}, "hash-ep-dl")
+
+	rec := do(t, h, http.MethodGet, "/api/v1/library/series/"+itoa(sr.ID), "")
+	wantStatus(t, rec, http.StatusOK)
+	var body seriesDetailJSON
+	decodeBody(t, rec, &body)
+	if !body.Downloading {
+		t.Fatalf("series downloading = false, want true")
+	}
+	if len(body.Seasons) == 0 || len(body.Seasons[0].Episodes) == 0 || !body.Seasons[0].Episodes[0].Downloading {
+		t.Fatalf("episode downloading = %+v, want the grabbed episode marked", body.Seasons)
+	}
+}
+
 // seedActiveGrab writes a grabbed-status grab and its in-flight download row,
 // which is what "this item is downloading right now" looks like in the store.
 func seedActiveGrab(t *testing.T, st *store.Store, info core.GrabInfo, engineID core.DownloadID) *core.Grab {
