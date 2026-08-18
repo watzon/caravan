@@ -753,6 +753,44 @@ func TestScanParksASceneItCannotDate(t *testing.T) {
 	}
 }
 
+func TestScanImportsASceneDatedOneDayOff(t *testing.T) {
+	h := newAdultHarness(t, true)
+	h.seedBrazzers()
+	h.writeVideo("library/Adult/Brazzers.22.03.13.Abella.Danger.Deep.Impact.XXX.1080p.MP4-KTR.mkv", "scene payload")
+
+	res := h.scan()
+	if res.Unmatched != 0 {
+		t.Fatalf("scan parked %d files: %v", res.Unmatched, res.Errors)
+	}
+	if res.Added != 1 {
+		t.Fatalf("added %d files, want 1 (errors: %v)", res.Added, res.Errors)
+	}
+
+	const want = "library/Adult/Brazzers/Season 2022/Brazzers - 2022-03-14 - Deep Impact.mkv"
+	if !h.exists(want) {
+		t.Fatalf("one-day-off scene did not land at %s", want)
+	}
+}
+
+func TestScanParksAnAmbiguousNearbyScene(t *testing.T) {
+	h := newAdultHarness(t, true)
+	h.seedBrazzers()
+	h.adult.scenes["site-1"] = append(h.adult.scenes["site-1"], core.SceneMeta{
+		StashID: "scene-before", SiteStashID: "site-1", SiteName: "Brazzers",
+		Title: "Day Before", Date: date(2022, time.March, 12),
+	})
+	h.writeVideo("library/Adult/Brazzers.22.03.13.Whichever.XXX.1080p.MP4-KTR.mkv", "x")
+
+	res := h.scan()
+	if res.Unmatched != 1 {
+		t.Fatalf("parked %d, want 1", res.Unmatched)
+	}
+	parked, _ := h.st.ListUnmatchedFiles(context.Background())
+	if parked[0].Reason != reasonAmbiguousScene {
+		t.Errorf("park reason = %q, want %q", parked[0].Reason, reasonAmbiguousScene)
+	}
+}
+
 func TestScanParksASceneTheSiteNeverReleased(t *testing.T) {
 	h := newAdultHarness(t, true)
 	h.seedBrazzers()

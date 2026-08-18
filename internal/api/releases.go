@@ -642,22 +642,10 @@ func sceneReleaseFlags(rel core.Release, airDate time.Time) []string {
 	if airDate.IsZero() {
 		return flags
 	}
-	if !sameDay(rel.Parsed.SceneDate, airDate) {
+	if !core.SameSceneDay(rel.Parsed.SceneDate, airDate) {
 		flags = append(flags, flagWrongDate)
 	}
 	return flags
-}
-
-// sameDay compares two dates by calendar day in UTC. A zero date matches
-// nothing: "this release does not say when it came out" is exactly the case the
-// flag is for.
-func sameDay(a, b time.Time) bool {
-	if a.IsZero() || b.IsZero() {
-		return false
-	}
-	ay, am, ad := a.UTC().Date()
-	by, bm, bd := b.UTC().Date()
-	return ay == by && am == bm && ad == bd
 }
 
 // commonReleaseFlags are the flags that do not depend on the target item.

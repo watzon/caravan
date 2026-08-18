@@ -3,6 +3,7 @@ package core
 import (
 	"slices"
 	"testing"
+	"time"
 )
 
 func TestMovieSearchesFanOutYearAndBareTitleForms(t *testing.T) {
@@ -15,6 +16,48 @@ func TestMovieSearchesFanOutYearAndBareTitleForms(t *testing.T) {
 	if got := MovieSearches("   ", 2008); got != nil {
 		t.Fatalf("MovieSearches with blank title = %v, want nil", got)
 	}
+}
+
+func TestSceneSearchesExactDateThenTitle(t *testing.T) {
+	released := time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC)
+	got := SceneSearches("Brazzers", released, "Deep Impact")
+	want := []SceneSearch{
+		{Variant: SceneSearchByDate, Query: "Brazzers 22.03.14"},
+		{Variant: SceneSearchByTitle, Query: "Brazzers Deep Impact"},
+	}
+	if !equalSceneSearches(got, want) {
+		t.Fatalf("SceneSearches = %#v, want %#v", got, want)
+	}
+}
+
+func TestNearbySceneSearchesAsksAdjacentDaysBeforeTitle(t *testing.T) {
+	released := time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC)
+	got := NearbySceneSearches("Brazzers", released, "Deep Impact")
+	want := []SceneSearch{
+		{Variant: SceneSearchByDate, Query: "Brazzers 22.03.14"},
+		{Variant: SceneSearchByDate, Query: "Brazzers 22.03.13"},
+		{Variant: SceneSearchByDate, Query: "Brazzers 22.03.15"},
+		{Variant: SceneSearchByTitle, Query: "Brazzers Deep Impact"},
+	}
+	if !equalSceneSearches(got, want) {
+		t.Fatalf("NearbySceneSearches = %#v, want %#v", got, want)
+	}
+
+	if got := NearbySceneSearches("Brazzers", time.Time{}, "Deep Impact"); !equalSceneSearches(got, SceneSearches("Brazzers", time.Time{}, "Deep Impact")) {
+		t.Fatalf("a scene with no date must not invent adjacent queries: %#v", got)
+	}
+}
+
+func equalSceneSearches(got, want []SceneSearch) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestSeriesSearchesFanOutEpisodeAndSeasonPackForms(t *testing.T) {

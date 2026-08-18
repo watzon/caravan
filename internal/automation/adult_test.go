@@ -253,14 +253,22 @@ func TestRSSMatchesScenesByReleaseDate(t *testing.T) {
 		t.Error("a scene released on the target's date did not match")
 	}
 
-	// A different day is a different scene, even though the site and the year
-	// — and therefore the season — are identical.
-	otherDay := core.Release{Parsed: core.ParsedRelease{
+	// A one-day drift is the usual timezone split and still matches. Two
+	// days is a different scene, even though the site and the year — and
+	// therefore the season — are identical.
+	nextDay := core.Release{Parsed: core.ParsedRelease{
 		Title: "Brazzers", Year: 2022, Season: 2022,
 		SceneDate: released.AddDate(0, 0, 1),
 	}}
+	if !matchesRSSEpisode(nextDay, target) {
+		t.Error("a scene dated one day off did not match")
+	}
+	otherDay := core.Release{Parsed: core.ParsedRelease{
+		Title: "Brazzers", Year: 2022, Season: 2022,
+		SceneDate: released.AddDate(0, 0, 2),
+	}}
 	if matchesRSSEpisode(otherDay, target) {
-		t.Error("a scene from another day matched")
+		t.Error("a scene from two days away matched")
 	}
 
 	// An episode-shaped release for the same site is not a scene at all. Its
@@ -487,8 +495,8 @@ func TestSceneSearchFallsBackToTheTitleVariant(t *testing.T) {
 	runner := NewRunner(st, fake.factory(), func(context.Context, int64, string) core.Engine { return &fakeEngine{} })
 	searchEpisodeJob(t, ctx, runner, st, scene.ID)
 
-	want := []string{"Brazzers 22.03.14", "Brazzers Deep Impact"}
-	if got := fake.queries(); len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+	want := []string{"Brazzers 22.03.14", "Brazzers 22.03.13", "Brazzers 22.03.15", "Brazzers Deep Impact"}
+	if got := fake.queries(); len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] || got[3] != want[3] {
 		t.Fatalf("queries = %v, want %v in that order", got, want)
 	}
 	if got := grabbedTitles(t, ctx, st); len(got) != 1 || !strings.Contains(got[0], "Deep.Impact") {
@@ -513,8 +521,8 @@ func TestSceneSearchRecordsWhichVariantsItTried(t *testing.T) {
 	runner := NewRunner(st, fake.factory(), func(context.Context, int64, string) core.Engine { return &fakeEngine{} })
 	searchEpisodeJob(t, ctx, runner, st, scene.ID)
 
-	if got := fake.queries(); len(got) != 2 {
-		t.Fatalf("queries = %v, want both variants tried", got)
+	if got := fake.queries(); len(got) != 4 {
+		t.Fatalf("queries = %v, want the exact day, the adjacent days, and the title", got)
 	}
 	events, err := st.ListEvents(ctx, 50)
 	if err != nil {
@@ -601,6 +609,12 @@ func TestMatchesSceneTitle(t *testing.T) {
 			want:    true,
 		},
 		{
+			name:    "a date one day off is the timezone split, not a different scene",
+			release: "Brazzers.22.03.13.Deep.Impact.XXX.1080p",
+			parsed:  core.ParsedRelease{SceneDate: released.AddDate(0, 0, -1)},
+			want:    true,
+		},
+		{
 			// The rule that matters most: words can line up and the release
 			// still be a different scene, and the date says so.
 			name:    "a contradicting date beats any title match",
@@ -663,9 +677,120 @@ func TestMatchesSceneTitle(t *testing.T) {
 				ep = scene
 			}
 			release := core.Release{Title: tt.release, Parsed: tt.parsed}
-			if got := matchesSceneTitle(release, sr, ep); got != tt.want {
+			if got := matchesSceneTitle(release, sr, ep, nil); got != tt.want {
 				t.Errorf("matchesSceneTitle(%q) = %v, want %v", tt.release, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestMatchesSceneTitleRejectsANearbyDateAnotherSceneOwns(t *testing.T) {
+	released := time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC)
+	release := core.Release{
+		Title:  "Brazzers.22.03.13.Deep.Impact.XXX.1080p",
+		Parsed: core.ParsedRelease{SceneDate: released.AddDate(0, 0, -1)},
+	}
+	series := core.Series{Title: "Brazzers"}
+	scene := core.Episode{Title: "Deep Impact", AirDate: released}
+	sibling := []time.Time{released.AddDate(0, 0, -1)}
+	if matchesSceneTitle(release, series, scene, sibling) {
+		t.Error("a nearby date another scene owns must not match")
+	}
+}
+
+func TestBestRSSScenePrefersTheExactDay(t *testing.T) {
+	released := time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC)
+	release := core.Release{Parsed: core.ParsedRelease{
+		Title: "Brazzers", SceneDate: released,
+	}}
+	exact := wanted.Episode{
+		Episode:     core.Episode{ID: 2, AirDate: released},
+		SeriesTitle: "Brazzers",
+		SeriesKind:  core.SeriesKindAdult,
+	}
+	nearby := wanted.Episode{
+		Episode:     core.Episode{ID: 1, AirDate: released.AddDate(0, 0, -1)},
+		SeriesTitle: "Brazzers",
+		SeriesKind:  core.SeriesKindAdult,
+	}
+	got := bestRSSScene(release, []wanted.Episode{nearby, exact})
+	if got == nil || got.ID != exact.ID {
+		t.Fatalf("bestRSSScene = %+v, want the exact-day scene", got)
+	}
+}
+
+func TestBestRSSSceneRefusesANearbyTie(t *testing.T) {
+	released := time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC)
+	release := core.Release{Parsed: core.ParsedRelease{
+		Title: "Brazzers", SceneDate: released,
+	}}
+	before := wanted.Episode{
+		Episode:     core.Episode{ID: 1, AirDate: released.AddDate(0, 0, -1)},
+		SeriesTitle: "Brazzers",
+		SeriesKind:  core.SeriesKindAdult,
+	}
+	after := wanted.Episode{
+		Episode:     core.Episode{ID: 3, AirDate: released.AddDate(0, 0, 1)},
+		SeriesTitle: "Brazzers",
+		SeriesKind:  core.SeriesKindAdult,
+	}
+	if got := bestRSSScene(release, []wanted.Episode{before, after}); got != nil {
+		t.Fatalf("bestRSSScene = %+v, want nil on a nearby tie", got)
+	}
+}
+
+func TestSceneSearchGrabsAReleaseDatedOneDayOff(t *testing.T) {
+	ctx := context.Background()
+	st := openStore(t)
+	enableAdultLibrary(t, st)
+
+	fake := startFakeTorznab(t)
+	cfg := addTorznabIndexer(t, ctx, st, fake, "shared", 6000)
+	overrideLibraryIndexer(t, ctx, st, core.LibraryKindAdult, cfg.ID, true, []int{6000})
+
+	released := time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC)
+	_, scene := addSceneWithTitle(t, ctx, st, "Brazzers", "Deep Impact", released, "Abella Danger")
+	fake.serves("Brazzers 22.03.13", torznabItem{
+		title: "Brazzers.22.03.13.Abella.Danger.Deep.Impact.XXX.1080p.MP4-KTR",
+		guid:  "off-by-one",
+	})
+
+	runner := NewRunner(st, fake.factory(), func(context.Context, int64, string) core.Engine { return &fakeEngine{} })
+	searchEpisodeJob(t, ctx, runner, st, scene.ID)
+
+	if got := grabbedTitles(t, ctx, st); len(got) != 1 || !strings.Contains(got[0], "22.03.13") {
+		t.Fatalf("grabbed %v, want the one-day-off release", got)
+	}
+}
+
+func TestSceneSearchDoesNotGrabANearbyDateAnotherSceneOwns(t *testing.T) {
+	ctx := context.Background()
+	st := openStore(t)
+	enableAdultLibrary(t, st)
+
+	fake := startFakeTorznab(t)
+	cfg := addTorznabIndexer(t, ctx, st, fake, "shared", 6000)
+	overrideLibraryIndexer(t, ctx, st, core.LibraryKindAdult, cfg.ID, true, []int{6000})
+
+	released := time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC)
+	series, scene := addSceneWithTitle(t, ctx, st, "Brazzers", "Deep Impact", released, "Abella Danger")
+	sibling := core.Episode{
+		SeriesID: series.ID, SeasonNumber: 2022, EpisodeNumber: 2,
+		StashID: "scene-other", Title: "Other Scene",
+		AirDate: released.AddDate(0, 0, -1), Monitored: true,
+	}
+	if err := st.UpsertEpisode(ctx, &sibling); err != nil {
+		t.Fatalf("upsert sibling: %v", err)
+	}
+	fake.serves("Brazzers 22.03.13", torznabItem{
+		title: "Brazzers.22.03.13.Other.Scene.XXX.1080p.MP4-KTR",
+		guid:  "siblings-day",
+	})
+
+	runner := NewRunner(st, fake.factory(), func(context.Context, int64, string) core.Engine { return &fakeEngine{} })
+	searchEpisodeJob(t, ctx, runner, st, scene.ID)
+
+	if got := grabbedTitles(t, ctx, st); len(got) != 0 {
+		t.Fatalf("grabbed %v, want none: that date belongs to another scene", got)
 	}
 }

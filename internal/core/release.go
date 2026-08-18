@@ -207,6 +207,56 @@ func SceneSearches(site string, airDate time.Time, title string) []SceneSearch {
 	return out
 }
 
+// NearbySceneSearches is the automatic-only expansion of SceneSearches.
+//
+// The interactive picker keeps the exact-date form so its seed stays the one
+// date the scene is filed under. Monitoring also asks the day before and the
+// day after, because a timezone split names the file with those digits and an
+// exact-date query will not see it. Adjacent queries come after the exact
+// date and before the title fallback, so a correctly dated release is still
+// the first thing tried.
+func NearbySceneSearches(site string, airDate time.Time, title string) []SceneSearch {
+	searches := SceneSearches(site, airDate, title)
+	if airDate.IsZero() {
+		return searches
+	}
+	site = strings.TrimSpace(site)
+	if site == "" {
+		return searches
+	}
+	extra := make([]SceneSearch, 0, 2*SceneDateSlackDays)
+	for delta := -SceneDateSlackDays; delta <= SceneDateSlackDays; delta++ {
+		if delta == 0 {
+			continue
+		}
+		day := airDate.UTC().AddDate(0, 0, delta)
+		extra = append(extra, SceneSearch{
+			Variant: SceneSearchByDate,
+			Query:   site + " " + day.Format(SceneDateLayout),
+		})
+	}
+	return insertAfterFirstDateSearch(searches, extra)
+}
+
+func insertAfterFirstDateSearch(searches, extra []SceneSearch) []SceneSearch {
+	if len(extra) == 0 {
+		return searches
+	}
+	out := make([]SceneSearch, 0, len(searches)+len(extra))
+	inserted := false
+	for _, search := range searches {
+		out = append(out, search)
+		if !inserted && search.Variant == SceneSearchByDate {
+			out = append(out, extra...)
+			inserted = true
+		}
+	}
+	if !inserted {
+		out = append(out, extra...)
+	}
+	return out
+}
+
 // sceneQueryText strips a scene title down to the words an indexer can match.
 //
 // Release names separate words with dots and carry no punctuation, so a title's

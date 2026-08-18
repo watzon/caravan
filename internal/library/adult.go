@@ -811,7 +811,8 @@ func (m *Manager) importScene(ctx context.Context, sr *core.Series, rel string, 
 }
 
 // resolveScene turns a scene parse into an ordinary episode parse by finding
-// the episode row whose air date is the date the filename claims.
+// the episode row whose air date is the date the filename claims, or the
+// unique scene one day away when the filename is off by a timezone split.
 //
 // This is the join that lets everything downstream be reused rather than
 // forked: once Season and Episodes are filled in, p is the same shape an
@@ -832,21 +833,41 @@ func (m *Manager) resolveScene(ctx context.Context, seriesID int64, p core.Parse
 		// on that date" about a query that never ran.
 		return nil, p, "", err
 	}
-	var match *core.Episode
+	var exact, nearby []*core.Episode
 	for i := range episodes {
-		if !sameDay(episodes[i].AirDate, p.SceneDate) {
+		days, ok := core.SceneDayDelta(episodes[i].AirDate, p.SceneDate)
+		if !ok {
 			continue
 		}
-		if match != nil {
-			// Two scenes released the same day, and the filename carries
-			// nothing that tells them apart. Guessing would import a scene as
-			// the wrong one and then supersede the right one's file on the next
-			// grab, so it parks for a human instead.
-			return nil, p, reasonAmbiguousScene, nil
+		abs := days
+		if abs < 0 {
+			abs = -abs
 		}
-		match = &episodes[i]
+		switch {
+		case abs == 0:
+			exact = append(exact, &episodes[i])
+		case abs <= core.SceneDateSlackDays:
+			nearby = append(nearby, &episodes[i])
+		}
 	}
-	if match == nil {
+	if len(exact) > 1 {
+		// Two scenes released the same day, and the filename carries
+		// nothing that tells them apart. Guessing would import a scene as
+		// the wrong one and then supersede the right one's file on the next
+		// grab, so it parks for a human instead.
+		return nil, p, reasonAmbiguousScene, nil
+	}
+	var match *core.Episode
+	switch {
+	case len(exact) == 1:
+		match = exact[0]
+	case len(nearby) == 1:
+		// The filename is one day off the stored air date — the usual
+		// timezone split — and no other scene claims that nearby day.
+		match = nearby[0]
+	case len(nearby) > 1:
+		return nil, p, reasonAmbiguousScene, nil
+	default:
 		return nil, p, reasonNoSceneMatch, nil
 	}
 	p.Season, p.Episodes = match.SeasonNumber, []int{match.EpisodeNumber}
@@ -1100,17 +1121,4 @@ func (m *Manager) adultSeriesByTitle(ctx context.Context, title string) (*core.S
 		return nil, nil
 	}
 	return &sites[idx], nil
-}
-
-// sameDay compares two instants by calendar date in UTC. Air dates are stored
-// as dates and scene dates are parsed as dates, so this is an equality test
-// that says so rather than one that depends on both sides having been
-// truncated the same way.
-func sameDay(a, b time.Time) bool {
-	if a.IsZero() || b.IsZero() {
-		return false
-	}
-	ay, am, ad := a.UTC().Date()
-	by, bm, bd := b.UTC().Date()
-	return ay == by && am == bm && ad == bd
 }

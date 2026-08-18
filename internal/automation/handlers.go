@@ -220,33 +220,48 @@ func (r *Runner) matchRSSRelease(ctx context.Context, st *store.Store, release c
 			return err
 		}
 	}
+	scenes := []wanted.Episode{}
 	for _, target := range lists.Episodes {
 		// The library an episode belongs to is its series' library, so a scene
 		// is only offered releases from a feed its OWN adult library
 		// subscribed to with categories this release is in. Another library
 		// that shares the indexer — of the other kind or of the same one —
 		// sees the same fetch and never these releases.
-		kind := core.LibraryKindForSeries(target.SeriesKind)
-		if !libs[target.SeriesLibraryID] || !matchesRSSEpisode(release, target) {
+		if !libs[target.SeriesLibraryID] {
 			continue
 		}
-		series, err := st.GetSeries(ctx, target.SeriesID)
-		if err != nil {
-			return fmt.Errorf("store: get series for rss episode: %w", err)
-		}
-		profile, err := st.ResolveItemQualityProfileByLibrary(ctx, series.LibraryID, kind, series.QualityProfileID)
-		if err != nil {
-			return fmt.Errorf("store: resolve episode profile: %w", err)
-		}
-		score, reject := wanted.ScoreRelease(release, profile)
-		if reject != "" || (target.Reason == wanted.ReasonBelowCutoff && !wanted.IsUpgrade(release.Parsed.Quality, target.FileQuality)) {
+		if target.SeriesKind == core.SeriesKindAdult {
+			scenes = append(scenes, target)
 			continue
 		}
-		if err := r.grabEpisode(ctx, st, series.LibraryID, kind, target.Episode, release, score, "automatic rss"); err != nil {
+		if !matchesRSSEpisode(release, target) {
+			continue
+		}
+		if err := r.grabRSSEpisode(ctx, st, target, release); err != nil {
 			return err
 		}
 	}
+	if target := bestRSSScene(release, scenes); target != nil {
+		return r.grabRSSEpisode(ctx, st, *target, release)
+	}
 	return nil
+}
+
+func (r *Runner) grabRSSEpisode(ctx context.Context, st *store.Store, target wanted.Episode, release core.Release) error {
+	kind := core.LibraryKindForSeries(target.SeriesKind)
+	series, err := st.GetSeries(ctx, target.SeriesID)
+	if err != nil {
+		return fmt.Errorf("store: get series for rss episode: %w", err)
+	}
+	profile, err := st.ResolveItemQualityProfileByLibrary(ctx, series.LibraryID, kind, series.QualityProfileID)
+	if err != nil {
+		return fmt.Errorf("store: resolve episode profile: %w", err)
+	}
+	score, reject := wanted.ScoreRelease(release, profile)
+	if reject != "" || (target.Reason == wanted.ReasonBelowCutoff && !wanted.IsUpgrade(release.Parsed.Quality, target.FileQuality)) {
+		return nil
+	}
+	return r.grabEpisode(ctx, st, series.LibraryID, kind, target.Episode, release, score, "automatic rss")
 }
 
 func (r *Runner) handleBacklogSweep(ctx context.Context, st *store.Store, payload json.RawMessage) error {
@@ -438,23 +453,28 @@ func (r *Runner) handleSearchEpisode(ctx context.Context, st *store.Store, paylo
 // stricter title test for the fallback query. The scoring, the rejection record
 // and the grab are the shared ones.
 //
-// Two queries, in order. "Site YY.MM.DD" is how scene releases are named, so it
-// is asked first and its answers are matched on the date alone. When it yields
-// nothing grabbable, "Site Scene Title" follows — the releases named after
-// their title or their performers, which the date query cannot see at all. That
-// second query is where Whisparr stops (its issue #115 asks for exactly this),
-// and it is only safe because what comes back is held to matchesSceneTitle
-// rather than to the date.
+// The exact date is asked first. When it yields nothing grabbable, the day
+// before and the day after follow — a timezone split names the file with
+// those digits, and an exact-date query will not see it. "Site Scene Title"
+// is last: the releases named after their title or their performers, which
+// no date query can see. That last query is where Whisparr stops (its issue
+// #115 asks for exactly this), and it is only safe because what comes back
+// is held to matchesSceneTitle rather than to the date.
 //
 // The fan-out itself is the adult library's: searchIndexers resolves that
 // library's indexers and the categories it asked each of them for, so a scene
 // search sends 6000-series categories and nothing else (PLAN phase 8 task 4).
 func (r *Runner) searchScene(ctx context.Context, st *store.Store, series core.Series, episode core.Episode, profile *core.QualityProfile) error {
-	searches := core.SceneSearches(series.Title, episode.AirDate, episode.Title)
+	searches := core.NearbySceneSearches(series.Title, episode.AirDate, episode.Title)
 	if len(searches) == 0 {
 		// No date and no title is no query to make and no candidate to
 		// recognize. Nothing is wrong; there is simply nothing to search for.
 		return nil
+	}
+
+	siblings, err := siblingSceneDates(ctx, st, series.ID, episode.ID)
+	if err != nil {
+		return err
 	}
 
 	info := core.GrabInfo{
@@ -465,7 +485,8 @@ func (r *Runner) searchScene(ctx context.Context, st *store.Store, series core.S
 	// A release returned by both query variants is still one candidate and, when
 	// it loses, one rejection record rather than two.
 	seen := map[string]bool{}
-	tried := make([]string, 0, len(searches))
+	tried := make([]string, 0, 2)
+	triedSeen := map[string]bool{}
 	matched := 0
 
 	for _, search := range searches {
@@ -476,7 +497,10 @@ func (r *Runner) searchScene(ctx context.Context, st *store.Store, series core.S
 		if err != nil {
 			return err
 		}
-		tried = append(tried, string(search.Variant))
+		if variant := string(search.Variant); !triedSeen[variant] {
+			triedSeen[variant] = true
+			tried = append(tried, variant)
+		}
 
 		automatic := make([]core.Release, 0, len(candidates))
 		for _, candidate := range candidates {
@@ -484,7 +508,7 @@ func (r *Runner) searchScene(ctx context.Context, st *store.Store, series core.S
 			if candidate.GUID != "" && seen[key] {
 				continue
 			}
-			if !matchesScene(candidate, search.Variant, series, episode) {
+			if !matchesScene(candidate, search.Variant, series, episode, siblings) {
 				continue
 			}
 			if candidate.GUID != "" {
@@ -494,7 +518,7 @@ func (r *Runner) searchScene(ctx context.Context, st *store.Store, series core.S
 		}
 		matched += len(automatic)
 
-		best, rejected := wanted.SelectBest(automatic, profile)
+		best, rejected := selectSceneRelease(automatic, episode.AirDate, profile)
 		if err := recordRejections(ctx, st, rejected, profile, info); err != nil {
 			return err
 		}
@@ -509,15 +533,16 @@ func (r *Runner) searchScene(ctx context.Context, st *store.Store, series core.S
 // matchesScene reports whether a candidate is the scene that was searched for.
 //
 // The date query's answers are matched on the date and nothing else: a scene
-// release named the standard way carries it, and that is an exact test.
-// The title query's answers cannot be — a release named after its title has no
-// date to compare — so they go through matchesSceneTitle, which is strict on
+// release named the standard way carries it. The day may be one off when no
+// sibling scene owns that nearby day (timezone split). The title query's
+// answers cannot rely on the date — a release named after its title has none
+// to compare — so they go through matchesSceneTitle, which is strict on
 // purpose.
-func matchesScene(release core.Release, variant core.SceneSearchVariant, series core.Series, episode core.Episode) bool {
+func matchesScene(release core.Release, variant core.SceneSearchVariant, series core.Series, episode core.Episode, siblings []time.Time) bool {
 	if variant == core.SceneSearchByTitle {
-		return matchesSceneTitle(release, series, episode)
+		return matchesSceneTitle(release, series, episode, siblings)
 	}
-	return sameReleaseDay(release.Parsed.SceneDate, episode.AirDate)
+	return sceneDateFits(release.Parsed.SceneDate, episode.AirDate, siblings)
 }
 
 // matchesSceneTitle is the conservative test a title-named release has to pass.
@@ -544,8 +569,8 @@ func matchesScene(release core.Release, variant core.SceneSearchVariant, series 
 // above it ("Brazzers.…" for a Brazzers Exxtra scene). Loosening the site test
 // to a partial match would take it, and would also take every other scene the
 // network released that day, so it stays strict.
-func matchesSceneTitle(release core.Release, series core.Series, episode core.Episode) bool {
-	if !release.Parsed.SceneDate.IsZero() && !sameReleaseDay(release.Parsed.SceneDate, episode.AirDate) {
+func matchesSceneTitle(release core.Release, series core.Series, episode core.Episode, siblings []time.Time) bool {
+	if !release.Parsed.SceneDate.IsZero() && !sceneDateFits(release.Parsed.SceneDate, episode.AirDate, siblings) {
 		return false
 	}
 
@@ -639,16 +664,65 @@ var sceneTitleStopWords = map[string]bool{
 	"my": true, "your": true, "his": true, "her": true, "part": true, "vol": true,
 }
 
-// sameReleaseDay compares a parsed scene date against an episode's air date by
-// calendar day in UTC. Both are stored as dates; this says so rather than
-// relying on both having been truncated identically.
-func sameReleaseDay(a, b time.Time) bool {
-	if a.IsZero() || b.IsZero() {
+// sceneDateFits reports whether a parsed release date is this scene's date.
+//
+// The exact stored day always fits. A date one day away also fits when no
+// other scene from the same site owns that day: that is the timezone split
+// (studio local time vs a UTC calendar day) that would otherwise leave a
+// monitored scene wanted forever. A sibling on the adjacent day means the
+// release is that other scene, so it is refused.
+func sceneDateFits(parsed, air time.Time, siblings []time.Time) bool {
+	days, ok := core.SceneDayDelta(parsed, air)
+	if !ok {
 		return false
 	}
-	ay, am, ad := a.UTC().Date()
-	by, bm, bd := b.UTC().Date()
-	return ay == by && am == bm && ad == bd
+	if days == 0 {
+		return true
+	}
+	if days < 0 {
+		days = -days
+	}
+	if days > core.SceneDateSlackDays {
+		return false
+	}
+	for _, sib := range siblings {
+		if core.SameSceneDay(parsed, sib) {
+			return false
+		}
+	}
+	return true
+}
+
+// selectSceneRelease prefers a release named with the scene's exact day.
+// Nearby-day candidates are only considered when nothing on the exact day
+// came back: falling through would grab yesterday's 2160p instead of today's
+// below-cutoff original.
+func selectSceneRelease(automatic []core.Release, air time.Time, profile *core.QualityProfile) (*core.Release, []wanted.Decision) {
+	exact := make([]core.Release, 0, len(automatic))
+	for _, rel := range automatic {
+		if core.SameSceneDay(rel.Parsed.SceneDate, air) {
+			exact = append(exact, rel)
+		}
+	}
+	if len(exact) > 0 {
+		return wanted.SelectBest(exact, profile)
+	}
+	return wanted.SelectBest(automatic, profile)
+}
+
+func siblingSceneDates(ctx context.Context, st *store.Store, seriesID, skipID int64) ([]time.Time, error) {
+	episodes, err := st.ListEpisodes(ctx, seriesID)
+	if err != nil {
+		return nil, fmt.Errorf("store: list scenes of series %d: %w", seriesID, err)
+	}
+	out := make([]time.Time, 0, len(episodes))
+	for _, ep := range episodes {
+		if ep.ID == skipID || ep.AirDate.IsZero() {
+			continue
+		}
+		out = append(out, ep.AirDate)
+	}
+	return out, nil
 }
 
 func (r *Runner) searchMovies(ctx context.Context, st *store.Store, libraryID int64, query string) ([]core.Release, error) {
@@ -1089,19 +1163,58 @@ func matchesMovie(release core.Release, movie core.Movie) bool {
 // looking for. The title test is shared; the identity test is not, because a
 // scene's season and episode numbers are Caravan's own mapping (release year,
 // sequence within that year) and no indexer publishes them. The release date is
-// what a scene name actually carries and what identifies it.
+// what a scene name actually carries and what identifies it. A scene date may
+// be one day off; matchRSSRelease then picks the closest wanted scene so a
+// daily studio does not have one release claimed by two days.
 func matchesRSSEpisode(release core.Release, episode wanted.Episode) bool {
 	if normalizeTitle(release.Parsed.Title) != normalizeTitle(episode.SeriesTitle) {
 		return false
 	}
 	if episode.SeriesKind == core.SeriesKindAdult {
-		return sameReleaseDay(release.Parsed.SceneDate, episode.AirDate)
+		return core.NearbySceneDay(release.Parsed.SceneDate, episode.AirDate)
 	}
 	// One episode only: a season pack matching by containment would be grabbed
 	// as if it were the single episode, which is the interactive path's job.
 	return len(release.Parsed.Episodes) == 1 &&
 		release.Parsed.Season == episode.SeasonNumber &&
 		contains(release.Parsed.Episodes, episode.EpisodeNumber)
+}
+
+// bestRSSScene picks the unique closest wanted scene for a dated release.
+// An exact day wins. Two scenes the same distance away (the day before and
+// the day after, with nothing on the release's own day) are left unmatched:
+// guessing would grab the wrong scene.
+func bestRSSScene(release core.Release, episodes []wanted.Episode) *wanted.Episode {
+	var best *wanted.Episode
+	bestAbs := 0
+	ties := 0
+	for i := range episodes {
+		ep := &episodes[i]
+		if !matchesRSSEpisode(release, *ep) {
+			continue
+		}
+		days, ok := core.SceneDayDelta(release.Parsed.SceneDate, ep.AirDate)
+		if !ok {
+			continue
+		}
+		abs := days
+		if abs < 0 {
+			abs = -abs
+		}
+		if best == nil || abs < bestAbs {
+			best = ep
+			bestAbs = abs
+			ties = 1
+			continue
+		}
+		if abs == bestAbs && ep.ID != best.ID {
+			ties++
+		}
+	}
+	if best == nil || (ties > 1 && bestAbs > 0) {
+		return nil
+	}
+	return best
 }
 
 func normalizeTitle(value string) string {

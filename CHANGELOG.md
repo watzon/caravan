@@ -72,6 +72,13 @@ and Caravan uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Monitored adult scenes are still found when the release date is one day
+  off the stored air date (the usual timezone split between a studio's
+  local calendar and a UTC day on stash-box). Search asks the adjacent
+  days after the exact date, RSS picks the closest wanted scene, and a
+  file on disk dated one day off imports when that nearby scene is unique.
+  A site that released something on the adjacent day is left alone, so a
+  daily studio does not grab yesterday's scene as today's.
 - Discover's poster shelves no longer stretch the page sideways. The row
   stays inside a capped scroller instead of growing the document to the
   uncapped width of every card.
