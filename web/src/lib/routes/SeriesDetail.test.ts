@@ -120,7 +120,22 @@ const COMPLETE_SERIES = {
   })),
 };
 
-function episode(number: number, withFile: boolean) {
+function cascadeSeriesMonitored<T extends { monitored: boolean; seasons?: typeof SERIES_WITH_FILES.seasons }>(
+  series: T,
+  monitored: boolean,
+): T {
+  return {
+    ...series,
+    monitored,
+    seasons: (series.seasons ?? []).map((season) => ({
+      ...season,
+      monitored,
+      episodes: season.episodes.map((episode) => ({ ...episode, monitored })),
+    })),
+  };
+}
+
+function episode(number: number, withFile: boolean, monitored = true) {
   return {
     id: number * 10,
     series_id: 3,
@@ -130,7 +145,7 @@ function episode(number: number, withFile: boolean) {
     title: '',
     overview: '',
     air_date: '',
-    monitored: true,
+    monitored,
     file: withFile
       ? {
           id: number,
@@ -186,10 +201,15 @@ function stubFetch(queued: number, series: unknown = SERIES, qualityProfileStatu
         });
       }
       if (body?.monitored !== undefined) {
-        return new Response(JSON.stringify({ ...(series as object), monitored: body.monitored }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        });
+        return new Response(
+          JSON.stringify(
+            cascadeSeriesMonitored(series as typeof SERIES_WITH_FILES, Boolean(body.monitored)),
+          ),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        );
       }
       return new Response(JSON.stringify(series), {
         status: 200,
@@ -221,12 +241,18 @@ async function settle() {
   flushSync();
 }
 
-function searchNowButton(): HTMLButtonElement {
+function searchMonitoredButton(): HTMLButtonElement {
   const button = [...host.querySelectorAll('button')].find((b) =>
-    b.textContent?.includes('Search now'),
+    b.textContent?.includes('Search monitored'),
   );
-  expect(button, 'Search now button').toBeDefined();
+  expect(button, 'Search monitored button').toBeDefined();
   return button as HTMLButtonElement;
+}
+
+function monitorAndSearchButton(): HTMLButtonElement | undefined {
+  return [...host.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
+    button.textContent?.includes('Monitor and search'),
+  );
 }
 
 /** The header's ⋯ trigger, named for a screen reader by the series title. */
@@ -528,14 +554,15 @@ describe('SeriesDetail search actions', () => {
 
     const inventory = host.querySelector('section[aria-labelledby="series-episodes-heading"]');
     expect(inventory).not.toBeNull();
-    expect(inventory?.contains(searchNowButton())).toBe(true);
+    expect(inventory?.contains(searchMonitoredButton())).toBe(true);
+    expect(monitorAndSearchButton()).toBeUndefined();
     expect(inventory?.textContent).toContain('3 of 4 on disk');
 
     const picker = host.querySelector('a[href="/series/3/search"]');
     expect(picker?.textContent).toContain('Choose a release');
     expect(inventory?.contains(picker)).toBe(true);
 
-    searchNowButton().click();
+    searchMonitoredButton().click();
     await settle();
 
     expect(
@@ -551,7 +578,7 @@ describe('SeriesDetail search actions', () => {
     app = mount(SeriesDetail, { target: host, props: { id: 3 } });
     await settle();
 
-    searchNowButton().click();
+    searchMonitoredButton().click();
     await settle();
 
     expect(toasts.items).toHaveLength(1);
@@ -563,23 +590,61 @@ describe('SeriesDetail search actions', () => {
     app = mount(SeriesDetail, { target: host, props: { id: 3 } });
     await settle();
 
-    searchNowButton().click();
+    searchMonitoredButton().click();
     await settle();
 
     expect(toasts.items).toHaveLength(0);
   });
 
-  it('monitors an unmonitored series before starting its automatic search', async () => {
-    stubFetch(2, { ...SERIES_WITH_FILES, monitored: false });
+  it('searches monitored episodes without turning the rest on', async () => {
+    const mixed = {
+      ...SERIES_WITH_FILES,
+      monitored: false,
+      seasons: SERIES_WITH_FILES.seasons.map((season, index) => ({
+        ...season,
+        monitored: index === 1,
+        episodes: season.episodes.map((row, rowIndex) => ({
+          ...row,
+          monitored: index === 1 && rowIndex === 1,
+        })),
+      })),
+    };
+    stubFetch(1, mixed);
     app = mount(SeriesDetail, { target: host, props: { id: 3 } });
     await settle();
 
-    expect([...host.querySelectorAll('button')].some((button) =>
-      button.textContent?.includes('Search now'),
-    )).toBe(false);
-    const monitorAndSearch = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
-      (button) => button.textContent?.includes('Monitor and search'),
+    searchMonitoredButton().click();
+    await settle();
+
+    expect(calls.filter((call) => call.method === 'PATCH' || call.method === 'POST')).toEqual([
+      {
+        url: '/api/v1/library/series/3/search',
+        method: 'POST',
+        body: null,
+      },
+    ]);
+    const missingEpisode = host.querySelector<HTMLButtonElement>(
+      'button[role="switch"][aria-label="Monitor S01E01"]',
     );
+    expect(missingEpisode?.getAttribute('aria-checked')).toBe('false');
+  });
+
+  it('monitors every season and episode before starting the automatic search', async () => {
+    const mixed = {
+      ...SERIES_WITH_FILES,
+      monitored: false,
+      seasons: SERIES_WITH_FILES.seasons.map((season) => ({
+        ...season,
+        monitored: false,
+        episodes: season.episodes.map((row) => ({ ...row, monitored: false })),
+      })),
+    };
+    stubFetch(2, mixed);
+    app = mount(SeriesDetail, { target: host, props: { id: 3 } });
+    await settle();
+
+    expect(searchMonitoredButton()).toBeDefined();
+    const monitorAndSearch = monitorAndSearchButton();
     expect(monitorAndSearch).toBeDefined();
 
     monitorAndSearch!.click();
@@ -597,9 +662,82 @@ describe('SeriesDetail search actions', () => {
         body: null,
       },
     ]);
+    const episodeSwitch = host.querySelector<HTMLButtonElement>(
+      'button[role="switch"][aria-label="Monitor S01E01"]',
+    );
+    expect(episodeSwitch?.getAttribute('aria-checked')).toBe('true');
+    expect(monitorAndSearchButton()).toBeUndefined();
   });
 
-  it('replaces whole-series search with a queue action while downloading', async () => {
+  it('turns episode switches on as soon as Monitor and search is pressed', async () => {
+    let releasePatch = () => {};
+    const holdPatch = new Promise<void>((resolve) => {
+      releasePatch = resolve;
+    });
+    const mixed = {
+      ...SERIES_WITH_FILES,
+      monitored: false,
+      seasons: SERIES_WITH_FILES.seasons.map((season) => ({
+        ...season,
+        monitored: false,
+        episodes: season.episodes.map((row) => ({ ...row, monitored: false })),
+      })),
+    };
+    calls = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
+        calls.push({ url, method: init?.method ?? 'GET', body });
+        if (url.endsWith('/quality-profiles')) {
+          return new Response(JSON.stringify({ profiles: PROFILES }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        if (url.endsWith('/libraries')) {
+          return new Response(JSON.stringify({ libraries: LIBRARIES }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        if (body?.monitored !== undefined) {
+          await holdPatch;
+          return new Response(JSON.stringify(cascadeSeriesMonitored(mixed, true)), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        if (url.endsWith('/search')) {
+          return new Response(JSON.stringify({ queued: 2 }), {
+            status: 202,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify(mixed), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    );
+    app = mount(SeriesDetail, { target: host, props: { id: 3 } });
+    await settle();
+
+    monitorAndSearchButton()!.click();
+    flushSync();
+    expect(
+      host.querySelector('button[role="switch"][aria-label="Monitor S01E01"]')?.getAttribute(
+        'aria-checked',
+      ),
+    ).toBe('true');
+
+    releasePatch();
+    await settle();
+    expect(calls.some((call) => call.method === 'POST' && call.url.endsWith('/search'))).toBe(true);
+  });
+
+  it('keeps monitored search available while a download is in flight', async () => {
     const downloading = {
       ...SERIES_WITH_FILES,
       downloading: true,
@@ -617,10 +755,10 @@ describe('SeriesDetail search actions', () => {
     const queueLinks = host.querySelectorAll('a[href="/queue"]');
     expect(queueLinks.length).toBeGreaterThanOrEqual(2);
     expect(queueLinks[0]?.textContent).toContain('View queue');
-    expect(host.querySelector('a[href="/series/3/search"]')).toBeNull();
-    expect([...host.querySelectorAll('button')].some((button) =>
-      button.textContent?.includes('Search now'),
-    )).toBe(false);
+    expect(searchMonitoredButton()).toBeDefined();
+    expect(host.querySelector('a[href="/series/3/search"]')?.textContent).toContain(
+      'Choose a release',
+    );
   });
 
   it('offers an explicit replacement search when every episode is imported', async () => {
@@ -632,7 +770,7 @@ describe('SeriesDetail search actions', () => {
       'Choose another release',
     );
     expect([...host.querySelectorAll('button')].some((button) =>
-      button.textContent?.includes('Search now'),
+      button.textContent?.includes('Search monitored'),
     )).toBe(false);
   });
 });

@@ -453,10 +453,11 @@ type JobSyncSitePayload struct {
 
 // Job states for the durable queue (SPEC §7).
 const (
-	JobStatePending = "pending"
-	JobStateRunning = "running"
-	JobStateDone    = "done"
-	JobStateFailed  = "failed"
+	JobStatePending   = "pending"
+	JobStateRunning   = "running"
+	JobStateDone      = "done"
+	JobStateFailed    = "failed"
+	JobStateCancelled = "cancelled"
 )
 
 // Job is one unit of durable, at-least-once background work (SPEC §7): a

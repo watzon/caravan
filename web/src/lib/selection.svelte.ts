@@ -11,18 +11,20 @@
  * not millions, and an array is what `$state` tracks without a reactive
  * wrapper.
  */
-export interface Selection {
+export interface Selection<ID extends string | number = number> {
   readonly active: boolean;
-  readonly ids: number[];
+  readonly ids: ID[];
   readonly count: number;
-  has(id: number): boolean;
-  toggle(id: number): void;
+  has(id: ID): boolean;
+  toggle(id: ID): void;
+  /** Replace the held ids. An empty list deactivates the selection. */
+  replace(ids: readonly ID[]): void;
   /** Drop the whole selection, which also deactivates it. */
   clear(): void;
 }
 
-export function createSelection(): Selection {
-  let ids = $state<number[]>([]);
+export function createSelection<ID extends string | number = number>(): Selection<ID> {
+  let ids = $state<ID[]>([]);
 
   return {
     get active() {
@@ -34,9 +36,12 @@ export function createSelection(): Selection {
     get count() {
       return ids.length;
     },
-    has: (id: number) => ids.includes(id),
-    toggle(id: number) {
+    has: (id) => ids.includes(id),
+    toggle(id) {
       ids = ids.includes(id) ? ids.filter((other) => other !== id) : [...ids, id];
+    },
+    replace(next) {
+      ids = [...next];
     },
     clear() {
       ids = [];

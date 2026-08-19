@@ -1572,7 +1572,18 @@ export interface EventPage {
   next_cursor: string;
 }
 
-export type JobState = 'pending' | 'running' | 'done' | 'failed';
+export type JobState = 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
+
+/** POST /jobs/cancel — park open automatic searches. */
+export interface CancelJobsRequest {
+  kinds?: string[];
+  subject_kind?: 'movie' | 'series' | 'site';
+  subject_id?: number;
+}
+
+export interface CancelJobsResult {
+  cancelled: number;
+}
 
 export interface Job {
   id: number;

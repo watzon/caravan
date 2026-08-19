@@ -137,6 +137,11 @@ describe('footerStack', () => {
       { label: 'Searching 2 scenes from Transfixed', href: '/adult/sites/9' },
       { label: 'Searching Severance', href: '/series/3' },
     ]);
+    expect(rows[0]?.stop).toEqual({
+      kinds: ['search_episode'],
+      subject_kind: 'site',
+      subject_id: 9,
+    });
   });
 
   it('names a movie search', () => {

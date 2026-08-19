@@ -827,6 +827,13 @@ func episodeMissing(ctx context.Context, st *store.Store, episodeID int64) (bool
 // grabSearchedMovie checks again after the indexer request. An import can
 // finish while that request is running, and the completed file wins that race.
 func (r *Runner) grabSearchedMovie(ctx context.Context, st *store.Store, movie core.Movie, release core.Release, score int) error {
+	dropped, err := searchJobDropped(ctx, st, core.JobSearchMovie, core.JobSearchMoviePayload{MovieID: movie.ID})
+	if err != nil {
+		return err
+	}
+	if dropped {
+		return nil
+	}
 	missing, err := movieMissing(ctx, st, movie.ID)
 	if err != nil {
 		return err
@@ -840,6 +847,13 @@ func (r *Runner) grabSearchedMovie(ctx context.Context, st *store.Store, movie c
 // grabSearchedEpisode is the episode and adult scene form of
 // grabSearchedMovie.
 func (r *Runner) grabSearchedEpisode(ctx context.Context, st *store.Store, libraryID int64, kind string, episode core.Episode, release core.Release, score int) error {
+	dropped, err := searchJobDropped(ctx, st, core.JobSearchEpisode, core.JobSearchEpisodePayload{EpisodeID: episode.ID})
+	if err != nil {
+		return err
+	}
+	if dropped {
+		return nil
+	}
 	missing, err := episodeMissing(ctx, st, episode.ID)
 	if err != nil {
 		return err
@@ -848,6 +862,20 @@ func (r *Runner) grabSearchedEpisode(ctx context.Context, st *store.Store, libra
 		return nil
 	}
 	return r.grabEpisode(ctx, st, libraryID, kind, episode, release, score, "automatic search")
+}
+
+// searchJobDropped reports that an automatic search was cancelled (or already
+// finished) while the indexer request was in flight. The grab must not start.
+func searchJobDropped(ctx context.Context, st *store.Store, kind string, payload any) (bool, error) {
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return false, fmt.Errorf("encode %s payload: %w", kind, err)
+	}
+	cancelled, err := st.HasJobInState(ctx, kind, string(encoded), core.JobStateCancelled)
+	if err != nil {
+		return false, err
+	}
+	return cancelled, nil
 }
 
 func (r *Runner) grabMovie(ctx context.Context, st *store.Store, movie core.Movie, release core.Release, score int, source string) error {

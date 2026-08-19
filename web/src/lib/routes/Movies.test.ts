@@ -245,6 +245,20 @@ describe('Movies grid', () => {
     expect(toasts.items.map((t) => t.message)).toEqual(['Queued searches for 1']);
   });
 
+  it('monitors then searches each selected movie', async () => {
+    await open();
+    await select('Dune');
+
+    button('Monitor and search').click();
+    await settle();
+
+    expect(calls.filter((call) => call.method === 'PATCH' || call.method === 'POST')).toEqual([
+      { url: '/api/v1/library/movies/2', method: 'PATCH' },
+      { url: '/api/v1/library/movies/2/search', method: 'POST' },
+    ]);
+    expect(toasts.items.map((t) => t.message)).toEqual(['Monitored and searched 1']);
+  });
+
   it('removes the selection behind one confirm, then reloads and drops the selection', async () => {
     await open();
     await select('Arrival');

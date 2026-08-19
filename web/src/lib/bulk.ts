@@ -17,9 +17,9 @@ export interface BulkResult {
   total: number;
 }
 
-export async function runBulk(
-  ids: readonly number[],
-  action: (id: number) => Promise<unknown>,
+export async function runBulk<ID>(
+  ids: readonly ID[],
+  action: (id: ID) => Promise<unknown>,
 ): Promise<BulkResult> {
   let ok = 0;
   let failed = 0;

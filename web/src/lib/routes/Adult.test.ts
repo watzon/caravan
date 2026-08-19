@@ -190,7 +190,7 @@ describe('the Adult shelf grid', () => {
     const bar = document.querySelector('[aria-label="Actions for 1 selected site"]');
     expect(bar, 'the selection action bar').toBeTruthy();
     expect(bar!.textContent).toContain('1 selected');
-    for (const label of ['Search', 'Monitor', 'Unmonitor', 'Remove…']) {
+    for (const label of ['Search', 'Monitor and search', 'Monitor', 'Unmonitor', 'Remove…']) {
       expect(bar!.textContent).toContain(label);
     }
   });

@@ -69,6 +69,12 @@ beforeEach(() => {
           headers: { 'Content-Type': 'application/json' },
         });
       }
+      if (method === 'POST') {
+        return new Response(JSON.stringify({ queued: 1 }), {
+          status: 202,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
       return new Response(JSON.stringify({ series: servedSeries }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
@@ -203,6 +209,20 @@ describe('Series grid selection', () => {
       '/api/v1/library/series/2',
     ]);
     expect(toasts.items.map((t) => t.message)).toEqual(['Unmonitored 2']);
+  });
+
+  it('monitors then searches the selected series', async () => {
+    await open();
+    await select('Andor');
+
+    button('Monitor and search').click();
+    await settle();
+
+    expect(calls.filter((call) => call.method === 'PATCH' || call.method === 'POST')).toEqual([
+      { url: '/api/v1/library/series/1', method: 'PATCH' },
+      { url: '/api/v1/library/series/1/search', method: 'POST' },
+    ]);
+    expect(toasts.items.map((t) => t.message)).toEqual(['Monitored and searched 1']);
   });
 
   it('removes the selection and does not pluralize "series"', async () => {

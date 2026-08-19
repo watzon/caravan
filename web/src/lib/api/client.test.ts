@@ -74,6 +74,7 @@ describe('endpoints', () => {
     expect(endpoints.remotePathMappings()).toBe('/api/v1/remote-path-mappings');
     expect(endpoints.remotePathMapping(6)).toBe('/api/v1/remote-path-mappings/6');
     expect(endpoints.task('rss/sync')).toBe('/api/v1/system/tasks/rss%2Fsync');
+    expect(endpoints.jobsCancel()).toBe('/api/v1/jobs/cancel');
   });
 
   it('escapes the engine-native download id, which is not a number', () => {
@@ -510,6 +511,18 @@ describe('history pagination', () => {
       next_cursor: '',
     });
     expect(only().url).toBe('/api/v1/jobs?limit=1&cursor=3');
+  });
+
+  it('cancels open automatic searches', async () => {
+    stubFetch({ cancelled: 4 });
+    await expect(api.cancelJobs({ subject_kind: 'site', subject_id: 13 })).resolves.toEqual({
+      cancelled: 4,
+    });
+    expect(only()).toEqual({
+      url: '/api/v1/jobs/cancel',
+      method: 'POST',
+      body: { subject_kind: 'site', subject_id: 13 },
+    });
   });
 });
 

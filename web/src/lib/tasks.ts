@@ -24,6 +24,12 @@ const ONESHOT = new Set([
   'move_item',
 ]);
 
+export interface SearchStop {
+  kinds: string[];
+  subject_kind?: 'movie' | 'series' | 'site';
+  subject_id?: number;
+}
+
 export interface TaskActivity {
   /** Stable key for the stack row. */
   id: string;
@@ -35,6 +41,8 @@ export interface TaskActivity {
   /** True while work is happening right now. */
   spinning: boolean;
   tone: 'accent' | 'warning';
+  /** Present on a live search group: stop that title's remaining searches. */
+  stop?: SearchStop;
 }
 
 export interface FooterStackInput {
@@ -329,6 +337,11 @@ function searchHref(group: NamedGroup): string {
 function searchRow(group: NamedGroup): TaskActivity {
   const name = group.subject;
   const href = searchHref(group);
+  const stop: SearchStop = {
+    kinds: group.kind === 'movie' ? ['search_movie'] : ['search_episode'],
+    subject_kind: group.kind === 'unknown' ? undefined : group.kind,
+    subject_id: group.subjectId,
+  };
   if (group.kind === 'site' && name) {
     return {
       id: `search:${group.key}`,
@@ -337,6 +350,7 @@ function searchRow(group: NamedGroup): TaskActivity {
       href,
       spinning: true,
       tone: 'accent',
+      stop,
     };
   }
   if (group.kind === 'series' && name) {
@@ -347,6 +361,7 @@ function searchRow(group: NamedGroup): TaskActivity {
       href,
       spinning: true,
       tone: 'accent',
+      stop,
     };
   }
   if (group.kind === 'movie' && name) {
@@ -360,6 +375,7 @@ function searchRow(group: NamedGroup): TaskActivity {
       href,
       spinning: true,
       tone: 'accent',
+      stop,
     };
   }
   return {
@@ -369,5 +385,6 @@ function searchRow(group: NamedGroup): TaskActivity {
     href,
     spinning: true,
     tone: 'accent',
+    stop,
   };
 }

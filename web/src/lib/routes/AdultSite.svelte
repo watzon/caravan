@@ -96,6 +96,12 @@
   });
   let canMove = $derived(libraries.accepting('adult').length > 1);
   let removing = $state(false);
+  /**
+   * Latest load() call. A slower GET that started earlier must not replace a
+   * newer tree — PATCH notes the library before it cascades, so the live
+   * stream can start a reload that still sees the old year and scene flags.
+   */
+  let loadEpoch = 0;
 
   /**
    * Reload the page's data.
@@ -107,15 +113,31 @@
    * throwing the reader out for, and the next tick retries.
    */
   async function load(quiet = false) {
+    const epoch = ++loadEpoch;
     if (!quiet) loading = true;
     try {
-      site = await api.getSite(id);
+      const next = await api.getSite(id);
+      if (epoch !== loadEpoch) return;
+      site = next;
       error = null;
     } catch (err) {
+      if (epoch !== loadEpoch) return;
       if (!quiet) error = errorText(err);
     } finally {
-      if (!quiet) loading = false;
+      if (!quiet && epoch === loadEpoch) loading = false;
     }
+  }
+
+  function cascadeSiteMonitored(current: SiteDetail): SiteDetail {
+    return {
+      ...current,
+      monitored: true,
+      years: current.years.map((year) => ({
+        ...year,
+        monitored: true,
+        scenes: year.scenes.map((scene) => ({ ...scene, monitored: true })),
+      })),
+    };
   }
 
   /**
@@ -190,9 +212,10 @@
    * episode is.
    */
   /**
-   * Automatic search for the whole site, which is SeriesDetail's searchNow
-   * against the same route. The server queues one job per missing scene that
-   * has no active download and answers the count.
+   * Automatic search for monitored missing scenes, which is SeriesDetail's
+   * searchNow against the same route. The server queues one job per wanted
+   * scene that has no active download and answers the count. Unmonitored
+   * scenes stay unmonitored.
    */
   async function searchNow() {
     const current = site;
@@ -207,21 +230,40 @@
     }
   }
 
+  /**
+   * Cascade the site monitored flag to every year and scene, reload the page
+   * tree so the toggles match the store, then search the wanted list.
+   *
+   * The series PATCH answers with television seasons, not this page's years,
+   * so the only honest way to show what cascaded is to re-read the site.
+   */
   async function monitorAndSearch() {
     const current = site;
     if (!current) return;
     searching = true;
+    const snapshot = current;
+    loadEpoch += 1;
+    site = cascadeSiteMonitored(current);
     try {
-      const updated = await api.setSeriesMonitored(current.id, true);
-      site = { ...current, monitored: updated.monitored };
+      await api.setSeriesMonitored(current.id, true);
       libraryChanged();
-      await queueSearch(current);
+      await load(true);
+      const latest = site;
+      if (latest) await queueSearch(latest);
     } catch (err) {
+      site = snapshot;
       pushToast(errorText(err), 'danger');
     } finally {
       searching = false;
     }
   }
+
+  let hasUnmonitored = $derived(
+    !site?.monitored ||
+      years.some(
+        (year) => !year.monitored || year.scenes.some((scene) => !scene.monitored),
+      ),
+  );
 
   async function queueSearch(current: SiteDetail) {
     const { queued } = await api.searchSeriesNow(current.id);
@@ -434,23 +476,31 @@
               <Button variant="primary" size="sm" href="/queue">
                 {t('route.adultSite.viewQueue')}
               </Button>
-            {:else if allScenesOwned}
-              <Button variant="secondary" size="sm" href="/adult/sites/{current.id}/search">
-                {t('route.adultSite.chooseAnotherRelease')}
-              </Button>
+            {/if}
+            {#if allScenesOwned}
+              {#if !anyDownloading}
+                <Button variant="secondary" size="sm" href="/adult/sites/{current.id}/search">
+                  {t('route.adultSite.chooseAnotherRelease')}
+                </Button>
+              {/if}
             {:else if sceneCount > 0}
               <Button
                 variant="primary"
                 size="sm"
                 disabled={searching}
-                onclick={current.monitored ? searchNow : monitorAndSearch}>
+                onclick={searchNow}>
                 <Icon name="search" size={14} />
-                {searching
-                  ? t('route.adultSite.searching')
-                  : current.monitored
-                    ? t('route.adultSite.searchMissing')
-                    : t('route.adultSite.monitorAndSearch')}
+                {searching ? t('route.adultSite.searching') : t('route.adultSite.searchMonitored')}
               </Button>
+              {#if hasUnmonitored}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={searching}
+                  onclick={monitorAndSearch}>
+                  {t('route.adultSite.monitorAndSearch')}
+                </Button>
+              {/if}
               <Button variant="secondary" size="sm" href="/adult/sites/{current.id}/search">
                 {t('route.adultSite.chooseRelease')}
               </Button>

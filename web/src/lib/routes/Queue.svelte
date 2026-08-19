@@ -9,6 +9,7 @@
    */
   import { api, errorText } from '../api/client';
   import type { DownloadStatus } from '../api/types';
+  import { runBulk } from '../bulk';
   import Badge from '../components/Badge.svelte';
   import Button from '../components/Button.svelte';
   import EmptyState from '../components/EmptyState.svelte';
@@ -35,7 +36,9 @@
     isSeedingDownload,
     sortDownloads,
   } from '../download';
+  import { createSelection } from '../selection.svelte';
   import { QUEUE_POLL_MS, downloads } from '../state/downloads.svelte';
+  import { TASKS_POLL_MS, tasks } from '../state/tasks.svelte';
   import { page } from '../state/page.svelte';
   import { pushToast } from '../state/toast.svelte';
   import { TONE_DOT } from '../status';
@@ -45,8 +48,10 @@
   const { t, tp } = useI18n();
 
   let busyID = $state<string | null>(null);
-  let removing = $state<DownloadStatus | null>(null);
+  let bulkBusy = $state(false);
+  let removing = $state<DownloadStatus[] | null>(null);
   let removeData = $state(false);
+  const selection = createSelection<string>();
   /**
    * The open drawer is tracked by id, never by the row object: the store
    * replaces every row on each poll, so holding the object froze the drawer at
@@ -65,13 +70,14 @@
 
   function openRemoveFromDetail(deleteData: boolean) {
     if (!detail) return;
-    removing = detail;
+    removing = [detail];
     removeData = deleteData;
   }
 
   // Polling is scoped to this screen's lifetime - the store stops when the last
   // subscriber leaves, so navigating away costs nothing.
   $effect(() => downloads.subscribe(QUEUE_POLL_MS));
+  $effect(() => tasks.subscribe(TASKS_POLL_MS));
 
   async function act(
     download: DownloadStatus,
@@ -91,28 +97,76 @@
   }
 
   function openRemove(download: DownloadStatus) {
-    removing = download;
+    removing = [download];
+    removeData = false;
+  }
+
+  function openRemoveSelected() {
+    const selected = rows.filter((row) => selection.has(row.id));
+    if (selected.length === 0) return;
+    removing = selected;
     removeData = false;
   }
 
   async function confirmRemove() {
-    const target = removing;
-    if (!target) return;
+    const targets = removing;
+    if (!targets || targets.length === 0) return;
     const deleteData = removeData;
-    busyID = target.id;
+    bulkBusy = true;
+    busyID = targets[0]!.id;
     try {
-      await api.removeDownload(target.id, deleteData);
-      downloads.forget(target.id);
+      const result = await runBulk(targets.map((row) => row.id), async (id) => {
+        await api.removeDownload(id, deleteData);
+        downloads.forget(id);
+      });
+      selection.clear();
       removing = null;
       detailID = null;
-      pushToast(
-        deleteData ? t('route.queue.removedAndDeleted') : t('route.queue.removedKeptData'),
-        'neutral',
-      );
+      if (targets.length === 1) {
+        pushToast(
+          deleteData ? t('route.queue.removedAndDeleted') : t('route.queue.removedKeptData'),
+          result.failed === 0 ? 'neutral' : 'danger',
+        );
+      } else {
+        pushToast(
+          result.failed === 0
+            ? tp('route.queue.removedSelected', result.ok)
+            : t('route.queue.removedSelectedPartial', { ok: result.ok, count: result.total }),
+          result.failed === 0 ? 'neutral' : 'danger',
+        );
+      }
     } catch (err) {
       pushToast(errorText(err), 'danger');
     } finally {
       busyID = null;
+      bulkBusy = false;
+    }
+  }
+
+  let liveSearchCount = $derived(
+    (tasks.jobs ?? []).filter(
+      (job) =>
+        (job.kind === 'search_movie' || job.kind === 'search_episode') &&
+        (job.state === 'pending' || job.state === 'running'),
+    ).length,
+  );
+
+  async function stopAllSearches() {
+    if (bulkBusy || liveSearchCount === 0) return;
+    bulkBusy = true;
+    try {
+      const { cancelled } = await api.cancelJobs();
+      pushToast(
+        cancelled > 0
+          ? tp('route.queue.stoppedSearches', cancelled)
+          : t('route.queue.noLiveSearches'),
+        'neutral',
+      );
+      await tasks.refresh();
+    } catch (err) {
+      pushToast(errorText(err), 'danger');
+    } finally {
+      bulkBusy = false;
     }
   }
 
@@ -132,6 +186,25 @@
   let rows = $derived(
     view === 'all' ? all : view === 'done' ? doneRows : view === 'seeding' ? seedingRows : activeRows,
   );
+
+  let allVisibleSelected = $derived(
+    rows.length > 0 && rows.every((row) => selection.has(row.id)),
+  );
+
+  $effect(() => {
+    const visible = new Set(rows.map((row) => row.id));
+    const kept = selection.ids.filter((id) => visible.has(id));
+    if (kept.length !== selection.ids.length) selection.replace(kept);
+  });
+
+  function toggleSelectAll() {
+    if (allVisibleSelected) selection.clear();
+    else selection.replace(rows.map((row) => row.id));
+  }
+
+  function onkeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape' && selection.active && !removing) selection.clear();
+  }
 
   let views = $derived<{ key: QueueView; label: string; count: number }[]>([
     { key: 'active', label: t('route.queue.active'), count: activeRows.length },
@@ -162,6 +235,8 @@
   });
 </script>
 
+<svelte:window onkeydown={onkeydown} />
+
 <div class="flex flex-col gap-6">
   <div class="flex flex-wrap items-center gap-3">
     <div class="flex flex-wrap items-center gap-2" role="group" aria-label={t('route.queue.filter')}>
@@ -180,7 +255,17 @@
         </button>
       {/each}
     </div>
-    <div class="ml-auto flex items-center gap-2">
+    <div class="ml-auto flex flex-wrap items-center gap-2">
+      {#if rows.length > 0}
+        <Button variant="secondary" onclick={toggleSelectAll}>
+          {allVisibleSelected ? t('route.queue.deselectAll') : t('route.queue.selectAll')}
+        </Button>
+      {/if}
+      {#if liveSearchCount > 0}
+        <Button variant="secondary" disabled={bulkBusy} onclick={() => void stopAllSearches()}>
+          {t('route.queue.stopSearches')}
+        </Button>
+      {/if}
       <Button variant="secondary" onclick={() => downloads.refresh()}>
         <Icon name="refresh" size={14} />
         {t('route.queue.refresh')}
@@ -250,13 +335,47 @@
           : seedingContext
             ? t('route.queue.pauseSeeding')
             : t('route.queue.pauseDownload')}
-        <li class="relative flex flex-col gap-3 rounded-md border border-border bg-surface px-3 py-3 transition-colors duration-150 hover:border-border-strong">
+        <li class="group/row relative flex flex-col gap-3 rounded-md border border-border bg-surface px-3 py-3 transition-colors duration-150 hover:border-border-strong {selection.has(download.id) ? 'ring-2 ring-accent' : ''}">
           <button
             type="button"
             class="absolute inset-0 rounded-md focus:outline-none focus:ring-2 focus:ring-accent"
-            aria-label={t('route.queue.openDetails', { name: download.name })}
-            onclick={() => (detailID = download.id)}></button>
+            aria-label={selection.active
+              ? t(selection.has(download.id) ? 'route.queue.deselect' : 'route.queue.select', {
+                  name: download.name,
+                })
+              : t('route.queue.openDetails', { name: download.name })}
+            aria-pressed={selection.active ? selection.has(download.id) : undefined}
+            onclick={() => {
+              if (selection.active) selection.toggle(download.id);
+              else detailID = download.id;
+            }}></button>
           <div class="relative z-10 flex pointer-events-none flex-wrap items-center gap-3">
+            {#if selection.active}
+              <span
+                class="flex size-5 shrink-0 items-center justify-center rounded-full border
+                       {selection.has(download.id)
+                  ? 'border-accent bg-accent text-ink-inverse'
+                  : 'border-border-strong bg-bg text-transparent'}"
+                aria-hidden="true">
+                <Icon name="check" size={12} />
+              </span>
+            {:else}
+              <button
+                type="button"
+                class="pointer-events-auto flex size-5 shrink-0 items-center justify-center rounded-full
+                       border border-border-strong bg-bg text-ink-secondary opacity-0
+                       transition-opacity duration-150 ease-out hover:border-accent hover:text-accent
+                       focus-visible:opacity-100 group-hover/row:opacity-100
+                       group-focus-within/row:opacity-100 pointer-coarse:opacity-100"
+                aria-label={t('route.queue.select', { name: download.name })}
+                aria-pressed="false"
+                onclick={(event) => {
+                  event.stopPropagation();
+                  selection.toggle(download.id);
+                }}>
+                <Icon name="check" size={12} />
+              </button>
+            {/if}
             <span class="size-2 shrink-0 rounded-full {TONE_DOT[meta.tone]}" aria-hidden="true"></span>
             {#if itemHref}
               <a
@@ -370,6 +489,37 @@
       {/each}
     </ul>
   {/if}
+  {#if selection.active}
+    <div class="pointer-events-none fixed bottom-3 left-0 right-0 z-40 flex justify-center px-3 md:bottom-6 md:left-60">
+      <div
+        class="pointer-events-auto flex max-w-full flex-wrap items-center justify-center gap-1 rounded-lg
+               border border-border-strong bg-overlay px-1.5 py-1.5 shadow-2xl"
+        role="group"
+        aria-label={t('route.queue.selectionActions')}>
+        <span class="mr-2 whitespace-nowrap px-2 text-base font-medium text-ink">
+          {tp('route.queue.selected', selection.count)}
+        </span>
+        <Button
+          variant="danger"
+          size="sm"
+          disabled={bulkBusy}
+          onclick={openRemoveSelected}>
+          <Icon name="trash" size={14} />
+          {t('route.queue.removeSelected')}
+        </Button>
+        <span class="mx-1 hidden h-5 w-px bg-border sm:block" aria-hidden="true"></span>
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={bulkBusy}
+          onclick={() => selection.clear()}
+          title={t('component.selectActions.clearSelection')}>
+          <Icon name="close" size={14} />
+          <span class="sr-only">{t('component.selectActions.clearSelection')}</span>
+        </Button>
+      </div>
+    </div>
+  {/if}
 </div>
 
 {#if detail}
@@ -386,11 +536,20 @@
 {/if}
 
 {#if removing}
-  {@const target = removing}
-  <Modal title={t('route.queue.removeTitle')} width="max-w-lg" onclose={() => (removing = null)}>
+  {@const targets = removing}
+  {@const single = targets.length === 1 ? targets[0] : null}
+  <Modal
+    title={single ? t('route.queue.removeTitle') : t('route.queue.removeSelectedTitle')}
+    width="max-w-lg"
+    onclose={() => (removing = null)}>
     <div class="flex flex-col gap-4 p-4">
-      <p class="font-mono text-sm text-ink" title={target.name || UNKNOWN}>{truncateMiddle(target.name || UNKNOWN, 72)}</p>
-      <p class="text-base text-ink-secondary">{t('route.queue.removeWarning')}</p>
+      {#if single}
+        <p class="font-mono text-sm text-ink" title={single.name || UNKNOWN}>{truncateMiddle(single.name || UNKNOWN, 72)}</p>
+        <p class="text-base text-ink-secondary">{t('route.queue.removeWarning')}</p>
+      {:else}
+        <p class="text-base text-ink">{tp('route.queue.selected', targets.length)}</p>
+        <p class="text-base text-ink-secondary">{t('route.queue.removeSelectedWarning')}</p>
+      {/if}
 
       <label class="flex items-center gap-3 rounded-md border border-border bg-raised px-3 py-2">
         <input
@@ -405,7 +564,7 @@
       <Button variant="ghost" onclick={() => (removing = null)}>{t('route.queue.cancel')}</Button>
       <Button
         variant={removeData ? 'danger' : 'primary'}
-        disabled={busyID === target.id}
+        disabled={bulkBusy}
         onclick={confirmRemove}>
         {removeData ? t('route.queue.removeAndDelete') : t('route.queue.removeButton')}
       </Button>

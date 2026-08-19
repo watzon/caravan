@@ -24,6 +24,7 @@
   "route.adultSite.unmonitored": "Unmonitored",
   "route.adultSite.searching": "Searching...",
   "route.adultSite.searchMissing": "Search missing",
+  "route.adultSite.searchMonitored": "Search monitored",
   "route.adultSite.monitorAndSearch": "Monitor and search",
   "route.adultSite.chooseRelease": "Choose a release",
   "route.adultSite.chooseReleaseShort": "Choose release",

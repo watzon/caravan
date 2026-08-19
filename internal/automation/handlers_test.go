@@ -177,6 +177,35 @@ func TestRunnerHandleSearchMovieGrabsBestOnce(t *testing.T) {
 	}
 }
 
+func TestRunnerHandleSearchMovieSkipsGrabWhenCancelled(t *testing.T) {
+	ctx := context.Background()
+	st := openStore(t)
+	addIndexer(t, ctx, st)
+	movie := addMovie(t, ctx, st, "Example Movie", 2024, true)
+	indexer := &fakeIndexer{movies: []core.Release{
+		{GUID: "best", Title: "Example Movie 2024 1080p", Protocol: core.ProtocolTorrent, Seeders: 5, Parsed: core.ParsedRelease{Quality: core.Quality1080p, Source: core.SourceWebDL}},
+	}}
+	engine := &fakeEngine{}
+	runner := newRunner(st, indexer, engine)
+	payload, err := json.Marshal(core.JobSearchMoviePayload{MovieID: movie.ID})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if err := st.EnqueueJob(ctx, &core.Job{Kind: core.JobSearchMovie, Payload: string(payload)}); err != nil {
+		t.Fatalf("enqueue search: %v", err)
+	}
+	if _, err := st.CancelOpenJobs(ctx, []string{core.JobSearchMovie}); err != nil {
+		t.Fatalf("CancelOpenJobs: %v", err)
+	}
+
+	if err := runner.handleSearchMovie(ctx, st, payload); err != nil {
+		t.Fatalf("handle search movie: %v", err)
+	}
+	if engine.adds != 0 {
+		t.Fatalf("engine Add calls = %d, want 0 after cancel", engine.adds)
+	}
+}
+
 func TestRunnerHandleSearchMovieKeepsIndexerPriorityWhenResultsFinishOutOfOrder(t *testing.T) {
 	ctx := context.Background()
 	st := openStore(t)

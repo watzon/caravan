@@ -140,6 +140,31 @@ const COMPLETE_SITE = {
   })),
 };
 
+function cascadeSiteMonitored<T extends typeof SITE>(site: T, monitored: boolean): T {
+  return {
+    ...site,
+    monitored,
+    years: site.years.map((year) => ({
+      ...year,
+      monitored,
+      scenes: year.scenes.map((scene) => ({ ...scene, monitored })),
+    })),
+  };
+}
+
+const MIXED_SITE = {
+  ...SITE,
+  monitored: false,
+  years: SITE.years.map((year) => ({
+    ...year,
+    monitored: false,
+    scenes: year.scenes.map((scene, index) => ({
+      ...scene,
+      monitored: index === 0,
+    })),
+  })),
+};
+
 const PROFILES = [
   {
     id: 1,
@@ -175,6 +200,7 @@ function user(role: 'admin' | 'member'): SessionUser {
 }
 
 function stubFetch(site: unknown = SITE, queued = 4): void {
+  let current = site as typeof SITE;
   calls = [];
   vi.stubGlobal(
     'fetch',
@@ -205,7 +231,8 @@ function stubFetch(site: unknown = SITE, queued = 4): void {
         body?.monitored !== undefined &&
         body?.quality_profile_id === undefined
       ) {
-        return new Response(JSON.stringify({ ...(site as object), monitored: body.monitored }), {
+        current = cascadeSiteMonitored(current, Boolean(body.monitored));
+        return new Response(JSON.stringify(current), {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
@@ -213,7 +240,7 @@ function stubFetch(site: unknown = SITE, queued = 4): void {
       if (method === 'PATCH' || method === 'DELETE') {
         return new Response(null, { status: 204 });
       }
-      const payload = method === 'POST' ? { queued } : site;
+      const payload = method === 'POST' ? { queued } : current;
       return new Response(JSON.stringify(payload), {
         status: method === 'POST' ? 202 : 200,
         headers: { 'Content-Type': 'application/json' },
@@ -272,7 +299,7 @@ describe('AdultSite actions', () => {
     const inventory = host!.querySelector('section[aria-labelledby="adult-scenes-heading"]');
     expect(inventory).not.toBeNull();
 
-    const button = buttonLabelled('Search missing');
+    const button = buttonLabelled('Search monitored');
     expect(button, 'a site-wide search action').toBeTruthy();
     expect(inventory?.contains(button!)).toBe(true);
 
@@ -290,11 +317,36 @@ describe('AdultSite actions', () => {
     expect(post?.url).toBe('/api/v1/library/series/7/search');
   });
 
-  it('monitors an unmonitored site before starting its automatic search', async () => {
-    stubFetch({ ...SITE, monitored: false }, 2);
+  it('searches monitored scenes without turning the rest on', async () => {
+    stubFetch(MIXED_SITE, 1);
     await mountSite();
 
-    expect(buttonLabelled('Search missing')).toBeUndefined();
+    const searchMonitored = buttonLabelled('Search monitored');
+    expect(searchMonitored).toBeDefined();
+    searchMonitored!.click();
+    await vi.waitFor(() => {
+      if (!calls.some((call) => call.method === 'POST')) throw new Error('no search yet');
+    });
+
+    expect(calls.filter((call) => call.method === 'PATCH' || call.method === 'POST')).toEqual([
+      {
+        url: '/api/v1/library/series/7/search',
+        method: 'POST',
+        body: null,
+      },
+    ]);
+    expect(
+      host!.querySelector('button[role="switch"][aria-label="Monitor #004"]')?.getAttribute(
+        'aria-checked',
+      ),
+    ).toBe('false');
+  });
+
+  it('monitors every year and scene before starting the automatic search', async () => {
+    stubFetch(MIXED_SITE, 2);
+    await mountSite();
+
+    expect(buttonLabelled('Search monitored')).toBeDefined();
     const monitorAndSearch = buttonLabelled('Monitor and search');
     expect(monitorAndSearch).toBeDefined();
 
@@ -317,9 +369,121 @@ describe('AdultSite actions', () => {
         body: null,
       },
     ]);
+    const patchAt = calls.findIndex((call) => call.method === 'PATCH');
+    expect(
+      calls
+        .slice(patchAt + 1)
+        .some((call) => call.method === 'GET' && call.url.endsWith('/adult/sites/7')),
+    ).toBe(true);
+    expect(
+      host!.querySelector('button[role="switch"][aria-label="Monitor #004"]')?.getAttribute(
+        'aria-checked',
+      ),
+    ).toBe('true');
+    expect(buttonLabelled('Monitor and search')).toBeUndefined();
   });
 
-  it('replaces site-wide search with queue actions while downloading', async () => {
+  it('does not restore old switches when a slower library reload finishes later', async () => {
+    let current = MIXED_SITE;
+    let cascadeDone = false;
+    let releaseStale = () => {};
+    const staleHold = new Promise<void>((resolve) => {
+      releaseStale = resolve;
+    });
+    let staleGets = 0;
+
+    calls = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        const method = init?.method ?? 'GET';
+        const body = typeof init?.body === 'string' ? JSON.parse(init.body) : null;
+        calls.push({ url, method, body });
+        if (url.endsWith('/quality-profiles')) {
+          return new Response(JSON.stringify({ profiles: PROFILES }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        if (url.endsWith('/libraries')) {
+          return new Response(JSON.stringify({ libraries: LIBRARIES }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        if (url.includes('/auth/me') || url.includes('/system/status')) {
+          return new Response(JSON.stringify({ error: 'not this stub' }), {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        if (
+          method === 'PATCH' &&
+          url.endsWith('/library/series/7') &&
+          body?.monitored !== undefined &&
+          body?.quality_profile_id === undefined
+        ) {
+          // Same order as the server: note the library, then cascade. The live
+          // stream starts a GET that still sees the old flags.
+          applyInvalidation('library');
+          current = cascadeSiteMonitored(current, true);
+          cascadeDone = true;
+          return new Response(JSON.stringify(current), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        if (method === 'POST') {
+          return new Response(JSON.stringify({ queued: 2 }), {
+            status: 202,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        if (url.includes('/adult/sites/7') && !cascadeDone) {
+          staleGets += 1;
+          if (staleGets > 1) {
+            await staleHold;
+            return new Response(JSON.stringify(MIXED_SITE), {
+              status: 200,
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+        }
+        return new Response(JSON.stringify(current), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }),
+    );
+
+    await mountSite();
+    const monitorAndSearch = buttonLabelled('Monitor and search');
+    expect(monitorAndSearch).toBeDefined();
+    monitorAndSearch!.click();
+    await vi.waitFor(() => {
+      if (!calls.some((call) => call.method === 'POST')) throw new Error('search not queued');
+    });
+    expect(
+      host!.querySelector('button[role="switch"][aria-label="Monitor #004"]')?.getAttribute(
+        'aria-checked',
+      ),
+    ).toBe('true');
+
+    releaseStale();
+    await vi.waitFor(() => {
+      if (staleGets < 2) throw new Error('stale reload has not finished');
+    });
+    await Promise.resolve();
+    flushSync();
+    expect(
+      host!.querySelector('button[role="switch"][aria-label="Monitor #004"]')?.getAttribute(
+        'aria-checked',
+      ),
+    ).toBe('true');
+  });
+
+  it('keeps monitored search available while a download is in flight', async () => {
     const downloading = {
       ...SITE,
       years: SITE.years.map((year) => ({
@@ -332,8 +496,10 @@ describe('AdultSite actions', () => {
     stubFetch(downloading);
     await mountSite();
 
-    expect(buttonLabelled('Search missing')).toBeUndefined();
-    expect(host!.querySelector('a[href="/adult/sites/7/search"]')).toBeNull();
+    expect(buttonLabelled('Search monitored')).toBeDefined();
+    expect(host!.querySelector('a[href="/adult/sites/7/search"]')?.textContent).toContain(
+      'Choose a release',
+    );
     const queueLinks = host!.querySelectorAll('a[href="/queue"]');
     expect(queueLinks.length).toBeGreaterThanOrEqual(2);
     expect(queueLinks[0]?.textContent).toContain('View queue');
@@ -346,7 +512,7 @@ describe('AdultSite actions', () => {
     expect(host!.querySelector('a[href="/adult/sites/7/search"]')?.textContent).toContain(
       'Choose another release',
     );
-    expect(buttonLabelled('Search missing')).toBeUndefined();
+    expect(buttonLabelled('Search monitored')).toBeUndefined();
   });
 
   it('offers the picker at the site, year and scene levels', async () => {
@@ -444,7 +610,7 @@ describe('AdultSite for a granted member', () => {
     stubFetch();
     await mountSite('member');
 
-    expect(buttonLabelled('Search missing')).toBeUndefined();
+    expect(buttonLabelled('Search monitored')).toBeUndefined();
     expect(buttonLabelled('Convert for TV')).toBeUndefined();
     expect(hrefs().some((href) => href.includes('/search'))).toBe(false);
     // Nothing was written, and nothing was even asked for beyond the page load.

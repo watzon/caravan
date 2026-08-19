@@ -9,6 +9,9 @@
    * Movies and Series share it because the only difference between them is
    * which per-item endpoints the actions call — passed in as `actions` — and
    * the noun in the confirm.
+   *
+   * Search queues wanted items only. Monitor and search turns monitoring on
+   * first so the same wanted list then includes the selection.
    */
   import { bulkSummary, runBulk } from '../bulk';
   import type { Selection } from '../selection.svelte';
@@ -101,6 +104,19 @@
         onclick={() => run(t('component.selectActions.queuedSearches'), actions.search)}>
         <Icon name="search" size={14} />
         {t('component.selectActions.search')}
+      </Button>
+      <!-- Search only queues wanted (already-monitored) items. This monitors
+           first so a mixed or unmonitored selection is actually searchable. -->
+      <Button
+        variant="ghost"
+        size="sm"
+        disabled={busy}
+        onclick={() =>
+          run(t('component.selectActions.monitoredAndSearched'), async (id) => {
+            await actions.setMonitored(id, true);
+            await actions.search(id);
+          })}>
+        {t('component.selectActions.monitorAndSearch')}
       </Button>
       <Button
         variant="ghost"

@@ -76,15 +76,21 @@
   let removing = $state(false);
   let collapsed = $state<Record<number, boolean>>({});
 
+  let loadEpoch = 0;
+
   async function load() {
+    const epoch = ++loadEpoch;
     loading = true;
     try {
-      series = await api.getSeries(id);
+      const next = await api.getSeries(id);
+      if (epoch !== loadEpoch) return;
+      series = next;
       error = null;
     } catch (err) {
+      if (epoch !== loadEpoch) return;
       error = errorText(err);
     } finally {
-      loading = false;
+      if (epoch === loadEpoch) loading = false;
     }
   }
 
@@ -144,8 +150,9 @@
   }
 
   /**
-   * Automatic search for the whole series (SPEC §9). The server queues one job
-   * per missing episode without an active download and answers the count.
+   * Automatic search for monitored missing episodes (SPEC §9). The server
+   * queues one job per wanted episode without an active download and answers
+   * the count. Unmonitored episodes stay unmonitored.
    */
   async function searchNow() {
     const current = series;
@@ -160,21 +167,50 @@
     }
   }
 
+  /**
+   * Cascade the series monitored flag to every season and episode, then search
+   * the wanted list. The PATCH response is the same tree GET returns, so the
+   * page can show the cascaded flags before the search starts.
+   */
+  function cascadeSeriesMonitored(current: Series): Series {
+    return {
+      ...current,
+      monitored: true,
+      seasons: (current.seasons ?? []).map((season) => ({
+        ...season,
+        monitored: true,
+        episodes: (season.episodes ?? []).map((episode) => ({ ...episode, monitored: true })),
+      })),
+    };
+  }
+
   async function monitorAndSearch() {
     const current = series;
     if (!current) return;
     searching = true;
+    const snapshot = current;
+    loadEpoch += 1;
+    series = cascadeSeriesMonitored(current);
     try {
       const updated = await api.setSeriesMonitored(current.id, true);
-      series = updated;
+      series = updated.seasons ? updated : cascadeSeriesMonitored(updated);
       libraryChanged();
       await queueSearch(updated);
     } catch (err) {
+      series = snapshot;
       pushToast(errorText(err), 'danger');
     } finally {
       searching = false;
     }
   }
+
+  let hasUnmonitored = $derived(
+    !series?.monitored ||
+      seasons.some(
+        (season) =>
+          !season.monitored || episodesOf(season).some((episode) => !episode.monitored),
+      ),
+  );
 
   async function queueSearch(current: Series) {
     const { queued } = await api.searchSeriesNow(current.id);
@@ -328,23 +364,31 @@
             <Button variant="primary" size="sm" href="/queue">
               {t('route.seriesDetail.viewQueue')}
             </Button>
-          {:else if allEpisodesOwned}
-            <Button variant="secondary" size="sm" href="/series/{current.id}/search">
-              {t('route.seriesDetail.chooseAnotherRelease')}
-            </Button>
+          {/if}
+          {#if allEpisodesOwned}
+            {#if !current.downloading}
+              <Button variant="secondary" size="sm" href="/series/{current.id}/search">
+                {t('route.seriesDetail.chooseAnotherRelease')}
+              </Button>
+            {/if}
           {:else if episodeCount > 0}
             <Button
               variant="primary"
               size="sm"
               disabled={searching}
-              onclick={current.monitored ? searchNow : monitorAndSearch}>
+              onclick={searchNow}>
               <Icon name="search" size={14} />
-              {searching
-                ? t('route.seriesDetail.searching')
-                : current.monitored
-                  ? t('route.seriesDetail.searchNow')
-                  : t('route.seriesDetail.monitorAndSearch')}
+              {searching ? t('route.seriesDetail.searching') : t('route.seriesDetail.searchMonitored')}
             </Button>
+            {#if hasUnmonitored}
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={searching}
+                onclick={monitorAndSearch}>
+                {t('route.seriesDetail.monitorAndSearch')}
+              </Button>
+            {/if}
             <Button variant="secondary" size="sm" href="/series/{current.id}/search">
               {t('route.seriesDetail.chooseRelease')}
             </Button>

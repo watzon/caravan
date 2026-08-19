@@ -74,6 +74,7 @@
   "route.history.jobRunning": "Running",
   "route.history.jobDone": "Done",
   "route.history.jobFailed": "Failed",
+  "route.history.jobCancelled": "Cancelled",
   "route.history.jobRssSync": "RSS sync",
   "route.history.jobBacklogSweep": "Backlog sweep",
   "route.history.jobMovieSearch": "Movie search",

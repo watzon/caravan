@@ -278,6 +278,72 @@ func TestFailJobBacksOffThenGivesUp(t *testing.T) {
 	}
 }
 
+func TestCancelOpenJobsParksPendingAndRunningSearches(t *testing.T) {
+	ctx := context.Background()
+	st, _ := openTemp(t)
+
+	pending := core.Job{Kind: core.JobSearchEpisode, Payload: `{"episode_id":1}`}
+	if err := st.EnqueueJob(ctx, &pending); err != nil {
+		t.Fatalf("EnqueueJob: %v", err)
+	}
+	running := core.Job{Kind: core.JobSearchMovie, Payload: `{"movie_id":2}`}
+	if err := st.EnqueueJob(ctx, &running); err != nil {
+		t.Fatalf("EnqueueJob movie: %v", err)
+	}
+	if _, err := st.ClaimJob(ctx, []string{core.JobSearchMovie}, time.Minute); err != nil {
+		t.Fatalf("ClaimJob: %v", err)
+	}
+	other := core.Job{Kind: core.JobRSSSync, Payload: "{}"}
+	if err := st.EnqueueJob(ctx, &other); err != nil {
+		t.Fatalf("EnqueueJob rss: %v", err)
+	}
+
+	n, err := st.CancelOpenJobs(ctx, []string{core.JobSearchMovie, core.JobSearchEpisode})
+	if err != nil {
+		t.Fatalf("CancelOpenJobs: %v", err)
+	}
+	if n != 2 {
+		t.Fatalf("cancelled = %d, want 2", n)
+	}
+
+	got, err := st.GetJob(ctx, pending.ID)
+	if err != nil {
+		t.Fatalf("GetJob pending: %v", err)
+	}
+	if got.State != core.JobStateCancelled {
+		t.Errorf("pending state = %q, want cancelled", got.State)
+	}
+	got, err = st.GetJob(ctx, running.ID)
+	if err != nil {
+		t.Fatalf("GetJob running: %v", err)
+	}
+	if got.State != core.JobStateCancelled {
+		t.Errorf("running state = %q, want cancelled", got.State)
+	}
+	claimed, err := st.ClaimJob(ctx, []string{core.JobSearchEpisode}, time.Minute)
+	if err != nil {
+		t.Fatalf("ClaimJob after cancel: %v", err)
+	}
+	if claimed != nil {
+		t.Fatalf("ClaimJob returned cancelled job %d", claimed.ID)
+	}
+	rss, err := st.GetJob(ctx, other.ID)
+	if err != nil {
+		t.Fatalf("GetJob rss: %v", err)
+	}
+	if rss.State != core.JobStatePending {
+		t.Errorf("rss state = %q, want pending", rss.State)
+	}
+
+	again, err := st.CancelJobs(ctx, []int64{pending.ID, other.ID})
+	if err != nil {
+		t.Fatalf("CancelJobs: %v", err)
+	}
+	if again != 1 {
+		t.Fatalf("CancelJobs = %d, want 1 remaining open job", again)
+	}
+}
+
 func TestFailJobAndScheduleRecurringCreatesSuccessorOnlyAfterTerminalFailure(t *testing.T) {
 	ctx := context.Background()
 	st, _ := openTemp(t)

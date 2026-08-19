@@ -32,6 +32,7 @@
     running: { label: t('route.history.jobRunning'), tone: 'info' },
     done: { label: t('route.history.jobDone'), tone: 'success' },
     failed: { label: t('route.history.jobFailed'), tone: 'danger' },
+    cancelled: { label: t('route.history.jobCancelled'), tone: 'neutral' },
   };
 
   const POLL_MS = 10_000;

@@ -91,6 +91,7 @@ beforeEach(() => {
       if (url.includes('/downloads')) return jsonResponse({ downloads: [] });
       if (url.endsWith('/requests')) return jsonResponse({ requests: [] });
       if (url.includes('/system/tasks')) return jsonResponse({ tasks: taskRows });
+      if (url.includes('/jobs/cancel')) return jsonResponse({ cancelled: 2 });
       if (url.includes('/jobs')) return jsonResponse({ jobs: jobRows });
       if (url.endsWith('/system/status')) return jsonResponse(system.status ?? {});
       throw new Error(`unexpected fetch: ${url}`);
@@ -359,6 +360,36 @@ describe('Sidebar task rail', () => {
     expect(activity()[0]?.getAttribute('href')).toBe('/wanted');
     expect(activity()[0]?.querySelector('.sidebar-task-pulse')).not.toBeNull();
     expect(activity()[0]?.className).toContain('text-accent-text');
+  });
+
+  it('stops a named search group from the activity rail', async () => {
+    jobRows = [
+      job({
+        id: 1,
+        subject: 'Transfixed',
+        subject_kind: 'site',
+        subject_id: 9,
+      }),
+    ];
+    await render();
+
+    const stop = host.querySelector<HTMLButtonElement>('button[aria-label="Stop searching"]');
+    expect(stop).not.toBeNull();
+    stop!.click();
+    await settle();
+
+    const calls = (globalThis.fetch as unknown as { mock: { calls: [string, RequestInit?][] } }).mock
+      .calls;
+    const cancel = calls.find(
+      ([url, init]) =>
+        String(url).includes('/jobs/cancel') && (init as RequestInit | undefined)?.method === 'POST',
+    );
+    expect(cancel, 'POST /jobs/cancel').toBeDefined();
+    expect(JSON.parse(String((cancel![1] as RequestInit).body))).toEqual({
+      kinds: ['search_episode'],
+      subject_kind: 'site',
+      subject_id: 9,
+    });
   });
 
   it('warns about a failed last run without a pulse', async () => {

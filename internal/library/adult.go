@@ -458,6 +458,15 @@ func (m *Manager) walkSiteScenes(ctx context.Context, provider core.AdultMetadat
 
 // writeScenes reconciles a site's scenes into season and episode rows.
 func (m *Manager) writeScenes(ctx context.Context, sr *core.Series, scenes []core.SceneMeta) error {
+	// Re-read the site flag each batch. The walk holds the series pointer from
+	// when the job started, and Monitor and search can cascade after that.
+	// New years must follow the flag as it is now, not as it was at enqueue.
+	current, err := m.store.GetSeries(ctx, sr.ID)
+	if err != nil {
+		return err
+	}
+	siteMonitored := current.Monitored
+
 	existing, err := m.store.ListEpisodes(ctx, sr.ID)
 	if err != nil {
 		return err
@@ -495,7 +504,7 @@ func (m *Manager) writeScenes(ctx context.Context, sr *core.Series, scenes []cor
 			// rows follow their series: the wanted list reads the EPISODE flag,
 			// so a site added unmonitored whose scenes landed monitored would
 			// be hunted for exactly as if it had been added monitored.
-			monitored = sr.Monitored
+			monitored = siteMonitored
 		}
 		if err := m.store.UpsertSeason(ctx, &core.Season{
 			SeriesID:  sr.ID,
@@ -519,7 +528,7 @@ func (m *Manager) writeScenes(ctx context.Context, sr *core.Series, scenes []cor
 		episode.SeriesID = sr.ID
 		monitored, ok := episodeMonitored[episode.StashID]
 		if !ok {
-			monitored = sr.Monitored
+			monitored = siteMonitored
 		}
 		episode.Monitored = monitored
 		if err := m.store.UpsertEpisode(ctx, episode); err != nil {

@@ -352,6 +352,18 @@ func (s *Store) ListJobsPage(ctx context.Context, limit int, beforeID int64) ([]
 	return out, 0, nil
 }
 
+// HasJobInState reports whether a job of the given kind and payload is in
+// that state. Used to see that a search was cancelled while its handler ran.
+func (s *Store) HasJobInState(ctx context.Context, kind, payload, state string) (bool, error) {
+	n, err := s.db.NewSelect().Model((*jobModel)(nil)).
+		Where("kind = ?", kind).Where("payload = ?", payload).Where("state = ?", state).
+		Count(ctx)
+	if err != nil {
+		return false, fmt.Errorf("store: has %s job in %s: %w", kind, state, err)
+	}
+	return n > 0, nil
+}
+
 // HasOpenJob reports whether a job of the given kind and payload is already
 // pending or running. Recurring jobs (RSS sync, backlog sweeps) use it to
 // stay singletons: a redelivered tick enqueues nothing when the work is
@@ -394,6 +406,46 @@ func (s *Store) OpenJobsByKind(ctx context.Context, kind string) ([]core.Job, er
 		out[i] = models[i].core()
 	}
 	return out, nil
+}
+
+// CancelOpenJobs parks every pending or running job of the given kinds as
+// cancelled. ClaimJob will not pick them up. A handler that is already running
+// must re-check HasOpenJob before it grabs.
+func (s *Store) CancelOpenJobs(ctx context.Context, kinds []string) (int, error) {
+	if len(kinds) == 0 {
+		return 0, nil
+	}
+	return s.cancelJobsWhere(ctx, "kind IN (?) AND state IN (?)", bun.In(kinds), bun.In([]string{core.JobStatePending, core.JobStateRunning}))
+}
+
+// CancelJobs parks the named pending or running jobs as cancelled. Ids that
+// are already finished are left alone and not counted.
+func (s *Store) CancelJobs(ctx context.Context, ids []int64) (int, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	return s.cancelJobsWhere(ctx, "id IN (?) AND state IN (?)", bun.In(ids), bun.In([]string{core.JobStatePending, core.JobStateRunning}))
+}
+
+func (s *Store) cancelJobsWhere(ctx context.Context, where string, args ...any) (int, error) {
+	res, err := s.db.NewUpdate().Model((*jobModel)(nil)).
+		Set("state = ?", core.JobStateCancelled).
+		Set("lease_expires_at = ?", "").
+		Set("last_error = ?", "cancelled").
+		Set("updated_at = ?", formatTime(now())).
+		Where(where, args...).
+		Exec(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("store: cancel jobs: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("store: cancel jobs: %w", err)
+	}
+	if n > 0 {
+		s.note("jobs")
+	}
+	return int(n), nil
 }
 
 // GetJob returns the job with the given id, or ErrNotFound.

@@ -266,6 +266,7 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 
 	// The job queue's activity feed (PLAN phase 3, task 8).
 	api.HandleFunc("GET /jobs", s.handleListJobs)
+	api.HandleFunc("POST /jobs/cancel", s.handleCancelJobs)
 
 	// The recurring background tasks, as the Settings screen shows them: what
 	// runs on a timer, when it last ran and how that went, and a button that

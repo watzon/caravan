@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"testing"
 
@@ -59,6 +60,106 @@ func TestHandleListJobsReturnsNewestFeed(t *testing.T) {
 		wantStatus(t, rec, http.StatusBadRequest)
 		wantErrorBody(t, rec)
 	}
+}
+
+func TestHandleCancelJobsStopsOpenSearches(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	ctx := context.Background()
+
+	movie := &core.Movie{TMDBID: 1, Title: "Arrival", SortTitle: "arrival"}
+	if err := st.UpsertMovie(ctx, movie); err != nil {
+		t.Fatalf("UpsertMovie: %v", err)
+	}
+	moviePayload, err := json.Marshal(core.JobSearchMoviePayload{MovieID: movie.ID})
+	if err != nil {
+		t.Fatalf("marshal movie payload: %v", err)
+	}
+	if err := st.EnqueueJob(ctx, &core.Job{Kind: core.JobSearchMovie, Payload: string(moviePayload)}); err != nil {
+		t.Fatalf("enqueue movie search: %v", err)
+	}
+	if err := st.EnqueueJob(ctx, &core.Job{Kind: core.JobRSSSync, Payload: "{}"}); err != nil {
+		t.Fatalf("enqueue rss: %v", err)
+	}
+
+	rec := do(t, h, http.MethodPost, "/api/v1/jobs/cancel", `{}`)
+	wantStatus(t, rec, http.StatusOK)
+	var body cancelJobsResponse
+	decodeBody(t, rec, &body)
+	if body.Cancelled != 1 {
+		t.Fatalf("cancelled = %d, want 1 search", body.Cancelled)
+	}
+
+	jobs, err := st.ListJobs(ctx, 10)
+	if err != nil {
+		t.Fatalf("ListJobs: %v", err)
+	}
+	var searchState, rssState string
+	for _, job := range jobs {
+		switch job.Kind {
+		case core.JobSearchMovie:
+			searchState = job.State
+		case core.JobRSSSync:
+			rssState = job.State
+		}
+	}
+	if searchState != core.JobStateCancelled {
+		t.Errorf("search state = %q, want cancelled", searchState)
+	}
+	if rssState != core.JobStatePending {
+		t.Errorf("rss state = %q, want pending", rssState)
+	}
+
+	rec = do(t, h, http.MethodPost, "/api/v1/jobs/cancel", `{"kinds":["rss_sync"]}`)
+	wantStatus(t, rec, http.StatusBadRequest)
+}
+
+func TestHandleCancelJobsCanLimitToOneTitle(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	ctx := context.Background()
+
+	keep := &core.Movie{TMDBID: 2, Title: "Dune", SortTitle: "dune"}
+	if err := st.UpsertMovie(ctx, keep); err != nil {
+		t.Fatalf("UpsertMovie keep: %v", err)
+	}
+	drop := &core.Movie{TMDBID: 3, Title: "Heat", SortTitle: "heat"}
+	if err := st.UpsertMovie(ctx, drop); err != nil {
+		t.Fatalf("UpsertMovie drop: %v", err)
+	}
+	for _, movie := range []*core.Movie{keep, drop} {
+		payload, err := json.Marshal(core.JobSearchMoviePayload{MovieID: movie.ID})
+		if err != nil {
+			t.Fatalf("marshal payload: %v", err)
+		}
+		if err := st.EnqueueJob(ctx, &core.Job{Kind: core.JobSearchMovie, Payload: string(payload)}); err != nil {
+			t.Fatalf("enqueue search: %v", err)
+		}
+	}
+
+	rec := do(t, h, http.MethodPost, "/api/v1/jobs/cancel",
+		fmt.Sprintf(`{"subject_kind":"movie","subject_id":%d}`, drop.ID))
+	wantStatus(t, rec, http.StatusOK)
+	var body cancelJobsResponse
+	decodeBody(t, rec, &body)
+	if body.Cancelled != 1 {
+		t.Fatalf("cancelled = %d, want 1", body.Cancelled)
+	}
+
+	keepOpen, err := st.HasOpenJob(ctx, core.JobSearchMovie, string(mustJSON(t, core.JobSearchMoviePayload{MovieID: keep.ID})))
+	if err != nil {
+		t.Fatalf("HasOpenJob keep: %v", err)
+	}
+	if !keepOpen {
+		t.Fatal("cancelled the movie that was not named")
+	}
+}
+
+func mustJSON(t *testing.T, payload any) []byte {
+	t.Helper()
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+	return raw
 }
 
 func TestHandleListJobsNamesLiveSearchSubjects(t *testing.T) {

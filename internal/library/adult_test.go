@@ -1465,6 +1465,60 @@ func TestRewalkKeepsExistingNumbersAndAppendsBackfills(t *testing.T) {
 	}
 }
 
+// Monitor and search can land while a catalogue walk is still paging. Later
+// years must follow the site flag as it is now, not the unmonitored pointer
+// the walk captured when the job started.
+func TestWriteScenesFollowsASiteMonitoredMidWalk(t *testing.T) {
+	a := newAdultHarness(t, true)
+	a.adult.sites = []core.SiteMeta{{StashID: "site-1", Name: "Studio"}}
+	ctx := context.Background()
+
+	off := false
+	sr, err := a.mgr.AddSite(ctx, siteRef("site-1"), &off, 0)
+	if err != nil {
+		t.Fatalf("AddSite: %v", err)
+	}
+
+	first := []core.SceneMeta{{
+		StashID: "s2022", SiteStashID: "site-1", Title: "First",
+		Date: date(2022, time.March, 14),
+	}}
+	if err := a.mgr.writeScenes(ctx, sr, first); err != nil {
+		t.Fatalf("writeScenes first year: %v", err)
+	}
+
+	updated := *sr
+	updated.Monitored = true
+	if err := a.st.UpsertSeries(ctx, &updated); err != nil {
+		t.Fatalf("monitor site: %v", err)
+	}
+	if err := a.st.CascadeSeriesMonitored(ctx, sr.ID, true); err != nil {
+		t.Fatalf("cascade monitored: %v", err)
+	}
+	if sr.Monitored {
+		t.Fatal("the walk's series pointer must stay stale for this test")
+	}
+
+	second := []core.SceneMeta{{
+		StashID: "s2023", SiteStashID: "site-1", Title: "Second",
+		Date: date(2023, time.February, 1),
+	}}
+	if err := a.mgr.writeScenes(ctx, sr, second); err != nil {
+		t.Fatalf("writeScenes second year: %v", err)
+	}
+
+	byID := map[string]core.Episode{}
+	for _, episode := range a.episodes(sr.ID) {
+		byID[episode.StashID] = episode
+	}
+	if got := byID["s2022"]; !got.Monitored {
+		t.Errorf("s2022 monitored = false, want the cascade to have kept it on")
+	}
+	if got := byID["s2023"]; !got.Monitored {
+		t.Errorf("s2023 monitored = false, want a new year to follow the site as it is now")
+	}
+}
+
 // A walk that fails part-way keeps what it had already published. That is the
 // point of writing additively: writeScenes only ever upserts, so an interrupted
 // walk leaves a partial catalogue rather than none, and the job's retry fills

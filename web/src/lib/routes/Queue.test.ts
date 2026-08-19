@@ -8,6 +8,7 @@ import { flushSync, mount, unmount } from 'svelte';
 import type { DownloadStatus } from '../api/types';
 import Queue from './Queue.svelte';
 import { downloads } from '../state/downloads.svelte';
+import { tasks } from '../state/tasks.svelte';
 import { toasts } from '../state/toast.svelte';
 
 function download(overrides: Partial<DownloadStatus>): DownloadStatus {
@@ -76,13 +77,34 @@ beforeEach(() => {
   queue = QUEUE;
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (input: RequestInfo | URL) => {
+    vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes('/insight')) {
         return new Response(
           JSON.stringify({ insight: { peers: [], trackers: [], availability: 0 } }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         );
+      }
+      if (url.includes('/jobs/cancel')) {
+        return new Response(JSON.stringify({ cancelled: 2 }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.includes('/jobs')) {
+        return new Response(JSON.stringify({ jobs: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (url.includes('/system/tasks')) {
+        return new Response(JSON.stringify({ tasks: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      if (init?.method === 'DELETE' && url.includes('/downloads/')) {
+        return new Response(null, { status: 204 });
       }
       if (url.includes('/downloads')) {
         return new Response(JSON.stringify({ downloads: queue }), {
@@ -100,6 +122,7 @@ beforeEach(() => {
 afterEach(() => {
   unmount(app);
   host.remove();
+  tasks.stopSoon();
   vi.unstubAllGlobals();
 });
 
@@ -381,6 +404,12 @@ describe('Queue retry', () => {
             headers: { 'Content-Type': 'application/json' },
           });
         }
+        if (url.includes('/jobs') || url.includes('/system/tasks')) {
+          return new Response(JSON.stringify({ jobs: [], tasks: [] }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
         if (url.includes('/downloads')) {
           return new Response(JSON.stringify({ downloads: queue }), {
             status: 200,
@@ -404,5 +433,65 @@ describe('Queue retry', () => {
     expect(toasts.items.some((t) => t.message.includes('only a failed download can be retried'))).toBe(
       true,
     );
+  });
+});
+
+describe('Queue selection', () => {
+  function selectButton(name: string): HTMLButtonElement {
+    const found = [...host.querySelectorAll('button')].find((button) =>
+      button.getAttribute('aria-label') === `Select ${name}`,
+    );
+    expect(found, `select ${name}`).toBeDefined();
+    return found!;
+  }
+
+  it('selects every visible row and removes the selection', async () => {
+    await mountQueue();
+
+    const selectAll = [...host.querySelectorAll('button')].find((button) =>
+      button.textContent?.trim() === 'Select all',
+    );
+    expect(selectAll).toBeDefined();
+    selectAll!.click();
+    flushSync();
+
+    expect(host.textContent).toContain('2 selected');
+    expect(host.querySelector('[aria-label="Queue selection actions"]')).not.toBeNull();
+
+    const removeSelected = [...host.querySelectorAll('button')].find((button) =>
+      button.textContent?.includes('Remove selected'),
+    );
+    expect(removeSelected).toBeDefined();
+    removeSelected!.click();
+    flushSync();
+
+    expect(host.querySelector('[role="dialog"]')?.textContent).toContain('2 selected');
+    const confirm = [...host.querySelectorAll('button')].find((button) =>
+      button.textContent?.trim() === 'Remove',
+    );
+    confirm!.click();
+    for (let i = 0; i < 15; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      flushSync();
+    }
+
+    const calls = (globalThis.fetch as unknown as { mock: { calls: [string, RequestInit?][] } }).mock
+      .calls;
+    const deletes = calls.filter(([, init]) => init?.method === 'DELETE').map(([url]) => String(url));
+    expect(deletes.some((url) => url.includes(encodeURIComponent('id-paused-mid-download')))).toBe(
+      true,
+    );
+    expect(deletes.some((url) => url.includes(encodeURIComponent('id-still-downloading')))).toBe(
+      true,
+    );
+  });
+
+  it('starts a selection from one row without opening the drawer', async () => {
+    await mountQueue();
+    selectButton('still-downloading').click();
+    flushSync();
+
+    expect(host.textContent).toContain('1 selected');
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
   });
 });

@@ -19,6 +19,7 @@
    * default shelf shows the default shelf rather than everything.
    */
   import { onMount } from 'svelte';
+  import { api, errorText } from '../api/client';
   import { isActive, router } from '../router.svelte';
   import {
     SETTINGS_CATALOG,
@@ -33,7 +34,8 @@
   import { downloads } from '../state/downloads.svelte';
   import { requests } from '../state/requests.svelte';
   import { tasks } from '../state/tasks.svelte';
-  import { footerStack } from '../tasks';
+  import { footerStack, type SearchStop } from '../tasks';
+  import { pushToast } from '../state/toast.svelte';
   import { system } from '../state/system.svelte';
   import Badge from '../components/Badge.svelte';
   import Button from '../components/Button.svelte';
@@ -341,6 +343,24 @@
       converting: status?.counts.converting ?? 0,
     }),
   );
+
+  let stoppingSearch = $state(false);
+
+  async function stopSearch(event: MouseEvent, stop: SearchStop) {
+    event.preventDefault();
+    event.stopPropagation();
+    if (stoppingSearch) return;
+    stoppingSearch = true;
+    try {
+      const { cancelled } = await api.cancelJobs(stop);
+      pushToast(tp('sidebar.stoppedSearches', cancelled), 'neutral');
+      await tasks.refresh();
+    } catch (err) {
+      pushToast(errorText(err), 'danger');
+    } finally {
+      stoppingSearch = false;
+    }
+  }
   let signOutLabel = $derived(
     auth.busy
       ? t('sidebar.signOut.busy')
@@ -517,22 +537,35 @@
     {#if session.isAdmin && stack.length > 0}
       <div data-sidebar-activity class="flex flex-col gap-0.5" aria-live="polite">
         {#each stack as item (item.id)}
-          <a
-            data-sidebar-activity-row
-            href={item.href}
-            title={item.title}
-            class="flex items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors duration-150 ease-out
-                   {item.tone === 'warning'
-              ? 'text-warning hover:bg-raised'
-              : 'text-accent-text hover:bg-raised'}"
-            onclick={closeForNavigation}>
-            <span
-              class="size-1.5 shrink-0 rounded-full
-                     {item.tone === 'warning' ? 'bg-warning' : 'bg-accent'}
-                     {item.spinning ? 'sidebar-task-pulse' : ''}"
-              aria-hidden="true"></span>
-            <span class="min-w-0 truncate">{item.label}</span>
-          </a>
+          <div class="flex items-center gap-0.5">
+            <a
+              data-sidebar-activity-row
+              href={item.href}
+              title={item.title}
+              class="flex min-w-0 flex-1 items-center gap-2 rounded-md px-3 py-1.5 text-sm transition-colors duration-150 ease-out
+                     {item.tone === 'warning'
+                ? 'text-warning hover:bg-raised'
+                : 'text-accent-text hover:bg-raised'}"
+              onclick={closeForNavigation}>
+              <span
+                class="size-1.5 shrink-0 rounded-full
+                       {item.tone === 'warning' ? 'bg-warning' : 'bg-accent'}
+                       {item.spinning ? 'sidebar-task-pulse' : ''}"
+                aria-hidden="true"></span>
+              <span class="min-w-0 truncate">{item.label}</span>
+            </a>
+            {#if item.stop}
+              <button
+                type="button"
+                class="flex size-7 shrink-0 items-center justify-center rounded-md text-ink-muted transition-colors duration-150 ease-out hover:bg-raised hover:text-ink"
+                title={t('sidebar.stopSearch')}
+                aria-label={t('sidebar.stopSearch')}
+                disabled={stoppingSearch}
+                onclick={(event) => void stopSearch(event, item.stop!)}>
+                <Icon name="close" size={14} />
+              </button>
+            {/if}
+          </div>
         {/each}
       </div>
     {/if}

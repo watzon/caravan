@@ -15,6 +15,8 @@ import type {
   ApproveRequestResult,
   AuthState,
   CalendarEntry,
+  CancelJobsRequest,
+  CancelJobsResult,
   Conversion,
   ConversionQueue,
   CreateRequestBody,
@@ -216,6 +218,7 @@ export const endpoints = {
   wantedSearch: () => `${API_BASE}/wanted/search`,
   events: () => `${API_BASE}/events`,
   jobs: () => `${API_BASE}/jobs`,
+  jobsCancel: () => `${API_BASE}/jobs/cancel`,
   // The recurring background tasks, their editable cadence, and the button
   // that brings the queued successor forward.
   tasks: () => `${API_BASE}/system/tasks`,
@@ -1163,6 +1166,13 @@ export const api = {
   listJobs: (limit = 100, signal?: AbortSignal) =>
     request<{ jobs: Job[] }>(endpoints.jobs(), { query: { limit }, signal })
       .then((payload) => payload?.jobs ?? []),
+
+  /**
+   * Park open automatic searches so they will not run or grab. Omit the
+   * subject to stop every live search; name one title to stop only that group.
+   */
+  cancelJobs: (body: CancelJobsRequest = {}) =>
+    request<CancelJobsResult>(endpoints.jobsCancel(), { method: 'POST', body }),
 
   /** The recurring background tasks and where each one is in its cycle. */
   listTasks: (signal?: AbortSignal) =>
