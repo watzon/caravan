@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import Wanted from './Wanted.svelte';
+import type { SessionLibrary } from '../api/types';
 import { tasks } from '../state/tasks.svelte';
+import { session } from '../state/session.svelte';
 import { clearToasts, toasts } from '../state/toast.svelte';
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -45,14 +47,14 @@ beforeEach(() => {
     if (url.endsWith('/wanted')) {
       return jsonResponse({
         movies: [
-          { id: 7, title: 'Arrival', year: 2016, poster_path: '', poster_url: '', reason: 'missing', file_quality: '' },
-          { id: 8, title: 'Blade Runner', year: 1982, poster_path: '', poster_url: '', reason: 'below_cutoff', file_quality: '720p' },
+          { id: 7, title: 'Arrival', year: 2016, poster_path: '', poster_url: '', reason: 'missing', file_quality: '', library_id: 1 },
+          { id: 8, title: 'Blade Runner', year: 1982, poster_path: '', poster_url: '', reason: 'below_cutoff', file_quality: '720p', library_id: 1 },
         ],
         episodes: [
-          { id: 10, series_id: 3, series_title: 'Severance', series_kind: 'tv', season_number: 1, episode_number: 2, title: 'Half Loop', air_date: '2026-07-14', poster_path: 'TV/Severance/poster.jpg', poster_url: '', reason: 'missing', file_quality: '' },
-          { id: 11, series_id: 3, series_title: 'Severance', series_kind: 'tv', season_number: 1, episode_number: 3, title: 'In Perpetuity', air_date: '', poster_path: 'TV/Severance/poster.jpg', poster_url: '', reason: 'missing', file_quality: '' },
-          { id: 12, series_id: 3, series_title: 'Severance', series_kind: 'tv', season_number: 1, episode_number: 4, title: 'The You You Are', air_date: '2026-07-28', poster_path: 'TV/Severance/poster.jpg', poster_url: '', reason: 'below_cutoff', file_quality: '720p' },
-          { id: 13, series_id: 9, series_title: 'Transfixed', series_kind: 'adult', season_number: 2026, episode_number: 24, title: 'A Lesson', air_date: '2026-05-20', poster_path: 'Adult/Transfixed/poster.jpg', poster_url: '', reason: 'missing', file_quality: '' },
+          { id: 10, series_id: 3, series_title: 'Severance', series_kind: 'tv', season_number: 1, episode_number: 2, title: 'Half Loop', air_date: '2026-07-14', poster_path: 'TV/Severance/poster.jpg', poster_url: '', reason: 'missing', file_quality: '', library_id: 2 },
+          { id: 11, series_id: 3, series_title: 'Severance', series_kind: 'tv', season_number: 1, episode_number: 3, title: 'In Perpetuity', air_date: '', poster_path: 'TV/Severance/poster.jpg', poster_url: '', reason: 'missing', file_quality: '', library_id: 2 },
+          { id: 12, series_id: 3, series_title: 'Severance', series_kind: 'tv', season_number: 1, episode_number: 4, title: 'The You You Are', air_date: '2026-07-28', poster_path: 'TV/Severance/poster.jpg', poster_url: '', reason: 'below_cutoff', file_quality: '720p', library_id: 2 },
+          { id: 13, series_id: 9, series_title: 'Transfixed', series_kind: 'adult', season_number: 2026, episode_number: 24, title: 'A Lesson', air_date: '2026-05-20', poster_path: 'Adult/Transfixed/poster.jpg', poster_url: '', reason: 'missing', file_quality: '', library_id: 9 },
         ],
       });
     }
@@ -67,6 +69,7 @@ afterEach(() => {
   unmount(app);
   host.remove();
   clearToasts();
+  session.user = null;
   tasks.stopSoon();
   vi.unstubAllGlobals();
   vi.useRealTimers();
@@ -96,6 +99,33 @@ function selectionBar(): HTMLElement | null {
 
 function searchCalls(): { url: string; method: string }[] {
   return calls.filter((call) => call.method === 'POST' && call.url.includes('/library/'));
+}
+
+function sessionLibrary(over: Partial<SessionLibrary> & { id: number }): SessionLibrary {
+  return { kind: 'movie', name: `Library ${over.id}`, icon: '', slug: `lib-${over.id}`, ...over };
+}
+
+function seedLibraries() {
+  session.user = {
+    username: 'root',
+    role: 'admin',
+    open: false,
+    adult: true,
+    libraries: [
+      sessionLibrary({ id: 1, kind: 'movie', name: 'Movies' }),
+      sessionLibrary({ id: 2, kind: 'tv', name: 'Series' }),
+      sessionLibrary({ id: 9, kind: 'adult', name: 'Adult' }),
+    ],
+  };
+}
+
+function openLibraryFilter(label = 'All libraries'): HTMLButtonElement[] {
+  const trigger = [...host.querySelectorAll<HTMLButtonElement>('button[aria-haspopup="dialog"]')].find((button) =>
+    button.textContent?.includes(label),
+  );
+  trigger!.click();
+  flushSync();
+  return [...host.querySelectorAll<HTMLButtonElement>('[role="dialog"] li button')];
 }
 
 describe('Wanted', () => {
@@ -267,5 +297,52 @@ describe('Wanted', () => {
     host.querySelector<HTMLButtonElement>('button[title="Clear selection"]')!.click();
     flushSync();
     expect(selectionBar()).toBeNull();
+  });
+
+  it('narrows the list to the libraries that are checked, and can keep more than one', async () => {
+    seedLibraries();
+    app = mount(Wanted, { target: host });
+    await settle();
+
+    expect(host.textContent).toContain('All libraries');
+    expect(host.textContent).toContain('Arrival (2016)');
+    expect(host.textContent).toContain('Severance · S01E02 · Half Loop');
+    expect(host.textContent).toContain('Transfixed');
+
+    const options = openLibraryFilter();
+    options[0]!.click();
+    flushSync();
+    expect(host.textContent).toContain('Arrival (2016)');
+    expect(host.textContent).not.toContain('Severance · S01E02 · Half Loop');
+    expect(host.textContent).not.toContain('Transfixed');
+    expect(
+      [...host.querySelectorAll<HTMLButtonElement>('[role="group"][aria-label="Wanted filter"] button')]
+        .find((button) => button.textContent?.includes('Missing'))
+        ?.textContent?.replace(/\s+/g, ' ')
+        .trim(),
+    ).toBe('Missing 1');
+
+    options[1]!.click();
+    flushSync();
+    expect(host.textContent).toContain('Arrival (2016)');
+    expect(host.textContent).toContain('Severance · S01E02 · Half Loop');
+    expect(host.textContent).not.toContain('Transfixed');
+    expect(host.textContent).toContain('2 libraries');
+  });
+
+  it('drops a selection that a library filter has just hidden', async () => {
+    seedLibraries();
+    app = mount(Wanted, { target: host });
+    await settle();
+
+    buttonLabeled('Select Arrival (2016)')!.click();
+    flushSync();
+    expect(selectionBar()?.textContent).toContain('1 selected');
+
+    openLibraryFilter()[1]!.click();
+    flushSync();
+    expect(selectionBar()).toBeNull();
+    expect(host.textContent).toContain('Severance · S01E02 · Half Loop');
+    expect(host.textContent).not.toContain('Arrival (2016)');
   });
 });

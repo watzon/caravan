@@ -17,7 +17,10 @@ func TestCalendarMergesEntriesAndAssignsStatuses(t *testing.T) {
 	ctx := context.Background()
 	today := calendarDate(time.Now())
 
-	series := &core.Series{TMDBID: 100, Title: "Calendar Show", SortTitle: "calendar show", Monitored: true}
+	series := &core.Series{
+		TMDBID: 100, Title: "Calendar Show", SortTitle: "calendar show", Monitored: true,
+		LibraryID: defaultLibraryID(t, st, core.LibraryKindTV),
+	}
 	if err := st.UpsertSeries(ctx, series); err != nil {
 		t.Fatalf("UpsertSeries: %v", err)
 	}
@@ -87,14 +90,19 @@ func TestCalendarMergesEntriesAndAssignsStatuses(t *testing.T) {
 	assertCalendarEntry(t, body.Entries, "movie", "Movie Failed", "missing", false)
 	assertCalendarEntry(t, body.Entries, "movie", "Movie Future", "unaired", false)
 
+	tvLib := defaultLibraryID(t, st, core.LibraryKindTV)
+	movieLib := defaultLibraryID(t, st, core.LibraryKindMovie)
+
 	entry := findCalendarEntry(t, body.Entries, "episode", "Downloaded")
 	if entry.SeriesID != series.ID || entry.MovieID != 0 || entry.EpisodeID != downloaded.ID ||
 		entry.SeriesKind != core.SeriesKindTV || entry.SeasonNumber != 1 || entry.EpisodeNumber != 1 ||
-		entry.Title != "Calendar Show" || entry.EpisodeTitle != "Downloaded" || entry.Date != downloaded.AirDate.Format(calendarDateFormat) {
+		entry.Title != "Calendar Show" || entry.EpisodeTitle != "Downloaded" || entry.Date != downloaded.AirDate.Format(calendarDateFormat) ||
+		entry.LibraryID != tvLib {
 		t.Fatalf("episode identity = %+v, want series and episode identifiers", entry)
 	}
 	entry = findCalendarEntry(t, body.Entries, "movie", "Movie Future")
-	if entry.MovieID != movieFuture.ID || entry.SeriesID != 0 || entry.EpisodeTitle != "" {
+	if entry.MovieID != movieFuture.ID || entry.SeriesID != 0 || entry.EpisodeTitle != "" ||
+		entry.LibraryID != movieLib {
 		t.Fatalf("movie identity = %+v, want movie identifier only", entry)
 	}
 }
@@ -208,7 +216,10 @@ func storeCalendarEpisode(t *testing.T, st *store.Store, seriesID int64, season,
 
 func storeCalendarMovie(t *testing.T, st *store.Store, title string, year int, date time.Time, monitored bool) *core.Movie {
 	t.Helper()
-	movie := &core.Movie{Title: title, SortTitle: strings.ToLower(title), Year: year, ReleaseDate: date, Monitored: monitored}
+	movie := &core.Movie{
+		Title: title, SortTitle: strings.ToLower(title), Year: year, ReleaseDate: date, Monitored: monitored,
+		LibraryID: defaultLibraryID(t, st, core.LibraryKindMovie),
+	}
 	if err := st.UpsertMovie(context.Background(), movie); err != nil {
 		t.Fatalf("UpsertMovie: %v", err)
 	}

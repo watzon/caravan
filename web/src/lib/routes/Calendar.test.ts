@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
 import Calendar from './Calendar.svelte';
 import TopBar from '../layout/TopBar.svelte';
+import type { SessionLibrary } from '../api/types';
+import { session } from '../state/session.svelte';
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
@@ -28,13 +30,13 @@ beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
     if (String(input).includes('/calendar?')) {
       return jsonResponse({ entries: [
-        { kind: 'movie', date, title: 'On Disk', movie_id: 1, monitored: true, has_file: true, status: 'downloaded' },
-        { kind: 'movie', date, title: 'In Progress', movie_id: 2, monitored: true, has_file: false, status: 'downloading' },
-        { kind: 'movie', date, title: 'Still Missing', movie_id: 3, monitored: true, has_file: false, status: 'missing' },
-        { kind: 'episode', date: tomorrow, title: 'Future', series_id: 4, episode_id: 40, season_number: 1, episode_number: 2, episode_title: 'Future', monitored: true, has_file: false, status: 'unaired' },
-        { kind: 'episode', date: tomorrow, title: 'Chainsmoker Cat', series_id: 5, episode_id: 56, season_number: 1, episode_number: 6, episode_title: 'Episode 6', monitored: true, has_file: false, status: 'unaired' },
-        { kind: 'episode', date: tomorrow, title: 'Series Name', series_id: 6, episode_id: 64, episode_number: 4, episode_title: 'Episode 4', monitored: true, has_file: false, status: 'unaired' },
-        { kind: 'episode', date, title: 'Vixen', series_id: 9, series_kind: 'adult', episode_id: 24, season_number: 2026, episode_number: 1, episode_title: 'A Scene', monitored: true, has_file: false, status: 'missing' },
+        { kind: 'movie', date, title: 'On Disk', movie_id: 1, monitored: true, has_file: true, status: 'downloaded', library_id: 1 },
+        { kind: 'movie', date, title: 'In Progress', movie_id: 2, monitored: true, has_file: false, status: 'downloading', library_id: 1 },
+        { kind: 'movie', date, title: 'Still Missing', movie_id: 3, monitored: true, has_file: false, status: 'missing', library_id: 1 },
+        { kind: 'episode', date: tomorrow, title: 'Future', series_id: 4, episode_id: 40, season_number: 1, episode_number: 2, episode_title: 'Future', monitored: true, has_file: false, status: 'unaired', library_id: 2 },
+        { kind: 'episode', date: tomorrow, title: 'Chainsmoker Cat', series_id: 5, episode_id: 56, season_number: 1, episode_number: 6, episode_title: 'Episode 6', monitored: true, has_file: false, status: 'unaired', library_id: 2 },
+        { kind: 'episode', date: tomorrow, title: 'Series Name', series_id: 6, episode_id: 64, episode_number: 4, episode_title: 'Episode 4', monitored: true, has_file: false, status: 'unaired', library_id: 2 },
+        { kind: 'episode', date, title: 'Vixen', series_id: 9, series_kind: 'adult', episode_id: 24, season_number: 2026, episode_number: 1, episode_title: 'A Scene', monitored: true, has_file: false, status: 'missing', library_id: 9 },
       ] });
     }
     throw new Error(`unexpected fetch: ${String(input)}`);
@@ -49,6 +51,7 @@ afterEach(() => {
   unmount(app);
   if (topbar) unmount(topbar);
   host.remove();
+  session.user = null;
   vi.unstubAllGlobals();
   vi.useRealTimers();
 });
@@ -168,5 +171,58 @@ describe('Calendar', () => {
     expect(host.querySelector('a[href="/movies/2"]')).not.toBeNull();
     expect(host.querySelector('a[href="/series/5#s1e6"]')).not.toBeNull();
     expect(host.querySelector('a[href="/adult/sites/9#y2026n1"]')?.textContent).toContain('Vixen');
+  });
+
+  it('keeps only the libraries that are checked on both month and agenda', async () => {
+    session.user = {
+      username: 'root',
+      role: 'admin',
+      open: false,
+      adult: true,
+      libraries: [
+        { id: 1, kind: 'movie', name: 'Movies', icon: '', slug: 'movies' } satisfies SessionLibrary,
+        { id: 2, kind: 'tv', name: 'Series', icon: '', slug: 'series' } satisfies SessionLibrary,
+        { id: 9, kind: 'adult', name: 'Adult', icon: '', slug: 'adult' } satisfies SessionLibrary,
+      ],
+    };
+    app = mount(Calendar, { target: host });
+    await settle();
+    topbar = mount(TopBar, { target: host, props: { title: 'Calendar' } });
+    flushSync();
+
+    const agendaButton = Array.from(host.querySelectorAll('button')).find((button) => button.textContent === 'Agenda');
+    agendaButton!.click();
+    flushSync();
+
+    expect(host.textContent).toContain('All libraries');
+    expect(host.querySelector('a[href="/movies/1"]')).not.toBeNull();
+    expect(host.querySelector('a[href="/series/4#s1e2"]')).not.toBeNull();
+    expect(host.querySelector('a[href="/adult/sites/9#y2026n1"]')).not.toBeNull();
+
+    const trigger = [...host.querySelectorAll<HTMLButtonElement>('button[aria-haspopup="dialog"]')].find((button) =>
+      button.textContent?.includes('All libraries'),
+    );
+    trigger!.click();
+    flushSync();
+    const options = [...host.querySelectorAll<HTMLButtonElement>('[role="dialog"] li button')];
+    options[0]!.click();
+    flushSync();
+
+    expect(host.querySelector('a[href="/movies/1"]')).not.toBeNull();
+    expect(host.querySelector('a[href="/series/4#s1e2"]')).toBeNull();
+    expect(host.querySelector('a[href="/adult/sites/9#y2026n1"]')).toBeNull();
+
+    options[1]!.click();
+    flushSync();
+    expect(host.querySelector('a[href="/movies/1"]')).not.toBeNull();
+    expect(host.querySelector('a[href="/series/4#s1e2"]')).not.toBeNull();
+    expect(host.querySelector('a[href="/adult/sites/9#y2026n1"]')).toBeNull();
+
+    const monthButton = Array.from(host.querySelectorAll('button')).find((button) => button.textContent === 'Month');
+    monthButton!.click();
+    flushSync();
+    expect(host.querySelector('[title="On Disk"]')).not.toBeNull();
+    expect(host.querySelector('[title="S01E02 Future"]')).not.toBeNull();
+    expect(host.querySelector('a[href="/adult/sites/9#y2026n1"]')).toBeNull();
   });
 });

@@ -11,6 +11,8 @@ import {
   sessionLibraryByID,
   sessionLibraryBySlug,
   sessionLibraryIDs,
+  sessionFilterLibraries,
+  matchesLibraryFilter,
   shelfBack,
   shelfHref,
 } from './library';
@@ -104,6 +106,42 @@ describe('shelfHref', () => {
   it('falls back to the kind path plus ?library= when the slug is missing', () => {
     expect(shelfHref(shelf({ id: 4, kind: 'movie', name: 'Kids' }))).toBe('/movies?library=4');
     expect(shelfHref(shelf({ id: 3, kind: 'anime', name: 'Anime' }))).toBe('/anime?library=3');
+  });
+});
+
+describe('sessionFilterLibraries', () => {
+  it('groups by kind, movies first, adult last, then by id', () => {
+    expect(
+      sessionFilterLibraries(
+        user([
+          shelf({ id: 9, kind: 'adult', name: 'Adult' }),
+          shelf({ id: 4, kind: 'movie', name: 'Kids' }),
+          shelf({ id: 3, kind: 'anime', name: 'Anime' }),
+          shelf({ id: 1, kind: 'movie', name: 'Movies' }),
+          shelf({ id: 2, kind: 'tv', name: 'Series' }),
+        ]),
+      ).map((library) => library.id),
+    ).toEqual([1, 4, 2, 3, 9]);
+  });
+
+  it('treats a missing library list as empty, not as "no libraries exist"', () => {
+    expect(sessionFilterLibraries(user(undefined))).toEqual([]);
+    expect(sessionFilterLibraries(null)).toEqual([]);
+  });
+});
+
+describe('matchesLibraryFilter', () => {
+  it('shows every row when nothing is checked', () => {
+    expect(matchesLibraryFilter(1, [])).toBe(true);
+    expect(matchesLibraryFilter(undefined, [])).toBe(true);
+    expect(matchesLibraryFilter(0, [])).toBe(true);
+  });
+
+  it('keeps only the checked libraries', () => {
+    expect(matchesLibraryFilter(1, [1, 2])).toBe(true);
+    expect(matchesLibraryFilter(3, [1, 2])).toBe(false);
+    expect(matchesLibraryFilter(undefined, [1])).toBe(false);
+    expect(matchesLibraryFilter(0, [1])).toBe(false);
   });
 });
 

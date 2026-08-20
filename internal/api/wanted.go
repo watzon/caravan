@@ -16,6 +16,9 @@ type wantedMovieJSON struct {
 	PosterURL   string `json:"poster_url"`
 	Reason      string `json:"reason"`
 	FileQuality string `json:"file_quality"`
+	// LibraryID is the movie's own library, so the wanted screen can filter
+	// the combined list down to the shelves the caller checked.
+	LibraryID int64 `json:"library_id"`
 }
 
 // wantedEpisodeJSON is one row of the wanted episode list. The poster is the
@@ -36,6 +39,9 @@ type wantedEpisodeJSON struct {
 	PosterURL     string `json:"poster_url"`
 	Reason        string `json:"reason"`
 	FileQuality   string `json:"file_quality"`
+	// LibraryID is the series' own library. Two shelves of one kind may both
+	// contribute wanted rows, and the screen has to tell them apart.
+	LibraryID int64 `json:"library_id"`
 }
 
 // handleWanted returns the wanted list: monitored movies and episodes that
@@ -57,6 +63,7 @@ func (s *server) handleWanted(w http.ResponseWriter, r *http.Request) {
 			PosterURL:   m.PosterURL,
 			Reason:      m.Reason,
 			FileQuality: m.FileQuality,
+			LibraryID:   m.LibraryID,
 		})
 	}
 	episodes := make([]wantedEpisodeJSON, 0, len(lists.Episodes))
@@ -74,6 +81,7 @@ func (s *server) handleWanted(w http.ResponseWriter, r *http.Request) {
 			PosterURL:     e.SeriesPosterURL,
 			Reason:        e.Reason,
 			FileQuality:   e.FileQuality,
+			LibraryID:     e.SeriesLibraryID,
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"movies": movies, "episodes": episodes})

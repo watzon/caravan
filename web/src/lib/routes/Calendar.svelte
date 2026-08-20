@@ -5,11 +5,12 @@
   import Button from '../components/Button.svelte';
   import EmptyState from '../components/EmptyState.svelte';
   import Icon from '../components/Icon.svelte';
+  import LibraryFilter from '../components/LibraryFilter.svelte';
   import LoadError from '../components/LoadError.svelte';
   import Modal from '../components/Modal.svelte';
   import Skeleton from '../components/Skeleton.svelte';
   import { episodeCode } from '../format';
-  import { libraryItemHref } from '../library';
+  import { libraryItemHref, matchesLibraryFilter } from '../library';
   import { TONE_DOT, TONE_TEXT, TONE_TINT, type Tone } from '../status';
   import { page } from '../state/page.svelte';
   import { pushToast } from '../state/toast.svelte';
@@ -98,6 +99,7 @@
 
   let month = $state(todayMonth());
   let view = $state<View>('month');
+  let libraryIDs = $state<number[]>([]);
   let entries = $state<CalendarEntry[] | null>(null);
   let loading = $state(true);
   let error = $state<string | null>(null);
@@ -109,9 +111,12 @@
   let cells = $derived(monthCells(month));
   let rangeStart = $derived(iso(cells[0]!));
   let rangeEnd = $derived(iso(new Date(cells[cells.length - 1]!.getFullYear(), cells[cells.length - 1]!.getMonth(), cells[cells.length - 1]!.getDate() + 1)));
+  let visibleEntries = $derived(
+    (entries ?? []).filter((entry) => matchesLibraryFilter(entry.library_id, libraryIDs)),
+  );
   let byDate = $derived.by(() => {
     const grouped = new Map<string, CalendarEntry[]>();
-    for (const entry of entries ?? []) {
+    for (const entry of visibleEntries) {
       const group = grouped.get(entry.date) ?? [];
       group.push(entry);
       grouped.set(entry.date, group);
@@ -203,6 +208,7 @@
       </button>
       <Button variant="secondary" size="sm" onclick={() => (month = todayMonth())}>{t('route.calendar.today')}</Button>
     </div>
+    <LibraryFilter selected={libraryIDs} onchange={(ids) => (libraryIDs = ids)} />
   </div>
 
   <div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-ink-secondary" aria-label={t('route.calendar.statusLegend')}>

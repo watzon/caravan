@@ -43,6 +43,10 @@ type calendarEntry struct {
 	Monitored     bool   `json:"monitored"`
 	HasFile       bool   `json:"has_file"`
 	Status        string `json:"status"`
+	// LibraryID is the shelf that owns the movie or series. The calendar is a
+	// combined grid, so the client filters by checking libraries rather than
+	// by toggling a single kind.
+	LibraryID int64 `json:"library_id"`
 }
 
 // handleCalendar is the combined movie and episode calendar (PLAN phase 3,
@@ -233,6 +237,7 @@ func (s *server) calendarEntries(ctx context.Context, gate *libraryGate, start, 
 			HasFile:       episode.HasFile,
 			Status: calendarStatus(episode.HasFile, downloadingEpisodes[episode.Episode.ID],
 				episode.Episode.AirDate, today),
+			LibraryID: episode.SeriesLibraryID,
 		})
 	}
 	for _, movie := range movies {
@@ -253,6 +258,7 @@ func (s *server) calendarEntries(ctx context.Context, gate *libraryGate, start, 
 			Monitored: movie.Movie.Monitored,
 			HasFile:   movie.HasFile,
 			Status:    calendarStatus(movie.HasFile, downloadingMovies[movie.Movie.ID], movie.Movie.ReleaseDate, today),
+			LibraryID: movie.Movie.LibraryID,
 		})
 	}
 

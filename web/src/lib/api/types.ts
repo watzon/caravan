@@ -1530,6 +1530,8 @@ export interface WantedMovie {
   poster_url: string;
   reason: WantedReason;
   file_quality: string;
+  /** The library that owns the movie. Missing on a server too old to send it. */
+  library_id?: number;
 }
 
 export interface WantedEpisode {
@@ -1547,6 +1549,8 @@ export interface WantedEpisode {
   poster_url: string;
   reason: WantedReason;
   file_quality: string;
+  /** The series' library. Missing on a server too old to send it. */
+  library_id?: number;
 }
 
 export interface WantedLists {
@@ -1692,6 +1696,8 @@ export interface CalendarEntry {
   monitored: boolean;
   has_file: boolean;
   status: CalendarStatus;
+  /** The library that owns the movie or series. Missing on older payloads. */
+  library_id?: number;
 }
 /** Score components that make a quality-profile decision explainable. */
 export interface ProfileScoreContributions {

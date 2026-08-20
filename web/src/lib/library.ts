@@ -119,6 +119,43 @@ export function sessionLibraryIDs(user: SessionUser | null, kind: LibraryKind): 
 }
 
 /**
+ * Kind order for a combined-surface library filter. Adult is included here
+ * because Wanted and Calendar mix every shelf this session can see, including
+ * the adult one when it is granted.
+ */
+const FILTER_KIND_ORDER: LibraryKind[] = [...LIBRARY_KIND_ORDER, 'adult'];
+
+function filterKindRank(kind: LibraryKind): number {
+  const index = FILTER_KIND_ORDER.indexOf(kind);
+  return index < 0 ? FILTER_KIND_ORDER.length : index;
+}
+
+/**
+ * The shelves a Wanted or Calendar library filter may offer, grouped by kind.
+ *
+ * /auth/me is already active-only and access-filtered, so this is the same
+ * list the sidebar draws from — GET /libraries stays admin-only.
+ */
+export function sessionFilterLibraries(user: SessionUser | null): SessionLibrary[] {
+  return [...(user?.libraries ?? [])].sort(
+    (a, b) => filterKindRank(a.kind) - filterKindRank(b.kind) || a.id - b.id,
+  );
+}
+
+/**
+ * Whether a row belongs on a combined surface given the libraries the caller
+ * checked. An empty selection means every library — that is the default, and
+ * unchecking the last box returns there rather than hiding everything.
+ */
+export function matchesLibraryFilter(
+  libraryID: number | undefined,
+  selected: readonly number[],
+): boolean {
+  if (selected.length === 0) return true;
+  return libraryID != null && selected.includes(libraryID);
+}
+
+/**
  * The library item a shared surface (Wanted, Calendar, Queue, Convert) can
  * name. Zero and missing ids are the same: this download or file is not
  * matched to that kind of row.

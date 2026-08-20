@@ -5,16 +5,17 @@
   import Badge from '../components/Badge.svelte';
   import Button from '../components/Button.svelte';
   import EmptyState from '../components/EmptyState.svelte';
+  import Icon from '../components/Icon.svelte';
+  import LibraryFilter from '../components/LibraryFilter.svelte';
   import LoadError from '../components/LoadError.svelte';
   import PageTabs from '../components/PageTabs.svelte';
   import Poster from '../components/Poster.svelte';
   import Skeleton from '../components/Skeleton.svelte';
-  import Icon from '../components/Icon.svelte';
   import { searchQueued } from '../state/activity';
   import { pushToast } from '../state/toast.svelte';
   import { episodeCode, formatDate, titleWithYear } from '../format';
   import { sceneNumber } from '../adult';
-  import { libraryItemHref } from '../library';
+  import { libraryItemHref, matchesLibraryFilter } from '../library';
   import { createSelection } from '../selection.svelte';
   import { useI18n } from '../i18n.svelte';
 
@@ -31,6 +32,7 @@
   let loading = $state(true);
   let error = $state<string | null>(null);
   let tab = $state<Tab>('missing');
+  let libraryIDs = $state<number[]>([]);
   let searching = $state(false);
   const movieSelection = createSelection();
   const episodeSelection = createSelection();
@@ -50,8 +52,14 @@
 
   onMount(load);
 
-  let movies = $derived((wanted?.movies ?? []).filter((item) => item.reason === tab));
-  let episodes = $derived((wanted?.episodes ?? []).filter((item) => item.reason === tab));
+  let filteredMovies = $derived(
+    (wanted?.movies ?? []).filter((item) => matchesLibraryFilter(item.library_id, libraryIDs)),
+  );
+  let filteredEpisodes = $derived(
+    (wanted?.episodes ?? []).filter((item) => matchesLibraryFilter(item.library_id, libraryIDs)),
+  );
+  let movies = $derived(filteredMovies.filter((item) => item.reason === tab));
+  let episodes = $derived(filteredEpisodes.filter((item) => item.reason === tab));
   let count = $derived(movies.length + episodes.length);
   let selectionActive = $derived(movieSelection.active || episodeSelection.active);
   let selectedCount = $derived(movieSelection.count + episodeSelection.count);
@@ -60,8 +68,8 @@
     TABS.map((item) => ({
       ...item,
       count: wanted
-        ? wanted.movies.filter((movie) => movie.reason === item.key).length +
-          wanted.episodes.filter((episode) => episode.reason === item.key).length
+        ? filteredMovies.filter((movie) => movie.reason === item.key).length +
+          filteredEpisodes.filter((episode) => episode.reason === item.key).length
         : null,
     })),
   );
@@ -152,6 +160,11 @@
     episodeSelection.clear();
   }
 
+  function setLibraryIDs(ids: number[]) {
+    libraryIDs = ids;
+    clearSelection();
+  }
+
   function onkeydown(event: KeyboardEvent) {
     if (event.key === 'Escape' && selectionActive) clearSelection();
   }
@@ -201,7 +214,8 @@
       active={tab}
       onchange={(key) => (tab = key)}
       ariaLabel={t('route.wanted.filter')} />
-    <div class="ml-auto">
+    <div class="ml-auto flex flex-wrap items-center justify-end gap-2">
+      <LibraryFilter selected={libraryIDs} onchange={setLibraryIDs} />
       <!-- This always searches missing items, even while the cutoff tab is open. -->
       <Button variant="primary" size="sm" disabled={searching} onclick={searchAll}>
         <Icon name="search" size={14} />
