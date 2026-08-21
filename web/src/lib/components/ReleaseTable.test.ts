@@ -122,6 +122,23 @@ describe('ReleaseTable', () => {
     expect(cell?.title).toBe(title);
   });
 
+  it('gives leftover row width to the release name, not quality or score', () => {
+    mountTable({ releases: [release()] });
+
+    const headers = [...host!.querySelectorAll('thead th')].map((el) => el.className);
+    expect(headers[0]).toContain('w-full');
+    expect(headers[1]).toContain('w-[1%]');
+    expect(headers[2]).toContain('w-[1%]');
+    expect(headers[3]).toContain('w-[1%]');
+
+    const cells = [...host!.querySelectorAll('tbody td')].map((el) => el.className);
+    expect(cells[0]).toContain('w-full');
+    expect(cells[0]).toContain('max-w-0');
+    expect(cells[1]).toContain('w-[1%]');
+    expect(cells[2]).toContain('w-[1%]');
+    expect(cells[3]).toContain('w-[1%]');
+  });
+
   it('pages long result sets, slicing only after the sort', () => {
     // Seeders descend with the index, so the sort keeps arrival order and the
     // first page provably holds the BEST rows, not the first-received ones.

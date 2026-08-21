@@ -115,11 +115,13 @@
   <div class="overflow-x-auto rounded-md border border-border">
     <table class="w-full min-w-[40rem] border-collapse text-sm">
       <thead>
+        <!-- w-full on the name + w-[1%] on the rest gives leftover width to
+             the title. max-w-0 on the cell is what lets MiddleEllipsis shrink. -->
         <tr class="bg-surface text-left">
-          <th class="micro-label px-3 py-2 font-semibold">{t('component.releaseTable.release')}</th>
-          <th class="micro-label px-3 py-2 font-semibold">{t('component.releaseTable.quality')}</th>
-          <th class="micro-label px-3 py-2 text-right font-semibold">{t('component.releaseTable.score')}</th>
-          <th class="micro-label px-3 py-2 text-right font-semibold">{t('component.releaseTable.grab')}</th>
+          <th class="micro-label w-full px-3 py-2 font-semibold">{t('component.releaseTable.release')}</th>
+          <th class="micro-label w-[1%] px-3 py-2 font-semibold">{t('component.releaseTable.quality')}</th>
+          <th class="micro-label w-[1%] px-3 py-2 text-right font-semibold">{t('component.releaseTable.score')}</th>
+          <th class="micro-label w-[1%] px-3 py-2 text-right font-semibold">{t('component.releaseTable.grab')}</th>
         </tr>
       </thead>
       <tbody>
@@ -133,7 +135,7 @@
           <tr
             class="border-t border-border align-middle transition-colors duration-150
                    {rowTone(release, best)}">
-            <td class="relative max-w-0 px-3 py-2.5" title={release.title}>
+            <td class="relative w-full max-w-0 px-3 py-2.5" title={release.title}>
               {#if rail}
                 <span class="pointer-events-none absolute inset-y-0 left-0 w-0.5 {rail}" aria-hidden="true"></span>
               {/if}
@@ -150,7 +152,7 @@
               </div>
             </td>
 
-            <td class="px-3 py-2.5">
+            <td class="w-[1%] px-3 py-2.5">
               <div class="flex flex-wrap items-center gap-1.5">
                 {#if release.parsed.quality && release.parsed.quality !== 'unknown'}
                   <Badge mono>{release.parsed.quality}</Badge>
@@ -177,12 +179,12 @@
             </td>
 
             <td
-              class="px-3 py-2.5 text-right font-mono {best ? 'text-accent-text' : 'text-ink-secondary'}"
+              class="w-[1%] whitespace-nowrap px-3 py-2.5 text-right font-mono {best ? 'text-accent-text' : 'text-ink-secondary'}"
               title={t('component.releaseTable.scoreHint')}>
               {releaseScore(release)}
             </td>
 
-            <td class="px-3 py-2.5">
+            <td class="w-[1%] whitespace-nowrap px-3 py-2.5">
               <div class="flex flex-col items-end gap-1">
                 {#if queued === 'downloading'}
                   <span class="inline-flex items-center gap-1.5 text-sm font-medium text-accent-text">
