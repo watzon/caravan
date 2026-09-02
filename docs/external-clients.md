@@ -2,8 +2,7 @@
 
 How a download that lives in qBittorrent, SABnzbd or NZBGet becomes a file in
 your library, what Caravan requires of your filesystem to do it, and what
-happens when the client stops answering (SPEC §5.1, §13; PLAN phase 6, tasks 2
-and 4).
+happens when the client stops answering (SPEC §5.1, §13).
 
 External clients are optional. Caravan has a built-in engine for both protocols
 — [docs/usenet.md](usenet.md) covers the Usenet one — so nothing on this page is

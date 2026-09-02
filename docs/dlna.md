@@ -1,7 +1,7 @@
 # DLNA media server
 
 Caravan advertises the library on the LAN as a DLNA/UPnP-AV Digital Media Server
-(SPEC §5.1, PLAN phase 4 task 2). It is on by default: a smart TV, console or
+(SPEC §5.1). It is on by default: a smart TV, console or
 phone on the same network finds "Caravan" in its media-server list, browses
 Movies and TV, and plays files directly.
 

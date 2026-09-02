@@ -2,7 +2,7 @@
 
 Caravan downloads NZBs itself. There is no SABnzbd, no NZBGet, and nothing to
 install alongside it — the same way there is no external torrent client
-(SPEC §5.1, PLAN phase 7).
+(SPEC §5.1).
 
 **Neither protocol requires an external download client.** Torrents go to the
 built-in BitTorrent engine, NZBs go to the built-in Usenet engine, and both are

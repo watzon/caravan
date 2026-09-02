@@ -13,7 +13,7 @@ documentation corrections, and focused pull requests are welcome.
 
 ## Development setup
 
-Source builds require Go 1.26.5, Node.js 22, npm, and
+Source builds require Go 1.26.6, Node.js 22, npm, and
 [Air](https://github.com/air-verse/air) for live reload:
 
 ```sh

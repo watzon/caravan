@@ -1,7 +1,7 @@
 # External download clients
 
 Caravan can hand grabs to a download client running elsewhere instead of (or
-alongside) its own embedded torrent engine (SPEC §5.1, §7; PLAN phase 6).
+alongside) its own embedded torrent engine (SPEC §5.1, §7).
 Configuration lives in the `download_clients` table and is edited under
 **Settings → Download clients**.
 

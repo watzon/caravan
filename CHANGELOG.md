@@ -7,8 +7,35 @@ and Caravan uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-03
+
 ### Added
 
+- A single self-hosted service for media discovery, requests, acquisition,
+  import, library management, and playback handoff.
+- Embedded torrent and Usenet download engines, with optional qBittorrent,
+  SABnzbd, and NZBGet integrations.
+- Movie, series, and access-controlled adult libraries with per-library
+  metadata providers, indexers, quality profiles, routing, and DLNA visibility.
+- Svelte web UI with first-run administrator setup, role-based access,
+  discovery, requests, wanted items, queue, history, calendar, and settings.
+- Jellyfin, Stash, DLNA, webhook, and iCalendar handoff surfaces.
+- Bare binaries for Linux, macOS, and Windows; a Docker Compose deployment; and
+  a portable-drive preparation flow.
+- Reproducible GitHub Release archives and SHA-256 checksums for five OS/CPU
+  targets.
+- MIT license for the project source.
+- Torrent sites behind a Cloudflare or DDoS-Guard challenge work through an
+  optional FlareSolverr endpoint (Settings > Indexers). The solver's cookies
+  and user agent are reused for the session, including torrent downloads,
+  and the catalog marks the sites that need it.
+- Every login-based tracker definition offers an optional session cookie
+  field. A pasted browser session replaces the login form, which is the way
+  in for trackers that show a captcha at login; the error names the field
+  when the captcha appears.
+- A login block without a method is treated as a form login, as upstream
+  does, and a stray closing parenthesis in an upstream template no longer
+  rejects the definition (1337x). Over 500 catalog sites are now addable.
 - Discover Featured now follows Overseerr's shape more closely: after
   trending, movie shelves come first (popular, upcoming, now in theatres,
   movie genres, browse by studio) and series shelves follow (popular,
@@ -72,6 +99,18 @@ and Caravan uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Storage relocation works on a stock install: the built-in Usenet engine
+  can quiesce, the queue stays quiesced after a successful move instead of
+  resuming into the old root, a quiesce hold no longer survives a restart as
+  a user pause, cross-device library moves fall back to copy, a retried
+  series move keeps episodes in their season folders, and every relocation
+  failure is recorded on the migration row.
+- Indexer errors redact only credentials and URL settings. An ordinary
+  setting such as a sort order no longer shreds unrelated words.
+- A scraped site that redirects between http and https on the same host is
+  no longer rejected as an unapproved redirect.
+- Indexer tests and health probes give scraped sites 45 seconds so a browser
+  challenge solve fits.
 - Monitored adult scenes are still found when the release date is one day
   off the stored air date (the usual timezone split between a studio's
   local calendar and a UTC day on stash-box). Search asks the adjacent
@@ -120,25 +159,6 @@ and Caravan uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   instead of forcing a new login.
 - Scan Review no longer re-lists a file the user already matched: a parked
   grab is a finished decision, so a restart does not import it again.
-
-## [0.1.0] - TBD
-
-### Added
-
-- A single self-hosted service for media discovery, requests, acquisition,
-  import, library management, and playback handoff.
-- Embedded torrent and Usenet download engines, with optional qBittorrent,
-  SABnzbd, and NZBGet integrations.
-- Movie, series, and access-controlled adult libraries with per-library
-  metadata providers, indexers, quality profiles, routing, and DLNA visibility.
-- Svelte web UI with first-run administrator setup, role-based access,
-  discovery, requests, wanted items, queue, history, calendar, and settings.
-- Jellyfin, Stash, DLNA, webhook, and iCalendar handoff surfaces.
-- Bare binaries for Linux, macOS, and Windows; a Docker Compose deployment; and
-  a portable-drive preparation flow.
-- Reproducible GitHub Release archives and SHA-256 checksums for five OS/CPU
-  targets.
-- MIT license for the project source.
 
 ### Known limitations
 

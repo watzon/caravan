@@ -1,6 +1,6 @@
 # Docker deployment
 
-Caravan's server-hosted mode (SPEC §2.1, PLAN phase 5 task 1): one container,
+Caravan's server-hosted mode (SPEC §2.1): one container,
 one `/config` volume, one `/data` volume.
 
 The whole design goal is that the *arr Docker folder-path problem cannot happen
