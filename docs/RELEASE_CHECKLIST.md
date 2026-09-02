@@ -6,7 +6,7 @@ Target: `v0.1.0` — an early public release, not a production-readiness claim.
 
 - [x] Choose and add a top-level `LICENSE`. MIT was selected and added.
 - [x] Create the `watzon/caravan` GitHub repository and add it as `origin`.
-- [ ] Push `main`, enable Actions, and confirm every job in `CI` passes remotely.
+- [x] Push `main`, enable Actions, and confirm every job in `CI` passes remotely.
 - [ ] Confirm a release tag outside `main` is rejected and archive builds wait
       for the release workflow's frontend, Go, race, and vulnerability gates.
 - [ ] Enable GitHub private vulnerability reporting so `SECURITY.md` has a live
