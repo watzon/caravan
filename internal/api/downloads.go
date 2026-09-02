@@ -62,12 +62,12 @@ type downloadJSON struct {
 	EpisodeNumber int     `json:"episode_number,omitempty"`
 }
 
-// handleListDownloads renders the queue (PLAN phase 2, task 4).
+// handleListDownloads renders the queue.
 //
 // The persisted rows and the engine's live snapshot are merged rather than
 // either being trusted alone: the rows carry what a download was grabbed for
 // and survive a restart, the snapshot carries the rates and progress that are
-// stale the moment they are written. Nothing is written back here — keeping the
+// stale the moment they are written. Nothing is written back here, keeping the
 // rows fresh is a background job's work, not a GET's.
 const (
 	defaultDownloadLimit = 100
@@ -387,10 +387,10 @@ func (f *libraryOwnershipFilter) downloadVisible(ctx context.Context, download c
 	if err != nil {
 		return false, err
 	}
-	// An untied universal-search grab has no movie and no series — exactly
-	// the shape ownerVisible waves through — so its LIBRARY answers first: a
-	// download bound for a library the caller cannot see must not sit in
-	// their queue.
+	// An untied universal-search grab has no movie and no series (exactly the
+	// shape ownerVisible waves through) so its library answers first: a
+	// download bound for a library the caller cannot see must not sit in their
+	// queue.
 	if visible, err := f.libraryVisibleTo(ctx, grab.LibraryID); err != nil || !visible {
 		return visible, err
 	}
@@ -499,10 +499,10 @@ func (s *server) handlePauseDownload(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) handleResumeDownload(w http.ResponseWriter, r *http.Request) {
 	// The teeth of the dirty-eject flow (SPEC §13): after an unclean shutdown
-	// every download comes back paused, and it stays that way until
-	// POST /system/verify has proved the database. Writing torrent pieces onto
-	// a filesystem nobody has checked is how a dirty eject turns into a corrupt
-	// library. Pausing, deleting and listing all stay available — this is the
+	// every download comes back paused, and it stays that way until POST
+	// /system/verify has proved the database. Writing torrent pieces onto a
+	// filesystem nobody has checked is how a dirty eject turns into a corrupt
+	// library. Pausing, deleting and listing all stay available. This is the
 	// one direction that adds writes.
 	if s.dirty.Load() {
 		writeError(w, http.StatusConflict,
@@ -522,10 +522,10 @@ func (s *server) handleResumeDownload(w http.ResponseWriter, r *http.Request) {
 // that is already done, so a release that failed to unpack is unpacked again
 // rather than fetched again.
 //
-// Only engines that say they can do this are asked. A torrent engine's
-// failures are about the swarm and Resume is already the whole answer there,
-// so the capability is absent rather than a no-op — the UI reads the same
-// refusal and does not offer the button.
+// Only engines that say they can do this are asked. A torrent engine's failures
+// are about the swarm and Resume is already the whole answer there, so the
+// capability is absent rather than a no-op. The UI reads the same refusal and
+// does not offer the button.
 func (s *server) handleRetryDownload(w http.ResponseWriter, r *http.Request) {
 	// The same guard Resume carries, for the same reason: after an unclean
 	// shutdown nothing may start writing to the library's filesystem until

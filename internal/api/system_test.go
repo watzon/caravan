@@ -66,8 +66,8 @@ func TestSystemStatusReportsRuntimeDiagnostics(t *testing.T) {
 }
 
 // The acceptance criterion: after a dirty eject downloads stay paused until the
-// database verifies. Pausing and listing keep working — it is only the
-// direction that resumes writes onto an unchecked filesystem that is refused.
+// database verifies. Pausing and listing keep working. It is only the direction
+// that resumes writes onto an unchecked filesystem that is refused.
 func TestDownloadsStayPausedUntilTheDatabaseVerifies(t *testing.T) {
 	h, engine, _ := newDirtyServer(t, true)
 
@@ -154,9 +154,9 @@ func TestShutdownPullsTheStopTrigger(t *testing.T) {
 	}
 }
 
-// A process with no way to stop itself says so rather than reporting a
-// shutdown that will not happen — the whole point of the endpoint is telling
-// the user when the drive is safe.
+// A process with no way to stop itself says so rather than reporting a shutdown
+// that will not happen. The whole point of the endpoint is telling the user
+// when the drive is safe.
 func TestShutdownWithoutATriggerIsUnavailable(t *testing.T) {
 	h, _, _ := newTestServer(t)
 	rec := do(t, h, http.MethodPost, "/api/v1/system/shutdown", "")

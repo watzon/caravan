@@ -15,14 +15,14 @@ import (
 // `/usenet-servers`).
 //
 // These are the built-in engine's article sources, not download clients: the
-// engine reads article bodies from them itself. Nothing here is optional in
-// the way an external client is — with no server configured the engine has
-// nowhere to download Usenet releases from at all.
+// engine reads article bodies from them itself. Nothing here is optional in the
+// way an external client is, with no server configured the engine has nowhere
+// to download Usenet releases from at all.
 //
 // The password follows the download-client rule exactly: it is never echoed
 // back, because a credential the API hands out is a credential that ends up in
-// a browser cache, a screenshot or a bug report (SPEC §12). Only whether one is
-// stored is reported, which is why usenetServerRequest treats an omitted
+// a browser cache, a screenshot or a bug report (SPEC §12). Only whether one
+// is stored is reported, which is why usenetServerRequest treats an omitted
 // password as "keep the stored one" rather than "clear it".
 type usenetServerJSON struct {
 	ID       int64  `json:"id"`
@@ -168,8 +168,8 @@ func usenetServerMessage(err error) string {
 //
 // TLS is part of the target, not a detail: a body that kept the host and port
 // but turned TLS off would put the stored password on the wire in plaintext.
-// That is the download-client guard's scheme comparison in its usenet form —
-// there, the scheme lives inside the URL being compared.
+// That is the download-client guard's scheme comparison in its usenet form.
+// There, the scheme lives inside the URL being compared.
 //
 // Port is compared resolved, so a body that round-trips what the GET returned
 // still matches, as does one that leaves the port blank for the default.
@@ -328,7 +328,7 @@ func (s *server) handleTestUsenetServerConfig(w http.ResponseWriter, r *http.Req
 		// The fallback only applies to the destination the credential was
 		// stored for. Pairing a stored password with a host from the body would
 		// make this endpoint send the credential the GET refuses to return to
-		// any machine the caller names (SPEC §12) — the exfiltration the
+		// any machine the caller names (SPEC §12). The exfiltration the
 		// withholding exists to prevent. A genuinely new address is a new
 		// credential, and the form still has the field to type it into.
 		if sameUsenetServerTarget(body, *found) {
@@ -358,9 +358,9 @@ const usenetTestDialTimeout = 10 * time.Second
 //
 // nntp.Dial does exactly that and no more: it is the same handshake every
 // pooled connection performs, so a green test means article fetches will get
-// past the front door. Reading an article is deliberately not part of it —
-// there is no message id that every provider is guaranteed to still carry, and
-// a missing article would report a working server as broken.
+// past the front door. Reading an article is deliberately not part of it. There
+// is no message id that every provider is guaranteed to still carry, and a
+// missing article would report a working server as broken.
 //
 // The failure carries the server's own message, because "it did not work"
 // without a reason is useless for fixing a wrong password or a typo'd port.
@@ -383,7 +383,7 @@ func (s *server) writeUsenetServerTest(w http.ResponseWriter, ctx context.Contex
 
 // usenetServerNameFree reports whether name is available, writing a 409 when it
 // is not. usenet_servers.name is unique, so without this check a duplicate name
-// — a plain user mistake — would surface as a 500.
+// (a plain user mistake) would surface as a 500.
 func (s *server) usenetServerNameFree(ctx context.Context, w http.ResponseWriter, name string, exceptID int64) bool {
 	configs, err := s.st.ListUsenetServers(ctx)
 	if err != nil {

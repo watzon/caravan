@@ -47,7 +47,7 @@ import (
 
 // usenetPartSize is the yEnc part size the release is posted with. At 8 KiB
 // against the fixture's 4 KiB par2 blocks, one lost article costs exactly two
-// recovery blocks — comfortably inside the fixture's budget of six, and five
+// recovery blocks, comfortably inside the fixture's budget of six, and five
 // lost articles are comfortably outside it.
 const usenetPartSize = 8 << 10
 
@@ -256,8 +256,8 @@ func startSmokeNNTP(t *testing.T) (*nntptest.Server, func() []string) {
 // askedFor reports whether any article of one of the named files was fetched.
 //
 // It matches on the exact message-ids postRelease published rather than on a
-// prefix, because the server records what the wire carried — angle brackets
-// included — and a prefix test that silently stops matching would turn this
+// prefix, because the server records what the wire carried (angle brackets
+// included) and a prefix test that silently stops matching would turn this
 // assertion into one that can only pass.
 func (fx *usenetFixture) askedFor(asked []string, names ...string) bool {
 	want := map[string]bool{}
@@ -438,9 +438,9 @@ func TestSmokeUsenetGrabRepairExtractImport(t *testing.T) {
 
 	downloadID := grabTheRelease(t, api, movieID)
 
-	// ---- the queue reports the stages ------------------------------------
-	// Phases are live and each one is short, so this records what it saw
-	// rather than requiring a particular phase to be caught mid-flight.
+	// the queue reports the stages Phases are live and each one is short, so
+	// this records what it saw rather than requiring a particular phase to be
+	// caught mid-flight.
 	seenPhases := map[string]bool{}
 	waitFor(t, 90*time.Second, "the usenet download to finish every stage", func() string {
 		row, ok := queueRowFor(t, api, downloadID)
@@ -478,7 +478,7 @@ func TestSmokeUsenetGrabRepairExtractImport(t *testing.T) {
 		t.Errorf("save path %q is absolute; the built-in engine writes under the storage root", row.SavePath)
 	}
 
-	// ---- repair and extraction really happened ---------------------------
+	// repair and extraction really happened
 	downloadDir := filepath.Join(dirs.storage, filepath.FromSlash(row.SavePath))
 	entries, err := os.ReadDir(downloadDir)
 	if err != nil {
@@ -496,7 +496,7 @@ func TestSmokeUsenetGrabRepairExtractImport(t *testing.T) {
 		}
 	}
 
-	// ---- and the import landed it in the library -------------------------
+	// and the import landed it in the library
 	want := filepath.Join(dirs.storage, filepath.FromSlash(smokeWantPath))
 	waitFor(t, 90*time.Second, "the import to land the file in the library", func() string {
 		if _, err := os.Stat(want); err != nil {

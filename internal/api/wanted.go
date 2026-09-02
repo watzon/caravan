@@ -22,7 +22,7 @@ type wantedMovieJSON struct {
 }
 
 // wantedEpisodeJSON is one row of the wanted episode list. The poster is the
-// series' — episodes have no artwork of their own.
+// series', episodes have no artwork of their own.
 type wantedEpisodeJSON struct {
 	ID          int64  `json:"id"`
 	SeriesID    int64  `json:"series_id"`
@@ -44,8 +44,8 @@ type wantedEpisodeJSON struct {
 	LibraryID int64 `json:"library_id"`
 }
 
-// handleWanted returns the wanted list: monitored movies and episodes that
-// are missing or below their profile's cutoff (PLAN phase 3, task 2).
+// handleWanted returns the wanted list: monitored movies and episodes that are
+// missing or below their profile's cutoff.
 func (s *server) handleWanted(w http.ResponseWriter, r *http.Request) {
 	lists, err := wanted.Compute(r.Context(), s.st)
 	if err != nil {

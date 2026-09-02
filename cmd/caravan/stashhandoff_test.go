@@ -21,16 +21,17 @@ import (
 	"github.com/watzon/caravan/internal/store"
 )
 
-// PLAN phase 11 acceptance criterion 1, end to end: "an adult import fires
-// exactly one scoped Stash scan; non-adult imports fire none."
+// End to end: an adult import fires exactly one scoped Stash scan; non-adult
+// imports fire none.
 //
-// The two tests below are the only place the whole path is joined up. Everywhere
-// else it is proved in halves that share no code — internal/library asserts a
-// stub notifier is called once, internal/stash asserts the handler sends the
-// right path when it is invoked by hand — and neither half notices if the two
-// are wired to each other wrongly, or not at all. Here the composition root
-// builds the Manager, a real import runs through it, a real automation.Runner
-// drains the queue, and the assertion is on what a fake Stash actually received.
+// The two tests below are the only place the whole path is joined up.
+// Everywhere else it is proved in halves that share no code (internal/library
+// asserts a stub notifier is called once, internal/stash asserts the handler
+// sends the right path when it is invoked by hand) and neither half notices if
+// the two are wired to each other wrongly, or not at all. Here the composition
+// root builds the Manager, a real import runs through it, a real
+// automation.Runner drains the queue, and the assertion is on what a fake Stash
+// actually received.
 
 // stashHarness is one Caravan wired the way serve.go wires it, pointed at a fake
 // Stash.
@@ -74,9 +75,9 @@ func newStashHarness(t *testing.T, adult bool) *stashHarness {
 		t.Fatalf("SetSettings: %v", err)
 	}
 	// The control half wants adult unreachable, and a store nobody has made an
-	// adult library in is already that — deactivating an empty kind is the
-	// no-op it looks like. It is spelled out anyway so the two halves of the
-	// harness differ by one word rather than by an absence.
+	// adult library in is already that, deactivating an empty kind is the no-op
+	// it looks like. It is spelled out anyway so the two halves of the harness
+	// differ by one word rather than by an absence.
 	if adult {
 		enableAdultLibrary(t, st)
 	} else {
@@ -90,10 +91,11 @@ func newStashHarness(t *testing.T, adult bool) *stashHarness {
 		t.Fatalf("set tmdb key: %v", err)
 	}
 
-	// The debounce is wound back rather than collapsed to zero: the queue orders
-	// run_after as a string, so a job queued for "now" and claimed microseconds
-	// later can compare wrongly. Production never lands there — the real window
-	// is twenty seconds — and a minute in the past is unambiguously claimable.
+	// The debounce is wound back rather than collapsed to zero: the queue
+	// orders run_after as a string, so a job queued for "now" and claimed
+	// microseconds later can compare wrongly. Production never lands there (the
+	// real window is twenty seconds) and a minute in the past is unambiguously
+	// claimable.
 	svc := stash.NewService(st, srv.Client(), discardLog(), stash.WithSchedule(-time.Minute, 0))
 
 	return &stashHarness{
@@ -208,8 +210,8 @@ func seedAdultScene(t *testing.T, st *store.Store) core.Episode {
 const tvTMDBID = 1399
 
 // startFakeTV serves the two endpoints a series import reads: the series detail
-// and its one season. It is deliberately minimal — nothing here is asserted,
-// it only has to let a television import actually succeed so the "no Stash
+// and its one season. It is deliberately minimal. Nothing here is asserted, it
+// only has to let a television import actually succeed so the "no Stash
 // traffic" claim is about a completed import rather than an aborted one.
 func startFakeTV(t *testing.T) string {
 	t.Helper()

@@ -12,7 +12,7 @@ import (
 )
 
 // adultProbe wires a handler that answers 204 behind requireAdult, so a test
-// can tell "the gate refused" apart from "no such route" — which, from outside,
+// can tell "the gate refused" apart from "no such route", which, from outside,
 // is exactly the distinction the gate is built to erase.
 func adultProbe(t *testing.T) (http.Handler, *store.Store) {
 	t.Helper()
@@ -84,7 +84,7 @@ func TestRequireAdultGatesTheSubtree(t *testing.T) {
 		},
 		{
 			// The open server authenticates as an implicit admin, so it needs
-			// only an active adult library — the same trusted-LAN default the
+			// only an active adult library. The same trusted-LAN default the
 			// rest of the API has.
 			name:    "enabled, the open server is an admin",
 			enabled: true,
@@ -146,7 +146,7 @@ func TestRequireAdultRefusalLooksLikeAnUnroutedPath(t *testing.T) {
 // to end against the real router with a real session.
 //
 // Its limits are worth stating, because they are the point: while the adult mux
-// is empty, this cannot tell a gated route from an unregistered one — that is
+// is empty, this cannot tell a gated route from an unregistered one: that is
 // precisely the indistinguishability the gate exists to produce, and
 // TestRequireAdultGatesTheSubtree above is what proves the gate itself works.
 // This test becomes load-bearing the moment the first adult route is registered
@@ -165,8 +165,8 @@ func TestAdultSubtreeIs404OnTheRealRouterWhenDisabled(t *testing.T) {
 	}
 }
 
-// Enabling the module is a decision about a LIBRARY ROW — since 0011 the row is
-// seeded dormant and the switch is its `active` flag — so adult_enabled must
+// Enabling the module is a decision about a library row (since 0011 the row is
+// seeded dormant and the switch is its `active` flag) so adult_enabled must
 // stay out of the PUT /settings allowlist, the way storage_root does. If it
 // ever leaks in, a key-value write would claim the module is on while every
 // gate still reads the dormant row and answers 404.
@@ -192,9 +192,9 @@ func TestPutSettingsRefusesTheAdultSwitch(t *testing.T) {
 	}
 }
 
-// The gate reads a grant from `library_access` on every request, and it must:
-// a copy taken at login would leave a housemate whose access was revoked this
-// morning still holding it until they logged out — and revoking a grant is
+// The gate reads a grant from `library_access` on every request, and it must: a
+// copy taken at login would leave a housemate whose access was revoked this
+// morning still holding it until they logged out, and revoking a grant is
 // exactly the moment somebody needs it to be instant.
 //
 // This is why the identity requireAuth resolves carries no grant of its own.

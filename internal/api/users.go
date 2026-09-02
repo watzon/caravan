@@ -141,11 +141,11 @@ func (s *server) insistAnAdminRemains(w http.ResponseWriter, r *http.Request, ro
 // the database. 409 because the request is well-formed and it is the state of
 // the world that says no.
 //
-// When the admin is the ONLY account, the delete is allowed: removing the
-// final account is the documented way to reopen the server (zero users = the
-// open LAN default), and refusing it would make gating a one-way door. The
-// caller deletes themself and the response's session is already revoked —
-// which is fine, because the very next request runs open.
+// When the admin is the only account, the delete is allowed: removing the final
+// account is the documented way to reopen the server (zero users = the open LAN
+// default), and refusing it would make gating a one-way door. The caller
+// deletes themself and the response's session is already revoked, which is
+// fine, because the very next request runs open.
 func (s *server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -194,9 +194,9 @@ type userPasswordRequest struct {
 }
 
 // handleResetUserPassword sets another account's password without proving the
-// old one — the point of an admin reset is that nobody knows it. It revokes
-// that account's sessions, so a password handed out on a sticky note does not
-// leave the previous holder logged in.
+// old one. The point of an admin reset is that nobody knows it. It revokes that
+// account's sessions, so a password handed out on a sticky note does not leave
+// the previous holder logged in.
 func (s *server) handleResetUserPassword(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {

@@ -49,9 +49,9 @@ type calendarEntry struct {
 	LibraryID int64 `json:"library_id"`
 }
 
-// handleCalendar is the combined movie and episode calendar (PLAN phase 3,
-// task 9). It keeps the date range at the HTTP boundary while the store owns
-// the joined file-state queries needed to build its entries.
+// handleCalendar is the combined movie and episode calendar. It keeps the date
+// range at the HTTP boundary while the store owns the joined file-state queries
+// needed to build its entries.
 func (s *server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 	today := calendarDate(time.Now())
 	start, end, ok := calendarRange(w, r, today, 7, 90)
@@ -76,10 +76,10 @@ func (s *server) handleCalendar(w http.ResponseWriter, r *http.Request) {
 //
 // That exemption is also why the feed carries only the libraries an accountless
 // reader may have. The URL is a bearer credential handed to Google Calendar, a
-// wall display or a housemate's phone, so the request has no account behind it —
+// wall display or a housemate's phone, so the request has no account behind it,
 // nobody's grant can be consulted, and inheriting the API key's implicit-admin
 // identity would put every scene title and site name on a shared calendar the
-// moment an adult library existed. So the ICS path asks the ANONYMOUS gate
+// moment an adult library existed. So the ICS path asks the anonymous gate
 // rather than resolving a caller: active and unrestricted, nothing else.
 func (s *server) handleCalendarICS(w http.ResponseWriter, r *http.Request) {
 	authorized, err := s.calendarKeyAuthenticated(r)
@@ -105,8 +105,8 @@ func (s *server) handleCalendarICS(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGenerateAPIKey (re)generates the API key the iCal feed authenticates
-// with (PLAN phase 3, task 9). Replacing rather than extending the old key
-// makes regeneration an immediate revocation.
+// with. Replacing rather than extending the old key makes regeneration an
+// immediate revocation.
 func (s *server) handleGenerateAPIKey(w http.ResponseWriter, r *http.Request) {
 	var raw [16]byte
 	if _, err := rand.Read(raw[:]); err != nil {
@@ -171,12 +171,12 @@ func calendarDate(t time.Time) time.Time {
 }
 
 // calendarEntriesFor is calendarEntries for a request that has an identity
-// behind it: the calendar is a SHARED surface — the same grid holds movies,
-// television and, once the adult module is on, scenes — so what it may show
+// behind it: the calendar is a shared surface (the same grid holds movies,
+// television and, once the adult module is on, scenes) so what it may show
 // depends on who asked.
 //
 // Routes without an identity (the ICS feed, which authenticates with a bearer
-// URL and names no account) must NOT come through here: they call
+// URL and names no account) must not come through here: they call
 // calendarEntries with the anonymous gate rather than inheriting currentUser's
 // implicit admin.
 func (s *server) calendarEntriesFor(r *http.Request, start, end, today time.Time) ([]calendarEntry, error) {
@@ -188,8 +188,7 @@ func (s *server) calendarEntriesFor(r *http.Request, start, end, today time.Time
 //
 // The gate is a parameter rather than something resolved in here because the
 // answer is not always a property of the caller: on the ICS feed there is no
-// caller, and the honest identity there is an account with no grants at all
-// (PLAN phase 9 task 5).
+// caller, and the honest identity there is an account with no grants at all.
 func (s *server) calendarEntries(ctx context.Context, gate *libraryGate, start, end, today time.Time) ([]calendarEntry, error) {
 	episodes, err := s.st.CalendarEpisodes(ctx, start, end)
 	if err != nil {

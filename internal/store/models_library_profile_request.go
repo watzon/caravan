@@ -42,7 +42,7 @@ type libraryAccessStoreModel struct {
 	UserID    int64 `bun:",pk"`
 }
 
-// qualityProfileStoreModel keeps JSON and timestamps in their established TEXT
+// qualityProfileStoreModel keeps JSON and timestamps in their established text
 // representation so decoding errors and malformed-time fallback stay at the
 // persistence boundary.
 type qualityProfileStoreModel struct {

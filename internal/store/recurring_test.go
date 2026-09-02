@@ -158,7 +158,7 @@ func TestRecurringJobStatusPrefersTheRunningRow(t *testing.T) {
 
 // Run-now moves the row that already exists rather than adding one: the
 // recurring chain keeps exactly one open row per kind, and the proof it worked
-// is that ClaimJob — which was finding nothing due — now hands the job over.
+// is that ClaimJob (which was finding nothing due) now hands the job over.
 func TestRunJobNowMakesThePendingRowClaimable(t *testing.T) {
 	ctx := context.Background()
 	st, _ := openTemp(t)
@@ -298,7 +298,7 @@ func TestRunJobNowReportsRunning(t *testing.T) {
 
 // The interval a task reports and the interval the scheduler sleeps for are the
 // same read, so a nonsense settings row must land on the default rather than
-// scheduling a job zero minutes — or a century — from now.
+// scheduling a job zero minutes (or a century) from now.
 func TestIntervalMinutesFallsBackOnUnusableValues(t *testing.T) {
 	ctx := context.Background()
 	st, _ := openTemp(t)

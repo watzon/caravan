@@ -36,9 +36,9 @@ type feedItem struct {
 }
 
 // feedEnclosure is one download link. A slice, not a struct: items can carry
-// several — AnimeTosho publishes a .torrent and an .nzb enclosure on the same
-// item — and a single field would silently keep only the last one
-// (encoding/xml overwrites on repeat), handing a torrent grab the .nzb URL.
+// several (AnimeTosho publishes a .torrent and an .nzb enclosure on the same
+// item) and a single field would silently keep only the last one (encoding/xml
+// overwrites on repeat), handing a torrent grab the .nzb URL.
 type feedEnclosure struct {
 	URL    string `xml:"url,attr"`
 	Length string `xml:"length,attr"`
@@ -183,15 +183,14 @@ func extensionAttributes(attributes []feedAttr) []core.ReleaseAttribute {
 }
 
 // parseTitle reads a result's name the way the category it was published under
-// says it is named (PLAN phase 9 task 4).
+// says it is named.
 //
 // The category is the selector rather than the shape of the name itself,
 // because a date in a television name is a daily episode and reading it as a
 // scene date would change what an existing release means. An item the indexer
-// filed under XXX is named the way scenes are named — and parse.Scene falls
-// back to parse.Parse when the name turns out not to be date-shaped, so an
-// indexer that mis-files a television release under 6000 still parses
-// correctly.
+// filed under XXX is named the way scenes are named, and parse.Scene falls back
+// to parse.Parse when the name turns out not to be date-shaped, so an indexer
+// that mis-files a television release under 6000 still parses correctly.
 func parseTitle(title string, cats []int) core.ParsedRelease {
 	if core.HasAdultCategory(cats) {
 		return parse.Scene(title)
@@ -292,10 +291,10 @@ func publishedAt(it feedItem, attrs map[string]string) time.Time {
 // categories reads every category id the item was published in.
 //
 // It goes to the raw attribute list rather than through attrMap because
-// `category` is the one attribute indexers deliberately repeat — an item in
-// 5000 and 5040 carries both — and attrMap keeps only the first. Anything that
-// is not a positive integer is dropped: a label alone cannot be matched against
-// a configured id.
+// `category` is the one attribute indexers deliberately repeat (an item in 5000
+// and 5040 carries both) and attrMap keeps only the first. Anything that is not
+// a positive integer is dropped: a label alone cannot be matched against a
+// configured id.
 func categories(it feedItem) []int {
 	out := []int{}
 	seen := map[int]bool{}

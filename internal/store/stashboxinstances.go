@@ -64,7 +64,7 @@ type seriesProviderUsageModel struct {
 // provider_id is deliberately absent from the update: it is the value every
 // pinned row and every provider chain stores, so it is the instance's identity
 // rather than one of its fields. The endpoint is writable here and refused at
-// the API door, which is where "immutable after creation" is enforced — the
+// the API door, which is where "immutable after creation" is enforced. The
 // store's job is to describe the table, and a restore or a repair path that
 // legitimately rewrites a row must not have to go around it.
 func (s *Store) UpsertStashboxInstance(ctx context.Context, in *core.StashboxInstance) error {
@@ -141,8 +141,8 @@ func (s *Store) GetStashboxInstanceByProviderID(ctx context.Context, providerID 
 }
 
 // ListStashboxInstances returns every configured instance, oldest first. Id
-// order is creation order, which puts the legacy instance — the endpoint that
-// was configured before there were instances — at the head of the list it has
+// order is creation order, which puts the legacy instance (the endpoint that
+// was configured before there were instances) at the head of the list it has
 // always been the only member of.
 func (s *Store) ListStashboxInstances(ctx context.Context) ([]core.StashboxInstance, error) {
 	models := make([]stashboxInstanceModel, 0)
@@ -173,7 +173,7 @@ func (s *Store) DeleteStashboxInstance(ctx context.Context, id int64) error {
 	return nil
 }
 
-// CountLibrariesUsingProvider reports how many libraries name providerID —
+// CountLibrariesUsingProvider reports how many libraries name providerID,
 // either as the head they identify through or anywhere in their chain.
 //
 // The chain is JSON and this matches it as text, with the quotes included. That
@@ -198,7 +198,7 @@ func (s *Store) CountLibrariesUsingProvider(ctx context.Context, providerID stri
 }
 
 // CountItemsPinnedToProvider reports how many movies and series are pinned to
-// providerID — the rows whose refs only this provider can be asked about.
+// providerID. The rows whose refs only this provider can be asked about.
 func (s *Store) CountItemsPinnedToProvider(ctx context.Context, providerID string) (int, error) {
 	movieCount, err := s.db.NewSelect().Model((*movieProviderUsageModel)(nil)).
 		Where("provider = ?", providerID).Count(ctx)

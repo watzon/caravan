@@ -419,8 +419,8 @@ func TestReclaimExpiredLeases(t *testing.T) {
 	if err := st.EnqueueJob(ctx, &j); err != nil {
 		t.Fatalf("EnqueueJob: %v", err)
 	}
-	// A worker claims the job with a lease that has already expired — the
-	// state a crash mid-job leaves behind (SPEC §7).
+	// A worker claims the job with a lease that has already expired. The state
+	// a crash mid-job leaves behind (SPEC §7).
 	if _, err := st.ClaimJob(ctx, nil, -time.Second); err != nil {
 		t.Fatalf("ClaimJob: %v", err)
 	}
@@ -469,7 +469,7 @@ func TestReclaimExpiredLeases(t *testing.T) {
 // because the kinds that get their own worker are the ones that run for hours.
 // A crash five minutes into one therefore leaves a row in `running` with a
 // lease nothing will reclaim until tomorrow, and the dedicated worker only ever
-// claims `pending` — so a storage migration killed mid-move stayed stuck with
+// claims `pending`, so a storage migration killed mid-move stayed stuck with
 // the library's files split across two roots and no way to fix it from the UI.
 //
 // Startup is the one moment where "running" can only mean "left by a process

@@ -102,9 +102,9 @@ func TestRoutePolicyAdultSurfaceIsClosed(t *testing.T) {
 			t.Errorf("adult policy %q is outside the gated subtree", policy.Name)
 		}
 	}
-	// The access routes are the module's replacement doors and they live OUTSIDE
-	// the gated subtree, deliberately: an adult library's roster has to be
-	// editable, and restriction is not an adult idea any more. They are
+	// The access routes are the module's replacement doors and they live
+	// outside the gated subtree, deliberately: an adult library's roster has to
+	// be editable, and restriction is not an adult idea any more. They are
 	// admin-only instead, by the ordinary rule.
 	for _, method := range []string{http.MethodGet, http.MethodPut} {
 		policy, ok := policyForRegistration(method, "/libraries/{id}/access")

@@ -64,7 +64,7 @@ type taskJSON struct {
 	// LastError is why the last run failed. Empty unless LastResult is failed.
 	LastError string `json:"last_error"`
 	// NextRun is when the pending successor comes due. Empty means either it is
-	// due now or there is nothing queued — Queued tells those apart.
+	// due now or there is nothing queued, Queued tells those apart.
 	NextRun string `json:"next_run"`
 	// Running is true while the task is being worked on right now.
 	Running bool `json:"running"`
@@ -115,8 +115,8 @@ func (s *server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 }
 
 // runTaskResponse is what POST /system/tasks/{kind}/run answers. A task that
-// was already running is not an error — there is nothing to bring forward
-// because the work is happening — so it is a 200 that says so.
+// was already running is not an error (there is nothing to bring forward
+// because the work is happening) so it is a 200 that says so.
 type runTaskResponse struct {
 	Kind           string `json:"kind"`
 	AlreadyRunning bool   `json:"already_running"`

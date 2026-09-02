@@ -1,18 +1,16 @@
-// Package api is Caravan's HTTP surface: the REST API under /api/v1
-// (SPEC §11) and the embedded Svelte SPA that consumes it.
+// Package api is Caravan's HTTP surface: the REST API under /api/v1 (SPEC §11)
+// and the embedded Svelte SPA that consumes it.
 //
-// Phase 1 scope (PLAN phase 1, task 8): settings, system status, the library
-// (movies and series), rescan, metadata search, the scan-review/import queue,
-// and the activity feed. Phase 2 adds acquisition (PLAN phase 2, tasks 1, 2 and
-// 4): indexer configuration, the interactive release picker, grabs, and the
-// download queue. Phase 5 adds the optional single-user password, its session
-// cookie and the API key (SPEC §11): with no password set every route behaves
-// as it always did, and with one set /api/v1 needs a session or the API key —
-// see auth.go for the deliberate exemptions.
+// Phase 1 scope: settings, system status, the library (movies and series),
+// rescan, metadata search, the scan-review/import queue, and the activity feed.
+// Phase 2 adds acquisition: indexer configuration, the interactive release
+// picker, grabs, and the download queue. Phase 5 adds the optional single-user
+// password, its session cookie and the API key (SPEC §11): with no password
+// set every route behaves as it always did, and with one set /api/v1 needs a
+// session or the API key. See auth.go for the deliberate exemptions.
 //
-// Every failure answers with the same envelope, {"error": "..."}, including
-// the routing failures the standard ServeMux would otherwise answer in plain
-// text.
+// Every failure answers with the same envelope, {"error": "..."}, including the
+// routing failures the standard ServeMux would otherwise answer in plain text.
 package api
 
 import (
@@ -76,8 +74,8 @@ type server struct {
 	// not built in, which GET /dlna reports as off.
 	dlna DLNAService
 
-	// stash is the adult library's handoff (PLAN phase 11). Nil means the
-	// process wired none, which the status endpoint reports as no trouble.
+	// stash is the adult library's handoff. Nil means the process wired none,
+	// which the status endpoint reports as no trouble.
 	stash StashService
 
 	// scanning is the single-flight guard for POST /library/rescan. A scan
@@ -117,7 +115,7 @@ type server struct {
 	dirty atomic.Bool
 
 	// credentials is the cached verdict on each credentialed provider's API key
-	// (SPEC §10.1, PLAN phase 10 task 2). It is why GET /system/status can
+	// (SPEC §10.1). It is why GET /system/status can
 	// report credential health on every poll without a single upstream call;
 	// see credentials.go.
 	credentials metadataCredentials
@@ -168,8 +166,8 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("GET /settings", s.handleGetSettings)
 	api.HandleFunc("PUT /settings", s.handlePutSettings)
 	api.HandleFunc("POST /settings/apikey", s.handleGenerateAPIKey)
-	// The metadata credential's Test button (PLAN phase 10 task 4), the twin of
-	// POST /indexers/{id}/test. It takes the key from the body so the first-run
+	// The metadata credential's Test button, the twin of POST
+	// /indexers/{id}/test. It takes the key from the body so the first-run
 	// wizard can prove one before it is saved.
 	api.HandleFunc("POST /settings/metadata/test", s.handleMetadataTest)
 	api.HandleFunc("POST /settings/flaresolverr/test", s.handleTestFlareSolverr)
@@ -188,9 +186,9 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("POST /system/shutdown", s.handleShutdown)
 	api.HandleFunc("POST /system/verify", s.handleVerify)
 
-	// Moving the storage root (SPEC §10, PLAN phase 5 task 4). Re-pointing is
-	// synchronous because it is one settings write; migrating answers 202 and
-	// the progress endpoint is polled, because it moves the library.
+	// Moving the storage root (SPEC §10). Re-pointing is synchronous because
+	// it is one settings write; migrating answers 202 and the progress endpoint
+	// is polled, because it moves the library.
 	api.HandleFunc("POST /system/storage-root/repoint", s.handleRepointStorageRoot)
 	api.HandleFunc("POST /system/storage-root/migrate", s.handleMigrateStorageRoot)
 	api.HandleFunc("GET /system/storage-root/migration", s.handleStorageMigration)
@@ -219,8 +217,7 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("DELETE /users/{id}", s.handleDeleteUser)
 	api.HandleFunc("POST /users/{id}/password", s.handleResetUserPassword)
 
-	// Quality profiles (PLAN phase 3, task 1) and the wanted list they drive
-	// (task 2).
+	// Quality profiles and the wanted list they drive (task 2).
 	api.HandleFunc("GET /quality-profiles", s.handleListQualityProfiles)
 	api.HandleFunc("POST /quality-profiles", s.handleCreateQualityProfile)
 	api.HandleFunc("GET /quality-profiles/export", s.handleExportQualityProfiles)
@@ -241,37 +238,37 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	// assigned that quality profile uses it everywhere compatibility matters.
 	api.HandleFunc("GET /tv-profiles", s.handleListTVProfiles)
 
-	// The convert-for-TV queue (SPEC §8, PLAN phase 4 task 4). Listing works
-	// without ffmpeg; queueing does not, and says so with a 503.
+	// The convert-for-TV queue (SPEC §8). Listing works without ffmpeg;
+	// queueing does not, and says so with a 503.
 	api.HandleFunc("GET /convert", s.handleListConversions)
 	api.HandleFunc("POST /convert", s.handleCreateConversion)
 	api.HandleFunc("POST /convert/{id}/cancel", s.handleCancelConversion)
 	api.HandleFunc("POST /convert/{id}/retry", s.handleRetryConversion)
 
-	// The Jellyfin playback handoff (SPEC §5.2, PLAN phase 4 task 1). The scan
-	// itself is not an endpoint: it is queued by the import pipeline and run by
-	// the job queue, so the API only configures and proves the connection.
-	// The built-in DLNA media server (SPEC §5.1, PLAN phase 4 task 2). Read
-	// only: the toggle and the friendly name are settings keys, so they are
-	// written through PUT /settings; what cannot be read from that table is
-	// whether SSDP actually came up, which is what this reports.
+	// The Jellyfin playback handoff (SPEC §5.2). The scan itself is not an
+	// endpoint: it is queued by the import pipeline and run by the job queue,
+	// so the API only configures and proves the connection. The built-in DLNA
+	// media server (SPEC §5.1). Read only: the toggle and the friendly name
+	// are settings keys, so they are written through PUT /settings; what cannot
+	// be read from that table is whether SSDP actually came up, which is what
+	// this reports.
 	api.HandleFunc("GET /dlna", s.handleDLNAStatus)
 
 	api.HandleFunc("GET /handoff/jellyfin", s.handleGetJellyfin)
 	api.HandleFunc("POST /handoff/jellyfin", s.handleSetJellyfin)
 	api.HandleFunc("POST /handoff/jellyfin/test", s.handleTestJellyfin)
 
-	// The combined calendar and its iCal feed (PLAN phase 3, task 9).
+	// The combined calendar and its iCal feed.
 	api.HandleFunc("GET /calendar", s.handleCalendar)
 	api.HandleFunc("GET /calendar.ics", s.handleCalendarICS)
 
-	// The job queue's activity feed (PLAN phase 3, task 8).
+	// The job queue's activity feed.
 	api.HandleFunc("GET /jobs", s.handleListJobs)
 	api.HandleFunc("POST /jobs/cancel", s.handleCancelJobs)
 
 	// The recurring background tasks, as the Settings screen shows them: what
 	// runs on a timer, when it last ran and how that went, and a button that
-	// brings the next run forward. Admin-only by the ordinary rule —
+	// brings the next run forward. Admin-only by the ordinary rule,
 	// memberAllowed names neither.
 	api.HandleFunc("GET /system/tasks", s.handleListTasks)
 	api.HandleFunc("POST /system/tasks/{kind}/run", s.handleRunTask)
@@ -305,7 +302,7 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 
 	// Automatic search on demand (SPEC §9): the same jobs the backlog sweep
 	// fans out, queued for one item now. They answer 202 and a count rather
-	// than releases — the work happens on the job queue, not in the request.
+	// than releases. The work happens on the job queue, not in the request.
 	api.HandleFunc("POST /library/movies/{id}/search", s.handleSearchMovieNow)
 	api.HandleFunc("POST /library/series/{id}/search", s.handleSearchSeriesNow)
 	api.HandleFunc("POST /library/episodes/{id}/search", s.handleSearchEpisodeNow)
@@ -319,11 +316,11 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	// requested, so the SPA never has to cross-reference two calls.
 	api.HandleFunc("GET /discover", s.handleDiscoverHome)
 	api.HandleFunc("GET /discover/browse", s.handleDiscoverBrowse)
-	// The filtered scopes (PLAN phase 12 tasks 1 and 3). One per media type
-	// rather than one endpoint with a ?type=, because the filter surfaces are
-	// not the same shape: only movies can be filtered by a person, and a
-	// single endpoint would have to accept the parameter and then refuse it.
-	// Their query strings are the whole filter, so a filtered view is a URL.
+	// The filtered scopes. One per media type rather than one endpoint with a
+	// ?type=, because the filter surfaces are not the same shape: only movies
+	// can be filtered by a person, and a single endpoint would have to accept
+	// the parameter and then refuse it. Their query strings are the whole
+	// filter, so a filtered view is a URL.
 	api.HandleFunc("GET /discover/movies", s.handleDiscoverMovies)
 	api.HandleFunc("GET /discover/series", s.handleDiscoverSeries)
 	// What the filter rail's controls are populated from: three typeaheads
@@ -343,11 +340,11 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("POST /requests/{id}/approve", s.handleApproveRequest)
 	api.HandleFunc("DELETE /requests/{id}", s.handleDismissRequest)
 
-	// The library sections and the settings each may answer for itself
-	// (SPEC §7, PLAN phase 8). Read-mostly and admin-only: memberAllowed names
-	// none of these, so a member never sees them. The rows themselves are
-	// seeded by the migration, so there is no create or delete — a library is
-	// part of the layout, not a thing a user adds.
+	// The library sections and the settings each may answer for itself (SPEC
+	// §7). Read-mostly and admin-only: memberAllowed names none of these, so a
+	// member never sees them. The rows themselves are seeded by the migration,
+	// so there is no create or delete. A library is part of the layout, not a
+	// thing a user adds.
 	api.HandleFunc("GET /libraries", s.handleListLibraries)
 	api.HandleFunc("POST /libraries", s.handleCreateLibrary)
 	api.HandleFunc("GET /libraries/providers", s.handleListProviders)
@@ -372,22 +369,22 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("DELETE /adult/stashbox-instances/{id}", s.handleDeleteStashboxInstance)
 	api.HandleFunc("POST /adult/stashbox-instances/{id}/test", s.handleTestStashboxInstance)
 
-	// The adult module (PLAN phase 9). Its routes are registered on a mux of
-	// their own and mounted behind requireAdult, so the gate is a property of
-	// where a route lives rather than of what its handler remembers to check:
-	// with the module off, or for a caller who was never granted it,
-	// everything under /adult is 404 before any handler runs.
+	// The adult module. Its routes are registered on a mux of their own and
+	// mounted behind requireAdult, so the gate is a property of where a route
+	// lives rather than of what its handler remembers to check: with the module
+	// off, or for a caller who was never granted it, everything under /adult is
+	// 404 before any handler runs.
 	//
 	// The subtree is mounted whether or not the module is enabled, because the
-	// alternative — building the routing table from a settings row — would
-	// make enabling it require a restart, and would make an unrouted /adult
-	// path answer differently from a gated one. Register adult routes here and
+	// alternative (building the routing table from a settings row) would make
+	// enabling it require a restart, and would make an unrouted /adult path
+	// answer differently from a gated one. Register adult routes here and
 	// nowhere else; the mux is not prefix-stripped, so the patterns read
-	// exactly as the URLs do.
-	// A member reaches only the routes memberAllowed also names; the rest are
-	// admin-only by being absent from it, which is the same rule the whole API
-	// runs on. Adding a route here without adding it there closes it to
-	// members, never opens it — the failure direction that is safe.
+	// exactly as the URLs do. A member reaches only the routes memberAllowed
+	// also names; the rest are admin-only by being absent from it, which is the
+	// same rule the whole API runs on. Adding a route here without adding it
+	// there closes it to members, never opens it. The failure direction that is
+	// safe.
 	adult := newPolicyMux()
 	adult.HandleFunc("GET /adult/sites", s.handleListSites)
 	adult.HandleFunc("POST /adult/sites", s.handleAddSite)
@@ -395,32 +392,32 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	adult.HandleFunc("GET /adult/search", s.handleSearchSites)
 	adult.HandleFunc("GET /adult/discover", s.handleAdultDiscover)
 	adult.HandleFunc("GET /adult/scenes/{stashID}", s.handleGetAdultScene)
-	// The scene filter rail's typeaheads (PLAN phase 12 task 3). They are on
-	// this mux and member-allowed for the same reason /adult/discover is: the
-	// rail is part of the browse screen a granted member reads, and a control
-	// that 403s is worse than no control. They read the provider only — no
-	// library row is involved — so there is nothing here an admin has that a
-	// granted member does not.
+	// The scene filter rail's typeaheads. They are on this mux and
+	// member-allowed for the same reason /adult/discover is: the rail is part
+	// of the browse screen a granted member reads, and a control that 403s is
+	// worse than no control. They read the provider only (no library row is
+	// involved) so there is nothing here an admin has that a granted member
+	// does not.
 	adult.HandleFunc("GET /adult/performers", s.handleAdultPerformers)
 	adult.HandleFunc("GET /adult/tags", s.handleAdultTags)
-	// The Stash handoff (PLAN phase 11), the adult twin of
-	// /handoff/jellyfin. It lives here rather than beside its twin because
-	// Stash is an adult-module feature: with the module off it must be absent,
-	// not merely disabled, and mounting it on this subtree is what makes that
-	// true without a check inside each handler. Admin-only by the ordinary
-	// rule — memberAllowed names none of these. The scan and the identity push
-	// are not endpoints: they are queued by the import pipeline and run by the
-	// job queue, so the API only configures and proves the connection.
+	// The Stash handoff, the adult twin of /handoff/jellyfin. It lives here
+	// rather than beside its twin because Stash is an adult-module feature:
+	// with the module off it must be absent, not merely disabled, and mounting
+	// it on this subtree is what makes that true without a check inside each
+	// handler. Admin-only by the ordinary rule, memberAllowed names none of
+	// these. The scan and the identity push are not endpoints: they are queued
+	// by the import pipeline and run by the job queue, so the API only
+	// configures and proves the connection.
 	adult.HandleFunc("GET /adult/stash", s.handleGetStash)
 	adult.HandleFunc("POST /adult/stash", s.handleSetStash)
 	adult.HandleFunc("POST /adult/stash/test", s.handleTestStash)
 	// The configured stash-box endpoints live on the admin mux, not this
 	// subtree. Settings → Metadata has to edit them before the first adult
-	// library exists — that library is the door into /adult, so putting CRUD
-	// behind requireAdult made the warning on Add library unsatisfiable.
-	// The module has no master switch left to register. Turning it on is
-	// POST /libraries with kind=adult — the one door into this subtree, and the
-	// reason it sits outside it — and turning it off is PATCH {active:false} on
+	// library exists. That library is the door into /adult, so putting CRUD
+	// behind requireAdult made the warning on Add library unsatisfiable. The
+	// module has no master switch left to register. Turning it on is POST
+	// /libraries with kind=adult (the one door into this subtree, and the
+	// reason it sits outside it) and turning it off is PATCH {active:false} on
 	// every adult library.
 	api.Handle("/adult/", s.requireAdult(adult))
 
@@ -435,10 +432,10 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("GET /indexers/{id}/categories", s.handleStoredIndexerCategories)
 	api.HandleFunc("POST /indexers/categories", s.handleIndexerCategories)
 
-	// External download clients (SPEC §5.1, PLAN phase 6 task 1). The type
-	// list is served rather than hard-coded in the SPA so a build without a
-	// backend says so instead of offering it. /test with no id in the path
-	// probes an unsaved configuration, as the indexer category endpoint does.
+	// External download clients (SPEC §5.1). The type list is served rather
+	// than hard-coded in the SPA so a build without a backend says so instead
+	// of offering it. /test with no id in the path probes an unsaved
+	// configuration, as the indexer category endpoint does.
 	api.HandleFunc("GET /download-clients", s.handleListDownloadClients)
 	api.HandleFunc("POST /download-clients", s.handleCreateDownloadClient)
 	api.HandleFunc("GET /download-clients/types", s.handleListDownloadClientTypes)
@@ -454,11 +451,11 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("PUT /remote-path-mappings/{id}", s.handleUpdateRemotePathMapping)
 	api.HandleFunc("DELETE /remote-path-mappings/{id}", s.handleDeleteRemotePathMapping)
 
-	// News servers the embedded engine fetches article bodies from (SPEC §5.1,
-	// PLAN phase 7 task 2). These are article sources, not download clients:
-	// they are what the built-in engine reads Usenet releases from itself.
-	// /test with no id in the path probes an unsaved configuration, exactly as
-	// the download-client and indexer forms do.
+	// News servers the embedded engine fetches article bodies from (SPEC
+	// §5.1). These are article sources, not download clients: they are what
+	// the built-in engine reads Usenet releases from itself. /test with no id
+	// in the path probes an unsaved configuration, exactly as the
+	// download-client and indexer forms do.
 	api.HandleFunc("GET /usenet-servers", s.handleListUsenetServers)
 	api.HandleFunc("POST /usenet-servers", s.handleCreateUsenetServer)
 	api.HandleFunc("POST /usenet-servers/test", s.handleTestUsenetServerConfig)
@@ -473,7 +470,7 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	api.HandleFunc("POST /downloads/{id}/resume", s.handleResumeDownload)
 	api.HandleFunc("POST /downloads/{id}/retry", s.handleRetryDownload)
 	api.HandleFunc("DELETE /downloads/{id}", s.handleDeleteDownload)
-	// Per-download insight and rate limits (PLAN phase 3, task 10).
+	// Per-download insight and rate limits.
 	api.HandleFunc("GET /downloads/{id}/insight", s.handleDownloadInsight)
 	api.HandleFunc("PUT /downloads/{id}/limits", s.handleSetDownloadLimits)
 
@@ -563,13 +560,13 @@ func (w *jsonErrorWriter) Write(b []byte) (int, error) {
 func (w *jsonErrorWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 // statusClientClosedRequest is nginx's 499: the caller hung up before the
-// answer existed. Nobody receives it — it exists so the request log records
+// answer existed. Nobody receives it, it exists so the request log records
 // "caller left" instead of a 5xx that pages someone.
 const statusClientClosedRequest = 499
 
-// clientGone reports whether the request's own context ended — a typeahead
-// abort or a closed tab. An upstream "failure" that is just that cancellation
-// propagating is normal operation, not an error worth an ERROR line.
+// clientGone reports whether the request's own context ended. A typeahead abort
+// or a closed tab. An upstream "failure" that is just that cancellation
+// propagating is normal operation, not an error worth an error line.
 func clientGone(r *http.Request) bool {
 	return r.Context().Err() != nil
 }

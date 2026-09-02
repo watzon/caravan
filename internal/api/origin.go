@@ -11,13 +11,13 @@ import (
 //
 // Caravan's documented default is no password on a LAN, and the Docker image
 // binds every interface. In that state every /api/v1 route is reachable by
-// anyone who can make the owner's browser send a request — which any web page
+// anyone who can make the owner's browser send a request, which any web page
 // can do, with no LAN foothold of its own. A form POST with
 // enctype="text/plain" is a CORS "simple request": no preflight, no need to
 // read the reply. That is enough to POST /system/shutdown, to queue a storage
-// migration that moves the library off the drive, or — because setting the
-// first password needs no proof of the old one — to lock the owner out of their
-// own box.
+// migration that moves the library off the drive, or (because setting the first
+// password needs no proof of the old one) to lock the owner out of their own
+// box.
 //
 // The session cookie's SameSite=Lax closes this once a password exists. The
 // guard below closes it in the state that ships.
@@ -62,7 +62,7 @@ func sameOrigin(r *http.Request) bool {
 		// No Origin and no fetch metadata: not a browser request.
 		return true
 	}
-	// "null" — a sandboxed iframe or a document from a data: URL — parses to an
+	// "null", a sandboxed iframe or a document from a data: URL, parses to an
 	// empty host and is refused, which is the intent.
 	u, err := url.Parse(origin)
 	if err != nil {

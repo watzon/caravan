@@ -53,7 +53,7 @@ type libraryAdapter struct {
 	notify library.Notifier
 	// notifyAdult is the adult library's handoff (Stash), carried for the same
 	// reason notify is. It is a separate seam because the two are told about
-	// disjoint sets of imports — see library.AdultNotifier.
+	// disjoint sets of imports. See library.AdultNotifier.
 	notifyAdult library.AdultNotifier
 
 	// adultMu guards adult, which is read and written from concurrent HTTP
@@ -62,7 +62,8 @@ type libraryAdapter struct {
 	// adult is one cached stash-box client per configured instance, keyed by
 	// provider id. A map rather than a single slot because the endpoints are
 	// separate catalogues with separate accounts, and a chain can walk two of
-	// them in one lookup — one slot would evict on every hop. See stashboxClient.
+	// them in one lookup. One slot would evict on every hop. See
+	// stashboxClient.
 	adult map[string]*cachedStashbox
 	// tmdbMu guards tmdb, which is read and replaced from concurrent HTTP
 	// handlers.
@@ -73,13 +74,13 @@ type libraryAdapter struct {
 	// anilistMu guards anilist, which is read and replaced from concurrent
 	// HTTP handlers.
 	anilistMu sync.Mutex
-	// anilist is THE AniList client for this process — there is no cache key
+	// anilist is the AniList client for this process. There is no cache key
 	// beside it because there is no setting to key on; see anilistClient.
 	anilist *anilist.Client
 	// tvmazeMu guards tvmaze, which is read and replaced from concurrent HTTP
 	// handlers.
 	tvmazeMu sync.Mutex
-	// tvmaze is THE TVmaze client for this process, for the same reason anilist
+	// tvmaze is the TVmaze client for this process, for the same reason anilist
 	// is the only AniList one; see tvmazeClient.
 	tvmaze *tvmaze.Client
 	// thetvdbMu guards thetvdb, which is read and replaced from concurrent HTTP
@@ -163,7 +164,7 @@ func (p providerRegistry) Metadata(ctx context.Context, providerID string) core.
 	return nil
 }
 
-// Adult resolves any id whose BASE is stash-box, which is what makes a chain
+// Adult resolves any id whose base is stash-box, which is what makes a chain
 // instance-aware without a case per endpoint: the compiled protocol is the
 // switch, the slug names which catalogue speaks it, and an id naming an
 // instance this install does not hold answers nil exactly as an unknown
@@ -176,13 +177,13 @@ func (p providerRegistry) Adult(ctx context.Context, providerID string) core.Adu
 }
 
 // metadataOnlyRegistry is providerRegistry with the adult half removed. The
-// watcher is the one Manager that outlives a settings change, and the reason
-// it carries no adult provider (see watcherManager) is unchanged by its
-// needing the metadata half.
+// watcher is the one Manager that outlives a settings change, and the reason it
+// carries no adult provider (see watcherManager) is unchanged by its needing
+// the metadata half.
 //
-// It EMBEDS providerRegistry rather than restating the metadata switch, so a
-// provider added there reaches the watcher without a second edit — which is
-// how AniList and TVmaze both got there.
+// It embeds providerRegistry rather than restating the metadata switch, so a
+// provider added there reaches the watcher without a second edit, which is how
+// AniList and TVmaze both got there.
 type metadataOnlyRegistry struct{ providerRegistry }
 
 func (metadataOnlyRegistry) Adult(context.Context, string) core.AdultMetadataProvider { return nil }
@@ -192,28 +193,28 @@ func (metadataOnlyRegistry) Adult(context.Context, string) core.AdultMetadataPro
 //
 // It is nil unless at least one adult library is switched on AND the instance
 // exists AND it has a credential, and the order matters: the switch is read
-// FIRST, so a server with every adult shelf dormant makes no instance lookup and
-// builds no client at all. library.adultReady asks the same question, which
+// first, so a server with every adult shelf dormant makes no instance lookup
+// and builds no client at all. library.adultReady asks the same question, which
 // makes this the second of two independent reasons the endpoint cannot be
-// reached when adult content is off — the acceptance criterion is zero requests,
+// reached when adult content is off. The acceptance criterion is zero requests,
 // and one guard is one bug away from zero guards.
 //
 // The question is asked of the library rows rather than of a server-wide
 // setting. This door has to stay shut for the same install states it always
-// did, and "no active adult library" is what "the module is off" has become —
+// did, and "no active adult library" is what "the module is off" has become,
 // asking the rows is what lets the setting be retired without revisiting this
 // file's semantics.
 //
 // An id no row answers to is nil rather than a fall back to another box. The
-// refs on a pinned item were minted by ONE catalogue, and asking a different one
-// about them does not fail — it answers about something else.
+// refs on a pinned item were minted by one catalogue, and asking a different
+// one about them does not fail. It answers about something else.
 //
 // The nil is a genuine untyped nil for the same reason Metadata's is: callers
 // test the interface value against nil, and a typed nil *stashbox.Client would
 // pass that test and then make a request.
 //
-// The row is read on every call — turning the module off, or rotating a key, has
-// to take effect at once — but the client built from it is reused; see
+// The row is read on every call (turning the module off, or rotating a key, has
+// to take effect at once) but the client built from it is reused; see
 // stashboxClient.
 func (a *libraryAdapter) adultClientFor(ctx context.Context, providerID string) core.AdultMetadataProvider {
 	on, err := a.st.AnyActiveLibraryOfKind(ctx, core.LibraryKindAdult)
@@ -312,15 +313,15 @@ func (a *libraryAdapter) defaultAdultProvider(ctx context.Context) core.AdultMet
 // built for it while its endpoint and key are unchanged.
 //
 // Unlike the TMDB client, a stash-box client learns something: the first search
-// against an endpoint discovers whether it implements queryStudios, and TPDB —
-// the default endpoint — does not. That memo lives on the client, so building a
+// against an endpoint discovers whether it implements queryStudios, and TPDB
+// (the default endpoint) does not. That memo lives on the client, so building a
 // fresh one per call threw the answer away and sent one doomed request per
 // search; a typeahead box did it per keystroke. The memo is also why the cache
 // is per instance: what one box implements says nothing about another.
 //
 // A change to either field still builds a new client, which is the point of
 // keying on them: a rotated key must not keep authenticating with the old one.
-// Nothing is invalidated on a timer — a restart is the re-check, the same rule
+// Nothing is invalidated on a timer. A restart is the re-check, the same rule
 // the memo itself follows.
 func (a *libraryAdapter) stashboxClient(providerID, key, endpoint string) *stashbox.Client {
 	a.adultMu.Lock()
@@ -337,18 +338,19 @@ func (a *libraryAdapter) stashboxClient(providerID, key, endpoint string) *stash
 	return client
 }
 
-// anilistClient returns THE AniList client, building it once.
+// anilistClient returns the AniList client, building it once.
 //
 // It takes no cache key because there is nothing to key on: AniList serves
 // anonymous reads, so no setting can change what a client for it would be, and
-// the endpoint is a constant rather than a preset (see anilist.DefaultEndpoint).
-// "Same settings, same client" therefore collapses into "same client, always".
+// the endpoint is a constant rather than a preset (see
+// anilist.DefaultEndpoint). "Same settings, same client" therefore collapses
+// into "same client, always".
 //
 // Reuse is not an optimisation here, it is the contract. The client carries the
-// rate limiter for a per-minute budget that AniList enforces per CALLER, not per
-// connection — one logical lookup can cost several requests — so a client built
-// per call would hand every caller a fresh, empty budget and the process would
-// walk straight into the limit it exists to respect. That is the same
+// rate limiter for a per-minute budget that AniList enforces per caller, not
+// per connection (one logical lookup can cost several requests) so a client
+// built per call would hand every caller a fresh, empty budget and the process
+// would walk straight into the limit it exists to respect. That is the same
 // provider-local state stashboxClient's cache exists to preserve; only the key
 // differs.
 func (a *libraryAdapter) anilistClient() *anilist.Client {
@@ -361,17 +363,17 @@ func (a *libraryAdapter) anilistClient() *anilist.Client {
 	return a.anilist
 }
 
-// tvmazeClient returns THE TVmaze client, building it once.
+// tvmazeClient returns the TVmaze client, building it once.
 //
 // It takes no cache key for the same reason anilistClient does not: TVmaze's
 // read API is public, so no setting can change what a client for it would be,
 // and the host is a constant rather than a preset (see tvmaze.DefaultBaseURL).
 //
 // Reuse is the contract here too, not an optimisation. The client carries the
-// throttle for a budget TVmaze enforces per CALLER — and one GetSeries costs
-// two requests — so a client built per call would hand every caller a fresh,
-// empty budget and the process would walk straight into the limit the throttle
-// exists to respect.
+// throttle for a budget TVmaze enforces per caller (and one GetSeries costs two
+// requests) so a client built per call would hand every caller a fresh, empty
+// budget and the process would walk straight into the limit the throttle exists
+// to respect.
 func (a *libraryAdapter) tvmazeClient() *tvmaze.Client {
 	a.tvmazeMu.Lock()
 	defer a.tvmazeMu.Unlock()
@@ -415,15 +417,15 @@ func (a *libraryAdapter) thetvdbProvider(ctx context.Context) core.MetadataProvi
 // while both are unchanged.
 //
 // The cache is load-bearing rather than an optimisation. A TheTVDB client holds
-// the bearer token it logged in for — the API takes no credential on an ordinary
-// request — so a client built per call would log in before every search
+// the bearer token it logged in for (the API takes no credential on an ordinary
+// request) so a client built per call would log in before every search
 // keystroke and every series in a refresh sweep, spending the subscription's
 // login budget to learn something the last client already knew.
 //
 // A change to either setting still builds a new client, which is the point of
 // keying on both: the PIN is half of what /login consumes, so a token obtained
 // with the old pair says nothing about the new one. Nothing is invalidated on a
-// timer — the token is refreshed by the 401 that proves it stopped working, see
+// timer. The token is refreshed by the 401 that proves it stopped working, see
 // internal/thetvdb.
 func (a *libraryAdapter) thetvdbClient(key, pin string) *thetvdb.Client {
 	a.thetvdbMu.Lock()
@@ -441,29 +443,29 @@ func (a *libraryAdapter) thetvdbClient(key, pin string) *thetvdb.Client {
 // the life of the process.
 //
 // It is here rather than inline in the watcher so it cannot drift from current:
-// the two differ only in where the root and the provider come from — the
+// the two differ only in where the root and the provider come from. The
 // watcher's root is fixed at startup and its provider is resolved per call
-// (lateMetadata) — and everything else, the playback handoff included, has to
-// be the same. A watcher without the notifier is the phase-4 acceptance
-// criterion silently unmet: automatic imports would land files and never tell
-// Jellyfin to rescan.
+// (lateMetadata), and everything else, the playback handoff included, has to be
+// the same. A watcher without the notifier is the phase-4 acceptance criterion
+// silently unmet: automatic imports would land files and never tell Jellyfin to
+// rescan.
 //
 // It carries no adult provider, deliberately. Importing a finished scene
-// download makes no stash-box call — the site's catalogue was walked when the
+// download makes no stash-box call (the site's catalogue was walked when the
 // site was added, and a grab is only ever made against an episode row that
-// already exists — so handing the one long-lived Manager in the process a
-// client for the endpoint would create a path to it that nothing uses and the
-// zero-traffic acceptance would have to defend.
-// The adult *notifier* is a different thing and is carried: it makes no
-// provider call either — it records that a scan and an identity push are owed —
-// and the watcher is the path a downloaded scene actually arrives by, so
-// leaving it out would make PLAN phase 11's acceptance silently unmet in
-// exactly the way a watcher without the playback handoff would.
+// already exists) so handing the one long-lived Manager in the process a client
+// for the endpoint would create a path to it that nothing uses and the
+// zero-traffic acceptance would have to defend. The adult *notifier* is a
+// different thing and is carried: it makes no provider call either (it records
+// that a scan and an identity push are owed) and the watcher is the path a
+// downloaded scene actually arrives by, so leaving it out would silently break
+// the Stash handoff in exactly the way a watcher without the playback handoff
+// would.
 //
-// It DOES carry the metadata registry, through metadataOnlyRegistry. Without
+// It does carry the metadata registry, through metadataOnlyRegistry. Without
 // one, every library the watcher imports for resolves to the Manager-level
 // provider alone, so an item pinned to any other provider could not be fetched
-// at all and its download would park — a Manager that answers differently from
+// at all and its download would park. A Manager that answers differently from
 // every other Manager in the process, which is precisely what this function
 // exists to prevent.
 func (a *libraryAdapter) watcherManager(root string) *library.Manager {
@@ -475,8 +477,8 @@ func (a *libraryAdapter) watcherManager(root string) *library.Manager {
 
 // StorageRoot is the storage root in force right now: the settings table's
 // value, or the bootstrap config's until the table has one. It returns the
-// empty string when neither has been configured — a first run, before the
-// setup screen has been through (SPEC §10.1).
+// empty string when neither has been configured. A first run, before the setup
+// screen has been through (SPEC §10.1).
 //
 // The download engine resolves its data directory through here too, so the
 // library and the queue can never disagree about where the storage root is.
@@ -537,8 +539,7 @@ func (a *libraryAdapter) metadata(ctx context.Context) core.MetadataProvider {
 	return client
 }
 
-// ValidateMetadataKey proves one provider's API key with one live call (PLAN
-// phase 10 tasks 2 and 4).
+// ValidateMetadataKey proves one provider's API key with one live call.
 //
 // It builds a client for the key it was handed rather than reading the settings
 // table, because the callers that matter are testing a key that is not stored
@@ -578,7 +579,7 @@ func (a *libraryAdapter) ValidateMetadataKey(ctx context.Context, providerID, ap
 // stashboxClient installs the unproven pair on a miss, so a typo'd key in the
 // enable modal evicted the working client of a module that is already on and
 // the next search re-probed the endpoint's dialect from scratch. Nothing is
-// lost by not caching — the credential is committed immediately afterwards, and
+// lost by not caching. The credential is committed immediately afterwards, and
 // the next adultMetadata() call builds and caches the client for the pair that
 // was actually stored.
 func (a *libraryAdapter) ValidateAdultCredential(ctx context.Context, endpoint, apiKey string) error {
@@ -586,7 +587,7 @@ func (a *libraryAdapter) ValidateAdultCredential(ctx context.Context, endpoint, 
 }
 
 // Scan reconciles the database with the storage root. api.Manager discards the
-// summary, so it is logged here — this is the only place it would otherwise be
+// summary, so it is logged here. This is the only place it would otherwise be
 // dropped, and it is the evidence that a scan did anything.
 func (a *libraryAdapter) Scan(ctx context.Context) error {
 	mgr, err := a.current(ctx)
@@ -638,10 +639,11 @@ func (a *libraryAdapter) AddSeries(ctx context.Context, ref core.ItemRef, monito
 	return mgr.AddSeries(ctx, ref, monitored, libraryID)
 }
 
-// AddSite adds a site by (instance, stash-box id). It goes through current like every other
-// add, so the storage root and both providers are whatever the settings table
-// says right now — including "the module was switched off a moment ago", which
-// current resolves to a nil adult provider and library.AddSite refuses.
+// AddSite adds a site by (instance, stash-box id). It goes through current like
+// every other add, so the storage root and both providers are whatever the
+// settings table says right now, including "the module was switched off a
+// moment ago", which current resolves to a nil adult provider and
+// library.AddSite refuses.
 func (a *libraryAdapter) AddSite(ctx context.Context, ref core.ItemRef, monitored *bool, libraryID int64) (*core.Series, error) {
 	mgr, err := a.current(ctx)
 	if err != nil {
@@ -674,8 +676,8 @@ func (a *libraryAdapter) SyncSite(ctx context.Context, seriesID int64) error {
 }
 
 // MoveMovie and MoveSeries run the core.JobMoveItem handler's body. Through
-// current for the usual reason: the storage root and providers are whatever
-// the settings say when the job RUNS, not when it was queued.
+// current for the usual reason: the storage root and providers are whatever the
+// settings say when the job runs, not when it was queued.
 func (a *libraryAdapter) MoveMovie(ctx context.Context, movieID, libraryID int64) error {
 	mgr, err := a.current(ctx)
 	if err != nil {
@@ -695,11 +697,10 @@ func (a *libraryAdapter) MoveSeries(ctx context.Context, seriesID, libraryID int
 // AdultMetadataFor is the provider the HTTP layer searches one named instance's
 // catalogue through. It reads the instance row on every call, exactly as
 // Metadata reads the settings table, so adding a box or rotating a key takes
-// effect without a restart — and, more importantly, so does turning the module
-// off.
+// effect without a restart, and so does turning the module off.
 //
-// An id whose base is not stash-box is nil without a lookup: nothing else serves
-// the adult kind, so such an id can only be a caller mistake.
+// An id whose base is not stash-box is nil without a lookup: nothing else
+// serves the adult kind, so such an id can only be a caller mistake.
 func (a *libraryAdapter) AdultMetadataFor(ctx context.Context, providerID string) core.AdultMetadataProvider {
 	if core.ProviderBase(providerID) != core.ProviderStashbox {
 		return nil

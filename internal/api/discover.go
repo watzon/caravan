@@ -28,7 +28,7 @@ const discoverLogoBaseURL = "https://image.tmdb.org/t/p/w185"
 // The lists are server-side constants rather than a table because they are
 // editorial, not configuration: they are the shelves the discover screen
 // offers, and a user who wants something else searches for it. No title counts
-// are carried — TMDB's are the whole catalogue, not what Caravan could get, and
+// are carried, TMDB's are the whole catalogue, not what Caravan could get, and
 // a number nobody can act on is worse than no number.
 type discoverSource struct {
 	ID   int64
@@ -187,8 +187,8 @@ type discoverTitleResponse struct {
 // The required popularity lists fail the page; extras (upcoming, now playing,
 // currently airing, genres) degrade to empty so one missing TMDB list does not
 // blank Featured. A limit of 4 keeps the burst inside TMDB's usual 40/10s
-// window — each shelf is two pages, and racing every call at once is how a
-// key gets a 429 on first paint.
+// window. Each shelf is two pages, and racing every call at once is how a key
+// gets a 429 on first paint.
 func (s *server) handleDiscoverHome(w http.ResponseWriter, r *http.Request) {
 	provider, ok := s.discovery(w, r)
 	if !ok {
@@ -609,7 +609,7 @@ func (st *libraryState) decorateAll(items []core.DiscoverItem) []discoverItemJSO
 func (s *server) discovery(w http.ResponseWriter, r *http.Request) (core.DiscoverProvider, bool) {
 	// A key that is absent or already known bad is answered with the typed code
 	// the discover screens turn into their directed empty state, before any
-	// round trip is spent proving it again (PLAN phase 10 task 3).
+	// round trip is spent proving it again.
 	metadata, ok := s.metadataProvider(w, r)
 	if !ok {
 		return nil, false

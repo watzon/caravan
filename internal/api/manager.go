@@ -32,9 +32,9 @@ type Manager interface {
 	// them; a ref-accepting body is a later phase.
 	//
 	// monitored is the add dialog's "Add and monitor" checkbox. Nil means
-	// unmonitored, so a new row starts automation only after an explicit opt-in.
-	// It applies to a NEW row only; re-adding something already in the library
-	// keeps the owner's flag.
+	// unmonitored, so a new row starts automation only after an explicit
+	// opt-in. It applies to a new row only; re-adding something already in the
+	// library keeps the owner's flag.
 	AddMovie(ctx context.Context, ref core.ItemRef, minAvailability string, monitored *bool, libraryID int64) (*core.Movie, error)
 
 	// AddSeries adds a series (with its seasons and episodes) by provider ref.
@@ -63,15 +63,15 @@ type Manager interface {
 	// interface: a stash-box id is a UUID string, not the int64 TMDB hands out.
 	//
 	// It reports library.ErrAdultDisabled when the module is switched off. That
-	// path is not reachable through the HTTP layer — every route that calls
-	// this sits behind requireAdult — but the manager is the thing that owns
-	// the invariant, and a second caller is one refactor away.
+	// path is not reachable through the HTTP layer (every route that calls this
+	// sits behind requireAdult) but the manager is the thing that owns the
+	// invariant, and a second caller is one refactor away.
 	//
-	// It does NOT walk the site's scene catalogue: that is hundreds of provider
+	// It does not walk the site's scene catalogue: that is hundreds of provider
 	// round trips for a large site, and it is a core.JobSyncSite the caller
 	// queues (see handleAddSite). monitored reads as AddMovie's does.
 	//
-	// ref names the stash-box INSTANCE the id was read from beside the id, for
+	// ref names the stash-box instance the id was read from beside the id, for
 	// AddMovie's reason: a UUID is only an identity together with the box that
 	// minted it, and two boxes hold the same UUID under different sites. An
 	// empty provider means the legacy instance, which is what a client written
@@ -97,7 +97,7 @@ type Manager interface {
 	// rather than assume TMDB.
 	//
 	// A provider that failed while others answered is a SearchHits.Failure and
-	// the call still succeeds — one provider being down must not hide the rest
+	// the call still succeeds. One provider being down must not hide the rest
 	// of the chain's hits. An error means the whole chain failed (its first
 	// failure's error, so core.ErrMetadataUnauthorized survives) or that
 	// nothing on the chain is configured at all (core.ErrNoMetadataProvider).
@@ -141,7 +141,7 @@ type Manager interface {
 	// though it were configured.
 	ValidateAdultCredential(ctx context.Context, endpoint, apiKey string) error
 
-	// AdultMetadataFor returns the provider for ONE configured stash-box
+	// AdultMetadataFor returns the provider for one configured stash-box
 	// instance, or nil.
 	//
 	// Nil is the answer when the module is switched off, when no instance
@@ -154,16 +154,17 @@ type Manager interface {
 	//
 	// There is deliberately no fallback for an id nothing answers to. The refs
 	// on a pinned item were minted by one catalogue, and asking a different one
-	// about them does not fail — it answers about something else.
+	// about them does not fail. It answers about something else.
 	AdultMetadataFor(ctx context.Context, providerID string) core.AdultMetadataProvider
 
 	// DefaultAdultMetadata is the provider a surface that names no instance
-	// answers from, together with the id it resolved to — so the answer can say
+	// answers from, together with the id it resolved to, so the answer can say
 	// which box it came from, which is the whole point of the `provider` field
 	// on the site and scene DTOs.
 	//
 	// The choice is the default adult library's chain head, or the oldest
-	// instance when it names none. Both halves are nil/"" when the module is off.
+	// instance when it names none. Both halves are nil/"" when the module is
+	// off.
 	DefaultAdultMetadata(ctx context.Context) (core.AdultMetadataProvider, string)
 }
 

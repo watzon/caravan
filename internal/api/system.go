@@ -9,7 +9,7 @@ import (
 	"github.com/watzon/caravan/internal/core"
 )
 
-// The portable-drive integrity flow (SPEC §2.3, §13, PLAN phase 5 task 3).
+// The portable-drive integrity flow (SPEC §2.3, §13).
 //
 // A portable install lives on a drive that can be pulled at any moment, so it
 // gets two things a server install does not need: a way to be shut down from
@@ -97,7 +97,7 @@ func WithDirtyStart(dirty bool) Option {
 // WithShutdown supplies the orderly-stop trigger POST /system/shutdown pulls.
 //
 // The function must be the same one the signal handler uses, so that a shutdown
-// from the UI and a Ctrl-C run the identical teardown — flush the engines,
+// from the UI and a Ctrl-C run the identical teardown, flush the engines,
 // checkpoint the WAL, close the database, write the clean marker. A server
 // built without it answers 503: a process that cannot stop itself must say so
 // rather than pretend the drive is safe.
@@ -127,8 +127,8 @@ func (s *server) handleShutdown(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]string{"status": "shutting down"})
 	// Best-effort push before the teardown starts. What actually guarantees the
 	// reply is the graceful drain: http.Server.Shutdown waits for in-flight
-	// requests, and this is one — which is also why the trigger has to be
-	// pulled from a goroutine rather than inline.
+	// requests, and this is one, which is also why the trigger has to be pulled
+	// from a goroutine rather than inline.
 	if flusher, ok := w.(http.Flusher); ok {
 		flusher.Flush()
 	}
@@ -150,7 +150,7 @@ type verifyResponse struct {
 // handleVerify is the recovery action offered after a dirty start (SPEC §13):
 // check the database, rescan the library, and only then let downloads resume.
 //
-// Caravan never runs fsck itself — that is the operating system's job on an
+// Caravan never runs fsck itself: that is the operating system's job on an
 // unmounted filesystem, and a tool that repaired the drive it was running from
 // would be its own worst failure mode. The UI prints the per-OS command; this
 // endpoint verifies what Caravan owns.

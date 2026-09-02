@@ -23,7 +23,7 @@ var imageExtensions = map[string]bool{
 }
 
 // handleImage serves an artwork file addressed by its storage-root-relative
-// path — the same path the library rows carry, so the client can render
+// path. The same path the library rows carry, so the client can render
 // `poster_path` without knowing where the root is.
 //
 // The storage root is read per request rather than captured at startup because
@@ -86,7 +86,7 @@ func (s *server) handleImage(w http.ResponseWriter, r *http.Request) {
 
 // imageAllowed decides whether this caller may be served the artwork at rel.
 //
-// EVERY library root is checked, not the adult ones alone: any library can now
+// every library root is checked, not the adult ones alone: any library can now
 // be switched off or narrowed to a few accounts, and its posters have to go
 // with it. A path under no library root at all is ordinary artwork and stays
 // open, which is what keeps the deliberate hole in authExempt open for the
@@ -94,10 +94,10 @@ func (s *server) handleImage(w http.ResponseWriter, r *http.Request) {
 //
 // The reason this endpoint has a rule at all is the path itself. importScene
 // writes a site's poster to <adult root>/<Site>/poster.jpg, derived from the
-// site's PUBLIC name — so an unauthenticated request for
-// library/Adult/Brazzers/poster.jpg is a yes/no oracle for "is this site in this
-// library", answerable by any device on the LAN and by an ungranted housemate.
-// That is the one such surface reachable with no credential at all.
+// site's public name, so an unauthenticated request for
+// library/Adult/Brazzers/poster.jpg is a yes/no oracle for "is this site in
+// this library", answerable by any device on the LAN and by an ungranted
+// housemate. That is the one such surface reachable with no credential at all.
 func (s *server) imageAllowed(r *http.Request, rel string) (bool, error) {
 	libs, err := s.st.ListLibraries(r.Context())
 	if err != nil {
@@ -113,10 +113,10 @@ func (s *server) imageAllowed(r *http.Request, rel string) (bool, error) {
 	if !hasAdult {
 		// No adult library, so there is no row to read a root from. The seed
 		// root is a constant, though, and anything sitting under it on such an
-		// install is not artwork this endpoint should hand out either — a
+		// install is not artwork this endpoint should hand out either. A
 		// leftover from before somebody deleted the row by hand, say. The
-		// synthetic row is inactive, so artworkVisible refuses it for
-		// everyone: a shelf that is not there shows nobody anything.
+		// synthetic row is inactive, so artworkVisible refuses it for everyone:
+		// a shelf that is not there shows nobody anything.
 		libs = append(libs, core.Library{RootPath: store.AdultLibraryRoot})
 	}
 	for _, lib := range libs {
@@ -179,7 +179,7 @@ func underRoot(rel, root string) bool {
 		return false
 	}
 	// Clean first, or "library/Movies/../Adult/poster.jpg" would walk straight
-	// past the prefix check — os.Root would then happily serve it, because the
+	// past the prefix check, os.Root would then happily serve it, because the
 	// file really is inside the storage root.
 	clean := strings.ToLower(path.Clean("/" + rel))
 	base := strings.ToLower(path.Clean("/" + root))

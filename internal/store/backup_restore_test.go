@@ -463,15 +463,15 @@ func restoreBackupWithSetting(t *testing.T, value string) []byte {
 }
 
 // versionEightBackup is a real v8 database as bytes: Goose applied up to 8 and
-// no further, one setting written, and the file snapshotted the way Store.Backup
-// snapshots one.
+// no further, one setting written, and the file snapshotted the way
+// Store.Backup snapshots one.
 //
-// It is built by MIGRATING UP rather than by editing a current database back
+// It is built by migrating up rather than by editing a current database back
 // into shape. Un-migrating by hand only ever worked while every later migration
-// was trigger-shaped; 0011 rebuilds two tables and seeds two rows, and a fixture
-// that reverted the parts somebody remembered would be a v8 database in its
-// migration history and a v11 one in its schema — which is precisely the state
-// this test exists to prove is rejected.
+// was trigger-shaped; 0011 rebuilds two tables and seeds two rows, and a
+// fixture that reverted the parts somebody remembered would be a v8 database in
+// its migration history and a v11 one in its schema, which is precisely the
+// state this test exists to prove is rejected.
 func versionEightBackup(t *testing.T) []byte {
 	t.Helper()
 	ctx := context.Background()

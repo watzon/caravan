@@ -18,7 +18,7 @@ import (
 
 // noMetadata is a core.MetadataProvider that answers nothing. RefreshLibrary
 // refuses to run at all without one, so the adult half of the sweep would never
-// be reached on a first-run install — and "the adult sweep did nothing because
+// be reached on a first-run install, and "the adult sweep did nothing because
 // the whole sweep did nothing" is not the property being tested.
 type noMetadata struct{}
 
@@ -30,15 +30,15 @@ func (noMetadata) GetMovie(context.Context, string) (*core.MovieMeta, error)   {
 func (noMetadata) GetSeries(context.Context, string) (*core.SeriesMeta, error) { return nil, nil }
 
 // enableAdultLibrary says directly what a server-wide adult switch used to say
-// indirectly: the Adult library exists and is switched on. An adult LIBRARY is
-// the module now — every gate in the tree asks whether a library of the kind is
-// active, never whether a setting says so — so a test that wants adult content
+// indirectly: the Adult library exists and is switched on. An adult library is
+// the module now (every gate in the tree asks whether a library of the kind is
+// active, never whether a setting says so) so a test that wants adult content
 // reachable has to create one, exactly as the owner does.
 //
 // The row is seeded with the values the product itself creates it with, because
-// none of them are decoration. dlna_visible is OFF: DLNA has no accounts, so a
+// none of them are decoration. dlna_visible is off: DLNA has no accounts, so a
 // container advertised on the LAN is readable by every device on it, and
-// sharing it is a second and separate decision. It is born RESTRICTED for the
+// sharing it is a second and separate decision. It is born restricted for the
 // same reason read the other way round: adult content was only ever reachable
 // by an account somebody granted, and a row born open would hand the whole
 // household a shelf on the act that made it. A fixture that let either default
@@ -48,7 +48,7 @@ func (noMetadata) GetSeries(context.Context, string) (*core.SeriesMeta, error) {
 // back on rather than duplicated, so a test may switch adult off and on again
 // and find the library exactly as it left it. Only the first adult library is
 // the kind's default, because idx_libraries_default_per_kind admits one per
-// kind — a second claiming it would fail the insert rather than the assertion.
+// kind. A second claiming it would fail the insert rather than the assertion.
 func enableAdultLibrary(t *testing.T, st *store.Store) core.Library {
 	t.Helper()
 	ctx := context.Background()
@@ -85,12 +85,12 @@ func enableAdultLibrary(t *testing.T, st *store.Store) core.Library {
 // setAdultLibrariesActive is the other half of what a module switch did: one
 // flip bound every adult library at once, and that is now spelled per library.
 //
-// Switching a library off deletes nothing — not the row, not the series, not
-// the episodes, and certainly not the files. "Off" is a reachability promise,
-// not a retention policy, so a test that disables adult and then drives a full
-// job cycle still finds every row it seeded standing there to be skipped, which
-// is the only state in which "the sweep walked them and asked nobody" can be
-// told apart from "the sweep found nothing to walk".
+// Switching a library off deletes nothing, not the row, not the series, not the
+// episodes, and certainly not the files. "Off" is a reachability promise, not a
+// retention policy, so a test that disables adult and then drives a full job
+// cycle still finds every row it seeded standing there to be skipped, which is
+// the only state in which "the sweep walked them and asked nobody" can be told
+// apart from "the sweep found nothing to walk".
 func setAdultLibrariesActive(t *testing.T, st *store.Store, active bool) {
 	t.Helper()
 	ctx := context.Background()
@@ -154,7 +154,7 @@ func setInstanceKey(t *testing.T, ctx context.Context, st *store.Store, provider
 
 // The composition root's own guard: with the module off, no client for the
 // endpoint is built at all. This is the outer of the two independent reasons
-// the endpoint cannot be reached — library.adultReady is the inner one.
+// the endpoint cannot be reached, library.adultReady is the inner one.
 func TestAdultProviderIsNilUntilTheModuleIsOnAndCredentialed(t *testing.T) {
 	ctx := context.Background()
 	adapter, st := testAdapter(t)
@@ -194,11 +194,11 @@ func TestAdultProviderIsNilUntilTheModuleIsOnAndCredentialed(t *testing.T) {
 	}
 }
 
-// PLAN phase 9 acceptance: "the fake stash-box server logs zero requests across
-// a full job cycle" with the module disabled.
+// The fake stash-box server logs zero requests across a full job cycle with
+// the module disabled.
 //
-// The Manager here is built with a REAL stashbox.Client pointed at the fake, so
-// the test is not proving that a nil provider makes no calls — it is proving
+// The Manager here is built with a real stashbox.Client pointed at the fake, so
+// the test is not proving that a nil provider makes no calls. It is proving
 // that the library's own gate stops a fully wired, reachable endpoint from ever
 // being asked. That is the guard that survives somebody making adultMetadata
 // unconditional.
@@ -222,8 +222,8 @@ func TestFullJobCycleMakesNoStashboxRequestWhenAdultIsDisabled(t *testing.T) {
 	mgr := library.NewManager(st, noMetadata{}, root,
 		library.WithAdultProvider(client))
 
-	// The recurring metadata refresh — the sweep that would otherwise walk
-	// every site's catalogue on a schedule.
+	// The recurring metadata refresh. The sweep that would otherwise walk every
+	// site's catalogue on a schedule.
 	if _, err := mgr.RefreshLibrary(ctx); err != nil {
 		t.Fatalf("RefreshLibrary: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestFullJobCycleMakesNoStashboxRequestWhenAdultIsDisabled(t *testing.T) {
 		t.Fatalf("a full job cycle with adult disabled made %d stash-box requests:\n%+v", n, fake.Requests())
 	}
 
-	// Control: the fake IS reachable, and the client IS wired. Without this the
+	// Control: the fake is reachable, and the client is wired. Without this the
 	// test above would pass just as well against a broken URL.
 	if _, err := client.SearchSites(ctx, "anything"); err == nil {
 		t.Log("fake answered the control request")
@@ -349,7 +349,7 @@ func tpdbFake(t *testing.T) *stashboxtest.Server {
 }
 
 // The client memoizes "this endpoint has no queryStudios" per instance, so the
-// composition root has to hand out the same instance twice — otherwise the memo
+// composition root has to hand out the same instance twice, otherwise the memo
 // is thrown away between HTTP requests and a typeahead search box sends one
 // doomed query per keystroke.
 func TestAdultProviderIsReusedAcrossCallsSoTheProbeRunsOnce(t *testing.T) {
@@ -374,7 +374,7 @@ func TestAdultProviderIsReusedAcrossCallsSoTheProbeRunsOnce(t *testing.T) {
 		t.Errorf("queryStudios attempts = %d, want 1: the capability memo must survive between acquisitions", n)
 	}
 
-	// Both searches still ran — a memo that worked by not searching would be
+	// Both searches still ran. A memo that worked by not searching would be
 	// worse than the bug.
 	if n := fake.Count(); n != 3 {
 		t.Errorf("requests = %d, want 3 (one probe + two scene-derived searches):\n%+v", n, fake.Requests())
@@ -382,11 +382,11 @@ func TestAdultProviderIsReusedAcrossCallsSoTheProbeRunsOnce(t *testing.T) {
 }
 
 // The cache is per instance and keyed on that instance's own endpoint and key.
-// A rotated credential has to build a fresh client, because what was true of the
-// old one is not evidence about the new one — and a SECOND instance has to get a
-// client of its own, probed on its own terms, without disturbing the first. One
-// slot for "the" stash-box client would have evicted on every hop of a two-box
-// chain.
+// A rotated credential has to build a fresh client, because what was true of
+// the old one is not evidence about the new one, and a second instance has to
+// get a client of its own, probed on its own terms, without disturbing the
+// first. One slot for "the" stash-box client would have evicted on every hop of
+// a two-box chain.
 func TestAdultProviderIsPerInstanceAndRebuiltOnAKeyChange(t *testing.T) {
 	ctx := context.Background()
 	adapter, st := testAdapter(t)
@@ -470,8 +470,8 @@ func TestDefaultAdultMetadataFollowsTheDefaultLibrarysChain(t *testing.T) {
 	}
 }
 
-// The switch is read BEFORE the instance table, so a disabled module costs no
-// query at all — the ordering that makes "zero traffic when off" hold even if
+// The switch is read before the instance table, so a disabled module costs no
+// query at all. The ordering that makes "zero traffic when off" hold even if
 // somebody later makes the lookup expensive.
 func TestDisabledModuleReadsNoInstanceRow(t *testing.T) {
 	ctx := context.Background()
@@ -499,7 +499,7 @@ func TestDisabledModuleReadsNoInstanceRow(t *testing.T) {
 }
 
 // adultClientFor is called from concurrent HTTP handlers, so the cache it now
-// reads and replaces has to be safe under -race — and has to hand every caller
+// reads and replaces has to be safe under -race, and has to hand every caller
 // the same client, since one client per goroutine would lose the memo exactly
 // the way one client per call did.
 func TestAdultProviderIsSafeForConcurrentCallers(t *testing.T) {
@@ -534,11 +534,11 @@ func TestAdultProviderIsSafeForConcurrentCallers(t *testing.T) {
 
 // A candidate credential is exactly what the client cache must not hold.
 //
-// The enable gate validates a pair BEFORE deciding whether to commit it, so
+// The enable gate validates a pair before deciding whether to commit it, so
 // routing that validation through the cache installed an unproven pair: a
 // typo'd key in the enable modal evicted the working client of a module that
-// was already on, and the next search paid the endpoint-dialect probe again —
-// the per-search round trip the cache exists to prevent.
+// was already on, and the next search paid the endpoint-dialect probe again.
+// The per-search round trip the cache exists to prevent.
 func TestValidatingACredentialDoesNotEvictTheWorkingClient(t *testing.T) {
 	ctx := context.Background()
 	adapter, st := testAdapter(t)
@@ -574,29 +574,29 @@ func TestValidatingACredentialDoesNotEvictTheWorkingClient(t *testing.T) {
 	}
 
 	// The enable modal, opened again on a live module and submitted with a
-	// typo. Nothing is committed — the settings still name the working key.
+	// typo. Nothing is committed. The settings still name the working key.
 	if err := adapter.ValidateAdultCredential(ctx, fake.URL(), "typo"); err != nil {
 		t.Fatalf("ValidateAdultCredential: %v", err)
 	}
 
 	search("after the validation")
 
-	// Two probes: the warmed client's, and the throwaway validation client's.
-	// A third would mean the validation replaced the cached client and the
-	// search had to rebuild — the memo thrown away by a credential that was
-	// never stored.
+	// Two probes: the warmed client's, and the throwaway validation client's. A
+	// third would mean the validation replaced the cached client and the search
+	// had to rebuild. The memo thrown away by a credential that was never
+	// stored.
 	if n := queryStudiosAttempts(fake); n != 2 {
 		t.Errorf("queryStudios attempts = %d, want 2: the validation must not evict the cached client", n)
 	}
 }
 
 // The same seam, driven by the switch a per-library toggle actually offers: a
-// fully seeded and credentialed adult LIBRARY that is switched off.
+// fully seeded and credentialed adult library that is switched off.
 //
 // It is a different state from the one above, where the seam is nil because no
 // adult library exists at all, and only this one can distinguish a guard that
 // reads `active` from a guard that merely counts adult rows. The two are worth
-// separating because the second is the shape a well-meant optimisation takes —
+// separating because the second is the shape a well-meant optimisation takes,
 // "an adult library exists, so the module is on" reads faster and is wrong for
 // every owner who ever switched a shelf off.
 func TestAdultMetadataSeamIsNilWhenEveryAdultLibraryIsInactive(t *testing.T) {
@@ -619,7 +619,7 @@ func TestAdultMetadataSeamIsNilWhenEveryAdultLibraryIsInactive(t *testing.T) {
 		t.Fatalf("SetLibraryActive(false): %v", err)
 	}
 	// The precondition the test is named for, stated rather than assumed: the
-	// deactivation above names ONE library, and only if it left no active adult
+	// deactivation above names one library, and only if it left no active adult
 	// library behind does a nil seam below mean what it is read to mean.
 	if on, err := st.AnyActiveLibraryOfKind(ctx, core.LibraryKindAdult); err != nil || on {
 		t.Fatalf("an active adult library survives = %t, %v — the state under test was never reached", on, err)

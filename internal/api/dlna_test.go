@@ -49,8 +49,8 @@ func TestDLNAStatus(t *testing.T) {
 	}
 }
 
-// Enabled-but-silent is a real state — a host with no usable multicast — and
-// the UI has to be able to tell it apart from "switched off".
+// Enabled-but-silent is a real state (a host with no usable multicast) and the
+// UI has to be able to tell it apart from "switched off".
 func TestDLNAStatusReportsWhyItIsNotAdvertising(t *testing.T) {
 	stub := &stubDLNA{status: dlna.Status{
 		Config: dlna.Config{Enabled: true, FriendlyName: "Caravan"},

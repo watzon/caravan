@@ -12,7 +12,7 @@ import (
 
 // requestJSON is one row of the requests screen. PosterPath is the provider
 // path the row stores; PosterURL is it rendered, and is empty when no metadata
-// provider is configured — listing requests must not depend on one.
+// provider is configured, listing requests must not depend on one.
 type requestJSON struct {
 	ID        int64  `json:"id"`
 	MediaType string `json:"media_type"`
@@ -64,8 +64,8 @@ type requestCreateRequest struct {
 	// Approve is admin-only: the request is recorded and granted in the one
 	// call, so an admin asking for something themselves never visits the
 	// requests queue for their own wish. The answer is the approve endpoint's
-	// shape, and the grant uses the request's own seasons and availability
-	// with server defaults — no profile override, no immediate search.
+	// shape, and the grant uses the request's own seasons and availability with
+	// server defaults. No profile override, no immediate search.
 	Approve bool `json:"approve"`
 }
 
@@ -91,10 +91,10 @@ type approveRequestRequest struct {
 
 // handleCreateRequest records a wish for a title that is not in the library.
 //
-// A second request for the same title merges into the pending one, unioning
-// the season lists — see store.CreateRequest. Requesting something already in
-// the library is refused rather than merged: nothing would ever absorb the row,
-// and it would sit pending forever.
+// A second request for the same title merges into the pending one, unioning the
+// season lists. See store.CreateRequest. Requesting something already in the
+// library is refused rather than merged: nothing would ever absorb the row, and
+// it would sit pending forever.
 //
 // `approve` turns the call into request-and-approve (Overseerr's admin flow):
 // the row is recorded and then granted in the same breath, with the ask's own
@@ -105,7 +105,7 @@ type approveRequestRequest struct {
 //
 // The row records the calling account, which is zero on an open server or for
 // the API key. A merge keeps the first asker, so the row the answer describes
-// can be somebody else's — which is why the name on it is filtered by
+// can be somebody else's, which is why the name on it is filtered by
 // visibleRequester rather than reported flat.
 func (s *server) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 	var body requestCreateRequest
@@ -215,7 +215,7 @@ func (s *server) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Approve {
 		// The grant takes the ask verbatim: the (possibly merged) season list
-		// and availability on the row, and no opinion on anything else — the
+		// and availability on the row, and no opinion on anything else. The
 		// admin choosing a profile or an immediate search is what the approve
 		// endpoint and the add modal are for.
 		out, ok := s.approveRequest(ctx, w, r, stored, approveRequestRequest{
@@ -241,8 +241,8 @@ func (s *server) handleCreateRequest(w http.ResponseWriter, r *http.Request) {
 // A member sees only their own rows, and a merge is the one place that rule
 // could be walked around: POST /requests answers with the row that now exists,
 // which on a merge is a housemate's. Handing the name back would turn the
-// endpoint into a lookup from a provider id to whoever asked for it — the
-// roster of accounts a failed login goes out of its way not to confirm.
+// endpoint into a lookup from a provider id to whoever asked for it. The roster
+// of accounts a failed login goes out of its way not to confirm.
 func (s *server) visibleRequester(r *http.Request, row core.Request, names map[int64]string) string {
 	if user := currentUser(r); user.Role == core.RoleMember && row.RequestedBy != user.ID {
 		return ""
@@ -283,9 +283,9 @@ func (s *server) handleListRequests(w http.ResponseWriter, r *http.Request) {
 	// The requests screen is a shared surface: one table holds every kind, so
 	// it is the list that has to filter rather than the router. A caller the
 	// adult module is not visible to sees the requests screen they saw before
-	// it existed — including an ADMIN on a server with the module switched
-	// off, whose own approved scene requests go quiet rather than reappearing
-	// as evidence of a module they turned off.
+	// it existed, including an admin on a server with the module switched off,
+	// whose own approved scene requests go quiet rather than reappearing as
+	// evidence of a module they turned off.
 	adult, err := s.gate(r).seesAdult(ctx)
 	if err != nil {
 		s.writeStoreError(w, "read library access", err)
@@ -314,10 +314,10 @@ func (s *server) handleListRequests(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"requests": out})
 }
 
-// handleApproveRequest grants a request by adding its title to the library —
-// the same path POST /library/movies and POST /library/series take, so an
-// approved title is indistinguishable from a directly added one. The request
-// is marked approved as a side effect of the add absorbing it.
+// handleApproveRequest grants a request by adding its title to the library. The
+// same path POST /library/movies and POST /library/series take, so an approved
+// title is indistinguishable from a directly added one. The request is marked
+// approved as a side effect of the add absorbing it.
 //
 // Admin-only, and enforced at the gate rather than here (memberAllowed): a
 // member who could approve their own request would be an admin wearing a
@@ -363,12 +363,12 @@ func (s *server) handleApproveRequest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// approveRequest grants a pending request: the title enters the library
-// through the same path the add endpoints take, so an approved title is
-// indistinguishable from a directly added one, and the add absorbs the row —
-// except a scene, which has no tmdb id for the absorber to key on and is
-// closed explicitly in approveScene. It writes its own failures; ok is false
-// once it has, and the caller stops.
+// approveRequest grants a pending request: the title enters the library through
+// the same path the add endpoints take, so an approved title is
+// indistinguishable from a directly added one, and the add absorbs the row,
+// except a scene, which has no tmdb id for the absorber to key on and is closed
+// explicitly in approveScene. It writes its own failures; ok is false once it
+// has, and the caller stops.
 //
 // Both doors to a grant come here: the approve route, and request-and-approve
 // off the create route. Validation against the row's media type is the
@@ -416,9 +416,9 @@ func (s *server) approveRequest(ctx context.Context, w http.ResponseWriter, r *h
 		s.writeStoreError(w, "read usernames", err)
 		return nil, false
 	}
-	// Admin-only at the gate, so visibleRequester never withholds anything here
-	// — it is used so that every single-row answer goes through one rule rather
-	// than two that have to be kept in step.
+	// Admin-only at the gate, so visibleRequester never withholds anything
+	// here. It is used so that every single-row answer goes through one rule
+	// rather than two that have to be kept in step.
 	out["request"] = s.requestDTO(*approved, s.visibleRequester(r, *approved, names))
 	return out, true
 }
@@ -487,16 +487,16 @@ func (s *server) loadRequest(w http.ResponseWriter, r *http.Request, id int64) (
 	return req, true
 }
 
-// approveScene grants a scene request by adding the SITE that released it.
+// approveScene grants a scene request by adding the site that released it.
 //
 // A scene is an episode, and an episode cannot exist without its series: the
 // site's catalogue is what numbers the scene (release year to season, sequence
 // within the year to episode number), so there is no way to add one scene on
 // its own. Adding the site is therefore not an over-delivery, it is the only
-// shape the request has. What WOULD be an over-delivery is monitoring it: one
+// shape the request has. What would be an over-delivery is monitoring it: one
 // granted scene is not a standing order for everything the studio releases, so
-// the site lands UNMONITORED and only the asked-for scene's episode is
-// monitored — the wanted list reads the EPISODE flag (library writeScenes), so
+// the site lands unmonitored and only the asked-for scene's episode is
+// monitored. The wanted list reads the episode flag (library writeScenes), so
 // that one flip is what turns "approved" into "hunted for". An explicit
 // monitored:true on the body keeps the old whole-site behaviour.
 //
@@ -506,18 +506,18 @@ func (s *server) loadRequest(w http.ResponseWriter, r *http.Request, id int64) (
 // lands under the studio it actually belongs to now.
 //
 // It writes its own failures and returns the error only so the caller can stop.
-// The bool reports whether a search was queued for the scene, so the answer
-// can say rather than have the approver guess.
+// The bool reports whether a search was queued for the scene, so the answer can
+// say rather than have the approver guess.
 func (s *server) approveScene(ctx context.Context, w http.ResponseWriter, r *http.Request, req *core.Request, body approveRequestRequest) (*core.Series, bool, error) {
 	// The DEFAULT instance: a request row carries no provider column, so there
 	// is no instance on it to honour. Scene requests made before instances
-	// existed are the reason it cannot simply grow one — the field would be
+	// existed are the reason it cannot simply grow one. The field would be
 	// empty on every historical row, and empty is not a box. The approval
 	// therefore reads whichever catalogue the default library identifies
 	// through, which is the box the scene was almost certainly browsed on.
 	provider, providerID := s.mgr.DefaultAdultMetadata(ctx)
 	if provider == nil {
-		// Coded, and coded as the ADULT credential: an uncoded 503 is read by
+		// Coded, and coded as the adult credential: an uncoded 503 is read by
 		// the SPA as a missing TMDB key (web/src/lib/credentials.ts), so
 		// approving a scene with no stash-box provider would send the admin to
 		// the wrong settings screen to fix the wrong credential.
@@ -540,8 +540,8 @@ func (s *server) approveScene(ctx context.Context, w http.ResponseWriter, r *htt
 	// AddSiteAndWait, not AddSite: the scenes have to exist by the time this
 	// returns. The ordinary add defers the catalogue walk to a durable job, and
 	// an approval that answered before the walk would close the request against
-	// an episode row that does not exist yet — so the granted scene would not
-	// be wanted, and the next sweep would search for nothing.
+	// an episode row that does not exist yet, so the granted scene would not be
+	// wanted, and the next sweep would search for nothing.
 	//
 	// The site is pinned to the instance that answered GetScene above, which is
 	// the only box whose catalogue this SiteStashID was read from.
@@ -554,11 +554,11 @@ func (s *server) approveScene(ctx context.Context, w http.ResponseWriter, r *htt
 	}
 
 	// The asked-for scene is the one thing monitored on the site the approval
-	// just added. A walk that has no row for it — the provider never gave the
-	// scene a release date, which is the only way a scene fails to file —
-	// means the approval would close the request against nothing, and that is
-	// a provider answer to refuse over, not absorb: the site add itself keeps
-	// no state the next approval attempt would not refresh.
+	// just added. A walk that has no row for it (the provider never gave the
+	// scene a release date, which is the only way a scene fails to file) means
+	// the approval would close the request against nothing, and that is a
+	// provider answer to refuse over, not absorb: the site add itself keeps no
+	// state the next approval attempt would not refresh.
 	filed, err := s.st.EpisodeIDsByStashID(ctx, []string{req.StashID})
 	if err != nil {
 		s.writeStoreError(w, "find scene episode", err)
@@ -596,8 +596,8 @@ func (s *server) approveScene(ctx context.Context, w http.ResponseWriter, r *htt
 	}
 
 	// The add absorbs a matching pending request the way every other add path
-	// does — but that machinery keys on a TMDB id, and a scene request has
-	// none, so this closes it explicitly.
+	// does, but that machinery keys on a TMDB id, and a scene request has none,
+	// so this closes it explicitly.
 	if err := s.st.SetRequestStatus(ctx, req.ID, core.RequestApproved); err != nil {
 		s.writeStoreError(w, "approve request", err)
 		return nil, false, err
@@ -626,7 +626,7 @@ func insistPending(w http.ResponseWriter, req *core.Request) bool {
 }
 
 // validSeasonNumbers rejects a season list containing a negative number,
-// writing the failure itself. Season 0 is legal — that is where specials live.
+// writing the failure itself. Season 0 is legal: that is where specials live.
 func validSeasonNumbers(w http.ResponseWriter, seasons []int) bool {
 	for _, n := range seasons {
 		if n < 0 {
@@ -681,7 +681,7 @@ func (s *server) inLibrary(
 // for, writing the failure itself.
 //
 // A caller the adult module is not visible to is refused a scene with the exact
-// message and status an unrecognised media type gets — "banana" and "scene" are
+// message and status an unrecognised media type gets, "banana" and "scene" are
 // the same answer, so POST /requests cannot be used to find out whether the
 // module exists on this server or whether this account was granted it. The
 // message widens only for a caller who could have used it anyway, where naming
@@ -704,8 +704,8 @@ func validRequestMediaType(w http.ResponseWriter, mediaType string, adult bool) 
 }
 
 // requestDTO renders one row. username is the asker's name, which the caller
-// resolves with requesterNames — passing it in rather than looking it up here
-// is what keeps a list of rows from becoming a query per row.
+// resolves with requesterNames, passing it in rather than looking it up here is
+// what keeps a list of rows from becoming a query per row.
 func (s *server) requestDTO(r core.Request, username string) requestJSON {
 	return requestJSON{
 		ID:                  r.ID,
@@ -742,10 +742,10 @@ func (s *server) requesterNames(ctx context.Context, rows []core.Request) (map[i
 //
 // A movie or series request stores a TMDB-relative path ("/abc.jpg") and needs
 // the provider's image base in front of it. A scene request stores something
-// else entirely: stashbox.coverURL hands out an ABSOLUTE url, the SPA sends it
+// else entirely: stashbox.coverURL hands out an absolute url, the SPA sends it
 // as poster_path, and handleCreateRequest stores it verbatim. Running that
 // through the TMDB helper concatenates the two into
-// "https://image.tmdb.org/t/p/w500/https://cdn.…/scene.jpg" — a dead image the
+// "https://image.tmdb.org/t/p/w500/https://cdn.…/scene.jpg". A dead image the
 // browser still fetches from TMDB's CDN with the adult path in the request
 // line. On a server with the adult module configured but no TMDB key it is
 // worse still: Metadata() is nil, providerPosterURL returns "", and the row

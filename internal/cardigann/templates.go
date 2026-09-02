@@ -18,9 +18,11 @@ func normalizeDefinitionTemplate(source string) string {
 	var out strings.Builder
 	out.Grow(len(source) + 16)
 	inAction := false
+	depth := 0
 	for offset := 0; offset < len(source); {
 		if !inAction && strings.HasPrefix(source[offset:], "{{") {
 			inAction = true
+			depth = 0
 			out.WriteString("{{")
 			offset += 2
 			continue
@@ -30,6 +32,18 @@ func normalizeDefinitionTemplate(source string) string {
 			out.WriteString("}}")
 			offset += 2
 			continue
+		}
+		// Upstream definitions occasionally carry a stray closing paren, which
+		// their regex-based evaluator ignores. Dropping it keeps the site usable.
+		if inAction && source[offset] == '(' {
+			depth++
+		}
+		if inAction && source[offset] == ')' {
+			if depth == 0 {
+				offset++
+				continue
+			}
+			depth--
 		}
 		if inAction && source[offset] == '"' {
 			start := offset

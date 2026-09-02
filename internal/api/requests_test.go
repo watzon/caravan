@@ -415,8 +415,8 @@ func TestDismissRequest(t *testing.T) {
 }
 
 // Ownership is recorded from the session, and an admin's list names who asked.
-// A row nobody owns — made while the server ran open, or before accounts
-// existed — names nobody rather than guessing.
+// A row nobody owns (made while the server ran open, or before accounts
+// existed) names nobody rather than guessing.
 func TestRequestsRecordTheAskerAndNameThemToAdmins(t *testing.T) {
 	ctx := context.Background()
 	h, st, _ := newTestServer(t)
@@ -1023,8 +1023,8 @@ func TestCreateRequestWithApproveGrantsAMovieImmediately(t *testing.T) {
 }
 
 // The series shape of the same: the ask's season list is the grant's season
-// list, so a request for season 2 approves into exactly season 2 — not the
-// whole title an empty approval body would mean.
+// list, so a request for season 2 approves into exactly season 2, not the whole
+// title an empty approval body would mean.
 func TestCreateRequestWithApproveGrantsTheAskedSeasons(t *testing.T) {
 	ctx := context.Background()
 	h, st := discoverServer(t, &stubDiscoverProvider{})
@@ -1047,7 +1047,7 @@ func TestCreateRequestWithApproveGrantsTheAskedSeasons(t *testing.T) {
 }
 
 // Approving is the admin's decision on every door: a member who asks with
-// approve set gets the approve route's answer, and no row is recorded — a
+// approve set gets the approve route's answer, and no row is recorded. A
 // refused create must not leave the wish behind as if it had been plain.
 func TestCreateRequestWithApproveIsAdminOnly(t *testing.T) {
 	h, st, _ := newTestServer(t)
@@ -1071,8 +1071,8 @@ func TestCreateRequestWithApproveIsAdminOnly(t *testing.T) {
 }
 
 // A request-and-approve that lands on a title already asked for grants the
-// EXISTING row — the merge rule does not change because the admin's call
-// carries a grant — so the asker's name and the household's one row survive.
+// existing row (the merge rule does not change because the admin's call carries
+// a grant) so the asker's name and the household's one row survive.
 func TestCreateRequestWithApproveMergesThenGrants(t *testing.T) {
 	ctx := context.Background()
 	h, st := discoverServer(t, &stubDiscoverProvider{})

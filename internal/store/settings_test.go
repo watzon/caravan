@@ -43,7 +43,7 @@ func TestSetSettingsIsAllOrNothing(t *testing.T) {
 
 	// Fail the second write the way a disk or a lock would. SetSettings takes
 	// the keys in sorted order, so "stashbox_api_key" is already written when
-	// the refusal lands on "stashbox_endpoint" — which is exactly the half-a-
+	// the refusal lands on "stashbox_endpoint", which is exactly the half-a-
 	// credential state a transaction is here to prevent.
 	if _, err := st.db.ExecContext(ctx, `
 		CREATE TRIGGER refuse_the_endpoint BEFORE UPDATE ON settings

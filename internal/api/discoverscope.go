@@ -60,7 +60,7 @@ var (
 )
 
 // discoverScopeResponse is one page of a filtered scope. It carries no source
-// block — unlike /discover/browse there is no curated shelf behind it, the
+// block, unlike /discover/browse there is no curated shelf behind it, the
 // filter itself is the description, and the client already holds it.
 type discoverScopeResponse struct {
 	MediaType  string             `json:"media_type"`
@@ -233,7 +233,7 @@ func (s *server) handleDiscoverKeywords(w http.ResponseWriter, r *http.Request) 
 
 // handleDiscoverGenres serves one media type's genre vocabulary. The two lists
 // differ and neither is a subset of the other, so ?type= is required rather
-// than defaulted — a rail rendering the movie genres over a series scope would
+// than defaulted. A rail rendering the movie genres over a series scope would
 // offer filters that match nothing.
 func (s *server) handleDiscoverGenres(w http.ResponseWriter, r *http.Request) {
 	provider, ok := s.discovery(w, r)
@@ -379,7 +379,7 @@ func (p *filterParser) date(key string) time.Time {
 
 // count reads a non-negative whole number: a runtime bound, a vote floor, a
 // page. Zero is "unset" for all three, which is why negatives are refused
-// rather than clamped — they would be indistinguishable from not asking.
+// rather than clamped. They would be indistinguishable from not asking.
 func (p *filterParser) count(key string) int {
 	raw := strings.TrimSpace(p.q.Get(key))
 	if p.err != nil || raw == "" {

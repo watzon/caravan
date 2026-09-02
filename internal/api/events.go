@@ -76,12 +76,12 @@ func (s *server) handleEvents(w http.ResponseWriter, r *http.Request) {
 }
 
 // libraryOwnershipFilter is the shared Queue and History ownership policy for
-// one request: which LIBRARY a row belongs to, and whether the caller has it.
+// one request: which library a row belongs to, and whether the caller has it.
 //
 // The owner of a row is resolved through the movie or series it names, then
 // cached, because a page commonly holds several events or downloads for the
 // same item. An item whose linked row is gone is an orphan, not evidence of
-// anything — ownership that cannot be established is not ownership — so it is
+// anything (ownership that cannot be established is not ownership) so it is
 // preserved. Unexpected store failures abort the response rather than leaking a
 // row whose owner could not be checked.
 type libraryOwnershipFilter struct {
@@ -113,8 +113,8 @@ func (s *server) ownershipFilter(r *http.Request) (libraryOwnershipFilter, error
 	return libraryOwnershipFilter{server: s, gate: gate, seesAll: seesAll, seesAdult: seesAdult}, nil
 }
 
-// libraryVisibleTo reports whether a row owned only by a LIBRARY — an untied
-// universal-search grab, or the file it parked — may be shown.
+// libraryVisibleTo reports whether a row owned only by a library (an untied
+// universal-search grab, or the file it parked) may be shown.
 func (f *libraryOwnershipFilter) libraryVisibleTo(ctx context.Context, libraryID int64) (bool, error) {
 	if f.seesAll {
 		return true, nil
@@ -123,7 +123,7 @@ func (f *libraryOwnershipFilter) libraryVisibleTo(ctx context.Context, libraryID
 }
 
 // ownerVisible resolves the library behind a row's item and asks the gate for
-// it. BOTH ids are followed: a movie library is as restrictable as any other,
+// it. both ids are followed: a movie library is as restrictable as any other,
 // so "a movie cannot be adult" is no longer a reason to wave one through.
 func (f *libraryOwnershipFilter) ownerVisible(ctx context.Context, movieID, seriesID int64) (bool, error) {
 	if f.seesAll {

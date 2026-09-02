@@ -1,8 +1,8 @@
 // Package indexer is Caravan's Torznab/Newznab client, the search side of the
 // grab flow (SPEC §5.1, §9).
 //
-// Torznab and Newznab are the same XML dialect over the same query interface —
-// Torznab is Newznab plus torrent attributes — so one client covers both and
+// Torznab and Newznab are the same XML dialect over the same query interface
+// (Torznab is Newznab plus torrent attributes) so one client covers both and
 // core.IndexerConfig.Type decides the dialect-specific details (which protocol
 // results default to, which namespace the extra attributes arrive in).
 //
@@ -84,7 +84,7 @@ func (e *APIError) Error() string {
 	}
 }
 
-// Unwrap maps credential failures — however the indexer chose to report them —
+// Unwrap maps credential failures (however the indexer chose to report them)
 // onto ErrUnauthorized so callers can branch without knowing the code table.
 func (e *APIError) Unwrap() error {
 	if e.StatusCode == http.StatusUnauthorized || e.StatusCode == http.StatusForbidden {
@@ -153,7 +153,7 @@ func (c *Client) Test(ctx context.Context) error {
 
 // Categories returns the category tree the indexer advertises in its
 // capabilities document, for the settings UI to offer as a picker. An indexer
-// that advertises none returns an empty tree, not an error — the picker falls
+// that advertises none returns an empty tree, not an error. The picker falls
 // back to manual entry.
 func (c *Client) Categories(ctx context.Context) ([]core.IndexerCategory, error) {
 	caps, err := c.caps(ctx)
@@ -261,8 +261,8 @@ func (c *Client) fetch(ctx context.Context, params url.Values) ([]byte, error) {
 }
 
 // errorDoc returns an *APIError when body is an <error> document, and nil for
-// anything else — including unparseable bytes, which are the caller's problem
-// to report with the context it has.
+// anything else, including unparseable bytes, which are the caller's problem to
+// report with the context it has.
 func (c *Client) errorDoc(body []byte) *APIError {
 	var doc errorDoc
 	if err := decodeDoc(body, "error", &doc); err != nil {

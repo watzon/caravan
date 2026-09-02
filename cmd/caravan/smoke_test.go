@@ -75,10 +75,10 @@ func TestSmokeGrabDownloadImport(t *testing.T) {
 	magnet := smokeMagnet(infoHash, peer)
 	indexerURL := startFakeTorznab(t, magnet)
 
-	// ---- boot -------------------------------------------------------------
+	// boot
 	api := startCaravan(t, dirs)
 
-	// ---- configure the indexer (POST /indexers) ---------------------------
+	// configure the indexer (POST /indexers)
 	var indexerResp struct {
 		ID   int64  `json:"id"`
 		Name string `json:"name"`
@@ -99,7 +99,7 @@ func TestSmokeGrabDownloadImport(t *testing.T) {
 	api.post(t, fmt.Sprintf("/indexers/%d/test", indexerResp.ID), nil, http.StatusOK, nil)
 	t.Log("indexer test passed")
 
-	// ---- interactive search (GET .../releases) ----------------------------
+	// interactive search (GET .../releases)
 	var releases struct {
 		Query    string `json:"query"`
 		Releases []struct {
@@ -124,7 +124,7 @@ func TestSmokeGrabDownloadImport(t *testing.T) {
 	}
 	t.Logf("search %q returned release %d %q", releases.Query, releases.Releases[0].ID, releases.Releases[0].Title)
 
-	// ---- grab (POST .../grab) ---------------------------------------------
+	// grab (POST .../grab)
 	var grab struct {
 		GrabID       int64  `json:"grab_id"`
 		DownloadID   string `json:"download_id"`
@@ -137,7 +137,7 @@ func TestSmokeGrabDownloadImport(t *testing.T) {
 	}
 	t.Logf("grabbed as grab %d, download %s", grab.GrabID, grab.DownloadID)
 
-	// ---- the transfer (GET /downloads) ------------------------------------
+	// the transfer (GET /downloads)
 	waitFor(t, 90*time.Second, "download to finish", func() string {
 		d, ok := api.download(t, grab.DownloadID)
 		if !ok {
@@ -157,7 +157,7 @@ func TestSmokeGrabDownloadImport(t *testing.T) {
 	}
 	t.Logf("download complete: state=%s size=%d save_path=%s", done.State, done.Size, done.SavePath)
 
-	// ---- the watcher imports it -------------------------------------------
+	// the watcher imports it
 	libraryFile := filepath.Join(dirs.storage, filepath.FromSlash(smokeWantPath))
 	waitFor(t, 60*time.Second, "the import watcher to import the download", func() string {
 		if _, err := os.Stat(libraryFile); err != nil {
@@ -193,7 +193,7 @@ func TestSmokeGrabDownloadImport(t *testing.T) {
 	assertSize(t, libraryFile, smokeContentSize)
 	t.Logf("library reports file %s (%d bytes)", movie.File.Path, movie.File.Size)
 
-	// ---- restart: the queue survives it -----------------------------------
+	// restart: the queue survives it
 	api.stop(t)
 	t.Log("caravan stopped")
 
@@ -216,7 +216,7 @@ func TestSmokeGrabDownloadImport(t *testing.T) {
 		t.Errorf("library holds %d movie files after a restart, want 1", n)
 	}
 
-	// ---- removing the download must not cost the library ------------------
+	// removing the download must not cost the library
 	api.delete(t, "/downloads/"+grab.DownloadID+"?deleteData=false", http.StatusNoContent)
 	if _, ok := api.download(t, grab.DownloadID); ok {
 		t.Error("download still in the queue after DELETE")
@@ -231,9 +231,7 @@ func TestSmokeGrabDownloadImport(t *testing.T) {
 	api.stop(t)
 }
 
-// ---------------------------------------------------------------------------
 // fixture: directories, config, seeded database
-// ---------------------------------------------------------------------------
 
 type smokeEnv struct {
 	work    string
@@ -295,9 +293,7 @@ func seedSmokeLibrary(t *testing.T, dirs smokeEnv) int64 {
 	return movie.ID
 }
 
-// ---------------------------------------------------------------------------
 // fixture: the fake outside world
-// ---------------------------------------------------------------------------
 
 // startFakeTMDB serves the one movie the library needs to resolve a grab.
 func startFakeTMDB(t *testing.T) string {
@@ -480,16 +476,14 @@ func smokeMagnet(infoHash, peer string) string {
 	return "magnet:?xt=urn:btih:" + infoHash + "&" + q.Encode()
 }
 
-// ---------------------------------------------------------------------------
 // fixture: the server under test
-// ---------------------------------------------------------------------------
 
 // caravanProcess is one run of runServe, in-process.
 //
-// In-process rather than a spawned binary so the test drives exactly the
-// wiring runServe builds — engine, watcher, indexer factory and shutdown —
-// and so the fake TMDB transport is reachable. Shutdown goes through a real
-// SIGTERM, which is the signal path runServe actually installs.
+// In-process rather than a spawned binary so the test drives exactly the wiring
+// runServe builds (engine, watcher, indexer factory and shutdown) and so the
+// fake TMDB transport is reachable. Shutdown goes through a real SIGTERM, which
+// is the signal path runServe actually installs.
 type caravanProcess struct {
 	baseURL string
 	errCh   chan error
@@ -555,9 +549,7 @@ func freeAddr(t *testing.T) string {
 	return l.Addr().String()
 }
 
-// ---------------------------------------------------------------------------
 // fixture: API client
-// ---------------------------------------------------------------------------
 
 type downloadRow struct {
 	ID        string  `json:"id"`
@@ -639,9 +631,7 @@ func (p *caravanProcess) download(t *testing.T, id string) (downloadRow, bool) {
 	return downloadRow{}, false
 }
 
-// ---------------------------------------------------------------------------
 // assertions
-// ---------------------------------------------------------------------------
 
 // waitFor polls until check returns "", failing with the last reason it gave.
 func waitFor(t *testing.T, timeout time.Duration, what string, check func() string) {
@@ -689,9 +679,7 @@ func countMovieFiles(t *testing.T, storageRoot string) int {
 	return n
 }
 
-// ---------------------------------------------------------------------------
 // the shipped binary
-// ---------------------------------------------------------------------------
 
 // TestBinaryBootsAndResumesDownloads runs the compiled binary rather than
 // runServe, and checks the one thing a process boundary can break that an

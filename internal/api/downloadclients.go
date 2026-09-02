@@ -10,20 +10,20 @@ import (
 	"github.com/watzon/caravan/internal/core"
 )
 
-// downloadClientJSON is a configured external download client on the wire
-// (SPEC §5.1, §11 `/download-clients`).
+// downloadClientJSON is a configured external download client on the wire (SPEC
+// §5.1, §11 `/download-clients`).
 //
-// Unlike the indexer and Jellyfin API keys, the password and API key are NOT
+// Unlike the indexer and Jellyfin API keys, the password and API key are not
 // echoed back. Those two predate the phase-5 password: with the API open, a
 // credential the server withheld was a credential the user could not re-read,
 // so echoing lost nothing. This surface is new, so it follows the rule
-// hiddenSettings already states — a credential the API hands back is a
+// hiddenSettings already states. A credential the API hands back is a
 // credential that ends up in a browser cache, a screenshot or a bug report
-// (SPEC §12) — and reports only whether one is stored.
+// (SPEC §12), and reports only whether one is stored.
 //
-// The consequence is that the edit form cannot pre-fill the field, which is
-// why downloadClientRequest treats an omitted credential as "keep the stored
-// one" rather than "clear it".
+// The consequence is that the edit form cannot pre-fill the field, which is why
+// downloadClientRequest treats an omitted credential as "keep the stored one"
+// rather than "clear it".
 type downloadClientJSON struct {
 	ID       int64  `json:"id"`
 	Type     string `json:"type"`
@@ -154,7 +154,7 @@ func (b downloadClientRequest) config(stored *core.DownloadClientConfig) (core.D
 
 // sameDownloadClientTarget reports whether a test body still names the machine
 // stored's credential belongs to, comparing the two fields that decide where
-// the probe's request — and with it the credential — is sent.
+// the probe's request (and with it the credential) is sent.
 //
 // URL and type are normalised exactly as config normalises them, so a body that
 // round-trips what the GET returned still matches.
@@ -315,7 +315,7 @@ func (s *server) handleTestDownloadClientConfig(w http.ResponseWriter, r *http.R
 		// The fallback only applies to the destination the credential was
 		// stored for. Pairing a stored password or API key with a URL from the
 		// body would make this endpoint send the credential the GET refuses to
-		// return to any host the caller names (SPEC §12) — the exfiltration the
+		// return to any host the caller names (SPEC §12). The exfiltration the
 		// withholding exists to prevent. A genuinely new address is a new
 		// credential, and the form still has the field to type it into.
 		if sameDownloadClientTarget(body, *found) {
@@ -367,7 +367,7 @@ func (s *server) clients() *clients.Registry {
 
 // downloadClientNameFree reports whether name is available, writing a 409 when
 // it is not. download_clients.name is unique, so without this check a duplicate
-// name — a plain user mistake — would surface as a 500.
+// name (a plain user mistake) would surface as a 500.
 func (s *server) downloadClientNameFree(ctx context.Context, w http.ResponseWriter, name string, exceptID int64) bool {
 	configs, err := s.st.ListDownloadClients(ctx)
 	if err != nil {

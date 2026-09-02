@@ -26,9 +26,9 @@ type jobJSON struct {
 	LastError      string          `json:"last_error"`
 	CreatedAt      string          `json:"created_at"`
 	UpdatedAt      string          `json:"updated_at"`
-	// Subject is the library title this job is about — a movie name, a
-	// series name, or an adult site. Empty on kinds that have no title, or
-	// when the row is gone. The footer groups live searches by this.
+	// Subject is the library title this job is about. A movie name, a series
+	// name, or an adult site. Empty on kinds that have no title, or when the
+	// row is gone. The footer groups live searches by this.
 	Subject string `json:"subject,omitempty"`
 	// SubjectKind is "movie", "series", or "site". Empty when Subject is.
 	SubjectKind string `json:"subject_kind,omitempty"`

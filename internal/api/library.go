@@ -66,8 +66,8 @@ type seriesJSON struct {
 	// Kind is core.SeriesKindTV, core.SeriesKindAnime or core.SeriesKindAdult.
 	// The picker seeds from it: an adult series is a site, and a television
 	// seed for one writes season/episode into the box until the search lands.
-	// It is also which screen the row belongs to — GET /library/series lists
-	// one kind at a time.
+	// It is also which screen the row belongs to, GET /library/series lists one
+	// kind at a time.
 	Kind       string `json:"kind"`
 	FirstAired string `json:"first_aired"`
 	AddedAt    string `json:"added_at"`
@@ -133,9 +133,9 @@ type mediaFileJSON struct {
 	AddedAt       string `json:"added_at"`
 	ModifiedAt    string `json:"modified_at"`
 	// Compatibility is the owning item's playback-target verdict on this file.
-	// The row carries no bit depth — that is a probe's answer, not a
-	// filename's — so a 10-bit file imported from an untagged name reads as
-	// unstated rather than as 8-bit.
+	// The row carries no bit depth (that is a probe's answer, not a filename's)
+	// so a 10-bit file imported from an untagged name reads as unstated rather
+	// than as 8-bit.
 	Compatibility compatibilityJSON `json:"compatibility"`
 }
 
@@ -225,7 +225,7 @@ func firstFileDTO(files []core.MediaFile, profile core.TVProfile) *mediaFileJSON
 //
 // The two search flags are optional and endpoint-specific: movies read
 // SearchNow, series read SearchMissing. Omitting them is the historical
-// behaviour — add and wait for the next backlog sweep.
+// behaviour, add and wait for the next backlog sweep.
 type addRequest struct {
 	TMDBID int64 `json:"tmdb_id"`
 	// Provider and ProviderRef are the general spelling of "which title": the
@@ -261,8 +261,8 @@ type addRequest struct {
 	// is series-only. Omitting it defaults a new movie to released and leaves
 	// a re-added movie's choice alone.
 	MinAvailability string `json:"min_availability"`
-	// LibraryID is the library a NEW item lands in. Zero targets the kind's
-	// default, and that is a WIRE convention rather than a stored one: a body
+	// LibraryID is the library a new item lands in. Zero targets the kind's
+	// default, and that is a wire convention rather than a stored one: a body
 	// that names no shelf means "wherever this kind goes", and the row it
 	// creates always names its library outright. A re-added title stays in the
 	// library it already lives in whatever this says: a move is an explicit
@@ -270,9 +270,9 @@ type addRequest struct {
 	LibraryID int64 `json:"library_id"`
 }
 
-// itemRefFrom resolves the two spellings of "which title" a body may carry
-// into one core.ItemRef, writing the refusal itself. mediaType is the item
-// VOCABULARY the endpoint is about: MediaTypeMovie for the movie routes,
+// itemRefFrom resolves the two spellings of "which title" a body may carry into
+// one core.ItemRef, writing the refusal itself. mediaType is the item
+// vocabulary the endpoint is about: MediaTypeMovie for the movie routes,
 // MediaTypeSeries for the series ones, MediaTypeScene for a scene match.
 //
 // tmdb_id is the compatibility spelling, and it is what every client written
@@ -282,23 +282,23 @@ type addRequest struct {
 // The pair travels together or not at all. Half a pair has named a provider
 // with nothing to look up, or a ref written in a vocabulary nobody named, and
 // there is no safe guess: a ref read in the wrong vocabulary is a different
-// title, not a failed lookup, so the item would be pinned to something real
-// and wrong.
+// title, not a failed lookup, so the item would be pinned to something real and
+// wrong.
 //
-// The provider is validated against the endpoint's VOCABULARY
-// (core.ProviderLooksUp) and NOT against the target library's chain, nor
+// The provider is validated against the endpoint's vocabulary
+// (core.ProviderLooksUp) and not against the target library's chain, nor
 // against the library kinds the provider may be chained on. The chain governs
-// IDENTIFICATION — which providers are asked when Caravan has to work out what
-// a file is — and this is the user telling it the answer outright. A ref pasted
+// identification (which providers are asked when Caravan has to work out what a
+// file is) and this is the user telling it the answer outright. A ref pasted
 // from a provider that is not on the chain is still a true ref, and refusing it
 // would quietly turn the chain into a second allow-list nobody asked for.
 //
 // Asking the registry's chain kinds instead is the mistake the two-function
 // split exists to prevent: a provider whose catalogue files films would have to
-// claim a movie LIBRARY kind to have its films added, and the claim would then
+// claim a movie library kind to have its films added, and the claim would then
 // offer it in every Movies library's chain editor.
 //
-// EXISTENCE is a different question from membership, and it is asked: a ref
+// existence is a different question from membership, and it is asked: a ref
 // naming a stash-box instance this install does not hold is a ref nothing can
 // ever be refreshed against, so it is refused here rather than pinned to a row
 // and discovered on the next refresh (see knownProviderInstance). That is why
@@ -338,11 +338,11 @@ type moveRequest struct {
 	LibraryID int64 `json:"library_id"`
 }
 
-// handleMoveMovie queues a movie's move into another library. 202 rather
-// than 200: the transfer is a durable job, because a move is file I/O the
-// request must not own. The validation happens now, while the user is
-// watching — the job re-checks, but a target of the wrong kind should be a
-// 400 today, not a failed job tomorrow.
+// handleMoveMovie queues a movie's move into another library. 202 rather than
+// 200: the transfer is a durable job, because a move is file I/O the request
+// must not own. The validation happens now, while the user is watching. The job
+// re-checks, but a target of the wrong kind should be a 400 today, not a failed
+// job tomorrow.
 func (s *server) handleMoveMovie(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -415,8 +415,8 @@ func (s *server) enqueueMove(w http.ResponseWriter, r *http.Request, itemType st
 }
 
 // validAddLibraryID validates an add's library target, writing the refusal
-// itself. Zero names the kind's default and is always fine — the request
-// convention, see addRequest.LibraryID — while a real id must exist, be visible
+// itself. Zero names the kind's default and is always fine (the request
+// convention, see addRequest.LibraryID) while a real id must exist, be visible
 // to this caller, and hold items of the endpoint's kind.
 func (s *server) validAddLibraryID(w http.ResponseWriter, r *http.Request, libraryID int64, kind string) bool {
 	if libraryID < 0 {
@@ -462,9 +462,9 @@ func (s *server) handleListMovies(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The Movies screen's first visibility filter. It changes nothing while
-	// every movie library is on and open to everybody — which is the point:
-	// the shelf a movie sits on is now allowed to be somebody else's, and this
-	// list is where that has to be true before it can be true anywhere.
+	// every movie library is on and open to everybody, which is the point: the
+	// shelf a movie sits on is now allowed to be somebody else's, and this list
+	// is where that has to be true before it can be true anywhere.
 	gate := s.gate(r)
 	out := make([]movieJSON, 0, len(movies))
 	for _, m := range movies {
@@ -529,8 +529,8 @@ func (s *server) handleAddMovie(w http.ResponseWriter, r *http.Request) {
 }
 
 // validAvailability rejects an availability that names no known stage, writing
-// the failure itself. Empty is fine — it means "no opinion" everywhere the
-// field appears.
+// the failure itself. Empty is fine, it means "no opinion" everywhere the field
+// appears.
 func validAvailability(w http.ResponseWriter, s string) bool {
 	if s != "" && !core.ValidAvailability(s) {
 		writeError(w, http.StatusBadRequest, "min_availability must be announced, in_cinemas or released")
@@ -580,7 +580,7 @@ func (s *server) addMovieToLibrary(ctx context.Context, ref core.ItemRef, search
 		if _, err := s.enqueueMovieSearch(ctx, m.ID); err != nil {
 			// The movie is in the library; failing the request now would tell
 			// the client the opposite. The add stands and the missed search is
-			// logged — the next backlog sweep queues it anyway.
+			// logged. The next backlog sweep queues it anyway.
 			s.log.Error("queue search for added movie", "movie_id", m.ID, "error", err)
 		}
 	}
@@ -677,7 +677,7 @@ func (s *server) absorbSeriesRequests(ctx context.Context, tmdbID int64, ungrant
 // caller did not ask for, and reports those season numbers.
 //
 // A nil selection is "the whole series": nothing is touched and nothing is
-// outstanding. The monitored flag is the only lever here — the rows have to
+// outstanding. The monitored flag is the only lever here. The rows have to
 // exist either way, because the series view shows what is missing.
 func (s *server) applySeasonSelection(ctx context.Context, seriesID int64, seasons []int) ([]int, error) {
 	if seasons == nil {
@@ -800,8 +800,8 @@ type itemPatchRequest struct {
 	Monitored        *bool  `json:"monitored"`
 	QualityProfileID *int64 `json:"quality_profile_id"`
 	// MinAvailability is movie-only, like it is on the add: the release stage
-	// the movie's automatic search waits for. Empty means "not changing it" —
-	// there is no unset state to spell, the store always holds a stage.
+	// the movie's automatic search waits for. Empty means "not changing it".
+	// There is no unset state to spell, the store always holds a stage.
 	MinAvailability string `json:"min_availability"`
 }
 
@@ -825,9 +825,8 @@ func (s *server) applyItemPatch(w http.ResponseWriter, r *http.Request, body ite
 }
 
 // handlePatchMovie updates the mutable fields of a movie: the monitored flag,
-// the quality profile assignment (PLAN phase 3, task 1) and the minimum
-// availability. Everything else is provider metadata, refreshed by a scan
-// rather than edited by hand.
+// the quality profile assignment and the minimum availability. Everything else
+// is provider metadata, refreshed by a scan rather than edited by hand.
 func (s *server) handlePatchMovie(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -934,10 +933,10 @@ func (s *server) handleDeleteMovie(w http.ResponseWriter, r *http.Request) {
 // reports whether the removal may proceed.
 //
 // The order is the contract: cancel first, then delete, so an engine that
-// cannot be reached fails the request with the library untouched — deleting
-// the item while its download kept running is exactly what removal must not
-// do. The downloaded data goes with the download: partial data for an item
-// that is leaving the library has no future. A configured-but-absent engine is
+// cannot be reached fails the request with the library untouched, deleting the
+// item while its download kept running is exactly what removal must not do. The
+// downloaded data goes with the download: partial data for an item that is
+// leaving the library has no future. A configured-but-absent engine is
 // tolerated when it has nothing to withdraw; the rows are still cleaned up,
 // since nothing can be downloading through an engine that is not there.
 func (s *server) cancelGrabs(w http.ResponseWriter, ctx context.Context, grabs []*core.Grab) bool {
@@ -971,16 +970,16 @@ func (s *server) cancelGrabs(w http.ResponseWriter, ctx context.Context, grabs [
 	return true
 }
 
-// handleListSeries answers the Series and Anime screens: ONE kind of series
-// per request, named by ?kind= and defaulting to television.
+// handleListSeries answers the Series and Anime screens: one kind of series per
+// request, named by ?kind= and defaulting to television.
 //
-// The filter is not a convenience. A site is stored as a series row (PLAN phase
-// 9 task 3), and this route is not an adult surface — sites have their own,
-// behind the /adult gate — so an unfiltered list would put them on the
-// television shelf for every admin, and on an install with the module switched
-// off it would be a visible trace of a module that is supposed to be absent.
-// The anime kind joins on the same terms: it is its own screen, and a television
-// list that included anime would show every row twice across the two.
+// The filter is not a convenience. A site is stored as a series row, and this
+// route is not an adult surface (sites have their own, behind the /adult gate)
+// so an unfiltered list would put them on the television shelf for every admin,
+// and on an install with the module switched off it would be a visible trace of
+// a module that is supposed to be absent. The anime kind joins on the same
+// terms: it is its own screen, and a television list that included anime would
+// show every row twice across the two.
 //
 // Only `tv` and `anime` are spellable here. `adult` is refused rather than
 // gated, so this route can never become a second door to the adult shelf, and
@@ -1009,7 +1008,7 @@ func (s *server) handleListSeries(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The kind filter above says which VOCABULARY belongs on this shelf; the
+	// The kind filter above says which vocabulary belongs on this shelf; the
 	// gate says which shelves this caller has. Both, in that order: a site is
 	// not a television series however visible its library is, and a restricted
 	// television library is not this caller's however television it is.
@@ -1070,14 +1069,14 @@ func (s *server) handleAddSeries(w http.ResponseWriter, r *http.Request) {
 // getVisibleSeries is GetSeries plus its library's access rule, writing the
 // refusal itself.
 //
-// A site is stored as a series row (PLAN phase 9 task 3), so every by-id series
-// route can be handed a site's id. handleListSeries was narrowed to television
-// for the reason its comment gives; the by-id routes need the same rule, or an
-// install that enabled the module once and switched it off again still answers
-// GET /library/series/{siteID} with the site's title, its root under
-// library/Adult and its whole season/episode tree — scene titles and release
-// dates — which the SPA then renders as an ordinary television detail page.
-// The same now holds for a television library somebody restricted.
+// A site is stored as a series row, so every by-id series route can be handed a
+// site's id. handleListSeries was narrowed to television for the reason its
+// comment gives; the by-id routes need the same rule, or an install that
+// enabled the module once and switched it off again still answers GET
+// /library/series/{siteID} with the site's title, its root under library/Adult
+// and its whole season/episode tree (scene titles and release dates) which the
+// SPA then renders as an ordinary television detail page. The same now holds
+// for a television library somebody restricted.
 //
 // The refusal is 404 rather than 403, the answer visibleLibrary and
 // requireAdult both give: "this exists and you may not have it" is the worse
@@ -1260,9 +1259,8 @@ func (s *server) handleDeleteSeries(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handlePatchSeason updates one season's monitored flag and cascades it to
-// the season's episodes (SPEC §7, PLAN phase 3 task 2: a bulk update, not a
-// lock, so individual episodes can be toggled back afterwards).
+// handlePatchSeason updates one season's monitored flag and cascades it to the
+// season's episodes (SPEC §7).
 func (s *server) handlePatchSeason(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -1330,9 +1328,9 @@ func (s *server) handlePatchEpisode(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreError(w, "get episode", err)
 		return
 	}
-	// An episode's visibility is its series': a scene is an episode of a site
-	// (PLAN phase 9 task 3), and this route takes an episode id, so without the
-	// gate it is the one way left to reach an adult row by id.
+	// An episode's visibility is its series': a scene is an episode of a site,
+	// and this route takes an episode id, so without the gate it is the one way
+	// left to reach an adult row by id.
 	if _, ok := s.getVisibleSeries(w, r, e.SeriesID); !ok {
 		return
 	}
@@ -1459,8 +1457,8 @@ func (s *server) handleRescan(w http.ResponseWriter, r *http.Request) {
 
 // WithStartupScan queues a library scan as the server is built.
 //
-// It is how SPEC §10.1's second first-run step — "point Caravan at existing
-// media, with a library scan queued immediately" — reaches the deployments that
+// It is how SPEC §10.1's second first-run step ("point Caravan at existing
+// media, with a library scan queued immediately") reaches the deployments that
 // never see the first-run screen. Docker sets CARAVAN_STORAGE_ROOT=/data and a
 // prepared drive's config says ".", so in both the root exists before the SPA
 // ever loads and it routes straight past first run. Without this, a user whose
@@ -1489,7 +1487,7 @@ func (s *server) startScan() bool {
 	go func() {
 		defer s.scanning.Store(false)
 		// The scan outlives its request, so it must not inherit the request's
-		// context — that gets cancelled the moment the handler returns.
+		// context. That gets cancelled the moment the handler returns.
 		if err := s.mgr.Scan(context.Background()); err != nil {
 			s.log.Error("library scan failed", "error", err)
 		}
@@ -1505,8 +1503,8 @@ func (s *server) startScan() bool {
 //
 // providerID is whose credential a rejection here would be about. An add and a
 // match are pinned to the ref's own provider (see library.AddMovie), so the
-// caller knows it exactly; a caller with no provider in the picture — a delete,
-// an adult site — passes "" and marks nothing, which noteMetadataFailure
+// caller knows it exactly; a caller with no provider in the picture (a delete,
+// an adult site) passes "" and marks nothing, which noteMetadataFailure
 // explains.
 func (s *server) writeManagerError(w http.ResponseWriter, providerID, msg string, err error) {
 	if errors.Is(err, store.ErrNotFound) {
@@ -1519,9 +1517,8 @@ func (s *server) writeManagerError(w http.ResponseWriter, providerID, msg string
 		return
 	}
 	// A key that exists and was refused. Without this the add-movie screen got
-	// a raw 502 for the one failure it can actually tell the user how to fix
-	// (PLAN phase 10 task 3), and the cached credential state never learned
-	// that the key had gone bad.
+	// a raw 502 for the one failure it can actually tell the user how to fix,
+	// and the cached credential state never learned that the key had gone bad.
 	if s.noteMetadataFailure(providerID, err) {
 		writeCodedError(w, http.StatusServiceUnavailable, CodeMetadataCredentialInvalid,
 			credentialRejectedMessage(providerID))

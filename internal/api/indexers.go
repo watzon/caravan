@@ -610,7 +610,7 @@ func (s *server) handleDeleteIndexer(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleTestIndexer asks the indexer whether it answers with the stored
-// credentials (PLAN phase 2, task 1).
+// credentials.
 //
 // A failed test is reported with the indexer's own message, because "it did not
 // work" without a reason is useless for fixing a wrong API key or a typo'd URL.
@@ -660,9 +660,9 @@ func (s *server) handleStoredIndexerCategories(w http.ResponseWriter, r *http.Re
 	s.writeIndexerCategories(w, r.Context(), newClient(*cfg))
 }
 
-// handleIndexerCategories fetches the category tree an indexer advertises.
-// The configuration comes from the body rather than a stored row because the
-// settings form needs the tree while the user is still typing — before the
+// handleIndexerCategories fetches the category tree an indexer advertises. The
+// configuration comes from the body rather than a stored row because the
+// settings form needs the tree while the user is still typing, before the
 // indexer exists to have an id.
 func (s *server) handleIndexerCategories(w http.ResponseWriter, r *http.Request) {
 	newClient, ok := s.requireIndexerClients(w)
@@ -704,8 +704,8 @@ func (s *server) writeIndexerCategories(w http.ResponseWriter, ctx context.Conte
 }
 
 // indexerNameFree reports whether name is available, writing a 409 when it is
-// not. indexers.name is unique, so without this check a duplicate name — a
-// plain user mistake — would surface as a 500.
+// not. indexers.name is unique, so without this check a duplicate name (a plain
+// user mistake) would surface as a 500.
 func (s *server) indexerNameFree(ctx context.Context, w http.ResponseWriter, name string, exceptID int64) bool {
 	indexers, err := s.st.ListIndexers(ctx)
 	if err != nil {
@@ -721,7 +721,19 @@ func (s *server) indexerNameFree(ctx context.Context, w http.ResponseWriter, nam
 	return true
 }
 
-const indexerHealthTimeout = 10 * time.Second
+const (
+	indexerHealthTimeout = 10 * time.Second
+	// A local definition may wait on a browser challenge solve or a slow
+	// scrape; a feed answers in a fraction of that.
+	indexerScrapeTimeout = 45 * time.Second
+)
+
+func indexerProbeTimeout(cfg core.IndexerConfig) time.Duration {
+	if cfg.DefinitionID != "" {
+		return indexerScrapeTimeout
+	}
+	return indexerHealthTimeout
+}
 
 // proveIndexer talks to the indexer before a create or an enable. A site
 // homepage is not a Torznab feed; failing here is how that stays out of
@@ -731,7 +743,7 @@ func (s *server) proveIndexer(ctx context.Context, w http.ResponseWriter, cfg co
 	if !ok {
 		return false
 	}
-	probe, cancel := context.WithTimeout(ctx, indexerHealthTimeout)
+	probe, cancel := context.WithTimeout(ctx, indexerProbeTimeout(cfg))
 	defer cancel()
 	if err := newClient(cfg).Test(probe); err != nil {
 		writeError(w, http.StatusBadGateway, indexerProbeError(cfg, err))
@@ -763,7 +775,7 @@ func (s *server) handleTestIndexerConfig(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, problem)
 		return
 	}
-	probe, cancel := context.WithTimeout(r.Context(), indexerHealthTimeout)
+	probe, cancel := context.WithTimeout(r.Context(), indexerProbeTimeout(cfg))
 	defer cancel()
 	if err := newClient(cfg).Test(probe); err != nil {
 		writeError(w, http.StatusBadGateway, indexerProbeError(cfg, err))

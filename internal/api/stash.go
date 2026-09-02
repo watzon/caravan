@@ -22,8 +22,8 @@ type StashService interface {
 	Health() stash.Health
 	// ResetHealth forgets the last verdict. The handoff remembers rather than
 	// probes, so the settings screen is the only place that can tell it the
-	// question has changed — a new URL, a handoff switched off, a test that
-	// just succeeded. Without it a banner survives the fix that made it wrong.
+	// question has changed. A new URL, a handoff switched off, a test that just
+	// succeeded. Without it a banner survives the fix that made it wrong.
 	ResetHealth()
 }
 
@@ -39,10 +39,9 @@ func WithStash(s StashService) Option {
 	return func(srv *server) { srv.stash = s }
 }
 
-// stashJSON is the handoff configuration on the wire
-// (GET/POST /adult/stash). It mirrors jellyfinJSON field for field, because
-// the settings card mirrors the Jellyfin one — see jellyfinJSON for why the API
-// key is echoed back.
+// stashJSON is the handoff configuration on the wire (GET/POST /adult/stash).
+// It mirrors jellyfinJSON field for field, because the settings card mirrors
+// the Jellyfin one. See jellyfinJSON for why the API key is echoed back.
 type stashJSON struct {
 	URL     string `json:"url"`
 	APIKey  string `json:"api_key"`
@@ -93,8 +92,8 @@ func (b stashRequest) config() (stash.Config, string) {
 	}, ""
 }
 
-// checkStashURL validates a server address, returning the user-facing problem or
-// "".
+// checkStashURL validates a server address, returning the user-facing problem
+// or "".
 //
 // Parsed rather than pattern-matched: the client builds request URLs from this
 // string, so a value it cannot use should fail here, where the user can fix it,
@@ -102,7 +101,7 @@ func (b stashRequest) config() (stash.Config, string) {
 //
 // Userinfo is refused rather than ignored. Go's HTTP client turns
 // http://user:pass@stash.lan:9999 into an Authorization header, so a URL that
-// carries it *is* a credential — one that would then be stored beside the API
+// carries it *is* a credential. One that would then be stored beside the API
 // key, echoed back by GET /adult/stash, and written wherever the handoff logs
 // the address it is talking to. Stash's own credential is the API key field
 // next to this one, and keeping the secret in exactly one field is what makes
@@ -124,7 +123,7 @@ func checkStashURL(raw string) string {
 // It lives on the adult mux, so the gate is structural: with the module off, or
 // for a caller who was never granted it, this is 404 before the handler runs.
 // That is the whole reason the Stash card is not a pair of keys in PUT
-// /settings — an adult-module feature has to be absent, not merely disabled.
+// /settings. An adult-module feature has to be absent, not merely disabled.
 func (s *server) handleGetStash(w http.ResponseWriter, r *http.Request) {
 	cfg, err := s.stashConfig(r.Context())
 	if err != nil {
@@ -240,7 +239,7 @@ func (s *server) stashConfig(ctx context.Context) (stash.Config, error) {
 // visible is passed in rather than resolved here for the reason the scene count
 // is: the caller already asked, and asking twice is a second chance to ask
 // differently. An ungranted caller, or one on a server with the module off,
-// gets nothing at all — a banner about a service that does not exist for you is
+// gets nothing at all. A banner about a service that does not exist for you is
 // the same leak requireAdult refuses.
 func (s *server) stashHealth(visible bool) *stashHealthJSON {
 	if !visible || s.stash == nil {

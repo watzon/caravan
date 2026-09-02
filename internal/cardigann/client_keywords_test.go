@@ -28,9 +28,9 @@ func TestSanitizeSearchKeywords(t *testing.T) {
 	}
 }
 
-// Regression: the client must hand the engine sanitized keywords — scraped
-// sites match literal text, so "Marvel's S.H.I.E.L.D." style metadata titles
-// would otherwise return nothing.
+// Regression: the client must hand the engine sanitized keywords, scraped sites
+// match literal text, so "Marvel's S.H.I.E.L.D." style metadata titles would
+// otherwise return nothing.
 func TestClientSearchSanitizesKeywordsForScrapedSites(t *testing.T) {
 	var gotPath string
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

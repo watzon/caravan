@@ -43,8 +43,8 @@ type stubManager struct {
 	addSiteErr error
 
 	// addSiteCalls records the refs AddSite was asked for, so a test can prove
-	// a scene approval added the SITE rather than something else — and, since
-	// instances, which BOX the row was pinned to.
+	// a scene approval added the site rather than something else, and, since
+	// instances, which box the row was pinned to.
 	addSiteCalls []core.ItemRef
 
 	// addSiteSceneStashID is the scene AddSiteAndWait files as an episode.
@@ -63,7 +63,7 @@ type stubManager struct {
 	matchErr error
 
 	// addSeriesEpisodes is how many aired, monitored, file-less episodes
-	// AddSeries writes alongside the series. Zero — the default — keeps the
+	// AddSeries writes alongside the series. Zero (the default) keeps the
 	// stub's historical shape; the search-on-add tests need a series that has
 	// something to search for.
 	addSeriesEpisodes int
@@ -77,9 +77,9 @@ type stubManager struct {
 
 	// validateKeys is the verdict ValidateMetadataKey gives each API key,
 	// looked up first as "provider/key" and then as the bare key. A key with no
-	// entry either way is accepted, so a test only has to name the keys it wants
-	// rejected — and only has to qualify them when it cares which provider was
-	// asked.
+	// entry either way is accepted, so a test only has to name the keys it
+	// wants rejected, and only has to qualify them when it cares which provider
+	// was asked.
 	validateKeys map[string]error
 
 	// adultCredentialErr is what ValidateAdultCredential reports, nil by
@@ -87,7 +87,7 @@ type stubManager struct {
 	adultCredentialErr error
 
 	// searchHits, when set, is what SearchLibrary answers instead of asking
-	// provider — the seam a chain of more than one provider is proved through,
+	// provider. The seam a chain of more than one provider is proved through,
 	// since the stub provider is a single TMDB.
 	searchHits *library.SearchHits
 
@@ -106,7 +106,7 @@ type matchCall struct {
 	mediaType string
 	tmdbID    int64
 	// ref is the whole identity the handler resolved, so a match made by
-	// provider/provider_ref can be told apart from one made by tmdb_id — the
+	// provider/provider_ref can be told apart from one made by tmdb_id. The
 	// tmdbID above is zero for every ref that is not TMDB's.
 	ref core.ItemRef
 }
@@ -120,7 +120,7 @@ type searchCall struct {
 
 // removeCall records what the handlers asked the manager to remove. Deleting
 // files is the manager's job, so the HTTP layer's contract is the flag it
-// forwards, not what happens on disk — internal/library owns that half.
+// forwards, not what happens on disk, internal/library owns that half.
 type removeCall struct {
 	kind        string
 	id          int64
@@ -241,7 +241,7 @@ func (m *stubManager) MatchUnmatched(ctx context.Context, id int64, mediaType st
 // SearchLibrary answers from the same stub provider Metadata does, so every
 // test written before search was per-library keeps meaning what it meant: a
 // stock database chains both default libraries to TMDB, and the stub provider
-// IS that TMDB. What it adds is the record of which library and media type the
+// is that TMDB. What it adds is the record of which library and media type the
 // handler asked about, and the searchHits seam for a longer chain.
 func (m *stubManager) SearchLibrary(ctx context.Context, libraryID int64, mediaType, q string) (*library.SearchHits, error) {
 	m.mu.Lock()
@@ -281,8 +281,8 @@ func (m *stubManager) searchCalls() []searchCall {
 }
 
 // AddSite writes an adult-kind series the way library.AddSite does, so the
-// handler tests read back the same shape a real manager produces — and, like
-// the real one, it files NO scenes. The catalogue walk is a job now, and a stub
+// handler tests read back the same shape a real manager produces, and, like the
+// real one, it files no scenes. The catalogue walk is a job now, and a stub
 // that quietly did it inline would hide the very split these tests defend.
 func (m *stubManager) AddSite(ctx context.Context, ref core.ItemRef, monitored *bool, libraryID int64) (*core.Series, error) {
 	m.mu.Lock()
@@ -331,7 +331,7 @@ func (m *stubManager) AddSiteAndWait(ctx context.Context, ref core.ItemRef, moni
 		SeriesID: sr.ID, SeasonNumber: 2022, EpisodeNumber: 1,
 		StashID: m.addSiteSceneStashID, Title: "Stub Scene",
 		AirDate: time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC),
-		// New scenes follow the site flag, exactly as writeScenes files them —
+		// New scenes follow the site flag, exactly as writeScenes files them,
 		// which is what makes the approval's scene-only monitoring observable:
 		// an unmonitored site files this unmonitored, and the approval has to
 		// be what flips it.
@@ -367,9 +367,9 @@ func (m *stubManager) siteRefs() []core.ItemRef {
 func (m *stubManager) Metadata() core.MetadataProvider { return m.provider }
 
 // AdultMetadataFor answers with the one canned provider for any id a stash-box
-// instance row exists for, so a test that seeds two instances gets the same fake
-// from both — what the handlers are asked to prove is which id they RESOLVED,
-// and adultProviderCalls is where that is recorded.
+// instance row exists for, so a test that seeds two instances gets the same
+// fake from both, what the handlers are asked to prove is which id they
+// resolved, and adultProviderCalls is where that is recorded.
 func (m *stubManager) AdultMetadataFor(ctx context.Context, providerID string) core.AdultMetadataProvider {
 	m.mu.Lock()
 	m.adultProviderCalls = append(m.adultProviderCalls, providerID)
@@ -383,8 +383,8 @@ func (m *stubManager) AdultMetadataFor(ctx context.Context, providerID string) c
 	return m.adult
 }
 
-// DefaultAdultMetadata resolves the way the real adapter does — the default
-// adult library's chain head, else the oldest instance — so a test can move the
+// DefaultAdultMetadata resolves the way the real adapter does (the default
+// adult library's chain head, else the oldest instance) so a test can move the
 // default by editing the library rather than by reaching into the stub.
 func (m *stubManager) DefaultAdultMetadata(ctx context.Context) (core.AdultMetadataProvider, string) {
 	if m.adult == nil {
@@ -428,7 +428,7 @@ func (m *stubManager) adultProviders() []string {
 // anything, so every existing test keeps meaning what it meant.
 //
 // The verdicts are keyed by (provider, key) so a test can reject a key for one
-// provider and accept the same string for another — the thing a per-provider
+// provider and accept the same string for another. The thing a per-provider
 // credential model has to get right. A bare key with no provider prefix answers
 // for every provider, which is what the tests written before there was a second
 // credentialed one mean.
@@ -545,22 +545,22 @@ func newTestServer(t *testing.T, opts ...Option) (http.Handler, *store.Store, *s
 // libraryFixture is the shape every per-library access test needs: one shelf of
 // each interesting state, and the identities that do and do not reach them.
 //
-// It exists once rather than per test because the matrix is the point — a
-// surface is only proved when the SAME restricted library is invisible to the
-// SAME ungranted account across all of them, and a fixture rebuilt per file
+// It exists once rather than per test because the matrix is the point. A
+// surface is only proved when the same restricted library is invisible to the
+// same ungranted account across all of them, and a fixture rebuilt per file
 // drifts until two surfaces are answering about two different libraries.
 type libraryFixture struct {
 	// openTV and openMovie are the seeded shelves: active, unrestricted, and
 	// the answer to "did the filter break the ordinary case".
 	openTV    core.Library
 	openMovie core.Library
-	// kids and kidsFilms are active ORDINARY libraries narrowed to one account.
+	// kids and kidsFilms are active ordinary libraries narrowed to one account.
 	// Non-adult on purpose: the promise of absence must hold on an everyday
 	// shelf, not only on the one it was written for.
 	kids      core.Library
 	kidsFilms core.Library
-	// dormantTV and dormantMovie are switched off, which binds everyone —
-	// admins included.
+	// dormantTV and dormantMovie are switched off, which binds everyone, admins
+	// included.
 	dormantTV    core.Library
 	dormantMovie core.Library
 
@@ -628,19 +628,19 @@ func restrictedLibraryFixture(t *testing.T, st *store.Store) libraryFixture {
 // reachable: an adult library exists and is switched on.
 //
 // It stands where a call to the server-wide switch used to, and the difference
-// is the point of the whole restructure — there is nothing to enable, only a
+// is the point of the whole restructure. There is nothing to enable, only a
 // shelf to have. The row is created restricted and DLNA-dark, which is what
 // POST /libraries writes for kind=adult, so a test seeding through here sees
 // the state the real door produces.
 //
 // Idempotent: an adult library that already exists is switched back on rather
 // than duplicated, so a test may say "and now it is on again" without tracking
-// whether it once was.
-// defaultLibraryID is the shelf a fixture item of this kind is filed on.
+// whether it once was. defaultLibraryID is the shelf a fixture item of this
+// kind is filed on.
 //
-// Every movie and every series names its library — migration 0011 stamped the
+// Every movie and every series names its library (migration 0011 stamped the
 // rows that carried a zero, and the visibility gate resolves ownership by id
-// alone — so a fixture that left library_id at zero would be a row no gate can
+// alone) so a fixture that left library_id at zero would be a row no gate can
 // place, which is exactly what the adult surfaces must never contain.
 func defaultLibraryID(t *testing.T, st *store.Store, kind string) int64 {
 	t.Helper()
@@ -1059,7 +1059,7 @@ func TestPutSettingsRequiresBody(t *testing.T) {
 
 // absentCredentials is the credential map of a fresh install: one entry per
 // credentialed provider, every one of them absent, and nothing for the keyless
-// ones — "Ready" is a fact the client reads off the provider list, not a verdict
+// ones, "Ready" is a fact the client reads off the provider list, not a verdict
 // this server reached.
 func absentCredentials() map[string]credentialStateJSON {
 	out := map[string]credentialStateJSON{}
@@ -1104,10 +1104,10 @@ func TestSystemStatus(t *testing.T) {
 		SchemaVersion: got.SchemaVersion,
 		Scanning:      false,
 		// The per-library breakdown names the shelves this caller can see. On a
-		// fresh install that is the two ACTIVE seeded libraries — the dormant
-		// Anime and Adult rows are invisible to everyone, so they carry no badge
-		// either. Both items landed with library_id 0, so neither library counts
-		// them: the count is ownership, not attribution.
+		// fresh install that is the two active seeded libraries. The dormant
+		// Anime and Adult rows are invisible to everyone, so they carry no
+		// badge either. Both items landed with library_id 0, so neither library
+		// counts them: the count is ownership, not attribution.
 		Counts: statusCounts{Movies: 1, Series: 1, MediaFiles: 1, Unmatched: 1,
 			Libraries: []libraryItemCountJSON{{ID: 1}, {ID: 2}}},
 		// "/data" does not exist on the test machine, so the disk stays

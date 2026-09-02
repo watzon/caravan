@@ -93,7 +93,7 @@ func loadServeConfig(args []string) (*config.Config, string, error) {
 func serve(cfg *config.Config, configDir, configFile, databasePath string, logger *slog.Logger) error {
 	// The clean-shutdown marker (SPEC §2.3) is claimed before the database is
 	// opened, because "did the last session end properly?" has to be answered
-	// while the answer is still on disk — opening the database is already a
+	// while the answer is still on disk, opening the database is already a
 	// write. Its deferred release is registered first so it runs last: the
 	// marker may only say "clean" once everything below has been torn down.
 	marker := integrity.NewMarker(cfg.StatePath())
@@ -111,14 +111,14 @@ func serve(cfg *config.Config, configDir, configFile, databasePath string, logge
 			"path", marker.Path(), "error", err)
 	}
 	// Only a start that got as far as opening the database may declare a clean
-	// shutdown. If the database is *why* this start failed — the likeliest way a
-	// dirty eject shows itself — releasing the marker would erase the evidence
+	// shutdown. If the database is *why* this start failed (the likeliest way a
+	// dirty eject shows itself) releasing the marker would erase the evidence
 	// and the next start would offer no recovery at all.
 	storeOpen := false
 	// flushed is what the marker actually vouches for. The checkpoint and the
 	// close below feed their verdict into it, because a drive that returned an
 	// error on either is precisely the drive whose next start must offer
-	// recovery — even though the marker's own tiny write may still succeed.
+	// recovery, even though the marker's own tiny write may still succeed.
 	flushed := true
 	defer func() {
 		if !storeOpen {
@@ -200,17 +200,17 @@ func serve(cfg *config.Config, configDir, configFile, databasePath string, logge
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	// The playback handoff (SPEC §5.2): imports hand it a "the library changed"
-	// notification, it turns that into a durable job, and the job tells
-	// Jellyfin to rescan. It is always constructed — an unconfigured or
+	// The playback handoff (SPEC §5.2): imports hand it a "the library
+	// changed" notification, it turns that into a durable job, and the job
+	// tells Jellyfin to rescan. It is always constructed. An unconfigured or
 	// disabled handoff is a no-op, not an absent dependency.
 	handoff := jellyfin.NewService(st, nil, logger)
 
-	// The adult library's handoff (PLAN phase 11), the same shape for Stash:
-	// a scene import records that a scoped scan and an identity push are owed,
-	// and the jobs carry them out. Always constructed for the reason the
-	// Jellyfin one is — an unconfigured handoff is a no-op — and doubly inert
-	// besides, because it also refuses to run while the adult module is off.
+	// The adult library's handoff, the same shape for Stash: a scene import
+	// records that a scoped scan and an identity push are owed, and the jobs
+	// carry them out. Always constructed for the reason the Jellyfin one is (an
+	// unconfigured handoff is a no-op) and doubly inert besides, because it
+	// also refuses to run while the adult module is off.
 	stashHandoff := stash.NewService(st, nil, logger)
 
 	mgr := newLibraryAdapter(st, cfg.StorageRoot, logger, handoff, stashHandoff)
@@ -242,9 +242,9 @@ func serve(cfg *config.Config, configDir, configFile, databasePath string, logge
 		return err
 	}
 
-	// The convert-for-TV queue is optional (SPEC §8): without ffmpeg on PATH
+	// The convert-for-TV queue is optional (SPEC §8): without ffmpeg on path
 	// the service reports itself unavailable, the API refuses to queue work,
-	// and the UI hides the affordance. Detection happens once at startup — a
+	// and the UI hides the affordance. Detection happens once at startup. A
 	// binary appearing mid-run is a restart, not a poll.
 	converter := convert.New(st, mgr.StorageRoot, convert.Detect(), logger)
 	logger.Info("convert-for-tv queue", "ffmpeg", converter.Available())
@@ -254,10 +254,10 @@ func serve(cfg *config.Config, configDir, configFile, databasePath string, logge
 		return err
 	}
 
-	// The built-in DLNA media server (SPEC §5.1): it shares this process's HTTP
-	// listener, so it needs that port to advertise a LOCATION clients can
-	// fetch. A listen address without a usable port means no advertisement —
-	// the API and the SPA still serve, and GET /dlna says why.
+	// The built-in DLNA media server (SPEC §5.1): it shares this process's
+	// HTTP listener, so it needs that port to advertise a location clients can
+	// fetch. A listen address without a usable port means no advertisement. The
+	// API and the SPA still serve, and GET /dlna says why.
 	dlnaServer := dlna.New(st, mgr.StorageRoot, listenPort(cfg.Listen, logger), logger)
 	// Deferred before Start so a Start that fails halfway is still torn down,
 	// and ordered so byebye goes out while the HTTP server can still answer the
@@ -278,7 +278,7 @@ func serve(cfg *config.Config, configDir, configFile, databasePath string, logge
 	// Conversions get a worker of their own: a two-hour transcode on the shared
 	// worker would hold up the Jellyfin handoff, the RSS sync and every
 	// monitored search for as long as it ran. A storage migration is the same
-	// shape of work — hours of it — for the same reason.
+	// shape of work (hours of it) for the same reason.
 	runner := automation.NewRunner(st, indexers, engines.await,
 		automation.WithDedicatedWorker(convert.JobKind, converter.Handle),
 		automation.WithDedicatedWorker(relocate.JobKind, relocator.Handle),
@@ -294,10 +294,10 @@ func serve(cfg *config.Config, configDir, configFile, databasePath string, logge
 		automation.WithHandler(stash.ScanJobKind, stashHandoff.HandleScan),
 		automation.WithHandler(stash.IdentifyJobKind, stashHandoff.HandleIdentify),
 		// The metadata refresh needs the library manager, which the automation
-		// package deliberately does not know about — same registration story
-		// as the Jellyfin handoff. A process with no TMDB key yet skips the
-		// sweep cleanly rather than burning the recurring job's retries on
-		// ordinary first-run state.
+		// package deliberately does not know about, same registration story as
+		// the Jellyfin handoff. A process with no TMDB key yet skips the sweep
+		// cleanly rather than burning the recurring job's retries on ordinary
+		// first-run state.
 		automation.WithHandler(core.JobRefreshMetadata,
 			func(ctx context.Context, _ *store.Store, _ json.RawMessage) error {
 				res, err := mgr.RefreshLibrary(ctx)
@@ -443,13 +443,13 @@ func listenPort(addr string, logger *slog.Logger) int {
 // warnOnUnseededShelves reports a library kind that ended up with no library at
 // all, which after migration 0011 has exactly one cause worth naming.
 //
-// 0011 seeds a dormant shelf for every kind, and skips a seed only when both the
-// preferred root path and its suffixed fallback are already taken by some other
-// library. That skip is deliberate — a refused upgrade would be a worse answer
-// than a missing optional shelf — but it is otherwise silent, and a silent skip
-// leaves an owner looking for an Anime shelf that the release notes promised.
-// Nothing else produces the state: the seeded rows are their kind's default, and
-// the delete guard refuses to remove a default.
+// 0011 seeds a dormant shelf for every kind, and skips a seed only when both
+// the preferred root path and its suffixed fallback are already taken by some
+// other library. That skip is deliberate (a refused upgrade would be a worse
+// answer than a missing optional shelf) but it is otherwise silent, and a
+// silent skip leaves an owner looking for an Anime shelf that the release notes
+// promised. Nothing else produces the state: the seeded rows are their kind's
+// default, and the delete guard refuses to remove a default.
 //
 // It warns rather than repairing. Choosing a root path is the one decision here
 // that belongs to the person who owns the disk.

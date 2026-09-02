@@ -11,7 +11,7 @@ import (
 // The root is storage-root-relative with forward slashes like every other
 // stored path (SPEC §1.2 pillar 3), and sits beside library/Movies and
 // library/TV so that "exclude the adult root" is one path prefix rather than a
-// scan of the whole tree (PLAN phase 9 task 6).
+// scan of the whole tree.
 const (
 	AdultLibraryName = "Adult"
 	AdultLibraryRoot = "library/Adult"

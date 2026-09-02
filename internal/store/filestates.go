@@ -98,9 +98,9 @@ type EpisodeFileState struct {
 	// profile of their own, so the wanted computation resolves the series'.
 	SeriesProfileID int64
 	// SeriesKind is the series' core.SeriesKind* value. It rides along because
-	// every decision downstream of a wanted episode — which library's quality
+	// every decision downstream of a wanted episode (which library's quality
 	// profile grades it, which indexers search for it, whether it may be shown
-	// at all — is a decision about the series it belongs to, and a second query
+	// at all) is a decision about the series it belongs to, and a second query
 	// per episode to find that out is a query per episode.
 	SeriesKind string
 	// SeriesLibraryID is the series' own library, for SeriesKind's reason: a

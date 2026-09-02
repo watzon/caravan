@@ -10,7 +10,7 @@ import (
 )
 
 // The three columns 0023 adds round-trip: a grab's target library, a parked
-// file's scope, and a cached release's own category filing — the field the
+// file's scope, and a cached release's own category filing. The field the
 // untied-grab adult gate reads without re-searching.
 func TestUniversalSearchColumnsRoundTrip(t *testing.T) {
 	ctx := context.Background()

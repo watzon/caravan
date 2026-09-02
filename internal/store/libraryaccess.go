@@ -10,7 +10,7 @@ import (
 //
 // Ids and nothing else. The screen that renders this list wants a username and
 // a role beside each row, but those live on `users` and the API already lists
-// every account to draw the checklist — joining them here would make the store
+// every account to draw the checklist, joining them here would make the store
 // answer a question about accounts while pretending to answer one about a
 // library, and would hand the caller a second, staler copy of every user row.
 //
@@ -35,8 +35,8 @@ func (s *Store) ListLibraryAccess(ctx context.Context, libraryID int64) ([]int64
 // one of the two queries the API's per-request gate runs, which is what bounds
 // the cost of per-library filtering to a constant.
 //
-// User id 0 — the API-key credential and the open install, both of which
-// authenticate as an admin — holds nothing and is not special-cased: there is no
+// User id 0 (the API-key credential and the open install, both of which
+// authenticate as an admin) holds nothing and is not special-cased: there is no
 // users row 0 to grant, and LibraryVisible never asks about a grant for an
 // admin.
 func (s *Store) ListLibraryAccessForUser(ctx context.Context, userID int64) (map[int64]bool, error) {
@@ -123,7 +123,7 @@ func (s *Store) SetLibraryAccess(ctx context.Context, libraryID int64, restricte
 // It is its own writer rather than a field on UpdateLibrary's round trip
 // because it is its own decision: everything else that method writes is a
 // setting, and this is whether the library exists for anybody at all. Nothing
-// is deleted — the rows, the files and the grants all wait for it to come back
+// is deleted, the rows, the files and the grants all wait for it to come back
 // on.
 //
 // The DLNA update id advances under UpdateLibrary's condition, and for its
@@ -154,7 +154,7 @@ func (s *Store) SetLibraryActive(ctx context.Context, id int64, active bool) err
 // It is the zero-traffic guard in its general form: the question "is this
 // module reachable at all" used to be a settings lookup, and with the switch
 // living on the library rows it becomes this. A caller that gets false must do
-// nothing at all — not degrade, not ask a provider, not advertise a container —
+// nothing at all (not degrade, not ask a provider, not advertise a container)
 // which is what keeps "off" meaning absent rather than merely hidden.
 func (s *Store) AnyActiveLibraryOfKind(ctx context.Context, kind string) (bool, error) {
 	exists, err := s.db.NewSelect().Model((*libraryStoreModel)(nil)).

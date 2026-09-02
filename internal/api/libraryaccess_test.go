@@ -15,9 +15,9 @@ import (
 )
 
 // The per-library access rule generalizes the adult module's promise of
-// absence, so it has to hold on an ORDINARY shelf: a television library
-// narrowed to one housemate must be as absent to the other as the adult
-// library ever was, on every surface that can carry one of its rows.
+// absence, so it has to hold on an ordinary shelf: a television library
+// narrowed to one housemate must be as absent to the other as the adult library
+// ever was, on every surface that can carry one of its rows.
 //
 // These are driven through the handlers with a synthetic identity rather than
 // over HTTP because a member cannot reach /library, /calendar, /events or
@@ -211,7 +211,7 @@ func TestRestrictedLibraryIsAbsentToAnUngrantedMember(t *testing.T) {
 	}
 }
 
-// An inactive library binds EVERYONE. The admin is the case worth pinning:
+// An inactive library binds everyone. The admin is the case worth pinning:
 // deactivating is how an owner hides a shelf from themselves, and a switch the
 // person holding it cannot feel is not a switch.
 func TestInactiveLibraryIsAbsentToTheAdminToo(t *testing.T) {
@@ -273,11 +273,12 @@ func TestInactiveLibraryIsAbsentToTheAdminToo(t *testing.T) {
 		}
 	}
 
-	// It IS on the Libraries screen, carrying active=false for the badge — and
+	// It is on the Libraries screen, carrying active=false for the badge, and
 	// that is the one exception, not a leak. GET /libraries is the management
 	// surface, and the toggle that undoes dormancy is reachable only from it; a
 	// shelf that vanished from the list the moment it was switched off would be
-	// a one-way door. Every route above is a CONTENT route, and those stay shut.
+	// a one-way door. Every route above is a content route, and those stay
+	// shut.
 	rec = doAuth(t, h, http.MethodGet, "/api/v1/libraries", "", adminCookie)
 	wantStatus(t, rec, http.StatusOK)
 	var listed libraryListBody
@@ -298,7 +299,7 @@ func TestInactiveLibraryIsAbsentToTheAdminToo(t *testing.T) {
 }
 
 // GET /images is auth-exempt for televisions, so it is the one surface an
-// ungranted housemate — or anyone on the LAN — can reach with no credential at
+// ungranted housemate (or anyone on the LAN) can reach with no credential at
 // all. Every library root now answers there, not just the adult one.
 func TestImagesFollowLibraryAccess(t *testing.T) {
 	ctx := context.Background()
@@ -430,16 +431,14 @@ func TestLibraryGateReadsTheStoreOncePerRequest(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // The access endpoints: the doors that replaced the module switch.
-// ---------------------------------------------------------------------------
 
 // Restricting a library and sharing it on the LAN cannot both be true.
 //
 // DLNA has no accounts: a container on the tree is readable by every device on
 // the network, so "restricted to two people" and "advertised to the house" are
 // contradictory, and of the two it is the restriction that was just asked for.
-// Unrestricting does NOT put the flag back — nobody asked for the LAN to see it
+// Unrestricting does not put the flag back. Nobody asked for the LAN to see it
 // again, and silently re-advertising a shelf would be exactly the surprise
 // clearing it prevented.
 func TestRestrictingALibraryTakesItOffTheLAN(t *testing.T) {
@@ -491,7 +490,7 @@ func TestSetLibraryAccessRefusesAnUnknownAccountWithoutWritingAnything(t *testin
 	}
 }
 
-// A restricted library's roster is editable while the library is DORMANT, which
+// A restricted library's roster is editable while the library is dormant, which
 // is the whole reason management and content routes ask different questions: an
 // owner fixing who may see a shelf before switching it back on must not have to
 // make it visible to the wrong people first.
@@ -520,7 +519,7 @@ func TestAccessCardReachesAnInactiveLibrary(t *testing.T) {
 
 // Deleting an adult library is an ordinary deletion now, under the ordinary
 // guards. Which leaves one install that cannot delete: a single adult library
-// that is its kind's default. That refusal is correct and must stay — every
+// that is its kind's default. That refusal is correct and must stay. Every
 // by-kind lookup needs an answer, and `active=0` is already the "off" that
 // deletion was never the right spelling of. Anyone tempted to "fix" it should
 // demote the library or make another default first.

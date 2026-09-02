@@ -12,7 +12,7 @@ import (
 	"github.com/watzon/caravan/internal/core"
 )
 
-// The scene scope's filter surface (PLAN phase 12 task 3).
+// The scene scope's filter surface.
 //
 // What is under test is the round trip: every control the rail offers reaches
 // the provider as the field it means, and anything the parser cannot read is a
@@ -159,7 +159,7 @@ func TestAdultDiscoverRejectsMalformedFilters(t *testing.T) {
 	}
 }
 
-// A provider that cannot express a filter says so, and that is the CALLER's
+// A provider that cannot express a filter says so, and that is the caller's
 // problem: a 400 naming the filter, not the 502 an upstream failure gets. The
 // value asked for is never echoed.
 func TestAdultDiscoverReportsAFilterTheEndpointCannotServe(t *testing.T) {
@@ -300,12 +300,10 @@ func TestAdultTypeaheadsReturnArrays(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// What the rail is allowed to draw (PLAN phase 12, acceptance criterion 1).
-// ---------------------------------------------------------------------------
+// What the rail is allowed to draw.
 
 // thinAdultProvider is a dialect that serves the filters every stash-box has
-// and refuses the ones only TPDB does — StashDB and FansDB, in other words.
+// and refuses the ones only TPDB does, StashDB and FansDB, in other words.
 type thinAdultProvider struct {
 	fakeAdultProvider
 }
@@ -348,7 +346,7 @@ func TestAuthMeReportsWhichSceneFiltersTheEndpointServes(t *testing.T) {
 }
 
 // The block is a fact about the adult module, so it is absent for a caller the
-// module is invisible to — the same rule the `adult` flag itself follows, and
+// module is invisible to. The same rule the `adult` flag itself follows, and
 // the reason it is a pointer.
 func TestSceneFiltersAreAbsentWithoutTheModule(t *testing.T) {
 	h, st, mgr := newTestServer(t)

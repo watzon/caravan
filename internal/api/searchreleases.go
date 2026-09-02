@@ -10,17 +10,17 @@ import (
 	"github.com/watzon/caravan/internal/searchql"
 )
 
-// Universal indexer search (plan part B): a free-text query fanned out over
-// the enabled indexers, Prowlarr-style. It exists for the releases the
-// derived per-item queries miss — a naming pattern the builders never try —
-// and for content that is no library item at all.
+// Universal indexer search: a free-text query fanned out over the enabled
+// indexers, Prowlarr-style. It exists for the releases the derived per-item
+// queries miss (a naming pattern the builders never try) and for content that
+// is no library item at all.
 //
 // It reuses the per-item picker's whole machinery: the same fan-out
 // (searchIndexers), the same cache (UpsertRelease is what makes the grab a
 // lookup by id), and the same row DTO, so one frontend table renders both.
 
 // searchReleaseLimits bound the response, not the cache: every row is cached
-// BEFORE the cut, so a truncated result is still grabbable after a narrower
+// before the cut, so a truncated result is still grabbable after a narrower
 // re-search finds it again.
 const (
 	searchReleaseDefaultLimit = 200
@@ -46,14 +46,14 @@ func (s *server) handleSearchReleases(w http.ResponseWriter, r *http.Request) {
 	// The parser's message is written for the search box and is passed through
 	// verbatim, because it names the part of the expression that broke and the
 	// user is the only one who can fix it. It only refuses input with no
-	// reading at all — an unknown field name stays a keyword, so "Re:Zero" is
+	// reading at all. An unknown field name stays a keyword, so "Re:Zero" is
 	// searched for rather than rejected.
 	query, err := searchql.Parse(q)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	// An expression of nothing but filters — `quality:1080p` — narrows results
+	// An expression of nothing but filters (`quality:1080p`) narrows results
 	// that were never asked for. Fanning it out would send the empty string to
 	// every indexer and filter whatever came back, so it is refused instead.
 	upstream := query.UpstreamQueries()
@@ -88,12 +88,12 @@ func (s *server) handleSearchReleases(w http.ResponseWriter, r *http.Request) {
 		s.writeStoreError(w, "read library access", err)
 		return
 	}
-	// The adult gate on the way OUT: requested adult categories are stripped
-	// for a caller the module is absent to, and a request that named ONLY
-	// adult categories short-circuits to an empty answer — indistinguishable
-	// from a search that matched nothing, which is the module's promise of
-	// absence. It must never fall through to an empty list, because an empty
-	// list means "search unfiltered" and would return everything.
+	// The adult gate on the way out: requested adult categories are stripped
+	// for a caller the module is absent to, and a request that named only adult
+	// categories short-circuits to an empty answer, indistinguishable from a
+	// search that matched nothing, which is the module's promise of absence. It
+	// must never fall through to an empty list, because an empty list means
+	// "search unfiltered" and would return everything.
 	if !adult {
 		kept := cats[:0]
 		for _, id := range cats {
@@ -112,7 +112,7 @@ func (s *server) handleSearchReleases(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The profile every row is scored against: the chosen library's, or the
-	// store-wide default. Never nil — the scorer and its DTO dereference it —
+	// store-wide default. Never nil (the scorer and its DTO dereference it)
 	// which is why an absent library_id still resolves a profile.
 	var libraryID int64
 	profile := (*core.QualityProfile)(nil)
@@ -180,10 +180,10 @@ func (s *server) handleSearchReleases(w http.ResponseWriter, r *http.Request) {
 		Errors:   failures,
 	}
 	for _, rel := range releases {
-		// The belt behind the stripped request: an indexer that files XXX
-		// into an unfiltered answer must not show it to a caller the module
-		// is absent to — and must not CACHE it under this search either, or
-		// the row id would be grabbable.
+		// The belt behind the stripped request: an indexer that files XXX into
+		// an unfiltered answer must not show it to a caller the module is
+		// absent to, and must not cache it under this search either, or the row
+		// id would be grabbable.
 		if !adult && core.HasAdultCategory(rel.Categories) {
 			continue
 		}
@@ -191,11 +191,11 @@ func (s *server) handleSearchReleases(w http.ResponseWriter, r *http.Request) {
 			s.writeStoreError(w, "cache release", err)
 			return
 		}
-		// The half of the expression no indexer could be asked to honour, applied
-		// after the cache and before the cut: a hidden row keeps its id, so
-		// loosening the expression re-finds it without a second fan-out. The
-		// count is reported rather than the rows silently vanishing — a search
-		// that returns three of forty should say so.
+		// The half of the expression no indexer could be asked to honour,
+		// applied after the cache and before the cut: a hidden row keeps its
+		// id, so loosening the expression re-finds it without a second fan-out.
+		// The count is reported rather than the rows silently vanishing. A
+		// search that returns three of forty should say so.
 		if !query.Matches(rel) {
 			out.Filtered++
 			continue
@@ -215,9 +215,9 @@ func (s *server) handleSearchReleases(w http.ResponseWriter, r *http.Request) {
 }
 
 // searchGrabRequest is POST /search/grab's body: the cached release, the
-// library the payload belongs to, and — optionally — the item it is tied to.
+// library the payload belongs to, and (optionally) the item it is tied to.
 //
-// "Add on the fly" is deliberately NOT here: the client adds through the
+// "Add on the fly" is deliberately not here: the client adds through the
 // ordinary add endpoint first and then ties to the new item, so there is one
 // add path and one metadata-search UI. A failed grab after a successful add
 // leaves a visible library item, which is honest and recoverable.
@@ -259,9 +259,9 @@ func (s *server) handleSearchGrab(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The grab-side adult gate, and what releases.categories exists for: a
-	// cached adult release id — cached by an admin's own search — must be
-	// "not found" to a caller the module is absent to, not a grabbable
-	// download. 404 rather than 403 for the module's usual reason.
+	// cached adult release id (cached by an admin's own search) must be "not
+	// found" to a caller the module is absent to, not a grabbable download. 404
+	// rather than 403 for the module's usual reason.
 	rel, err := s.st.GetRelease(ctx, body.ReleaseID)
 	if err != nil {
 		s.writeStoreError(w, "get release", err)
@@ -280,9 +280,9 @@ func (s *server) handleSearchGrab(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if body.Tie == nil {
-		// Untied: the library IS the whole target. The import pipeline sees a
-		// grab with no movie and no series but a library, and parks the
-		// payload in scan review scoped to it.
+		// Untied: the library is the whole target. The import pipeline sees a
+		// grab with no movie and no series but a library, and parks the payload
+		// in scan review scoped to it.
 		s.grabRelease(w, r, lib.ID, lib.Kind,
 			body.ReleaseID,
 			core.GrabInfo{LibraryID: lib.ID},
@@ -303,9 +303,10 @@ func (s *server) handleSearchGrab(w http.ResponseWriter, r *http.Request) {
 		}
 		s.grabRelease(w, r, lib.ID, core.LibraryKindMovie, body.ReleaseID,
 			core.GrabInfo{MovieID: m.ID, LibraryID: lib.ID},
-			// lib.Kind, not the movie's own vocabulary: the check above has just
-			// proved the film sits on THIS shelf, and an anime shelf's films sort
-			// beside its episodes rather than into the Movies folder.
+			// lib.Kind, not the movie's own vocabulary: the check above has
+			// just proved the film sits on this shelf, and an anime shelf's
+			// films sort beside its episodes rather than into the Movies
+			// folder.
 			core.AddOpts{Category: engineCategoryFor(lib.Kind), MovieID: m.ID, LibraryID: lib.ID})
 	case core.MediaTypeSeries:
 		sr, ok := s.getVisibleSeries(w, r, body.Tie.MediaID)
@@ -340,8 +341,8 @@ func (s *server) handleSearchGrab(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// engineCategoryFor labels a grab by the SHELF its payload lands on — the kind
-// of the library it was made for — and it is the one labeller every grab goes
+// engineCategoryFor labels a grab by the shelf its payload lands on (the kind
+// of the library it was made for) and it is the one labeller every grab goes
 // through, tied or untied.
 //
 // The shelf rather than the item table, and that is the whole rule: a film
@@ -350,7 +351,7 @@ func (s *server) handleSearchGrab(w http.ResponseWriter, r *http.Request) {
 // chose, not the table Caravan happens to store the row in. It is why the movie
 // tie asks its target library rather than answering "movies" outright.
 //
-// Per-LIBRARY labels are a different thing and deliberately not this: two anime
+// Per-library labels are a different thing and deliberately not this: two anime
 // shelves share one label, because a label per row would be a settings field
 // the owner names, not a value derived here.
 func engineCategoryFor(kind string) string {

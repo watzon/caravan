@@ -21,7 +21,7 @@ const downloadColumns = `id, grab_id, engine, engine_id, title, state, progress,
 // handle and this table is how those handles are mapped back to grabs.
 //
 // A zero GrabID never clears an existing link. Grabs are a concept the download
-// engine does not have — core.AddOpts carries no grab id — so every progress
+// engine does not have (core.AddOpts carries no grab id) so every progress
 // record an engine writes after the grab handler linked the row reports zero.
 // Treating that as "no grab" would unlink the download from the item it was
 // fetched for, and the import watcher would then skip it forever.

@@ -131,11 +131,11 @@ func (s *Store) ListUsers(ctx context.Context) ([]core.User, error) {
 
 // UsernamesByID maps account ids onto usernames, omitting the ids that name
 // nobody. It exists for the requests screen, which stores the id of whoever
-// asked and would otherwise either load every account or issue a query per row
-// — the same trade MovieIDsByTMDBID makes for the discover screens.
+// asked and would otherwise either load every account or issue a query per row.
+// The same trade MovieIDsByTMDBID makes for the discover screens.
 //
-// An id with no account — a housemate who has since been deleted, or the zero
-// that means "no account at all" — is simply absent from the map, so the caller
+// An id with no account (a housemate who has since been deleted, or the zero
+// that means "no account at all") is simply absent from the map, so the caller
 // renders it however it renders an unknown asker rather than being handed a
 // wrong name.
 func (s *Store) UsernamesByID(ctx context.Context, ids []int64) (map[int64]string, error) {

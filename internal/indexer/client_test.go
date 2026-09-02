@@ -257,7 +257,7 @@ func TestSearchNewznabParsesItems(t *testing.T) {
 // TestSearchPicksEnclosureMatchingProtocol is the AnimeTosho regression: items
 // carrying a .torrent and an .nzb enclosure side by side. encoding/xml keeps
 // only the last repeated element in a non-slice field, so before enclosures
-// became a slice every such release downloaded from the .nzb URL — and the
+// became a slice every such release downloaded from the .nzb URL, and the
 // torrent engine choked on XML ("bencode: unknown value type '<'").
 func TestSearchPicksEnclosureMatchingProtocol(t *testing.T) {
 	c, _ := newStub(t, torznabCfg(), map[string]response{"search": ok(t, "torznab_search_dual_enclosure.xml")})
@@ -538,7 +538,7 @@ func TestCategoriesParsesAdvertisedTree(t *testing.T) {
 }
 
 // TestCategoriesDropsUnusableNodes feeds a caps document with the id shapes
-// real indexers publish — flat lists, non-numeric ids, zero, padding — and
+// real indexers publish (flat lists, non-numeric ids, zero, padding) and
 // asserts only offerable nodes survive. A node without a numeric id takes its
 // subtree with it: an id is the one thing a selection can store.
 func TestCategoriesDropsUnusableNodes(t *testing.T) {
@@ -674,7 +674,7 @@ func TestConfigRoundTrips(t *testing.T) {
 // An RSS cycle fetches each indexer once with the union of every library's
 // categories, so the per-library narrowing is re-applied to the results rather
 // than to the request. That is only possible if the categories an item was
-// published in survive parsing — including the repeated `category` attribute,
+// published in survive parsing, including the repeated `category` attribute,
 // which is the one attribute indexers deliberately send more than once.
 func TestSearchParsesItemCategories(t *testing.T) {
 	c, _ := newStub(t, torznabCfg(), map[string]response{"search": ok(t, "torznab_search_categories.xml")})

@@ -36,7 +36,7 @@ var adultRoutes = []struct{ method, path string }{
 
 // fakeAdultProvider is a canned core.AdultMetadataProvider that records every
 // call. The recording is what the "no adult surface reaches the provider"
-// assertions are made against — a nil provider would prove only that a nil
+// assertions are made against. A nil provider would prove only that a nil
 // provider is quiet.
 type fakeAdultProvider struct {
 	sites      []core.SiteMeta
@@ -204,13 +204,11 @@ func linkSceneFile(t *testing.T, st *store.Store, stashID string) int64 {
 	return scene.ID
 }
 
-// ---------------------------------------------------------------------------
 // Disabled: every adult route is 404, for everyone, including an admin.
-// ---------------------------------------------------------------------------
 
 // This is the test Track 2 left as a placeholder: it could not tell a gated
-// route from an unregistered one while the adult mux was empty. It can now —
-// every path below IS registered, so a 404 can only be the gate.
+// route from an unregistered one while the adult mux was empty. It can now,
+// every path below is registered, so a 404 can only be the gate.
 func TestEveryAdultRouteIs404WhenTheModuleIsDisabled(t *testing.T) {
 	h, st, mgr := newTestServer(t)
 	provider := &fakeAdultProvider{sites: []core.SiteMeta{{StashID: "site-1", Name: "Brazzers"}}, scenes: fakeScenes()}
@@ -255,9 +253,7 @@ func TestDisabledAdultRoutesLookLikeUnroutedPaths(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Enabled: an ungranted member sees nothing adult, anywhere.
-// ---------------------------------------------------------------------------
 
 // The enumeration this phase's acceptance asks for: every surface an ungranted
 // member can reach at all, checked for adult content in one place so a new
@@ -273,7 +269,7 @@ func TestUngrantedMemberSeesNothingAdultOnAnySharedSurface(t *testing.T) {
 	adminCookie := login(t, h, testAdmin, testPassword)
 	cookie := login(t, h, testMember, testPassword)
 
-	// The member's OWN scene request, made while they were granted and then
+	// The member's own scene request, made while they were granted and then
 	// left behind when the grant was taken away. It has to be theirs: a member
 	// sees only their own rows anyway, so an admin's row would make the
 	// requests-screen assertion below true for a reason that has nothing to do
@@ -307,7 +303,7 @@ func TestUngrantedMemberSeesNothingAdultOnAnySharedSurface(t *testing.T) {
 		for _, route := range adultRoutes {
 			rec := doAuth(t, h, route.method, route.path, `{"granted":true}`, withCookie(cookie))
 			// 404 from the gate for the routes memberAllowed names, 403 from
-			// requireAuth for the rest — which is the same 403 every
+			// requireAuth for the rest, which is the same 403 every
 			// non-allowlisted route in the API gives a member, so it says
 			// nothing about this module in particular.
 			if rec.Code != http.StatusNotFound && rec.Code != http.StatusForbidden {
@@ -325,7 +321,7 @@ func TestUngrantedMemberSeesNothingAdultOnAnySharedSurface(t *testing.T) {
 	})
 
 	t.Run("a scene cannot be requested, and the refusal names no scene", func(t *testing.T) {
-		// A scene the library does NOT hold, so the refusal has to come from
+		// A scene the library does not hold, so the refusal has to come from
 		// the media-type rule and cannot come from the already-in-the-library
 		// conflict check standing in front of it.
 		rec := doAuth(t, h, http.MethodPost, "/api/v1/requests",
@@ -381,7 +377,7 @@ func TestUngrantedMemberSeesNothingAdultOnAnySharedSurface(t *testing.T) {
 	})
 }
 
-// An ADMIN on a server with the module switched off is the other half of the
+// An admin on a server with the module switched off is the other half of the
 // rule: their own scene rows go quiet rather than reappearing as evidence of a
 // module they turned off.
 func TestDisablingTheModuleHidesSceneRequestsFromTheAdminToo(t *testing.T) {
@@ -416,7 +412,7 @@ func TestDisablingTheModuleHidesSceneRequestsFromTheAdminToo(t *testing.T) {
 
 	// Nothing was deleted: switching it back on finds the row as it was. The
 	// library route is reachable throughout, which is the whole difference
-	// between a dormant shelf and a hidden one — see manageableLibrary.
+	// between a dormant shelf and a hidden one. See manageableLibrary.
 	wantStatus(t, doAuth(t, h, http.MethodPatch, "/api/v1/libraries/"+itoa(lib.ID),
 		`{"active":true}`, withCookie(cookie)), http.StatusOK)
 	rec = doAuth(t, h, http.MethodGet, "/api/v1/requests", "", withCookie(cookie))
@@ -425,9 +421,7 @@ func TestDisablingTheModuleHidesSceneRequestsFromTheAdminToo(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Enabled and granted: the member's whole journey.
-// ---------------------------------------------------------------------------
 
 func TestGrantedMemberCanDiscoverAndRequestAScene(t *testing.T) {
 	h, st, mgr := newTestServer(t)
@@ -498,7 +492,7 @@ func TestGrantedMemberCanDiscoverAndRequestAScene(t *testing.T) {
 		t.Error("a requested scene does not read as requested")
 	}
 
-	// Approving adds the SITE the scene belongs to, and closes the request.
+	// Approving adds the site the scene belongs to, and closes the request.
 	rec = doAuth(t, h, http.MethodPost, "/api/v1/requests/"+itoa(created.ID)+"/approve",
 		"{}", withCookie(adminCookie))
 	wantStatus(t, rec, http.StatusOK)
@@ -568,9 +562,9 @@ func TestGrantedMemberReadsTheAdultScreensButCannotWrite(t *testing.T) {
 		t.Errorf("performers = %v", scene.Performers)
 	}
 
-	// The Explore rail's Site pill (PLAN phase 12 task 5) drives this one, and
-	// the widening ladder only appears once a site is picked — so a member who
-	// cannot search sites cannot ask for "this whole network's scenes" at all.
+	// The Explore rail's Site pill drives this one, and the widening ladder
+	// only appears once a site is picked, so a member who cannot search sites
+	// cannot ask for "this whole network's scenes" at all.
 	rec = doAuth(t, h, http.MethodGet, "/api/v1/adult/search?q=brazzers", "", withCookie(cookie))
 	wantStatus(t, rec, http.StatusOK)
 	var found struct {
@@ -698,16 +692,14 @@ func TestSiteEndpointRefusesATelevisionSeries(t *testing.T) {
 	wantStatus(t, rec, http.StatusOK)
 }
 
-// ---------------------------------------------------------------------------
 // Bringing the module into existence.
-// ---------------------------------------------------------------------------
 
 // The whole bootstrap, in the order the door now admits.
 //
-// There is no module switch: an adult library IS the module, so POST /libraries
-// is what turns the /adult browse surface on. Stash-box instance CRUD is
-// admin metadata, reachable before that library exists, so the Add-library
-// warning can be satisfied first.
+// There is no module switch: an adult library is the module, so POST /libraries
+// is what turns the /adult browse surface on. Stash-box instance CRUD is admin
+// metadata, reachable before that library exists, so the Add-library warning
+// can be satisfied first.
 //
 // The row is born restricted and DLNA-dark, which is what the module's own
 // switch used to guarantee: the household does not acquire a shelf because
@@ -733,13 +725,13 @@ func TestCreatingAnAdultLibraryOpensTheModuleAndThenItsInstanceRoutes(t *testing
 		`{"kind":"adult","name":"Scenes","root_path":"library/Scenes"}`,
 		withCookie(memberCookie)), http.StatusForbidden)
 
-	// A SECOND adult library, beside the dormant one migration 0011 seeds: the
-	// seeded row's own on-switch is `active`, and this covers the other door —
+	// A second adult library, beside the dormant one migration 0011 seeds: the
+	// seeded row's own on-switch is `active`, and this covers the other door,
 	// creating one, which still opens the module because CreateLibrary forces a
 	// new library active.
 	//
-	// No stash-box instance is configured, and the create is not refused for it:
-	// the chain defaults to the bare legacy id, which is the id the first
+	// No stash-box instance is configured, and the create is not refused for
+	// it: the chain defaults to the bare legacy id, which is the id the first
 	// instance ever created is minted with, so it resolves the moment one is.
 	rec := doAuth(t, h, http.MethodPost, "/api/v1/libraries",
 		`{"kind":"adult","name":"Scenes","root_path":"library/Scenes"}`, withCookie(adminCookie))
@@ -767,9 +759,7 @@ func TestPutSettingsStillRefusesTheAdultKey(t *testing.T) {
 	wantStatus(t, rec, http.StatusBadRequest)
 }
 
-// ---------------------------------------------------------------------------
 // The member-access card.
-// ---------------------------------------------------------------------------
 
 // GET /users is reachable on every install, so it must carry nothing adult:
 // an "adult_access" key on an install that never enabled the module is exactly
@@ -796,7 +786,7 @@ func TestTheAccountsAPICarriesNoAdultField(t *testing.T) {
 //
 // Admin rows report always_granted rather than a checkbox: an admin bypasses
 // restriction (core.LibraryVisible), so a toggle beside their name would
-// describe a permission that does nothing — and the person reading the card
+// describe a permission that does nothing, and the person reading the card
 // would believe they had removed access they had not.
 func TestLibraryAccessCardReportsGrantsAndAdminsAreAlwaysGranted(t *testing.T) {
 	h, st, _ := newTestServer(t)
@@ -831,7 +821,7 @@ func TestLibraryAccessCardReportsGrantsAndAdminsAreAlwaysGranted(t *testing.T) {
 	}
 
 	// The flag and the roster travel together, and the answer is the same body
-	// a read gives — the screen re-renders the card from the write.
+	// a read gives. The screen re-renders the card from the write.
 	rec := doAuth(t, h, http.MethodPut, "/api/v1/libraries/"+itoa(lib.ID)+"/access",
 		`{"restricted":true,"user_ids":[`+itoa(member.ID)+`]}`, withCookie(cookie))
 	wantStatus(t, rec, http.StatusOK)
@@ -871,9 +861,7 @@ func cmpAccess(wrote libraryAccessJSON, read map[string]libraryAccessUserJSON) b
 	return true
 }
 
-// ---------------------------------------------------------------------------
 // GET /search is the television search and stays that way.
-// ---------------------------------------------------------------------------
 
 // The provider search endpoint reaches TMDB and nothing else. A `type=scene`
 // that quietly worked would put adult results on the add-to-library picker,
@@ -904,9 +892,7 @@ func TestTelevisionSearchNeverReachesTheAdultProvider(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // Helpers.
-// ---------------------------------------------------------------------------
 
 func containsCall(calls []string, want string) bool {
 	for _, c := range calls {
@@ -1146,9 +1132,9 @@ func TestAdultSceneDetailReturnsNotFoundForUnknownScene(t *testing.T) {
 	wantStatus(t, rec, http.StatusNotFound)
 }
 
-// Without a stash-box credential the adult screens say so rather than pretending
-// there is nothing to find — the same 503 GET /search gives for a missing TMDB
-// key.
+// Without a stash-box credential the adult screens say so rather than
+// pretending there is nothing to find. The same 503 GET /search gives for a
+// missing TMDB key.
 func TestAdultProviderScreensReportAMissingCredential(t *testing.T) {
 	h, st, _ := newTestServer(t)
 	enableAdult(t, st)
@@ -1223,12 +1209,12 @@ func TestSiteSearchWithNoQueryAsksTheProviderForItsDefaultList(t *testing.T) {
 	}
 }
 
-// The provider id on a site's page is a link out, and where it points depends on
-// which endpoint the SITE's own instance answers on — which is why the server
+// The provider id on a site's page is a link out, and where it points depends
+// on which endpoint the site's own instance answers on, which is why the server
 // derives it: the instance list is admin-only, and this page is one a granted
 // member reads.
 //
-// Two instances in one install means two websites, so the link is a per-ROW
+// Two instances in one install means two websites, so the link is a per-row
 // fact and not a server-wide one. A link built from the wrong endpoint lands on
 // a page about a different site, or on a 404, while looking exactly like a
 // working link.
@@ -1267,7 +1253,7 @@ func TestSiteDetailLinksToTheSitesOwnInstance(t *testing.T) {
 			if body.ProviderURL != tt.want {
 				t.Errorf("provider_url = %q, want %q", body.ProviderURL, tt.want)
 			}
-			// The scene rows carry their own page on the same endpoint — the
+			// The scene rows carry their own page on the same endpoint. The
 			// destination behind a scene's title.
 			if len(body.Years) != 1 || len(body.Years[0].Scenes) != 1 {
 				t.Fatalf("years = %+v, want the one seeded scene", body.Years)
@@ -1334,12 +1320,10 @@ func TestSiteDTOOffersNoTelevisionFields(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// The shared by-id series routes (PLAN phase 9 task 3).
-// ---------------------------------------------------------------------------
+// The shared by-id series routes.
 
-// seriesByIDRoutes is every route that takes a series id — or an id belonging
-// to one of its children — and can therefore be handed a SITE's id. The list is
+// seriesByIDRoutes is every route that takes a series id (or an id belonging to
+// one of its children) and can therefore be handed a site's id. The list is
 // written out rather than discovered, for the reason adultRoutes gives: what is
 // under test is that the SET is closed and every member of it is gated.
 func seriesByIDRoutes(seriesID, episodeID int64) []struct{ method, path, body string } {
@@ -1358,9 +1342,9 @@ func seriesByIDRoutes(seriesID, episodeID int64) []struct{ method, path, body st
 
 // With the module off, GET /library/series/{siteID} used to answer 200 with the
 // site's title, its root under library/Adult and its whole season/episode tree
-// — scene titles and air dates — which the SPA renders as an ordinary
-// television detail page. handleListSeries and handleSystemStatus were narrowed
-// to television precisely to remove that trace; these routes are the same trace
+// (scene titles and air dates) which the SPA renders as an ordinary television
+// detail page. handleListSeries and handleSystemStatus were narrowed to
+// television precisely to remove that trace; these routes are the same trace
 // reachable by id.
 func TestSeriesByIDRoutesAre404ForASiteWhenTheModuleIsDisabled(t *testing.T) {
 	h, st, mgr := newTestServer(t)
@@ -1372,7 +1356,7 @@ func TestSeriesByIDRoutesAre404ForASiteWhenTheModuleIsDisabled(t *testing.T) {
 	createUser(t, st, testAdmin, testPassword, core.RoleAdmin)
 	cookie := login(t, h, testAdmin, testPassword)
 
-	// The gate is the SWITCH, not the seeding: switching a library off deletes
+	// The gate is the switch, not the seeding: switching a library off deletes
 	// nothing, so every row this test is about is still there to be refused.
 	setAdultLibrariesActive(t, st, false)
 
@@ -1406,7 +1390,7 @@ func TestSeriesByIDRoutesAre404ForASiteWhenTheModuleIsDisabled(t *testing.T) {
 
 // The other half: an ungranted member is refused by these routes too. They are
 // admin-only anyway (memberAllowed names none of them), so this is belt and
-// braces — but the 403 must not become a 200 if the allowlist ever widens.
+// braces, but the 403 must not become a 200 if the allowlist ever widens.
 func TestSeriesByIDRoutesRefuseAnUngrantedMember(t *testing.T) {
 	h, st, mgr := newTestServer(t)
 	mgr.adult = &fakeAdultProvider{scenes: fakeScenes()}
@@ -1461,9 +1445,7 @@ func siteScene(t *testing.T, st *store.Store, seriesID int64) core.Episode {
 	return e
 }
 
-// ---------------------------------------------------------------------------
-// The interactive picker for a scene (PLAN phase 9 task 3).
-// ---------------------------------------------------------------------------
+// The interactive picker for a scene.
 
 // routingEngineProvider hands out a different engine per library kind and
 // records which kind was asked for. The recording is the assertion: with a
@@ -1494,7 +1476,7 @@ func (p *routingEngineProvider) kindsAsked() []string {
 }
 
 // A site is a series row, so GET /library/series/{id}/releases can be handed
-// one. It must be searched as a SCENE: the adult library's indexers and
+// one. It must be searched as a scene: the adult library's indexers and
 // categories, and a query built from the release date rather than an SxxEyy no
 // indexer has ever published for a scene.
 func TestInteractiveReleaseSearchForASiteIsAnAdultSearch(t *testing.T) {
@@ -1546,11 +1528,10 @@ func TestInteractiveSceneSearchMergesBothVariants(t *testing.T) {
 
 	// The date query finds the standard name and one release that both queries
 	// return; the title query finds a title-named release and that same shared
-	// one again.
-	// The fake answers with core.Release values directly, so the parse the real
-	// indexer client does for a 6000-category result is spelled out here — the
-	// site as the title and the release date, which is what parse.Scene reads
-	// off a date-named release.
+	// one again. The fake answers with core.Release values directly, so the
+	// parse the real indexer client does for a 6000-category result is spelled
+	// out here. The site as the title and the release date, which is what
+	// parse.Scene reads off a date-named release.
 	dated := core.ParsedRelease{
 		Title:     "Brazzers",
 		SceneDate: time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC),
@@ -1656,11 +1637,11 @@ func TestInteractiveReleaseSearchForATelevisionSeriesIsUnchanged(t *testing.T) {
 	}
 }
 
-// And the grab: a scene picked by hand goes through the ADULT library's engine
+// And the grab: a scene picked by hand goes through the adult library's engine
 // under the adult label, exactly where automation.grabEpisode sends one the
 // backlog sweep found. Landing it in the television library's download folder
-// under category "tv" is silent — importDownloadedEpisodes branches on kind and
-// still imports it — which is why this is asserted rather than noticed.
+// under category "tv" is silent (importDownloadedEpisodes branches on kind and
+// still imports it) which is why this is asserted rather than noticed.
 func TestInteractiveGrabForASiteRoutesThroughTheAdultLibrary(t *testing.T) {
 	adultEngine, tvEngine := &stubEngine{}, &stubEngine{}
 	provider := &routingEngineProvider{byKind: map[string]*stubEngine{
@@ -1696,10 +1677,11 @@ func TestInteractiveGrabForASiteRoutesThroughTheAdultLibrary(t *testing.T) {
 }
 
 // A scene request's poster_path is not a TMDB-relative path: stashbox.coverURL
-// hands out an ABSOLUTE url and AdultScenes.svelte sends it verbatim. Rendering
+// hands out an absolute url and AdultScenes.svelte sends it verbatim. Rendering
 // it through the TMDB image base concatenates the two into
-// "https://image.tmdb.org/t/p/w500/https://cdn…/scene.jpg" — a dead image the
-// browser still fetches from TMDB's CDN with the adult path in the request line.
+// "https://image.tmdb.org/t/p/w500/https://cdn…/scene.jpg". A dead image the
+// browser still fetches from TMDB's CDN with the adult path in the request
+// line.
 func TestSceneRequestPosterURLIsTheProvidersOwnURL(t *testing.T) {
 	h, st, mgr := newTestServer(t)
 	mgr.adult = &fakeAdultProvider{scenes: fakeScenes()}
@@ -1720,7 +1702,7 @@ func TestSceneRequestPosterURLIsTheProvidersOwnURL(t *testing.T) {
 	}
 
 	// The list is the screen the finding is about, and it renders through the
-	// same helper — assert it too rather than trusting they stay together.
+	// same helper, assert it too rather than trusting they stay together.
 	rec = do(t, h, http.MethodGet, "/api/v1/requests", "")
 	wantStatus(t, rec, http.StatusOK)
 	var body struct {
@@ -1791,9 +1773,9 @@ func jsonString(s string) string {
 }
 
 // TestSystemStatusCountsSitesOnlyWhenTheModuleIsVisible: the sidebar's Adult
-// badge reads counts.sites, and the field must not exist at all — not even as
-// a zero — for a caller the module is invisible to, so a module-off response
-// stays byte-identical to one from an install that never enabled it.
+// badge reads counts.sites, and the field must not exist at all (not even as a
+// zero) for a caller the module is invisible to, so a module-off response stays
+// byte-identical to one from an install that never enabled it.
 func TestSystemStatusCountsSitesOnlyWhenTheModuleIsVisible(t *testing.T) {
 	h, st, _ := newTestServer(t)
 
@@ -1819,15 +1801,15 @@ func TestSystemStatusCountsSitesOnlyWhenTheModuleIsVisible(t *testing.T) {
 	}
 }
 
-// A canceled request is the typeahead working — every keystroke aborts the one
-// before it — so the provider error it drags along must not become an ERROR
-// log and a 502. The same failure with the caller still on the line is a real
+// A canceled request is the typeahead working (every keystroke aborts the one
+// before it) so the provider error it drags along must not become an error log
+// and a 502. The same failure with the caller still on the line is a real
 // upstream error and stays one.
 func TestAbandonedSiteSearchIsNotAnUpstreamFailure(t *testing.T) {
 	h, st, mgr := newTestServer(t)
 	enableAdult(t, st)
 
-	// The abort happens MID provider call, the way a typeahead abort does: a
+	// The abort happens mid provider call, the way a typeahead abort does: a
 	// context canceled before the request even authenticates never reaches the
 	// provider at all.
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1847,8 +1829,8 @@ func TestAbandonedSiteSearchIsNotAnUpstreamFailure(t *testing.T) {
 	wantStatus(t, rec, http.StatusBadGateway)
 }
 
-// hangupProvider cancels the caller's context mid-call — a typeahead abort —
-// and returns the error that cancellation produces.
+// hangupProvider cancels the caller's context mid-call (a typeahead abort) and
+// returns the error that cancellation produces.
 type hangupProvider struct {
 	fakeAdultProvider
 	cancel context.CancelFunc
@@ -1859,7 +1841,7 @@ func (p *hangupProvider) SearchSites(ctx context.Context, q string) ([]core.Site
 	return nil, context.Canceled
 }
 
-// ---- the deferred catalogue walk (POST /adult/sites) -----------------------
+// the deferred catalogue walk (POST /adult/sites)
 
 // jobsOfKind is every queued job of one kind, newest first.
 func jobsOfKind(t *testing.T, st *store.Store, kind string) []core.Job {
@@ -1877,7 +1859,7 @@ func jobsOfKind(t *testing.T, st *store.Store, kind string) []core.Job {
 	return out
 }
 
-// The request answers with the site row and NOTHING filed under it: the
+// The request answers with the site row and nothing filed under it: the
 // catalogue walk is a job. A large site is hundreds of provider round trips,
 // and the whole reason this is a job is that people gave up waiting and clicked
 // Add again.
@@ -1920,8 +1902,8 @@ func TestAddSiteAnswersBeforeTheCatalogueIsWalked(t *testing.T) {
 }
 
 // The double click. Two POSTs while the first walk is still pending are one
-// site and one job — the row upserts on the stash id, the job dedupes on its
-// payload — and neither is an error.
+// site and one job (the row upserts on the stash id, the job dedupes on its
+// payload) and neither is an error.
 func TestAddSiteQueuesTheCatalogueWalkOnce(t *testing.T) {
 	h, st, mgr := newTestServer(t)
 	mgr.adult = &fakeAdultProvider{}
@@ -1946,7 +1928,7 @@ func TestAddSiteQueuesTheCatalogueWalkOnce(t *testing.T) {
 
 // search_now rides on the sync job rather than being queued here. Before the
 // walk the site has no episode rows, so a search queued now would queue
-// nothing — the flag has to survive until there is something to search for.
+// nothing. The flag has to survive until there is something to search for.
 func TestAddSiteCarriesSearchNowOnTheSyncJob(t *testing.T) {
 	h, st, mgr := newTestServer(t)
 	mgr.adult = &fakeAdultProvider{}
@@ -2001,10 +1983,10 @@ func TestAddSiteHonoursTheMonitoredChoice(t *testing.T) {
 
 // The regression that guards the AddSite/AddSiteAndWait split.
 //
-// Approving a scene request grants ONE scene, and a scene is an episode row.
+// Approving a scene request grants one scene, and a scene is an episode row.
 // The ordinary add defers the walk that creates those rows to a job, so an
 // approval that used it would answer "approved" against a site with nothing
-// filed under it — the granted scene would not be wanted, and no search would
+// filed under it. The granted scene would not be wanted, and no search would
 // ever be made for it. This asserts the episode exists the moment the approval
 // returns, which is only true of the waiting variant.
 func TestApproveSceneLandsTheEpisodeSynchronously(t *testing.T) {
@@ -2030,7 +2012,7 @@ func TestApproveSceneLandsTheEpisodeSynchronously(t *testing.T) {
 		"{}", withCookie(cookie))
 	wantStatus(t, rec, http.StatusOK)
 
-	// The scene the approval granted is a row, right now — not once some job
+	// The scene the approval granted is a row, right now, not once some job
 	// gets around to running.
 	filed, err := st.EpisodeIDsByStashID(ctx, []string{"scene-1"})
 	if err != nil {
@@ -2048,8 +2030,8 @@ func TestApproveSceneLandsTheEpisodeSynchronously(t *testing.T) {
 // The monitoring contract of a scene approval.
 //
 // Granting one scene is not a standing order for everything the studio
-// releases, so the site lands UNMONITORED and only the asked-for scene's
-// episode is monitored — the wanted list reads the EPISODE flag, and that one
+// releases, so the site lands unmonitored and only the asked-for scene's
+// episode is monitored. The wanted list reads the episode flag, and that one
 // flip is the whole grant. monitored:true is how an approver says the studio
 // itself is wanted, and search_now queues the hunt for the scene instead of
 // leaving it to the next sweep.
@@ -2142,7 +2124,7 @@ func TestApproveSceneMonitorsOnlyTheAskedForScene(t *testing.T) {
 }
 
 // Request-and-approve, in the scene shape: the one call records the wish and
-// grants it, and the grant is the same one the approve endpoint would make —
+// grants it, and the grant is the same one the approve endpoint would make,
 // site added unmonitored, the asked-for scene monitored.
 func TestCreateSceneRequestWithApproveGrantsItImmediately(t *testing.T) {
 	h, st, mgr := newTestServer(t)
@@ -2188,7 +2170,7 @@ func TestCreateSceneRequestWithApproveGrantsItImmediately(t *testing.T) {
 	}
 }
 
-// ---- cataloguing: the site page can see the walk running -------------------
+// cataloguing: the site page can see the walk running
 
 // queueSiteSync puts an open sync_site job in the queue by hand, the way
 // POST /adult/sites does. searchNow varies the payload deliberately: the flag
@@ -2216,7 +2198,7 @@ func siteCataloguingFlag(t *testing.T, h http.Handler, id int64) bool {
 	return body.Cataloguing
 }
 
-// The flag has to be true for BOTH payload spellings: the site is the subject,
+// The flag has to be true for both payload spellings: the site is the subject,
 // and search_now is only a passenger. This fails against a HasOpenJob-style
 // exact-payload match, which would answer true for one of the two and false for
 // the other.
@@ -2242,7 +2224,7 @@ func TestSiteDetailReportsCataloguingForEitherPayload(t *testing.T) {
 	}
 }
 
-// A running job counts as much as a pending one — the walk is publishing years
+// A running job counts as much as a pending one. The walk is publishing years
 // while it runs, which is precisely when the page most needs to keep polling.
 func TestSiteDetailReportsCataloguingWhileTheWalkRuns(t *testing.T) {
 	h, st, _ := newTestServer(t)
@@ -2270,7 +2252,7 @@ func TestSiteDetailReportsCataloguingWhileTheWalkRuns(t *testing.T) {
 	}
 }
 
-// A walk of ANOTHER site says nothing about this one. Without the series-id
+// A walk of another site says nothing about this one. Without the series-id
 // match, every site page would poll itself for as long as any site anywhere was
 // being indexed.
 func TestSiteDetailIgnoresAnotherSitesWalk(t *testing.T) {
@@ -2331,8 +2313,8 @@ func TestUniversalSearchKeepsAdultAbsentWithTheModuleOff(t *testing.T) {
 	createUser(t, st, testAdmin, testPassword, core.RoleAdmin)
 	cookie := login(t, h, testAdmin, testPassword)
 
-	// An all-adult category request short-circuits: empty answer, zero
-	// outbound searches — indistinguishable from a search that matched nothing.
+	// An all-adult category request short-circuits: empty answer, zero outbound
+	// searches, indistinguishable from a search that matched nothing.
 	rec := doAuth(t, h, http.MethodGet, "/api/v1/search/releases?q=scene&cats=6000,6010", "",
 		withCookie(cookie))
 	wantStatus(t, rec, http.StatusOK)

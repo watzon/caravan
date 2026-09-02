@@ -41,14 +41,14 @@ const (
 )
 
 // writableSettings is the allowlist PUT /settings accepts. Settings are a
-// key-value table, so without an allowlist a buggy client could quietly fill
-// it with keys nothing reads.
+// key-value table, so without an allowlist a buggy client could quietly fill it
+// with keys nothing reads.
 //
 // store.SettingStorageRoot is deliberately absent. It is the one setting with
-// rules attached — it must be absolute, it must name a folder that exists, and
-// it must not change while a migration owns both roots — and a generic
-// key-value PUT enforces none of them. POST /system/storage-root/repoint is the
-// only way in (SPEC §10); see internal/api/storage.go.
+// rules attached (it must be absolute, it must name a folder that exists, and
+// it must not change while a migration owns both roots) and a generic key-value
+// PUT enforces none of them. POST /system/storage-root/repoint is the only way
+// in (SPEC §10); see internal/api/storage.go.
 var writableSettings = map[string]bool{
 	store.SettingTMDBAPIKey:                   true,
 	store.SettingTheTVDBAPIKey:                true,
@@ -85,11 +85,11 @@ var writableSettings = map[string]bool{
 
 // trimmedSettings are written with their surrounding whitespace removed.
 //
-// They are the credentials, and the reason is that everything that JUDGES them
+// They are the credentials, and the reason is that everything that judges them
 // trims: settingValue, the metadata test, and the cached verdict's key are all
 // about the trimmed string, while the clients built in cmd/caravan send the
 // stored one verbatim. Storing " abc " therefore cached a verdict for "abc" and
-// then sent "+abc+" upstream forever — a credential reported healthy while
+// then sent "+abc+" upstream forever. A credential reported healthy while
 // nothing worked. Trimming on the way in makes the stored string, the validated
 // string and the sent string the same value.
 var trimmedSettings = map[string]bool{
@@ -152,8 +152,7 @@ var publicSettingKeys = map[string]bool{
 }
 
 // adultOnlySettings are public settings readable only by a caller some adult
-// library is visible to. They are the Stash handoff's non-secret settings
-// (PLAN phase 11).
+// library is visible to. They are the Stash handoff's non-secret settings.
 //
 // The promise is to be *absent* when there is nothing to see, not merely
 // disabled (see requireAdult), and a settings object carrying a stash_url is
@@ -162,8 +161,8 @@ var publicSettingKeys = map[string]bool{
 // response body.
 //
 // The old module switch is gone: the switch is per-library now, and a library
-// reports its own `active` on
-// the surface that owns it, not through the settings bag.
+// reports its own `active` on the surface that owns it, not through the
+// settings bag.
 var adultOnlySettings = map[string]bool{
 	store.SettingStashURL:     true,
 	store.SettingStashEnabled: true,
@@ -284,19 +283,19 @@ func (s *server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// TheTVDB's credential is a PAIR: the login consumes the key and, when the
-	// subscription is user-supported, the PIN beside it. The loop below can only
-	// see the key, because ProviderDescriptor.CredentialSetting names one
-	// settings row — so a PIN edit changes what a login sends while leaving that
+	// TheTVDB's credential is a pair: the login consumes the key and, when the
+	// subscription is user-supported, the PIN beside it. The loop below can
+	// only see the key, because ProviderDescriptor.CredentialSetting names one
+	// settings row, so a PIN edit changes what a login sends while leaving that
 	// loop nothing to notice, and the cached verdict, which is filed under the
 	// key string, survives an edit it is no longer true of.
 	//
-	// Dropping it first is what makes the recheck a recheck. When the key came in
-	// this body too, the loop below then proves the new pair; when it did not,
-	// the stored key is what the new PIN will travel with, so it is proved here.
-	// A settings read that fails leaves the state optimistic rather than failing
-	// a save that has already landed, exactly as revalidateMetadataKey does with
-	// an unreachable provider.
+	// Dropping it first is what makes the recheck a recheck. When the key came
+	// in this body too, the loop below then proves the new pair; when it did
+	// not, the stored key is what the new PIN will travel with, so it is proved
+	// here. A settings read that fails leaves the state optimistic rather than
+	// failing a save that has already landed, exactly as revalidateMetadataKey
+	// does with an unreachable provider.
 	if _, ok := body[store.SettingTheTVDBPIN]; ok {
 		s.credentials.forget(core.ProviderTheTVDB)
 		if _, keyEdited := body[store.SettingTheTVDBAPIKey]; !keyEdited {
@@ -306,11 +305,11 @@ func (s *server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// A key edit is the first of the two credential-state transitions (PLAN
-	// phase 10 task 2). It runs after the write, costs at most one upstream
-	// call per edited credential, and is skipped entirely for a key the Test
-	// button already proved — see revalidateMetadataKey. Only the keys this body
-	// actually carried are checked, so saving an unrelated setting stays free.
+	// A key edit is the first of the two credential-state transitions. It runs
+	// after the write, costs at most one upstream call per edited credential,
+	// and is skipped entirely for a key the Test button already proved. See
+	// revalidateMetadataKey. Only the keys this body actually carried are
+	// checked, so saving an unrelated setting stays free.
 	for _, p := range core.Providers() {
 		if p.CredentialSetting == "" {
 			continue
@@ -341,11 +340,6 @@ func (s *server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, settings)
 }
 
-// validateDLNASettings refuses values the media server would silently reinterpret.
-//
-// An unparseable dlna_enabled reads as off, and a friendly name that is only
-// whitespace falls back to the default — both are quiet surprises, so they are
-// rejected here where the user can see them (SPEC §13).
 // validateFlareSolverrSetting accepts an empty value (solver off) or a bare
 // http(s) endpoint.
 func validateFlareSolverrSetting(settings map[string]string) error {
@@ -359,6 +353,9 @@ func validateFlareSolverrSetting(settings map[string]string) error {
 	return nil
 }
 
+// validateDLNASettings refuses values the media server would silently
+// reinterpret: an unparseable dlna_enabled reads as off, and a whitespace-only
+// friendly name falls back to the default (SPEC §13).
 func validateDLNASettings(settings map[string]string) error {
 	if raw, ok := settings[store.SettingDLNAEnabled]; ok {
 		if _, err := strconv.ParseBool(strings.TrimSpace(raw)); err != nil {
@@ -484,16 +481,15 @@ type statusResponse struct {
 	Counts        statusCounts `json:"counts"`
 	// DiskFreeBytes and DiskTotalBytes describe the filesystem holding the
 	// storage root. Both zero when no root is set or the filesystem cannot be
-	// asked — the UI renders that as "unknown", never as "full".
+	// asked. The UI renders that as "unknown", never as "full".
 	DiskFreeBytes  int64 `json:"disk_free_bytes"`
 	DiskTotalBytes int64 `json:"disk_total_bytes"`
 	// EngineHealth is the download engine's state: "ok", "unconfigured" (no
 	// storage root yet, so no engine), or "error" (it failed to start).
 	EngineHealth string `json:"engine_health"`
-	// MetadataCredential is the TMDB key's health: "absent", "invalid" or "ok"
-	// (PLAN phase 10 task 2). It is read from the cached verdict in
-	// credentials.go, so polling this endpoint costs no TMDB traffic however
-	// often the UI asks.
+	// MetadataCredential is the TMDB key's health: "absent", "invalid" or "ok".
+	// It is read from the cached verdict in credentials.go, so polling this
+	// endpoint costs no TMDB traffic however often the UI asks.
 	MetadataCredential string `json:"metadata_credential"`
 	// MetadataCredentialReason is why the credential is invalid, in the
 	// provider's own words. Empty for every other state, and never contains the
@@ -516,23 +512,21 @@ type statusResponse struct {
 	// reached.
 	MetadataCredentials map[string]credentialStateJSON `json:"metadata_credentials"`
 	// UnhealthyDownloadClients names the external clients the queue poller
-	// cannot reach (PLAN phase 6 task 4). Empty is the normal case; a
-	// non-empty list is what raises the "client X unreachable" banner. The
-	// embedded engine is never in it — it is not a client, and one dead
-	// seedbox must not make Caravan look broken.
+	// cannot reach. Empty is the normal case; a non-empty list is what raises
+	// the "client X unreachable" banner. The embedded engine is never in it. It
+	// is not a client, and one dead seedbox must not make Caravan look broken.
 	UnhealthyDownloadClients []unhealthyClientJSON `json:"unhealthy_download_clients"`
 	// StashUnreachable is the adult library handoff's twin of that list: the
 	// Stash server the last scan or identity push could not reach, absent while
-	// the handoff is healthy (PLAN phase 11 task 4). Absent, too, for a caller
-	// the adult module is not visible to — omitempty so a module-off response
-	// stays byte-identical to one from an install that never enabled it, exactly
-	// as Counts.Sites does.
+	// the handoff is healthy. Absent, too, for a caller the adult module is not
+	// visible to, omitempty so a module-off response stays byte-identical to
+	// one from an install that never enabled it, exactly as Counts.Sites does.
 	//
-	// It is a banner and never a blocker: the scan and the push are durable jobs
-	// that deliver when Stash comes back, and the import that queued them
+	// It is a banner and never a blocker: the scan and the push are durable
+	// jobs that deliver when Stash comes back, and the import that queued them
 	// completed regardless.
 	StashUnreachable *stashHealthJSON `json:"stash_unreachable,omitempty"`
-	// FFmpegAvailable reports whether ffmpeg and ffprobe are both on PATH.
+	// FFmpegAvailable reports whether ffmpeg and ffprobe are both on path.
 	// False hides the whole convert-for-TV affordance and degrades the
 	// TV-incompatible warning to informational (SPEC §8).
 	FFmpegAvailable bool `json:"ffmpeg_available"`
@@ -547,20 +541,19 @@ type statusResponse struct {
 	// question the SPA has always asked of it. Neither is a credential.
 	PasswordSet       bool `json:"password_set"`
 	ListeningPublicly bool `json:"listening_publicly"`
-	// Dirty says the previous session ended without a clean shutdown — a pulled
-	// drive, a power cut, a kill -9 (SPEC §2.3). It stays true until
-	// POST /system/verify passes, and while it is true downloads refuse to
-	// resume. Only portable mode ever sets it.
+	// Dirty says the previous session ended without a clean shutdown. A pulled
+	// drive, a power cut, a kill -9 (SPEC §2.3). It stays true until POST
+	// /system/verify passes, and while it is true downloads refuse to resume.
+	// Only portable mode ever sets it.
 	Dirty bool `json:"dirty"`
 	// Runtime carries process diagnostics when the serving command supplied
 	// them. It is absent for in-process tests and embedded servers.
 	Runtime *runtimeJSON `json:"runtime,omitempty"`
 }
 
-// unhealthyClientJSON is one unreachable download client on GET
-// /system/status. It carries no credential — the fields are the ones the
-// settings screen already shows, plus the poll's own failure message
-// (SPEC §12).
+// unhealthyClientJSON is one unreachable download client on GET /system/status.
+// It carries no credential. The fields are the ones the settings screen already
+// shows, plus the poll's own failure message (SPEC §12).
 type unhealthyClientJSON struct {
 	ID    int64  `json:"id"`
 	Name  string `json:"name"`
@@ -580,7 +573,7 @@ type statusCounts struct {
 	// Converting is the open convert-for-TV queue: queued plus running.
 	Converting int `json:"converting"`
 	// Sites is the adult library's site count, present only for a caller the
-	// module is visible to — omitempty so a module-off response stays
+	// module is visible to, omitempty so a module-off response stays
 	// byte-identical to one from an install that never enabled it.
 	Sites int `json:"sites,omitempty"`
 	// Libraries is the per-library item count the navigation badges each shelf
@@ -640,14 +633,14 @@ func (s *server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 	// Television only, for the reason handleListSeries gives: the count on the
 	// status card is the television shelf's, and a number that silently
 	// included sites would report the adult library to a caller who cannot see
-	// it — including on an install where the module is off.
+	// it, including on an install where the module is off.
 	series, err := s.st.ListSeriesByKind(ctx, core.SeriesKindTV)
 	if err != nil {
 		s.writeStoreError(w, "count series", err)
 		return
 	}
-	// The adult shelf's count, only for a caller the module is visible to —
-	// the same predicate that decides whether the nav item this badge sits on
+	// The adult shelf's count, only for a caller the module is visible to. The
+	// same predicate that decides whether the nav item this badge sits on
 	// exists at all.
 	gate := s.gate(r)
 	adultVisible, err := gate.seesAdult(ctx)
@@ -657,7 +650,7 @@ func (s *server) handleSystemStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	// One entry per shelf the caller may see, for the navigation's per-library
 	// badges. It is the same list /auth/me draws the rows from, so a badge can
-	// never describe a shelf the sidebar does not show — and a library this
+	// never describe a shelf the sidebar does not show, and a library this
 	// caller was not granted contributes no entry, which is the one thing an
 	// item count must not leak.
 	visibleLibraries, err := gate.visibleLibraries(ctx)
@@ -789,8 +782,8 @@ func (s *server) engineHealth() string {
 
 // unhealthyDownloadClients is the banner's input: the external clients the
 // queue poller cannot reach right now. A provider that does not poll external
-// clients — the phase-2 embedded-only wiring, and every test server built
-// without one — reports none.
+// clients (the phase-2 embedded-only wiring, and every test server built
+// without one) reports none.
 func (s *server) unhealthyDownloadClients() []unhealthyClientJSON {
 	out := []unhealthyClientJSON{}
 	if s.engine == nil {

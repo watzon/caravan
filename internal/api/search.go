@@ -12,7 +12,7 @@ import (
 )
 
 // Values accepted by GET /search?type=. The default is TypeAll, which queries
-// both media types in one round trip — the UI's add-to-library picker lets the
+// both media types in one round trip. The UI's add-to-library picker lets the
 // user flip between them without re-typing.
 const (
 	TypeAll = "all"
@@ -27,7 +27,7 @@ const (
 // provider that offered it, and they are what an add sends back. TMDBID stays
 // beside them and stays authoritative for a TMDB hit: a client written before
 // chains existed keeps reading exactly what it always did, and a hit from any
-// other provider simply carries a zero there — which is honest, because it has
+// other provider simply carries a zero there, which is honest, because it has
 // no TMDB id.
 type movieMetaJSON struct {
 	TMDBID int64 `json:"tmdb_id"`
@@ -42,9 +42,9 @@ type movieMetaJSON struct {
 	OriginalTitle string `json:"original_title"`
 	Year          int    `json:"year"`
 	Overview      string `json:"overview"`
-	// ReleaseDate is a BARE day, "2013-04-07", empty when the catalogue has
-	// none. A search hit's date is a calendar fact rather than an instant —
-	// nobody publishes a cinema release at a time of day — and the add dialog
+	// ReleaseDate is a bare day, "2013-04-07", empty when the catalogue has
+	// none. A search hit's date is a calendar fact rather than an instant
+	// (nobody publishes a cinema release at a time of day) and the add dialog
 	// tells "released on a known day" from "date unknown" by the shape of this
 	// string, so an RFC3339 spelling here reads as "unknown" for every hit from
 	// every provider. jsonDate rather than jsonTime, and pinned by
@@ -80,10 +80,10 @@ type seriesMetaJSON struct {
 type searchResponse struct {
 	Movies []movieMetaJSON  `json:"movies"`
 	Series []seriesMetaJSON `json:"series"`
-	// Providers are the chain ids that actually ran, in the order they ran.
-	// The client uses the LENGTH as much as the contents: a per-row provider
-	// badge is noise on the overwhelmingly common single-provider install, and
-	// is the only way to tell two hits apart once a chain is longer than one.
+	// Providers are the chain ids that actually ran, in the order they ran. The
+	// client uses the length as much as the contents: a per-row provider badge
+	// is noise on the overwhelmingly common single-provider install, and is the
+	// only way to tell two hits apart once a chain is longer than one.
 	Providers []string `json:"providers"`
 	// LibraryID is the library the chain belongs to, echoed so the add the user
 	// makes next lands in the library they searched. Zero means the request
@@ -94,7 +94,7 @@ type searchResponse struct {
 	// They are part of a 200, deliberately: one provider being down must not
 	// hide the hits the others returned, and a chain that silently came back
 	// short is indistinguishable from a chain that had nothing to say. A chain
-	// where EVERY provider failed is not this — that is the 502/503 below.
+	// where every provider failed is not this: that is the 502/503 below.
 	Errors []searchErrorJSON `json:"errors"`
 }
 
@@ -109,7 +109,7 @@ type searchErrorJSON struct {
 // step 1).
 //
 // ?library_id= names the shelf the add will land on, and therefore the chain
-// that answers. Absent, the kind's default library answers — which is the shelf
+// that answers. Absent, the kind's default library answers, which is the shelf
 // the add would land on anyway, so a search made before the user picked one is
 // still a search of somewhere real.
 //
@@ -136,17 +136,17 @@ func (s *server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A named library answers only about the kinds of thing it can HOLD, so a
+	// A named library answers only about the kinds of thing it can hold, so a
 	// half whose vocabulary the shelf does not speak is dropped: a television
 	// library's chain has no vocabulary for a movie query, and asking it anyway
-	// would return whatever the chain's providers happen to say about films that
-	// are not going on that shelf.
+	// would return whatever the chain's providers happen to say about films
+	// that are not going on that shelf.
 	//
 	// core.LibraryKindAccepts rather than equality, for the reason the add
 	// validation uses it: an anime library holds films and series together, so
-	// BOTH halves run for one — and type=all on an anime library means both
-	// halves of that one shelf, which is exactly right. Equality here answered a
-	// named anime library with two empty lists whatever the caller asked for.
+	// both halves run for one, and type=all on an anime library means both
+	// halves of that one shelf, which is exactly right. Equality here answered
+	// a named anime library with two empty lists whatever the caller asked for.
 	//
 	// With no library named, both halves run against their own defaults, which
 	// is what type=all has always meant.
@@ -161,14 +161,14 @@ func (s *server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 	// The credential pre-check, before any provider is asked.
 	//
-	// A cached verdict is about ONE provider's key, so it can only speak for a
+	// A cached verdict is about one provider's key, so it can only speak for a
 	// chain that contains that provider. A library chained to AniList alone
 	// needs no key at all, and refusing its search because a key it never uses
 	// was rejected an hour ago would make the provider that works unreachable
 	// through the provider that does not. The question is asked of every
 	// credentialed provider on the chain rather than of TMDB, so a rejected
 	// TheTVDB key refuses the libraries chained to TheTVDB and no others. A
-	// MIXED chain is still refused whole: this runs before anything does, so
+	// mixed chain is still refused whole: this runs before anything does, so
 	// there is no partial answer to keep.
 	var willRun []string
 	if runMovies {
@@ -225,7 +225,7 @@ func (out *searchResponse) absorb(hits *library.SearchHits) {
 // appendUniqueProviders adds one chain's ids to a running list, keeping each
 // id's first position.
 //
-// type=all with no library named searches TWO libraries, and on a stock install
+// type=all with no library named searches two libraries, and on a stock install
 // both are chained to TMDB. A list that named it twice would make the client's
 // "more than one provider ran, so badge the rows" rule fire on an install with
 // exactly one provider.
@@ -243,7 +243,7 @@ func appendUniqueProviders(into, ids []string) []string {
 //
 // An adult library is refused rather than searched. Without this, a caller who
 // may see the adult module could route a stash-box search through the
-// television endpoint by naming an adult library — and /search sits in front of
+// television endpoint by naming an adult library, and /search sits in front of
 // requireAdult, not behind it, so the gate the adult surfaces are built on
 // would simply not be in the path.
 func (s *server) resolveSearchLibrary(w http.ResponseWriter, r *http.Request) (*core.Library, int64, bool) {
@@ -275,9 +275,9 @@ func (s *server) resolveSearchLibrary(w http.ResponseWriter, r *http.Request) (*
 // library's, or the kind's default library's when none was named.
 //
 // It exists only for the credential pre-check, which has to know whether TMDB
-// is on the chain BEFORE anything is asked. SearchLibrary resolves the same
-// library for itself, so a failure to resolve it here is not worth reporting —
-// the search that follows reports it properly.
+// is on the chain before anything is asked. SearchLibrary resolves the same
+// library for itself, so a failure to resolve it here is not worth reporting.
+// The search that follows reports it properly.
 func (s *server) searchChain(ctx context.Context, lib *core.Library, kind string) []string {
 	if lib != nil {
 		return lib.ProviderChain()

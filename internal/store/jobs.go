@@ -96,7 +96,7 @@ func (s *Store) EnqueueJobIfNotOpen(ctx context.Context, j *core.Job) (bool, err
 //
 // It returns (nil, nil) when nothing is eligible: an idle queue is the normal
 // case for a poller, not an error. The claim is a single transaction, so two
-// workers can never hold the same job — and because a lease can expire and be
+// workers can never hold the same job, and because a lease can expire and be
 // reclaimed (SPEC §7), delivery is at-least-once and every handler must be
 // idempotent.
 func (s *Store) ClaimJob(ctx context.Context, kinds []string, lease time.Duration) (*core.Job, error) {
@@ -283,7 +283,7 @@ func (s *Store) ReclaimExpired(ctx context.Context) (int, error) {
 // It is startup-only, and correct only there: exactly one Caravan process owns
 // a storage root at a time (internal/integrity holds the lock that enforces
 // it), so a job still marked running when a process starts can only have been
-// left by one that died. ReclaimExpired cannot do this job — a dedicated worker
+// left by one that died. ReclaimExpired cannot do this job. A dedicated worker
 // takes a twelve-hour lease, so a storage migration or a transcode killed five
 // minutes in would sit in running, unclaimable, for the rest of the day. For a
 // migration that is the whole library reading as missing until the lease runs
@@ -306,8 +306,8 @@ func (s *Store) ReclaimRunning(ctx context.Context) (int, error) {
 	return int(n), nil
 }
 
-// ListJobs returns the most recent jobs, newest first, for the activity
-// feed (PLAN phase 3, task 8). A limit of zero or less returns every job.
+// ListJobs returns the most recent jobs, newest first, for the activity feed. A
+// limit of zero or less returns every job.
 func (s *Store) ListJobs(ctx context.Context, limit int) ([]core.Job, error) {
 	models := []jobModel{}
 	query := s.db.NewSelect().Model(&models).Order("id DESC")
@@ -365,10 +365,9 @@ func (s *Store) HasJobInState(ctx context.Context, kind, payload, state string) 
 }
 
 // HasOpenJob reports whether a job of the given kind and payload is already
-// pending or running. Recurring jobs (RSS sync, backlog sweeps) use it to
-// stay singletons: a redelivered tick enqueues nothing when the work is
-// already queued, which is what keeps a restart from stacking duplicates
-// (PLAN phase 3, task 5).
+// pending or running. Recurring jobs (RSS sync, backlog sweeps) use it to stay
+// singletons: a redelivered tick enqueues nothing when the work is already
+// queued, which is what keeps a restart from stacking duplicates.
 func (s *Store) HasOpenJob(ctx context.Context, kind, payload string) (bool, error) {
 	n, err := s.db.NewSelect().Model((*jobModel)(nil)).
 		Where("kind = ?", kind).Where("payload = ?", payload).
@@ -383,8 +382,8 @@ func (s *Store) HasOpenJob(ctx context.Context, kind, payload string) (bool, err
 // OpenJobsByKind returns every pending or running job of one kind.
 //
 // It is the reader's counterpart to HasOpenJob, and the difference is the
-// payload. HasOpenJob matches an EXACT payload string, which is the right
-// dedupe key for a producer that always encodes the same struct — but the wrong
+// payload. HasOpenJob matches an exact payload string, which is the right
+// dedupe key for a producer that always encodes the same struct, but the wrong
 // question for "is there a job about this thing", because a payload with more
 // than one field has more than one spelling for the same subject.
 // core.JobSyncSitePayload is exactly that: it carries SearchNow beside the

@@ -159,7 +159,7 @@ func TestCreateRequestWholeTitleAbsorbsSeasons(t *testing.T) {
 }
 
 // Who asked is recorded on the row, and a request made with no account behind
-// it — an open server — records the zero that means "nobody in particular".
+// it (an open server) records the zero that means "nobody in particular".
 func TestCreateRequestRecordsTheAsker(t *testing.T) {
 	ctx := context.Background()
 	st, _ := openTemp(t)
@@ -649,7 +649,7 @@ func TestGrantRequestSeasonsWithNothingPendingIsSilent(t *testing.T) {
 }
 
 // A movie request's availability choice round-trips, and a merge fills the
-// field only when nobody has chosen yet — the first asker's choice stands.
+// field only when nobody has chosen yet. The first asker's choice stands.
 func TestCreateRequestMinAvailability(t *testing.T) {
 	ctx := context.Background()
 	st, _ := openTemp(t)

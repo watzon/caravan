@@ -11,7 +11,7 @@ import (
 
 // directoryListing is one folder the storage-root picker can show: the folder
 // itself, the parent the Up control walks to, and the child folders a click
-// descends into. Files are omitted — the picker chooses a root, not a media
+// descends into. Files are omitted, the picker chooses a root, not a media
 // file.
 type directoryListing struct {
 	Path        string           `json:"path"`

@@ -38,7 +38,7 @@ func (p *portableServer) storageRoot(t *testing.T) string {
 }
 
 // The subcommand is reachable from the top-level dispatcher and scaffolds a
-// real drive, including this machine's binary — which for a test is the test
+// real drive, including this machine's binary, which for a test is the test
 // binary, exactly the way it is the caravan binary in production.
 func TestPrepareSubcommandScaffoldsADrive(t *testing.T) {
 	root := t.TempDir()
@@ -149,8 +149,8 @@ func TestNormalizePrepareArgsMovesDriveAfterFlags(t *testing.T) {
 
 // The point of the whole layout: a prepared drive boots from its own launcher's
 // working directory, and boots again unchanged after the drive is mounted
-// somewhere else — a different letter on Windows, a different /Volumes path on
-// a Mac (SPEC §2.3, PLAN phase 5 task 2).
+// somewhere else. A different letter on Windows, a different /Volumes path on a
+// Mac (SPEC §2.3).
 //
 // This is the automated half of that acceptance criterion. It runs the real
 // runServe against the real caravan.yaml prepare wrote, exactly as the

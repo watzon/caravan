@@ -128,7 +128,7 @@ func TestDiscoverScopesAcceptAnEmptyFilter(t *testing.T) {
 	}
 }
 
-// THE SEAM, enforced at the edge: TMDB's TV discover endpoint has no person
+// the seam, enforced at the edge: TMDB's TV discover endpoint has no person
 // parameter and ignores one if sent, so a person filter on the series scope is
 // refused rather than dropped. A caller that asked a narrower question than it
 // got is the failure this prevents.
@@ -363,8 +363,8 @@ func TestDiscoverGenresRequireAMediaType(t *testing.T) {
 	}
 }
 
-// A plain upstream failure — not a credential problem — stays a 502 on every
-// new route, rather than sending anyone to the Settings screen.
+// A plain upstream failure (not a credential problem) stays a 502 on every new
+// route, rather than sending anyone to the Settings screen.
 func TestDiscoverScopeProviderFailureIsBadGateway(t *testing.T) {
 	h, _ := discoverServer(t, &stubDiscoverProvider{
 		err: errors.New("tmdb: get /discover/movie: connection refused"),

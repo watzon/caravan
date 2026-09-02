@@ -65,8 +65,8 @@ func TestWantedListCarriesSeriesKind(t *testing.T) {
 }
 
 // The wanted screen is a combined list. A library filter only works if every
-// row names the shelf it belongs to — otherwise checking "Movies" cannot hide
-// a television hole, and two movie libraries collapse into one pile.
+// row names the shelf it belongs to, otherwise checking "Movies" cannot hide a
+// television hole, and two movie libraries collapse into one pile.
 func TestWantedListCarriesLibraryID(t *testing.T) {
 	h, st, _ := newTestServer(t)
 	ctx := context.Background()

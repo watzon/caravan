@@ -48,8 +48,8 @@ type Definition struct {
 	URLPlaceholder string   `json:"url_placeholder"`
 	RequiresAPIKey bool     `json:"requires_api_key"`
 	Categories     []int    `json:"categories"`
-	// Content is the coarse media kinds this source is good for — movies, TV,
-	// anime, and so on — used by the add-indexer picker, not sent to the API.
+	// Content is the coarse media kinds this source is good for (movies, TV,
+	// anime, and so on) used by the add-indexer picker, not sent to the API.
 	Content  []string  `json:"content"`
 	Settings []Setting `json:"settings"`
 }

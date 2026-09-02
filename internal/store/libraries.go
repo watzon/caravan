@@ -86,7 +86,7 @@ func (s *Store) GetDefaultLibrary(ctx context.Context, kind string) (*core.Libra
 }
 
 // ListLibrariesByKind returns every library of one kind ordered by id, the
-// default first among equals only by virtue of usually being oldest — callers
+// default first among equals only by virtue of usually being oldest. Callers
 // that need the default ask GetDefaultLibrary.
 func (s *Store) ListLibrariesByKind(ctx context.Context, kind string) ([]core.Library, error) {
 	models := make([]libraryStoreModel, 0)
@@ -109,22 +109,22 @@ func (s *Store) ListLibrariesByKind(ctx context.Context, kind string) ([]core.Li
 var (
 	// ErrLibraryNotEmpty refuses to delete a library that still owns items.
 	ErrLibraryNotEmpty = errors.New("store: library still has items")
-	// ErrLibraryIsDefault refuses to delete a kind's default library —
-	// demote it first, so every by-kind lookup keeps an answer.
+	// ErrLibraryIsDefault refuses to delete a kind's default library, demote it
+	// first, so every by-kind lookup keeps an answer.
 	ErrLibraryIsDefault = errors.New("store: library is its kind's default")
 )
 
 // CreateLibrary inserts a new library and writes back the assigned id. The
-// caller (the API layer) validates the kind, the provider and the root path —
-// this function only owns what the schema owns: root uniqueness, and the DLNA
+// caller (the API layer) validates the kind, the provider and the root path.
+// This function only owns what the schema owns: root uniqueness, and the DLNA
 // tree version, which must advance when a visible container appears.
 //
-// A library is born ACTIVE, whatever the caller left in the field. Dormancy is
-// a later and deliberate act on a library that exists — there is no form that
+// A library is born active, whatever the caller left in the field. Dormancy is
+// a later and deliberate act on a library that exists. There is no form that
 // creates one already switched off, and a Go zero value silently meaning "off"
 // would make every caller written before the column existed create libraries
-// nobody can see. Restriction is the opposite: it IS a create-time decision
-// (an adult library is born restricted), so it is passed through.
+// nobody can see. Restriction is the opposite: it is a create-time decision (an
+// adult library is born restricted), so it is passed through.
 func (s *Store) CreateLibrary(ctx context.Context, l *core.Library) error {
 	chain, err := normalizeChain(l)
 	if err != nil {
@@ -229,9 +229,9 @@ func (s *Store) SetDefaultLibrary(ctx context.Context, id int64) error {
 	return nil
 }
 
-// UpdateLibrary rewrites the mutable fields of an existing library. Kind is
-// not among them: it is the library's identity and what items are mapped by.
-// Neither is is_default — that is SetDefaultLibrary's transactional job.
+// UpdateLibrary rewrites the mutable fields of an existing library. Kind is not
+// among them: it is the library's identity and what items are mapped by.
+// Neither is is_default: that is SetDefaultLibrary's transactional job.
 // Updating an absent library is ErrNotFound.
 //
 // Flipping dlna_visible also advances SettingDLNAUpdateID, because that flag is
@@ -243,7 +243,7 @@ func (s *Store) SetDefaultLibrary(ctx context.Context, id int64) error {
 //
 // `active` advances it too, but only for a library dlna_visible was already on
 // for. The DLNA rule is `active AND dlna_visible`, so deactivating a shared
-// library removes its container and reactivating puts it back — both are tree
+// library removes its container and reactivating puts it back, both are tree
 // changes a cached client must be told about. For a library nobody shares, the
 // tree did not contain the container either way and the counter has nothing to
 // report.
@@ -350,12 +350,11 @@ func (s *Store) SetLibraryIndexer(ctx context.Context, li *core.LibraryIndexer) 
 }
 
 // ResolveLibrarySettings returns the effective settings for one library: its
-// own value where it set one, the global default everywhere else (PLAN phase 8
-// task 2).
+// own value where it set one, the global default everywhere else.
 //
 // This is the only place the fallback rule lives, and the set of settings it
-// covers is closed — routing, DLNA visibility, the default quality profile,
-// and the indexer set with its per-pair categories. Every other setting stays
+// covers is closed, routing, DLNA visibility, the default quality profile, and
+// the indexer set with its per-pair categories. Every other setting stays
 // global, so nothing else has to learn that libraries exist.
 func (s *Store) ResolveLibrarySettings(ctx context.Context, libraryID int64) (*core.LibrarySettings, error) {
 	lib, err := s.GetLibrary(ctx, libraryID)
@@ -408,7 +407,7 @@ func (s *Store) ResolveLibrarySettings(ctx context.Context, libraryID int64) (*c
 }
 
 // DefaultLibraryCategories is what a library asks an indexer for when nobody
-// has written it an override — given the library's kind and the indexer's own
+// has written it an override, given the library's kind and the indexer's own
 // categories.
 //
 // For every kind but one the answer is the indexer's own list, and for them
@@ -418,25 +417,25 @@ func (s *Store) ResolveLibrarySettings(ctx context.Context, libraryID int64) (*c
 // The adult library cannot inherit them, because by construction they are the
 // movie and television ones. An install that enables the module has an indexer
 // configured for 2000/5000 and a brand new Adult library with no override row,
-// so inheriting would send every scene search out under `cat=5000,2000` — and
-// that fails SILENTLY rather than loudly. indexer.parseTitle selects the
+// so inheriting would send every scene search out under `cat=5000,2000`, and
+// that fails silently rather than loudly. indexer.parseTitle selects the
 // date-based scene parser only for a 6000-series result, so everything such a
 // search returns parses with a zero scene date and is then dropped by
 // searchScene's date match: the job records "no release found" forever, on an
-// indexer that carries the scene (PLAN phase 9 task 3).
+// indexer that carries the scene.
 //
 // So the adult fallback is the adult category block itself. An indexer already
-// narrowed to specific adult subcategories keeps exactly those — that is its
-// owner naming which flavours of XXX this install wants — and one with no adult
+// narrowed to specific adult subcategories keeps exactly those (that is its
+// owner naming which flavours of XXX this install wants) and one with no adult
 // category at all gets the parent 6000, which is what "XXX" is. Either way an
 // adult search sends only 6000-series categories, the invariant the whole
 // module rests on. An explicit per-library override still wins outright: it is
 // the owner's word, and phase 8's Libraries screen is where it is given.
 //
 // It is exported because the Libraries screen renders the per-library matrix
-// from ListLibraryIndexers — the raw table, where "no row" is a hole — and has
-// to fill that hole with the same answer a search would use, or the screen
-// would show a default the searches do not run.
+// from ListLibraryIndexers (the raw table, where "no row" is a hole) and has to
+// fill that hole with the same answer a search would use, or the screen would
+// show a default the searches do not run.
 func DefaultLibraryCategories(kind string, own []int) []int {
 	if kind != core.LibraryKindAdult {
 		return own
@@ -457,8 +456,8 @@ func DefaultLibraryCategories(kind string, own []int) []int {
 // an item names, falling back to the kind's default library when it names one
 // that has vanished, or names none at all.
 //
-// Naming none is no longer an item's state — migration 0011 stamped the rows
-// that carried a zero — but it is still a caller's: work that has a kind and no
+// Naming none is no longer an item's state (migration 0011 stamped the rows
+// that carried a zero) but it is still a caller's: work that has a kind and no
 // row in hand passes 0 deliberately, which is what the fallback is for.
 func (s *Store) ResolveLibrarySettingsForItem(ctx context.Context, libraryID int64, kind string) (*core.LibrarySettings, error) {
 	if libraryID != 0 {
@@ -488,18 +487,17 @@ func (s *Store) ResolveLibrarySettingsByKind(ctx context.Context, kind string) (
 }
 
 // ResolveItemQualityProfileByLibrary returns the effective profile for one
-// library item: the profile the item names, its library's default when it
-// names none, and the store-wide default when neither answers.
+// library item: the profile the item names, its library's default when it names
+// none, and the store-wide default when neither answers.
 //
 // It is the library step ResolveQualityProfile deliberately has no notion of.
 // Every scoring site goes through here (or the by-kind wrapper below) rather
-// than through ResolveQualityProfile directly, because a library default
-// nobody reads is a setting that saves, renders as an override, and changes
-// nothing (PLAN phase 8 task 2).
+// than through ResolveQualityProfile directly, because a library default nobody
+// reads is a setting that saves, renders as an override, and changes nothing.
 //
-// libraryID 0 — a caller with a kind and no row in hand, see
-// ResolveItemQualityProfile below — or a library that has vanished falls
-// through to kind: the kind's default library answers.
+// libraryID 0 (a caller with a kind and no row in hand, see
+// ResolveItemQualityProfile below) or a library that has vanished falls through
+// to kind: the kind's default library answers.
 func (s *Store) ResolveItemQualityProfileByLibrary(ctx context.Context, libraryID int64, kind string, itemProfileID int64) (*core.QualityProfile, error) {
 	if itemProfileID > 0 {
 		p, err := s.GetQualityProfile(ctx, itemProfileID)

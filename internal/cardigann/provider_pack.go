@@ -97,7 +97,7 @@ type PackLegalMaterial struct {
 	Notice  []byte
 }
 
-// LegalMaterial returns the exact, bounded LICENSE and optional NOTICE bytes
+// LegalMaterial returns the exact, bounded license and optional notice bytes
 // that were digest-checked while verifying this candidate.
 func (c *PackCandidate) LegalMaterial() PackLegalMaterial {
 	if c == nil {

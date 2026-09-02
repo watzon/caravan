@@ -69,7 +69,7 @@ func TestSystemStatusReportsNoUnhealthyClientsByDefault(t *testing.T) {
 }
 
 // A grab routed to a client that has stopped answering fails immediately, with
-// the poll's own reason rather than a generic "add download" — and the grab is
+// the poll's own reason rather than a generic "add download", and the grab is
 // recorded as failed so the queue does not show a download nobody holds.
 func TestGrabToAnUnreachableClientFailsWithItsReason(t *testing.T) {
 	ctx := context.Background()

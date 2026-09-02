@@ -12,12 +12,12 @@ import (
 	"github.com/watzon/caravan/internal/store"
 )
 
-// Credential health (PLAN phase 10 tasks 2-4).
+// Credential health.
 //
-// A metadata-needing surface in Caravan sits behind a credential, and before
-// this phase a missing or wrong one surfaced as a 503 with a prose message or,
-// once the key was wrong rather than absent, as a raw 502 from whatever call
-// happened to fail first. Neither told the SPA what to render.
+// A metadata-needing surface in Caravan sits behind a credential. A missing or
+// wrong one used to surface as a 503 with a prose message or, once the key was
+// wrong rather than absent, as a raw 502 from whatever call failed first.
+// Neither told the SPA what to render.
 //
 // Two things fix that, and they are deliberately separate:
 //
@@ -61,7 +61,7 @@ const (
 // branches on; the messages beside them are for humans and may be reworded.
 const (
 	// CodeMetadataCredentialAbsent means the surface needs a metadata key and
-	// none has been entered — the fix is Settings → Metadata.
+	// none has been entered. The fix is Settings → Metadata.
 	CodeMetadataCredentialAbsent = "metadata_credential_absent"
 	// CodeMetadataCredentialInvalid means a key is on file and the provider
 	// rejected it.
@@ -103,7 +103,7 @@ type credentialVerdict struct {
 //
 // Only a rejection is ever cached. A validation that failed because the network
 // was down says nothing about the credential, so it leaves no verdict and the
-// state stays optimistic — an unreachable provider is not a wrong API key, and
+// state stays optimistic. An unreachable provider is not a wrong API key, and
 // telling the user to go fix their key would be a lie.
 //
 // A keyless provider never appears here, not even as an "ok": that a provider
@@ -143,12 +143,12 @@ func (c *metadataCredentials) record(providerID, key string, err error) {
 // asks instead of believing what is on file.
 //
 // It exists for the one credential that is not a single string. TheTVDB's login
-// consumes a key AND, for a user-supported subscription, a PIN, while this cache
-// is keyed on the key alone — so editing the PIN changes the exchange without
-// changing the cache key, and the verdict left behind is about a login this
-// server no longer makes. That is stale in both directions: a repaired PIN would
-// stay "invalid" until somebody retyped the key, and a broken one would go on
-// reading "ok".
+// consumes a key AND, for a user-supported subscription, a PIN, while this
+// cache is keyed on the key alone, so editing the PIN changes the exchange
+// without changing the cache key, and the verdict left behind is about a login
+// this server no longer makes. That is stale in both directions: a repaired PIN
+// would stay "invalid" until somebody retyped the key, and a broken one would
+// go on reading "ok".
 func (c *metadataCredentials) forget(providerID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -212,9 +212,9 @@ func (s *server) metadataCredentialState(ctx context.Context, providerID string)
 // id. It is what GET /system/status reports, and the flat TMDB fields beside it
 // are read out of this same map so the two cannot disagree.
 //
-// Keyless providers are absent rather than "ok" — see metadataCredentialState —
-// which also keeps the payload bounded by the number of keys a person can
-// enter rather than by the size of the registry.
+// Keyless providers are absent rather than "ok" (see metadataCredentialState)
+// which also keeps the payload bounded by the number of keys a person can enter
+// rather than by the size of the registry.
 func (s *server) credentialStates(ctx context.Context) (map[string]credentialStateJSON, error) {
 	out := make(map[string]credentialStateJSON)
 	for _, p := range core.Providers() {
@@ -287,16 +287,16 @@ func (s *server) settingValue(ctx context.Context, key string) (string, error) {
 	return strings.TrimSpace(value), nil
 }
 
-// metadataProvider resolves the provider for a surface that cannot work
-// without it, answering the typed 503 the SPA turns into a directed empty state
-// and reporting false when there is nothing to call.
+// metadataProvider resolves the provider for a surface that cannot work without
+// it, answering the typed 503 the SPA turns into a directed empty state and
+// reporting false when there is nothing to call.
 //
 // Absence is asked of the manager rather than of the settings table because the
 // manager is what would do the work: it holds the provider, and in the serving
 // process that provider exists exactly when the key does. What the settings
-// table is consulted for is the cached verdict — refusing a key already known
-// to be rejected, so the SPA gets its empty state without Caravan spending a
-// round trip proving something it was told an hour ago.
+// table is consulted for is the cached verdict, refusing a key already known to
+// be rejected, so the SPA gets its empty state without Caravan spending a round
+// trip proving something it was told an hour ago.
 func (s *server) metadataProvider(w http.ResponseWriter, r *http.Request) (core.MetadataProvider, bool) {
 	provider := s.mgr.Metadata()
 	if provider == nil {
@@ -318,7 +318,7 @@ func (s *server) metadataProvider(w http.ResponseWriter, r *http.Request) (core.
 // separate questions once a library can be chained to something other than
 // TMDB: a per-library search has to ask "is this chain's key bad" without
 // asking "is TMDB configured", and answers the second for itself by walking the
-// chain (see handleSearch). A store read that fails counts as refused — the
+// chain (see handleSearch). A store read that fails counts as refused. The
 // response has been written either way, and the caller must stop.
 //
 // Keyless ids on the list are skipped rather than refused: a chain is a list of
@@ -358,13 +358,13 @@ func (s *server) tmdbKeyRejected(w http.ResponseWriter, r *http.Request) bool {
 // noteMetadataFailure records a rejected credential seen by a live metadata
 // call, and reports whether that is what it was.
 //
-// This is the second of the two transitions in PLAN phase 10 task 2: a key that
-// was valid when it was entered and has since been revoked flips to invalid the
+// This is the second of the two credential-state transitions: a key that was
+// valid when it was entered and has since been revoked flips to invalid the
 // first time anything tries to use it, without waiting for someone to press
 // Test.
 //
 // providerID is whose credential the caller can prove the failure was about. An
-// empty id — or one that holds no credential — records NOTHING while still
+// empty id (or one that holds no credential) records nothing while still
 // reporting true, and that refusal is the point: a call that walked a chain
 // knows a key was refused but not which one, and marking a key bad on a guess
 // sends someone to re-enter a credential that works while the broken one goes
@@ -398,14 +398,14 @@ func (s *server) noteMetadataFailure(providerID string, err error) bool {
 // credential into the typed answer the guarded surfaces use and leaving every
 // other failure as the bad gateway it was.
 //
-// providerIDs are the providers the call could have reached — a chain, for the
+// providerIDs are the providers the call could have reached. A chain, for the
 // per-library search. The rejection is attributed only when exactly one of them
 // is credentialed, which is the difference between knowing whose key was
 // refused and guessing; see soleCredentialedProvider and noteMetadataFailure.
 func (s *server) writeMetadataError(w http.ResponseWriter, providerIDs []string, msg string, err error) {
 	// A chain with nothing configured on it is the absent-credential answer,
 	// not a bad gateway. Before per-library search this could not be reached
-	// here — the caller had already resolved a provider — but a chain resolves
+	// here (the caller had already resolved a provider) but a chain resolves
 	// inside the manager now, so "no provider" arrives as an error rather than
 	// as a nil, and the SPA needs the same directed empty state either way.
 	if errors.Is(err, core.ErrNoMetadataProvider) {
@@ -443,8 +443,8 @@ type metadataTestRequest struct {
 	PIN string `json:"pin"`
 }
 
-// handleMetadataTest proves one provider's API key against that provider (PLAN
-// phase 10 task 4), mirroring POST /indexers/{id}/test.
+// handleMetadataTest proves one provider's API key against that provider,
+// mirroring POST /indexers/{id}/test.
 //
 // The verdict is cached against the provider and the key that was tested, so
 // testing a key in the first-run wizard and then saving it costs one upstream
@@ -455,9 +455,9 @@ type metadataTestRequest struct {
 // behind either, and a Test button that passes for a card with no field on it
 // would be reporting the health of nothing.
 //
-// The response never echoes the key, and neither does the log line — the
-// provider's message can quote a request, and SPEC §12 keeps credentials out of
-// both.
+// The response never echoes the key, and neither does the log line. The
+// provider's message can quote a request, and SPEC §12 keeps credentials out
+// of both.
 func (s *server) handleMetadataTest(w http.ResponseWriter, r *http.Request) {
 	var body metadataTestRequest
 	// A bodyless POST is legitimate here: "test what is saved".
@@ -515,7 +515,7 @@ func (s *server) handleMetadataTest(w http.ResponseWriter, r *http.Request) {
 // at. What the check buys is that the state on the status card is right
 // immediately, rather than staying optimistically "ok" until something fails.
 //
-// A key that already carries a verdict — the wizard tested it a moment ago — is
+// A key that already carries a verdict (the wizard tested it a moment ago) is
 // believed, so this costs nothing on the path the UI actually takes.
 func (s *server) revalidateMetadataKey(ctx context.Context, providerID, key string) {
 	if key == "" {

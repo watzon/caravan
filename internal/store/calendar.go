@@ -15,9 +15,9 @@ type CalendarEpisode struct {
 	Episode     core.Episode
 	SeriesTitle string
 	// SeriesKind is the series' core.SeriesKind* value. The calendar is a
-	// shared surface — one grid holds movies, television and, once the module
-	// is on, scenes — so the row has to be able to say which it is: an
-	// ungranted viewer must see nothing adult here (PLAN phase 9 task 5).
+	// shared surface (one grid holds movies, television and, once the module is
+	// on, scenes) so the row has to be able to say which it is: an ungranted
+	// viewer must see nothing adult here.
 	SeriesKind string
 	// SeriesLibraryID is which library owns the series, so the calendar can
 	// drop the rows of a library this viewer cannot see. Zero is a row that

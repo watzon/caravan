@@ -34,7 +34,7 @@ func TestAniListClientIsReused(t *testing.T) {
 }
 
 // TVmaze needs no credential either, so its entry has to resolve on a store
-// where nothing has been configured at all — a library chained to it works on a
+// where nothing has been configured at all. A library chained to it works on a
 // fresh install, and a test that seeded a setting first would not prove it.
 func TestProviderRegistryResolvesTVmazeWithoutSettings(t *testing.T) {
 	adapter, _ := testAdapter(t)
@@ -58,9 +58,9 @@ func TestTVmazeClientIsReused(t *testing.T) {
 }
 
 // TheTVDB is the other way round: it cannot be resolved until a key exists, and
-// the nil it answers with until then must be a GENUINE untyped nil — callers
-// test the interface value, and a typed nil *thetvdb.Client would pass that test
-// and then try to log in with no credential.
+// the nil it answers with until then must be a genuine untyped nil. Callers
+// test the interface value, and a typed nil *thetvdb.Client would pass that
+// test and then try to log in with no credential.
 func TestProviderRegistryWithholdsTheTVDBWithoutAKey(t *testing.T) {
 	ctx := context.Background()
 	adapter, st := testAdapter(t)
@@ -109,7 +109,7 @@ func TestTheTVDBClientCachesOnKeyAndPIN(t *testing.T) {
 	}
 }
 
-// An id nobody compiled in must be a GENUINE untyped nil: callers test the
+// An id nobody compiled in must be a genuine untyped nil: callers test the
 // interface value, and a typed nil pointer would pass that test and then be
 // called.
 func TestProviderRegistryUnknownIDIsUntypedNil(t *testing.T) {

@@ -95,15 +95,15 @@ type MediaFileProfileAssignment struct {
 // GetMediaFileProfileAssignment resolves the one item assignment that owns a
 // media file: the library and quality profile named by its movie or series.
 //
-// The ID is what decides anything — with several libraries per kind, the kind
+// The ID is what decides anything, with several libraries per kind, the kind
 // alone does not say whose dlna_visible flag applies, and since migration 0011
 // every owning row names its library outright. The kind is reported beside it
-// as the owner's vocabulary, which is what makes an ownership conflict
-// (a file linked to both a movie and a series) legible to a caller.
+// as the owner's vocabulary, which is what makes an ownership conflict (a file
+// linked to both a movie and a series) legible to a caller.
 //
 // Files with no owner, or with conflicting movie/episode owners, or with
-// episode owners with different assignments, return ErrNotFound so callers
-// fail closed instead of choosing a playback target arbitrarily.
+// episode owners with different assignments, return ErrNotFound so callers fail
+// closed instead of choosing a playback target arbitrarily.
 func (s *Store) GetMediaFileProfileAssignment(ctx context.Context, id int64) (MediaFileProfileAssignment, error) {
 	fail := func(err error) (MediaFileProfileAssignment, error) {
 		return MediaFileProfileAssignment{}, err
@@ -202,8 +202,7 @@ func (s *Store) ResolveMediaFilePlaybackTarget(ctx context.Context, id int64) (c
 	)
 }
 
-// UpdateMediaFileConverted repoints a media file at the file ffmpeg produced
-// (PLAN phase 4, task 4).
+// UpdateMediaFileConverted repoints a media file at the file ffmpeg produced.
 //
 // It updates in place instead of insert-plus-delete because the row id is what
 // episode_files links against: a multi-episode file that lost its id on
@@ -224,8 +223,8 @@ func (s *Store) UpdateMediaFileConverted(ctx context.Context, id int64, path str
 }
 
 // UpdateMediaFilePath repoints one media file row at the location a move put
-// its file. The row id survives on purpose — episode links reference it, and
-// a delete-and-reinsert would orphan them (the same reason
+// its file. The row id survives on purpose, episode links reference it, and a
+// delete-and-reinsert would orphan them (the same reason
 // UpdateMediaFileConverted updates in place).
 func (s *Store) UpdateMediaFilePath(ctx context.Context, id int64, path string) error {
 	res, err := s.db.NewUpdate().Model((*mediaFileModel)(nil)).

@@ -13,8 +13,8 @@ import (
 )
 
 // newRoutingServer builds a server whose engine is the real protocol router
-// over stubs, so the grab endpoints are exercised through the same dispatch
-// the serving process uses (PLAN phase 6 task 3).
+// over stubs, so the grab endpoints are exercised through the same dispatch the
+// serving process uses.
 //
 // usenet is optional: passing nil is the configuration a stock Caravan has,
 // where usenet has no engine at all.
@@ -106,9 +106,9 @@ func TestGrabRoutesByReleaseProtocol(t *testing.T) {
 	}
 }
 
-// A usenet release with no usenet engine configured is a recorded rejection
-// and a 4xx that names what to configure — never a silent drop, and never a
-// misroute into the embedded torrent engine.
+// A usenet release with no usenet engine configured is a recorded rejection and
+// a 4xx that names what to configure, never a silent drop, and never a misroute
+// into the embedded torrent engine.
 func TestUsenetGrabWithoutAUsenetEngineIsRejected(t *testing.T) {
 	ctx := context.Background()
 	h, st, torrentEngine, _ := newRoutingServer(t, nil)
@@ -124,7 +124,7 @@ func TestUsenetGrabWithoutAUsenetEngineIsRejected(t *testing.T) {
 	decodeBody(t, rec, &failure)
 	// What to configure is a storage root and a news server: the built-in
 	// Usenet engine needs no external download client, and telling the user
-	// otherwise would present one as required (PLAN phase 7 acceptance).
+	// otherwise would present one as required.
 	if !strings.Contains(failure.Error, "storage root") || !strings.Contains(failure.Error, "Usenet servers") {
 		t.Fatalf("error = %q, want it to name what to configure", failure.Error)
 	}

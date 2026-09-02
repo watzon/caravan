@@ -48,8 +48,8 @@ type conversionJSON struct {
 	EpisodeNumber int    `json:"episode_number,omitempty"`
 	SourcePath    string `json:"source_path"`
 	OutputPath    string `json:"output_path"`
-	// Strategy is "", "none", "remux" or "transcode" — empty until the file
-	// has been probed, because the choice is the probe's, not the queue's.
+	// Strategy is "", "none", "remux" or "transcode", empty until the file has
+	// been probed, because the choice is the probe's, not the queue's.
 	Strategy string `json:"strategy"`
 	// ProfileID is the playback target this conversion uses, recorded at queue
 	// time so a later profile change does not rewrite history.

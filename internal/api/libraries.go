@@ -14,11 +14,11 @@ import (
 )
 
 // libraryJSON is one section of the media library as the Libraries settings
-// screen renders it (SPEC §7 `libraries`, PLAN phase 8).
+// screen renders it (SPEC §7 `libraries`).
 //
-// The override fields carry the library's OWN answer, not the resolved one:
+// The override fields carry the library's own answer, not the resolved one:
 // empty and zero mean "this library does not answer, the global setting does",
-// which is exactly the distinction the screen draws between an OVERRIDE and a
+// which is exactly the distinction the screen draws between an override and a
 // GLOBAL DEFAULT. Handing back a resolved value would make every library look
 // permanently overridden.
 type libraryJSON struct {
@@ -29,7 +29,7 @@ type libraryJSON struct {
 	// create and kept across a rename.
 	Slug string `json:"slug"`
 	// Icon names the glyph the navigation draws for this library. Empty means
-	// "the kind's default", which the client resolves — see core.Library.Icon
+	// "the kind's default", which the client resolves. See core.Library.Icon
 	// for why the server keeps no list of icon names.
 	Icon string `json:"icon"`
 	// RootPath is read-only here: it is where the organizer already put the
@@ -51,9 +51,9 @@ type libraryJSON struct {
 	// Restricted narrows the library to the accounts named in its access
 	// roster, plus admins. False is every account.
 	Restricted bool `json:"restricted"`
-	// ItemCount is how many movies and series name this library as theirs —
-	// the number the delete guard reports, so the screen can explain a
-	// refusal before the user reaches it.
+	// ItemCount is how many movies and series name this library as theirs. The
+	// number the delete guard reports, so the screen can explain a refusal
+	// before the user reaches it.
 	ItemCount int64 `json:"item_count"`
 	// DLNAVisible advertises this library in the DLNA content tree.
 	DLNAVisible bool `json:"dlna_visible"`
@@ -107,7 +107,7 @@ type libraryIndexerJSON struct {
 type libraryPatchRequest struct {
 	Name *string `json:"name"`
 	// Icon is the glyph name, empty to go back to the kind's default. It is
-	// validated for SHAPE only (validLibraryIcon), so a client can ship a new
+	// validated for shape only (validLibraryIcon), so a client can ship a new
 	// glyph without a server release.
 	Icon *string `json:"icon"`
 	// Provider and Providers are two spellings of the same setting: the
@@ -120,10 +120,10 @@ type libraryPatchRequest struct {
 	// Active is the master switch: false is dormant for everyone, admins
 	// included, and deletes nothing.
 	//
-	// `restricted` is deliberately NOT here. It is written only by PUT
+	// `restricted` is deliberately not here. It is written only by PUT
 	// /libraries/{id}/access, together with the roster it applies to, because
-	// the two are one decision — one door per invariant, so a PATCH cannot
-	// leave a library restricted to nobody.
+	// the two are one decision. One door per invariant, so a PATCH cannot leave
+	// a library restricted to nobody.
 	Active           *bool   `json:"active"`
 	DLNAVisible      *bool   `json:"dlna_visible"`
 	RouteTorrent     *string `json:"route_torrent"`
@@ -155,19 +155,19 @@ type libraryIndexerRequest struct {
 // handleListProviders lists the providers the create form and the chain editor
 // may offer.
 //
-// It is a MERGE of two registries, not one list. The compiled-in descriptors
+// It is a merge of two registries, not one list. The compiled-in descriptors
 // (core.Providers) are protocols, and the adult kind is stripped from every one
-// of them — the static "Stash-box" descriptor therefore never ships, because
-// "stash-box" is a wire dialect and a chain element has to name a catalogue with
-// an account and its own UUIDs behind it. Those are the configured instances,
-// one descriptor each, and they are added only for a caller who can see an
-// adult library: a name in a picker is a trace of a shelf whose promise is
-// absence.
+// of them. The static "Stash-box" descriptor therefore never ships, because
+// "stash-box" is a wire dialect and a chain element has to name a catalogue
+// with an account and its own UUIDs behind it. Those are the configured
+// instances, one descriptor each, and they are added only for a caller who can
+// see an adult library: a name in a picker is a trace of a shelf whose promise
+// is absence.
 //
 // An admin who could CREATE an adult library still sees no instance here until
 // one exists, and that costs nothing: the instance routes are behind the same
 // gate, so an install with no adult library has no instance to offer either.
-// The picker fills itself in the order the bootstrap runs — library, then
+// The picker fills itself in the order the bootstrap runs, library, then
 // endpoint, then the chain editor that names it.
 func (s *server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
@@ -215,24 +215,23 @@ func (s *server) handleListProviders(w http.ResponseWriter, r *http.Request) {
 // handleCreateLibrary creates a new library beside the seeded ones.
 //
 // Nothing is written to disk, for AddMovie's reason: an empty folder is a
-// library item the scanner cannot see, and the organizer's MkdirAll creates
-// the directory the moment the first import needs it.
+// library item the scanner cannot see, and the organizer's MkdirAll creates the
+// directory the moment the first import needs it.
 //
 // The new row is created with DLNA sharing off. The DLNA tree carves one
-// container per library, so the flag would work — but sharing a library over a
+// container per library, so the flag would work, but sharing a library over a
 // protocol with no accounts is a decision the owner makes, not one a create
 // form makes for them, so it starts down and the Reach card is where it goes
 // up.
 //
-// Creating an ADULT library is how the adult module is turned on, and this
-// route is the only door into /adult. Stash-box instance CRUD sits on the
-// admin mux so an endpoint can be added first — Settings → Metadata is
-// reachable without a library, and the Add-library form points there.
-// The row is born RESTRICTED — to the admins alone until somebody is named —
-// which is what the module's own switch used to guarantee. Nothing here asks
-// whether an endpoint is configured: the screen warns, and a library whose
-// chain resolves to no box parks its scans rather than failing them (see
-// library.adultChain).
+// Creating an adult library is how the adult module is turned on, and this
+// route is the only door into /adult. Stash-box instance CRUD sits on the admin
+// mux so an endpoint can be added first, Settings → Metadata is reachable
+// without a library, and the Add-library form points there. The row is born
+// restricted (to the admins alone until somebody is named) which is what the
+// module's own switch used to guarantee. Nothing here asks whether an endpoint
+// is configured: the screen warns, and a library whose chain resolves to no box
+// parks its scans rather than failing them (see library.adultChain).
 func (s *server) handleCreateLibrary(w http.ResponseWriter, r *http.Request) {
 	var body libraryCreateRequest
 	if !decodeJSON(w, r, &body) {
@@ -287,31 +286,31 @@ func chainFrom(providers []string, provider, kind string) []string {
 	return []string{provider}
 }
 
-// validProviderChain rejects a chain that cannot be walked, writing the
-// refusal itself.
+// validProviderChain rejects a chain that cannot be walked, writing the refusal
+// itself.
 //
 // Every element must serve the kind, which is what keeps an adult library's
 // chain to stash-box ids without a rule that says so: no other compiled-in
 // provider serves the adult kind (core.ProviderServes). Duplicates are refused
-// because a chain is an ORDER, and an id appearing twice has no second meaning
-// — the walk would ask the same provider the same question again.
+// because a chain is an ORDER, and an id appearing twice has no second meaning.
+// The walk would ask the same provider the same question again.
 //
 // It is a method taking a context because the third rule is a database
 // question: an id whose base is stash-box has to name an instance that is
 // actually configured. ProviderServes answers on the base and so accepts
-// `stashbox:anything` that is well-formed, which is right for it — which kinds a
-// protocol serves is a compiled fact — and leaves "does this box exist here" to
+// `stashbox:anything` that is well-formed, which is right for it (which kinds a
+// protocol serves is a compiled fact) and leaves "does this box exist here" to
 // be asked once, here.
 //
 // That third rule has exactly one exception, and it is what makes the module
-// bootstrappable: on an install with NO stash-box instance at all, the bare
+// bootstrappable: on an install with no stash-box instance at all, the bare
 // legacy id is accepted. The instance routes live under /adult, which is absent
 // until an adult library exists, so the first library necessarily predates the
-// first box — and `stashbox` is the id the first instance ever created is
-// minted with (mintStashboxInstance), so the chain is a forward reference to
-// the endpoint about to be configured rather than a name for a box this install
-// has never held. A qualified `stashbox:something` gets no such benefit: that
-// names a particular box, and there is nothing for it to resolve into later.
+// first box, and `stashbox` is the id the first instance ever created is minted
+// with (mintStashboxInstance), so the chain is a forward reference to the
+// endpoint about to be configured rather than a name for a box this install has
+// never held. A qualified `stashbox:something` gets no such benefit: that names
+// a particular box, and there is nothing for it to resolve into later.
 func (s *server) validProviderChain(ctx context.Context, w http.ResponseWriter, chain []string, kind string) bool {
 	if len(chain) == 0 {
 		writeError(w, http.StatusBadRequest, "at least one provider is required")
@@ -394,8 +393,8 @@ func validateLibraryRoot(ctx context.Context, st *store.Store, raw string) (stri
 // An adult library is deleted under the same two guards as any other. Which
 // leaves one install unable to delete: exactly one adult library, its kind's
 // default, switched off. That is ErrLibraryIsDefault doing its job and not a
-// gap to close — every by-kind lookup needs an answer, and `active=0` is
-// already the "off" that deletion was never the right spelling of.
+// gap to close. Every by-kind lookup needs an answer, and `active=0` is already
+// the "off" that deletion was never the right spelling of.
 func (s *server) handleDeleteLibrary(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -436,15 +435,16 @@ func (s *server) handleListLibraries(w http.ResponseWriter, r *http.Request) {
 	gate := s.gate(r)
 	out := make([]libraryJSON, 0, len(libraries))
 	for _, l := range libraries {
-		// A library the caller may not have is dropped rather than greyed: a row
-		// carrying a name, a root path and a DLNA state is exactly the trace
-		// that "this shelf is not here for you" promises not to leave.
+		// A library the caller may not have is dropped rather than greyed: a
+		// row carrying a name, a root path and a DLNA state is exactly the
+		// trace that "this shelf is not here for you" promises not to leave.
 		//
-		// An INACTIVE one is kept, because this is the management surface and
+		// An inactive one is kept, because this is the management surface and
 		// the row carries `active: false` for the screen to grey it with. It is
-		// the only list the toggle that undoes dormancy can be reached from, and
-		// this route is admin-only (routePolicies, and memberAllowed names none
-		// of it) — so the row never reaches somebody a restriction hid it from.
+		// the only list the toggle that undoes dormancy can be reached from,
+		// and this route is admin-only (routePolicies, and memberAllowed names
+		// none of it), so the row never reaches somebody a restriction hid it
+		// from.
 		visible, err := gate.manages(ctx, l)
 		if err != nil {
 			s.writeStoreError(w, "read library access", err)
@@ -463,9 +463,9 @@ func (s *server) handleListLibraries(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"libraries": out})
 }
 
-// visibleLibrary resolves a library for a CONTENT route — searching it,
-// grabbing into it, adding to it, moving into it, reading its parked files —
-// writing the refusal itself.
+// visibleLibrary resolves a library for a content route (searching it, grabbing
+// into it, adding to it, moving into it, reading its parked files) writing the
+// refusal itself.
 //
 // A library the caller may not see is 404 rather than 403, for the reason
 // requireAdult gives: "this exists and you may not have it" is a worse answer
@@ -536,7 +536,7 @@ func (s *server) manageableLibrary(w http.ResponseWriter, r *http.Request, id in
 
 // handleUpdateLibrary edits the settings a library may answer for itself. It is
 // a PATCH because the screen saves one card at a time, and because a PUT would
-// have to carry root_path and kind — neither of which it may change.
+// have to carry root_path and kind, neither of which it may change.
 func (s *server) handleUpdateLibrary(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -798,13 +798,13 @@ func (s *server) libraryDTO(ctx context.Context, l core.Library, indexers []core
 	}, nil
 }
 
-// validLibraryIcon checks the SHAPE of an icon name and nothing else: letters
+// validLibraryIcon checks the shape of an icon name and nothing else: letters
 // only, at most 32 of them, and empty is fine because empty is how a library
 // goes back to its kind's default glyph.
 //
 // It deliberately does not check the name against a list. The glyphs live in
 // the SPA, and a server-side allow-list would be a second copy of that list
-// which goes stale the first time a glyph is added — the client already falls
+// which goes stale the first time a glyph is added. The client already falls
 // back to the kind default for a name it does not recognise, so an unknown name
 // costs nothing. What the shape rule buys is that the value stays a bare
 // identifier: no markup, no path, no separator a future consumer could read as

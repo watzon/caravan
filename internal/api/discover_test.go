@@ -34,10 +34,10 @@ type stubDiscoverProvider struct {
 	// browseCalls records what the browse endpoint forwarded.
 	browseCalls []browseCall
 
-	// The filtered scopes (PLAN phase 12) and what they forwarded. The filters
-	// are recorded rather than acted on: what the provider does with them is
-	// internal/tmdb's business, and what the API must get right is that the
-	// query string became exactly this struct.
+	// The filtered scopes and what they forwarded. The filters are recorded
+	// rather than acted on: what the provider does with them is internal/tmdb's
+	// business, and what the API must get right is that the query string became
+	// exactly this struct.
 	movieFilters  []core.MovieFilter
 	seriesFilters []core.SeriesFilter
 

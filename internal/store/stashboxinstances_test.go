@@ -31,7 +31,7 @@ func TestFreshInstallHasNoStashboxInstances(t *testing.T) {
 
 // The reason 0026 demotes the bare stash_id indexes: the public boxes are forks
 // of one another and mint identical UUIDs, so the same site catalogued on two
-// instances is two rows — and under the old global unique index the second one
+// instances is two rows, and under the old global unique index the second one
 // simply could not be written.
 func TestTwoInstancesMayHoldTheSameStashID(t *testing.T) {
 	ctx := context.Background()
@@ -216,7 +216,7 @@ func TestStashboxInstanceUniqueness(t *testing.T) {
 }
 
 // The counters behind the delete guard. Both have to see an instance that is
-// only ever named in the tail of a chain — a library identifying through
+// only ever named in the tail of a chain. A library identifying through
 // ["stashbox:stashdb", "stashbox"] uses both, and only its head is a column.
 func TestProviderUsageCounters(t *testing.T) {
 	ctx := context.Background()
@@ -230,8 +230,8 @@ func TestProviderUsageCounters(t *testing.T) {
 
 	for id, want := range map[string]int{
 		core.ProviderStashbox + ":stashdb": 1,
-		// The tail, plus the Adult library 0011 seeds — which is chained to the
-		// bare id too. Each library is counted once: the base does NOT also
+		// The tail, plus the Adult library 0011 seeds, which is chained to the
+		// bare id too. Each library is counted once: the base does not also
 		// claim its instance's library twice over, because the match is on the
 		// whole quoted id and "stashbox" does not occur inside
 		// "stashbox:stashdb".

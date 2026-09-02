@@ -46,14 +46,14 @@ func TestImageServesPosterFromStorageRoot(t *testing.T) {
 
 // TestImageRefusesEscapingTheStorageRoot is the traversal regression.
 //
-// The escape target sits in the storage root's *parent*, which is exactly
-// where "library/../../secret.jpg" resolves once the root is prepended — so
-// this fails if the handler ever goes back to joining the request path onto
-// the root instead of confining it with os.Root.
+// The escape target sits in the storage root's *parent*, which is exactly where
+// "library/../../secret.jpg" resolves once the root is prepended, so this fails
+// if the handler ever goes back to joining the request path onto the root
+// instead of confining it with os.Root.
 //
 // The dot segments are percent-encoded because http.ServeMux cleans and
-// redirects a literal "/../" before any handler sees it; encoding them is how
-// a real attacker gets ".." all the way to the handler.
+// redirects a literal "/../" before any handler sees it; encoding them is how a
+// real attacker gets ".." all the way to the handler.
 func TestImageRefusesEscapingTheStorageRoot(t *testing.T) {
 	h, st, _ := newTestServer(t)
 	root := t.TempDir()
@@ -113,11 +113,11 @@ func TestImageWithoutStorageRootIs404(t *testing.T) {
 // Adult artwork is the one thing GET /images will not hand to just anybody.
 //
 // The endpoint is auth-exempt so a television can fetch album art, and the
-// paths under it are guessable: importScene writes a site's poster to
-// <adult root>/<Site>/poster.jpg, derived from the site's public name. Left
-// open, a 200 versus a 404 on that URL is a yes/no oracle for "is this site in
-// this library" — answerable with no credential at all, by any device on the
-// LAN, and even with the module switched off.
+// paths under it are guessable: importScene writes a site's poster to <adult
+// root>/<Site>/poster.jpg, derived from the site's public name. Left open, a
+// 200 versus a 404 on that URL is a yes/no oracle for "is this site in this
+// library", answerable with no credential at all, by any device on the LAN, and
+// even with the module switched off.
 func TestImagesRefuseAdultArtworkWithoutAReasonToServeIt(t *testing.T) {
 	ctx := context.Background()
 	h, st, _ := newTestServer(t)
@@ -142,7 +142,7 @@ func TestImagesRefuseAdultArtworkWithoutAReasonToServeIt(t *testing.T) {
 	memberCookie := withCookie(login(t, h, testMember, "correct-horse"))
 
 	// Module never enabled: there is no adult library row, so nothing changes
-	// for anyone — and the site path is a 404 for the ordinary reason.
+	// for anyone, and the site path is a 404 for the ordinary reason.
 	if got := get(sitePath, nil); got != http.StatusNotFound {
 		t.Errorf("anonymous adult poster with the module never enabled = %d, want 404", got)
 	}
@@ -197,7 +197,7 @@ func TestImagesRefuseAdultArtworkWithoutAReasonToServeIt(t *testing.T) {
 	}
 
 	// And switching the module off closes it for everyone, the admin and the
-	// LAN included — the dlna_visible the owner left behind does not apply.
+	// LAN included. The dlna_visible the owner left behind does not apply.
 	setAdultLibrariesActive(t, st, false)
 	for _, tc := range []struct {
 		name     string

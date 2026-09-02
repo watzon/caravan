@@ -30,7 +30,7 @@ func listTasks(t *testing.T, h http.Handler) map[string]taskJSON {
 }
 
 // The screen's whole job: a finished run with its result, and the open
-// successor that says when the next one is due — read off the same rows the
+// successor that says when the next one is due, read off the same rows the
 // scheduler wrote.
 func TestSystemTasksReportTheLastRunAndTheNextOne(t *testing.T) {
 	h, st, _ := newTestServer(t)
@@ -142,7 +142,7 @@ func TestRunTaskMakesThePendingJobDue(t *testing.T) {
 	}
 }
 
-// With no open row — a stopped runner, or a database that never bootstrapped —
+// With no open row (a stopped runner, or a database that never bootstrapped)
 // the button still has to start the task rather than answer "nothing to do".
 func TestRunTaskRestartsAChainWithNoOpenRow(t *testing.T) {
 	h, st, _ := newTestServer(t)

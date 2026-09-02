@@ -47,7 +47,7 @@ type RecurringInterval struct {
 	DefaultMinutes int
 }
 
-// recurringKinds is the order recurring jobs are bootstrapped and listed in —
+// recurringKinds is the order recurring jobs are bootstrapped and listed in,
 // most frequent first, which is also how a user reads them.
 var recurringKinds = []string{core.JobRSSSync, core.JobIndexerHealth, core.JobNotificationDispatch, core.JobBacklogSweep, core.JobRefreshMetadata, core.JobRecycleCleanup}
 
@@ -153,8 +153,8 @@ func (s *Store) SetRecurringInterval(ctx context.Context, kind string, minutes i
 }
 
 // JobStatus is one kind's place in the queue: the run that finished most
-// recently, and the row that is still open. Either may be nil — a kind that
-// has never completed a cycle has no finished row, and a kind whose chain was
+// recently, and the row that is still open. Either may be nil, a kind that has
+// never completed a cycle has no finished row, and a kind whose chain was
 // broken (a stopped runner, a fresh database) has no open one.
 type JobStatus struct {
 	Kind string
@@ -162,7 +162,7 @@ type JobStatus struct {
 	// run ended and its LastError is why, when it failed.
 	LastFinished *core.Job
 	// Open is the pending successor waiting on its RunAfter, or the row that is
-	// running right now — the running one wins when both exist.
+	// running right now. The running one wins when both exist.
 	Open *core.Job
 }
 

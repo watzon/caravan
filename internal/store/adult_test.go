@@ -12,8 +12,8 @@ import (
 )
 
 // enableAdultLibrary says directly what a module-wide enable used to say for a
-// test: the Adult library exists and is switched on. An adult library IS the
-// module now — there is no server-wide flag left to set — so a test that wants
+// test: the Adult library exists and is switched on. An adult library is the
+// module now (there is no server-wide flag left to set) so a test that wants
 // adult content reachable creates one, exactly as the create form does.
 //
 // It is idempotent the way the enable it replaces was: an existing row is
@@ -56,7 +56,7 @@ func enableAdultLibrary(t *testing.T, s *Store) core.Library {
 // bound every adult library at once, and that is now spelled per library.
 //
 // Off is a visibility answer and never a retention one, which is why this walks
-// the rows rather than deleting them — a test that turns the module off and
+// the rows rather than deleting them. A test that turns the module off and
 // expects its scenes back is testing the promise, not the fixture.
 func setAdultLibrariesActive(t *testing.T, s *Store, active bool) {
 	t.Helper()
@@ -130,9 +130,9 @@ func TestBaselineLeavesTheForeignKeysSound(t *testing.T) {
 	}
 }
 
-// Migration 0011 seeds the Adult library, and it must arrive DORMANT. The row
-// existing is not the trace this phase forbids — a shelf nobody can see is —
-// so what matters is that `active = 0` and `restricted = 1` make
+// Migration 0011 seeds the Adult library, and it must arrive dormant. The row
+// existing is not the trace this phase forbids (a shelf nobody can see is) so
+// what matters is that `active = 0` and `restricted = 1` make
 // core.LibraryVisible answer no to an admin as flatly as to a member. Switching
 // it on is the deliberate act that turns the module on, in place of the create
 // form that used to be the only door.
@@ -227,7 +227,7 @@ func TestUpsertSeriesDefaultsToTVAndRejectsAnUnknownKind(t *testing.T) {
 // UUIDs were therefore unambiguous. 0026 demoted that index: the public boxes
 // are forks of one another and mint identical UUIDs, so a global rule would
 // refuse the second box's copy of a site outright. The rule did not go away, it
-// moved to 0024's UNIQUE (provider, provider_ref) — which is where a site's
+// moved to 0024's UNIQUE (provider, provider_ref), which is where a site's
 // identity has actually lived since every matched row started carrying both.
 //
 // Unmatched rows stay unconstrained either way: a scan that found scene files
@@ -251,7 +251,7 @@ func TestAdultSeriesIdentityIsUniquePerProvider(t *testing.T) {
 		t.Fatalf("site identity = %q/%q, want the write door to fill in stashbox/site-1",
 			first.Provider, first.ProviderRef)
 	}
-	// A different row claiming the same site on the SAME instance is the
+	// A different row claiming the same site on the same instance is the
 	// duplicate that must still be refused.
 	_, err := st.DB().ExecContext(ctx, `
 		INSERT INTO series (kind, stash_id, provider, provider_ref, title, added_at, updated_at)
@@ -326,7 +326,7 @@ func TestListSeriesByKind(t *testing.T) {
 }
 
 // The scene column is the one piece of an episode that is not a column, so it
-// has to survive the encode/decode round trip intact — including the difference
+// has to survive the encode/decode round trip intact, including the difference
 // between "no scene metadata" and "an empty one".
 func TestEpisodeSceneRoundTrips(t *testing.T) {
 	ctx := context.Background()

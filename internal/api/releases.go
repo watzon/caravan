@@ -29,8 +29,8 @@ const grabReasonInteractive = "interactive pick"
 
 // Rejection-style flags on a release row (SPEC §9 step 4). They are advisory:
 // the picker greys a flagged release rather than hiding it, because the user
-// asked to see what the indexers actually have. Profile scoring — the part
-// that turns a flag into a refusal — is phase 3.
+// asked to see what the indexers actually have. Profile scoring (the part that
+// turns a flag into a refusal) is phase 3.
 const (
 	flagWrongYear    = "wrong-year"
 	flagWrongSeason  = "wrong-season"
@@ -46,7 +46,7 @@ const (
 	flagWrongTitle = "wrong-title"
 	// flagWrongDate is the scene equivalent of wrong-season/wrong-episode: a
 	// scene is addressed by its release date, so a release whose parsed date is
-	// not the searched scene's is the wrong scene (PLAN phase 9 task 3).
+	// not the searched scene's is the wrong scene.
 	flagWrongDate = "wrong-date"
 )
 
@@ -98,9 +98,9 @@ type indexerErrorJSON struct {
 
 type releasesResponse struct {
 	// Query is what was actually sent to the indexers, so a picker that comes
-	// back empty can show the user why. When a search sends several — a scene
-	// is looked for by date AND by title — this is the first of them and
-	// Queries is all of them.
+	// back empty can show the user why. When a search sends several (a scene is
+	// looked for by date AND by title) this is the first of them and Queries is
+	// all of them.
 	Query string `json:"query"`
 	// Queries is every search that was run, in the order they were run. It has
 	// one entry for everything but a scene.
@@ -113,7 +113,7 @@ type releasesResponse struct {
 	// property searchql's own tests pin.
 	SearchExpression string `json:"search_expression,omitempty"`
 	// Filtered counts the releases the universal search's expression hid with
-	// its local filters — a field term or a negation the indexers cannot be
+	// its local filters. A field term or a negation the indexers cannot be
 	// asked to honour. Every one of them is still cached, so it is a display
 	// count, not a loss.
 	Filtered int `json:"filtered,omitempty"`
@@ -187,7 +187,7 @@ func (s *server) handleSeriesReleases(w http.ResponseWriter, r *http.Request) {
 	// library kind decides which indexers answer and with which categories, so
 	// a hardcoded TV kind here would fan a scene search out over the television
 	// library's 5000-series categories, the exact thing searchScene exists to
-	// avoid (PLAN phase 9 task 3).
+	// avoid.
 	if kind == core.LibraryKindAdult {
 		s.serveSceneReleases(w, r, *sr, season, episode, profile)
 		return
@@ -205,8 +205,8 @@ func (s *server) handleSeriesReleases(w http.ResponseWriter, r *http.Request) {
 // the television one exactly where searchScene differs from a television
 // search.
 //
-// The query is the site and the scene's RELEASE DATE, because a scene has no
-// SxxEyy an indexer could filter on — "Site YY.MM.DD" is how scene releases are
+// The query is the site and the scene's release date, because a scene has no
+// SxxEyy an indexer could filter on, "Site YY.MM.DD" is how scene releases are
 // named and therefore how they are found. Caravan's season and episode numbers
 // are its own mapping (release year, sequence within that year) and no indexer
 // has ever heard of them, so putting an S22E07 in the query would return
@@ -246,22 +246,22 @@ func (s *server) serveSceneReleases(w http.ResponseWriter, r *http.Request, sr c
 		queries = []string{sr.Title}
 	}
 
-	// The seed spells out every variant this handler runs — the dated form OR
-	// the site-and-title fallback — so the box the user edits and the
-	// "searched indexers for" line always tell the same story.
+	// The seed spells out every variant this handler runs (the dated form OR
+	// the site-and-title fallback) so the box the user edits and the "searched
+	// indexers for" line always tell the same story.
 	s.serveReleases(w, r, sr.LibraryID, core.LibraryKindAdult, queries,
 		searchql.SceneExpression(sr.Title, airDate, title), profile, func(rel core.Release) []string {
 			return sceneReleaseFlags(rel, airDate)
 		})
 }
 
-// serveReleases runs one interactive search and writes the picker payload:
-// fan out, merge, cache, flag, score, sort. libraryID is the searched item's
-// own library — which decides which indexers answer and with which categories
-// (PLAN phase 8 task 4) — with kind as the fallback for an item that names
-// none. profile is resolved once from the item, its library, and then the
-// system default. expression is the searchql seed echoed to the client, which
-// is display only: the fan-out runs queries, exactly as it always has.
+// serveReleases runs one interactive search and writes the picker payload: fan
+// out, merge, cache, flag, score, sort. libraryID is the searched item's own
+// library (which decides which indexers answer and with which categories) with
+// kind as the fallback for an item that names none. profile is resolved once
+// from the item, its library, and then the system default. expression is the
+// searchql seed echoed to the client, which is display only: the fan-out runs
+// queries, exactly as it always has.
 func (s *server) serveReleases(w http.ResponseWriter, r *http.Request, libraryID int64, kind string, queries []string, expression string, profile *core.QualityProfile, flags func(core.Release) []string) {
 	newClient, ok := s.requireIndexerClients(w)
 	if !ok {
@@ -504,9 +504,9 @@ func searchIndexersOnce(ctx context.Context, newClient IndexerFactory, indexers 
 	return merged, failures
 }
 
-// releaseTags is what the playback-target check judges a release on. The container
-// comes from the release name, which usually does not carry one — an absent
-// container is simply not judged (core.TVProfile.Check).
+// releaseTags is what the playback-target check judges a release on. The
+// container comes from the release name, which usually does not carry one. An
+// absent container is simply not judged (core.TVProfile.Check).
 func releaseTags(rel core.Release) core.MediaTags {
 	return core.MediaTags{
 		Codec:     rel.Parsed.Codec,
@@ -677,12 +677,12 @@ func (s *server) handleMovieGrab(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A film has no kind column of its own — its library is the only thing that
-	// says whether it is an anime film — so the label costs a library read here
+	// A film has no kind column of its own (its library is the only thing that
+	// says whether it is an anime film) so the label costs a library read here
 	// where a series reads it off `series.kind`. The gate has the whole list
 	// cached for this request, so the read is free; a library the gate cannot
-	// resolve falls back to the movie label, which is what every film that names
-	// no shelf is.
+	// resolve falls back to the movie label, which is what every film that
+	// names no shelf is.
 	category := engineCategoryMovies
 	if lib, ok, err := s.gate(r).library(r.Context(), m.LibraryID); err == nil && ok {
 		category = engineCategoryFor(lib.Kind)
@@ -733,9 +733,8 @@ func (s *server) handleSeriesGrab(w http.ResponseWriter, r *http.Request) {
 
 // seriesGrabScope resolves the episode rows a series grab of this scope must
 // satisfy. A whole-series grab (season < 0) has no season to record, so it
-// reports 0 — the same value season 0 (specials) has; the episode ids are
-// what the import pipeline actually matches against, and those are
-// unambiguous.
+// reports 0. The same value season 0 (specials) has; the episode ids are what
+// the import pipeline actually matches against, and those are unambiguous.
 func seriesGrabScope(episodes []core.Episode, season, episode int) ([]int64, int) {
 	episodeIDs := []int64{}
 	for _, e := range episodes {
@@ -754,11 +753,11 @@ func seriesGrabScope(episodes []core.Episode, season, episode int) ([]int64, int
 	return episodeIDs, seasonNum
 }
 
-// seriesGrabTarget builds the grab record and engine options for a series
-// grab, shared by the per-item picker and the universal search's tied grab.
-// The library a series belongs to decides which engine the download is routed
-// to and which label it lands under, so a scene picked by hand goes exactly
-// where automation.grabEpisode sends one found by the sweep — never into the
+// seriesGrabTarget builds the grab record and engine options for a series grab,
+// shared by the per-item picker and the universal search's tied grab. The
+// library a series belongs to decides which engine the download is routed to
+// and which label it lands under, so a scene picked by hand goes exactly where
+// automation.grabEpisode sends one found by the sweep, never into the
 // television library's download folder under category "tv", which
 // importDownloadedEpisodes would then have to un-guess.
 func seriesGrabTarget(sr core.Series, seasonNum int, episodeIDs []int64) (core.GrabInfo, core.AddOpts) {
@@ -797,9 +796,8 @@ func (s *server) grab(w http.ResponseWriter, r *http.Request, libraryID int64, k
 }
 
 // grabRelease is grab with the release id already decoded, so the universal
-// search's grab — whose body carries more than a release id — shares the grab
-// row, engine dispatch, error mapping and history event without a second
-// copy.
+// search's grab (whose body carries more than a release id) shares the grab
+// row, engine dispatch, error mapping and history event without a second copy.
 func (s *server) grabRelease(w http.ResponseWriter, r *http.Request, libraryID int64, kind string, releaseID int64, info core.GrabInfo, opts core.AddOpts) {
 	engine, ok := s.requireEngineFor(w, libraryID, kind)
 	if !ok {
@@ -835,7 +833,7 @@ func (s *server) grabRelease(w http.ResponseWriter, r *http.Request, libraryID i
 		// Nothing broke: the release's protocol has no engine behind it, which
 		// is a configuration the user has not finished rather than a failure.
 		// It is recorded as a rejection with the reason, and answered with a
-		// 4xx that names what to configure — never a silent drop, and never a
+		// 4xx that names what to configure, never a silent drop, and never a
 		// misroute to an engine that does not speak this protocol.
 		if errors.Is(err, download.ErrNoEngine) {
 			s.rejectGrab(ctx, g, info, err)
@@ -844,9 +842,9 @@ func (s *server) grabRelease(w http.ResponseWriter, r *http.Request, libraryID i
 		}
 		// The client the release routes to has stopped answering its polls.
 		// That is the download client's failure, not Caravan's, so the grab
-		// fails rather than being rejected — but the reason is the poll's own
+		// fails rather than being rejected, but the reason is the poll's own
 		// message, because "add download" alone would leave the user hunting
-		// for a machine that is simply switched off (PLAN phase 6 task 4).
+		// for a machine that is simply switched off.
 		if errors.Is(err, download.ErrClientUnreachable) {
 			s.failGrab(ctx, g, info, err)
 			writeError(w, http.StatusBadGateway, err.Error())
@@ -955,10 +953,10 @@ func (s *server) failGrab(ctx context.Context, g *core.Grab, info core.GrabInfo,
 // rejectGrab records a grab nothing was configured to take.
 //
 // It is GrabStatusRejected rather than GrabStatusFailed for the same reason
-// phase 3 gives the status to a release an automatic search skipped: the row
-// is a decision-log entry, and "why is this not downloading" is answered by
-// its reason. The event is a warning, not an error — the activity feed is
-// where a user looks for this, and there is nothing broken to report.
+// phase 3 gives the status to a release an automatic search skipped: the row is
+// a decision-log entry, and "why is this not downloading" is answered by its
+// reason. The event is a warning, not an error. The activity feed is where a
+// user looks for this, and there is nothing broken to report.
 func (s *server) rejectGrab(ctx context.Context, g *core.Grab, info core.GrabInfo, cause error) {
 	if err := s.st.SetGrabStatus(ctx, g.GrabID, core.GrabStatusRejected, cause.Error()); err != nil {
 		s.log.Error("record rejected grab", "error", err, "grab_id", g.GrabID)

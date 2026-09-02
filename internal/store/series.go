@@ -14,9 +14,9 @@ import (
 //
 // Identity is sr.ID when set, otherwise whichever provider id the series
 // carries: sr.TMDBID for a television series, sr.StashID for an adult one. The
-// two are looked up the same way and for the same reason — a refresh that
+// two are looked up the same way and for the same reason (a refresh that
 // already knows the provider's id must land on the row it wrote last time
-// rather than making a second one — and both columns carry the same partial
+// rather than making a second one) and both columns carry the same partial
 // unique index, so only a matched row can collide.
 func (s *Store) UpsertSeries(ctx context.Context, sr *core.Series) error {
 	// One place defaults the discriminator, so a caller built before kinds
@@ -28,7 +28,7 @@ func (s *Store) UpsertSeries(ctx context.Context, sr *core.Series) error {
 		return fmt.Errorf("store: upsert series %q: unknown kind %q", sr.Title, sr.Kind)
 	}
 	// A series' library must speak the series' kind: `series.kind` says what
-	// the row IS, the library says which shelf answers for it, and the two
+	// the row is, the library says which shelf answers for it, and the two
 	// vocabularies line up through core.LibraryKindForSeries. Drift here would
 	// grade an adult series against a television library's settings (or the
 	// reverse), so it is refused loudly at the one door every write uses.
@@ -66,7 +66,7 @@ func (s *Store) UpsertSeries(ctx context.Context, sr *core.Series) error {
 
 	model := catalogSeriesModelFromCore(sr)
 	if sr.ID != 0 {
-		// library_id 0 keeps the stored value — a refresh must never move a
+		// library_id 0 keeps the stored value. A refresh must never move a
 		// series between libraries; a move names its target explicitly.
 		res, err := s.db.NewUpdate().Model(&model).
 			Column("kind", "provider", "provider_ref", "tmdb_id", "stash_id", "tvdb_id", "imdb_id",
@@ -121,7 +121,7 @@ func (s *Store) GetSeriesByStashID(ctx context.Context, stashID string) (*core.S
 }
 
 // normalizeSeriesProvider derives the provider identity from whichever legacy
-// id the series' kind is matched on, when the caller supplied none — the same
+// id the series' kind is matched on, when the caller supplied none. The same
 // move this function's neighbour makes for Kind, and for the same reason.
 //
 // It is what makes "every matched row carries a ref" a property of the table
@@ -166,16 +166,16 @@ func (s *Store) series(ctx context.Context, query *bun.SelectQuery, what string)
 }
 
 // matchExistingSeries finds the row sr is an update of, by whichever provider
-// id its kind is matched on, or nil when there is none. An unmatched series
-// (no provider id at all) always inserts: two shows the scanner has not
-// identified are two shows, not one.
+// id its kind is matched on, or nil when there is none. An unmatched series (no
+// provider id at all) always inserts: two shows the scanner has not identified
+// are two shows, not one.
 //
 // RUNG ORDER MATTERS. The ref rung is first and applies to every kind; the
 // stash and tmdb rungs behind it are compatibility aliases for the two
 // providers that predate refs. Put the tmdb rung first and a re-fetched TMDB
-// series matches on tmdb_id while its ref goes unconsulted — which is fine
-// until a provider that writes no tmdb_id comes along, at which point every
-// refresh inserts a duplicate instead of updating the row it wrote last time.
+// series matches on tmdb_id while its ref goes unconsulted, which is fine until
+// a provider that writes no tmdb_id comes along, at which point every refresh
+// inserts a duplicate instead of updating the row it wrote last time.
 func (s *Store) matchExistingSeries(ctx context.Context, sr *core.Series) (*core.Series, error) {
 	var (
 		existing *core.Series
@@ -205,7 +205,7 @@ func (s *Store) matchExistingSeries(ctx context.Context, sr *core.Series) (*core
 // Every kind, deliberately: this is the raw table, and the callers that must
 // not show adult titles are the ones that know who is asking. They narrow with
 // ListSeriesByKind rather than having a filter applied here behind their back,
-// because a list that silently omits rows is the harder bug — an adult series
+// because a list that silently omits rows is the harder bug. An adult series
 // that never appears in a rescan is a lot quieter than one that appears where
 // it should not.
 func (s *Store) ListSeries(ctx context.Context) ([]core.Series, error) {
@@ -213,9 +213,9 @@ func (s *Store) ListSeries(ctx context.Context) ([]core.Series, error) {
 }
 
 // ListSeriesByKind returns every series of one core.SeriesKind*, in the same
-// order ListSeries uses. It is how a surface that may only show television —
-// the TV library screen, the DLNA tree's TV container — asks for exactly that,
-// and how the adult module's own screens ask for their side.
+// order ListSeries uses. It is how a surface that may only show television (the
+// TV library screen, the DLNA tree's TV container) asks for exactly that, and
+// how the adult module's own screens ask for their side.
 func (s *Store) ListSeriesByKind(ctx context.Context, kind string) ([]core.Series, error) {
 	return s.listSeries(ctx, s.db.NewSelect().Model((*catalogSeriesModel)(nil)).Where("kind = ?", kind))
 }

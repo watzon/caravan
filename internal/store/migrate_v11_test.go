@@ -11,9 +11,9 @@ import (
 )
 
 // openAtVersionTen builds a real pre-0011 database: Goose applied up to 10 and
-// no further. It is the migrate_v5/migrate_v8 pattern, and it is the only honest
-// way to test an upgrade — a current database edited backwards would prove
-// nothing about the statements 0011 actually runs.
+// no further. It is the migrate_v5/migrate_v8 pattern, and it is the only
+// honest way to test an upgrade. A current database edited backwards would
+// prove nothing about the statements 0011 actually runs.
 func openAtVersionTen(t *testing.T) (*sql.DB, string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "v10.sqlite")
@@ -74,14 +74,14 @@ func TestMigrationElevenSeedsFourLibraries(t *testing.T) {
 }
 
 // The upgrade a real install runs. The pre-0011 database already holds the two
-// things the seeds can collide with — a hand-made tv-kind library rooted at
-// 'library/Anime', and an adult library of the owner's own — plus the child rows
+// things the seeds can collide with (a hand-made tv-kind library rooted at
+// 'library/Anime', and an adult library of the owner's own) plus the child rows
 // the table rebuilds must not destroy.
 //
 // This is the whole risk of 0011 in one test: `foreign_keys` is on, so a naive
-// create-copy-drop-rename of `libraries` or `series` would silently cascade away
-// the indexer overrides, the access grants, the seasons, the episodes and the
-// episode-file links.
+// create-copy-drop-rename of `libraries` or `series` would silently cascade
+// away the indexer overrides, the access grants, the seasons, the episodes and
+// the episode-file links.
 func TestMigrationElevenUpgradesWithoutLosingAnything(t *testing.T) {
 	ctx := context.Background()
 	db, path := openAtVersionTen(t)
@@ -199,7 +199,7 @@ func TestMigrationElevenUpgradesWithoutLosingAnything(t *testing.T) {
 
 // The fallback spelling occupied and the preferred one free. The seed must take
 // the path it prefers rather than reading "the fallback is gone" as "there is
-// nowhere to put this": the suffixed root is a way OUT of a collision, not a
+// nowhere to put this": the suffixed root is a way out of a collision, not a
 // second condition for seeding at all.
 func TestMigrationElevenSeedsThePreferredRootWhenOnlyTheFallbackIsTaken(t *testing.T) {
 	ctx := context.Background()
@@ -232,8 +232,8 @@ func TestMigrationElevenSeedsThePreferredRootWhenOnlyTheFallbackIsTaken(t *testi
 	}
 }
 
-// Both spellings occupied. The migration must still apply — a refused upgrade is
-// a worse answer than a missing optional shelf — and the kind is then simply
+// Both spellings occupied. The migration must still apply (a refused upgrade is
+// a worse answer than a missing optional shelf) and the kind is then simply
 // absent, which is what the startup warning in `caravan serve` reports.
 func TestMigrationElevenSkipsTheAnimeSeedWhenBothRootsAreTaken(t *testing.T) {
 	ctx := context.Background()
@@ -307,13 +307,13 @@ func TestMigrationElevenLeavesTheSeriesCascadeIntact(t *testing.T) {
 	}
 }
 
-// The backfill. A v10 install could file an item under no library at all —
-// `library_id = 0` meant "resolve me through my kind's default", and every
-// reader carried a branch for it — so 0011 spends that meaning once and stamps
+// The backfill. A v10 install could file an item under no library at all
+// (`library_id = 0` meant "resolve me through my kind's default", and every
+// reader carried a branch for it) so 0011 spends that meaning once and stamps
 // the rows. Everything downstream (the visibility gate, the DLNA tree, the RSS
 // matcher, the upsert heal) then resolves ownership by id alone.
 //
-// The adult site is the case that has to run LAST: its shelf is one 0011 itself
+// The adult site is the case that has to run last: its shelf is one 0011 itself
 // seeds, so a backfill placed before the seeds would leave it homeless.
 func TestMigrationElevenStampsRowsThatNameNoLibrary(t *testing.T) {
 	ctx := context.Background()

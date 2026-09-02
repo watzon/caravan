@@ -100,7 +100,7 @@ func doAuth(t *testing.T, h http.Handler, method, target, body string, decorate 
 }
 
 // The pre-RBAC contract: with no accounts, nothing changes. This is the
-// regression that keeps the gate from becoming mandatory by accident — an
+// regression that keeps the gate from becoming mandatory by accident. An
 // upgrade must not lock a household out of its own media box.
 func TestNoUsersLeavesTheAPIOpen(t *testing.T) {
 	h, _, _ := newTestServer(t)
@@ -119,7 +119,7 @@ func TestNoUsersLeavesTheAPIOpen(t *testing.T) {
 		}
 	}
 
-	// And the caller is an implicit admin, not a nobody — holding every seeded
+	// And the caller is an implicit admin, not a nobody, holding every seeded
 	// shelf, because an open install hides nothing from anybody.
 	rec := do(t, h, http.MethodGet, "/api/v1/auth/me", "")
 	wantStatus(t, rec, http.StatusOK)
@@ -663,7 +663,7 @@ func TestMemberAllowlist(t *testing.T) {
 		{http.MethodGet, "/discover/browse", true},
 		{http.MethodGet, "/discover/movie/27205", true},
 		{http.MethodGet, "/discover/series/1396", true},
-		// The filtered scopes and the controls that drive them (PLAN phase 12).
+		// The filtered scopes and the controls that drive them.
 		{http.MethodGet, "/discover/movies", true},
 		{http.MethodGet, "/discover/series", true},
 		{http.MethodGet, "/discover/people", true},
@@ -749,9 +749,9 @@ func TestMemberIsForbiddenNotUnauthorized(t *testing.T) {
 	// And what a member may reach, they reach.
 	wantStatus(t, doAuth(t, h, http.MethodGet, "/api/v1/requests", "", withCookie(member)),
 		http.StatusOK)
-	// Discover needs a metadata provider this server has none of, so it
-	// answers 503 — but it is the handler answering, which is the point: the
-	// gate let the member through.
+	// Discover needs a metadata provider this server has none of, so it answers
+	// 503, but it is the handler answering, which is the point: the gate let
+	// the member through.
 	if rec := doAuth(t, h, http.MethodGet, "/api/v1/discover", "", withCookie(member)); rec.Code == http.StatusForbidden {
 		t.Fatal("GET /discover = 403 for a member; discover is what a member is for")
 	}
@@ -780,8 +780,8 @@ func TestMeReportsTheCallingIdentity(t *testing.T) {
 			testAdmin, core.RoleAdmin},
 		{"member session", withCookie(login(t, h, testMember, testPassword)),
 			testMember, core.RoleMember},
-		// The API key is the owner's own credential, so it is an admin — but
-		// it names no account, so there is nobody to report.
+		// The API key is the owner's own credential, so it is an admin, but it
+		// names no account, so there is nobody to report.
 		{"api key", func(r *http.Request) { r.Header.Set("X-Api-Key", "deadbeef") },
 			"", core.RoleAdmin},
 	}

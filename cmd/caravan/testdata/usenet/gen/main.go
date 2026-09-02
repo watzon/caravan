@@ -143,8 +143,8 @@ func main() {
 
 // payload is deterministic pseudo-random content. Go's math/rand with an
 // explicit source is stable across versions, so re-running this reproduces the
-// fixture byte for byte — which it must, because the par2 set beside it
-// protects these exact bytes.
+// fixture byte for byte, which it must, because the par2 set beside it protects
+// these exact bytes.
 func payload(n int) []byte {
 	out := make([]byte, n)
 	rng := rand.New(rand.NewSource(20080520))

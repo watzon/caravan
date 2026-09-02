@@ -12,17 +12,17 @@ import (
 	"github.com/watzon/caravan/internal/store"
 )
 
-// The stash-box instance CRUD (PLAN Part 2 phase 3).
+// The stash-box instance CRUD.
 //
 // These routes keep the /adult/ URL but live on the admin mux. They are
-// metadata credentials — same job as a TMDB key — and Settings → Metadata
-// has to edit them before the first adult library exists. That library is
-// the door into requireAdult, so putting CRUD behind it made the Add-library
-// warning unsatisfiable. Members still cannot reach them: memberAllowed
-// names none of these.
+// metadata credentials (same job as a TMDB key) and Settings → Metadata has
+// to edit them before the first adult library exists. That library is the door
+// into requireAdult, so putting CRUD behind it made the Add-library warning
+// unsatisfiable. Members still cannot reach them: memberAllowed names none of
+// these.
 //
-// The shape is the indexers one — request struct, config() validator,
-// has_api_key redaction, a stored-credential test beside a body-only test —
+// The shape is the indexers one, request struct, config() validator,
+// has_api_key redaction, a stored-credential test beside a body-only test,
 // because the two are the same object: a configured remote with a name, a URL
 // and a write-only key.
 
@@ -53,7 +53,7 @@ type stashboxInstanceJSON struct {
 //
 // APIKey is a pointer for the indexerRequest reason: omitted or null keeps the
 // stored credential, an explicit empty string clears it. Endpoint is a plain
-// string because it is immutable after creation — an update either repeats it or
+// string because it is immutable after creation. An update either repeats it or
 // omits it, and neither of those is a change.
 type stashboxInstanceRequest struct {
 	Name     string  `json:"name"`
@@ -118,7 +118,7 @@ func (s *server) handleListStashboxInstances(w http.ResponseWriter, r *http.Requ
 
 // handleCreateStashboxInstance mints an instance.
 //
-// The id follows the migration's rule: the FIRST instance on an install takes
+// The id follows the migration's rule: the first instance on an install takes
 // the bare id `stashbox`, which is the id every adult row written before
 // instances existed already carries, and every one after it takes
 // `stashbox:<slug>`. A fresh install therefore reaches the same state an
@@ -198,9 +198,9 @@ func (s *server) mintStashboxInstance(ctx context.Context, w http.ResponseWriter
 // creation: its label and its credential.
 //
 // A new key is proved live before it is written. That is the invariant the
-// deleted guardAdultCredentialEdit held from the settings side — the module is
+// deleted guardAdultCredentialEdit held from the settings side (the module is
 // on only while a credential that was proved sits behind it, and an edit is as
-// much a way to break it as a bad enable — moved to the door the credential now
+// much a way to break it as a bad enable) moved to the door the credential now
 // comes in through.
 func (s *server) handleUpdateStashboxInstance(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
@@ -286,9 +286,9 @@ func (s *server) handleUpdateStashboxInstance(w http.ResponseWriter, r *http.Req
 // Nothing cascades in the store, so the two counts are the whole guard: a
 // library whose chain names this instance would walk to a provider that cannot
 // be built, and an item pinned to it would lose the only box that can be asked
-// about its refs. Both are recoverable — the rows stay — but neither is
-// something to do silently, so the refusal names them and the user moves the
-// items or edits the chain first.
+// about its refs. Both are recoverable (the rows stay) but neither is something
+// to do silently, so the refusal names them and the user moves the items or
+// edits the chain first.
 func (s *server) handleDeleteStashboxInstance(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -303,13 +303,14 @@ func (s *server) handleDeleteStashboxInstance(w http.ResponseWriter, r *http.Req
 	}
 	// Asked before the use counts because it is the broader refusal: the last
 	// instance is the module's only way to reach a provider at all, so removing
-	// it would leave every adult surface answering 503 with no screen saying why.
+	// it would leave every adult surface answering 503 with no screen saying
+	// why.
 	//
 	// The question is whether any adult library is switched ON, not whether one
 	// exists: this route is absent to a caller who can see none, so in practice
 	// the last instance outlives the last active library rather than being
 	// deletable during the gap. A library switched off is why an install can
-	// hold instances nothing reaches — which is the state that lets an owner
+	// hold instances nothing reaches, which is the state that lets an owner
 	// tidy them up.
 	enabled, err := s.st.AnyActiveLibraryOfKind(ctx, core.LibraryKindAdult)
 	if err != nil {
@@ -366,7 +367,7 @@ func (s *server) handleTestStashboxInstance(w http.ResponseWriter, r *http.Reque
 }
 
 // handleTestStashboxInstanceConfig probes an endpoint and key that are not
-// stored yet, which is what the add form needs while the user is still typing —
+// stored yet, which is what the add form needs while the user is still typing,
 // before the instance exists to have an id. The indexer categories endpoint is
 // body-shaped for the same reason.
 func (s *server) handleTestStashboxInstanceConfig(w http.ResponseWriter, r *http.Request) {
@@ -392,7 +393,7 @@ func (s *server) handleTestStashboxInstanceConfig(w http.ResponseWriter, r *http
 }
 
 // testStashboxCredential is the one live call both test routes make. It goes
-// through ValidateAdultCredential rather than the cached client on purpose — see
+// through ValidateAdultCredential rather than the cached client on purpose. See
 // the comment there: a candidate credential is exactly what the cache must not
 // hold.
 func (s *server) testStashboxCredential(w http.ResponseWriter, r *http.Request, endpoint, apiKey string) {
@@ -408,8 +409,8 @@ func (s *server) testStashboxCredential(w http.ResponseWriter, r *http.Request, 
 
 // stashboxInstanceFree reports whether name and providerID are available,
 // writing the 409 when either is not. Both columns are UNIQUE, so without this
-// a duplicate — a plain user mistake, and two names that fold to one slug are an
-// easy one — would surface as a 500. An empty providerID skips that half, which
+// a duplicate (a plain user mistake, and two names that fold to one slug are an
+// easy one) would surface as a 500. An empty providerID skips that half, which
 // is what an update wants: the id is not derived from the new name.
 func (s *server) stashboxInstanceFree(w http.ResponseWriter, existing []core.StashboxInstance, name, providerID string, exceptID int64) bool {
 	for _, in := range existing {
@@ -464,12 +465,12 @@ func (s *server) stashboxInstanceUse(ctx context.Context, providerID string) (li
 }
 
 // knownProviderInstance reports whether id names something the registry can
-// resolve to a client: a bare compiled-in provider, or a stash-box instance that
-// is actually configured.
+// resolve to a client: a bare compiled-in provider, or a stash-box instance
+// that is actually configured.
 //
-// It is the check a chain element and an item ref both need. An id whose base is
-// stash-box but which no row answers to is not a provider that is merely
-// unconfigured — it is a name for a box this install has never held, so a chain
+// It is the check a chain element and an item ref both need. An id whose base
+// is stash-box but which no row answers to is not a provider that is merely
+// unconfigured. It is a name for a box this install has never held, so a chain
 // containing it would walk to nothing and a ref pinned to it could never be
 // refreshed.
 func (s *server) knownProviderInstance(ctx context.Context, id string) (bool, error) {

@@ -21,7 +21,7 @@ import (
 // makes it a CORS simple request: no preflight, and the attacker never needs to
 // read the reply. Before the same-origin guard this queued a storage migration
 // that physically moved the library off the drive, and the bodiless variant
-// against /system/shutdown stopped the server outright — on the passwordless
+// against /system/shutdown stopped the server outright, on the passwordless
 // default the Docker image ships.
 func TestCrossSiteFormPostIsRefused(t *testing.T) {
 	h, st, _ := newTestServer(t)
@@ -83,7 +83,7 @@ func TestCrossSiteFormPostIsRefused(t *testing.T) {
 
 // The SPA's own requests carry same-origin fetch metadata, and a non-browser
 // caller (curl, a script with the API key) carries neither header. Both must
-// still work — a CSRF defence that breaks them is not shippable.
+// still work. A CSRF defence that breaks them is not shippable.
 func TestSameOriginAndNonBrowserRequestsStillWork(t *testing.T) {
 	h, _, _ := newTestServer(t)
 
@@ -118,11 +118,11 @@ func TestFormEncodedBodiesAreRefused(t *testing.T) {
 	}
 }
 
-// storage_root has rules attached — absolute, exists, is a folder, and not
-// while a migration owns both roots. The generic settings PUT enforced none of
-// them, so a stale tab or a script could flip the root mid-move; the library
-// then read as entirely missing and whichever way the job ended it clobbered
-// the value the user had written.
+// storage_root has rules attached, absolute, exists, is a folder, and not while
+// a migration owns both roots. The generic settings PUT enforced none of them,
+// so a stale tab or a script could flip the root mid-move; the library then
+// read as entirely missing and whichever way the job ended it clobbered the
+// value the user had written.
 func TestPutSettingsCannotWriteTheStorageRoot(t *testing.T) {
 	h, st, _ := newTestServer(t)
 	root := t.TempDir()
@@ -153,7 +153,7 @@ func TestPutSettingsCannotWriteTheStorageRoot(t *testing.T) {
 
 // Every /auth/login runs a 19 MiB argon2id derivation, and net/http caps
 // handler concurrency at nothing. A burst of concurrent logins used to hold one
-// of those blocks live per request, which OOM-kills a Pi-class box — the exact
+// of those blocks live per request, which OOM-kills a Pi-class box. The exact
 // hardware SPEC §2.1 targets, and an unclean shutdown that leaves the marker
 // dirty and downloads refusing to resume.
 func TestLoginIsBoundedAndAudited(t *testing.T) {
@@ -211,7 +211,7 @@ func TestLoginIsBoundedAndAudited(t *testing.T) {
 // A dirty start and a half-finished migration turn up together: the crash that
 // set the flag is the crash that stopped the move. The recovery banner's one
 // button rescans, and a rescan deletes the media_file row of every path that is
-// no longer under the root — which, mid-move, is every file the mover has
+// no longer under the root, which, mid-move, is every file the mover has
 // already taken, artwork references included.
 func TestVerifyAndRescanRefuseWhileAMigrationIsOpen(t *testing.T) {
 	h, st, mgr := newTestServer(t, WithDirtyStart(true))
@@ -246,8 +246,8 @@ func TestVerifyAndRescanRefuseWhileAMigrationIsOpen(t *testing.T) {
 	wantStatus(t, rec, http.StatusOK)
 }
 
-// SPEC §10.1 step 2 — "point Caravan at existing media, with a library scan
-// queued immediately" — is unreachable in Docker and on a portable drive,
+// SPEC §10.1 step 2 ("point Caravan at existing media, with a library scan
+// queued immediately") is unreachable in Docker and on a portable drive,
 // because both bring a storage root with them and the SPA routes straight past
 // the first-run screen. A user who ran `docker compose up` on a host that
 // already had media under the mount landed on an empty library, with nothing

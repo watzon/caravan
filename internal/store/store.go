@@ -1,8 +1,8 @@
-// Package store owns Caravan's sqlite database: connection setup, the
-// embedded migration runner, and the CRUD the rest of the application needs.
+// Package store owns Caravan's sqlite database: connection setup, the embedded
+// migration runner, and the CRUD the rest of the application needs.
 //
 // SPEC §1.2 pillar 2 makes the database a rebuildable cache, not the source of
-// truth — the filesystem is. That shapes the schema: structural parent/child
+// truth, the filesystem is. That shapes the schema: structural parent/child
 // links cascade, but cross-subsystem references are loose integer ids so a
 // stale row can never block an import or a rescan.
 package store
@@ -176,7 +176,7 @@ func dsn(path string) string {
 	q.Add("_pragma", "journal_mode(WAL)")
 	q.Add("_pragma", "foreign_keys(1)")
 	q.Add("_pragma", "busy_timeout(5000)")
-	// NORMAL is the documented safe pairing with WAL: durable across process
+	// normal is the documented safe pairing with WAL: durable across process
 	// crashes, and a fsync per checkpoint rather than per commit.
 	q.Add("_pragma", "synchronous(NORMAL)")
 	return "file:" + path + "?" + q.Encode()
@@ -215,9 +215,9 @@ func (s *Store) Checkpoint() error {
 //
 // The dirty-eject recovery flow (SPEC §13) runs this before letting downloads
 // resume: a database that came back from a yanked drive with torn pages must
-// not be written to. It is deliberately the full check rather than
-// quick_check — a portable library is small, and the cheap check skips exactly
-// the index corruption a half-written page produces.
+// not be written to. It is deliberately the full check rather than quick_check.
+// A portable library is small, and the cheap check skips exactly the index
+// corruption a half-written page produces.
 func (s *Store) IntegrityCheck(ctx context.Context) error {
 	rows, err := s.db.QueryContext(ctx, "PRAGMA integrity_check")
 	if err != nil {

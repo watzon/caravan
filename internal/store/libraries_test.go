@@ -39,7 +39,7 @@ func TestGetLibraryByKind(t *testing.T) {
 // once had a third, refusing the kind outright, because the module switch owned
 // the row and promised that switching off destroyed nothing; `active` keeps
 // that promise now and is the deliberate "off". A kind-shaped exception here
-// would only mean the one shelf an owner can never tidy away — and it would
+// would only mean the one shelf an owner can never tidy away, and it would
 // leave them deleting the row by hand, which takes the grants and the items
 // with it silently.
 func TestDeleteLibraryAcceptsAnAdultLibrary(t *testing.T) {
@@ -76,14 +76,14 @@ func TestDeleteLibraryAcceptsAnAdultLibrary(t *testing.T) {
 	}
 }
 
-// The default guard is NOT the adult exception wearing a different name, and
+// The default guard is not the adult exception wearing a different name, and
 // this test exists so that nobody reading the one above deletes this one as a
 // leftover. ErrLibraryIsDefault is about by-kind lookups keeping an answer:
-// GetLibraryByKind and GetDefaultLibrary are what a scan, an import and a
-// scene request resolve their shelf through, and a kind whose default was
-// deleted answers ErrNotFound to all three. The refusal is per row and is
-// lifted by demoting it, which is a thing an owner can actually do — that is
-// what makes it a guard rather than the ban that was removed.
+// GetLibraryByKind and GetDefaultLibrary are what a scan, an import and a scene
+// request resolve their shelf through, and a kind whose default was deleted
+// answers ErrNotFound to all three. The refusal is per row and is lifted by
+// demoting it, which is a thing an owner can actually do: that is what makes it
+// a guard rather than the ban that was removed.
 func TestDeleteLibraryRefusesADefaultAdultLibrary(t *testing.T) {
 	ctx := context.Background()
 	st, _ := openTemp(t)
@@ -167,7 +167,7 @@ func seedIndexer(t *testing.T, st *Store, name string, categories []int) core.In
 	return ix
 }
 
-// The migrated state must resolve to exactly what the globals already said —
+// The migrated state must resolve to exactly what the globals already said:
 // that is the whole "zero observable behavior change" promise.
 func TestResolveLibrarySettingsFallsBackToGlobals(t *testing.T) {
 	ctx := context.Background()

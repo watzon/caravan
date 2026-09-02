@@ -16,7 +16,7 @@ import (
 // movie with none of the three is always inserted: an unmatched movie has no
 // stable identity to collapse on.
 //
-// The ref rung comes FIRST and the tmdb_id rung is the compatibility alias
+// The ref rung comes first and the tmdb_id rung is the compatibility alias
 // behind it. Reversed, a re-fetched TMDB movie would match on tmdb_id, and any
 // movie identified by a provider that writes no tmdb_id would match on nothing
 // and insert a duplicate on every refresh.
@@ -100,8 +100,8 @@ func (s *Store) GetMovie(ctx context.Context, id int64) (*core.Movie, error) {
 }
 
 // normalizeMovieProvider derives the provider identity from the legacy TMDB id
-// when the caller supplied none — the same move UpsertSeries makes for Kind,
-// and for the same reason.
+// when the caller supplied none. The same move UpsertSeries makes for Kind, and
+// for the same reason.
 //
 // It is what makes "every matched row carries a ref" a property of the table
 // rather than a habit of its callers: a caller written before 0024 still lands
@@ -115,8 +115,8 @@ func normalizeMovieProvider(m *core.Movie) {
 
 // GetMovieByProviderRef returns the movie one provider identified by ref, or
 // ErrNotFound. A blank ref matches nothing rather than matching every
-// unidentified row — "" is precisely the value the partial unique index
-// excludes (GetSeriesByStashID's rule, generalized).
+// unidentified row, "" is precisely the value the partial unique index excludes
+// (GetSeriesByStashID's rule, generalized).
 func (s *Store) GetMovieByProviderRef(ctx context.Context, provider, ref string) (*core.Movie, error) {
 	what := fmt.Sprintf("movie %s/%s", provider, ref)
 	if provider == "" || ref == "" {

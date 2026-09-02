@@ -18,7 +18,7 @@ func searchReleasesURL(expression string) string {
 }
 
 // The universal search is genuinely unfiltered: no requested categories means
-// NO cat parameter reaches the indexer — not the indexer's configured list,
+// no cat parameter reaches the indexer, not the indexer's configured list,
 // which is what the per-item fan-out sends. Rows come back scored against the
 // store default profile and cached, so a grab is a lookup by id.
 func TestUniversalSearchIsUnfilteredAndCached(t *testing.T) {
@@ -228,8 +228,8 @@ func TestUniversalSearchFansOutFieldExpressionLikeTheItemPicker(t *testing.T) {
 	}
 }
 
-// A negation is never sent upstream — asking for what the user rejected — so
-// the local test is the only one it gets, and it runs against the title.
+// A negation is never sent upstream (asking for what the user rejected) so the
+// local test is the only one it gets, and it runs against the title.
 func TestUniversalSearchHidesNegatedKeywordLocally(t *testing.T) {
 	fake := newFakeIndexer(t)
 	h, st, _ := newTestServer(t, WithIndexerClients(fake.factory()))

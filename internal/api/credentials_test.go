@@ -39,7 +39,7 @@ func credentialState(t *testing.T, h http.Handler) statusResponse {
 }
 
 // wantCode asserts the failure envelope carries a specific machine-readable
-// code — the contract the SPA branches on to render a directed empty state
+// code. The contract the SPA branches on to render a directed empty state
 // instead of an error toast.
 func wantCode(t *testing.T, rec *httptest.ResponseRecorder, want string) {
 	t.Helper()
@@ -53,9 +53,9 @@ func wantCode(t *testing.T, rec *httptest.ResponseRecorder, want string) {
 	}
 }
 
-// TestSystemStatusReportsCredentialStateWithoutUpstreamCalls is the acceptance
-// criterion in PLAN phase 10: the status endpoint is polled on a timer, so it
-// must answer from the cached verdict and never from TMDB.
+// TestSystemStatusReportsCredentialStateWithoutUpstreamCalls: the status
+// endpoint is polled on a timer, so it must answer from the cached verdict and
+// never from TMDB.
 func TestSystemStatusReportsCredentialStateWithoutUpstreamCalls(t *testing.T) {
 	h, st, mgr := newTestServer(t)
 
@@ -76,8 +76,8 @@ func TestSystemStatusReportsCredentialStateWithoutUpstreamCalls(t *testing.T) {
 	}
 }
 
-// TestMetadataCredentialTurnsInvalidWhenAMetadataCallIsRejected is the second
-// transition in PLAN phase 10 task 2: a key that was fine when it was entered
+// TestMetadataCredentialTurnsInvalidWhenAMetadataCallIsRejected covers the
+// second credential-state transition: a key that was fine when it was entered
 // and has since been revoked flips the moment anything tries to use it, without
 // waiting for someone to press Test.
 func TestMetadataCredentialTurnsInvalidWhenAMetadataCallIsRejected(t *testing.T) {
@@ -131,9 +131,8 @@ func TestMetadataCredentialTurnsInvalidWhenAMetadataCallIsRejected(t *testing.T)
 	}
 }
 
-// TestMetadataTestEndpointProvesTheKey covers the Test button (PLAN phase 10
-// task 4), including the first-run shape where the key is proved before it is
-// ever written.
+// TestMetadataTestEndpointProvesTheKey covers the Test button, including the
+// first-run shape where the key is proved before it is ever written.
 func TestMetadataTestEndpointProvesTheKey(t *testing.T) {
 	h, st, mgr := newTestServer(t)
 	mgr.validateKeys = map[string]error{"bad": errKeyRejected}
@@ -143,7 +142,7 @@ func TestMetadataTestEndpointProvesTheKey(t *testing.T) {
 	wantStatus(t, rec, http.StatusBadRequest)
 	wantCode(t, rec, CodeMetadataCredentialAbsent)
 
-	// A key from the body, not the settings table — and nothing is stored by a
+	// A key from the body, not the settings table, and nothing is stored by a
 	// test, passing or failing.
 	rec = do(t, h, http.MethodPost, "/api/v1/settings/metadata/test", `{"api_key":"bad"}`)
 	wantStatus(t, rec, http.StatusBadGateway)
@@ -200,9 +199,9 @@ func TestMetadataTestFallsBackToTheStoredKey(t *testing.T) {
 	}
 }
 
-// TestGuardedSurfacesAnswerTypedCredentialErrors is PLAN phase 10 task 3: every
-// metadata-needing surface names the fix with a code the SPA can branch on,
-// rather than a raw 502.
+// TestGuardedSurfacesAnswerTypedCredentialErrors: every metadata-needing
+// surface names the fix with a code the SPA can branch on, rather than a raw
+// 502.
 func TestGuardedSurfacesAnswerTypedCredentialErrors(t *testing.T) {
 	surfaces := []struct {
 		name   string
@@ -274,8 +273,8 @@ func TestProviderFailuresThatAreNotCredentialsStayBadGateway(t *testing.T) {
 	}
 }
 
-// TestRescanWithoutAMetadataKeyStillRuns is the other half of PLAN phase 10
-// task 3: no key degrades matching, it does not stop the scanner.
+// TestRescanWithoutAMetadataKeyStillRuns: no key degrades matching, it does
+// not stop the scanner.
 func TestRescanWithoutAMetadataKeyStillRuns(t *testing.T) {
 	h, _, mgr := newTestServer(t)
 
@@ -307,7 +306,6 @@ func (p *countingProvider) SearchSeries(ctx context.Context, q string) ([]core.S
 	return p.stubProvider.SearchSeries(ctx, q)
 }
 
-// ---------------------------------------------------------------------------
 // Per-provider credential state.
 //
 // "The metadata provider" stopped being singular when libraries gained chains,
@@ -479,7 +477,7 @@ func TestSoleCredentialedProvider(t *testing.T) {
 		{"the same one twice", []string{core.ProviderTMDB, core.ProviderTMDB}, core.ProviderTMDB},
 		// An id nothing implements holds no credential, so it cannot be the one
 		// that was refused and cannot make the answer ambiguous either. The row
-		// for two REGISTERED credentials arrives with TheTVDB, which is the
+		// for two registered credentials arrives with TheTVDB, which is the
 		// first provider able to make this return "".
 		{"an unknown id beside a credential", []string{core.ProviderTMDB, "nope"}, core.ProviderTMDB},
 	}
@@ -493,8 +491,8 @@ func TestSoleCredentialedProvider(t *testing.T) {
 }
 
 // The Test button names the provider it is testing. A default of TMDB keeps
-// every body written before there was a second credentialed provider — and the
-// bodyless POST the settings screen sends — meaning exactly what it meant.
+// every body written before there was a second credentialed provider (and the
+// bodyless POST the settings screen sends) meaning exactly what it meant.
 func TestMetadataTestNamesItsProvider(t *testing.T) {
 	t.Run("an explicit tmdb is the same request as none", func(t *testing.T) {
 		h, st, mgr := newTestServer(t)
@@ -566,7 +564,7 @@ func TestMetadataTestNamesItsProvider(t *testing.T) {
 		if got := status.MetadataCredentials[core.ProviderTMDB].State; got != CredentialInvalid {
 			t.Fatalf("metadata_credentials[tmdb].state = %q, want %q", got, CredentialInvalid)
 		}
-		// One entry per CREDENTIALED provider and no more: the keyless ones are
+		// One entry per credentialed provider and no more: the keyless ones are
 		// absent because "Ready" is a fact the client reads off the provider
 		// list, not a verdict this server reached.
 		if len(status.MetadataCredentials) != credentialedProviderCount() {
@@ -594,16 +592,15 @@ func credentialedProviderCount() int {
 	return n
 }
 
-// ---------------------------------------------------------------------------
 // TheTVDB: the first consumer of the per-provider credential model.
 //
 // TMDB was the only credential when the model was generalized, so nothing could
 // prove that generalizing it meant anything. These are that proof.
 
-// THE acceptance assertion of the per-provider model: a rejected TheTVDB key
+// the acceptance assertion of the per-provider model: a rejected TheTVDB key
 // marks TheTVDB and nothing else. While "the metadata credential" was one
-// field, this rejection would have put the TMDB card — and every Discover
-// surface behind it — into the "your key is wrong" state, and the fix offered
+// field, this rejection would have put the TMDB card (and every Discover
+// surface behind it) into the "your key is wrong" state, and the fix offered
 // would have been to re-enter a key that works.
 func TestARejectedTheTVDBKeyLeavesTMDBHealthy(t *testing.T) {
 	h, st, mgr := newTestServer(t)
@@ -629,7 +626,7 @@ func TestARejectedTheTVDBKeyLeavesTMDBHealthy(t *testing.T) {
 			status.MetadataCredential, CredentialOK)
 	}
 	// The Test button asked about the provider whose card it sits on, with the
-	// key stored for THAT provider.
+	// key stored for that provider.
 	want := validateCall{provider: core.ProviderTheTVDB, key: "revoked"}
 	if got := mgr.validations(); len(got) != 1 || got[0] != want {
 		t.Fatalf("validated %v, want exactly [%v]", got, want)
@@ -638,7 +635,7 @@ func TestARejectedTheTVDBKeyLeavesTMDBHealthy(t *testing.T) {
 
 // A PIN edit is a credential edit. TheTVDB's login consumes the key and the PIN
 // together, so saving a PIN changes the exchange even though the settings row
-// ProviderDescriptor.CredentialSetting names did not move — and the verdict on
+// ProviderDescriptor.CredentialSetting names did not move, and the verdict on
 // file is then about a login this server no longer makes.
 func TestATheTVDBPINEditRechecksTheCredential(t *testing.T) {
 	h, st, mgr := newTestServer(t)
@@ -709,7 +706,7 @@ func TestTheTVDBKeySetFlagComesFromTheRegistry(t *testing.T) {
 
 // Both halves are stored with their surrounding whitespace removed. A pasted
 // PIN that kept its trailing space would be sent to /login verbatim while
-// everything that judges the credential trimmed it — a card reading healthy
+// everything that judges the credential trimmed it. A card reading healthy
 // while nothing works.
 func TestTheTVDBCredentialIsTrimmedOnTheWayIn(t *testing.T) {
 	h, st, _ := newTestServer(t)
@@ -735,8 +732,8 @@ func TestTheTVDBCredentialIsTrimmedOnTheWayIn(t *testing.T) {
 // The value that is stored must be the value that was validated and the value
 // that is sent upstream. Everything inside internal/api trims a credential
 // before judging it, while the clients built in cmd/caravan send the stored
-// string verbatim — so storing the untrimmed one cached a verdict about a
-// string nothing would ever send.
+// string verbatim, so storing the untrimmed one cached a verdict about a string
+// nothing would ever send.
 func TestSettingsPutStoresCredentialsTrimmed(t *testing.T) {
 	h, st, mgr := newTestServer(t)
 	mgr.validateKeys = map[string]error{"padded": errKeyRejected}
@@ -759,10 +756,10 @@ func TestSettingsPutStoresCredentialsTrimmed(t *testing.T) {
 	}
 }
 
-// The adult module's own 503s must name the ADULT credential. An uncoded 503 is
-// read by the SPA as a missing TMDB key (web/src/lib/credentials.ts reads a bare
-// 503 that way for back-compat), which would send an admin to the wrong settings
-// screen to fix a credential that was never the problem.
+// The adult module's own 503s must name the adult credential. An uncoded 503 is
+// read by the SPA as a missing TMDB key (web/src/lib/credentials.ts reads a
+// bare 503 that way for back-compat), which would send an admin to the wrong
+// settings screen to fix a credential that was never the problem.
 func TestAdultSurfacesNameTheAdultCredential(t *testing.T) {
 	t.Run("site search", func(t *testing.T) {
 		h, st, mgr := newTestServer(t)

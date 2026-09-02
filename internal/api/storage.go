@@ -11,13 +11,13 @@ import (
 	"github.com/watzon/caravan/internal/store"
 )
 
-// Moving the storage root (SPEC §10, PLAN phase 5 task 4).
+// Moving the storage root (SPEC §10).
 //
 // Two endpoints because they are two different promises.
 //
 // Re-point is instant and answers synchronously: it validates the folder,
-// writes one setting, and every consumer that resolves the root per call — the
-// library manager, the media server, the convert queue — is already looking at
+// writes one setting, and every consumer that resolves the root per call (the
+// library manager, the media server, the convert queue) is already looking at
 // the new one by the time the response lands. It never touches media.
 //
 // Migrate moves the files, which is hours of work that has to survive the
@@ -32,7 +32,7 @@ type storageMigrationJSON struct {
 	// Status is "queued", "running", "done", "rolled_back" or "failed".
 	// "rolled_back" means the move broke and undid itself: the old root still
 	// has everything and nothing was lost. "failed" is the one that needs a
-	// human — part of the library is under each root.
+	// human, part of the library is under each root.
 	Status     string `json:"status"`
 	FilesTotal int64  `json:"files_total"`
 	FilesDone  int64  `json:"files_done"`
@@ -67,7 +67,7 @@ type storageRootRequest struct {
 // repointResponse is what POST /system/storage-root/repoint answers with.
 type repointResponse struct {
 	Root string `json:"root"`
-	// Warnings are things worth knowing that are not reasons to refuse — most
+	// Warnings are things worth knowing that are not reasons to refuse, most
 	// often "this folder has no library in it", which is what re-pointing at a
 	// fresh drive looks like and must not be blocked.
 	Warnings []string `json:"warnings"`
@@ -108,8 +108,8 @@ func (s *server) handleRepointStorageRoot(w http.ResponseWriter, r *http.Request
 	}
 
 	// The media server holds settings of its own and re-reads them on request,
-	// the same way a saved DLNA toggle reaches it. Everything else — the library
-	// manager, the convert queue — resolves the root per call and needs nothing.
+	// the same way a saved DLNA toggle reaches it. Everything else (the library
+	// manager, the convert queue) resolves the root per call and needs nothing.
 	if s.dlna != nil {
 		s.dlna.Reload(r.Context())
 	}
@@ -237,7 +237,7 @@ func (s *server) handleStorageMigration(w http.ResponseWriter, r *http.Request) 
 // answer while a migration is in flight.
 //
 // A scan reconciles the database against what is under the storage root, and it
-// deletes the media_file row of every path that is no longer there — artwork
+// deletes the media_file row of every path that is no longer there, artwork
 // references included. While a migration is running, "no longer there" is every
 // file the mover has already taken, so a scan started mid-move empties the
 // library. The dirty-eject recovery banner is the path that matters: a crash

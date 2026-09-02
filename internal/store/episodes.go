@@ -75,7 +75,7 @@ func (s *Store) DeleteSeason(ctx context.Context, id int64) error {
 }
 
 // UpsertEpisode inserts or updates an episode and writes back the assigned ID.
-// Identity is (SeriesID, SeasonNumber, EpisodeNumber) — for a scene, that is
+// Identity is (SeriesID, SeasonNumber, EpisodeNumber), for a scene, that is
 // (site, release year, sequence within the year), which is the whole
 // site-as-series mapping expressed in the key the table already had.
 func (s *Store) UpsertEpisode(ctx context.Context, e *core.Episode) error {

@@ -14,9 +14,9 @@ import (
 	"github.com/watzon/caravan/internal/store"
 )
 
-// The adult module's HTTP surface (PLAN phase 9 task 7).
+// The adult module's HTTP surface.
 //
-// EVERY route in this file is registered on the adult mux in api.go and nowhere
+// every route in this file is registered on the adult mux in api.go and nowhere
 // else. That is not a filing convention, it is the access control: requireAdult
 // wraps the mux, so a handler here cannot be reached by a caller the gate would
 // refuse, and it therefore does not repeat the check. A route moved out of that
@@ -24,23 +24,23 @@ import (
 // so at the registration site too.
 //
 // There is no master switch outside this mux any more. Turning the module on is
-// POST /libraries with kind=adult, which is an ordinary library route — and
+// POST /libraries with kind=adult, which is an ordinary library route, and
 // which is why the library has to exist before anything here, including the
 // instance CRUD, can answer.
 
 // siteJSON is one site on the Adult grid.
 //
-// It is a DTO of its own rather than seriesJSON, even though a site IS a series
-// row (PLAN phase 9 task 3). seriesJSON carries tmdb_id, tvdb_id, imdb_id,
-// status and first_aired, and every one of those is permanently zero for a
-// site: stash-box supplies none of them, and a site is a publisher rather than
-// a production with a first-air year. A card rendered from fields that are
-// always empty invites a client to display them, so they are not offered.
+// It is a DTO of its own rather than seriesJSON, even though a site is a series
+// row. seriesJSON carries tmdb_id, tvdb_id, imdb_id, status and first_aired,
+// and every one of those is permanently zero for a site: stash-box supplies
+// none of them, and a site is a publisher rather than a production with a
+// first-air year. A card rendered from fields that are always empty invites a
+// client to display them, so they are not offered.
 type siteJSON struct {
 	ID    int64  `json:"id"`
 	Title string `json:"title"`
 	// StashID is the provider id, which is what identifies a site everywhere
-	// the API accepts one — a library id is Caravan's own and means nothing to
+	// the API accepts one. A library id is Caravan's own and means nothing to
 	// the discover screen.
 	StashID          string `json:"stash_id"`
 	SortTitle        string `json:"sort_title"`
@@ -69,8 +69,8 @@ type siteDetailJSON struct {
 	// ProviderURL is the site's page on the metadata endpoint's own website,
 	// empty when there is no id to link or no endpoint configured.
 	//
-	// It is derived here rather than in the browser because the shape depends on
-	// which endpoint is configured, and the endpoint setting is admin-only —
+	// It is derived here rather than in the browser because the shape depends
+	// on which endpoint is configured, and the endpoint setting is admin-only,
 	// while this page is one a granted member reads. Deriving it in the SPA
 	// would mean either handing the setting to every reader or showing the link
 	// to admins alone, and a link off a record is not an admin fact.
@@ -78,7 +78,7 @@ type siteDetailJSON struct {
 	// Cataloguing is true while a catalogue walk for this site is queued or
 	// running (core.JobSyncSite).
 	//
-	// It exists because the walk is now something the reader can WATCH: the
+	// It exists because the walk is now something the reader can watch: the
 	// scenes land a release year at a time while the job runs, so the page
 	// polls itself until this goes false. Without it the page cannot tell a
 	// site that is still being indexed from one the provider has nothing for,
@@ -94,8 +94,8 @@ type siteYearJSON struct {
 }
 
 // sceneJSON is one scene row on a site's page. Number is the scene's sequence
-// within its release year — the episode number — which is what the "#003"
-// prefix on the row renders.
+// within its release year (the episode number) which is what the "#003" prefix
+// on the row renders.
 type sceneJSON struct {
 	ID         int64    `json:"id"`
 	SeriesID   int64    `json:"series_id"`
@@ -107,10 +107,11 @@ type sceneJSON struct {
 	Studio     string   `json:"studio"`
 	Performers []string `json:"performers"`
 	URL        string   `json:"url"`
-	// ProviderURL is the scene's page on the metadata endpoint's own website —
-	// the site detail page links titles there, not to the scene's own site,
+	// ProviderURL is the scene's page on the metadata endpoint's own website.
+	// The site detail page links titles there, not to the scene's own site,
 	// because the provider page is the one that explains what Caravan thinks
-	// this scene is. Derived server-side for the reason siteJSON.ProviderURL is.
+	// this scene is. Derived server-side for the reason siteJSON.ProviderURL
+	// is.
 	ProviderURL string `json:"provider_url"`
 	// ReleaseDate is the episode's air date under the name this screen uses: a
 	// scene is published, not broadcast.
@@ -127,9 +128,9 @@ type sceneJSON struct {
 // siteMetaJSON is a provider search hit: a site that may or may not be in the
 // library yet, so it carries a stash id and no library id.
 type siteMetaJSON struct {
-	// Provider is the instance that answered — the id a later add repeats so
-	// the row is pinned to the box whose UUIDs it carries. Two boxes can hold
-	// the same site under the same UUID, so a hit without it names nothing.
+	// Provider is the instance that answered. The id a later add repeats so the
+	// row is pinned to the box whose UUIDs it carries. Two boxes can hold the
+	// same site under the same UUID, so a hit without it names nothing.
 	Provider string `json:"provider"`
 	StashID  string `json:"stash_id"`
 	Name     string `json:"name"`
@@ -173,8 +174,8 @@ type sceneMetaJSON struct {
 // handleListSites answers the Adult grid: every site in the library, with the
 // scene counts its badge renders.
 //
-// It is reachable by a GRANTED member as well as an admin, which is more than
-// GET /library/series offers one — that route is admin-only. The asymmetry is
+// It is reachable by a granted member as well as an admin, which is more than
+// GET /library/series offers one. That route is admin-only. The asymmetry is
 // deliberate and comes from the phase spec: the Adult nav item exists for
 // anyone the module is visible to, and a nav item that 403s is a worse answer
 // than a shelf. The grant is what makes it safe, and the gate is what enforces
@@ -251,7 +252,7 @@ func (s *server) handleGetSite(w http.ResponseWriter, r *http.Request) {
 //
 // A queue read that fails answers "not cataloguing" rather than failing the
 // page, exactly as siteProviderURL does with its setting. The cost of being
-// wrong is a page that stops polling a second early — against losing the whole
+// wrong is a page that stops polling a second early, against losing the whole
 // site view to a transient database error, that is not a trade worth making.
 func (s *server) siteCataloguing(ctx context.Context, seriesID int64) bool {
 	jobs, err := s.st.OpenJobsByKind(ctx, core.JobSyncSite)
@@ -273,11 +274,11 @@ func (s *server) siteCataloguing(ctx context.Context, seriesID int64) bool {
 	return false
 }
 
-// siteProviderURL is the site's page on ITS OWN instance's website.
+// siteProviderURL is the site's page on its own instance's website.
 //
 // The row's provider decides it, not a server-wide setting: two instances have
 // two websites, and a link built from the wrong one lands on a page about a
-// different site — or on a 404 — while looking exactly like a working link.
+// different site (or on a 404) while looking exactly like a working link.
 //
 // A lookup that fails is not worth failing the page for: the link is the least
 // important thing on it, and a site with no link renders exactly as one whose
@@ -285,9 +286,10 @@ func (s *server) siteCataloguing(ctx context.Context, seriesID int64) bool {
 func (s *server) siteProviderURL(ctx context.Context, sr *core.Series) string {
 	endpoint := s.siteEndpoint(ctx, sr)
 	if endpoint == "" {
-		// NOT stashbox.SiteWebURL's own blank-means-the-preset rule: that
-		// sentinel died with the prerelease settings pair. A gone instance links
-		// nowhere rather than at whichever box the preset happens to name.
+		// not stashbox.SiteWebURL's own blank-means-the-preset rule: that
+		// sentinel died with the prerelease settings pair. A gone instance
+		// links nowhere rather than at whichever box the preset happens to
+		// name.
 		return ""
 	}
 	return stashbox.SiteWebURL(endpoint, sr.StashID)
@@ -342,9 +344,9 @@ func (s *server) siteYears(ctx context.Context, sr *core.Series) ([]siteYearJSON
 	if err != nil {
 		return nil, 0, 0, err
 	}
-	// The SITE's instance, read once for the whole page: every scene on it was
+	// The site's instance, read once for the whole page: every scene on it was
 	// minted by the same box the site was, so one lookup answers the lot.
-	// Tolerant for the reason siteProviderURL is — scenes with no provider link
+	// Tolerant for the reason siteProviderURL is, scenes with no provider link
 	// render fine.
 	endpoint := s.siteEndpoint(ctx, sr)
 	episodeIDs := make([]int64, 0, len(episodes))
@@ -407,20 +409,20 @@ func (s *server) siteYears(ctx context.Context, sr *core.Series) ([]siteYearJSON
 type addSiteRequest struct {
 	StashID string `json:"stash_id"`
 	// Provider names the stash-box instance whose catalogue this stash id was
-	// read from — the id GET /adult/search hands back on the hit. Empty means
+	// read from. The id GET /adult/search hands back on the hit. Empty means
 	// the default instance, which is what every client written before instances
 	// sends and what a single-box install always resolves to anyway.
 	Provider string `json:"provider"`
 	// Monitored is the dialog's "Add and monitor" checkbox, and reads exactly
-	// as addRequest.Monitored does — absent means unmonitored.
+	// as addRequest.Monitored does, absent means unmonitored.
 	Monitored *bool `json:"monitored"`
 	// SearchNow queues a search for every wanted scene once the catalogue is
 	// filed. It rides on the sync job rather than happening here (see
 	// core.JobSyncSitePayload): before the walk the site has no episode rows,
 	// so a search queued now would queue nothing.
 	SearchNow bool `json:"search_now"`
-	// LibraryID reads exactly as addRequest.LibraryID: the adult library a
-	// NEW site lands in, zero for the default.
+	// LibraryID reads exactly as addRequest.LibraryID: the adult library a new
+	// site lands in, zero for the default.
 	LibraryID int64 `json:"library_id"`
 }
 
@@ -450,11 +452,11 @@ func (s *server) handleAddSite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	// The instance the hit came from, validated here and CARRIED: it is what the
-	// row is pinned to, and every later refresh of this site asks that box and
-	// no other. An omitted provider resolves to the default instance rather than
-	// travelling empty, so the row records which box actually answered instead
-	// of leaving the library layer to guess again later.
+	// The instance the hit came from, validated here and carried: it is what
+	// the row is pinned to, and every later refresh of this site asks that box
+	// and no other. An omitted provider resolves to the default instance rather
+	// than travelling empty, so the row records which box actually answered
+	// instead of leaving the library layer to guess again later.
 	providerID, ok := s.adultRefProvider(w, r, body.Provider)
 	if !ok {
 		return
@@ -468,7 +470,7 @@ func (s *server) handleAddSite(w http.ResponseWriter, r *http.Request) {
 		// Unlike the search-on-add flags elsewhere, this one is not logged and
 		// swallowed. The walk is what makes the site page anything other than
 		// empty, so a site added with no job behind it is a site that stays
-		// blank until somebody notices — better to report the failure and let
+		// blank until somebody notices, better to report the failure and let
 		// the identical, idempotent re-add fix it.
 		s.writeStoreError(w, "queue site catalogue walk", err)
 		return
@@ -481,7 +483,7 @@ func (s *server) handleAddSite(w http.ResponseWriter, r *http.Request) {
 //
 // The dedupe is HasOpenJob on the encoded payload, the same one every search
 // job uses, which is why the payload is marshalled from core.JobSyncSitePayload
-// rather than assembled by hand: the encoded string IS the key.
+// rather than assembled by hand: the encoded string is the key.
 func (s *server) enqueueSiteSync(ctx context.Context, seriesID int64, searchNow bool) error {
 	payload, err := json.Marshal(core.JobSyncSitePayload{SeriesID: seriesID, SearchNow: searchNow})
 	if err != nil {
@@ -497,14 +499,15 @@ func (s *server) enqueueSiteSync(ctx context.Context, seriesID int64, searchNow 
 	return s.st.EnqueueJob(ctx, &core.Job{Kind: core.JobSyncSite, Payload: string(payload)})
 }
 
-// handleSearchSites queries the provider for sites to add. It is the adult
-// twin of GET /search, and admin-only for the reason handleAddSite is: its only
-// use is choosing something to add.
+// handleSearchSites queries the provider for sites to add. It is the adult twin
+// of GET /search, and admin-only for the reason handleAddSite is: its only use
+// is choosing something to add.
 //
-// A blank q is a search, not a bad request — the difference from GET /search,
-// where an empty TMDB query means nothing. A stash-box endpoint answers one with
-// its own default list, which is what the add-a-site dialog opens on before
-// anything is typed, exactly as GET /adult/discover opens on the newest scenes.
+// A blank q is a search, not a bad request. The difference from GET /search,
+// where an empty TMDB query means nothing. A stash-box endpoint answers one
+// with its own default list, which is what the add-a-site dialog opens on
+// before anything is typed, exactly as GET /adult/discover opens on the newest
+// scenes.
 func (s *server) handleSearchSites(w http.ResponseWriter, r *http.Request) {
 	query := strings.TrimSpace(r.URL.Query().Get("q"))
 	provider, providerID, ok := s.adultProvider(w, r)
@@ -579,7 +582,7 @@ func (s *server) handleGetAdultScene(w http.ResponseWriter, r *http.Request) {
 // network and studio shelves; merging scenes into it would mean the ungranted
 // filter lived in a handler rather than at the router, which is exactly the
 // arrangement requireAdult exists to avoid. A caller who may not see scenes
-// does not get a filtered /discover — they get a 404 from a route they cannot
+// does not get a filtered /discover. They get a 404 from a route they cannot
 // reach, and their /discover is byte-for-byte the one they had before the
 // module existed.
 func (s *server) handleAdultDiscover(w http.ResponseWriter, r *http.Request) {
@@ -596,10 +599,10 @@ func (s *server) handleAdultDiscover(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	result, err := provider.SearchScenes(ctx, query)
 	if err != nil {
-		// A filter this endpoint cannot express is the CALLER's problem, not
-		// an upstream failure: the provider refused rather than answering the
-		// wider question, and the rail has a control it must stop offering.
-		// The filter is named; the value never is.
+		// A filter this endpoint cannot express is the caller's problem, not an
+		// upstream failure: the provider refused rather than answering the
+		// wider question, and the rail has a control it must stop offering. The
+		// filter is named; the value never is.
 		var unsupported *core.SceneFilterUnsupportedError
 		if errors.As(err, &unsupported) {
 			writeError(w, http.StatusBadRequest,
@@ -721,16 +724,16 @@ func (s *server) siteIDsByStashID(ctx context.Context, sites []core.SiteMeta) (m
 // id of the one it chose, writing the refusal itself.
 //
 // `?provider=` names an instance; omitting it means the default one
-// (Manager.DefaultAdultMetadata). The id is VALIDATED rather than passed
+// (Manager.DefaultAdultMetadata). The id is validated rather than passed
 // through: an id nothing answers to would otherwise reach the manager and come
 // back as the same nil a module with no credential gives, which would report a
 // caller's typo as a configuration problem.
 //
-// A missing credential is configuration, not a retry, so it reads the same way a
-// missing TMDB key does on GET /search. The code matters as much as the status:
-// the SPA reads an UNCODED 503 as a missing TMDB key, so naming the adult
-// credential here is what keeps a stash-box failure from being reported as a
-// TMDB one.
+// A missing credential is configuration, not a retry, so it reads the same way
+// a missing TMDB key does on GET /search. The code matters as much as the
+// status: the SPA reads an uncoded 503 as a missing TMDB key, so naming the
+// adult credential here is what keeps a stash-box failure from being reported
+// as a TMDB one.
 func (s *server) adultProvider(w http.ResponseWriter, r *http.Request) (core.AdultMetadataProvider, string, bool) {
 	ctx := r.Context()
 	if named := strings.TrimSpace(r.URL.Query().Get("provider")); named != "" {
@@ -757,7 +760,7 @@ func (s *server) adultProvider(w http.ResponseWriter, r *http.Request) (core.Adu
 
 // adultRefProvider resolves the instance a body named, defaulting to the one a
 // surface with no opinion answers from. It writes the refusal itself, and it is
-// how every adult body spells "which box" — the query-parameter twin is
+// how every adult body spells "which box". The query-parameter twin is
 // adultProvider.
 func (s *server) adultRefProvider(w http.ResponseWriter, r *http.Request, named string) (string, bool) {
 	ctx := r.Context()
@@ -777,8 +780,8 @@ func (s *server) adultRefProvider(w http.ResponseWriter, r *http.Request, named 
 }
 
 // validAdultInstance refuses an id that is not a configured stash-box instance,
-// writing the 400. It is itemRefFrom's check under another name — the same
-// question asked of a query parameter instead of a body — and the message names
+// writing the 400. It is itemRefFrom's check under another name (the same
+// question asked of a query parameter instead of a body) and the message names
 // the id because a caller that sent one can fix it.
 func (s *server) validAdultInstance(ctx context.Context, w http.ResponseWriter, providerID string) bool {
 	if core.ProviderBase(providerID) != core.ProviderStashbox ||
@@ -804,8 +807,8 @@ func (s *server) validAdultInstance(ctx context.Context, w http.ResponseWriter, 
 // is the one string on this surface nobody wants echoed into a shared log or a
 // browser's error console.
 func (s *server) writeAdultProviderError(w http.ResponseWriter, r *http.Request, what string, err error) {
-	// A canceled search is the typeahead working — every keystroke aborts the
-	// previous request — so it logs as debug and closes out as 499, not as an
+	// A canceled search is the typeahead working (every keystroke aborts the
+	// previous request) so it logs as debug and closes out as 499, not as an
 	// upstream failure.
 	if clientGone(r) {
 		s.log.Debug("adult provider request abandoned by the caller", "what", what, "error", err)

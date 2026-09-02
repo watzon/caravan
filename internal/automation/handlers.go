@@ -1049,7 +1049,12 @@ func (r *Runner) handleIndexerHealth(ctx context.Context, st *store.Store, paylo
 		return fmt.Errorf("store: list indexers: %w", err)
 	}
 	for _, cfg := range indexers {
-		probe, cancel := context.WithTimeout(ctx, 10*time.Second)
+		// A scraped site may sit behind a browser challenge; a feed answers fast.
+		timeout := 10 * time.Second
+		if cfg.DefinitionID != "" {
+			timeout = 45 * time.Second
+		}
+		probe, cancel := context.WithTimeout(ctx, timeout)
 		err := r.indexers(cfg).Test(probe)
 		cancel()
 		if recErr := st.RecordIndexerHealth(ctx, cfg.ID, err); recErr != nil {

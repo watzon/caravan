@@ -179,10 +179,10 @@ func TestStashCardIsAdminOnly(t *testing.T) {
 	}
 }
 
-// The keys are an adult-module feature, so they must be absent from
-// GET /settings for a caller the module is not visible to — not merely
-// unwritable. A settings object carrying a stash_url is the module announcing
-// itself on an install where it is supposed to be gone.
+// The keys are an adult-module feature, so they must be absent from GET
+// /settings for a caller the module is not visible to, not merely unwritable. A
+// settings object carrying a stash_url is the module announcing itself on an
+// install where it is supposed to be gone.
 func TestStashSettingsAreAbsentWhileTheModuleIsOff(t *testing.T) {
 	h, st, _ := newTestServer(t)
 	cookie := adminSession(t, h, st)
@@ -200,7 +200,7 @@ func TestStashSettingsAreAbsentWhileTheModuleIsOff(t *testing.T) {
 		t.Fatalf("settings = %+v, want the stash card while the module is on", on)
 	}
 
-	// Switched off, they are gone — and so is the card's own endpoint.
+	// Switched off, they are gone, and so is the card's own endpoint.
 	setAdultLibrariesActive(t, st, false)
 	rec = doAuth(t, h, http.MethodGet, "/api/v1/settings", "", withCookie(cookie))
 	wantStatus(t, rec, http.StatusOK)
@@ -262,7 +262,7 @@ func TestUnreachableStashSurfacesOnSystemStatus(t *testing.T) {
 	}
 }
 
-// A healthy handoff, and a server wired without one, both report nothing — the
+// A healthy handoff, and a server wired without one, both report nothing. The
 // field is absent rather than an empty object, so a client can treat presence
 // as the banner condition.
 func TestHealthyStashRaisesNoBanner(t *testing.T) {

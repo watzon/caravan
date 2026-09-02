@@ -546,11 +546,11 @@ func TestListDownloadsRespectsAdultVisibility(t *testing.T) {
 	}
 }
 
-// Every queue row says which protocol it is, because the detail drawer is
-// built from it: a torrent has peers, trackers, a ratio and an upload limit,
-// and a Usenet download has a file list and repair stages instead. Before this
-// the UI showed torrent chrome — and a Limits tab the embedded Usenet engine
-// answers 400 for — on every download whatever fetched it.
+// Every queue row says which protocol it is, because the detail drawer is built
+// from it: a torrent has peers, trackers, a ratio and an upload limit, and a
+// Usenet download has a file list and repair stages instead. Before this the UI
+// showed torrent chrome (and a Limits tab the embedded Usenet engine answers
+// 400 for) on every download whatever fetched it.
 func TestListDownloadsTagsEachRowWithItsProtocol(t *testing.T) {
 	h, st, engine, _ := newAcquisitionServer(t)
 

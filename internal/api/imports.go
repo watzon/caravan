@@ -22,8 +22,8 @@ type unmatchedJSON struct {
 	Reason string `json:"reason"`
 	SeenAt string `json:"seen_at"`
 	// LibraryID scopes the manual match: an untied universal-search grab
-	// already chose a library, and the review screen pre-selects it. 0 —
-	// every scan-parked file — means unscoped.
+	// already chose a library, and the review screen pre-selects it. 0 (every
+	// scan-parked file) means unscoped.
 	LibraryID int64      `json:"library_id"`
 	Parsed    parsedJSON `json:"parsed"`
 }
@@ -120,7 +120,7 @@ func (s *server) handleImportQueue(w http.ResponseWriter, r *http.Request) {
 
 	out := make([]unmatchedJSON, 0, len(files))
 	for _, f := range files {
-		// A file parked into a library — an untied grab's payload — is as
+		// A file parked into a library (an untied grab's payload) is as
 		// invisible as that library is to this caller.
 		if visible, ok := s.unmatchedVisible(w, r, &f); !ok {
 			return
@@ -199,7 +199,7 @@ func (s *server) handleImportMatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Matching a parked file puts the title in the library, which is what a
-	// pending request was asking for. See absorbRequests — including why a
+	// pending request was asking for. See absorbRequests, including why a
 	// non-TMDB ref absorbs nothing.
 	s.absorbRequests(r.Context(), body.Type, ref.TMDBID())
 	writeJSON(w, http.StatusOK, map[string]string{"status": "matched"})
@@ -232,9 +232,9 @@ func (s *server) handleImportDelete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// unmatchedVisible reports whether a parked file may be shown to this caller:
-// a file scoped to a library is as visible as that library is. A file with no
-// library — every scan-parked one — is unscoped and belongs to nobody in
+// unmatchedVisible reports whether a parked file may be shown to this caller: a
+// file scoped to a library is as visible as that library is. A file with no
+// library (every scan-parked one) is unscoped and belongs to nobody in
 // particular, so it stays visible. The second return is false when the check
 // itself failed and the response has been written.
 func (s *server) unmatchedVisible(w http.ResponseWriter, r *http.Request, u *core.UnmatchedFile) (bool, bool) {

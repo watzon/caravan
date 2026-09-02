@@ -411,10 +411,11 @@ func TestTestUnsavedConfigFallsBackToStoredCredential(t *testing.T) {
 //
 // Without that, POST /download-clients/test is a credential exfiltrator: name a
 // saved row by id, give any URL you like, omit the credential, and the server
-// sends the stored password (or API key) to the host you named — the qBittorrent
+// sends the stored password (or API key) to the host you named. The qBittorrent
 // probe POSTs it to /api/v2/auth/login, the SABnzbd one puts the key in the
 // query string. That defeats the whole reason downloadClientJSON withholds the
-// credential (SPEC §12), and it is reachable by anything that can reach the API.
+// credential (SPEC §12), and it is reachable by anything that can reach the
+// API.
 func TestTestUnsavedConfigWillNotSendAStoredCredentialToAnotherHost(t *testing.T) {
 	h, st, probe := newDownloadClientServer(t)
 	ctx := context.Background()
@@ -445,9 +446,9 @@ func TestTestUnsavedConfigWillNotSendAStoredCredentialToAnotherHost(t *testing.T
 
 // The same scoping by type. Both qBittorrent and NZBGet authenticate with a
 // username and password, so without the type check a stored qBittorrent
-// password falls back into an NZBGet probe — the credential leaves for a
-// backend it was never typed into. The row it was saved on is the only thing
-// that says which backend a credential belongs to.
+// password falls back into an NZBGet probe. The credential leaves for a backend
+// it was never typed into. The row it was saved on is the only thing that says
+// which backend a credential belongs to.
 func TestTestUnsavedConfigWillNotSendAStoredCredentialToAnotherType(t *testing.T) {
 	probe := &fakeClientProbe{}
 	reg := clients.NewRegistry()

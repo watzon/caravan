@@ -35,7 +35,7 @@ func TestUpsertEpisodePreservesAbsoluteNumber(t *testing.T) {
 		t.Fatalf("stored absolute = %d, want the provider's 105", got.AbsoluteNumber)
 	}
 
-	// A later writer with no opinion — the shape a placeholder row is written
+	// A later writer with no opinion. The shape a placeholder row is written
 	// in. It changes the title and must leave the number alone.
 	silent := &core.Episode{SeriesID: sr.ID, SeasonNumber: 5, EpisodeNumber: 3, Title: "Bound (fixed)"}
 	if err := st.UpsertEpisode(ctx, silent); err != nil {

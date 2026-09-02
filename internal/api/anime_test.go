@@ -91,7 +91,7 @@ func TestListSeriesRefusesKindsThatAreNotItsOwn(t *testing.T) {
 	}
 }
 
-// An anime library accepts BOTH an add of a movie and an add of a series: it is
+// An anime library accepts both an add of a movie and an add of a series: it is
 // the one shelf that speaks two vocabularies, and the acceptance rule is what
 // says so (core.LibraryKindAccepts). A television library keeps refusing films,
 // so the widening is the anime kind's and not everybody's.
@@ -115,7 +115,7 @@ func TestAnimeLibraryAcceptsBothAddScopes(t *testing.T) {
 
 // The per-library item counts the navigation badges each shelf with. They are
 // ownership rather than attribution: a row that names no library counts for
-// nobody, and a library the caller cannot see contributes no entry at all —
+// nobody, and a library the caller cannot see contributes no entry at all,
 // which is the one thing an item count must not leak.
 func TestSystemStatusCountsItemsPerVisibleLibrary(t *testing.T) {
 	h, st, _ := newTestServer(t)
@@ -160,8 +160,8 @@ func TestSystemStatusCountsItemsPerVisibleLibrary(t *testing.T) {
 	}
 }
 
-// The icon is validated for SHAPE and nothing else, so a client can ship a new
-// glyph without a server release — and empty is how a library goes back to its
+// The icon is validated for shape and nothing else, so a client can ship a new
+// glyph without a server release, and empty is how a library goes back to its
 // kind's default.
 func TestPatchLibraryIcon(t *testing.T) {
 	h, st, _ := newTestServer(t)
@@ -212,8 +212,8 @@ func TestPatchLibraryIcon(t *testing.T) {
 	}
 }
 
-// The sidebar's own source of data carries the icon, because /auth/me IS what
-// the navigation is built from — a member cannot read GET /libraries to find
+// The sidebar's own source of data carries the icon, because /auth/me is what
+// the navigation is built from. A member cannot read GET /libraries to find
 // one.
 func TestMeReportsLibraryIcons(t *testing.T) {
 	h, st, _ := newTestServer(t)
@@ -246,9 +246,9 @@ func TestMeReportsLibraryIcons(t *testing.T) {
 	}
 }
 
-// A search scoped to an anime library runs BOTH halves, because the shelf holds
+// A search scoped to an anime library runs both halves, because the shelf holds
 // both. The gate used to be kind equality, which matched neither `movie` nor
-// `tv` for an anime library and answered every scope — movie, series and all —
+// `tv` for an anime library and answered every scope (movie, series and all)
 // with two empty lists while the chain underneath was perfectly able to answer
 // (library.SearchLibrary resolves through the same acceptance rule).
 func TestSearchThroughAnAnimeLibraryRunsBothHalves(t *testing.T) {
@@ -264,7 +264,7 @@ func TestSearchThroughAnAnimeLibraryRunsBothHalves(t *testing.T) {
 	}{
 		"movie scope":  {"&type=movie", []string{MediaTypeMovie}},
 		"series scope": {"&type=series", []string{MediaTypeSeries}},
-		// type=all on an anime library means both halves of THIS shelf.
+		// type=all on an anime library means both halves of this shelf.
 		"both scopes": {"", []string{MediaTypeMovie, MediaTypeSeries}},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -307,12 +307,12 @@ func TestSearchThroughATVLibraryStillRunsOneHalf(t *testing.T) {
 	}
 }
 
-// A dormant shelf accepts nothing, through ANY door that names a target:
-// searching it, adding to it, or moving into it. It is the promise
-// `active = 0` makes — dormant for EVERYONE, an admin included — and it is what
-// a client naming a library id has to be able to rely on: the seeded Anime and
-// Adult rows are visible on the admin Libraries screen, so a surface that built
-// a target list from THAT list could name a shelf no content route will answer
+// A dormant shelf accepts nothing, through any door that names a target:
+// searching it, adding to it, or moving into it. It is the promise `active = 0`
+// makes (dormant for everyone, an admin included) and it is what a client
+// naming a library id has to be able to rely on: the seeded Anime and Adult
+// rows are visible on the admin Libraries screen, so a surface that built a
+// target list from that list could name a shelf no content route will answer
 // for. The refusal is 404 rather than 403, for the reason visibleLibrary gives.
 func TestDormantLibraryRefusesEveryTargetDoor(t *testing.T) {
 	h, st, mgr := newTestServer(t)
@@ -327,7 +327,7 @@ func TestDormantLibraryRefusesEveryTargetDoor(t *testing.T) {
 	id := itoa(anime.ID)
 	mgr.searchHits = &library.SearchHits{Providers: []string{core.ProviderAniList}}
 
-	// A movie and a series on the ACTIVE shelves, so the move cases below fail
+	// A movie and a series on the active shelves, so the move cases below fail
 	// on the destination rather than on the item.
 	if err := st.UpsertMovie(t.Context(), &core.Movie{TMDBID: 9, Title: "A Film"}); err != nil {
 		t.Fatalf("UpsertMovie: %v", err)
@@ -358,9 +358,9 @@ func TestDormantLibraryRefusesEveryTargetDoor(t *testing.T) {
 	}
 }
 
-// The download-client label follows the SHELF the payload lands on, so an anime
-// library's films and its episodes sort into ONE folder — the one its owner
-// gave the shelf — rather than being split back across "movies" and "tv".
+// The download-client label follows the shelf the payload lands on, so an anime
+// library's films and its episodes sort into one folder (the one its owner gave
+// the shelf) rather than being split back across "movies" and "tv".
 //
 // Four doors reach the engine and all four are checked here, because a label
 // that depended on which button was pressed would scatter one shelf's downloads

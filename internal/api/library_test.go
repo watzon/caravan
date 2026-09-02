@@ -1065,9 +1065,9 @@ func TestAddRefValidationRefusals(t *testing.T) {
 	}
 }
 
-// A chain the user's ref is NOT on still accepts the ref. The chain governs
-// identification — which providers are asked when Caravan has to work out what
-// something is — and an add is the user answering that question outright.
+// A chain the user's ref is not on still accepts the ref. The chain governs
+// identification (which providers are asked when Caravan has to work out what
+// something is) and an add is the user answering that question outright.
 func TestAddAcceptsARefOffTheLibraryChain(t *testing.T) {
 	h, _, mgr := newTestServer(t)
 	rec := do(t, h, http.MethodPost, "/api/v1/libraries",
@@ -1118,7 +1118,7 @@ func TestAddMovieMinAvailabilityContract(t *testing.T) {
 	wantErrorBody(t, rec)
 }
 
-// PATCH /library/movies/{id} edits the availability choice after the add — the
+// PATCH /library/movies/{id} edits the availability choice after the add. The
 // choice at add time must not be final. Movie-only, like everywhere else the
 // field appears.
 func TestPatchMovieMinAvailability(t *testing.T) {
@@ -1156,7 +1156,7 @@ func TestPatchMovieMinAvailability(t *testing.T) {
 	wantStatus(t, rec, http.StatusBadRequest)
 }
 
-// ---- "Add and monitor" -----------------------------------------------------
+// "Add and monitor"
 
 // The checkbox's wire contract: absent and explicit false are unmonitored.
 // Only an explicit true opts a new item into automation.

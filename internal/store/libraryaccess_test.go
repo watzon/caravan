@@ -50,7 +50,7 @@ func TestCreateLibraryIsBornActiveAndOpen(t *testing.T) {
 	}
 }
 
-// The roster is replaced wholesale, not merged: the submitted list IS the
+// The roster is replaced wholesale, not merged: the submitted list is the
 // answer, so an account left off it loses the grant in the same write that
 // hands one to whoever was added.
 func TestSetLibraryAccessReplacesTheRosterWholesale(t *testing.T) {
@@ -129,9 +129,9 @@ func TestSetLibraryAccessClearsDLNAWhenRestricting(t *testing.T) {
 		t.Errorf("dlna update id stayed %q; a television keeps showing the container", before)
 	}
 
-	// Unrestricting does NOT put the flag back. Nobody asked for the LAN to see
+	// Unrestricting does not put the flag back. Nobody asked for the LAN to see
 	// it again, and re-advertising silently would be exactly the surprise
-	// clearing it was there to prevent — re-sharing is a second act on the Reach
+	// clearing it was there to prevent, re-sharing is a second act on the Reach
 	// card.
 	if err := st.SetLibraryAccess(ctx, lib.ID, false, nil); err != nil {
 		t.Fatalf("SetLibraryAccess: %v", err)
@@ -236,7 +236,7 @@ func TestListLibraryAccessForUser(t *testing.T) {
 	}
 }
 
-// SetLibraryActive is the master switch, and it deletes nothing — the grants and
+// SetLibraryActive is the master switch, and it deletes nothing. The grants and
 // the roster are exactly where they were when it comes back on.
 func TestSetLibraryActive(t *testing.T) {
 	ctx := context.Background()

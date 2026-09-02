@@ -50,15 +50,15 @@ type dlnaJSON struct {
 	Advertising bool `json:"advertising"`
 	// Error is why advertising is off despite being enabled. Empty otherwise.
 	Error string `json:"error"`
-	// Recent is the request trace, oldest first — what clients actually
-	// asked. The way to debug a TV that shows an empty shelf.
+	// Recent is the request trace, oldest first, what clients actually asked.
+	// The way to debug a TV that shows an empty shelf.
 	Recent []dlna.TraceEntry `json:"recent"`
 }
 
 // handleDLNAStatus reports the media server's state.
 //
 // There is no matching PUT: enabled and the friendly name are ordinary settings
-// keys and go through PUT /settings with everything else (SPEC §10 — the table
+// keys and go through PUT /settings with everything else (SPEC §10. The table
 // is the runtime configuration). This endpoint exists because the state SSDP is
 // actually in cannot be read out of the settings table.
 func (s *server) handleDLNAStatus(w http.ResponseWriter, r *http.Request) {

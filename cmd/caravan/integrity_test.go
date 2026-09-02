@@ -15,8 +15,8 @@ import (
 	"github.com/watzon/caravan/internal/integrity"
 )
 
-// The portable integrity flow end to end (SPEC §2.3, §13, PLAN phase 5 task 3),
-// driven through the real HTTP API against the real wiring in runServe:
+// The portable integrity flow end to end (SPEC §2.3, §13), driven through the
+// real HTTP API against the real wiring in runServe:
 //
 //  1. a first start writes the marker and reports a clean session;
 //  2. POST /system/shutdown stops the process and leaves the marker clean;
@@ -68,8 +68,8 @@ func startPortable(t *testing.T, cfgPath string) *portableServer {
 	return p
 }
 
-// waitStopped waits for runServe to return, which is when its deferred
-// teardown — engines, checkpoint, database, marker — has finished.
+// waitStopped waits for runServe to return, which is when its deferred teardown
+// (engines, checkpoint, database, marker) has finished.
 func (p *portableServer) waitStopped(t *testing.T) {
 	t.Helper()
 	select {
@@ -145,14 +145,14 @@ func TestPortableDirtyEjectDetectionAndRecovery(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := writePortableConfig(t, dir)
 
-	// ---- 1: a first start is clean, and claims the directory ---------------
+	// 1: a first start is clean, and claims the directory
 	server := startPortable(t, cfgPath)
 	if server.dirty(t) {
 		t.Fatal("a first start reported a dirty shutdown")
 	}
 	wantMarker(t, dir, integrity.StateRunning)
 
-	// ---- 2: shutting down through the API leaves the marker clean ----------
+	// 2: shutting down through the API leaves the marker clean
 	if code, body := server.post(t, "/system/shutdown"); code != http.StatusAccepted {
 		t.Fatalf("POST /system/shutdown = %d (%s), want 202", code, body)
 	}
@@ -165,10 +165,9 @@ func TestPortableDirtyEjectDetectionAndRecovery(t *testing.T) {
 		t.Fatal("a start after a clean shutdown reported dirty")
 	}
 
-	// ---- 3: simulate the eject --------------------------------------------
-	// Kill the process the way a pulled drive does: stop it without letting it
-	// write the clean marker. Signalling would run the clean path, so the
-	// marker is put back the way a killed process leaves it.
+	// 3: simulate the eject Kill the process the way a pulled drive does: stop
+	// it without letting it write the clean marker. Signalling would run the
+	// clean path, so the marker is put back the way a killed process leaves it.
 	if code, _ := server.post(t, "/system/shutdown"); code != http.StatusAccepted {
 		t.Fatalf("POST /system/shutdown = %d, want 202", code)
 	}
@@ -188,7 +187,7 @@ func TestPortableDirtyEjectDetectionAndRecovery(t *testing.T) {
 		t.Fatalf("POST /downloads/{id}/resume while dirty = %d (%s), want 409", code, body)
 	}
 
-	// ---- 4: recovery clears it --------------------------------------------
+	// 4: recovery clears it
 	code, body := server.post(t, "/system/verify")
 	if code != http.StatusOK {
 		t.Fatalf("POST /system/verify = %d (%s), want 200", code, body)
@@ -200,13 +199,13 @@ func TestPortableDirtyEjectDetectionAndRecovery(t *testing.T) {
 		t.Fatal("status still reports dirty after a successful verify")
 	}
 	// The engine is unbuilt in this test, so a permitted resume gets as far as
-	// the 503 that says so — which is the proof the dirty gate is no longer
-	// what is stopping it.
+	// the 503 that says so, which is the proof the dirty gate is no longer what
+	// is stopping it.
 	if code, body := server.post(t, "/downloads/deadbeef/resume"); code != http.StatusServiceUnavailable {
 		t.Fatalf("POST /downloads/{id}/resume after verifying = %d (%s), want 503", code, body)
 	}
 
-	// ---- 5: the signal path ends in the same clean marker ------------------
+	// 5: the signal path ends in the same clean marker
 	signalSelfTerm(t)
 	server.waitStopped(t)
 	wantMarker(t, dir, integrity.StateClean)

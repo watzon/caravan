@@ -7,10 +7,10 @@ import (
 	"github.com/watzon/caravan/internal/core"
 )
 
-// The category an indexer files a result under decides how its name is read
-// (PLAN phase 9 task 4). This is the selector, and it is asserted on results
-// that come back through the real feed decoder rather than on a call to the
-// parser directly — because the wiring is the part that can silently regress.
+// The category an indexer files a result under decides how its name is read.
+// This is the selector, and it is asserted on results that come back through
+// the real feed decoder rather than on a call to the parser directly, because
+// the wiring is the part that can silently regress.
 func TestAdultCategoriesSelectTheSceneParser(t *testing.T) {
 	c, _ := newStub(t, torznabCfg(), map[string]response{"search": ok(t, "torznab_search_adult.xml")})
 
@@ -47,7 +47,7 @@ func TestAdultCategoriesSelectTheSceneParser(t *testing.T) {
 	}
 
 	// And the converse, which is the reason the selector is the category and
-	// not the shape of the name: a dated TELEVISION release is a daily episode
+	// not the shape of the name: a dated television release is a daily episode
 	// and must not be read as a scene.
 	daily := rels[2]
 	if daily.Parsed.IsScene() {

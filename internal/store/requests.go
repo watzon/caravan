@@ -20,7 +20,7 @@ const requestColumns = `id, media_type, tmdb_id, stash_id, title, year, poster_p
 // requestIdentity is the (column, value) pair that identifies a request of one
 // media type: a TMDB id for a movie or a series, a stash-box id for a scene. It
 // is what CreateRequest looks an existing pending row up by, and it mirrors the
-// pair of partial unique indexes the table enforces the same rule with — so the
+// pair of partial unique indexes the table enforces the same rule with, so the
 // merge below finds exactly the row an INSERT would have collided with.
 func requestIdentity(r *core.Request) (string, any) {
 	if r.MediaType == core.MediaTypeScene {
@@ -34,7 +34,7 @@ func requestIdentity(r *core.Request) (string, any) {
 // It merges rather than duplicates: when a pending request already exists for
 // the same (MediaType, TMDBID), the two season lists are unioned into that row
 // and its id is written back to r. Two people asking for the same show, or one
-// person asking for season 2 after season 1, is the normal case — a second row
+// person asking for season 2 after season 1, is the normal case. A second row
 // would give the approver two things to approve for one title.
 //
 // A nil Seasons list means the whole title, and it wins over any named seasons
@@ -42,8 +42,8 @@ func requestIdentity(r *core.Request) (string, any) {
 //
 // RequestedBy records who asked. A merge leaves the existing row's asker alone
 // and writes it back to r, so the caller answers with the truth rather than
-// with itself. The rest of the row's description — title, year, artwork, the
-// availability a movie is held for — belongs to that asker too: a merge fills a
+// with itself. The rest of the row's description (title, year, artwork, the
+// availability a movie is held for) belongs to that asker too: a merge fills a
 // field nobody has filled and overwrites nothing.
 func (s *Store) CreateRequest(ctx context.Context, r *core.Request) error {
 	if r.Status == "" {
@@ -80,12 +80,12 @@ func (s *Store) CreateRequest(ctx context.Context, r *core.Request) error {
 			return fmt.Errorf("store: merge request %d: %w", existing.ID, err)
 		}
 		// The first asker's row is theirs, so a merge fills a field only when
-		// nobody has filled it — it never overwrites one. POST /requests is
+		// nobody has filled it. It never overwrites one. POST /requests is
 		// member-allowed and its body is free text, and a merge that rewrote
-		// the description would let one housemate put words in another's
-		// mouth, under their name, in the admin's approval queue. The same
-		// rule keeps a later request from merging toward "wait longer" behind
-		// the first asker's back.
+		// the description would let one housemate put words in another's mouth,
+		// under their name, in the admin's approval queue. The same rule keeps
+		// a later request from merging toward "wait longer" behind the first
+		// asker's back.
 		//
 		// Seasons are the exception, and the reason a merge exists: they union.
 		if existing.Title != "" {
@@ -251,8 +251,8 @@ func (s *Store) SetRequestStatus(ctx context.Context, id int64, status string) e
 
 // ApproveRequestsFor absorbs the pending request for a title that has just
 // reached the library, and reports how many rows it moved. Adding a title is
-// the whole point of requesting it, so however it got added — approval, the
-// add-to-library button, a match from the scan-review queue — the wish is
+// the whole point of requesting it, so however it got added (approval, the
+// add-to-library button, a match from the scan-review queue) the wish is
 // granted and the request stops asking.
 //
 // It is a no-op with no error when nothing is pending, which is the common

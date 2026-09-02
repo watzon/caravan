@@ -21,11 +21,10 @@ const maxBodyBytes = 1 << 20
 type errorResponse struct {
 	Error string `json:"error"`
 	// Code is a stable machine-readable tag for the failures a client has to
-	// branch on rather than merely display — today, the credential states in
-	// credentials.go (PLAN phase 10 task 3). It is omitted from every other
-	// failure: an absent code means "render the message", which is what the
-	// SPA has always done and must keep doing for errors nobody has had a
-	// reason to name.
+	// branch on rather than merely display, today, the credential states in
+	// credentials.go. It is omitted from every other failure: an absent code
+	// means "render the message", which is what the SPA has always done and
+	// must keep doing for errors nobody has had a reason to name.
 	Code string `json:"code,omitempty"`
 }
 

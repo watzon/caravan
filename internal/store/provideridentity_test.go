@@ -12,7 +12,7 @@ import (
 
 // The partial index is 0001's rule for tmdb_id and 0013's for stash_id, stated
 // once: a ref is unique per provider, and unidentified rows do not collide with
-// each other — which is what a scan that found files before it found metadata
+// each other, which is what a scan that found files before it found metadata
 // produces, over and over.
 func TestProviderRefUniquenessIsPartial(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "caravan.db")
@@ -56,7 +56,7 @@ func TestProviderRefUniquenessIsPartial(t *testing.T) {
 }
 
 // The ref rung must come before the tmdb rung in both upserts. Reversed, a
-// re-fetched title matches on its legacy id and its ref is never consulted —
+// re-fetched title matches on its legacy id and its ref is never consulted,
 // which works only for as long as every provider writes a tmdb_id.
 func TestUpsertMatchesOnProviderRefFirst(t *testing.T) {
 	ctx := context.Background()

@@ -512,8 +512,8 @@ func TestAddSeriesSearchesMissingOnlyWhenAsked(t *testing.T) {
 
 // A monitored movie that has not reached its minimum availability must not be
 // searched: before the gate, adding an unreleased movie queued a search that
-// could only find junk. A file on disk overrides the calendar — whatever
-// exists is graded against the profile regardless of dates.
+// could only find junk. A file on disk overrides the calendar, whatever exists
+// is graded against the profile regardless of dates.
 func TestSearchWantedSkipsUnavailableMovies(t *testing.T) {
 	h, st, _ := newTestServer(t)
 	ctx := context.Background()

@@ -9,11 +9,10 @@ import (
 	"github.com/watzon/caravan/internal/core"
 )
 
-// The scene scope's filter surface (PLAN phase 12 tasks 2 and 3): the query
-// parameters GET /adult/discover accepts, and the two typeaheads that fill
-// them in.
+// The scene scope's filter surface: the query parameters GET /adult/discover
+// accepts, and the two typeaheads that fill them in.
 //
-// EVERY route in this file is registered on the adult mux in api.go and nowhere
+// every route in this file is registered on the adult mux in api.go and nowhere
 // else, for the reason adultsites.go gives at length: the mux is the access
 // control, so a handler here does not repeat the check and must never be moved
 // off it.
@@ -30,8 +29,8 @@ const (
 	paramDateOp        = "date_op"
 	paramDuration      = "duration"
 	// paramProvider names which configured stash-box instance answers. It is
-	// not a filter — it chooses the catalogue the filters are applied to — but
-	// it rides in the same query string, so the allowlist has to know it or
+	// not a filter (it chooses the catalogue the filters are applied to) but it
+	// rides in the same query string, so the allowlist has to know it or
 	// rejectUnknown would refuse it as an unserved filter.
 	paramProvider = "provider"
 )
@@ -50,10 +49,10 @@ var sceneFilterParams = []string{
 // sceneFilterRefJSON is one performer or tag, in a typeahead answer and in the
 // filter that follows it.
 //
-// ID is a STRING and is opaque: it is TPDB's numeric id on a TPDB install and a
+// ID is a string and is opaque: it is TPDB's numeric id on a TPDB install and a
 // stash-box uuid elsewhere, and a client that echoes back what it was handed
 // never has to know which. That is the same rule the rest of the adult surface
-// keeps — nothing downstream learns that the REST dialect exists.
+// keeps. Nothing downstream learns that the REST dialect exists.
 type sceneFilterRefJSON struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
@@ -160,7 +159,7 @@ func parseSceneQuery(q url.Values) (core.SceneQuery, error) {
 		Order:         p.order(),
 		// An unparseable page is page 1, as it is on /discover/browse: it is
 		// how a client that has not paged yet spells "the beginning". Every
-		// FILTER above is strict, because a filter read wrongly changes which
+		// filter above is strict, because a filter read wrongly changes which
 		// scenes come back and a page read wrongly does not.
 		Page: sceneQueryPage(q),
 	}
@@ -185,8 +184,8 @@ func sceneQueryPage(q url.Values) int {
 // refs reads a repeated performer or tag parameter. Each value is one ref,
 // spelled `id` or `id:name`.
 //
-// It is repeated rather than one comma-separated list — the shape the movie and
-// series scopes use for their id lists — because a value here carries a NAME,
+// It is repeated rather than one comma-separated list (the shape the movie and
+// series scopes use for their id lists) because a value here carries a name,
 // and a performer's name may contain a comma. The id is opaque: numeric on
 // TPDB, a uuid elsewhere (see sceneFilterRefJSON), so it is classified rather
 // than validated as one or the other.

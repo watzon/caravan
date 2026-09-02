@@ -52,7 +52,7 @@ func TestCheckpointTruncatesTheWriteAheadLog(t *testing.T) {
 		t.Fatalf("%s is %d bytes after the checkpoint, want 0", wal, after.Size())
 	}
 
-	// The data is still there — a checkpoint moves writes into the database
+	// The data is still there. A checkpoint moves writes into the database
 	// file, it does not discard them.
 	events, err := st.ListEvents(ctx, 0)
 	if err != nil {

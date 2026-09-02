@@ -45,8 +45,8 @@ func hasTitle(entries []calendarEntry, want string) bool {
 }
 
 // The calendar is the shared surface the phase names explicitly, and the
-// exposure rule is per-caller: an ungranted member — and everybody, once the
-// module is off — must see nothing adult in it.
+// exposure rule is per-caller: an ungranted member (and everybody, once the
+// module is off) must see nothing adult in it.
 //
 // It is driven through calendarEntries with a synthetic identity rather than
 // over HTTP because members cannot reach GET /calendar at all today
@@ -168,8 +168,8 @@ func TestCalendarEndpointDropsScenesWhenTheModuleIsOff(t *testing.T) {
 // The iCal feed is a bearer URL, so it carries no scenes for anybody.
 //
 // It is authenticated by a query parameter that ends up in Google Calendar, a
-// wall display, a housemate's phone, browser history and third-party databases
-// — apiKeyAuthenticated's own comment says as much. There is no account behind
+// wall display, a housemate's phone, browser history and third-party databases,
+// apiKeyAuthenticated's own comment says as much. There is no account behind
 // such a request, so no grant can be consulted; inheriting currentUser's
 // implicit admin would put every site name, scene title and release date on a
 // shared calendar the moment the module was switched on.
@@ -213,8 +213,8 @@ func TestCalendarICSNeverCarriesAScene(t *testing.T) {
 }
 
 // The Series screen is the television shelf, and the status card counts it. A
-// site is a series row, so both would carry the adult library without a filter
-// — for every role, and on an install with the module switched off.
+// site is a series row, so both would carry the adult library without a filter,
+// for every role, and on an install with the module switched off.
 func TestSeriesScreenAndStatusCountHoldNoSites(t *testing.T) {
 	ctx := context.Background()
 	h, st, _ := newTestServer(t)

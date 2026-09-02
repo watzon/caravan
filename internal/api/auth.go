@@ -33,17 +33,17 @@ const (
 	// script can read it and SameSite=Lax so another site cannot make the
 	// browser POST with it.
 	//
-	// Secure is deliberately NOT set: Caravan serves plain HTTP on a LAN
-	// (SPEC §2, §11), and a Secure cookie is never sent back over http://, so
+	// Secure is deliberately not set: Caravan serves plain HTTP on a LAN (SPEC
+	// §2, §11), and a Secure cookie is never sent back over http://, so
 	// setting it would lock every user out of their own server. Anyone putting
 	// Caravan on the public internet is expected to terminate TLS in front of
 	// it, where the proxy can upgrade the cookie.
 	sessionCookieName = "caravan_session"
 
 	// defaultSessionTTL is how long a login lasts. The cookie is an opaque
-	// handle; the pairing lives in sqlite so a process restart — Air, a
-	// Docker recreate, a portable-drive remount — does not sign everyone
-	// out. Seven days matches a household that opens the tab and leaves it.
+	// handle; the pairing lives in sqlite so a process restart (Air, a Docker
+	// recreate, a portable-drive remount) does not sign everyone out. Seven
+	// days matches a household that opens the tab and leaves it.
 	defaultSessionTTL = 7 * 24 * time.Hour
 
 	// minPasswordLength is a floor, not a policy: Caravan does not demand
@@ -56,8 +56,8 @@ const (
 // POST /auth/login is the one gated-API route an unauthenticated caller may
 // reach, and every call to it runs an argon2id derivation that allocates
 // argonMemory (19 MiB). net/http imposes no handler concurrency limit, so
-// without these three numbers a LAN device — or, before the same-origin guard,
-// any web page — could hold hundreds of those blocks live at once and OOM a
+// without these three numbers a LAN device (or, before the same-origin guard,
+// any web page) could hold hundreds of those blocks live at once and OOM a
 // Raspberry Pi (SPEC §2.1).
 const (
 	// loginConcurrency is how many password verifications may run at once.
@@ -95,7 +95,7 @@ func newLoginGuard() *loginGuard {
 
 // enter reserves a verification slot, reporting false when the endpoint is
 // locked out or already at capacity. A false answer must be a 429 written
-// without touching argon2 — the whole point is that the expensive work does not
+// without touching argon2. The whole point is that the expensive work does not
 // start.
 func (g *loginGuard) enter() bool {
 	g.mu.Lock()
@@ -115,7 +115,7 @@ func (g *loginGuard) enter() bool {
 func (g *loginGuard) leave() { <-g.slots }
 
 // fail records a rejected password. It reports whether the owner should be told
-// — the first failure of a burst, and every lockout — so the activity feed
+// (the first failure of a burst, and every lockout) so the activity feed
 // carries the attack without being drowned by it.
 func (g *loginGuard) fail() (notable bool, locked bool) {
 	g.mu.Lock()
@@ -207,8 +207,8 @@ func hashSessionToken(token string) string {
 }
 
 // issue mints a 256-bit opaque token for userID, valid for ttl. The token
-// carries no identity itself — the store is the only place the pairing
-// exists — so a stolen cookie is worth nothing once the row is gone.
+// carries no identity itself (the store is the only place the pairing exists)
+// so a stolen cookie is worth nothing once the row is gone.
 func (s *sessionStore) issue(userID int64, ttl time.Duration) (string, error) {
 	var raw [32]byte
 	if _, err := rand.Read(raw[:]); err != nil {
@@ -291,8 +291,8 @@ func (s *sessionStore) revoke(token string) {
 
 // revokeUser ends every session belonging to one account, and nothing else. A
 // password that changed must not leave the sessions it protected alive, and a
-// deleted account must not leave a live browser behind — but neither is a
-// reason to sign a housemate out of the film they were browsing.
+// deleted account must not leave a live browser behind, but neither is a reason
+// to sign a housemate out of the film they were browsing.
 func (s *sessionStore) revokeUser(userID int64) error {
 	s.mu.Lock()
 	for hash, sess := range s.tokens {
@@ -380,8 +380,8 @@ func withRequestUser(r *http.Request, u requestUser) *http.Request {
 }
 
 // currentUser is who the request is acting as. A request that never went
-// through requireAuth — an exempt path, or a unit test calling a handler
-// directly — reports the open implicit admin, which is what those paths behave
+// through requireAuth (an exempt path, or a unit test calling a handler
+// directly) reports the open implicit admin, which is what those paths behave
 // as anyway.
 func currentUser(r *http.Request) requestUser {
 	if u, ok := r.Context().Value(userContextKey{}).(requestUser); ok {
@@ -553,12 +553,12 @@ func (s *server) resolveUser(r *http.Request) (requestUser, bool, error) {
 // key in the X-Api-Key header. That header is the only form the gated API
 // accepts.
 //
-// The ?apikey= query form is deliberately NOT accepted here. It exists for one
-// caller — the iCal feed, whose subscribers cannot set a header — and a URL
+// The ?apikey= query form is deliberately not accepted here. It exists for one
+// caller (the iCal feed, whose subscribers cannot set a header) and a URL
 // handed to Google Calendar or a housemate's phone is stored in third-party
 // databases, browser history and Referer headers. Honouring it on every route
-// would make that shared URL a credential for POST /system/shutdown and
-// POST /system/storage-root/migrate. See calendarKeyAuthenticated.
+// would make that shared URL a credential for POST /system/shutdown and POST
+// /system/storage-root/migrate. See calendarKeyAuthenticated.
 func (s *server) apiKeyAuthenticated(r *http.Request) (bool, error) {
 	return s.apiKeyMatches(r, r.Header.Get("X-Api-Key"))
 }
@@ -618,7 +618,7 @@ const invalidCredentials = "invalid username or password"
 // nobody guesses at should not pay 19 MiB of key derivation to boot.
 var decoyHash = sync.OnceValue(func() string {
 	// A hash of a value nothing can present. An error here yields the empty
-	// string, which verifyPassword rejects — the wrong cost, never a wrong
+	// string, which verifyPassword rejects. The wrong cost, never a wrong
 	// answer.
 	hash, _ := hashPassword("caravan decoy: no account has this password")
 	return hash
@@ -660,11 +660,11 @@ func (s *server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	if !verifyPassword(user.PasswordHash, body.Password) {
 		// A failure nobody can see cannot be responded to (SPEC §13), so it
-		// reaches the process log with the device that sent it and — for the
-		// first of a burst, and every lockout — the activity feed the History
+		// reaches the process log with the device that sent it and (for the
+		// first of a burst, and every lockout) the activity feed the History
 		// screen renders. The username is deliberately not logged: it is
-		// attacker-supplied text, and often a real person's password typed
-		// into the wrong box.
+		// attacker-supplied text, and often a real person's password typed into
+		// the wrong box.
 		s.log.Warn("rejected login", "remote_addr", r.RemoteAddr)
 		if notable, locked := s.logins.fail(); notable {
 			detail := "One or more logins were rejected. If this was not you, someone on your network is guessing."
@@ -761,7 +761,7 @@ type meResponse struct {
 	// adult-kind library is switched on AND this account reaches it
 	// (libraryGate.seesAdult). The name and the type are the ones every client
 	// has always read; only what makes it true moved, from a server-wide switch
-	// onto the libraries themselves. It is false — not absent — for everyone
+	// onto the libraries themselves. It is false (not absent) for everyone
 	// else, so a client cannot tell "there is no adult library" from "I was not
 	// granted one", which is the same thing the 404 on /adult says.
 	//
@@ -775,7 +775,7 @@ type meResponse struct {
 	// asking for anything on one, and GET /libraries is routeAdmin and must
 	// stay so: its DTO carries root paths, provider chains, routing overrides
 	// and the per-indexer matrix, which are an operator's business. This is the
-	// member-safe projection — an id, a kind and a name, which is what a
+	// member-safe projection. An id, a kind and a name, which is what a
 	// navigation entry is made of and nothing more.
 	//
 	// Inactive libraries are absent for everyone, admins included: `active=0`
@@ -783,19 +783,18 @@ type meResponse struct {
 	// The Libraries settings screen is where an admin sees those, greyed, with
 	// the toggle that brings them back.
 	Libraries []meLibraryJSON `json:"libraries"`
-	// SceneFilters says which controls the Explore rail's Adult scope may
-	// draw, because "stash-box" is a protocol with dialects and the configured
+	// SceneFilters says which controls the Explore rail's Adult scope may draw,
+	// because "stash-box" is a protocol with dialects and the configured
 	// endpoint decides: TPDB serves a release year, a runtime, a widened site
 	// scope and two extra orderings, and a StashDB or FansDB install refuses
 	// every one of them (internal/stashbox/scenes.go). Without this the rail
 	// had no way to know, and touching Year on the wrong endpoint replaced the
-	// whole grid with a 400 — the exact "control the provider cannot answer"
-	// PLAN phase 12's first acceptance criterion forbids.
+	// whole grid with a 400.
 	//
 	// It rides here rather than on the scene answer for one reason: it must be
-	// readable BEFORE the first scene request, or a URL naming an unsupported
+	// readable before the first scene request, or a URL naming an unsupported
 	// filter fails and the rail never learns why. `omitempty` on a pointer, so
-	// it is absent — not a block of `false` — for a caller who cannot see the
+	// it is absent (not a block of `false`) for a caller who cannot see the
 	// module at all, and absent likewise when no credential is configured,
 	// where the screen's own 503 has the better answer.
 	SceneFilters *sceneFiltersJSON `json:"scene_filters,omitempty"`
@@ -817,15 +816,16 @@ type meLibraryJSON struct {
 	Slug string `json:"slug"`
 	// Icon is the glyph the navigation draws for this shelf, empty for "the
 	// kind's default". It rides here rather than being looked up per row
-	// because this response IS the navigation's source of data — a sidebar that
-	// had to ask GET /libraries for an icon would be asking an admin-only route.
+	// because this response is the navigation's source of data. A sidebar that
+	// had to ask GET /libraries for an icon would be asking an admin-only
+	// route.
 	Icon string `json:"icon"`
 }
 
 // sceneFiltersJSON is core.SceneFilterSupport on the wire. Positive: true is
-// "this control works", so a client reading an older server's answer — where
-// the block is absent — falls back to drawing everything and letting the
-// refusal explain, which is what it did before this existed.
+// "this control works", so a client reading an older server's answer (where the
+// block is absent) falls back to drawing everything and letting the refusal
+// explain, which is what it did before this existed.
 type sceneFiltersJSON struct {
 	Year          bool `json:"year"`
 	Duration      bool `json:"duration"`
@@ -945,10 +945,10 @@ func (s *server) handleSetPassword(w http.ResponseWriter, r *http.Request) {
 
 	user := currentUser(r)
 	if user.ID == 0 {
-		// An open server, or the API key: admin either way, but with no
-		// account behind it, so there is no password of "mine" to change.
-		// 400 rather than 403 — the caller has every right, there is just
-		// nothing to act on.
+		// An open server, or the API key: admin either way, but with no account
+		// behind it, so there is no password of "mine" to change. 400 rather
+		// than 403, the caller has every right, there is just nothing to act
+		// on.
 		writeError(w, http.StatusBadRequest,
 			"this request is not signed in as an account; create one with POST /users")
 		return
@@ -987,8 +987,8 @@ func (s *server) handleSetPassword(w http.ResponseWriter, r *http.Request) {
 
 // hashNewPassword validates and hashes a password on its way into the database,
 // writing the failure itself when it will not do. It is shared by every route
-// that sets one — first account, own change, admin reset — so the length rule
-// is stated once.
+// that sets one (first account, own change, admin reset) so the length rule is
+// stated once.
 func hashNewPassword(w http.ResponseWriter, log *slog.Logger, password string) (string, bool) {
 	if n := len(password); n < minPasswordLength || n > maxPasswordLength {
 		writeError(w, http.StatusBadRequest,
@@ -1052,7 +1052,7 @@ func listeningPublicly(addr string) bool {
 		host = addr
 	}
 	host = strings.Trim(host, "[]")
-	// ":8677" — every interface.
+	// ":8677", every interface.
 	if host == "" {
 		return true
 	}

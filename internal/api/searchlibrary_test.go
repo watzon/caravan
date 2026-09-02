@@ -23,7 +23,7 @@ func createLibrary(t *testing.T, h http.Handler, body string) libraryJSON {
 	return created
 }
 
-// A search scoped to a library goes through THAT library's chain, and says so.
+// A search scoped to a library goes through that library's chain, and says so.
 //
 // The envelope has to carry both halves of the answer: which providers ran, so
 // the client knows whether a per-row badge distinguishes anything, and which
@@ -114,7 +114,7 @@ func TestSearchWithoutALibraryKeepsBothDefaults(t *testing.T) {
 
 // ?library_id=<adult> is refused rather than searched.
 //
-// /search sits in FRONT of requireAdult, so without this refusal naming an
+// /search sits in front of requireAdult, so without this refusal naming an
 // adult library would route a stash-box chain through the television endpoint
 // and the gate the adult surfaces are built on would simply not be in the path.
 // The refusal a caller the library is invisible to gets is the 404 every other
@@ -139,7 +139,7 @@ func TestSearchRefusesAnAdultLibrary(t *testing.T) {
 	})
 
 	t.Run("invisible caller is refused with a 404", func(t *testing.T) {
-		// The module was on once — that is what created the library — and has
+		// The module was on once (that is what created the library) and has
 		// been switched off, so the row is still there and the caller is
 		// somebody it must not exist for.
 		h, st, mgr := newTestServer(t)
@@ -161,7 +161,7 @@ func TestSearchRefusesAnAdultLibrary(t *testing.T) {
 
 // A rejected TMDB key must not make an AniList library unsearchable.
 //
-// The cached verdict is about ONE credential, and AniList needs none. Before
+// The cached verdict is about one credential, and AniList needs none. Before
 // the chain-aware check, a stale rejection on a key the library never uses
 // refused every search the install could make.
 func TestARejectedTMDBKeyLeavesAnAniListLibrarySearchable(t *testing.T) {
@@ -174,7 +174,7 @@ func TestARejectedTMDBKeyLeavesAnAniListLibrarySearchable(t *testing.T) {
 	wantStatus(t, rec, http.StatusServiceUnavailable)
 	wantCode(t, rec, CodeMetadataCredentialInvalid)
 
-	// An ANIME library, because AniList serves that kind and no other: the
+	// An anime library, because AniList serves that kind and no other: the
 	// registry partitions strictly, so this is the only shelf whose chain can
 	// name the keyless provider this test needs.
 	anime := createLibrary(t, h,
@@ -203,8 +203,8 @@ func TestARejectedTMDBKeyLeavesAnAniListLibrarySearchable(t *testing.T) {
 //
 // A rejected TheTVDB key must stop a TheTVDB-chained library and nothing else.
 // This is the pair TMDB alone could never prove: the per-chain check has to
-// find the verdict for the id ON THIS CHAIN, so a TVmaze library goes on
-// searching and — see TestARejectedTheTVDBKeyLeavesTMDBHealthy — the TMDB card
+// find the verdict for the id ON THIS chain, so a TVmaze library goes on
+// searching and (see TestARejectedTheTVDBKeyLeavesTMDBHealthy) the TMDB card
 // stays green.
 func TestARejectedTheTVDBKeyRefusesOnlyItsOwnChain(t *testing.T) {
 	h, st, mgr := newTestServer(t)
@@ -283,7 +283,7 @@ func TestSearchRejectsABadLibraryID(t *testing.T) {
 	wantStatus(t, rec, http.StatusNotFound)
 }
 
-// A search hit's date is a bare CALENDAR DAY on the wire, not a timestamp.
+// A search hit's date is a bare calendar day on the wire, not a timestamp.
 //
 // This is a contract with the add dialog rather than a formatting preference:
 // AddItemModal reads "released on a known day" straight off the shape of this

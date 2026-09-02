@@ -26,9 +26,9 @@ func runPrepare(args []string) error {
 	storageRoot := fs.String("storage-root", "",
 		"drive-relative root for media libraries and downloads (default: drive root)")
 	// Off by default, and asked for by name every time: a prepared drive leaves
-	// the house, and the adult library goes on one only when somebody says so
-	// (PLAN phase 9 task 6). There is deliberately no config key and no
-	// remembered answer — the flag is the consent.
+	// the house, and the adult library goes on one only when somebody says so.
+	// There is deliberately no config key and no remembered answer. The flag is
+	// the consent.
 	includeAdult := fs.Bool("include-adult", false,
 		"also create the Adult library folder on the drive (off by default)")
 	if err := fs.Parse(normalizePrepareArgs(args)); err != nil {

@@ -198,8 +198,8 @@ func TestDeleteUserRejectsBadIDs(t *testing.T) {
 	wantStatus(t, rec, http.StatusNotFound)
 }
 
-// An admin reset proves nothing about the old password — that is the point —
-// and turns out whoever was holding it.
+// An admin reset proves nothing about the old password (that is the point) and
+// turns out whoever was holding it.
 func TestAdminResetsAPassword(t *testing.T) {
 	h, st, _ := newTestServer(t)
 	setPassword(t, st, testPassword)

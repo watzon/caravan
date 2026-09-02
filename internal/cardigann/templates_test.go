@@ -77,9 +77,9 @@ search:
 	}
 }
 
-// Regression: a helper field whose regexp filter matches nothing (for
-// example LimeTorrents' category_is_tv_show probe on a movie row) must only
-// blank that field for that row — never abort the search.
+// Regression: a helper field whose regexp filter matches nothing (for example
+// LimeTorrents' category_is_tv_show probe on a movie row) must only blank that
+// field for that row, never abort the search.
 func TestEngineSearchKeepsRowsWhenHelperFieldFilterDoesNotMatch(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -146,9 +146,9 @@ search:
 	}
 }
 
-// Regression: single-character setting values (select defaults such as
-// sort=d) must not be substituted out of error messages — that shreds
-// unrelated words — while real secret values must still be redacted.
+// Regression: single-character setting values (select defaults such as sort=d)
+// must not be substituted out of error messages (that shreds unrelated words)
+// while real secret values must still be redacted.
 func TestRedactErrorKeepsShortNonSecretFragmentsIntact(t *testing.T) {
 	src := []byte(`
 id: fixture
@@ -199,5 +199,18 @@ search:
 	}
 	if !strings.Contains(redacted, "render template failed") {
 		t.Fatalf("non-secret words were shredded: %q", redacted)
+	}
+}
+
+func TestNormalizeDefinitionTemplateDropsStrayClosingParen(t *testing.T) {
+	source := `{{ if and (.Keywords) (eq .Config.disablesort .False)) }}sort-{{ else }}{{ end }}/{{ .Keywords }}`
+	got := normalizeDefinitionTemplate(source)
+	want := `{{ if and (.Keywords) (eq (index .Config "disablesort") .False) }}sort-{{ else }}{{ end }}/{{ .Keywords }}`
+	if got != want {
+		t.Fatalf("normalizeDefinitionTemplate = %q, want %q", got, want)
+	}
+	balanced := `{{ re_replace (index .Config "sort") "_" "" }}`
+	if got := normalizeDefinitionTemplate(balanced); got != balanced {
+		t.Fatalf("balanced template changed: %q", got)
 	}
 }

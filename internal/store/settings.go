@@ -46,11 +46,11 @@ const (
 	// subscription: a licensed key logs in alone, and a user-supported key logs
 	// in with the subscriber's PIN beside it (see internal/thetvdb).
 	//
-	// The PIN is stored as a credential, not as a preference: it is half of what
-	// /login consumes, so it is write-only on the wire exactly as the key is.
-	// An empty PIN is the licensed case and means the field is omitted from the
-	// login body entirely — a stored empty string and a stored " " are the same
-	// thing, which is why both keys are trimmed on the way in.
+	// The PIN is stored as a credential, not as a preference: it is half of
+	// what /login consumes, so it is write-only on the wire exactly as the key
+	// is. An empty PIN is the licensed case and means the field is omitted from
+	// the login body entirely. A stored empty string and a stored " " are the
+	// same thing, which is why both keys are trimmed on the way in.
 	SettingTheTVDBAPIKey = "thetvdb_api_key"
 	SettingTheTVDBPIN    = "thetvdb_pin"
 	// SettingStashboxEndpoint and SettingStashboxAPIKey are RETIRED. They
@@ -66,28 +66,28 @@ const (
 	// that must still spell it, not configuration. Do not add a reader.
 	SettingStashboxEndpoint = "stashbox_endpoint"
 	SettingStashboxAPIKey   = "stashbox_api_key"
-	// SettingAdultEnabled is RETIRED, on the same terms and for the same kind of
-	// reason. It was the server-wide switch for the adult module (PLAN phase 9
-	// task 5) until per-library `active` generalized it: a switch that binds
-	// every caller is a property of a library, not of the server, and a server
-	// that can hold two adult libraries cannot answer for them with one flag.
+	// SettingAdultEnabled is retired, on the same terms and for the same kind
+	// of reason. It was the server-wide switch for the adult module until
+	// per-library `active` generalized it: a switch that binds every caller is
+	// a property of a library, not of the server, and a server that can hold
+	// two adult libraries cannot answer for them with one flag.
 	//
 	// Migration 0027 read it to decide whether an upgraded install's adult
-	// library came out active, and 0028 then deleted the row. Nothing writes it,
-	// nothing reads it, and it was never in the PUT /settings allowlist. What
-	// still names it is the migrations' own upgrade-in-place tests, which have to
-	// write the pre-0028 row to prove it is read and then removed. Ask
+	// library came out active, and 0028 then deleted the row. Nothing writes
+	// it, nothing reads it, and it was never in the PUT /settings allowlist.
+	// What still names it is the migrations' own upgrade-in-place tests, which
+	// have to write the pre-0028 row to prove it is read and then removed. Ask
 	// AnyActiveLibraryOfKind instead, and do not add a reader.
 	SettingAdultEnabled = "adult_enabled"
 	// SettingAPIKey is Caravan's own API credential, used by endpoints an
-	// external app subscribes to (the iCal feed, PLAN phase 3 task 9). It is
-	// generated from the settings screen, never hand-written.
+	// external app subscribes to (the iCal feed). It is generated from the
+	// settings screen, never hand-written.
 	SettingAPIKey = "api_key"
 	// SettingRSSSyncIntervalMinutes is how often enabled indexers are polled
-	// for new releases (PLAN phase 3, task 4).
+	// for new releases.
 	SettingRSSSyncIntervalMinutes = "rss_sync_interval_minutes"
 	// SettingBacklogIntervalMinutes is how often the wanted list is swept for
-	// items that need a backlog search (PLAN phase 3, task 4).
+	// items that need a backlog search.
 	SettingBacklogIntervalMinutes = "backlog_interval_minutes"
 	// SettingDefaultQualityProfileID is the id of the profile used when neither
 	// an item nor its library selects one. It is persisted rather than inferred
@@ -115,29 +115,30 @@ const (
 	// what Caravan did before there were caps at all: ten grabs all started at
 	// once and starved each other.
 	//
-	// A download over the ceiling is not refused and not paused — it waits in
+	// A download over the ceiling is not refused and not paused. It waits in
 	// the queue's existing `queued` state until a slot frees, oldest first.
 	SettingMaxConcurrentDownloads = "max_concurrent_downloads"
-	// SettingEmbeddedTorrentMaxConcurrent and SettingEmbeddedUsenetMaxConcurrent
-	// are the per-method ceilings for the two built-in engines. Zero is
-	// unlimited for that method; the global ceiling still applies.
+	// SettingEmbeddedTorrentMaxConcurrent and
+	// SettingEmbeddedUsenetMaxConcurrent are the per-method ceilings for the
+	// two built-in engines. Zero is unlimited for that method; the global
+	// ceiling still applies.
 	//
 	// The Usenet one deserves a small number. Parallel NZBs share one pool of
 	// connections to the same news servers, so a second simultaneous download
-	// does not make articles arrive faster — it splits the same bandwidth and
+	// does not make articles arrive faster. It splits the same bandwidth and
 	// doubles how long it takes either release to become importable.
 	SettingEmbeddedTorrentMaxConcurrent = "embedded_torrent_max_concurrent"
 	SettingEmbeddedUsenetMaxConcurrent  = "embedded_usenet_max_concurrent"
 	// SettingRouteTorrent and SettingRouteUsenet name the default download
-	// engine per release protocol (SPEC §5.1, PLAN phase 6 task 3). A grab is
-	// routed on the release's protocol, never on the user's last choice, so
-	// these are the whole routing configuration.
+	// engine per release protocol (SPEC §5.1). A grab is routed on the
+	// release's protocol, never on the user's last choice, so these are the
+	// whole routing configuration.
 	//
-	// The value is a `download_clients.id` in decimal, or RouteEmbedded for
-	// the built-in torrent engine. Unset means RouteEmbedded for torrents —
-	// a stock Caravan downloads torrents with nothing configured — and means
-	// "nothing configured" for usenet, where there is no built-in engine and
-	// a grab is therefore a recorded rejection rather than a misroute.
+	// The value is a `download_clients.id` in decimal, or RouteEmbedded for the
+	// built-in torrent engine. Unset means RouteEmbedded for torrents (a stock
+	// Caravan downloads torrents with nothing configured) and means "nothing
+	// configured" for usenet, where there is no built-in engine and a grab is
+	// therefore a recorded rejection rather than a misroute.
 	SettingRouteTorrent = "route_torrent"
 	SettingRouteUsenet  = "route_usenet"
 	// SettingConvertVideoPreset, SettingConvertVideoCRF and
@@ -150,33 +151,33 @@ const (
 	SettingConvertVideoCRF         = "convert_video_crf"
 	SettingConvertAudioBitrateKbps = "convert_audio_bitrate_kbps"
 	// SettingJellyfinURL, SettingJellyfinAPIKey and SettingJellyfinEnabled
-	// configure the playback handoff (SPEC §5.2, PLAN phase 4 task 1): where
-	// the user's Jellyfin lives, the API key created in its dashboard, and
-	// whether an import is allowed to tell it to rescan. Enabled is stored as
-	// "true"/"false"; anything else reads as off.
+	// configure the playback handoff (SPEC §5.2): where the user's Jellyfin
+	// lives, the API key created in its dashboard, and whether an import is
+	// allowed to tell it to rescan. Enabled is stored as "true"/"false";
+	// anything else reads as off.
 	SettingJellyfinURL     = "jellyfin_url"
 	SettingJellyfinAPIKey  = "jellyfin_api_key"
 	SettingJellyfinEnabled = "jellyfin_enabled"
 	// SettingStashURL, SettingStashAPIKey and SettingStashEnabled configure the
-	// adult library's handoff (PLAN phase 11): where the user's Stash lives, the
-	// API key from its Security screen, and whether an adult import is allowed
-	// to tell it to rescan. They are the Jellyfin keys' adult twin, stored the
-	// same way — Enabled is "true"/"false" and anything else reads as off.
+	// adult library's handoff: where the user's Stash lives, the API key from
+	// its Security screen, and whether an adult import is allowed to tell it to
+	// rescan. They are the Jellyfin keys' adult twin, stored the same way,
+	// Enabled is "true"/"false" and anything else reads as off.
 	//
 	// Like the stash-box credential, none of them does anything on its own: the
-	// handoff also requires an active adult library (AnyActiveLibraryOfKind), so
-	// a stored Stash address is not a reason to talk to one. They are
-	// deliberately absent from the PUT /settings allowlist and from GET /settings
-	// for a caller no adult library is visible to; POST /adult/stash is the only
-	// door.
+	// handoff also requires an active adult library (AnyActiveLibraryOfKind),
+	// so a stored Stash address is not a reason to talk to one. They are
+	// deliberately absent from the PUT /settings allowlist and from GET
+	// /settings for a caller no adult library is visible to; POST /adult/stash
+	// is the only door.
 	SettingStashURL     = "stash_url"
 	SettingStashAPIKey  = "stash_api_key"
 	SettingStashEnabled = "stash_enabled"
 	// SettingDLNAEnabled, SettingDLNAFriendlyName and SettingDLNAUUID configure
-	// the built-in DLNA media server (SPEC §5.1, PLAN phase 4 task 2). Enabled
-	// is stored as "true"/"false" and defaults to ON when the key has never been
-	// written, because SPEC's promise is that the library is advertised whenever
-	// the server runs. The UUID is generated on first advertisement and kept so
+	// the built-in DLNA media server (SPEC §5.1). Enabled is stored as
+	// "true"/"false" and defaults to ON when the key has never been written,
+	// because SPEC's promise is that the library is advertised whenever the
+	// server runs. The UUID is generated on first advertisement and kept so
 	// clients see the same device across restarts; losing it costs a
 	// re-discovery, never media, which is why it is allowed to live in the
 	// disposable database.
@@ -185,20 +186,19 @@ const (
 	SettingDLNAUUID         = "dlna_uuid"
 	// SettingDLNAUpdateID is the ContentDirectory's SystemUpdateID: the version
 	// of the content tree, which clients cache against. It is written only by
-	// bumpDLNAUpdateID and is deliberately not in the PUT /settings allowlist —
-	// a counter a client trusts to mean "something changed" is not a preference.
-	// Absent means 1, so an install nobody has reconfigured reports the value it
-	// always did.
+	// bumpDLNAUpdateID and is deliberately not in the PUT /settings allowlist.
+	// A counter a client trusts to mean "something changed" is not a
+	// preference. Absent means 1, so an install nobody has reconfigured reports
+	// the value it always did.
 	SettingDLNAUpdateID = "dlna_update_id"
 	// SettingPasswordHash was the optional single-user password, an argon2id
-	// PHC string (SPEC §11, PLAN phase 5 task 5). Migration 0011 folded it into
-	// an 'admin' row in the users table and deleted the setting, so nothing
-	// writes it any more.
+	// PHC string (SPEC §11). Migration 0011 folded it into an 'admin' row in
+	// the users table and deleted the setting, so nothing writes it any more.
 	//
 	// The name survives because the API still refuses to read or write it: it
 	// stays out of the PUT /settings allowlist and inside hiddenSettings, so a
 	// database that somehow still carries the row can neither serve the hash
-	// nor have one planted (SPEC §12 — credentials never leave the server).
+	// nor have one planted (SPEC §12, credentials never leave the server).
 	SettingPasswordHash = "password_hash"
 )
 
@@ -238,7 +238,7 @@ func (s *Store) SetSetting(ctx context.Context, key, value string) error {
 
 // SetSettings writes every pair or none of them.
 //
-// It exists for the settings that are only meaningful together — the stash-box
+// It exists for the settings that are only meaningful together. The stash-box
 // endpoint and its API key are one credential, and committing half of a new
 // pair leaves a combination nothing ever validated behind a module that is
 // already on (SPEC §10.2). Callers writing independent keys should keep using

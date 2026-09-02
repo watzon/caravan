@@ -41,12 +41,12 @@ func libraryOfKind(t *testing.T, body libraryListBody, kind string) libraryJSON 
 	return libraryJSON{}
 }
 
-// A freshly migrated install answers with the FOUR seeded libraries, no
+// A freshly migrated install answers with the four seeded libraries, no
 // overrides anywhere, and every configured indexer searched with its own
-// categories — the JSON shape of "nothing has changed yet".
+// categories. The JSON shape of "nothing has changed yet".
 //
 // This is the management surface, so the two dormant rows are here: an admin
-// has to be able to see Anime and Adult in order to switch either on. Every
+// has to be able to see Anime and Adult to switch either on. Every
 // content route still answers 404 for them, and /auth/me still lists neither.
 func TestListLibrariesReportsSeededDefaults(t *testing.T) {
 	h, st, _ := newTestServer(t)
@@ -152,7 +152,7 @@ func TestSetLibraryIndexerOverridesOneLibraryOnly(t *testing.T) {
 		t.Errorf("movie indexer row = %+v, want the indexer's own categories, unoverridden", movies)
 	}
 
-	// And the resolver — what search actually reads — agrees with the JSON.
+	// And the resolver (what search actually reads) agrees with the JSON.
 	settings, err := st.ResolveLibrarySettingsByKind(ctx, core.LibraryKindTV)
 	if err != nil {
 		t.Fatalf("ResolveLibrarySettingsByKind: %v", err)
@@ -303,13 +303,13 @@ func putLibraryIndexer(t *testing.T, h http.Handler, libraryID, indexerID int64,
 // A dormant library is still the admin's to work, and nobody else's to see.
 //
 // The two halves are the whole point of the manageable/visible split. Every
-// CONTENT route answers 404 for an inactive library, an admin included — that
-// is what "dormant for everyone" means. The MANAGEMENT surface keeps answering,
+// content route answers 404 for an inactive library, an admin included: that is
+// what "dormant for everyone" means. The management surface keeps answering,
 // because the toggle that undoes dormancy lives on it: a library switched off
 // and then dropped from the only list it appears in would be a one-way door.
 //
 // GET /libraries is admin-only (routePolicies; memberAllowed names none of it),
-// so the row a member was never meant to see does not reach one here — the
+// so the row a member was never meant to see does not reach one here. The
 // filter that hides it from a member is the same `manages` predicate, with the
 // role rule inside core.LibraryVisible doing the work.
 func TestDormantLibrariesStayManageableAndUnreachable(t *testing.T) {
@@ -378,8 +378,8 @@ func TestDormantLibrariesStayManageableAndUnreachable(t *testing.T) {
 	}
 
 	// And back on, through the same toggle, with the state it was left in. The
-	// access write above restricted it, which clears dlna_visible — so the
-	// PATCH that re-shared it is what this reads back.
+	// access write above restricted it, which clears dlna_visible, so the PATCH
+	// that re-shared it is what this reads back.
 	wantStatus(t, do(t, h, http.MethodPatch, "/api/v1/libraries/"+itoa(adult.ID),
 		`{"active":true,"dlna_visible":true}`), http.StatusOK)
 	back := libraryOfKind(t, list(), core.LibraryKindAdult)
@@ -388,7 +388,7 @@ func TestDormantLibrariesStayManageableAndUnreachable(t *testing.T) {
 	}
 }
 
-// The Libraries screen renders the per-library matrix from the RAW override
+// The Libraries screen renders the per-library matrix from the raw override
 // table, where "no row" is a hole it fills with a default. That default has to
 // be the one a search would actually resolve, or the card describes a fan-out
 // that never happens: the Adult library falls back to the 6000 block rather
@@ -464,7 +464,7 @@ func TestCreateLibraryValidatesAndCreates(t *testing.T) {
 		"wrong provider":        `{"kind":"movie","name":"X","root_path":"library/X","provider":"stashbox"}`,
 		"unknown kind":          `{"kind":"music","name":"X","root_path":"library/X"}`,
 		"empty name":            `{"kind":"tv","name":"  ","root_path":"library/X"}`,
-		// An adult chain that names a PARTICULAR box gets no bootstrap benefit:
+		// An adult chain that names a particular box gets no bootstrap benefit:
 		// only the bare legacy id is a forward reference to the instance about
 		// to be minted, and a qualified one has nothing to resolve into.
 		"adult on a named box": `{"kind":"adult","name":"X","root_path":"library/X","providers":["stashbox:fansdb"]}`,
@@ -562,7 +562,7 @@ func TestListProvidersOmitsAdultWithoutTheModule(t *testing.T) {
 	}
 }
 
-// AniList is a non-adult provider, so the create form offers it to everybody —
+// AniList is a non-adult provider, so the create form offers it to everybody,
 // for the anime kind and for that kind alone. The registry partitions strictly
 // by library kind, so the chain editor of a Movies or a Series library never
 // names it, whatever AniList can look up (core.ProviderLooksUp).
@@ -590,7 +590,7 @@ func TestListProvidersOffersAniListForItsKinds(t *testing.T) {
 	t.Errorf("providers = %+v, want anilist listed", body.Providers)
 }
 
-// A library carries an ordered provider CHAIN, and the wire keeps both
+// A library carries an ordered provider chain, and the wire keeps both
 // spellings: `providers` is the list, `provider` is its read-only head, so a
 // client written before chains keeps reading exactly what it always did.
 func TestCreateLibraryAcceptsAProviderChain(t *testing.T) {
@@ -663,7 +663,7 @@ func TestPatchLibraryValidatesTheProviderChain(t *testing.T) {
 // An adult library's chain can only ever name stash-box instances, and not
 // because a rule says so: no other compiled-in provider serves the adult kind,
 // and the per-element check is what makes that a consequence rather than a
-// promise. The instance half is a database question — a well-formed id for a box
+// promise. The instance half is a database question. A well-formed id for a box
 // this install does not hold is refused too, because a chain that names one
 // walks to a provider nothing can build.
 func TestProviderChainForAdultNamesConfiguredInstancesAlone(t *testing.T) {
@@ -699,8 +699,8 @@ func TestProviderChainForAdultNamesConfiguredInstancesAlone(t *testing.T) {
 //
 // The anime kind is the case the partition exists for. An anime shelf whose
 // chain mixed AniList's flat records with TMDB's or TheTVDB's seasons would
-// renumber episodes rather than fill a gap — a rung that answers WRONG is worse
-// than a rung that answers nothing — so the anime kind is AniList's alone and
+// renumber episodes rather than fill a gap (a rung that answers wrong is worse
+// than a rung that answers nothing) so the anime kind is AniList's alone and
 // AniList reaches no other kind.
 func TestProviderChainsPartitionStrictlyByLibraryKind(t *testing.T) {
 	cases := []struct {
@@ -734,12 +734,12 @@ func TestProviderChainsPartitionStrictlyByLibraryKind(t *testing.T) {
 	}
 }
 
-// The other half of the split: what a provider may be CHAINED on says nothing
+// The other half of the split: what a provider may be chained on says nothing
 // about what it may be asked to look up.
 //
 // An AniList film ref is accepted on POST /library/movies even though AniList
 // chains onto no movie library, because a ref pasted off a search hit is the
-// user naming the title outright — the chain governs identification, which is
+// user naming the title outright. The chain governs identification, which is
 // the question nobody is asking here. Before the split this add could only be
 // made to work by widening AniList's chain kinds, which put it in every Movies
 // library's chain editor.

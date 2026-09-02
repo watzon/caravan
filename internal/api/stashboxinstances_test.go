@@ -39,7 +39,7 @@ func seedStashboxInstance(t *testing.T, st *store.Store, providerID, name, endpo
 	return in
 }
 
-// adultAdmin is a server with the module on and an admin logged in — the state
+// adultAdmin is a server with the module on and an admin logged in. The state
 // every instance route is reachable from.
 func adultAdmin(t *testing.T) (http.Handler, *store.Store, *stubManager, *http.Cookie) {
 	t.Helper()
@@ -171,7 +171,7 @@ func TestStashboxInstanceListReportsEachSceneFilterDialect(t *testing.T) {
 
 // Re-pointing an instance at another box would have the next refresh overwrite
 // every row pinned to it with whatever the new box holds under the same UUIDs.
-// Repeating the stored endpoint — which is what the read-only form field sends —
+// Repeating the stored endpoint (which is what the read-only form field sends)
 // is not a change and is accepted.
 func TestStashboxInstanceEndpointIsImmutable(t *testing.T) {
 	h, st, _, cookie := adultAdmin(t)
@@ -198,8 +198,8 @@ func TestStashboxInstanceEndpointIsImmutable(t *testing.T) {
 }
 
 // The invariant guardAdultCredentialEdit used to hold from the settings side:
-// the module runs against a credential that was PROVED, and an edit is as much a
-// way to break that as a bad enable. A rejected key writes nothing.
+// the module runs against a credential that was proved, and an edit is as much
+// a way to break that as a bad enable. A rejected key writes nothing.
 func TestStashboxInstanceUpdateProvesANewKey(t *testing.T) {
 	h, st, mgr, cookie := adultAdmin(t)
 	created := createInstance(t, h, cookie,
@@ -232,9 +232,9 @@ func TestStashboxInstanceUpdateProvesANewKey(t *testing.T) {
 	}
 }
 
-// Nothing cascades, so the counts ARE the guard: a chain naming a gone instance
-// walks to a provider nothing can build, and an item pinned to one loses the only
-// box that can be asked about its refs.
+// Nothing cascades, so the counts are the guard: a chain naming a gone instance
+// walks to a provider nothing can build, and an item pinned to one loses the
+// only box that can be asked about its refs.
 func TestDeleteStashboxInstanceRefusesWhileItIsInUse(t *testing.T) {
 	h, st, _, cookie := adultAdmin(t)
 	ctx := context.Background()
@@ -355,7 +355,7 @@ func TestStashboxInstanceRefusesAnUndialableEndpoint(t *testing.T) {
 }
 
 // Both test routes prove a credential with one live call: the stored one by id,
-// the typed one from the body — which is what the add form needs before the
+// the typed one from the body, which is what the add form needs before the
 // instance exists to have an id.
 func TestStashboxInstanceTestRoutes(t *testing.T) {
 	h, _, mgr, cookie := adultAdmin(t)
@@ -386,7 +386,7 @@ func TestStashboxInstanceTestRoutes(t *testing.T) {
 }
 
 // The chain editor's vocabulary: one entry per configured instance, and the
-// static "Stash-box" descriptor never among them — a protocol is not something a
+// static "Stash-box" descriptor never among them. A protocol is not something a
 // chain can name.
 func TestListProvidersMergesConfiguredInstances(t *testing.T) {
 	h, st, _, cookie := adultAdmin(t)
@@ -425,7 +425,7 @@ func TestListProvidersMergesConfiguredInstances(t *testing.T) {
 	}
 }
 
-// An ungranted caller sees no adult provider at all — not the protocol, not one
+// An ungranted caller sees no adult provider at all, not the protocol, not one
 // instance, not an adult kind on anything else.
 func TestListProvidersHidesInstancesFromEveryoneElse(t *testing.T) {
 	h, st, _ := newTestServer(t)
@@ -493,9 +493,7 @@ func TestPutSettingsNoLongerAcceptsStashboxCredentials(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Instance resolution on the adult surfaces (PLAN Part 2 phase 4).
-// ---------------------------------------------------------------------------
+// Instance resolution on the adult surfaces.
 
 // adultAdminWithProvider is adultAdmin with a canned stash-box behind it and the
 // two instances the resolution tests choose between.
@@ -512,7 +510,7 @@ func adultAdminWithProvider(t *testing.T) (http.Handler, *store.Store, *stubMana
 }
 
 // A hit says which box answered, because two boxes can hold the same site under
-// the same UUID — a hit without the instance names nothing an add could pin to.
+// the same UUID. A hit without the instance names nothing an add could pin to.
 func TestAdultHitsCarryTheAnsweringInstance(t *testing.T) {
 	h, st, _, cookie := adultAdminWithProvider(t)
 
@@ -563,7 +561,7 @@ func TestAdultHitsCarryTheAnsweringInstance(t *testing.T) {
 	assertProvider("/api/v1/adult/discover?provider="+core.ProviderStashbox, core.ProviderStashbox)
 }
 
-// An id nothing answers to is the CALLER's mistake and reads as one. Passing it
+// An id nothing answers to is the caller's mistake and reads as one. Passing it
 // through would come back as the same nil an unconfigured module gives, and a
 // typo would be reported as a configuration problem.
 func TestAdultSurfacesRefuseAnUnknownProvider(t *testing.T) {
@@ -585,8 +583,9 @@ func TestAdultSurfacesRefuseAnUnknownProvider(t *testing.T) {
 }
 
 // The bodies accept the same id the hits carry, validated the same way. AddSite
-// cannot yet carry it to the library layer (see handleAddSite) and a request row
-// has no column for it, so both drop it — but neither accepts one nobody checked.
+// cannot yet carry it to the library layer (see handleAddSite) and a request
+// row has no column for it, so both drop it, but neither accepts one nobody
+// checked.
 func TestAdultBodiesValidateTheInstanceTheyName(t *testing.T) {
 	h, _, _, cookie := adultAdminWithProvider(t)
 

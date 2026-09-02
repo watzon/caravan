@@ -14,7 +14,7 @@ import (
 )
 
 // addMovie stores a movie to search or grab for, filed on the movie shelf the
-// way a real add files one — every item row names its library.
+// way a real add files one. Every item row names its library.
 func addMovie(t *testing.T, st *store.Store, title string, year int) core.Movie {
 	t.Helper()
 	m := core.Movie{TMDBID: 1234, Title: title, SortTitle: title, Year: year, Monitored: true,
@@ -59,8 +59,8 @@ func torrentRelease(title, guid string, seeders int, parsed core.ParsedRelease) 
 	}
 }
 
-// Regression: interactive searches fan out every query form — torrent
-// listings often omit the year, and season packs answer only the Sxx form.
+// Regression: interactive searches fan out every query form, torrent listings
+// often omit the year, and season packs answer only the Sxx form.
 func TestReleaseSearchesFanOutMultipleQueryForms(t *testing.T) {
 	h, st, _, fake := newAcquisitionServer(t)
 	m := addMovie(t, st, "Big Buck Bunny", 2008)
@@ -209,7 +209,7 @@ func TestMovieReleasesFanOutMergesSortsAndCaches(t *testing.T) {
 	}
 
 	// Every enabled indexer was asked. These carry no category configuration,
-	// so the search goes out unfiltered — never a guessed default, which
+	// so the search goes out unfiltered, never a guessed default, which
 	// silently returns nothing from indexers that do not expand parent
 	// categories.
 	searches := fake.recorded()
@@ -356,8 +356,7 @@ func overrideLibraryIndexer(t *testing.T, st *store.Store, kind string, indexerI
 }
 
 // An interactive search belongs to a library too: the picker must ask the
-// indexers that library searches, with the categories that library asked for
-// (PLAN phase 8 task 4).
+// indexers that library searches, with the categories that library asked for.
 func TestReleaseSearchUsesTheLibrarysIndexersAndCategories(t *testing.T) {
 	h, st, _, fake := newAcquisitionServer(t)
 	m := addMovie(t, st, "Big Buck Bunny", 2008)
@@ -846,9 +845,9 @@ func TestPerItemReleasesCarryASearchExpression(t *testing.T) {
 }
 
 // A scene is addressed by its site and release date, never by Caravan's own
-// season and episode numbers — and its seed spells out BOTH variants the
-// handler runs, dated form and site-and-title fallback, so the search box
-// and the "searched indexers for" line agree.
+// season and episode numbers, and its seed spells out both variants the handler
+// runs, dated form and site-and-title fallback, so the search box and the
+// "searched indexers for" line agree.
 func TestSceneReleasesCarryASiteAndDateSearchExpression(t *testing.T) {
 	fake := newFakeIndexer(t)
 	h, st, _ := newTestServer(t, WithIndexerClients(fake.factory()))

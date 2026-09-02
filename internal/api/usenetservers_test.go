@@ -474,8 +474,8 @@ func TestTestUnsavedUsenetConfigDoesNotSendStoredCredentialElsewhere(t *testing.
 		{
 			// Same listener, a different host string. The stored credential
 			// belongs to the name that was stored, so a rewritten host is a new
-			// destination even when it happens to resolve to the same machine —
-			// the comparison cannot depend on resolving anything.
+			// destination even when it happens to resolve to the same machine.
+			// The comparison cannot depend on resolving anything.
 			name:   "different host",
 			probed: victim,
 			body: `{"id":` + itoa(cfg.ID) + `,"name":"mine","host":"localhost","port":` +
@@ -506,7 +506,7 @@ func TestTestUnsavedUsenetConfigTreatsTLSAsPartOfTheTarget(t *testing.T) {
 	h, st, news := newUsenetServerFixture(t, password)
 
 	// Stored as a TLS server on the fake's port. The fake speaks plaintext, so
-	// a probe that honoured the stored TLS flag could never succeed anyway —
+	// a probe that honoured the stored TLS flag could never succeed anyway,
 	// what is under test is whether the password travels at all.
 	cfg := core.UsenetServerConfig{
 		Name: "mine", Host: news.Host(), Port: news.Port(), TLS: true,
