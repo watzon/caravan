@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,6 +18,10 @@ import (
 // s.mgr.Metadata() hands back.
 type stubDiscoverProvider struct {
 	stubProvider
+
+	// mu guards the recorded calls: the discover home handler fans out to
+	// several provider methods concurrently.
+	mu sync.Mutex
 
 	trending       []core.DiscoverItem
 	popularMovies  []core.DiscoverItem
@@ -88,17 +93,23 @@ func (p *stubDiscoverProvider) AiringSeries(context.Context) ([]core.DiscoverIte
 }
 
 func (p *stubDiscoverProvider) MoviesByCompany(_ context.Context, companyID int64, page int) (*core.DiscoverPage, error) {
+	p.mu.Lock()
 	p.browseCalls = append(p.browseCalls, browseCall{kind: SourceStudio, id: companyID, page: page})
+	p.mu.Unlock()
 	return p.page, p.err
 }
 
 func (p *stubDiscoverProvider) SeriesByNetwork(_ context.Context, networkID int64, page int) (*core.DiscoverPage, error) {
+	p.mu.Lock()
 	p.browseCalls = append(p.browseCalls, browseCall{kind: SourceNetwork, id: networkID, page: page})
+	p.mu.Unlock()
 	return p.page, p.err
 }
 
 func (p *stubDiscoverProvider) DiscoverMovies(_ context.Context, f core.MovieFilter) (*core.DiscoverPage, error) {
+	p.mu.Lock()
 	p.movieFilters = append(p.movieFilters, f)
+	p.mu.Unlock()
 	if p.err != nil {
 		return nil, p.err
 	}
@@ -106,7 +117,9 @@ func (p *stubDiscoverProvider) DiscoverMovies(_ context.Context, f core.MovieFil
 }
 
 func (p *stubDiscoverProvider) DiscoverSeries(_ context.Context, f core.SeriesFilter) (*core.DiscoverPage, error) {
+	p.mu.Lock()
 	p.seriesFilters = append(p.seriesFilters, f)
+	p.mu.Unlock()
 	if p.err != nil {
 		return nil, p.err
 	}
@@ -114,22 +127,30 @@ func (p *stubDiscoverProvider) DiscoverSeries(_ context.Context, f core.SeriesFi
 }
 
 func (p *stubDiscoverProvider) SearchPeople(_ context.Context, query string) ([]core.DiscoverPerson, error) {
+	p.mu.Lock()
 	p.typeaheadQueries = append(p.typeaheadQueries, query)
+	p.mu.Unlock()
 	return p.people, p.err
 }
 
 func (p *stubDiscoverProvider) SearchCompanies(_ context.Context, query string) ([]core.DiscoverCompany, error) {
+	p.mu.Lock()
 	p.typeaheadQueries = append(p.typeaheadQueries, query)
+	p.mu.Unlock()
 	return p.companies, p.err
 }
 
 func (p *stubDiscoverProvider) SearchKeywords(_ context.Context, query string) ([]core.DiscoverKeyword, error) {
+	p.mu.Lock()
 	p.typeaheadQueries = append(p.typeaheadQueries, query)
+	p.mu.Unlock()
 	return p.keywords, p.err
 }
 
 func (p *stubDiscoverProvider) Genres(_ context.Context, mediaType string) ([]core.DiscoverGenre, error) {
+	p.mu.Lock()
 	p.genreCalls = append(p.genreCalls, mediaType)
+	p.mu.Unlock()
 	return p.genres[mediaType], p.err
 }
 

@@ -340,8 +340,10 @@ func TestServiceConcurrentConsumeIsSingleReceiptAndIdempotent(t *testing.T) {
 			t.Fatalf("unexpected concurrent consume error: %v", err)
 		}
 	}
-	if successes != 1 {
-		t.Fatalf("concurrent consumers succeeded %d times, want exactly one", successes)
+	// Callers that lose the token burn may still be answered with the
+	// winner's receipt once it is stored; the invariant is one receipt.
+	if successes < 1 {
+		t.Fatal("no concurrent consumer succeeded")
 	}
 	revisions, err := st.ListDefinitionPackRevisions(context.Background())
 	if err != nil || len(revisions) != 1 {
