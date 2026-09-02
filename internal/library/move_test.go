@@ -3,6 +3,7 @@ package library
 import (
 	"context"
 	"errors"
+	"path"
 	"testing"
 
 	"github.com/watzon/caravan/internal/core"
@@ -75,6 +76,151 @@ func TestMoveMovieRelocatesFilesAndRow(t *testing.T) {
 	}
 	if again.LibraryID != films.ID {
 		t.Errorf("rescan moved the movie back to library %d", again.LibraryID)
+	}
+}
+
+// A failed database update leaves the file moved but its row at the source.
+// On retry, an occupied unsuffixed destination belongs to another file, so the
+// row must recover the collision-suffixed file Caravan actually moved.
+func TestMoveMovieRetryUsesTheCollisionSuffixedFile(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+	seedMovie(h)
+	h.writeVideo(rawMovieRel, "movie bytes")
+	if res := h.scan(); res.Added != 1 {
+		t.Fatalf("seed scan: %+v", res)
+	}
+	films := &core.Library{Kind: core.LibraryKindMovie, Name: "Films", RootPath: "library/Films", Provider: core.ProviderTMDB}
+	if err := h.st.CreateLibrary(ctx, films); err != nil {
+		t.Fatalf("CreateLibrary: %v", err)
+	}
+	mv, err := h.st.GetMovieByTMDBID(ctx, 10378)
+	if err != nil {
+		t.Fatalf("GetMovieByTMDBID: %v", err)
+	}
+	unsuffixed := "library/Films/Big Buck Bunny (2008)/Big Buck Bunny (2008).mkv"
+	h.writeVideo(unsuffixed, "an unrelated pre-existing file")
+	h.mgr.updateMediaFilePath = func(context.Context, int64, string) error {
+		return errors.New("injected update failure")
+	}
+	if err := h.mgr.MoveMovie(ctx, mv.ID, films.ID); err == nil {
+		t.Fatal("MoveMovie succeeded despite the injected media-file update failure")
+	}
+
+	h.mgr.updateMediaFilePath = h.st.UpdateMediaFilePath
+	if err := h.mgr.MoveMovie(ctx, mv.ID, films.ID); err != nil {
+		t.Fatalf("MoveMovie retry: %v", err)
+	}
+	suffixed := "library/Films/Big Buck Bunny (2008)/Big Buck Bunny (2008) (1).mkv"
+	if got := h.read(unsuffixed); got != "an unrelated pre-existing file" {
+		t.Fatalf("unsuffixed file = %q, want the unrelated file", got)
+	}
+	if got := h.read(suffixed); got != "movie bytes" {
+		t.Fatalf("suffixed file = %q, want the moved file", got)
+	}
+	files, err := h.st.ListMediaFilesForMovie(ctx, mv.ID)
+	if err != nil {
+		t.Fatalf("ListMediaFilesForMovie: %v", err)
+	}
+	if len(files) != 1 || files[0].Path != suffixed {
+		t.Fatalf("media files = %+v, want the collision-suffixed path", files)
+	}
+}
+
+func TestMoveMovieRejectsJournalForAnotherDestination(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+	seedMovie(h)
+	h.writeVideo(rawMovieRel, "movie bytes")
+	if res := h.scan(); res.Added != 1 {
+		t.Fatalf("seed scan: %+v", res)
+	}
+	first := &core.Library{Kind: core.LibraryKindMovie, Name: "First", RootPath: "library/First", Provider: core.ProviderTMDB}
+	second := &core.Library{Kind: core.LibraryKindMovie, Name: "Second", RootPath: "library/Second", Provider: core.ProviderTMDB}
+	for _, lib := range []*core.Library{first, second} {
+		if err := h.st.CreateLibrary(ctx, lib); err != nil {
+			t.Fatalf("CreateLibrary: %v", err)
+		}
+	}
+	mv, err := h.st.GetMovieByTMDBID(ctx, 10378)
+	if err != nil {
+		t.Fatalf("GetMovieByTMDBID: %v", err)
+	}
+	h.mgr.updateMediaFilePath = func(context.Context, int64, string) error { return errors.New("injected update failure") }
+	if err := h.mgr.MoveMovie(ctx, mv.ID, first.ID); err == nil {
+		t.Fatal("first MoveMovie succeeded despite the injected failure")
+	}
+	h.mgr.updateMediaFilePath = h.st.UpdateMediaFilePath
+	if err := h.mgr.MoveMovie(ctx, mv.ID, second.ID); err == nil {
+		t.Fatal("MoveMovie accepted a journal from another destination")
+	}
+	files, err := h.st.ListMediaFilesForMovie(ctx, mv.ID)
+	if err != nil {
+		t.Fatalf("ListMediaFilesForMovie: %v", err)
+	}
+	if len(files) != 1 || files[0].Path != organizedRel {
+		t.Fatalf("media files = %+v, want the original path", files)
+	}
+}
+
+func TestMoveMovieSidecarRetryKeepsPosterAndNFOSeparate(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+	mv, _ := h.addMovieWithFile("Big Buck Bunny", 2008)
+	dir := movieDir(stockMovieLib(), mv.Title, mv.Year)
+	h.writeVideo(path.Join(dir, PosterName), "poster")
+	h.writeVideo(path.Join(dir, MovieNFOName), "nfo")
+	films := &core.Library{Kind: core.LibraryKindMovie, Name: "Films", RootPath: "library/Films", Provider: core.ProviderTMDB}
+	if err := h.st.CreateLibrary(ctx, films); err != nil {
+		t.Fatalf("CreateLibrary: %v", err)
+	}
+	h.mgr.upsertMovie = func(context.Context, *core.Movie) error { return errors.New("injected item update failure") }
+	if err := h.mgr.MoveMovie(ctx, mv.ID, films.ID); err == nil {
+		t.Fatal("MoveMovie succeeded despite the injected item update failure")
+	}
+	h.mgr.upsertMovie = h.st.UpsertMovie
+	if err := h.mgr.MoveMovie(ctx, mv.ID, films.ID); err != nil {
+		t.Fatalf("MoveMovie retry: %v", err)
+	}
+	newDir := movieDir(films, mv.Title, mv.Year)
+	if got := h.read(path.Join(newDir, PosterName)); got != "poster" {
+		t.Fatalf("poster = %q, want poster", got)
+	}
+	if got := h.read(path.Join(newDir, MovieNFOName)); got != "nfo" {
+		t.Fatalf("NFO = %q, want nfo", got)
+	}
+	row, err := h.st.GetMovie(ctx, mv.ID)
+	if err != nil {
+		t.Fatalf("GetMovie: %v", err)
+	}
+	if row.PosterPath != path.Join(newDir, PosterName) {
+		t.Fatalf("PosterPath = %q, want poster path", row.PosterPath)
+	}
+}
+
+func TestMoveMovieFreshManagerRejectsMissingSource(t *testing.T) {
+	ctx := context.Background()
+	h := newHarness(t)
+	seedMovie(h)
+	h.writeVideo(rawMovieRel, "movie bytes")
+	if res := h.scan(); res.Added != 1 {
+		t.Fatalf("seed scan: %+v", res)
+	}
+	films := &core.Library{Kind: core.LibraryKindMovie, Name: "Films", RootPath: "library/Films", Provider: core.ProviderTMDB}
+	if err := h.st.CreateLibrary(ctx, films); err != nil {
+		t.Fatalf("CreateLibrary: %v", err)
+	}
+	mv, err := h.st.GetMovieByTMDBID(ctx, 10378)
+	if err != nil {
+		t.Fatalf("GetMovieByTMDBID: %v", err)
+	}
+	h.mgr.updateMediaFilePath = func(context.Context, int64, string) error { return errors.New("injected update failure") }
+	if err := h.mgr.MoveMovie(ctx, mv.ID, films.ID); err == nil {
+		t.Fatal("MoveMovie succeeded despite the injected failure")
+	}
+	fresh := h.newManager(h.st, h.provider)
+	if err := fresh.MoveMovie(ctx, mv.ID, films.ID); err == nil {
+		t.Fatal("fresh Manager inferred a missing source had moved")
 	}
 }
 

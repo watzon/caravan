@@ -273,8 +273,8 @@ func TestImportDownloadKeepsMovieWhenReplacementCannotBeVerified(t *testing.T) {
 	const upgradeFile = "incomplete/Big.Buck.Bunny.2008.1080p/Big.Buck.Bunny.2008.1080p.mkv"
 	h.parser[filepath.Base(upgradeFile)] = movieParse("Big Buck Bunny", 2008)
 	h.writeVideo(upgradeFile, "new movie bytes")
-	h.mgr.link = func(_ string, dst string) error {
-		return os.WriteFile(dst, []byte("short"), 0o644)
+	h.mgr.rootLink = func(root *os.Root, _ string, dst string) error {
+		return root.WriteFile(dst, []byte("short"), 0o644)
 	}
 	err := h.mgr.ImportDownload(ctx, core.DownloadStatus{ID: "broken-upgrade", State: core.DownloadSeeding, SavePath: upgradeFile}, h.grabFor(core.GrabInfo{MovieID: mv.ID}))
 	if err == nil || !strings.Contains(err.Error(), "verify imported file") {
@@ -815,7 +815,7 @@ func TestImportDownloadFallsBackToCopy(t *testing.T) {
 	mv := addMovieItem(h)
 	dl := movieDownload(h, "movie bytes")
 	grab := h.grabFor(core.GrabInfo{MovieID: mv.ID})
-	h.mgr.link = func(string, string) error { return errors.New("no hardlinks here") }
+	h.mgr.rootLink = func(*os.Root, string, string) error { return errors.New("no hardlinks here") }
 
 	if err := h.mgr.ImportDownload(context.Background(), dl, grab); err != nil {
 		t.Fatalf("ImportDownload: %v", err)

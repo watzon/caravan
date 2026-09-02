@@ -131,6 +131,8 @@ type Router struct {
 	table Table
 }
 
+var _ core.EngineQuiescer = (*Router)(nil)
+
 // NewRouter returns a router that resolves its engines through table.
 func NewRouter(table Table) *Router {
 	return &Router{table: table}
@@ -193,6 +195,50 @@ func (r *Router) Add(ctx context.Context, rel core.Release, opts core.AddOpts) (
 		}
 	}
 	return qualified, nil
+}
+
+// Quiesce closes every configured backend before the migration moves the
+// shared incomplete tree. Checking every capability first avoids pausing one
+// backend when another cannot provide the same no-new-writer guarantee.
+func (r *Router) Quiesce(ctx context.Context) error {
+	routes, err := r.table(ctx)
+	if err != nil {
+		return err
+	}
+	quiescers := make([]core.EngineQuiescer, 0, len(routes))
+	for _, route := range routes {
+		quiescer, ok := route.Engine.(core.EngineQuiescer)
+		if !ok {
+			return fmt.Errorf("%w: %s cannot quiesce transfers", ErrUnsupported, route.Name)
+		}
+		quiescers = append(quiescers, quiescer)
+	}
+	for _, quiescer := range quiescers {
+		if err := quiescer.Quiesce(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ResumeQuiesced opens every backend after migration. Each backend remembers
+// the downloads its own barrier stopped, so a user's pre-existing pause stays
+// untouched.
+func (r *Router) ResumeQuiesced(ctx context.Context) error {
+	routes, err := r.table(ctx)
+	if err != nil {
+		return err
+	}
+	for _, route := range routes {
+		quiescer, ok := route.Engine.(core.EngineQuiescer)
+		if !ok {
+			return fmt.Errorf("%w: %s cannot resume quiesced transfers", ErrUnsupported, route.Name)
+		}
+		if err := quiescer.ResumeQuiesced(ctx); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Status returns the snapshot from whichever engine holds id.

@@ -23,6 +23,8 @@ package library
 import (
 	"context"
 	"net/http"
+	"os"
+	"sync"
 	"time"
 
 	"github.com/watzon/caravan/internal/core"
@@ -85,6 +87,22 @@ type Manager struct {
 	// link is os.Link. Overridable so the no-hardlink fallback (exFAT,
 	// cross-device) is testable without a second filesystem.
 	link func(oldname, newname string) error
+	// rootLink is os.Root.Link. It keeps the normal in-root hardlink fast path
+	// confined while retaining a seam for filesystems that reject hardlinks.
+	rootLink func(*os.Root, string, string) error
+	// updateMediaFilePath is the store write at the end of an item move. It is a
+	// seam because a failed write must leave the next delivery to prove which
+	// collision-suffixed file the earlier move created.
+	updateMediaFilePath func(context.Context, int64, string) error
+	// upsertMovie and upsertSeries keep the item-row boundary injectable so a
+	// retry test can prove sidecar journals survive until that boundary commits.
+	upsertMovie  func(context.Context, *core.Movie) error
+	upsertSeries func(context.Context, *core.Series) error
+	// movedFiles records every filesystem move until its parent item row is
+	// written. Its key includes both source and destination because either alone
+	// can identify a different move after a retry is redirected.
+	movedFiles map[moveJournalKey]movedFile
+	moveMu     sync.Mutex
 	// hc fetches posters.
 	hc *http.Client
 	// minConfidence is the parking threshold described on defaultMinConfidence.
@@ -198,14 +216,19 @@ func WithAdultProvider(p core.AdultMetadataProvider) Option {
 // (SPEC §13 — import match failures are visible, never fatal).
 func NewManager(st *store.Store, mp core.MetadataProvider, root string, opts ...Option) *Manager {
 	m := &Manager{
-		store:         st,
-		provider:      mp,
-		root:          cleanRoot(root),
-		parse:         parse.Parse,
-		parseScene:    parse.Scene,
-		link:          osLink,
-		hc:            &http.Client{Timeout: posterTimeout},
-		minConfidence: defaultMinConfidence,
+		store:               st,
+		provider:            mp,
+		root:                cleanRoot(root),
+		parse:               parse.Parse,
+		parseScene:          parse.Scene,
+		link:                osLink,
+		rootLink:            func(root *os.Root, oldname, newname string) error { return root.Link(oldname, newname) },
+		updateMediaFilePath: st.UpdateMediaFilePath,
+		upsertMovie:         st.UpsertMovie,
+		upsertSeries:        st.UpsertSeries,
+		movedFiles:          make(map[moveJournalKey]movedFile),
+		hc:                  &http.Client{Timeout: posterTimeout},
+		minConfidence:       defaultMinConfidence,
 	}
 	for _, opt := range opts {
 		opt(m)

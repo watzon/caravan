@@ -365,14 +365,22 @@ func TestMigrateRefusesNestedRootsWithoutMovingAnything(t *testing.T) {
 // one is a panic in a test rather than a silent no-op.
 type stubEngine struct {
 	core.Engine
-	list    []core.DownloadStatus
-	paused  []core.DownloadID
-	resumed []core.DownloadID
+	list       []core.DownloadStatus
+	listErr    error
+	pauseErr   map[core.DownloadID]error
+	paused     []core.DownloadID
+	resumed    []core.DownloadID
+	quiesceErr error
+	resumeErr  error
+	quiesced   bool
 }
 
-func (e *stubEngine) List(context.Context) ([]core.DownloadStatus, error) { return e.list, nil }
+func (e *stubEngine) List(context.Context) ([]core.DownloadStatus, error) { return e.list, e.listErr }
 
 func (e *stubEngine) Pause(_ context.Context, id core.DownloadID) error {
+	if err := e.pauseErr[id]; err != nil {
+		return err
+	}
 	e.paused = append(e.paused, id)
 	return nil
 }
@@ -382,7 +390,26 @@ func (e *stubEngine) Resume(_ context.Context, id core.DownloadID) error {
 	return nil
 }
 
-func TestMigratePausesTheQueueAndLeavesItPausedOnSuccess(t *testing.T) {
+func (e *stubEngine) Quiesce(context.Context) error {
+	if e.quiesceErr != nil {
+		return e.quiesceErr
+	}
+	e.quiesced = true
+	return nil
+}
+
+func (e *stubEngine) ResumeQuiesced(ctx context.Context) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if e.resumeErr != nil {
+		return e.resumeErr
+	}
+	e.quiesced = false
+	return nil
+}
+
+func TestMigrateQuiescesTheQueueAndReleasesItOnSuccess(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	engine := &stubEngine{list: []core.DownloadStatus{
@@ -396,13 +423,8 @@ func TestMigratePausesTheQueueAndLeavesItPausedOnSuccess(t *testing.T) {
 	m := h.queue(h.src, h.dst)
 	h.run(m)
 
-	if want := []core.DownloadID{"active", "seeding"}; !equalIDs(engine.paused, want) {
-		t.Fatalf("paused = %v, want %v: a download already paused by the user must stay that way", engine.paused, want)
-	}
-	// The engine captured the old root when it was built, so resuming here
-	// would write the next block under the root the library just left.
-	if len(engine.resumed) != 0 {
-		t.Fatalf("resumed = %v, want nothing until the process restarts", engine.resumed)
+	if engine.quiesced {
+		t.Fatal("queue is still quiesced after a completed migration")
 	}
 }
 
@@ -423,10 +445,219 @@ func TestMigrateResumesTheQueueAfterARollback(t *testing.T) {
 	if got := h.reload(m.ID); got.Status != core.StorageMigrationRolledBack {
 		t.Fatalf("status = %q, want rolled_back", got.Status)
 	}
-	// The files are back under the root this engine already points at, so the
-	// queue can go on exactly as it was.
-	if want := []core.DownloadID{"active"}; !equalIDs(engine.resumed, want) {
-		t.Fatalf("resumed = %v, want %v", engine.resumed, want)
+	if engine.quiesced {
+		t.Fatal("queue is still quiesced after rollback")
+	}
+}
+
+func TestMigrateAbortsWhenTheQueueCannotQuiesce(t *testing.T) {
+	h := newHarness(t)
+	files := h.seed()
+	engine := &stubEngine{quiesceErr: errors.New("engine is unavailable")}
+	h.svc = New(h.st, func() core.Engine { return engine }, discardLogger())
+
+	m := h.queue(h.src, h.dst)
+	err := h.svc.Handle(context.Background(), nil, mustPayload(t, m.ID))
+	if err == nil || !strings.Contains(err.Error(), "quiesce the download queue") {
+		t.Fatalf("Handle error = %v, want queue-quiesce failure", err)
+	}
+	for rel, content := range files {
+		wantOnlyAt(t, h.src, h.dst, rel, content)
+	}
+}
+
+func TestMigrateAbortsWhenTheQueueBarrierRejectsANewTransfer(t *testing.T) {
+	h := newHarness(t)
+	files := h.seed()
+	engine := &stubEngine{quiesceErr: errors.New("new transfer attempted while quiescing")}
+	h.svc = New(h.st, func() core.Engine { return engine }, discardLogger())
+
+	m := h.queue(h.src, h.dst)
+	err := h.svc.Handle(context.Background(), nil, mustPayload(t, m.ID))
+	if err == nil || !strings.Contains(err.Error(), "new transfer attempted") {
+		t.Fatalf("Handle error = %v, want the barrier to reject the new transfer", err)
+	}
+	for rel, content := range files {
+		wantOnlyAt(t, h.src, h.dst, rel, content)
+	}
+}
+
+func TestResumeQueueIgnoresTheJobCancellation(t *testing.T) {
+	h := newHarness(t)
+	engine := &stubEngine{quiesced: true}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if err := h.svc.resumeQueue(ctx, engine); err != nil {
+		t.Fatalf("resumeQueue: %v", err)
+	}
+	if engine.quiesced {
+		t.Fatal("queue is still quiesced after resuming from a cancelled job")
+	}
+}
+
+func TestHandleRetriesWhenQueueReleaseFails(t *testing.T) {
+	h := newHarness(t)
+	h.seed()
+	engine := &stubEngine{resumeErr: errors.New("client is unavailable")}
+	h.svc = New(h.st, func() core.Engine { return engine }, discardLogger())
+	m := h.queue(h.src, h.dst)
+	payload := mustPayload(t, m.ID)
+
+	if err := h.svc.Handle(context.Background(), nil, payload); err == nil {
+		t.Fatal("Handle returned nil, want retryable queue-release failure")
+	}
+	if got := h.reload(m.ID); got.Status != core.StorageMigrationRunning {
+		t.Fatalf("status = %q, want running until the queue is released", got.Status)
+	}
+	engine.resumeErr = nil
+	if err := h.svc.Handle(context.Background(), nil, payload); err != nil {
+		t.Fatalf("retry Handle: %v", err)
+	}
+	if got := h.reload(m.ID); got.Status != core.StorageMigrationDone {
+		t.Fatalf("status = %q, want done after queue release", got.Status)
+	}
+}
+
+// failingStore wraps the real store so these tests fail one durable operation
+// without hiding the row and filesystem state that a later delivery must read.
+type failingStore struct {
+	relocationStore
+	getErr    error
+	updateErr func(*core.StorageMigration) error
+}
+
+func (s *failingStore) GetStorageMigration(ctx context.Context, id int64) (*core.StorageMigration, error) {
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
+	return s.relocationStore.GetStorageMigration(ctx, id)
+}
+
+func (s *failingStore) UpdateStorageMigration(ctx context.Context, m *core.StorageMigration) error {
+	if s.updateErr != nil {
+		if err := s.updateErr(m); err != nil {
+			return err
+		}
+	}
+	return s.relocationStore.UpdateStorageMigration(ctx, m)
+}
+
+func mustPayload(t *testing.T, id int64) json.RawMessage {
+	t.Helper()
+	payload, err := json.Marshal(Payload{MigrationID: id})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	return payload
+}
+
+func TestHandleRetriesWhenReadingOrClaimingTheMigrationFails(t *testing.T) {
+	for name, configure := range map[string]func(*failingStore){
+		"read": func(s *failingStore) { s.getErr = errors.New("database is unavailable") },
+		"claim": func(s *failingStore) {
+			s.updateErr = func(*core.StorageMigration) error { return errors.New("database is unavailable") }
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			files := h.seed()
+			m := h.queue(h.src, h.dst)
+			failing := &failingStore{relocationStore: h.st}
+			configure(failing)
+			h.svc.st = failing
+
+			if err := h.svc.Handle(context.Background(), nil, mustPayload(t, m.ID)); err == nil {
+				t.Fatal("Handle returned nil, want retryable store failure")
+			}
+			for rel, content := range files {
+				wantOnlyAt(t, h.src, h.dst, rel, content)
+			}
+		})
+	}
+}
+
+func TestHandleRetriesWhenCompletionCannotBeStored(t *testing.T) {
+	h := newHarness(t)
+	files := h.seed()
+	m := h.queue(h.src, h.dst)
+	failed := false
+	failing := &failingStore{relocationStore: h.st, updateErr: func(m *core.StorageMigration) error {
+		if !failed && m.Status == core.StorageMigrationDone {
+			failed = true
+			return errors.New("database is unavailable")
+		}
+		return nil
+	}}
+	h.svc.st = failing
+
+	if err := h.svc.Handle(context.Background(), nil, mustPayload(t, m.ID)); err == nil {
+		t.Fatal("Handle returned nil, want retryable completion failure")
+	}
+	if got := h.reload(m.ID); got.Status != core.StorageMigrationRunning {
+		t.Fatalf("status = %q, want running until completion is stored", got.Status)
+	}
+	if err := h.svc.Handle(context.Background(), nil, mustPayload(t, m.ID)); err != nil {
+		t.Fatalf("retry Handle: %v", err)
+	}
+	if got := h.reload(m.ID); got.Status != core.StorageMigrationDone {
+		t.Fatalf("status = %q, want done after retry", got.Status)
+	}
+	for rel, content := range files {
+		wantOnlyAt(t, h.dst, h.src, rel, content)
+	}
+}
+
+func TestHandleRetriesWhenRollbackCannotBeStored(t *testing.T) {
+	h := newHarness(t)
+	h.seed()
+	blocked := filepath.Join(h.dst, filepath.FromSlash("library/Movies/Zed (2001)/Zed (2001).mkv"))
+	if err := os.MkdirAll(blocked, 0o755); err != nil {
+		t.Fatalf("place the blocking directory: %v", err)
+	}
+	m := h.queue(h.src, h.dst)
+	failed := false
+	failing := &failingStore{relocationStore: h.st, updateErr: func(m *core.StorageMigration) error {
+		if !failed && m.Status == core.StorageMigrationRolledBack {
+			failed = true
+			return errors.New("database is unavailable")
+		}
+		return nil
+	}}
+	h.svc.st = failing
+	payload := mustPayload(t, m.ID)
+
+	if err := h.svc.Handle(context.Background(), nil, payload); err == nil {
+		t.Fatal("Handle returned nil, want retryable rollback failure")
+	}
+	if got := h.reload(m.ID); got.Status != core.StorageMigrationRunning || got.Error == "" {
+		t.Fatalf("migration = %#v, want durable running rollback marker", got)
+	}
+	if err := h.svc.Handle(context.Background(), nil, payload); err != nil {
+		t.Fatalf("retry Handle: %v", err)
+	}
+	if got := h.reload(m.ID); got.Status != core.StorageMigrationRolledBack {
+		t.Fatalf("status = %q, want rolled_back after retry", got.Status)
+	}
+}
+
+func TestHandleIsIdempotentAfterSuccessfulCompletion(t *testing.T) {
+	h := newHarness(t)
+	files := h.seed()
+	m := h.queue(h.src, h.dst)
+	payload := mustPayload(t, m.ID)
+
+	if err := h.svc.Handle(context.Background(), nil, payload); err != nil {
+		t.Fatalf("first Handle: %v", err)
+	}
+	if err := h.svc.Handle(context.Background(), nil, payload); err != nil {
+		t.Fatalf("redelivered Handle: %v", err)
+	}
+	if got := h.reload(m.ID); got.Status != core.StorageMigrationDone {
+		t.Fatalf("status = %q, want done", got.Status)
+	}
+	for rel, content := range files {
+		wantOnlyAt(t, h.dst, h.src, rel, content)
 	}
 }
 

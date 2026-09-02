@@ -165,6 +165,11 @@ type Embedded struct {
 	mu     sync.Mutex
 	items  map[core.DownloadID]*item
 	closed bool
+	// quiescing closes the admission gate while storage migration owns the
+	// incomplete tree. quiesced remembers only transfers this gate paused, so a
+	// release cannot restart a download the user had already stopped.
+	quiescing bool
+	quiesced  map[core.DownloadID]struct{}
 }
 
 // item is one download: the live torrent, the durable record that mirrors it,
@@ -209,6 +214,7 @@ type item struct {
 var _ core.Engine = (*Embedded)(nil)
 var _ core.EngineInsight = (*Embedded)(nil)
 var _ core.EngineRateLimits = (*Embedded)(nil)
+var _ core.EngineQuiescer = (*Embedded)(nil)
 
 // NewEmbedded starts the embedded torrent client, writing in-progress data
 // under dataDir/IncompleteDir, and re-adds whatever opts.Store remembers.
@@ -358,6 +364,12 @@ func (e *Embedded) Add(ctx context.Context, r core.Release, opts core.AddOpts) (
 	spec, err := e.torrentSpec(ctx, r)
 	if err != nil {
 		return "", err
+	}
+	e.mu.Lock()
+	quiescing := e.quiescing
+	e.mu.Unlock()
+	if quiescing {
+		return "", errors.New("download: storage migration is quiescing transfers")
 	}
 	return e.add(ctx, spec, core.Download{Title: r.Title}, false)
 }
@@ -677,6 +689,10 @@ func (e *Embedded) setPaused(ctx context.Context, id core.DownloadID, paused boo
 		e.mu.Unlock()
 		return fmt.Errorf("download: %s %q: %w", verb, id, ErrNotFound)
 	}
+	if !paused && e.quiescing {
+		e.mu.Unlock()
+		return errors.New("download: storage migration is quiescing transfers")
+	}
 	if paused {
 		// A paused download does not hold a slot. That is the whole reason
 		// pausing one thing starts the next: the queue is about what is
@@ -695,12 +711,60 @@ func (e *Embedded) setPaused(ctx context.Context, id core.DownloadID, paused boo
 	return e.save(ctx, snapshot)
 }
 
+// Quiesce stops every active transfer after closing the admission gate. Both
+// steps share e.mu, so a new Add, Resume, wake, or metadata arrival cannot
+// become a writer between the snapshot and the pauses.
+func (e *Embedded) Quiesce(ctx context.Context) error {
+	e.mu.Lock()
+	if e.quiescing {
+		e.mu.Unlock()
+		return nil
+	}
+	e.quiescing = true
+	e.quiesced = make(map[core.DownloadID]struct{})
+	for id, it := range e.items {
+		if it.paused || it.failure != "" || it.t.Complete().Bool() {
+			continue
+		}
+		pauseItem(it)
+		e.release(it)
+		e.quiesced[id] = struct{}{}
+	}
+	e.mu.Unlock()
+	return nil
+}
+
+// ResumeQuiesced opens the admission gate and restarts only the downloads
+// Quiesce stopped. It is idempotent so a retried migration can finish release.
+func (e *Embedded) ResumeQuiesced(ctx context.Context) error {
+	e.mu.Lock()
+	if !e.quiescing {
+		e.mu.Unlock()
+		return nil
+	}
+	ids := e.quiesced
+	e.quiesced = nil
+	e.quiescing = false
+	for id := range ids {
+		if it, ok := e.items[id]; ok {
+			resumeItem(it)
+			e.admitLocked(it)
+		}
+	}
+	e.mu.Unlock()
+	return nil
+}
+
 // admitLocked asks the coordinator for a slot and applies the answer. It must
 // be called with e.mu held.
 //
 // No coordinator means no caps, which is the configuration every Caravan had
 // before this existed: nothing is asked and nothing is held back.
 func (e *Embedded) admitLocked(it *item) {
+	if e.quiescing {
+		holdItem(it)
+		return
+	}
 	if e.opts.Admitter == nil || e.opts.Admitter.Request(EngineName, it.rec.EngineID) {
 		admitItem(it)
 		return
@@ -725,7 +789,7 @@ func (e *Embedded) release(it *item) {
 func (e *Embedded) wake() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if e.closed {
+	if e.closed || e.quiescing {
 		return
 	}
 	waiting := make([]*item, 0, len(e.items))

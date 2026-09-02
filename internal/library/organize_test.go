@@ -99,7 +99,7 @@ func TestPlaceFileIsANoOpWhenAlreadyInPlace(t *testing.T) {
 	rel := "library/Movies/Movie (2000)/Movie (2000).mkv"
 	h.writeVideo(rel, "content")
 
-	h.mgr.link = func(string, string) error {
+	h.mgr.rootLink = func(*os.Root, string, string) error {
 		t.Fatal("placeFile tried to transfer a file that was already in place")
 		return nil
 	}
@@ -115,6 +115,32 @@ func TestPlaceFileIsANoOpWhenAlreadyInPlace(t *testing.T) {
 	}
 }
 
+func TestOrganizeAndNFOWritesRefuseSymlinkedDestinations(t *testing.T) {
+	h := newHarness(t)
+	h.writeVideo("library/input.mkv", "input")
+	movies := filepath.Join(h.root, LibraryDir, MoviesDir)
+	outside := t.TempDir()
+	if err := os.MkdirAll(filepath.Dir(movies), 0o755); err != nil {
+		t.Fatalf("mkdir library: %v", err)
+	}
+	if err := os.Symlink(outside, movies); err != nil {
+		t.Fatalf("link Movies directory: %v", err)
+	}
+	dst := "library/Movies/Film (2000)/Film (2000).mkv"
+	if _, err := h.mgr.placeFile("library/input.mkv", dst, consumeSource); err == nil {
+		t.Fatal("placeFile accepted a symlinked destination")
+	}
+	if err := h.mgr.writeFileAtomic("library/Movies/Film (2000)/movie.nfo", []byte("nfo")); err == nil {
+		t.Fatal("writeFileAtomic accepted a symlinked destination")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "Film (2000)", "Film (2000).mkv")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("outside movie write = %v, want no file", err)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "Film (2000)", "movie.nfo")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("outside NFO write = %v, want no file", err)
+	}
+}
+
 // TestScanFallsBackWhenHardlinksAreUnavailable simulates exFAT and cross-device
 // sources (SPEC §3): os.Link always fails, and the file must still be
 // organized with nothing left behind.
@@ -124,7 +150,7 @@ func TestScanFallsBackWhenHardlinksAreUnavailable(t *testing.T) {
 	h.writeVideo(rawMovieRel, "movie bytes")
 
 	linkCalls := 0
-	h.mgr.link = func(string, string) error {
+	h.mgr.rootLink = func(*os.Root, string, string) error {
 		linkCalls++
 		return errors.New("simulated: filesystem has no hardlinks")
 	}

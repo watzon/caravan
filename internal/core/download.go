@@ -209,6 +209,19 @@ type EngineRateLimits interface {
 	SetDownloadRates(ctx context.Context, id DownloadID, downKbps, upKbps int64) error
 }
 
+// EngineQuiescer is the optional migration safety boundary. Quiesce prevents a
+// new transfer from starting and confirms that every existing writer has
+// stopped. ResumeQuiesced releases only downloads Quiesce stopped, so it never
+// restarts a download that a person had already paused.
+//
+// A storage migration must refuse an engine that does not implement this
+// capability. Listing and pausing one snapshot is not a barrier: a new writer
+// can appear after the list and corrupt a file while it is moved.
+type EngineQuiescer interface {
+	Quiesce(ctx context.Context) error
+	ResumeQuiesced(ctx context.Context) error
+}
+
 // PeerInsight is the observable state of one connected peer.
 type PeerInsight struct {
 	Addr     string  `json:"addr"`

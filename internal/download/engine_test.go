@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -393,6 +394,27 @@ func TestAddRecordsAndIsIdempotent(t *testing.T) {
 	}
 	if rec.Title != info.BestName() && rec.Title != release.Title {
 		t.Fatalf("persisted title = %q, want the release or torrent name", rec.Title)
+	}
+}
+
+func TestQuiesceRejectsNewTransfers(t *testing.T) {
+	mi, _, _ := buildTorrent(t, "payload.bin", 128<<10)
+	e := newTestEngine(t, t.TempDir(), testOpts(newMemStore()))
+	ctx := context.Background()
+
+	if err := e.Quiesce(ctx); err != nil {
+		t.Fatalf("Quiesce: %v", err)
+	}
+	_, err := e.Add(ctx, core.Release{
+		Title:       "Blocked while relocating",
+		Protocol:    core.ProtocolTorrent,
+		DownloadURL: serveTorrent(t, mi),
+	}, core.AddOpts{})
+	if err == nil || !strings.Contains(err.Error(), "quiescing transfers") {
+		t.Fatalf("Add error = %v, want quiescing rejection", err)
+	}
+	if err := e.ResumeQuiesced(ctx); err != nil {
+		t.Fatalf("ResumeQuiesced: %v", err)
 	}
 }
 

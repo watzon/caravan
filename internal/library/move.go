@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/watzon/caravan/internal/core"
 )
@@ -62,11 +64,11 @@ func (m *Manager) MoveMovie(ctx context.Context, movieID, targetLibraryID int64)
 		return err
 	}
 	for _, f := range files {
-		finalRel, err := m.moveItemFile(f.Path, oldDir, newDir)
+		finalRel, err := m.moveItemFile(f, oldDir, newDir)
 		if err != nil {
 			return err
 		}
-		if err := m.store.UpdateMediaFilePath(ctx, f.ID, finalRel); err != nil {
+		if err := m.updateMediaFilePath(ctx, f.ID, finalRel); err != nil {
 			return err
 		}
 	}
@@ -82,9 +84,10 @@ func (m *Manager) MoveMovie(ctx context.Context, movieID, targetLibraryID int64)
 	if posterRel != "" {
 		mv.PosterPath = posterRel
 	}
-	if err := m.store.UpsertMovie(ctx, mv); err != nil {
+	if err := m.upsertMovie(ctx, mv); err != nil {
 		return err
 	}
+	m.clearMoveJournal(newDir)
 	m.removeEmptyItemDir(oldDir)
 
 	_ = m.store.InsertEvent(ctx, &core.Event{
@@ -141,11 +144,11 @@ func (m *Manager) MoveSeries(ctx context.Context, seriesID, targetLibraryID int6
 			continue
 		}
 		seen[pair.File.ID] = true
-		finalRel, err := m.moveItemFile(pair.File.Path, oldDir, newDir)
+		finalRel, err := m.moveItemFile(pair.File, oldDir, newDir)
 		if err != nil {
 			return err
 		}
-		if err := m.store.UpdateMediaFilePath(ctx, pair.File.ID, finalRel); err != nil {
+		if err := m.updateMediaFilePath(ctx, pair.File.ID, finalRel); err != nil {
 			return err
 		}
 	}
@@ -159,9 +162,10 @@ func (m *Manager) MoveSeries(ctx context.Context, seriesID, targetLibraryID int6
 	if posterRel != "" {
 		sr.PosterPath = posterRel
 	}
-	if err := m.store.UpsertSeries(ctx, sr); err != nil {
+	if err := m.upsertSeries(ctx, sr); err != nil {
 		return err
 	}
+	m.clearMoveJournal(newDir)
 	m.removeEmptyItemDir(oldDir)
 
 	// An adult site's move must stay as invisible to ungranted callers as the
@@ -182,18 +186,145 @@ func (m *Manager) MoveSeries(ctx context.Context, seriesID, targetLibraryID int6
 // moveItemFile relocates one media file, preserving its layout below the item
 // directory (season folders survive the move). A file stored outside the item
 // directory — a pre-organize path, a manual edit — keeps only its base name.
-// A source that is already gone resolves to its destination when the
-// destination exists: that is a re-run of a crashed move, not a lost file.
-func (m *Manager) moveItemFile(rel, oldDir, newDir string) (string, error) {
-	suffix := path.Base(rel)
-	if oldDir != "" && strings.HasPrefix(rel, oldDir+"/") {
-		suffix = strings.TrimPrefix(rel, oldDir+"/")
+// A retry accepts a missing source only when this Manager journaled the exact
+// destination before its database write failed. The unsuffixed destination can
+// belong to an unrelated file, so its mere presence proves nothing about an
+// earlier move.
+func (m *Manager) moveItemFile(file core.MediaFile, oldDir, newDir string) (string, error) {
+	suffix := path.Base(file.Path)
+	if oldDir != "" && strings.HasPrefix(file.Path, oldDir+"/") {
+		suffix = strings.TrimPrefix(file.Path, oldDir+"/")
 	}
 	dst := path.Join(newDir, suffix)
-	if !fileExists(m.abs(rel)) && fileExists(m.abs(dst)) {
-		return dst, nil
+	root, err := os.OpenRoot(m.root)
+	if err != nil {
+		return "", fmt.Errorf("library: open storage root: %w", err)
 	}
-	return m.placeFile(rel, dst, consumeSource)
+	defer root.Close()
+	srcInfo, err := root.Stat(filepath.FromSlash(file.Path))
+	if errors.Is(err, fs.ErrNotExist) {
+		return m.journaledMoveDestination(root, file.Path, dst)
+	} else if err != nil {
+		return "", fmt.Errorf("library: inspect move source %s: %w", file.Path, err)
+	}
+	finalRel, err := m.placeLibraryFile(root, file.Path, dst)
+	if err != nil {
+		return "", err
+	}
+	m.rememberMovedFile(file.Path, dst, finalRel, srcInfo)
+	return finalRel, nil
+}
+
+type movedFile struct {
+	path     string
+	expected string
+	size     int64
+	modTime  time.Time
+}
+
+type moveJournalKey struct {
+	source      string
+	destination string
+}
+
+func (m *Manager) rememberMovedFile(source, expected, destination string, info fs.FileInfo) {
+	m.moveMu.Lock()
+	defer m.moveMu.Unlock()
+	m.movedFiles[moveJournalKey{source: source, destination: expected}] = movedFile{
+		path: destination, expected: expected, size: info.Size(), modTime: info.ModTime(),
+	}
+}
+
+func (m *Manager) clearMoveJournal(destinationDir string) {
+	m.moveMu.Lock()
+	defer m.moveMu.Unlock()
+	for key := range m.movedFiles {
+		if key.destination == destinationDir || strings.HasPrefix(key.destination, destinationDir+"/") {
+			delete(m.movedFiles, key)
+		}
+	}
+}
+
+func (m *Manager) hasJournaledMove(source, destination string) bool {
+	m.moveMu.Lock()
+	defer m.moveMu.Unlock()
+	_, ok := m.movedFiles[moveJournalKey{source: source, destination: destination}]
+	return ok
+}
+
+func (m *Manager) journaledMoveDestination(root *os.Root, source, expected string) (string, error) {
+	m.moveMu.Lock()
+	key := moveJournalKey{source: source, destination: expected}
+	moved, ok := m.movedFiles[key]
+	if !ok {
+		for stale := range m.movedFiles {
+			if stale.source == source {
+				delete(m.movedFiles, stale)
+			}
+		}
+	}
+	m.moveMu.Unlock()
+	if !ok {
+		return "", fmt.Errorf("library: move source %s is missing and no journaled destination exists for %s", source, expected)
+	}
+	if moved.expected != expected {
+		m.moveMu.Lock()
+		delete(m.movedFiles, key)
+		m.moveMu.Unlock()
+		return "", fmt.Errorf("library: journaled move destination %s differs from requested destination %s", moved.expected, expected)
+	}
+	info, err := root.Stat(filepath.FromSlash(moved.path))
+	if err != nil {
+		return "", fmt.Errorf("library: inspect journaled move destination %s: %w", moved.path, err)
+	}
+	if info.Size() != moved.size || !info.ModTime().Equal(moved.modTime) {
+		return "", fmt.Errorf("library: journaled move destination %s no longer matches its source", moved.path)
+	}
+	return moved.path, nil
+}
+
+// placeLibraryFile chooses a collision-safe destination and moves through the
+// already-open root, which keeps both endpoints below the storage root.
+func (m *Manager) placeLibraryFile(root *os.Root, srcRel, dstRel string) (string, error) {
+	srcInfo, err := root.Stat(filepath.FromSlash(srcRel))
+	if err != nil {
+		return "", fmt.Errorf("library: stat %s: %w", srcRel, err)
+	}
+	if err := root.MkdirAll(filepath.Dir(filepath.FromSlash(dstRel)), 0o755); err != nil {
+		return "", fmt.Errorf("library: create %s: %w", path.Dir(dstRel), err)
+	}
+	finalRel, same, err := uniqueRootDest(root, dstRel, srcInfo)
+	if err != nil {
+		return "", err
+	}
+	if same {
+		return finalRel, nil
+	}
+	if err := root.Rename(filepath.FromSlash(srcRel), filepath.FromSlash(finalRel)); err != nil {
+		return "", fmt.Errorf("library: move %s to %s: %w", srcRel, finalRel, err)
+	}
+	return finalRel, nil
+}
+
+func uniqueRootDest(root *os.Root, dst string, src fs.FileInfo) (string, bool, error) {
+	ext := path.Ext(dst)
+	stem := strings.TrimSuffix(dst, ext)
+	for i := 0; i <= maxCollisionSuffix; i++ {
+		candidate := dst
+		if i > 0 {
+			candidate = fmt.Sprintf("%s (%d)%s", stem, i, ext)
+		}
+		info, err := root.Stat(filepath.FromSlash(candidate))
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			return candidate, false, nil
+		case err != nil:
+			return "", false, fmt.Errorf("library: stat %s: %w", candidate, err)
+		case os.SameFile(info, src):
+			return candidate, true, nil
+		}
+	}
+	return "", false, fmt.Errorf("library: no free filename for %s after %d attempts", dst, maxCollisionSuffix)
 }
 
 // moveSidecars carries the poster and the NFO along with the files. They are
@@ -208,10 +339,11 @@ func (m *Manager) moveSidecars(oldDir, newDir, nfoName string) (string, error) {
 	posterRel := ""
 	for _, name := range []string{PosterName, nfoName} {
 		src := path.Join(oldDir, name)
-		if !fileExists(m.abs(src)) {
+		dst := path.Join(newDir, name)
+		if !fileExists(m.abs(src)) && !m.hasJournaledMove(src, dst) {
 			continue
 		}
-		finalRel, err := m.placeFile(src, path.Join(newDir, name), consumeSource)
+		finalRel, err := m.moveItemFile(core.MediaFile{Path: src}, oldDir, newDir)
 		if err != nil {
 			return "", err
 		}
@@ -230,15 +362,26 @@ func (m *Manager) removeEmptyItemDir(dir string) {
 	if dir == "" {
 		return
 	}
-	abs := m.abs(dir)
-	entries, err := os.ReadDir(abs)
+	root, err := os.OpenRoot(m.root)
+	if err != nil {
+		return
+	}
+	defer root.Close()
+	itemDir, err := root.Open(filepath.FromSlash(dir))
+	if err != nil {
+		return
+	}
+	entries, err := itemDir.ReadDir(-1)
+	if closeErr := itemDir.Close(); err == nil {
+		err = closeErr
+	}
 	if err != nil {
 		return
 	}
 	for _, entry := range entries {
 		if entry.IsDir() {
-			_ = os.Remove(filepath.Join(abs, entry.Name()))
+			_ = root.Remove(filepath.Join(filepath.FromSlash(dir), entry.Name()))
 		}
 	}
-	_ = os.Remove(abs)
+	_ = root.Remove(filepath.FromSlash(dir))
 }

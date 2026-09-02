@@ -227,6 +227,44 @@ func TestRemoveMovieRefusesPathsOutsideTheLibrary(t *testing.T) {
 	}
 }
 
+// A path can remain lexically below a library after an intermediate directory
+// becomes a link to another tree. Removal must reject that link rather than
+// letting os.Remove reach the file the link names.
+func TestRemoveMovieRefusesIntermediateSymlinkEscape(t *testing.T) {
+	h := newHarness(t)
+	mv, rel := h.addMovieWithFile("Big Buck Bunny", 2008)
+	outside := t.TempDir()
+	victim := filepath.Join(outside, filepath.FromSlash(strings.TrimPrefix(rel, LibraryDir+"/"+MoviesDir+"/")))
+	if err := os.MkdirAll(filepath.Dir(victim), 0o755); err != nil {
+		t.Fatalf("mkdir outside victim: %v", err)
+	}
+	if err := os.WriteFile(victim, []byte("precious"), 0o644); err != nil {
+		t.Fatalf("write outside victim: %v", err)
+	}
+
+	movies := filepath.Join(h.root, LibraryDir, MoviesDir)
+	if err := os.Rename(movies, movies+"-saved"); err != nil {
+		t.Fatalf("move original Movies directory: %v", err)
+	}
+	if err := os.Symlink(outside, movies); err != nil {
+		t.Fatalf("link Movies directory: %v", err)
+	}
+
+	if err := h.mgr.RemoveMovie(context.Background(), mv.ID, true); err != nil {
+		t.Fatalf("RemoveMovie: %v", err)
+	}
+	if _, err := os.Stat(victim); err != nil {
+		t.Fatalf("outside victim was touched: %v", err)
+	}
+	if !h.movieGone(mv.ID) {
+		t.Fatal("movie is still tracked after refusing the symlink escape")
+	}
+	warnings := h.warnings()
+	if len(warnings) != 2 || !strings.Contains(strings.Join(warnings, "\n"), rel) {
+		t.Fatalf("warnings = %v, want refusals naming %s", warnings, rel)
+	}
+}
+
 // The storage root, the library directory and the two section directories are
 // the layout SPEC §6 promises to players. No row may address them.
 func TestRemoveMovieNeverDeletesTheLayout(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // osLink is the default Manager.link. It exists so the field has a named,
@@ -46,26 +47,97 @@ const (
 // where the destination is a hardlink of the source — nothing is touched.
 func (m *Manager) placeFile(srcRel, dstRel string, disp sourceDisposition) (string, error) {
 	srcAbs := m.abs(srcRel)
-	dstAbs := m.abs(dstRel)
-
 	srcInfo, err := os.Stat(srcAbs)
 	if err != nil {
 		return "", fmt.Errorf("library: stat %s: %w", srcRel, err)
 	}
-	if err := os.MkdirAll(filepath.Dir(dstAbs), 0o755); err != nil {
+	root, err := os.OpenRoot(m.root)
+	if err != nil {
+		return "", fmt.Errorf("library: open storage root: %w", err)
+	}
+	defer root.Close()
+	if err := root.MkdirAll(filepath.Dir(filepath.FromSlash(dstRel)), 0o755); err != nil {
 		return "", fmt.Errorf("library: create %s: %w", filepath.Dir(dstRel), err)
 	}
-
-	finalAbs, same, err := uniqueDest(dstAbs, srcInfo)
+	finalRel, same, err := uniqueRootDest(root, dstRel, srcInfo)
 	if err != nil {
 		return "", err
 	}
 	if !same {
-		if err := m.transfer(srcAbs, finalAbs, disp); err != nil {
+		if err := m.transferToRoot(root, srcRel, srcAbs, finalRel, disp); err != nil {
 			return "", err
 		}
 	}
-	return m.rel(finalAbs)
+	return finalRel, nil
+}
+
+// transferToRoot keeps every destination operation below root. A source outside
+// storage may still be read normally, but it is copied rather than linked so a
+// raw absolute destination never reintroduces a symlink escape.
+func (m *Manager) transferToRoot(root *os.Root, srcRel, srcAbs, dstRel string, disp sourceDisposition) error {
+	if !filepath.IsAbs(srcRel) {
+		if err := m.rootLink(root, filepath.FromSlash(srcRel), filepath.FromSlash(dstRel)); err == nil {
+			if disp == consumeSource {
+				if err := root.Remove(filepath.FromSlash(srcRel)); err != nil {
+					return fmt.Errorf("library: remove %s after hardlink: %w", srcRel, err)
+				}
+			}
+			return nil
+		}
+		if disp == consumeSource {
+			if err := root.Rename(filepath.FromSlash(srcRel), filepath.FromSlash(dstRel)); err == nil {
+				return nil
+			}
+		}
+	}
+	return copyThenReplaceRoot(root, srcAbs, srcRel, dstRel, disp)
+}
+
+// copyThenReplaceRoot is copyThenReplace's confined counterpart. The temporary
+// file and its final replacement both use Root methods so a swapped directory
+// link cannot redirect a write outside the storage root.
+func copyThenReplaceRoot(root *os.Root, srcAbs, srcRel, dstRel string, disp sourceDisposition) error {
+	in, err := os.Open(srcAbs)
+	if err != nil {
+		return fmt.Errorf("library: open %s: %w", srcRel, err)
+	}
+	defer in.Close()
+	tmpRel := fmt.Sprintf("%s/.caravan-%d", filepath.ToSlash(filepath.Dir(filepath.FromSlash(dstRel))), time.Now().UnixNano())
+	tmp, err := root.OpenFile(filepath.FromSlash(tmpRel), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return fmt.Errorf("library: create temp beside %s: %w", dstRel, err)
+	}
+	defer root.Remove(filepath.FromSlash(tmpRel))
+	if _, err := io.Copy(tmp, in); err != nil {
+		tmp.Close()
+		return fmt.Errorf("library: copy %s to %s: %w", srcRel, dstRel, err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("library: sync %s: %w", tmpRel, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("library: close %s: %w", tmpRel, err)
+	}
+	if err := root.Chmod(filepath.FromSlash(tmpRel), 0o644); err != nil {
+		return fmt.Errorf("library: chmod %s: %w", tmpRel, err)
+	}
+	if err := root.Rename(filepath.FromSlash(tmpRel), filepath.FromSlash(dstRel)); err != nil {
+		return fmt.Errorf("library: rename %s to %s: %w", tmpRel, dstRel, err)
+	}
+	if disp == keepSource {
+		return nil
+	}
+	if filepath.IsAbs(srcRel) {
+		if err := os.Remove(srcAbs); err != nil {
+			return fmt.Errorf("library: remove %s after copy: %w", srcRel, err)
+		}
+		return nil
+	}
+	if err := root.Remove(filepath.FromSlash(srcRel)); err != nil {
+		return fmt.Errorf("library: remove %s after copy: %w", srcRel, err)
+	}
+	return nil
 }
 
 // uniqueDest finds a free destination path, or reports that dst already is

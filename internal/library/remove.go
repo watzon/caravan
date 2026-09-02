@@ -111,7 +111,7 @@ func (m *Manager) removeItemFiles(ctx context.Context, dir, nfoName string, file
 			m.refuseRemoval(ctx, f.Path, err)
 			continue
 		}
-		if err := os.Remove(abs); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := m.removeLibraryPath(f.Path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("library: delete %s: %w", f.Path, err)
 		}
 		if err := m.store.DeleteMediaFileByPath(ctx, f.Path); err != nil {
@@ -126,7 +126,7 @@ func (m *Manager) removeItemFiles(ctx context.Context, dir, nfoName string, file
 			m.refuseRemoval(ctx, dir, err)
 		} else {
 			for _, name := range []string{PosterName, nfoName} {
-				if err := os.Remove(filepath.Join(abs, name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				if err := m.removeLibraryPath(path.Join(dir, name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
 					return fmt.Errorf("library: delete %s: %w", path.Join(dir, name), err)
 				}
 			}
@@ -176,11 +176,8 @@ func (m *Manager) recycleItemFiles(ctx context.Context, dir, nfoName string, fil
 		} else if err != nil {
 			return false, fmt.Errorf("library: inspect %s: %w", rel, err)
 		}
-		dst := filepath.Join(m.root, "recycle", batch, filepath.FromSlash(rel))
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return false, fmt.Errorf("library: create recycle destination for %s: %w", rel, err)
-		}
-		if err := os.Rename(abs, dst); err != nil {
+		dst := path.Join("recycle", batch, rel)
+		if err := m.moveLibraryPath(rel, dst); err != nil {
 			return false, fmt.Errorf("library: recycle %s: %w", rel, err)
 		}
 		prune = append(prune, filepath.Dir(abs))
@@ -227,13 +224,25 @@ func (m *Manager) HandleRecycleCleanup(ctx context.Context, _ *store.Store, _ js
 	if err != nil {
 		return err
 	}
-	root := filepath.Join(m.root, "recycle")
-	entries, err := os.ReadDir(root)
+	storageRoot, err := os.OpenRoot(m.root)
+	if err != nil {
+		return fmt.Errorf("library: open storage root: %w", err)
+	}
+	defer storageRoot.Close()
+	recycle, err := storageRoot.Open("recycle")
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("library: read recycle: %w", err)
+	}
+	entries, err := recycle.ReadDir(-1)
+	if err != nil {
+		recycle.Close()
+		return fmt.Errorf("library: read recycle: %w", err)
+	}
+	if err := recycle.Close(); err != nil {
+		return fmt.Errorf("library: close recycle: %w", err)
 	}
 	cutoff := time.Now().UTC().AddDate(0, 0, -days)
 	removed := 0
@@ -245,7 +254,7 @@ func (m *Manager) HandleRecycleCleanup(ctx context.Context, _ *store.Store, _ js
 		if err != nil || (days > 0 && !batch.Before(cutoff)) {
 			continue
 		}
-		if err := os.RemoveAll(filepath.Join(root, entry.Name())); err != nil {
+		if err := storageRoot.RemoveAll(path.Join("recycle", entry.Name())); err != nil {
 			return fmt.Errorf("library: remove recycle batch %s: %w", entry.Name(), err)
 		}
 		removed++
@@ -292,7 +301,40 @@ func (m *Manager) insideLibrary(ctx context.Context, rel string) (string, error)
 	if !insideRoots(root, abs, roots) {
 		return "", fmt.Errorf("library: %s: %w", rel, ErrOutsideLibrary)
 	}
+	storageRoot, err := os.OpenRoot(root)
+	if err != nil {
+		return "", fmt.Errorf("library: open storage root: %w", err)
+	}
+	defer storageRoot.Close()
+	if _, err := storageRoot.Lstat(filepath.FromSlash(rel)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return "", fmt.Errorf("library: unsafe path %s: %w", rel, err)
+	}
 	return abs, nil
+}
+
+// removeLibraryPath removes one validated storage-root-relative path through
+// os.Root, because a lexical path check cannot prevent a later symlink swap.
+func (m *Manager) removeLibraryPath(rel string) error {
+	root, err := os.OpenRoot(m.root)
+	if err != nil {
+		return fmt.Errorf("library: open storage root: %w", err)
+	}
+	defer root.Close()
+	return root.Remove(filepath.FromSlash(rel))
+}
+
+// moveLibraryPath moves paths through os.Root so neither endpoint can follow
+// an intermediate symlink outside the storage root.
+func (m *Manager) moveLibraryPath(srcRel, dstRel string) error {
+	root, err := os.OpenRoot(m.root)
+	if err != nil {
+		return fmt.Errorf("library: open storage root: %w", err)
+	}
+	defer root.Close()
+	if err := root.MkdirAll(filepath.Dir(filepath.FromSlash(dstRel)), 0o755); err != nil {
+		return fmt.Errorf("create destination: %w", err)
+	}
+	return root.Rename(filepath.FromSlash(srcRel), filepath.FromSlash(dstRel))
 }
 
 // removableRoots lists the storage-root-relative roots removals may touch:
@@ -338,8 +380,25 @@ func (m *Manager) pruneEmpty(ctx context.Context, abs string) error {
 	if err != nil {
 		return err
 	}
+	storageRoot, err := os.OpenRoot(root)
+	if err != nil {
+		return fmt.Errorf("library: open storage root: %w", err)
+	}
+	defer storageRoot.Close()
 	for insideRoots(root, abs, roots) {
-		entries, err := os.ReadDir(abs)
+		rel, err := filepath.Rel(root, abs)
+		if err != nil {
+			return fmt.Errorf("library: resolve prune path %s: %w", abs, err)
+		}
+		dir, err := storageRoot.Open(rel)
+		var entries []os.DirEntry
+		if err == nil {
+			entries, err = dir.ReadDir(-1)
+			closeErr := dir.Close()
+			if err == nil {
+				err = closeErr
+			}
+		}
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
 			// Already gone: keep walking up, the parent may still be prunable.
@@ -348,7 +407,7 @@ func (m *Manager) pruneEmpty(ctx context.Context, abs string) error {
 		case len(entries) > 0:
 			return nil
 		default:
-			if err := os.Remove(abs); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			if err := storageRoot.Remove(rel); err != nil && !errors.Is(err, fs.ErrNotExist) {
 				return fmt.Errorf("library: remove %s: %w", abs, err)
 			}
 		}

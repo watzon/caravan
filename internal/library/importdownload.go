@@ -488,7 +488,7 @@ func (m *Manager) removeSupersededFiles(ctx context.Context, sourceRel string, e
 		if same {
 			continue
 		}
-		if err := os.Remove(m.abs(old.Path)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := m.removeLibraryPath(old.Path); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("library: remove superseded file %s: %w", old.Path, err)
 		}
 		if err := m.store.DeleteMediaFileByPath(ctx, old.Path); err != nil {

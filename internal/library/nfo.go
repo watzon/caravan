@@ -122,30 +122,33 @@ func (m *Manager) writeXML(relPath string, doc any) error {
 // writeFileAtomic writes data to a storage-root-relative path through a
 // temporary file in the same directory.
 func (m *Manager) writeFileAtomic(relPath string, data []byte) error {
-	absPath := m.abs(relPath)
-	if err := os.MkdirAll(filepath.Dir(absPath), 0o755); err != nil {
+	root, err := os.OpenRoot(m.root)
+	if err != nil {
+		return fmt.Errorf("library: open storage root: %w", err)
+	}
+	defer root.Close()
+	if err := root.MkdirAll(filepath.Dir(filepath.FromSlash(relPath)), 0o755); err != nil {
 		return fmt.Errorf("library: create %s: %w", path.Dir(relPath), err)
 	}
-
-	tmp, err := os.CreateTemp(filepath.Dir(absPath), ".caravan-*")
+	tmpRel := fmt.Sprintf("%s/.caravan-%d", path.Dir(relPath), time.Now().UnixNano())
+	tmp, err := root.OpenFile(filepath.FromSlash(tmpRel), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return fmt.Errorf("library: create temp beside %s: %w", relPath, err)
 	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName)
+	defer root.Remove(filepath.FromSlash(tmpRel))
 
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
 		return fmt.Errorf("library: write %s: %w", relPath, err)
 	}
 	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("library: close %s: %w", tmpName, err)
+		return fmt.Errorf("library: close %s: %w", tmpRel, err)
 	}
-	if err := os.Chmod(tmpName, 0o644); err != nil {
-		return fmt.Errorf("library: chmod %s: %w", tmpName, err)
+	if err := root.Chmod(filepath.FromSlash(tmpRel), 0o644); err != nil {
+		return fmt.Errorf("library: chmod %s: %w", tmpRel, err)
 	}
-	if err := os.Rename(tmpName, absPath); err != nil {
-		return fmt.Errorf("library: rename %s to %s: %w", tmpName, relPath, err)
+	if err := root.Rename(filepath.FromSlash(tmpRel), filepath.FromSlash(relPath)); err != nil {
+		return fmt.Errorf("library: rename %s to %s: %w", tmpRel, relPath, err)
 	}
 	return nil
 }

@@ -63,9 +63,18 @@ const progressInterval = 500 * time.Millisecond
 // this package the same lazily-built engine everything else uses.
 type EngineFunc func() core.Engine
 
+// relocationStore is the durable boundary this handler needs. Keeping it small
+// lets the failure paths prove that a job is retried until its state is stored.
+type relocationStore interface {
+	GetStorageMigration(context.Context, int64) (*core.StorageMigration, error)
+	UpdateStorageMigration(context.Context, *core.StorageMigration) error
+	SetSetting(context.Context, string, string) error
+	InsertEvent(context.Context, *core.Event) error
+}
+
 // Service owns the migration job handler.
 type Service struct {
-	st     *store.Store
+	st     relocationStore
 	engine EngineFunc
 	log    *slog.Logger
 	// step is the mover's test seam; see mover.step.
@@ -90,10 +99,9 @@ func New(st *store.Store, engine EngineFunc, log *slog.Logger) *Service {
 // mid-flight re-derives where every file is by looking at both roots — which is
 // also how it resumes after a crash.
 //
-// It never returns an error. A failed move has already put the files back and
-// said so on the row; letting the queue retry it on a backoff would start
-// moving a library again, unattended, minutes after it went wrong. Restarting
-// one is an explicit act.
+// It returns an error only when the durable state cannot be read or written, or
+// before a move can safely start. A terminal move failure is recorded before it
+// completes, so the queue can acknowledge it without starting it again.
 func (s *Service) Handle(ctx context.Context, _ *store.Store, payload json.RawMessage) error {
 	var p Payload
 	if err := json.Unmarshal(payload, &p); err != nil {
@@ -107,50 +115,68 @@ func (s *Service) Handle(ctx context.Context, _ *store.Store, payload json.RawMe
 	}
 	if err != nil {
 		s.log.Error("storage migration: read the migration", "id", p.MigrationID, "error", err)
-		return nil
+		return err
 	}
 	if !core.StorageMigrationOpen(m.Status) {
 		return nil
+	}
+	if m.Status == core.StorageMigrationRunning && m.Error != "" {
+		quiescer, err := s.quiesceQueue(ctx)
+		if err != nil {
+			return err
+		}
+		return s.unwind(ctx, m, quiescer, errors.New(m.Error))
 	}
 
 	m.Status = core.StorageMigrationRunning
 	m.Error = ""
 	if err := s.st.UpdateStorageMigration(ctx, m); err != nil {
 		s.log.Error("storage migration: claim the migration", "id", m.ID, "error", err)
-		return nil
+		return err
 	}
 
-	// Paused for the duration: a download writing into the incomplete folder
-	// while it is being moved is a file the mover measures, copies and deletes
-	// between two writes.
-	paused := s.pauseQueue(ctx)
+	// Quiesced for the duration: a one-time queue snapshot cannot stop a new
+	// download from writing into incomplete while the mover copies and deletes.
+	quiescer, err := s.quiesceQueue(ctx)
+	if err != nil {
+		return err
+	}
 
-	if err := s.run(ctx, m); err != nil {
-		return s.unwind(ctx, m, paused, err)
+	moved, terminal, err := s.run(ctx, m)
+	if err != nil {
+		if !moved && !terminal {
+			return errors.Join(err, s.resumeQueue(ctx, quiescer))
+		}
+		return s.unwind(ctx, m, quiescer, err)
+	}
+	if err := s.resumeQueue(ctx, quiescer); err != nil {
+		return err
 	}
 	return s.finish(ctx, m)
 }
 
 // run does the move, leaving every status decision to its caller.
-func (s *Service) run(ctx context.Context, m *core.StorageMigration) error {
+func (s *Service) run(ctx context.Context, m *core.StorageMigration) (moved, terminal bool, err error) {
 	// Re-validated rather than trusted from the enqueue: hours can pass in
 	// between, and every rule it enforces describes a way to lose a library.
 	// The empty-target rule is deliberately not re-checked — a resumed
 	// migration's target is full of its own files.
 	if err := ValidateMove(m.SourceRoot, m.TargetRoot); err != nil {
-		return err
+		// Invalid roots cannot recover on a queue retry. Recording the rejected
+		// request ends the job without moving any files.
+		return false, true, err
 	}
 
 	entries, err := plan(m.SourceRoot, m.TargetRoot)
 	if err != nil {
-		return err
+		return false, false, err
 	}
 	m.FilesTotal, m.FilesDone, m.BytesTotal, m.BytesDone = int64(len(entries)), 0, 0, 0
 	for _, e := range entries {
 		m.BytesTotal += e.size
 	}
 	if err := s.st.UpdateStorageMigration(ctx, m); err != nil {
-		return err
+		return false, false, err
 	}
 
 	flushed := time.Now()
@@ -170,19 +196,19 @@ func (s *Service) run(ctx context.Context, m *core.StorageMigration) error {
 
 	mv := &mover{from: m.SourceRoot, to: m.TargetRoot, log: s.log, step: s.step}
 	if err := mv.move(ctx, entries, done, false); err != nil {
-		return err
+		return true, true, err
 	}
 	if err := verify(m.SourceRoot, m.TargetRoot, entries); err != nil {
-		return err
+		return true, true, err
 	}
 
 	// Everything has arrived and been measured. Only now does the database stop
 	// describing the old root.
 	if err := s.st.SetSetting(ctx, store.SettingStorageRoot, m.TargetRoot); err != nil {
-		return err
+		return true, true, err
 	}
 	pruneEmptyDirs(m.SourceRoot)
-	return nil
+	return true, false, nil
 }
 
 // finish records a completed migration.
@@ -197,6 +223,7 @@ func (s *Service) finish(ctx context.Context, m *core.StorageMigration) error {
 	m.Error = ""
 	if err := s.st.UpdateStorageMigration(ctx, m); err != nil {
 		s.log.Error("storage migration: record completion", "id", m.ID, "error", err)
+		return err
 	}
 	s.event(ctx, core.EventLevelInfo,
 		fmt.Sprintf("Storage root moved to %s", m.TargetRoot),
@@ -212,10 +239,20 @@ func (s *Service) finish(ctx context.Context, m *core.StorageMigration) error {
 // It runs on a context that cannot be cancelled: the process shutting down
 // mid-move is exactly when the library most needs to end up back under the root
 // the settings table still points at.
-func (s *Service) unwind(ctx context.Context, m *core.StorageMigration, paused []core.DownloadID, cause error) error {
+func (s *Service) unwind(ctx context.Context, m *core.StorageMigration, quiescer core.EngineQuiescer, cause error) error {
 	ctx = context.WithoutCancel(ctx)
 	s.log.Error("storage migration failed, putting the files back",
 		"id", m.ID, "from", m.SourceRoot, "to", m.TargetRoot, "error", cause)
+
+	// The marker is durable before rollback changes the filesystem. A retry that
+	// follows a failed final write therefore finishes the rollback instead of
+	// treating the restored source tree as a new migration.
+	m.Status = core.StorageMigrationRunning
+	m.Error = cause.Error()
+	if err := s.st.UpdateStorageMigration(ctx, m); err != nil {
+		s.log.Error("storage migration: mark rollback", "id", m.ID, "error", err)
+		return err
+	}
 
 	// The plan is rebuilt from the filesystem rather than reused: after a crash
 	// there is no in-memory plan to reuse, and this path has to behave the same
@@ -232,6 +269,7 @@ func (s *Service) unwind(ctx context.Context, m *core.StorageMigration, paused [
 	// files have just been taken out of.
 	if err := s.st.SetSetting(ctx, store.SettingStorageRoot, m.SourceRoot); err != nil {
 		s.log.Error("storage migration: restore the storage root setting", "id", m.ID, "error", err)
+		return err
 	}
 	pruneEmptyDirs(m.TargetRoot)
 
@@ -246,10 +284,15 @@ func (s *Service) unwind(ctx context.Context, m *core.StorageMigration, paused [
 	m.Error = cause.Error()
 	if err := s.st.UpdateStorageMigration(ctx, m); err != nil {
 		s.log.Error("storage migration: record the failure", "id", m.ID, "error", err)
+		return err
 	}
 
-	// Safe now: the files are back where this engine already expects them.
-	s.resumeQueue(ctx, paused)
+	// Safe now: the files are back where this engine already expects them. The
+	// row stays open when release fails, which preserves the engine's quiesced
+	// set for the next delivery instead of leaving downloads paused in silence.
+	if err := s.resumeQueue(ctx, quiescer); err != nil {
+		return err
+	}
 
 	level, message := core.EventLevelWarn, "Storage migration rolled back"
 	if m.Status == core.StorageMigrationFailed {
@@ -259,52 +302,32 @@ func (s *Service) unwind(ctx context.Context, m *core.StorageMigration, paused [
 	return nil
 }
 
-// pauseQueue pauses every transferring download and reports which ones it
-// paused, so a rollback can put the queue back the way it found it.
-//
-// Downloads that were already paused are left alone and not reported: resuming
-// them afterwards would start transfers the user had deliberately stopped.
-func (s *Service) pauseQueue(ctx context.Context) []core.DownloadID {
+// quiesceQueue acquires the engine's transfer barrier. A migration is unsafe
+// with an engine that cannot reject new writers while it confirms old writers
+// have stopped, so no weaker List-and-Pause fallback exists.
+func (s *Service) quiesceQueue(ctx context.Context) (core.EngineQuiescer, error) {
 	engine := s.currentEngine()
 	if engine == nil {
-		return nil
+		return nil, nil
 	}
-	list, err := engine.List(ctx)
-	if err != nil {
-		s.log.Warn("storage migration: read the download queue", "error", err)
-		return nil
+	quiescer, ok := engine.(core.EngineQuiescer)
+	if !ok {
+		return nil, errors.New("download engine cannot quiesce transfers for a storage migration")
 	}
-	var paused []core.DownloadID
-	for _, d := range list {
-		switch d.State {
-		case core.DownloadPaused, core.DownloadCompleted, core.DownloadFailed:
-			continue
-		}
-		if err := engine.Pause(ctx, d.ID); err != nil {
-			s.log.Warn("storage migration: pause a download", "download", d.ID, "error", err)
-			continue
-		}
-		paused = append(paused, d.ID)
+	if err := quiescer.Quiesce(ctx); err != nil {
+		return nil, fmt.Errorf("quiesce the download queue: %w", err)
 	}
-	if len(paused) > 0 {
-		s.log.Info("storage migration: download queue paused", "downloads", len(paused))
-	}
-	return paused
+	return quiescer, nil
 }
 
-func (s *Service) resumeQueue(ctx context.Context, ids []core.DownloadID) {
-	if len(ids) == 0 {
-		return
+func (s *Service) resumeQueue(ctx context.Context, quiescer core.EngineQuiescer) error {
+	if quiescer == nil {
+		return nil
 	}
-	engine := s.currentEngine()
-	if engine == nil {
-		return
+	if err := quiescer.ResumeQuiesced(context.WithoutCancel(ctx)); err != nil {
+		return fmt.Errorf("resume the download queue: %w", err)
 	}
-	for _, id := range ids {
-		if err := engine.Resume(ctx, id); err != nil {
-			s.log.Warn("storage migration: resume a download", "download", id, "error", err)
-		}
-	}
+	return nil
 }
 
 func (s *Service) currentEngine() core.Engine {
