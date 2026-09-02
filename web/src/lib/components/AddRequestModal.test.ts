@@ -696,7 +696,7 @@ describe('AddRequestModal — minimum availability', () => {
 });
 
 /**
- * The add path's credential guard (PLAN phase 10 task 3).
+ * The add path's credential guard.
  *
  * This dialog closes on success and has no empty state to fall back to, so the
  * toast is the only affordance — which makes it all the more important that it
@@ -728,10 +728,10 @@ describe('AddRequestModal — metadata credential', () => {
 
   // Discover and Requests both mount this modal without a `seasons` prop, so a
   // series ask prefetches them on mount. That call needs the same credential as
-  // the submit below it, and used to raw-toast the provider's complaint — the
-  // exact thing PLAN phase 10 task 3 rules out. The Requests path is the
-  // reachable one: the queue renders without TMDB, so an admin approving a
-  // series asked for yesterday meets it the moment the key goes bad.
+  // the submit below it, and must name the fix rather than raw-toast the
+  // provider's complaint. The Requests path is the reachable one: the queue
+  // renders without TMDB, so an admin approving a series asked for yesterday
+  // meets it the moment the key goes bad.
   it('names the fix when the season prefetch is the call that fails', async () => {
     vi.stubGlobal(
       'fetch',

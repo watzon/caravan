@@ -1,5 +1,5 @@
 /**
- * Settings → Metadata → Stash-box (PLAN Part 2 phase 8).
+ * Settings → Metadata → Stash-box.
  *
  * Three things this card must never get wrong, so they are what these test:
  *

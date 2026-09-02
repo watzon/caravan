@@ -344,7 +344,7 @@ describe('Requests', () => {
 });
 
 /**
- * Scene rows on the shared requests screen (PLAN phase 9 task 7d).
+ * Scene rows on the shared requests screen.
  *
  * They only ever reach a caller the adult module is visible to — the server
  * strips them from everyone else's list — so what is proved here is that a row

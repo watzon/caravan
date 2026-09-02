@@ -3,24 +3,21 @@
    * Explore → Requests, which is two screens sharing one list (SPEC §11).
    *
    * An admin sees a decision screen split into awaiting approval and approved
-   * history. Pending wishes keep the two decisions they can receive: Approve
-   * reopens the shared add/request modal in add mode prefilled with the
-   * requested seasons, and submits through POST /requests/{id}/approve — the
-   * add is what marks the row approved, so there is no second write to get out
-   * of step with. Dismiss answers no; the row survives as history, and the
+   * history. Approve reopens the shared add/request modal in add mode prefilled
+   * with the requested seasons, and submits through POST /requests/{id}/approve.
+   * The add is what marks the row approved, so there is no second write to get
+   * out of step with. Dismiss answers no; the row survives as history, and the
    * title can be requested again later.
    *
-   * A scene row is the one exception on both counts, and the reason the row
-   * helpers live in lib/requests.ts rather than inline here: it has no tmdb id
-   * and so nowhere to link, and approving it takes the POST directly because
-   * the modal has nothing to ask about it (see `approveScene`). Scene rows only
-   * ever reach a caller the adult module is visible to — the server strips them
-   * from everybody else's list — so there is no visibility branch in this file.
+   * A scene row is the exception on both counts, and the reason the row helpers
+   * live in lib/requests.ts rather than inline here: it has no tmdb id and so
+   * nowhere to link, and approving it takes the POST directly because the modal
+   * has nothing to ask about it (see `approveScene`). The server strips scene
+   * rows from the list of anybody the adult module is invisible to, so there is
+   * no visibility branch in this file.
    *
-   * A member sees only their own rows, and every status of them, so they can
-   * watch a wish go from pending to approved. The only thing they may do to one
-   * is cancel it while it is still pending — the same DELETE, under the name it
-   * has when the row is yours. The server enforces both halves and the list it
+   * A member sees only their own rows, in every status, and may cancel one
+   * while it is still pending. The server enforces both halves and the list it
    * hands back is already scoped, so nothing here filters by owner.
    */
   import { api, errorText } from '../api/client';

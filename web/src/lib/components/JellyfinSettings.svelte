@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * The Jellyfin playback handoff (SPEC §5.2, PLAN phase 4 task 1).
+   * The Jellyfin playback handoff (SPEC §5.2).
    *
    * Caravan already writes the library in the layout and NFO conventions
    * Jellyfin reads, so this integration is one thing only: after an import,

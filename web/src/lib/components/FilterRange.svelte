@@ -1,30 +1,21 @@
 <script lang="ts">
   /**
    * A popover body that is a number, or a pair of them: year window, runtime
-   * bounds, rating floor, scene duration.
+   * bounds, rating floor, scene duration. `max` is optional because the adult
+   * provider serves a single `duration` with no comparison operator, so a
+   * second box there would be a control nothing could honour. 0 means unset,
+   * so an emptied box clears the filter rather than filtering on zero.
    *
-   * `max` is optional because one of these genuinely has no upper half — the
-   * adult provider serves a single `duration` with no comparison operator, so a
-   * second box there would be a control nothing could honour. The component
-   * renders what it is given rather than rendering a pair and disabling one,
-   * which would read as a bug rather than as a limit.
-   *
-   * 0 is "unset" for every one of these, so an emptied box clears the filter
-   * rather than filtering on zero.
-   *
-   * THE BOX OWNS ITS TEXT. Every one of these fields drives a filter that lives
-   * in the URL, so a committed value comes straight back down as a prop — and
-   * echoing that back into the field is how the rating pill lost the half-star
-   * its own control advertised. "7." is not a complete number, so it committed
-   * as "unset", the URL was rewritten, and the re-render wiped the 7 before the
-   * 5 could be typed. Hence the two rules here:
+   * The box owns its text. These filters live in the URL, so a committed value
+   * comes straight back down as a prop, and echoing it into the field wipes a
+   * half-typed number. Hence two rules:
    *
    *  1. The text is local state. It is refilled from above only when the value
-   *     coming down disagrees with what this component last sent up — Clear
-   *     all, a removed chip, a Back — never as the echo of its own commit.
+   *     coming down disagrees with what this component last sent up (Clear all,
+   *     a removed chip, a Back), never as the echo of its own commit.
    *  2. A commit happens on a COMPLETE number, after the same debounce the
-   *     typeaheads use. A half-typed "7." or "-" is not a filter yet, and
-   *     without the wait every digit of a year was its own scope request.
+   *     typeaheads use. Without the wait, every digit of a year is its own
+   *     scope request.
    *
    * That is also why these are text boxes with `inputmode="decimal"` rather
    * than `type="number"`: a number input reports "" for a partly-typed value,

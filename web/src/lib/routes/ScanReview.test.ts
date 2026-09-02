@@ -1,5 +1,5 @@
 /**
- * Scan review's credential banner (PLAN phase 10 task 3).
+ * Scan review's credential banner.
  *
  * A scan with no usable TMDB key still runs — it walks the disk, parses every
  * name and imports what it finds — it just cannot ask TMDB which title any of
@@ -319,9 +319,9 @@ describe('ScanReview', () => {
   });
 
   /**
-   * The universal search's untied grab parks here on purpose (plan part B8),
-   * and it arrives knowing two things a scan-parked file does not: which
-   * library the user chose, and that nothing actually failed.
+   * The universal search's untied grab parks here on purpose, and it arrives
+   * knowing two things a scan-parked file does not: which library the user
+   * chose, and that nothing actually failed.
    */
   it('names the library an untied grab was scoped to', async () => {
     libraries.all = [library()];

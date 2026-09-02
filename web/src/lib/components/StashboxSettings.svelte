@@ -1,7 +1,7 @@
 <script lang="ts">
   import { useI18n } from '../i18n.svelte';
   /**
-   * Settings → Metadata → Stash-box (PLAN Part 2 phase 8).
+   * Settings → Metadata → Stash-box.
    *
    * One card per provider is this page's rule, and stash-box is the provider
    * that is configured more than once: each endpoint a household subscribes to
@@ -13,8 +13,8 @@
    * than quietly identifying nothing on the next scan.
    *
    * Every route it calls is admin-only. The card is mounted for any admin
-   * session, including one that has no adult library yet: that is how the
-   * first endpoint gets added before Add library can point at it.
+   * session, including one that has no adult library yet: that is how the first
+   * endpoint gets added before Add library can point at it.
    */
   import { onMount } from 'svelte';
   import { api, errorText } from '../api/client';

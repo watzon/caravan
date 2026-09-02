@@ -1,5 +1,5 @@
 /**
- * The shared release table (plan part B7).
+ * The shared release table.
  *
  * It was lifted out of the per-item picker so the universal search renders the
  * same rows, which makes its contract worth pinning: the ranked order and the

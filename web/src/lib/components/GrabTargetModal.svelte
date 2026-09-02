@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * Where a universal-search grab lands (plan part B8).
+   * Where a universal-search grab lands.
    *
    * The per-item picker never asks this: it was opened FROM an item, so the
    * item is the answer. A free-text search has no item, so the question has to
@@ -8,10 +8,10 @@
    *
    * "Download only" is the default because it is the one that cannot be wrong:
    * the payload parks in scan review scoped to the chosen library and the user
-   * matches it by hand, which is the same graceful-degradation path the
-   * scanner already uses (SPEC §13). "Tie to an item" is the better outcome
-   * when the item exists — the import knows what it is importing — so it is
-   * offered, but it is never guessed at.
+   * matches it by hand, which is the same graceful-degradation path the scanner
+   * already uses (SPEC §13). "Tie to an item" is the better outcome when the
+   * item exists — the import knows what it is importing — so it is offered, but
+   * it is never guessed at.
    *
    * The library is asked for in both modes because the server requires it in
    * both: an untied grab has nothing else to say where the file belongs.

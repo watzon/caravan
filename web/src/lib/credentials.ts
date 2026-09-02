@@ -1,5 +1,5 @@
 /**
- * The credential model the SPA branches on (PLAN phase 10 tasks 2-5).
+ * The credential model the SPA branches on.
  *
  * Two things arrive from the server and they are deliberately different:
  *

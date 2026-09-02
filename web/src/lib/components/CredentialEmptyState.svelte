@@ -1,7 +1,7 @@
 <script lang="ts">
   /**
    * What a metadata-needing surface renders when the TMDB key is missing or
-   * rejected (PLAN phase 10 task 3).
+   * rejected.
    *
    * It is an empty state rather than an error, because that is what it is: the
    * screen has nothing to show and there is exactly one thing that would change

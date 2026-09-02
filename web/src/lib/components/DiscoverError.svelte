@@ -6,10 +6,10 @@
    * Everything else is the provider being unhappy, which is what the retry is
    * for.
    *
-   * Phase 10 split "no key" into absent vs invalid: the error envelope now
-   * carries a code, and the two need different sentences because they need
-   * different actions (enter one / correct one). A 503 with no code still reads
-   * as absent, which is what every such route meant before the code existed.
+   * "No key" and "key refused" need different sentences because they need
+   * different actions: enter one, or correct one. A 503 with no error code
+   * still reads as absent, which is what every such route meant before the code
+   * existed.
    */
   import type { CredentialFault } from '../credentials';
   import CredentialEmptyState from './CredentialEmptyState.svelte';

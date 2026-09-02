@@ -36,7 +36,7 @@ class SystemState {
   }
 
   /**
-   * The TMDB key's state as of the last status fetch (PLAN phase 10 task 2).
+   * The TMDB key's state as of the last status fetch.
    *
    * A status we have not fetched — and a member, who may not fetch it at all —
    * reads as "ok": the badge this feeds is a warning, and warning about a

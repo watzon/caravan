@@ -1,26 +1,23 @@
 <script lang="ts">
   /**
-   * Settings → Libraries (SPEC §7 `libraries`, PLAN phase 8 task 7).
+   * Settings → Libraries (SPEC §7 `libraries`).
    *
    * A library is where the multi-instance *arr pattern collapses into one
    * Caravan: Movies and Series each carry their own indexer set, per-pair
    * category overrides, download routing and DLNA visibility, falling back to
    * the global settings wherever they do not answer. So the screen's whole job
    * is to keep "this library decided that" and "the global setting decided
-   * that" visibly apart — an override that looks like a default is a setting
+   * that" visibly apart. An override that looks like a default is a setting
    * nobody knows is in effect.
    *
-   * It is also where a library is switched off and narrowed to named accounts
-   * (PLAN Part 3 phase 5). Those two controls used to be one module-wide
-   * switch and one module-wide roster on a page of their own; a library is the
-   * object they always described, so they moved onto its card and the page
-   * dissolved. Nothing here asks what KIND a library is before offering them —
-   * an adult shelf and a children's shelf are the same object with the same
-   * questions, which is the whole point of the generalization.
+   * It is also where a library is switched off and narrowed to named accounts.
+   * Nothing here asks what KIND a library is before offering those two
+   * controls: an adult shelf and a children's shelf are the same object with
+   * the same questions.
    *
    * Every control saves on change rather than through a per-card Save button.
    * The switcher pills swap the whole screen, so staged edits would either be
-   * silently discarded on a switch or have to block it; and the library writes
+   * silently discarded on a switch or have to block it, and the library writes
    * answer with the library's whole state, so one response re-renders every
    * card. A failed write therefore leaves the screen showing what the server
    * still holds, never an edit that did not land. The access pair is the one
@@ -1409,7 +1406,7 @@
         </Field>
       {/if}
 
-      <!-- A warning, never a block (PLAN Part 3 phase 4): the stash-box
+      <!-- A warning, never a block: the stash-box
            instance CRUD lives under /adult and only appears once an adult
            library does, so the library necessarily comes first. A library whose
            chain resolves to no box parks its scans rather than failing them. -->

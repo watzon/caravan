@@ -1,11 +1,11 @@
 /**
- * The universal indexer search screen (plan part B8).
+ * The universal indexer search screen.
  *
  * Three promises are pinned here. The URL is the search, so a shared link
  * reproduces its own results. A grab always goes through the target dialog,
  * because a free-text result has no item behind it. And the two answers that
- * dialog can give — untied and tied — reach the server as two different
- * request shapes.
+ * dialog can give — untied and tied — reach the server as two different request
+ * shapes.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';

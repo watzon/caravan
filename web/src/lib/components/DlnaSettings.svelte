@@ -1,13 +1,13 @@
 <script lang="ts">
   /**
-   * The built-in DLNA media server (SPEC §5.1, PLAN phase 4 task 2).
+   * The built-in DLNA media server (SPEC §5.1).
    *
    * There is nothing to configure beyond "on" and what the device calls itself:
    * a DLNA server either advertises the library on the LAN or it does not, and
    * everything else — what a client sees, how it plays — is fixed by the
-   * protocol. So the two values are plain settings keys saved through
-   * PUT /settings, and this component's real job is the status line: whether
-   * SSDP actually came up, which the settings table cannot tell you.
+   * protocol. So the two values are plain settings keys saved through PUT
+   * /settings, and this component's real job is the status line: whether SSDP
+   * actually came up, which the settings table cannot tell you.
    */
   import { onMount } from 'svelte';
   import { api, errorText } from '../api/client';
@@ -49,12 +49,12 @@
   let friendlyName = $state('');
 
   /**
-   * The Adult library row, when the module is on (PLAN phase 9 task 7b).
+   * The Adult library row, when the module is on.
    *
    * GET /libraries omits it entirely while the module is off, so "did the
-   * response carry an adult row" IS the question "should the sub-toggle
-   * exist" — there is no second setting to consult and no way for the two
-   * answers to disagree.
+   * response carry an adult row" IS the question "should the sub-toggle exist"
+   * — there is no second setting to consult and no way for the two answers to
+   * disagree.
    */
   let adultLibrary = $state<Library | null>(null);
   let sharingAdult = $state(false);
@@ -94,11 +94,11 @@
   }
 
   /**
-   * The sub-toggle writes the library row through the phase-8 libraries API
-   * rather than a DLNA setting of its own. That is the whole integration: the
-   * Adult shelf is advertised or not for exactly the reason Movies and Series
-   * are, and there is no adult-specific visibility rule in the DLNA server to
-   * get out of step with this switch.
+   * The sub-toggle writes the library row through the libraries API rather than
+   * a DLNA setting of its own. That is the whole integration: the Adult shelf
+   * is advertised or not for exactly the reason Movies and Series are, and
+   * there is no adult-specific visibility rule in the DLNA server to get out of
+   * step with this switch.
    */
   async function shareAdult(next: boolean) {
     const lib = adultLibrary;

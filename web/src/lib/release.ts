@@ -2,9 +2,9 @@
  * Release picker logic (SPEC §9 step 4): the score the table sorts by, and the
  * flags that warn a user off a result without hiding it.
  *
- * Nothing here is a quality profile — profiles and cutoffs are phase 3. This is
- * the "sensible default order" for a human reading a fan-out of raw indexer
- * results, and the user can still grab any row.
+ * Nothing here is a quality profile. This is the "sensible default order" for a
+ * human reading a fan-out of raw indexer results, and the user can still grab
+ * any row.
  *
  * Pure — unit-tested in release.test.ts.
  */

@@ -26,10 +26,6 @@ import {
   type TranslationKey,
 } from './i18n.svelte';
 
-/* ---------------------------------------------------------------------------
- * The scope row.
- * ------------------------------------------------------------------------ */
-
 export type ExploreScope = 'featured' | 'movies' | 'series' | 'adult';
 
 /**
@@ -57,10 +53,6 @@ export function exploreScopeHref(scope: ExploreScope): string {
 export function visibleScopes(adultVisible: boolean): typeof EXPLORE_SCOPES {
   return EXPLORE_SCOPES.filter((scope) => !scope.adult || adultVisible);
 }
-
-/* ---------------------------------------------------------------------------
- * Refs — an id with the name it was picked under.
- * ------------------------------------------------------------------------ */
 
 export interface FilterRef {
   /** Opaque. A TMDB integer as a string, or a stash-box uuid. */
@@ -98,10 +90,10 @@ export function hasRef(refs: readonly FilterRef[], id: string): boolean {
   return refs.some((r) => r.id === id);
 }
 
-/* ---------------------------------------------------------------------------
- * Sorting. One list per scope, each entry a (sort, order) pair under a name a
- * reader recognises — "Newest" rather than "release_date, descending".
- * ------------------------------------------------------------------------ */
+/*
+ * One sort list per scope, each entry a (sort, order) pair under a name a
+ * reader recognises: "Newest" rather than "release_date, descending".
+ */
 
 export type SortOrder = 'asc' | 'desc';
 
@@ -152,10 +144,6 @@ function sortChoice(choices: SortChoice[], key: string): SortChoice {
   return choices.find((c) => c.key === key) ?? (choices[0] as SortChoice);
 }
 
-/* ---------------------------------------------------------------------------
- * The title filter (movies and series).
- * ------------------------------------------------------------------------ */
-
 export interface TitleFilter {
   genres: FilterRef[];
   keywords: FilterRef[];
@@ -203,10 +191,6 @@ export const EMPTY_TITLE_FILTER: TitleFilter = {
   sort: 'popularity',
   hideOwned: false,
 };
-
-/* ---------------------------------------------------------------------------
- * The scene filter.
- * ------------------------------------------------------------------------ */
 
 export type SceneSiteScope = 'site' | 'parent' | 'network';
 
@@ -266,14 +250,14 @@ export const EMPTY_SCENE_FILTER: SceneFilter = {
   hideOwned: false,
 };
 
-/* ---------------------------------------------------------------------------
+/*
  * URL ⇄ filter.
  *
  * `hide` is the one client-only parameter. It is stripped on the way to the
  * API, which allowlists its query string and answers 400 to anything it does
  * not serve — so a parameter that only the browser understands must never be
  * forwarded.
- * ------------------------------------------------------------------------ */
+ */
 
 const HIDE_PARAM = 'hide';
 /** Client-only: the unfiltered movies/series/adult path is a shelf landing. */
@@ -490,14 +474,14 @@ export function sceneAddedHref(): string {
   return sceneFilterHref({ ...EMPTY_SCENE_FILTER, sort: 'added' });
 }
 
-/* ---------------------------------------------------------------------------
+/*
  * Filter → API query.
  *
- * The two dialects differ in one way that matters: TMDB takes comma-joined
- * bare ids, and the adult endpoint takes one repeated parameter per ref with
- * the name attached, because a performer's name may contain a comma and its
+ * The two dialects differ in one way that matters: TMDB takes comma-joined bare
+ * ids, and the adult endpoint takes one repeated parameter per ref with the
+ * name attached, because a performer's name may contain a comma and its
  * provider filters on the name as well as the id.
- * ------------------------------------------------------------------------ */
+ */
 
 export type ApiQuery = Record<string, string | number | string[] | undefined>;
 
@@ -560,13 +544,13 @@ export function sceneApiQuery(filter: SceneFilter, page: number): ApiQuery {
   };
 }
 
-/* ---------------------------------------------------------------------------
+/*
  * Applied chips.
  *
  * One chip is one removable fact. A range is a single chip because "runtime
- * 60-120" is one thought, and two chips for it would let somebody remove half
- * a bound and be left with a filter they did not choose.
- * ------------------------------------------------------------------------ */
+ * 60-120" is one thought, and two chips for it would let somebody remove half a
+ * bound and be left with a filter they did not choose.
+ */
 
 export interface AppliedChip {
   /** Stable, and the argument `removeTitleChip`/`removeSceneChip` takes back. */
@@ -775,14 +759,14 @@ export function clearedSceneFilter(filter: SceneFilter): SceneFilter {
   return { ...EMPTY_SCENE_FILTER, sort: filter.sort, hideOwned: filter.hideOwned };
 }
 
-/* ---------------------------------------------------------------------------
+/*
  * The language pill.
  *
  * A short list rather than TMDB's several hundred: the pill is a filter, not a
  * catalogue, and every code here is one the provider has a meaningful amount of
  * in. The labels come from the runtime, so they arrive in the reader's own
  * language.
- * ------------------------------------------------------------------------ */
+ */
 
 export const FILTER_LANGUAGES = [
   'en', 'es', 'fr', 'de', 'it', 'pt', 'nl', 'sv', 'da', 'no', 'pl', 'ru',

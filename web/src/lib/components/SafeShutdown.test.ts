@@ -1,7 +1,7 @@
 /**
- * Safe shutdown (SPEC §2.3, §11, PLAN phase 5 task 3): the confirm dialog, the
- * POST, and the terminal "safe to eject" state the SPA lands in when the server
- * it was talking to stops existing.
+ * Safe shutdown (SPEC §2.3, §11): the confirm dialog, the POST, and the
+ * terminal "safe to eject" state the SPA lands in when the server it was
+ * talking to stops existing.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';

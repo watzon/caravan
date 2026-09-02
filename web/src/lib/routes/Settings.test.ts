@@ -320,10 +320,10 @@ describe('Settings overview and route resolution', () => {
   });
 
   /**
-   * The Adult content page dissolved into the library cards (PLAN Part 3
-   * phase 5): its master switch is a library's Active toggle and its member
-   * roster is a library's Access card. A bookmark has to land where both now
-   * are, not on the generic Metadata fallback that an unknown slug gets.
+   * The Adult content page dissolved into the library cards: its master switch
+   * is a library's Active toggle and its member roster is a library's Access
+   * card. A bookmark has to land where both now are, not on the generic
+   * Metadata fallback that an unknown slug gets.
    */
   it('lands the retired adult slug on Libraries', async () => {
     stubFetch();
@@ -481,12 +481,12 @@ describe('Settings engine tab', () => {
 });
 
 /**
- * Settings → Metadata (PLAN phase 10 task 4).
+ * Settings → Metadata.
  *
  * The key entered here is the one every metadata surface runs on, so it gets
- * the indexer card's idiom: ask the provider, report what it said, inline —
- * and prove the key in the field rather than the one on disk, so a typo never
- * has to be saved to find out it was one.
+ * the indexer card's idiom: ask the provider, report what it said, inline — and
+ * prove the key in the field rather than the one on disk, so a typo never has
+ * to be saved to find out it was one.
  */
 describe('Settings metadata pane', () => {
   const ALL_PROVIDERS = [
@@ -742,8 +742,8 @@ describe('Settings metadata pane', () => {
     expect(calls.filter((c) => c.method === 'PUT').at(-1)?.body).toEqual({ thetvdb_pin: '1234' });
   });
 
-  // The point of the per-provider map (phase 5): one rejected key marks its own
-  // provider and says nothing about the other.
+  // The point of the per-provider map: one rejected key marks its own provider
+  // and says nothing about the other.
   it('reads each card’s badge from that provider’s entry in the status map', async () => {
     stubMetadata(() => jsonResponse({ status: 'ok' }));
     system.status = {
@@ -785,9 +785,9 @@ describe('Settings metadata pane', () => {
     }
   });
 
-  // The pointer card is gone (PLAN Part 2 phase 8): stash-box endpoints are
-  // managed HERE now, one row per configured box. The card is on Metadata
-  // for any admin, including one with no adult library yet.
+  // The pointer card is gone: stash-box endpoints are managed HERE now, one row
+  // per configured box. The card is on Metadata for any admin, including one
+  // with no adult library yet.
   it('manages the stash-box instances for an admin session', async () => {
     session.user = { username: 'root', role: 'admin', open: false, adult: false };
     stubMetadata(() => jsonResponse({ status: 'ok' }));

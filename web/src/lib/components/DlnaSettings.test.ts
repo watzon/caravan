@@ -196,9 +196,9 @@ describe('DlnaSettings', () => {
     expect(button('Retry')).toBeDefined();
   });
 
-  // PLAN phase 9 task 7b. The sub-toggle is the one discoverable control for
-  // putting adult content on the LAN, so its absence while the module is off is
-  // as much of the contract as its behaviour while the module is on.
+  // The sub-toggle is the one discoverable control for putting adult content on
+  // the LAN, so its absence while the module is off is as much of the contract
+  // as its behaviour while the module is on.
   describe('the Adult sub-toggle', () => {
     function switches(): HTMLButtonElement[] {
       return [...host.querySelectorAll('[role="switch"]')] as HTMLButtonElement[];
@@ -234,7 +234,7 @@ describe('DlnaSettings', () => {
       sub.click();
       await settle();
 
-      // The phase-8 libraries API, not a DLNA setting of its own.
+      // The libraries API, not a DLNA setting of its own.
       expect(patched).toEqual([{ id: 3, body: { dlna_visible: true } }]);
       expect(toggle(1).getAttribute('aria-checked')).toBe('true');
       // Nothing about the DLNA card's own Save button was touched by it.

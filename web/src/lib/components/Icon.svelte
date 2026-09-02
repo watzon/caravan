@@ -53,9 +53,9 @@
     // The overflow trigger. Filled dots rather than stroked circles: at 2px
     // stroke and this size, rings read as smudges.
     more: '<circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.4" fill="currentColor" stroke="none"/>',
-    // The adult module's mark (phase 9). Stroke-based and 24x24 like the rest;
-    // it is the one icon in the set that is not a noun from the media domain,
-    // which is the point — it reads as "this is a different kind of shelf".
+    // The adult module's mark. Stroke-based and 24x24 like the rest; it is the
+    // one icon in the set that is not a noun from the media domain, which is
+    // the point — it reads as "this is a different kind of shelf".
     flame:
       '<path d="M12 21a6 6 0 0 0 6-6c0-4-3-6.5-4-9.5-1.5 1.5-2 3-2 4.5-1-1-1.5-2.5-1.5-4C8 8 6 10.5 6 15a6 6 0 0 0 6 6z"/><path d="M12 21a2.5 2.5 0 0 0 2.5-2.5c0-1.6-1.3-2.4-2.5-4-1.2 1.6-2.5 2.4-2.5 4A2.5 2.5 0 0 0 12 21z"/>',
     // Theme toggle: sun when the chrome is dark (switch to light), moon

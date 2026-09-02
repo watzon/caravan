@@ -1,6 +1,6 @@
 /**
  * Settings → Playback, tested for one thing only: whether the Stash card is
- * there (PLAN phase 11 task 5).
+ * there.
  *
  * The other three cards have their own files. This one exists because the gate
  * lives here rather than inside StashSettings, and a gate nobody mounts the

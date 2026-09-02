@@ -1,17 +1,16 @@
 <script lang="ts">
   import { useI18n } from '../i18n.svelte';
   /**
-   * The release result table, its skeleton, and its empty state (plan part B7).
+   * The release result table, its skeleton, and its empty state.
    *
    * Lifted out of ReleaseSearch so the per-item picker and the universal search
    * render one table. Every result is grabbable, including the flagged ones —
-   * the UI de-emphasizes a bad release, it does not decide for the user
-   * (SPEC §13).
+   * the UI de-emphasizes a bad release, it does not decide for the user (SPEC
+   * §13).
    *
    * A row is a specimen strip: the release name keeps its tail (DESIGN.md §6),
-   * indexer/age/size live on a facts line, and the action cell IS the row
-   * state — Grab, Downloading, or Downloaded — rather than a chip fighting a
-   * button.
+   * indexer/age/size live on a facts line, and the action cell IS the row state
+   * — Grab, Downloading, or Downloaded — rather than a chip fighting a button.
    */
   import type { Release } from '../api/types';
   import { UNKNOWN, formatAge, formatBytes } from '../format';

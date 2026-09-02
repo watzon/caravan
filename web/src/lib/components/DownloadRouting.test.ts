@@ -159,9 +159,8 @@ describe('DownloadRouting', () => {
 
     expect(options('route-torrent')).toEqual([{ value: 'embedded', label: 'Built-in engine' }]);
     expect(select('route-torrent').value).toBe('embedded');
-    // Usenet has a built-in engine too, so a stock Caravan grabs both
-    // protocols and the screen must not present a client as required
-    // (PLAN phase 7 acceptance).
+    // Usenet has a built-in engine too, so a stock Caravan grabs both protocols
+    // and the screen must not present a client as required.
     expect(options('route-usenet')).toEqual([{ value: '', label: 'Built-in engine' }]);
     expect(select('route-usenet').value).toBe('');
     expect(host.textContent).not.toContain('No usenet client is configured');

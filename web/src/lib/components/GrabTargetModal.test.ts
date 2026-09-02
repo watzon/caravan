@@ -1,11 +1,11 @@
 /**
- * Where a universal-search grab lands (plan part B8).
+ * Where a universal-search grab lands.
  *
  * The dialog exists because a free-text result has no item behind it, so the
  * request it builds is the whole contract: an untied grab names a library and
  * nothing else, and a tied one names the item as well. Both shapes are pinned
- * here, along with the reason the library question is asked at all — the
- * server requires it in both modes.
+ * here, along with the reason the library question is asked at all — the server
+ * requires it in both modes.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';

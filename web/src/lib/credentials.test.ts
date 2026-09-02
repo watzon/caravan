@@ -1,9 +1,9 @@
 /**
- * The credential model (PLAN phase 10 tasks 2-5).
+ * The credential model.
  *
- * These are the rules every guarded screen branches on, so they are tested
- * once here rather than re-asserted per component: which failures are a
- * credential problem, which are not, and what each one is called.
+ * These are the rules every guarded screen branches on, so they are tested once
+ * here rather than re-asserted per component: which failures are a credential
+ * problem, which are not, and what each one is called.
  */
 import { describe, expect, it } from 'vitest';
 import { ApiError } from './api/client';

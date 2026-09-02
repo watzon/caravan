@@ -1,11 +1,11 @@
 /**
- * The editable per-item picker (plan part B7).
+ * The editable per-item picker.
  *
  * The screen makes two promises that pull in opposite directions, and both are
  * pinned here: the query is the user's to change, and the target is not. An
  * edited query goes to the universal endpoint; the grab that follows still
- * posts to this item's own grab endpoint, because the route — not the query
- * box — is what says where the file lands.
+ * posts to this item's own grab endpoint, because the route — not the query box
+ * — is what says where the file lands.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';

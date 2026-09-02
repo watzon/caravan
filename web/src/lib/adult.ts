@@ -87,7 +87,7 @@ export function sceneFiltersOf(user: SessionUser | null): SceneFilterSupport {
 }
 
 /**
- * The "Stash is unreachable" banner's text (PLAN phase 11 task 4).
+ * The "Stash is unreachable" banner's text.
  *
  * Null when the handoff is answering — and null is also what an absent field
  * means, which is what every caller the module is not visible to receives. So
@@ -115,7 +115,7 @@ export function stashUnreachableBanner(
 }
 
 /**
- * Where the retired Scenes tab's job went (PLAN phase 12 task 4).
+ * Where the retired Scenes tab's job went.
  *
  * The Adult shelf had two tabs — what is on it, and what could be — and the
  * second one was browsing a provider catalogue, which is Explore's job. It now

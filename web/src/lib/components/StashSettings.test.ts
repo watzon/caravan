@@ -1,5 +1,5 @@
 /**
- * The Stash card (PLAN phase 11 task 5).
+ * The Stash card.
  *
  * It is the Jellyfin card again, so these are the Jellyfin card's tests again —
  * plus the one thing that is not shared: the scope promise. A user is handing

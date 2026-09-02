@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * The indexers that did not answer (plan part B7).
+   * The indexers that did not answer.
    *
    * A release fan-out returns partial results by design: one dead tracker must
    * not blank a screen the other three filled. But a short list of results has

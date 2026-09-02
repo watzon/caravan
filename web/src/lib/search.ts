@@ -1,12 +1,12 @@
 /**
- * The universal search screen's URL (plan part B8).
+ * The universal search screen's URL.
  *
  * A search is a filter over a screen, not a screen of its own, so it lives in
- * the query string — the same split router.ts documents for the explore
- * scopes. That makes a search shareable and reload-proof, which matters more
- * here than anywhere else in the app: a fan-out over every enabled indexer is
- * slow and remote, and "what exactly did you search for" is the first question
- * anybody asks about a result.
+ * the query string — the same split router.ts documents for the explore scopes.
+ * That makes a search shareable and reload-proof, which matters more here than
+ * anywhere else in the app: a fan-out over every enabled indexer is slow and
+ * remote, and "what exactly did you search for" is the first question anybody
+ * asks about a result.
  *
  * Pure — unit-tested in search.test.ts.
  */

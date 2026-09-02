@@ -1,29 +1,19 @@
 <script lang="ts">
   /**
-   * One site's page (PLAN phase 9 task 7c): release years as seasons, scene
-   * rows inside them.
+   * One site's page: release years as seasons, scene rows inside them. This is
+   * SeriesDetail's shape with this shelf's nouns, reusing its status
+   * vocabulary, badges and collapse behaviour rather than inventing a parallel
+   * set. The actions go to the series routes, because a site IS a series row
+   * and a scene IS an episode.
    *
-   * It is SeriesDetail's shape with this shelf's nouns — a year where a season
-   * heading goes, "#003 Title · Performers" where an episode's SxxEyy and title
-   * go, a release date where an air date goes — and it deliberately reuses the
-   * same status vocabulary, badges and collapse behaviour rather than inventing
-   * a parallel one.
+   * Every action is an admin write, and a granted MEMBER may read this page. So
+   * the actions are behind `session.isAdmin` while everything that reports
+   * state (monitored flags, counts, statuses) is not: a member should see what
+   * will happen next, and be offered nothing that would 403.
    *
-   * The actions are SeriesDetail's, at the same three levels: search the whole
-   * site, open the picker for one release year, open it for one scene. They go
-   * to the series routes, because a site IS a series row and a scene IS an
-   * episode — the server gates those routes on the same adult grant that let
-   * this page load, so none of them is a button that 404s.
-   *
-   * Every one of them is an admin write, and this page is one a granted MEMBER
-   * reads. So the actions are behind `session.isAdmin` while everything that
-   * reports state — monitored flags, counts, statuses — is not: a member should
-   * see what will happen next, and be offered nothing that would 403.
-   *
-   * Monitoring is controllable at all three levels and the site can be removed,
-   * through the same routes and the same confirm SeriesDetail uses. A higher
-   * level's toggle cascades as a bulk update rather than a lock, so a site or
-   * year toggle reloads instead of guessing what happened to its children.
+   * A higher level's monitor toggle cascades as a bulk update rather than a
+   * lock, so a site or year toggle reloads instead of guessing what happened to
+   * its children.
    */
   import { onMount } from 'svelte';
   import { api, errorText } from '../api/client';

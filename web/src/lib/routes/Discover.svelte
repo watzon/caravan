@@ -101,7 +101,7 @@
 </script>
 
 <div class="flex w-full min-w-0 flex-col gap-8">
-  <!-- Featured is one of four scopes now (PLAN phase 12 task 4), so the row is
+  <!-- Featured is one of four scopes now, so the row is
        here too: this screen is where somebody arrives, and it is the only place
        the other three are announced. -->
   <ExploreScopes active="featured" />

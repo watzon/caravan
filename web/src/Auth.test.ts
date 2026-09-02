@@ -1,8 +1,7 @@
 /**
- * The password gate (SPEC §11, PLAN phase 5 task 5), end to end through the
- * real shell: a 401 puts the login screen up, a successful login takes it down,
- * and the nag appears exactly when the server is reachable with no password on
- * it.
+ * The password gate (SPEC §11), end to end through the real shell: a 401 puts
+ * the login screen up, a successful login takes it down, and the nag appears
+ * exactly when the server is reachable with no password on it.
  *
  * It lives in its own file because `auth` is a module singleton - a test that
  * leaves it "required" would break every test after it in the same file.

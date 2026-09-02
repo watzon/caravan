@@ -262,8 +262,8 @@ describe('a member', () => {
 });
 
 /**
- * The adult module's conditional visibility (PLAN phase 9 track 5), across the
- * disabled/enabled × admin/granted/ungranted matrix, through the real shell.
+ * The adult module's conditional visibility, across the disabled/enabled ×
+ * admin/granted/ungranted matrix, through the real shell.
  *
  * `SessionUser.adult` is the server's already-ANDed answer, so "module off" and
  * "account not granted" are the same input here — which is exactly the design:
@@ -404,8 +404,8 @@ describe('the adult module — visible', () => {
     });
 
     /**
-     * The Scenes tab is retired (PLAN phase 12 task 4). An old bookmark lands
-     * on the scope that replaced it rather than on Not found.
+     * The Scenes tab is retired. An old bookmark lands on the scope that
+     * replaced it rather than on Not found.
      */
     it(`forwards ${who} from the retired scene tab to the adult scope`, async () => {
       me = identity;

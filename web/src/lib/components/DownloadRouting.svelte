@@ -1,13 +1,12 @@
 <script lang="ts">
   /**
-   * Settings → Download clients → Routing (SPEC §5.1, PLAN phase 6 task 3).
+   * Settings → Download clients → Routing (SPEC §5.1).
    *
-   * There is no per-grab engine choice anywhere in Caravan: a release is
-   * routed on its protocol, so the only thing to configure is which engine
-   * each protocol lands on. Both protocols always have somewhere to go: each
-   * has a built-in engine that is the default and is offered even when
-   * external clients exist, so an external client is a choice rather than a
-   * requirement (PLAN phase 7).
+   * There is no per-grab engine choice anywhere in Caravan: a release is routed
+   * on its protocol, so the only thing to configure is which engine each
+   * protocol lands on. Both protocols always have somewhere to go: each has a
+   * built-in engine that is the default and is offered even when external
+   * clients exist, so an external client is a choice rather than a requirement.
    */
   import { onMount } from 'svelte';
   import { api, errorText } from '../api/client';

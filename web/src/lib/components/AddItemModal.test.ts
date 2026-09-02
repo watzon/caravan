@@ -1187,10 +1187,10 @@ describe('AddItemModal adult scope', () => {
 });
 
 /**
- * The guarded add surface (PLAN phase 10 task 3).
+ * The guarded add surface.
  *
- * TMDB is what names a movie or a series, so with no usable key this dialog
- * has nothing to search and nothing to add. It must say that where the results
+ * TMDB is what names a movie or a series, so with no usable key this dialog has
+ * nothing to search and nothing to add. It must say that where the results
  * would have been — with the destination attached — rather than throwing the
  * provider's complaint at a toast and leaving an empty list behind it.
  */
@@ -1964,7 +1964,7 @@ describe('AddItemModal — target library', () => {
 });
 
 /**
- * Merged provider chains (PLAN phase 8).
+ * Merged provider chains.
  *
  * A library may name several metadata providers, and then one search is
  * several providers' answers in one list. Three things change, and each is a

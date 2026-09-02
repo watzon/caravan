@@ -1,5 +1,5 @@
 /**
- * FilterRange (PLAN phase 12 task 5).
+ * FilterRange.
  *
  * The property under test is the one that is invisible until it breaks: these
  * boxes drive filters that live in the URL, so every committed value comes

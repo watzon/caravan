@@ -293,8 +293,8 @@ import Search from './lib/routes/Search.svelte';
   });
 
   /**
-   * The retired Scenes tab (PLAN phase 12 task 4). Its job is Explore's adult
-   * scope now, and an old bookmark lands there rather than on Not found.
+   * The retired Scenes tab. Its job is Explore's adult scope now, and an old
+   * bookmark lands there rather than on Not found.
    *
    * It is gated on the grant for the same reason the effect above exists: an
    * ungranted reader must be sent to their own shelf, not forwarded to another
@@ -425,9 +425,9 @@ import Search from './lib/routes/Search.svelte';
               message={unreachableClients.message} />
           {/if}
 
-          <!-- The same shape for the adult library's handoff (PLAN phase 11
-               task 4). The field is only on the payload for a caller the module
-               is visible to, so there is no session check here. -->
+          <!-- The same shape for the adult library's handoff. The field is only
+               on the payload for a caller the module is visible to, so there is
+               no session check here. -->
           {#if unreachableStash}
             <Banner
               tone="warning"

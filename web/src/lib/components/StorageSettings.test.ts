@@ -1,5 +1,5 @@
 /**
- * The Storage settings section (SPEC §10, PLAN phase 5 task 4).
+ * The Storage settings section (SPEC §10).
  *
  * The two operations are deliberately not interchangeable, and these tests say
  * so: re-point posts one root and never touches media; migrate queues a job and

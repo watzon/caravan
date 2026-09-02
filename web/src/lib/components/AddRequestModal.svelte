@@ -6,8 +6,8 @@
    * - `request` records a wish (POST /requests). No profile, no folder, no
    *   search switch: none of those are the requester's to decide, and offering
    *   them would imply an approval that has not happened. A movie's minimum
-   *   availability IS the requester's — "when do I want this" is part of the
-   *   ask — so that one field lives in both modes.
+   *   availability IS the requester's, since "when do I want this" is part of
+   *   the ask, so that one field lives in both modes.
    * - `add` puts it in the library now, through the same endpoints the ⌘K add
    *   flow uses. Approving a pending request is this mode with a `requestID`,
    *   which routes the add through POST /requests/{id}/approve so the row is

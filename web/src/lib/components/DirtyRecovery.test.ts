@@ -1,7 +1,7 @@
 /**
- * Dirty-eject recovery (SPEC §2.3, §13, PLAN phase 5 task 3): the banner that
- * comes up after an unclean shutdown, the fsck instructions it carries, and the
- * verify action that clears it.
+ * Dirty-eject recovery (SPEC §2.3, §13): the banner that comes up after an
+ * unclean shutdown, the fsck instructions it carries, and the verify action
+ * that clears it.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';

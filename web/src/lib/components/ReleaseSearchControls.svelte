@@ -2,7 +2,7 @@
   import { useI18n } from '../i18n.svelte';
   /**
    * The query rail every release search wears: what to ask for, which
-   * categories, which indexers (plan part B7).
+   * categories, which indexers.
    *
    * It is one component rather than two because the per-item picker and the
    * universal search ask indexers the same question — the only difference is

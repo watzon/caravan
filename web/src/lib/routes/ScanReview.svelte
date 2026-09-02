@@ -181,8 +181,8 @@
   /**
    * A scan with no usable TMDB key still runs: it walks the disk, parses every
    * name and imports what it finds — it just cannot ask TMDB which title any of
-   * it is, so everything lands here (PLAN phase 10 task 3). Without this banner
-   * that reads as a broken scanner, which is the one thing it is not.
+   * it is, so everything lands here. Without this banner that reads as a broken
+   * scanner, which is the one thing it is not.
    */
   let credentialState = $derived(system.metadataCredential);
 </script>

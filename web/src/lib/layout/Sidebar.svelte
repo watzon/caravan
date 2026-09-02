@@ -1,22 +1,21 @@
 <script lang="ts">
   /**
    * DESIGN.md §5: fixed 240px sidebar on --color-surface with a hairline right
-   * border. Nav is phase-gated: Wanted and Calendar arrived with phase 3 and
-   * Convert with phase 4, so every entry here has a screen behind it.
+   * border. Every nav entry has a screen behind it.
    *
-   * The persistent bottom slot is a live task rail (what is running, or
-   * the last failure) plus sign-out — not a status card.
+   * The persistent bottom slot is a live task rail (what is running, or the
+   * last failure) plus sign-out, not a status card.
    *
    * A member sees the Explore group and nothing else: the other three lead to
    * screens the server answers 403 for (SPEC §11). The one exception is the
-   * Adult shelf, which a granted member may read — so their Library group
-   * holds that row alone rather than being suppressed wholesale.
+   * Adult shelf, which a granted member may read, so their Library group holds
+   * that row alone rather than being suppressed wholesale.
    *
    * The shelf rows themselves are DATA, not code: one row per library in
    * `session.user.libraries`, which /auth/me has already narrowed to what this
    * account may see. A second movie library is a row without an edit here, and
-   * — the bug that started this — each row links to `/l/{slug}`, so the
-   * default shelf shows the default shelf rather than everything.
+   * each row links to `/l/{slug}`, so the default shelf shows the default shelf
+   * rather than everything.
    */
   import { onMount } from 'svelte';
   import { api, errorText } from '../api/client';

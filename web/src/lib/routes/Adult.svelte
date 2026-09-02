@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * Library → Adult: the site grid (PLAN phase 9 task 7c).
+   * Library → Adult: the site grid.
    *
    * It is the Series screen's grid with different nouns — a site is a series
    * row, a scene is an episode row — so it reuses PosterGrid/PosterCard and the
@@ -148,9 +148,9 @@
 </script>
 
 <div class="flex flex-col gap-6">
-  <!-- No tab strip: the Scenes tab was retired in phase 12 and its job moved
-       to Explore's adult scope, so this shelf is sites and only sites. A strip
-       with one tab in it is a strip that says nothing. -->
+  <!-- No tab strip: the Scenes tab was retired and its job moved to Explore's
+       adult scope, so this shelf is sites and only sites. A strip with one tab
+       in it is a strip that says nothing. -->
   <div class="flex flex-wrap items-center gap-3">
     <div class="ml-auto flex w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
       <Dropdown

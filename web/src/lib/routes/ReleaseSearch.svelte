@@ -8,13 +8,13 @@
    * including the flagged ones — the UI de-emphasizes a bad release, it does
    * not decide for the user (SPEC §13).
    *
-   * The query is editable (plan part B7). The server's derived query is a guess
-   * at what an indexer calls this item, and it is wrong often enough that the
-   * screen it lands on has to let the user say otherwise. What is NOT editable
-   * is the target: the grab always posts to this item's own endpoint with the
-   * season and episode ids the route named, whatever the query box says. That
-   * split is the whole point — a wrong query is a bad search, a wrong target is
-   * a file in the wrong place.
+   * The query is editable. The server's derived query is a guess at what an
+   * indexer calls this item, and it is wrong often enough that the screen it
+   * lands on has to let the user say otherwise. What is NOT editable is the
+   * target: the grab always posts to this item's own endpoint with the season
+   * and episode ids the route named, whatever the query box says. That split is
+   * the whole point — a wrong query is a bad search, a wrong target is a file
+   * in the wrong place.
    */
   import { onMount } from 'svelte';
   import { api, errorText } from '../api/client';

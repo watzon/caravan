@@ -1,7 +1,7 @@
 /**
- * The phase-2 half of the API client (SPEC §11). These assert the wire: the
- * exact URL, method and body the SPA sends, because that is the contract the Go
- * handlers are written against and a typo here is invisible until runtime.
+ * The API client (SPEC §11). These assert the wire: the exact URL, method and
+ * body the SPA sends, because that is the contract the Go handlers are written
+ * against and a typo here is invisible until runtime.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, api, endpoints } from './client';

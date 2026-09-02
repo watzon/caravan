@@ -1,7 +1,7 @@
 <script lang="ts">
   import { useI18n } from '../i18n.svelte';
   /**
-   * The Stash handoff for the adult library (PLAN phase 11 task 5).
+   * The Stash handoff for the adult library.
    *
    * Deliberately the Jellyfin card again, for the other library: three values
    * edited, validated and tested together, with no scan button — the scan is

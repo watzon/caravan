@@ -1,21 +1,19 @@
 /**
  * Safe shutdown for the portable drive (SPEC §2.3, §11).
  *
- * This is the one action in Caravan whose success is the server disappearing,
- * so it cannot be a toast on a screen that keeps polling: the shell has to be
- * replaced by a terminal "safe to eject" screen. That is why the phase lives
- * here rather than inside the button — the sidebar starts it, and App.svelte
- * renders the ending.
+ * This is the one action whose success is the server disappearing, so it cannot
+ * be a toast on a screen that keeps polling. The shell has to be replaced by a
+ * terminal "safe to eject" screen, which is why the phase lives here rather
+ * than inside the button: the sidebar starts it, and App.svelte renders the
+ * ending.
  *
- * The 202 is not the ending. The server writes it *before* the teardown begins
+ * The 202 is not the ending. The server writes it before the teardown begins
  * (internal/api/system.go), and everything the eject promise is about happens
  * after: the request drain, the import watcher, the DLNA byebye, the download
  * engine flushing every torrent's resume data back through sqlite,
  * `PRAGMA wal_checkpoint(TRUNCATE)`, the database close, and the fsync'd clean
- * marker (cmd/caravan/serve.go). Telling the user "safe to eject" on the 202
- * invites them to pull the drive in the middle of exactly the writes this whole
- * feature exists to protect. So the success path stops promising anything until
- * the origin has actually stopped answering.
+ * marker (cmd/caravan/serve.go). So the success path promises nothing until the
+ * origin has actually stopped answering.
  */
 
 import { ApiError, api, errorText } from '../api/client';

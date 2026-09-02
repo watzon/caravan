@@ -1,7 +1,6 @@
 <script lang="ts">
   /**
-   * Explore → Movies / Series: the whole TMDB catalogue behind a filter rail
-   * (PLAN phase 12 tasks 4-6).
+   * Explore → Movies / Series: the whole TMDB catalogue behind a filter rail.
    *
    * One component for both scopes, because they are one screen: the same grid,
    * the same paging, the same chips, and exactly one pill that differs. That

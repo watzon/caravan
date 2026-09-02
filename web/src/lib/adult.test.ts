@@ -120,10 +120,10 @@ describe('sceneFiltersOf', () => {
 
 describe('adult shelf links', () => {
   /**
-   * The Scenes tab is retired (PLAN phase 12 task 4): browsing the provider's
-   * catalogue moved to Explore, beside the other two catalogues, and the shelf
-   * is sites only. The tab vocabulary went with it — this is what is left, and
-   * it is a link INTO Explore rather than a second tab.
+   * The Scenes tab is retired: browsing the provider's catalogue moved to
+   * Explore, beside the other two catalogues, and the shelf is sites only. The
+   * tab vocabulary went with it — this is what is left, and it is a link INTO
+   * Explore rather than a second tab.
    */
   it('sends "browse scenes" to the explore scope, not to a tab', () => {
     expect(ADULT_EXPLORE_HREF).toBe('/discover/adult');

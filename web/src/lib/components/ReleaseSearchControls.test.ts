@@ -1,5 +1,5 @@
 /**
- * The shared search rail (plan part B7).
+ * The shared search rail.
  *
  * Two things here are promises rather than decoration: Enter searches (a box
  * you have to reach for a button to use is not a search box), and the adult

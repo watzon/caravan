@@ -1,13 +1,13 @@
 <script lang="ts">
   /**
-   * The universal indexer search (plan part B8): any query, any categories,
-   * every enabled indexer — Prowlarr-style.
+   * The universal indexer search: any query, any categories, every enabled
+   * indexer — Prowlarr-style.
    *
    * It exists for what the per-item pickers cannot reach. Their queries are
-   * derived from a library item, so they can only ever find releases for
-   * things Caravan already tracks, under names its builders think to try. This
-   * screen has neither limit: it asks exactly what the user typed, and what it
-   * finds does not have to be a library item at all.
+   * derived from a library item, so they can only ever find releases for things
+   * Caravan already tracks, under names its builders think to try. This screen
+   * has neither limit: it asks exactly what the user typed, and what it finds
+   * does not have to be a library item at all.
    *
    * Nothing here is grabbed on one click. A result has no item behind it, so
    * "where does this land" is a real question, and GrabTargetModal asks it.

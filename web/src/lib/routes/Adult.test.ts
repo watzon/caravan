@@ -296,10 +296,10 @@ describe('the Adult shelf sort', () => {
 });
 
 /**
- * The Scenes tab is retired (PLAN phase 12 task 4). Browsing the provider's
- * catalogue moved to Explore, beside the other two catalogues, so the shelf is
- * what Caravan HOLDS and nothing else — and a tab strip with one tab in it is a
- * strip that says nothing, so there is no strip at all.
+ * The Scenes tab is retired. Browsing the provider's catalogue moved to
+ * Explore, beside the other two catalogues, so the shelf is what Caravan HOLDS
+ * and nothing else — and a tab strip with one tab in it is a strip that says
+ * nothing, so there is no strip at all.
  */
 describe('the retired Scenes tab', () => {
   it('leaves the shelf with no tab strip and no link to the old route', async () => {

@@ -120,10 +120,9 @@ beforeEach(() => {
     // Television only, which is what gives a tv library a second eligible
     // provider to chain.
     { id: 'tvmaze', name: 'TVmaze', kinds: ['tv'] },
-    // The adult descriptors are one per CONFIGURED stash-box instance (PLAN
-    // Part 2 phase 3 merges them into this list), so an id here may be
-    // instance-qualified and the chain editor names it from the same list as
-    // everything else.
+    // The adult descriptors are one per CONFIGURED stash-box instance, so an id
+    // here may be instance-qualified and the chain editor names it from the
+    // same list as everything else.
     { id: 'stashbox', name: 'ThePornDB', kinds: ['adult'] },
     { id: 'stashbox:stashdb', name: 'StashDB', kinds: ['adult'] },
   ];
@@ -741,7 +740,7 @@ describe('LibrariesSettings — switcher and reach', () => {
   });
 
   /**
-   * The Adult pill's conditional visibility (PLAN phase 9 track 5).
+   * The Adult pill's conditional visibility.
    *
    * It is conditional for the ordinary reason every pill is: GET /libraries
    * returned a row. The server drops that row for any caller the module is not
@@ -912,12 +911,12 @@ describe('LibrariesSettings — multiple libraries', () => {
 });
 
 /**
- * The Active switch and the Access card (PLAN Part 3 phase 5).
+ * The Active switch and the Access card.
  *
  * These two used to be the adult module's master switch and its member roster,
  * on a settings page of their own. A library is the object both always
- * described, so they are library controls now — offered for every kind, with
- * no adult branch anywhere in the screen.
+ * described, so they are library controls now — offered for every kind, with no
+ * adult branch anywhere in the screen.
  */
 describe('LibrariesSettings — active and access', () => {
   it('PATCHes the master switch and never disables the control that undoes it', async () => {

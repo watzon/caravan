@@ -1,5 +1,5 @@
 /**
- * The filter model (PLAN phase 12 task 5).
+ * The filter model.
  *
  * Three properties are worth proving and only one of them is visible on screen:
  *
@@ -54,10 +54,6 @@ import {
 } from './explore';
 import type { MediaType } from './api/types';
 
-/* ---------------------------------------------------------------------------
- * The scope row.
- * ------------------------------------------------------------------------ */
-
 describe('the scope row', () => {
   it('addresses Featured as /discover itself', () => {
     expect(exploreScopeHref('featured')).toBe('/discover');
@@ -68,8 +64,8 @@ describe('the scope row', () => {
 
   /**
    * The Adult pill is ABSENT without the grant, not disabled. A greyed-out pill
-   * announces that the module exists, which is exactly the trace phase 9
-   * promised not to leave.
+   * announces that the module exists, which is exactly the trace the module
+   * must not leave.
    */
   it('omits the adult pill entirely without the grant', () => {
     expect(visibleScopes(false).map((s) => s.key)).toEqual(['featured', 'movies', 'series']);
@@ -81,10 +77,6 @@ describe('the scope row', () => {
     ]);
   });
 });
-
-/* ---------------------------------------------------------------------------
- * Refs.
- * ------------------------------------------------------------------------ */
 
 describe('refs', () => {
   it('reads a bare id and an id:name', () => {
@@ -133,10 +125,6 @@ describe('refs', () => {
     expect(toggleRef([one, two], { id: '1', name: 'A' })).toEqual([two]);
   });
 });
-
-/* ---------------------------------------------------------------------------
- * Round trip — the shareable-URL property.
- * ------------------------------------------------------------------------ */
 
 /** Everything the movie rail can set at once. */
 const FULL_MOVIE_FILTER: TitleFilter = {
@@ -308,10 +296,6 @@ describe('URL round trip', () => {
   });
 });
 
-/* ---------------------------------------------------------------------------
- * Filter → API query.
- * ------------------------------------------------------------------------ */
-
 describe('the movie scope query', () => {
   it('sends every filter the rail offers, and nothing else', () => {
     expect(titleApiQuery('movie', FULL_MOVIE_FILTER, 3)).toEqual({
@@ -462,10 +446,6 @@ describe('the scene scope query', () => {
   });
 });
 
-/* ---------------------------------------------------------------------------
- * Chips.
- * ------------------------------------------------------------------------ */
-
 describe('applied chips', () => {
   it('names every applied movie filter once', () => {
     expect(titleChips('movie', FULL_MOVIE_FILTER).map((c) => c.label)).toEqual([
@@ -574,10 +554,6 @@ describe('applied chips', () => {
     expect(one[0]?.label).toBe('Year: 2019');
   });
 });
-
-/* ---------------------------------------------------------------------------
- * Small renderers.
- * ------------------------------------------------------------------------ */
 
 describe('durationBadge', () => {
   it('reads as a run time, not as a number of seconds', () => {

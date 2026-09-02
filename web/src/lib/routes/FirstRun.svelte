@@ -1,24 +1,23 @@
 <script lang="ts">
   /**
-   * First run (SPEC §10.1, PLAN phase 10 task 1): account creation gets its own
-   * screen, followed by the three configuration steps — where the media lives,
-   * how Caravan identifies it, and whether to scan what is already there.
-   * Everything else ships with defaults.
+   * First run (SPEC §10.1): account creation gets its own screen, followed by
+   * three configuration steps. Where the media lives, how Caravan identifies
+   * it, and whether to scan what is already there. Everything else ships with
+   * defaults.
    *
    * The metadata step is here rather than in Settings for one reason: a first
    * run that ends without a TMDB key ends in a Caravan where search, Discover
-   * and every add are degraded. TheTVDB is optional beside it — series libraries
-   * can use it, but leaving it blank is a valid first run. Both credentials are
-   * proved BEFORE they are written.
+   * and every add are degraded. TheTVDB is optional beside it: series libraries
+   * can use it, but leaving it blank is a valid first run.
    *
-   * Nothing is written until Start Caravan, and the key is proved BEFORE the
-   * first write: a wrong key never reaches the database, and a failed test
-   * leaves the user on this screen with the field they mistyped still in front
-   * of them.
+   * Nothing is written until Start Caravan, and both credentials are proved
+   * before that first write. A wrong key never reaches the database, and a
+   * failed test leaves the user on this screen with the field they mistyped
+   * still in front of them.
    *
-   * There are deliberately zero adult-content references here (PLAN phase 10
-   * task 6). The module is invisible while it is off, and a first run is the
-   * one place that promise is most visible.
+   * There are deliberately zero adult-content references here. The module is
+   * invisible while it is off, and a first run is the one place that promise is
+   * most visible.
    */
   import { api, errorText } from '../api/client';
   import Button from '../components/Button.svelte';

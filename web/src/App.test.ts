@@ -831,8 +831,8 @@ describe('App shell', () => {
     expect(host.textContent).not.toContain('The queue is empty');
   });
 
-  // Killing one download client must say so, name it, and leave the rest of
-  // the shell working (SPEC §5.1, PLAN phase 6 task 4).
+  // Killing one download client must say so, name it, and leave the rest of the
+  // shell working (SPEC §5.1).
   it('banners a download client the poller cannot reach', async () => {
     statusBody = {
       ...STATUS,
@@ -867,10 +867,10 @@ describe('App shell', () => {
   });
 
   /**
-   * PLAN phase 11 task 4: Stash being down is a banner, never a blocker. The
-   * field is only on the payload for a caller the module is visible to, so its
-   * presence is what raises this — there is no second adult check to keep in
-   * step with the server's.
+   * Stash being down is a banner, never a blocker. The field is only on the
+   * payload for a caller the module is visible to, so its presence is what
+   * raises this. There is no second adult check to keep in step with the
+   * server's.
    */
   it('banners the adult library handoff when Stash is unreachable', async () => {
     statusBody = {

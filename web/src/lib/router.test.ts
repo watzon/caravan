@@ -152,9 +152,9 @@ describe('matchRoutes', () => {
   });
 
   /**
-   * The filtered scopes (phase 12). They are two-segment paths and the title
-   * screens are three-segment ones, so /discover/movies can never be read as
-   * "the movie whose id is 'movies'".
+   * The filtered scopes. They are two-segment paths and the title screens are
+   * three-segment ones, so /discover/movies can never be read as "the movie
+   * whose id is 'movies'".
    */
   it('resolves the filtered scopes without shadowing the title screens', () => {
     expect(matchRoutes(ROUTES, '/discover/movies')?.pattern).toBe('/discover/movies');
@@ -201,7 +201,7 @@ describe('matchRoutes', () => {
 });
 
 /**
- * The second, independent gate on the adult screens (PLAN phase 9 track 5).
+ * The second, independent gate on the adult screens.
  *
  * `memberAllowedRoute` answers a question about a ROLE; this answers one about
  * a per-account grant that an admin also has to have been given. Both have to
@@ -215,8 +215,8 @@ describe('isAdultRoute', () => {
       '/adult/scenes',
       '/adult/scenes/:provider/:stashId',
       '/adult/sites/:id',
-      // Phase 12: scene browsing moved next to the other two catalogues, so an
-      // adult screen now lives outside /adult for the first time.
+      // Scene browsing moved next to the other two catalogues, so an adult
+      // screen now lives outside /adult for the first time.
       '/discover/adult',
     ] as const) {
       expect(isAdultRoute(pattern), pattern).toBe(true);

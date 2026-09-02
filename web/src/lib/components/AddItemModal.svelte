@@ -6,10 +6,10 @@
    *
    * One row of tabs, one target. In add mode a tab IS a library: the shelf the
    * item lands on, and therefore the provider chain that answers the search.
-   * The tab's kind decides what is searched — films, television, both at once
-   * on an anime shelf, or the stash-box catalogue on an adult one. Adult tabs
-   * exist only where the module does — `session.adult`, the same single boolean
-   * the sidebar row reads — and a caller cannot select one into being: see
+   * The tab's kind decides what is searched: films, television, both at once on
+   * an anime shelf, or the stash-box catalogue on an adult one. Adult tabs exist
+   * only where the module does (`session.adult`, the same single boolean the
+   * sidebar row reads), and a caller cannot select one into being: see
    * `fixedScope`. With it absent, nothing here touches an adult type or an
    * adult route.
    *
@@ -584,7 +584,7 @@
 
   /**
    * The TMDB credential fault behind the last failure, from whichever half of
-   * the dialog hit it (PLAN phase 10 task 3).
+   * the dialog hit it.
    *
    * Both halves need it: the search says "no key" before a row can exist, and
    * the add says it for a key that was revoked between the search and the

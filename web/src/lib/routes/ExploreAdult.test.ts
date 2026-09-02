@@ -438,8 +438,8 @@ describe('an endpoint that cannot answer', () => {
     await open('/discover/adult');
 
     expect(host.textContent).toContain('No metadata source configured');
-    // The endpoints are configured on Metadata now (PLAN Part 2 phase 8), and
-    // the adult settings page it used to point at no longer exists.
+    // The endpoints are configured on Metadata now, and the adult settings page
+    // it used to point at no longer exists.
     expect(host.querySelector('a[href="/settings/metadata"]')).not.toBeNull();
   });
 
@@ -479,11 +479,10 @@ describe('the Site pill', () => {
 
 describe('the rail on an endpoint that serves less', () => {
   /**
-   * PLAN phase 12's first acceptance criterion has two clauses, and this is the
-   * second: "nothing renders a control the provider cannot answer". A generic
-   * stash-box endpoint refuses a release year, a runtime, a widened site scope
-   * and two of the six orderings, so on one of those the rail draws none of
-   * them — a 400 that blanks the grid is not a control, it is a trap.
+   * Nothing renders a control the provider cannot answer. A generic stash-box
+   * endpoint refuses a release year, a runtime, a widened site scope and two of
+   * the six orderings, so on one of those the rail draws none of them. A 400
+   * that blanks the grid is not a control, it is a trap.
    */
   it('draws every pill on an endpoint that serves everything', async () => {
     session.user = grantedUser(EVERY_SCENE_FILTER);

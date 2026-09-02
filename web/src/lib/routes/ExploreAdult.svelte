@@ -1,19 +1,19 @@
 <script lang="ts">
   /**
-   * Explore → Adult: the provider's scene catalogue behind a filter rail
-   * (PLAN phase 12 tasks 4-6). It replaces the Adult section's Scenes tab,
-   * which is retired: browsing a catalogue belongs beside the other two
-   * catalogues, and the library shelf is for what Caravan already holds.
+   * Explore → Adult: the provider's scene catalogue behind a filter rail. It
+   * replaces the Adult section's Scenes tab, which is retired: browsing a
+   * catalogue belongs beside the other two catalogues, and the library shelf is
+   * for what Caravan already holds.
    *
    * Moving it did not weaken the gate. `/discover/adult` is an adult route
    * (router.ts isAdultRoute names it), App.svelte gates the RENDER on
    * `session.adult` as well as redirecting, and every endpoint below lives on
-   * the server's adult mux and answers 404 — byte-identical to an unrouted
-   * path — to a caller the module is not visible to.
+   * the server's adult mux and answers 404 — byte-identical to an unrouted path
+   * — to a caller the module is not visible to.
    *
    * The verb is Request for everybody, admins included, for the reason the
-   * Scenes tab gave: approving a scene request adds the SITE, so an admin
-   * "add" here would be one click for several hundred scenes.
+   * Scenes tab gave: approving a scene request adds the SITE, so an admin "add"
+   * here would be one click for several hundred scenes.
    */
   import { ApiError, api, errorText } from '../api/client';
   import type { AdultDiscoverPage, SceneMeta, SiteMeta } from '../api/types';
@@ -269,16 +269,15 @@
         : t('route.exploreAdult.filterEmpty'),
   );
   /**
-   * What the configured endpoint can actually answer (PLAN phase 12,
-   * acceptance criterion 1: "nothing renders a control the provider cannot
-   * answer"). "stash-box" is a protocol with dialects — TPDB serves a release
-   * year, a runtime, a widened site scope and two extra orderings, and a
-   * StashDB or FansDB install refuses all of them — so which pills exist is a
-   * property of the server, not of this file.
+   * What the configured endpoint can actually answer: nothing renders a control
+   * the provider cannot answer. "stash-box" is a protocol with dialects. TPDB
+   * serves a release year, a runtime, a widened site scope and two extra
+   * orderings, and a StashDB or FansDB install refuses all of them — so which
+   * pills exist is a property of the server, not of this file.
    *
    * The answer comes from /auth/me rather than from the scene answer, because
-   * it has to be readable BEFORE the first request: a URL naming an
-   * unsupported filter 400s, and a 400 carries no capabilities to learn from.
+   * it has to be readable BEFORE the first request: a URL naming an unsupported
+   * filter 400s, and a 400 carries no capabilities to learn from.
    */
   let can = $derived(session.sceneFilters);
 

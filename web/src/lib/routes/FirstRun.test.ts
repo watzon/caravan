@@ -1,11 +1,11 @@
 /**
- * First run (SPEC §10.1, PLAN phase 10 tasks 1 and 6).
+ * First run (SPEC §10.1).
  *
- * The wizard is the one flow a user cannot come back to, so the tests are
- * about what it refuses to let them leave with: a key that does not work.
- * Leaving a metadata field blank is how you skip it. And about the promise
- * the whole adult module rests on — an install that has never turned it on
- * must not learn it exists here.
+ * The wizard is the one flow a user cannot come back to, so the tests are about
+ * what it refuses to let them leave with: a key that does not work. Leaving a
+ * metadata field blank is how you skip it. And about the promise the whole
+ * adult module rests on — an install that has never turned it on must not learn
+ * it exists here.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushSync, mount, unmount } from 'svelte';
@@ -219,8 +219,8 @@ describe('FirstRun', () => {
     expect(called('/storage-root/repoint')).toHaveLength(1);
   });
 
-  // PLAN phase 10 task 6, and the module's whole promise: an install that has
-  // never turned adult content on must not learn it exists from the front door.
+  // The module's whole promise: an install that has never turned adult content
+  // on must not learn it exists from the front door.
   it('contains zero adult-content references', () => {
     mountWizard();
 

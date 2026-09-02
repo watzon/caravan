@@ -25,8 +25,8 @@ export const ROUTES = [
   // nav entry has a canonical href.
   '/',
   '/discover',
-  // The filtered scopes (phase 12). One screen each, all of their state in the
-  // query string so a filtered view is shareable and survives a reload.
+  // The filtered scopes. One screen each, all of their state in the query
+  // string so a filtered view is shareable and survives a reload.
   // /discover/adult is an adult route despite not living under /adult — see
   // isAdultRoute, which names it explicitly for that reason.
   '/discover/movies',
@@ -60,15 +60,15 @@ export const ROUTES = [
   // a detail page's back link needs a place that IS that library. The kind
   // paths above stay as aliases so a bookmark to /anime still works.
   '/l/:slug',
-  // The adult module (phase 9). Every one of these is behind `isAdultRoute`
-  // as well as the member allowlist: the module is invisible to an account it
-  // was not granted to, whatever that account's role is.
+  // The adult module. Every one of these is behind `isAdultRoute` as well as
+  // the member allowlist: the module is invisible to an account it was not
+  // granted to, whatever that account's role is.
   '/adult',
-  // Retired in phase 12: scene browsing moved to /discover/adult, where the
-  // other two catalogues are browsed. The pattern stays so an old bookmark
-  // lands somewhere on purpose rather than on Not found — App.svelte redirects
-  // it — and it stays an ADULT route while it does, so an ungranted caller is
-  // still sent away from it rather than through it.
+  // Retired: scene browsing moved to /discover/adult, where the other two
+  // catalogues are browsed. The pattern stays so an old bookmark lands
+  // somewhere on purpose rather than on Not found — App.svelte redirects it —
+  // and it stays an ADULT route while it does, so an ungranted caller is still
+  // sent away from it rather than through it.
   '/adult/scenes',
   // A provider scene has no local id until it is imported, so its durable detail
   // URL carries the provider instance and provider-native stash id.
@@ -82,10 +82,10 @@ export const ROUTES = [
   '/adult/sites/:id/search',
   '/adult/sites/:id/search/:year',
   '/adult/sites/:id/search/:year/:number',
-  // The universal indexer search (plan part B8). Deliberately absent from
-  // MEMBER_ROUTES: it grabs, and grabbing is an admin write. Its query lives
-  // in the query string (?q=&cats=&indexers=), per the split documented above
-  // — a search is a filter over one screen, not a screen per query.
+  // The universal indexer search. Deliberately absent from MEMBER_ROUTES: it
+  // grabs, and grabbing is an admin write. Its query lives in the query string
+  // (?q=&cats=&indexers=), per the split documented above: a search is a filter
+  // over one screen, not a screen per query.
   '/search',
   '/queue',
   '/convert',
@@ -154,11 +154,11 @@ export function memberAllowedRoute(pattern: RoutePattern): boolean {
  * having been added, not by somebody remembering to name it twice.
  *
  * /discover/adult is the one exception, and it is named rather than derived
- * because its path cannot be: phase 12 moved scene browsing next to the other
- * two catalogues, so the adult scope's URL reads like its siblings' and the
- * prefix rule no longer reaches it. router.test.ts pins the FULL list this
- * returns true for, so a future adult screen filed outside /adult fails that
- * test rather than shipping ungated.
+ * because its path cannot be. Scene browsing moved next to the other two
+ * catalogues, so the adult scope's URL reads like its siblings' and the prefix
+ * rule no longer reaches it. router.test.ts pins the FULL list this returns
+ * true for, so a future adult screen filed outside /adult fails that test
+ * rather than shipping ungated.
  */
 export const ADULT_SCOPE_ROUTE = '/discover/adult' as const;
 

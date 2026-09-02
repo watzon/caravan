@@ -1,16 +1,16 @@
 <script lang="ts">
   /**
-   * Dirty-eject recovery (SPEC §2.3, §13, PLAN phase 5 task 3).
+   * Dirty-eject recovery (SPEC §2.3, §13).
    *
    * The server came up after an unclean shutdown — a pulled drive, a power cut.
-   * Until it is verified, downloads refuse to resume, so this banner is the only
-   * way back and it does not auto-dismiss.
+   * Until it is verified, downloads refuse to resume, so this banner is the
+   * only way back and it does not auto-dismiss.
    *
    * Caravan never runs fsck itself: repairing the filesystem it is running from
-   * is the one recovery step that can make things worse, and the drive has to be
-   * unmounted for it anyway. So the commands are printed for the user to run
-   * from a terminal, and the button covers only what Caravan owns — sqlite's own
-   * consistency check plus a library rescan.
+   * is the one recovery step that can make things worse, and the drive has to
+   * be unmounted for it anyway. So the commands are printed for the user to run
+   * from a terminal, and the button covers only what Caravan owns — sqlite's
+   * own consistency check plus a library rescan.
    */
   import { api, errorText } from '../api/client';
   import { system } from '../state/system.svelte';
