@@ -177,7 +177,7 @@ func (e *Engine) executeDownloadPayloadRequest(req *http.Request) ([]byte, error
 	if err := e.waitRequestDelay(req.Context()); err != nil {
 		return nil, err
 	}
-	resp, err := e.hc.Do(req)
+	resp, err := e.do(req)
 	if err != nil {
 		return nil, safeRequestError(err)
 	}

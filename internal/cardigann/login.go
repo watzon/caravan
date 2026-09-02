@@ -3,6 +3,7 @@ package cardigann
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,19 @@ import (
 	"github.com/PuerkitoBio/goquery"
 	"golang.org/x/net/html/charset"
 )
+
+// errLoginCaptcha is returned when the login page shows the captcha the
+// definition declares. A pasted session cookie bypasses the form entirely.
+var errLoginCaptcha = errors.New("the tracker asks for a login captcha. Sign in with a browser and paste the session cookie into the Session cookie field instead")
+
+// loginMethod applies Cardigann's default: a login block without a method is a form login.
+func loginMethod(login *loginBlock) string {
+	method := strings.ToLower(strings.TrimSpace(login.Method))
+	if method == "" {
+		return "form"
+	}
+	return method
+}
 
 func (e *Engine) ensureLogin(ctx context.Context) error {
 	if e == nil || e.def == nil || e.def.Login == nil {
@@ -26,7 +40,20 @@ func (e *Engine) ensureLogin(ctx context.Context) error {
 	if err := e.seedLoginCookies(login.Cookies); err != nil {
 		return err
 	}
-	switch strings.ToLower(strings.TrimSpace(login.Method)) {
+	if cookie := strings.TrimSpace(e.settings[sessionCookieSetting]); cookie != "" {
+		if strings.ContainsAny(cookie, "\r\n") {
+			return fmt.Errorf("configured session cookie is invalid")
+		}
+		e.sessionCookie = cookie
+		if login.Test.Path != "" {
+			if err := e.performLoginTest(ctx, login.Test); err != nil {
+				return err
+			}
+		}
+		e.loginReady = true
+		return nil
+	}
+	switch loginMethod(login) {
 	case "cookie":
 		cookie, err := e.renderTemplate(login.Inputs["cookie"], Query{})
 		if err != nil {
@@ -95,6 +122,9 @@ func (e *Engine) performFormLogin(ctx context.Context, login *loginBlock) ([]byt
 	form := doc.Find(formSelector).First()
 	if form.Length() == 0 {
 		return nil, fmt.Errorf("login form selector did not match")
+	}
+	if login.Captcha != nil && strings.TrimSpace(login.Captcha.Selector) != "" && doc.Find(login.Captcha.Selector).Length() > 0 {
+		return nil, errLoginCaptcha
 	}
 	values := url.Values{}
 	form.Find("input[name]").Each(func(_ int, input *goquery.Selection) {
@@ -285,7 +315,7 @@ func (e *Engine) performLoginRequest(ctx context.Context, login *loginBlock) ([]
 		}
 		values.Set(name, value)
 	}
-	method := strings.ToUpper(strings.TrimSpace(login.Method))
+	method := strings.ToUpper(loginMethod(login))
 	var requestBody io.Reader
 	if method == http.MethodGet {
 		query := target.Query()
@@ -359,7 +389,7 @@ func (e *Engine) executeLoginRequest(req *http.Request) ([]byte, error) {
 	if err := e.waitRequestDelay(req.Context()); err != nil {
 		return nil, err
 	}
-	resp, err := e.hc.Do(req)
+	resp, err := e.do(req)
 	if err != nil {
 		return nil, safeRequestError(err)
 	}

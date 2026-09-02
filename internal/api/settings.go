@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/watzon/caravan/internal/cardigann"
 	"net/http"
 	"sort"
 	"strconv"
@@ -54,6 +55,7 @@ var writableSettings = map[string]bool{
 	store.SettingTheTVDBPIN:                   true,
 	store.SettingRSSSyncIntervalMinutes:       true,
 	store.SettingIndexerHealthIntervalMinutes: true,
+	store.SettingFlareSolverrURL:              true,
 	store.SettingBacklogIntervalMinutes:       true,
 	store.SettingRefreshIntervalMinutes:       true,
 	store.SettingEngineListenPort:             true,
@@ -91,6 +93,7 @@ var writableSettings = map[string]bool{
 // nothing worked. Trimming on the way in makes the stored string, the validated
 // string and the sent string the same value.
 var trimmedSettings = map[string]bool{
+	store.SettingFlareSolverrURL:         true,
 	store.SettingTMDBAPIKey:              true,
 	store.SettingTheTVDBAPIKey:           true,
 	store.SettingTheTVDBPIN:              true,
@@ -117,6 +120,7 @@ var publicSettingKeys = map[string]bool{
 	store.SettingStorageRoot:                  true,
 	store.SettingRSSSyncIntervalMinutes:       true,
 	store.SettingIndexerHealthIntervalMinutes: true,
+	store.SettingFlareSolverrURL:              true,
 	store.SettingBacklogIntervalMinutes:       true,
 	store.SettingRefreshIntervalMinutes:       true,
 	store.SettingEngineListenPort:             true,
@@ -247,6 +251,10 @@ func (s *server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if err := validateFlareSolverrSetting(body); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err := s.validateRouteSettings(r.Context(), body); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -338,6 +346,19 @@ func (s *server) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 // An unparseable dlna_enabled reads as off, and a friendly name that is only
 // whitespace falls back to the default — both are quiet surprises, so they are
 // rejected here where the user can see them (SPEC §13).
+// validateFlareSolverrSetting accepts an empty value (solver off) or a bare
+// http(s) endpoint.
+func validateFlareSolverrSetting(settings map[string]string) error {
+	raw, ok := settings[store.SettingFlareSolverrURL]
+	if !ok || strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	if _, err := cardigann.NewFlareSolverr(raw, nil); err != nil {
+		return err
+	}
+	return nil
+}
+
 func validateDLNASettings(settings map[string]string) error {
 	if raw, ok := settings[store.SettingDLNAEnabled]; ok {
 		if _, err := strconv.ParseBool(strings.TrimSpace(raw)); err != nil {

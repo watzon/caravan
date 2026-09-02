@@ -36,7 +36,7 @@ func TestIndexerProbeErrorLocalAdapterForbiddenSkipsFeedGuidance(t *testing.T) {
 	if strings.Contains(message, "Torznab or Newznab feed") {
 		t.Fatalf("local adapter probe error gave feed guidance: %q", message)
 	}
-	if !strings.Contains(message, "HTTP 403") || !strings.Contains(message, "anti-bot") {
+	if !strings.Contains(message, "HTTP 403") || !strings.Contains(message, "FlareSolverr") {
 		t.Fatalf("probe error = %q, want the tracker refusal explained", message)
 	}
 }

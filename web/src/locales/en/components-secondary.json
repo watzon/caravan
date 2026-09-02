@@ -948,5 +948,15 @@
   "component.usersSettings.deleteNamed": "Delete {name}",
   "component.usersSettings.deleteMessage": "{name} can no longer sign in, and any browser signed in as them is turned out immediately. What they already asked for stays on the requests screen. Deleting somebody does not delete the history of what they wanted.",
   "component.usersSettings.resetPasswordMessage": "{name} is signed out of every browser, including this one if it is them. They are not asked for the old password.",
-  "component.usersSettings.delete": "Delete"
+  "component.usersSettings.delete": "Delete",
+  "component.flaresolverr.description": "Some torrent sites sit behind a Cloudflare or DDoS-Guard browser challenge. Point Caravan at a FlareSolverr instance and those indexers pass it automatically. Leave the field empty if you do not use one.",
+  "component.flaresolverr.url": "FlareSolverr URL",
+  "component.flaresolverr.urlHelp": "The base URL of your FlareSolverr instance, for example http://flaresolverr:8191. Caravan sends every challenged request through it.",
+  "component.flaresolverr.save": "Save",
+  "component.flaresolverr.saving": "Saving…",
+  "component.flaresolverr.saved": "FlareSolverr URL saved",
+  "component.flaresolverr.test": "Test connection",
+  "component.flaresolverr.testing": "Testing…",
+  "component.flaresolverr.testOk": "FlareSolverr {version} answered.",
+  "component.indexers.needsFlareSolverr": "Needs FlareSolverr"
 }

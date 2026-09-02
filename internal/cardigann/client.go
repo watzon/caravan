@@ -36,6 +36,14 @@ func sanitizeSearchKeywords(q string) string {
 	return strings.Join(strings.Fields(q), " ")
 }
 
+// ClientOption adjusts the engine configuration built by NewClient.
+type ClientOption func(*Config)
+
+// WithFlareSolverr routes browser challenges through the given solver.
+func WithFlareSolverr(solver *FlareSolverr) ClientOption {
+	return func(cfg *Config) { cfg.FlareSolverr = solver }
+}
+
 // Client adapts a local definition engine to Caravan's IndexerClient contract.
 type Client struct {
 	cfg    core.IndexerConfig
@@ -54,14 +62,18 @@ func (c *Client) Modes() map[string]bool {
 // NewClient resolves cfg.DefinitionID and builds a local indexer client. Build
 // errors are retained and returned by every operation because the application
 // factory contract cannot itself return an error.
-func NewClient(registry *Registry, cfg core.IndexerConfig, hc *http.Client) *Client {
+func NewClient(registry *Registry, cfg core.IndexerConfig, hc *http.Client, opts ...ClientOption) *Client {
 	client := &Client{cfg: cfg}
 	definition, ok := registry.Get(cfg.DefinitionID)
 	if !ok {
 		client.err = fmt.Errorf("unknown local indexer definition %q", cfg.DefinitionID)
 		return client
 	}
-	engine, err := New(definition, Config{BaseURL: cfg.URL, Settings: cfg.Settings}, hc)
+	engineConfig := Config{BaseURL: cfg.URL, Settings: cfg.Settings}
+	for _, opt := range opts {
+		opt(&engineConfig)
+	}
+	engine, err := New(definition, engineConfig, hc)
 	if err != nil {
 		client.err = err
 		return client

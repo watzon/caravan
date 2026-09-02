@@ -12,7 +12,7 @@ id: fixture
 name: Fixture
 type: private
 links: [https://tracker.example]
-login: {path: /login}
+login: {path: /login, method: oneurl}
 search:
   paths:
     - path: /search
@@ -44,7 +44,7 @@ search:
 	}
 }
 
-func TestParseManifestLetsUsersProvideCookieAndUserAgentButKeepsWAFInert(t *testing.T) {
+func TestParseManifestAcceptsCookieUserAgentAndFlareSolverrSettings(t *testing.T) {
 	manifest, err := ParseManifest("managed", []byte(`
 id: guarded-settings
 name: Guarded Settings
@@ -59,9 +59,8 @@ search: {paths: [{path: /search}], rows: {selector: article}, fields: {title: {s
 	if err != nil {
 		t.Fatalf("ParseManifest: %v", err)
 	}
-	want := []CapabilityCode{UnsupportedWAFSetting}
-	if manifest.Runnable || !slices.Equal(manifest.Unsupported, want) {
-		t.Fatalf("guarded settings manifest = %+v, want %v", manifest, want)
+	if !manifest.Runnable || len(manifest.Unsupported) != 0 {
+		t.Fatalf("guarded settings manifest = %+v, want runnable", manifest)
 	}
 }
 

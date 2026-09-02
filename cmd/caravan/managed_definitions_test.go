@@ -47,7 +47,7 @@ search:
 		t.Fatalf("InstallManagedSnapshot: %v", err)
 	}
 
-	runtime, err := newIndexerRuntime(dataDir, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	runtime, err := newIndexerRuntime(dataDir, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
 	if err != nil {
 		t.Fatalf("newIndexerRuntime: %v", err)
 	}

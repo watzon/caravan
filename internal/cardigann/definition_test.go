@@ -138,13 +138,14 @@ search: {paths: [{path: /search}], rows: {selector: article}, fields: {title: {s
 	}
 }
 
-func TestParseDefinitionRejectsLoginWithoutAMethod(t *testing.T) {
+func TestParseDefinitionRejectsLoginWithUnknownMethod(t *testing.T) {
 	src := []byte(`
 id: unsupported-login
 name: Unsupported Login
 links: [https://example.com]
 login:
   path: /login
+  method: oneurl
 caps:
   categorymappings: [{id: 1, cat: Movies}]
   modes: {search: [q]}

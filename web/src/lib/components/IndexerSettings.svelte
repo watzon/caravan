@@ -886,6 +886,9 @@
                       {#if entry.language}
                         <Badge mono tone="neutral">{entry.language}</Badge>
                       {/if}
+                      {#if managedDefinition.requires_flaresolverr}
+                        <Badge tone="warning">{t('component.indexers.needsFlareSolverr')}</Badge>
+                      {/if}
                     </span>
                     {#if entry.description}
                       <span class="line-clamp-2 text-sm text-ink-secondary">{entry.description}</span>

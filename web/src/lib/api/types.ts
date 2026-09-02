@@ -697,6 +697,13 @@ export const SETTING_THETVDB_API_KEY_SET = 'thetvdb_api_key_set';
  * returns it (internal/api/settings.go).
  */
 export const SETTING_API_KEY = 'api_key';
+/** Optional FlareSolverr endpoint used by local definitions behind a browser challenge. */
+export const SETTING_FLARESOLVERR_URL = 'flaresolverr_url';
+
+export interface FlareSolverrTestResult {
+  status: string;
+  version: string;
+}
 
 export const SETTING_ENGINE_LISTEN_PORT = 'engine_listen_port';
 export const SETTING_ENGINE_MAX_CONNECTIONS = 'engine_max_connections';
@@ -975,6 +982,8 @@ export interface IndexerExecutionStatus {
   addable: boolean;
   settings?: IndexerDefinitionSetting[];
   base_urls?: string[];
+  /** The site sits behind a browser challenge and needs the FlareSolverr URL from settings. */
+  requires_flaresolverr?: boolean;
 }
 
 /** Metadata inventory is display-only unless an exact verified definition is addable. */

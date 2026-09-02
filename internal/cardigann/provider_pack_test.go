@@ -91,7 +91,7 @@ func TestOpenSignedPackArchiveQuarantinesJSONSlashEscapeCompilerIncompatibility(
 	if err != nil {
 		t.Fatal(err)
 	}
-	compilerInvalid := []byte("id: first\nname: First\ndescription: \"x\\/y\"\nlinks: [https://tracker.example]\nlogin: {path: /login}\n")
+	compilerInvalid := []byte("id: first\nname: First\ndescription: \"x\\/y\"\nlinks: [https://tracker.example]\nlogin: {path: /login, method: oneurl}\n")
 	archive := writeSignedPackArchive(t, privateKey, func(f *packFixture) {
 		f.documents = f.documents[:1]
 		f.manifest.Definitions = f.manifest.Definitions[:1]
@@ -618,7 +618,7 @@ func writeSignedPackArchive(t *testing.T, privateKey ed25519.PrivateKey, mutate 
 	t.Helper()
 	documents := [][]byte{
 		[]byte(runnablePackDefinition("first", "https://tracker.example")),
-		[]byte("id: second\nname: Second\nlinks: [https://tracker.example]\nlogin: {path: /login}\n"),
+		[]byte("id: second\nname: Second\nlinks: [https://tracker.example]\nlogin: {path: /login, method: oneurl}\n"),
 	}
 	license := []byte("Synthetic test license\n")
 	fixture := packFixture{

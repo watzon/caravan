@@ -226,7 +226,7 @@ func serve(cfg *config.Config, configDir, configFile, databasePath string, logge
 	if err := refreshManagedDefinitionCache(ctx, cfg.DataDir, logger, &http.Client{Timeout: indexerTimeout}, managedDefinitionSourceURL); err != nil {
 		logger.Warn("managed indexer definition refresh failed; using last verified cache", "error", err)
 	}
-	indexerRuntime, err := newIndexerRuntime(cfg.DataDir, logger, st)
+	indexerRuntime, err := newIndexerRuntime(cfg.DataDir, logger, st, st)
 	if err != nil {
 		return err
 	}

@@ -34,11 +34,11 @@ const (
 	maxConfiguredSettingBytes = 16 << 10
 )
 
-// Config is one configured instance of a definition. Credentials and other
-// definition settings will be added here as login support lands.
+// Config is one configured instance of a definition.
 type Config struct {
-	BaseURL  string
-	Settings map[string]string
+	BaseURL      string
+	Settings     map[string]string
+	FlareSolverr *FlareSolverr
 }
 
 // Query is the subset of Torznab search inputs the definition templates use.
@@ -155,6 +155,10 @@ type Engine struct {
 	loginReady       bool
 	sessionCookie    string
 	seededCookie     string
+	waf              *FlareSolverr
+	wafRequired      bool
+	wafMu            sync.Mutex
+	wafUserAgent     string
 }
 
 type followRedirectContextKey struct{}
@@ -274,6 +278,7 @@ func New(def *Definition, cfg Config, hc *http.Client) (*Engine, error) {
 		def: def, base: u, hc: &client, origins: origins,
 		catBySite: def.categoryMap(), settings: settings, templateSettings: templateSettings,
 		secrets: configuredSecretValues(base, settings),
+		waf:     cfg.FlareSolverr, wafRequired: def.RequiresFlareSolverr(),
 	}, nil
 }
 
@@ -806,7 +811,7 @@ func (e *Engine) fetchRows(req *http.Request, response responseBlock, q Query) (
 	if err := e.waitRequestDelay(req.Context()); err != nil {
 		return nil, err
 	}
-	resp, err := e.hc.Do(req)
+	resp, err := e.do(req)
 	if err != nil {
 		return nil, safeRequestError(err)
 	}

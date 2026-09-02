@@ -51,7 +51,7 @@ func TestIndexerFactoryRoutesDefinitionsThroughLocalEngine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadBuiltins: %v", err)
 	}
-	factory := configuredIndexerFactory(definitions, upstream.Client(), upstream.Client())
+	factory := configuredIndexerFactory(definitions, upstream.Client(), upstream.Client(), nil)
 	client := factory(core.IndexerConfig{
 		ID:           7,
 		DefinitionID: "thepiratebay",
@@ -79,7 +79,7 @@ func TestIndexerFactoryNeverResolvesPinnedPackThroughLegacyRegistry(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	factory := configuredIndexerFactory(definitions, upstream.Client(), upstream.Client())
+	factory := configuredIndexerFactory(definitions, upstream.Client(), upstream.Client(), nil)
 	for _, cfg := range []core.IndexerConfig{
 		{
 			DefinitionID:       "builtin:thepiratebay",
@@ -195,7 +195,7 @@ name: Login Required
 type: private
 links: [https://tracker.example]
 caps: {modes: {search: [q]}}
-login: {path: /login}
+login: {path: /login, method: oneurl}
 search: {paths: [{path: /search}], rows: {selector: tr}, fields: {title: {selector: td}, download: {selector: a, attribute: href}}}
 `
 	for name, contents := range map[string]string{
@@ -208,7 +208,7 @@ search: {paths: [{path: /search}], rows: {selector: tr}, fields: {title: {select
 		}
 	}
 
-	runtime, err := newIndexerRuntime(dataDir, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	runtime, err := newIndexerRuntime(dataDir, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
 	if err != nil {
 		t.Fatalf("newIndexerRuntime: %v", err)
 	}

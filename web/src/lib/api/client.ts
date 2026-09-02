@@ -1,5 +1,5 @@
 /**
- * Typed fetch wrappers for /api/v1 (SPEC §11, phase-1 subset).
+ * Typed fetch wrappers for /api/v1 (SPEC §11).
  *
  * Every URL the SPA talks to is built from `endpoints` below, so a server-side
  * path change is a one-object edit here rather than a hunt through components.
@@ -49,6 +49,7 @@ import type {
   DefinitionPackUpload,
   JellyfinConfig,
   JellyfinConfigInput,
+  FlareSolverrTestResult,
   JellyfinTestResult,
   Job,
   Library,
@@ -128,24 +129,25 @@ export class ApiError extends Error {
   }
 }
 
-/** Every endpoint the phase-1 SPA uses, in one place. */
+/** Every endpoint the SPA uses, in one place. */
 export const endpoints = {
   systemStatus: () => `${API_BASE}/system/status`,
-  // Phase 5 — the portable integrity flow (SPEC §2.3, §13).
+  // The portable integrity flow (SPEC §2.3, §13).
   systemShutdown: () => `${API_BASE}/system/shutdown`,
   systemVerify: () => `${API_BASE}/system/verify`,
   systemBackup: () => `${API_BASE}/system/backup`,
   systemRestore: () => `${API_BASE}/system/restore`,
-  // Phase 5 — moving the storage root (SPEC §10). Re-pointing answers
-  // synchronously; migrating answers 202 and the progress endpoint is polled.
+  // Moving the storage root (SPEC §10). Re-pointing answers synchronously;
+  // migrating answers 202 and the progress endpoint is polled.
   storageRootRepoint: () => `${API_BASE}/system/storage-root/repoint`,
   storageRootMigrate: () => `${API_BASE}/system/storage-root/migrate`,
   storageMigration: () => `${API_BASE}/system/storage-root/migration`,
   directories: () => `${API_BASE}/system/directories`,
   settings: () => `${API_BASE}/settings`,
-  // Phase 10 — proving the TMDB key where it is typed, the same idiom as
-  // POST /indexers/{id}/test. It takes the key in the body so the first-run
-  // wizard can prove one that has not been saved yet.
+  flareSolverrTest: () => `${API_BASE}/settings/flaresolverr/test`,
+  // Proving the TMDB key where it is typed, the same idiom as POST
+  // /indexers/{id}/test. It takes the key in the body so the first-run wizard
+  // can prove one that has not been saved yet.
   metadataTest: () => `${API_BASE}/settings/metadata/test`,
   movies: () => `${API_BASE}/library/movies`,
   movie: (id: number) => `${API_BASE}/library/movies/${id}`,
@@ -156,7 +158,7 @@ export const endpoints = {
   episode: (id: number) => `${API_BASE}/library/episodes/${id}`,
   rescan: () => `${API_BASE}/library/rescan`,
   // SPEC §11 names the scan-review queue /import/queue: it is the same queue
-  // that will hold stuck downloads from phase 2 onwards.
+  // that holds stuck downloads.
   unmatched: () => `${API_BASE}/import/queue`,
   unmatchedItem: (id: number) => `${API_BASE}/import/queue/${id}`,
   unmatchedMatch: (id: number) => `${API_BASE}/import/queue/${id}/match`,
@@ -164,7 +166,7 @@ export const endpoints = {
   image: (relPath: string) =>
     `${API_BASE}/images/${relPath.split('/').map(encodeURIComponent).join('/')}`,
 
-  // Phase 2 — search & download (SPEC §5.1, §9, §11).
+  // Search & download (SPEC §5.1, §9, §11).
   indexers: () => `${API_BASE}/indexers`,
   indexer: (id: number) => `${API_BASE}/indexers/${id}`,
   indexerCatalog: () => `${API_BASE}/indexers/catalog`,
@@ -178,8 +180,8 @@ export const endpoints = {
   definitionPacksActivate: () => `${API_BASE}/definition-packs/activate`,
   definitionPacksRollback: () => `${API_BASE}/definition-packs/rollback`,
 
-  // Phase 6 — external download clients (SPEC §5.1). downloadClientTestConfig
-  // takes the form's current values, so Test works before a client is saved.
+  // External download clients (SPEC §5.1). downloadClientTestConfig takes the
+  // form's current values, so Test works before a client is saved.
   downloadClients: () => `${API_BASE}/download-clients`,
   downloadClient: (id: number) => `${API_BASE}/download-clients/${id}`,
   downloadClientTypes: () => `${API_BASE}/download-clients/types`,
@@ -190,9 +192,8 @@ export const endpoints = {
   remotePathMappings: () => `${API_BASE}/remote-path-mappings`,
   remotePathMapping: (id: number) => `${API_BASE}/remote-path-mappings/${id}`,
 
-  // Phase 7 — news servers the built-in engine fetches articles from
-  // (SPEC §5.1). Same shape as the download-client endpoints, including the
-  // unsaved-config probe.
+  // News servers the built-in engine fetches articles from (SPEC §5.1). Same
+  // shape as the download-client endpoints, including the unsaved-config probe.
   usenetServers: () => `${API_BASE}/usenet-servers`,
   usenetServer: (id: number) => `${API_BASE}/usenet-servers/${id}`,
   usenetServerTest: (id: number) => `${API_BASE}/usenet-servers/${id}/test`,
@@ -252,15 +253,15 @@ export const endpoints = {
 
   tvProfiles: () => `${API_BASE}/tv-profiles`,
 
-  // Phase 4 — the built-in DLNA media server (SPEC §5.1). Read-only: the
-  // toggle and the friendly name are settings keys, saved through PUT /settings.
+  // The built-in DLNA media server (SPEC §5.1). Read-only: the toggle and the
+  // friendly name are settings keys, saved through PUT /settings.
   dlna: () => `${API_BASE}/dlna`,
 
-  // Phase 4 — the Jellyfin playback handoff (SPEC §5.2).
+  // The Jellyfin playback handoff (SPEC §5.2).
   jellyfin: () => `${API_BASE}/handoff/jellyfin`,
   jellyfinTest: () => `${API_BASE}/handoff/jellyfin/test`,
 
-  // Phase 4 — the convert-for-TV queue (SPEC §8).
+  // The convert-for-TV queue (SPEC §8).
   conversions: () => `${API_BASE}/convert`,
   conversionCancel: (id: number) => `${API_BASE}/convert/${id}/cancel`,
   conversionRetry: (id: number) => `${API_BASE}/convert/${id}/retry`,
@@ -271,8 +272,8 @@ export const endpoints = {
   qualityProfilesExport: () => `${API_BASE}/quality-profiles/export`,
   qualityProfilesImport: () => `${API_BASE}/quality-profiles/import`,
 
-  // Phase 8 — libraries as first-class objects (SPEC §7). Admin-only: a member
-  // gets 403 from the allowlist, so nothing here is offered to one.
+  // Libraries as first-class objects (SPEC §7). Admin-only: a member gets 403
+  // from the allowlist, so nothing here is offered to one.
   libraries: () => `${API_BASE}/libraries`,
   library: (id: number) => `${API_BASE}/libraries/${id}`,
   libraryIndexer: (id: number, indexerID: number) =>
@@ -286,8 +287,8 @@ export const endpoints = {
   // block is a TMDB id; library ids only appear in the decorated payloads.
   discover: () => `${API_BASE}/discover`,
   discoverBrowse: () => `${API_BASE}/discover/browse`,
-  // The filtered scopes and the typeaheads that fill their rails (phase 12).
-  // Plural, so they cannot collide with /discover/{type}/{id} below.
+  // The filtered scopes and the typeaheads that fill their rails. Plural, so
+  // they cannot collide with /discover/{type}/{id} below.
   discoverScope: (mediaType: MediaType) =>
     `${API_BASE}/discover/${mediaType === 'movie' ? 'movies' : 'series'}`,
   discoverPeople: () => `${API_BASE}/discover/people`,
@@ -302,11 +303,11 @@ export const endpoints = {
   request: (id: number) => `${API_BASE}/requests/${id}`,
   requestApprove: (id: number) => `${API_BASE}/requests/${id}/approve`,
 
-  // Phase 9 — the adult module. Everything under /adult sits behind the
-  // server's router-level gate: with the module off, or for an account that
-  // was not granted it, each of these answers 404 with the body an unrouted
-  // path gets. The SPA is expected not to ask (SessionUser.adult says so), and
-  // a 404 from one of them is that answer arriving late, not an error to show.
+  // The adult module. Everything under /adult sits behind the server's
+  // router-level gate: with the module off, or for an account that was not
+  // granted it, each of these answers 404 with the body an unrouted path gets.
+  // The SPA is expected not to ask (SessionUser.adult says so), and a 404 from
+  // one of them is that answer arriving late, not an error to show.
   adultSites: () => `${API_BASE}/adult/sites`,
   adultSite: (id: number) => `${API_BASE}/adult/sites/${id}`,
   adultSearch: () => `${API_BASE}/adult/search`,
@@ -315,9 +316,9 @@ export const endpoints = {
     `${API_BASE}/adult/scenes/${encodeURIComponent(stashID)}?provider=${encodeURIComponent(provider)}`,
   adultPerformers: () => `${API_BASE}/adult/performers`,
   adultTags: () => `${API_BASE}/adult/tags`,
-  // Phase 11 — the Stash handoff. Inside the gated subtree with the rest of
-  // /adult rather than beside /handoff/jellyfin, so an adult-module setting is
-  // absent for an ungranted caller rather than merely switched off.
+  // The Stash handoff. Inside the gated subtree with the rest of /adult rather
+  // than beside /handoff/jellyfin, so an adult-module setting is absent for an
+  // ungranted caller rather than merely switched off.
   adultStash: () => `${API_BASE}/adult/stash`,
   adultStashTest: () => `${API_BASE}/adult/stash/test`,
   // The stash-box instances. Inside the gated subtree for the reason the
@@ -447,11 +448,11 @@ function errorMessage(payload: unknown, res: Response): string {
 /**
  * The stable `code` on an error envelope, or '' when the server sent none.
  *
- * The envelope grew the field in phase 10 (internal/api.errorResponse): a coded
- * error is one the SPA is expected to branch on — a missing credential has a
- * destination, not a message — while an uncoded one keeps the old contract of
- * "render what it says". Everything that reads a code lives in credentials.ts;
- * this is only the accessor, so no caller has to know the body's shape.
+ * A coded error (internal/api.errorResponse) is one the SPA is expected to
+ * branch on: a missing credential has a destination, not a message. An uncoded
+ * one keeps the contract of "render what it says". Everything that reads a code
+ * lives in credentials.ts; this is only the accessor, so no caller has to know
+ * the body's shape.
  */
 export function errorCode(err: unknown): string {
   if (!(err instanceof ApiError)) return '';
@@ -591,28 +592,29 @@ export const api = {
   getSettings: (signal?: AbortSignal) =>
     request<Settings>(endpoints.settings(), { signal }),
 
+  /** Ping a FlareSolverr endpoint before saving it; an empty URL tests the saved one. */
+  testFlareSolverr: (url: string) =>
+    request<FlareSolverrTestResult>(endpoints.flareSolverrTest(), { method: 'POST', body: { url } }),
+
   putSettings: (patch: Settings) =>
     request<Settings>(endpoints.settings(), { method: 'PUT', body: patch }),
 
   /**
-   * Prove one provider's API key against that provider (PLAN phase 10 task 4).
+   * Prove one provider's API key against that provider.
    *
-   * Passing the key tests that exact string without storing it, which is what
-   * the first-run wizard and the settings field both do — so a wrong key is
-   * caught before it is saved. Passing nothing tests the stored one.
-   *
+   * Passing the key tests that exact string without storing it, so a wrong key
+   * is caught before it is saved. Passing nothing tests the stored one.
    * `provider` defaults to TMDB, which is what the server assumes for a body
-   * that names none — so a caller that has only ever had one key to prove keeps
-   * asking the question it always asked. An id with no key field of its own is
-   * a 400 rather than a test that quietly proves TMDB's key instead.
+   * that names none; an id with no key field of its own is a 400 rather than a
+   * test that quietly proves TMDB's key instead.
    *
    * The server caches the verdict against the key's value, so testing and then
-   * saving the same key costs one upstream call, not two: prefer test-then-save
+   * saving the same key costs one upstream call, not two. Prefer test-then-save
    * over saving blind.
    *
-   * `pin` is TheTVDB's subscriber PIN. Empty means "use the stored one", which
-   * is what the settings Test button needs. First run sends the unsaved PIN
-   * so a user-supported key can be proved before either half is written.
+   * `pin` is TheTVDB's subscriber PIN. Empty means use the stored one, which is
+   * what the settings Test button needs. First run sends the unsaved PIN so a
+   * user-supported key can be proved before either half is written.
    */
   testMetadataKey: (apiKey = '', provider = 'tmdb', pin = '') =>
     request<{ status: string }>(endpoints.metadataTest(), {
@@ -808,7 +810,7 @@ export const api = {
     }),
 
   /* ------------------------------------------------------------------------
-   * Phase 2 — search & download.
+   * Search & download.
    * --------------------------------------------------------------------- */
 
   listIndexers: (signal?: AbortSignal) =>
@@ -911,7 +913,7 @@ export const api = {
     }),
 
   /* ---------------------------------------------------------------------
-   * Phase 6 — external download clients (SPEC §5.1, §11).
+   * External download clients (SPEC §5.1, §11).
    * ------------------------------------------------------------------- */
 
   listDownloadClients: (signal?: AbortSignal) =>
@@ -982,7 +984,7 @@ export const api = {
     request<void>(endpoints.notificationWebhookTest(id), { method: 'POST' }),
 
   /* ---------------------------------------------------------------------
-   * Phase 7 — news servers for the built-in engine (SPEC §5.1, §11).
+   * News servers for the built-in engine (SPEC §5.1, §11).
    * ------------------------------------------------------------------- */
 
   listUsenetServers: (signal?: AbortSignal) =>
@@ -1279,7 +1281,7 @@ export const api = {
     request<{ profiles: number }>(endpoints.qualityProfilesImport(), { method: 'POST', body }),
 
   /* ------------------------------------------------------------------------
-   * Phase 8 — libraries.
+   * Libraries.
    *
    * Both writes answer with the library's whole state, so one response
    * re-renders every card rather than the screen guessing what a write did to
@@ -1361,12 +1363,12 @@ export const api = {
     }),
 
   /**
-   * One page of a filtered scope (phase 12).
+   * One page of a filtered scope.
    *
    * The query is built by lib/explore.ts and passed through: the endpoint
    * ALLOWLISTS its parameters and answers 400 to anything else, including a
-   * filter the other scope serves, so nothing may be added here that the
-   * filter model did not decide to send.
+   * filter the other scope serves, so nothing may be added here that the filter
+   * model did not decide to send.
    */
   discoverScope: (
     mediaType: MediaType,
@@ -1483,7 +1485,7 @@ export const api = {
     }),
 
   /* ------------------------------------------------------------------------
-   * Phase 9 — the adult module.
+   * The adult module.
    *
    * 503 means no stash-box credential is configured (send the user to
    * Settings → Metadata); 502 means the provider is unhappy. Both arrive
@@ -1493,7 +1495,7 @@ export const api = {
    * --------------------------------------------------------------------- */
 
   /**
-   * The configured stash-box endpoints (PLAN Part 2 phase 3).
+   * The configured stash-box endpoints.
    *
    * Every one of these 404s while the module is off, so the settings card that
    * calls them is mounted only for a session that already sees the module.
@@ -1592,7 +1594,7 @@ export const api = {
     ),
 
   /* ------------------------------------------------------------------------
-   * Phase 11 — the Stash handoff (SPEC §5.2's adult twin). Like Jellyfin's,
+   * The Stash handoff (SPEC §5.2's adult twin). Like Jellyfin's,
    * the scan is never triggered from here: an adult import queues it and the
    * job queue runs it, so the UI only configures the connection and proves it.
    * --------------------------------------------------------------------- */

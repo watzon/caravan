@@ -55,6 +55,9 @@ type ExecutionStatus struct {
 	Settings     []Setting `json:"settings,omitempty"`
 	BaseURLs     []string  `json:"base_urls,omitempty"`
 	Addable      bool      `json:"addable"`
+	// RequiresFlareSolverr marks sites behind a browser challenge; they only
+	// work once a FlareSolverr URL is saved in settings.
+	RequiresFlareSolverr bool `json:"requires_flaresolverr,omitempty"`
 }
 
 // InventoryEntry keeps the 542-row metadata plane separate from the existing

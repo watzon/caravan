@@ -27,7 +27,6 @@ const (
 	UnsupportedScript                   CapabilityCode = "script"
 	UnsupportedCookieSetting            CapabilityCode = "login.cookie"
 	UnsupportedUserAgentSetting         CapabilityCode = "settings.useragent"
-	UnsupportedWAFSetting               CapabilityCode = "waf.flaresolverr"
 )
 
 // Manifest is inert metadata decoded from a definition. A manifest is never an
@@ -183,9 +182,6 @@ func classifyManifest(root *yaml.Node) []CapabilityCode {
 		if key == "search" {
 			codes = append(codes, classifySearch(value)...)
 		}
-		if key == "settings" {
-			codes = append(codes, classifySettings(value)...)
-		}
 	})
 	return codes
 }
@@ -195,10 +191,13 @@ func classifyLogin(node *yaml.Node) []CapabilityCode {
 		return []CapabilityCode{UnsupportedLogin}
 	}
 	method := strings.ToLower(scalarValue(mappingValue(node, "method")))
+	if method == "" {
+		method = "form"
+	}
 	if method != "cookie" && method != "get" && method != "post" && method != "form" {
 		return []CapabilityCode{UnsupportedLogin}
 	}
-	allowed := set("path", "method", "form", "submitpath", "inputs", "selectorinputs", "selectors", "cookies", "headers", "test", "error")
+	allowed := set("path", "method", "form", "submitpath", "inputs", "selectorinputs", "selectors", "cookies", "headers", "test", "error", "captcha")
 	unsupported := false
 	forEachMapping(node, func(key string, _ *yaml.Node) {
 		if !allowed[key] {
@@ -285,21 +284,6 @@ func classifyDownload(node *yaml.Node) []CapabilityCode {
 		return []CapabilityCode{unsupported}
 	}
 	return nil
-}
-
-func classifySettings(node *yaml.Node) []CapabilityCode {
-	if node == nil || node.Kind != yaml.SequenceNode {
-		return nil
-	}
-	codes := make([]CapabilityCode, 0)
-	for _, setting := range node.Content {
-		settingType := strings.ToLower(scalarValue(mappingValue(setting, "type")))
-		switch settingType {
-		case "info_flaresolverr":
-			codes = append(codes, UnsupportedWAFSetting)
-		}
-	}
-	return codes
 }
 
 func classifyCaps(node *yaml.Node) []CapabilityCode {

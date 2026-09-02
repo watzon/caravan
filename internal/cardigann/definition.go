@@ -127,6 +127,7 @@ type searchBlock struct {
 type loginBlock struct {
 	Path           string                    `yaml:"path"`
 	Method         string                    `yaml:"method"`
+	Captcha        *loginCaptchaBlock        `yaml:"captcha"`
 	Form           string                    `yaml:"form"`
 	SubmitPath     string                    `yaml:"submitpath"`
 	Inputs         map[string]string         `yaml:"inputs"`
@@ -136,6 +137,14 @@ type loginBlock struct {
 	Headers        map[string]headerTemplate `yaml:"headers"`
 	Test           loginTestBlock            `yaml:"test"`
 	Error          []loginErrorBlock         `yaml:"error"`
+}
+
+// loginCaptchaBlock names the captcha a form login may show. Caravan cannot
+// solve one; the engine detects it and points the user at cookie login.
+type loginCaptchaBlock struct {
+	Type     string `yaml:"type"`
+	Selector string `yaml:"selector"`
+	Input    string `yaml:"input"`
 }
 
 type loginTestBlock struct {
@@ -287,6 +296,7 @@ func ParseDefinition(src []byte) (*Definition, error) {
 	if err := validateLoginBlock(def.Login); err != nil {
 		return nil, fmt.Errorf("definition %s login: %w", def.ID, err)
 	}
+	def.Settings = withSessionCookieSetting(def.Login, def.Settings)
 	if err := validateDownloadBlock(def.Download); err != nil {
 		return nil, fmt.Errorf("definition %s download: %w", def.ID, err)
 	}
@@ -324,7 +334,7 @@ func validateLoginBlock(login *loginBlock) error {
 	if login == nil {
 		return nil
 	}
-	method := strings.ToLower(strings.TrimSpace(login.Method))
+	method := loginMethod(login)
 	switch method {
 	case "cookie":
 		if strings.TrimSpace(login.Inputs["cookie"]) == "" {
@@ -344,8 +354,17 @@ func validateLoginBlock(login *loginBlock) error {
 	if len(login.Inputs) > 128 || len(login.SelectorInputs) > 32 || len(login.Cookies) > 32 || len(login.Headers) > 64 || len(login.Error) > 32 {
 		return fmt.Errorf("exceeds bounded login metadata")
 	}
-	if (len(login.SelectorInputs) > 0 || login.Selectors || login.SubmitPath != "") && method != "form" {
-		return fmt.Errorf("selector inputs, selector keys, and submit path require form method")
+	if (len(login.SelectorInputs) > 0 || login.Selectors || login.SubmitPath != "" || login.Captcha != nil) && method != "form" {
+		return fmt.Errorf("selector inputs, selector keys, captcha, and submit path require form method")
+	}
+	if login.Captcha != nil {
+		captchaType := strings.ToLower(strings.TrimSpace(login.Captcha.Type))
+		if captchaType != "" && captchaType != "image" && captchaType != "text" {
+			return fmt.Errorf("unsupported captcha type %q", login.Captcha.Type)
+		}
+		if strings.TrimSpace(login.Captcha.Selector) == "" {
+			return fmt.Errorf("captcha requires a selector")
+		}
 	}
 	for name, source := range login.Inputs {
 		if strings.TrimSpace(name) == "" || strings.ContainsAny(name, "\r\n") {
@@ -725,14 +744,49 @@ func (d *Definition) SettingSchemas() []SettingSchema {
 	return out
 }
 
+// sessionCookieSetting is added by Caravan to every definition that logs in
+// with credentials. A pasted browser session replaces the login flow, which is
+// the only way past trackers that show a captcha on their login form.
+const sessionCookieSetting = "caravan_session_cookie"
+
+func withSessionCookieSetting(login *loginBlock, settings []settingBlock) []settingBlock {
+	if login == nil || loginMethod(login) == "cookie" {
+		return settings
+	}
+	for _, setting := range settings {
+		if setting.Name == sessionCookieSetting {
+			return settings
+		}
+	}
+	return append(settings, settingBlock{
+		Name:  sessionCookieSetting,
+		Type:  "text",
+		Label: "Session cookie (optional, replaces the login above)",
+	})
+}
+
+// RequiresFlareSolverr reports whether the definition declares that the site
+// sits behind a browser challenge.
+func (d *Definition) RequiresFlareSolverr() bool {
+	if d == nil {
+		return false
+	}
+	for _, setting := range d.Settings {
+		if strings.EqualFold(strings.TrimSpace(setting.Type), flareSolverrSettingType) {
+			return true
+		}
+	}
+	return false
+}
+
 func specializedInfoGuidance(raw string) (label, message string, ok bool) {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "info_category_8000":
 		return "Adult categories", "Adult results use the 8000 category group and remain subject to Caravan's category filters.", true
 	case "info_cookie":
 		return "Cookie authentication", "Paste the tracker session cookie requested by this indexer.", true
-	case "info_flaresolverr":
-		return "WAF assistance", "This indexer requires separately approved browser or WAF assistance before it can run.", true
+	case flareSolverrSettingType:
+		return "Browser challenge", "This site sits behind a Cloudflare or DDoS-Guard challenge. Caravan passes it through the FlareSolverr URL set in Settings > Indexers.", true
 	case "info_useragent":
 		return "Browser user agent", "Provide the same browser user agent associated with the tracker session.", true
 	default:

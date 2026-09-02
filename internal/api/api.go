@@ -172,6 +172,7 @@ func NewServer(st *store.Store, mgr Manager, dist fs.FS, opts ...Option) http.Ha
 	// POST /indexers/{id}/test. It takes the key from the body so the first-run
 	// wizard can prove one before it is saved.
 	api.HandleFunc("POST /settings/metadata/test", s.handleMetadataTest)
+	api.HandleFunc("POST /settings/flaresolverr/test", s.handleTestFlareSolverr)
 	api.HandleFunc("GET /system/status", s.handleSystemStatus)
 	api.HandleFunc("GET /system/backup", s.handleBackup)
 	api.HandleFunc("POST /system/restore", s.handleRestore)

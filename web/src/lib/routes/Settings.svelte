@@ -15,6 +15,7 @@
   import Icon from '../components/Icon.svelte';
   import DownloadsSettings from '../components/DownloadsSettings.svelte';
   import IndexerSettings from '../components/IndexerSettings.svelte';
+import FlareSolverrSettings from '../components/FlareSolverrSettings.svelte';
   import InterfaceSettings from '../components/InterfaceSettings.svelte';
   import LibrariesSettings from '../components/LibrariesSettings.svelte';
   import LoadError from '../components/LoadError.svelte';
@@ -269,6 +270,9 @@
       <LibrariesSettings />
     {:else if activeEntry?.route === '/settings/indexers'}
       <IndexerSettings />
+      {#if settings}
+        <FlareSolverrSettings {settings} {saving} onsave={save} />
+      {/if}
     {:else if activeEntry?.route === '/settings/storage' && settings}
       <StorageSettings {settings} {saving} onsave={save} />
     {:else if activeEntry?.route === '/settings/quality-profiles'}

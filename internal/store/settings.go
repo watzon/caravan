@@ -28,6 +28,9 @@ const (
 	// probed. A failure flags the indexer out of search immediately; several
 	// in a row switch it off.
 	SettingIndexerHealthIntervalMinutes = "indexer_health_interval_minutes"
+	// SettingFlareSolverrURL is the optional FlareSolverr endpoint that local
+	// tracker definitions use to pass Cloudflare and DDoS-Guard challenges.
+	SettingFlareSolverrURL = "flaresolverr_url"
 	// Naming settings describe the generated Jellyfin-compatible paths. Unset
 	// values use the built-in formats so existing installations keep their
 	// exact paths.

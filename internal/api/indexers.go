@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"github.com/watzon/caravan/internal/store"
 	"net/http"
 	"net/url"
 	"sort"
@@ -774,15 +775,57 @@ func (s *server) handleTestIndexerConfig(w http.ResponseWriter, r *http.Request)
 func indexerProbeError(cfg core.IndexerConfig, err error) string {
 	msg := redactIndexerMessage(cfg, err.Error())
 	lower := strings.ToLower(msg)
+	if strings.Contains(lower, "browser challenge") || strings.Contains(lower, "flaresolverr") || strings.Contains(lower, "captcha") {
+		return "indexer test failed: " + msg
+	}
 	if strings.Contains(lower, "forbidden") || strings.Contains(lower, "http 403") {
-		// A local adapter scrapes the site itself, so a 403 there is the
-		// tracker refusing the request — feed guidance would be wrong.
+		// A local definition scrapes the site itself, so a 403 there is the
+		// tracker refusing the request; feed guidance would be wrong.
 		if cfg.DefinitionID != "" {
-			return "indexer test failed: " + msg + ". The site refused the request, likely with anti-bot protection (such as a Cloudflare challenge) that Caravan cannot pass."
+			return "indexer test failed: " + msg + ". The site refused the request. If it uses a browser challenge, set a FlareSolverr URL in Settings > Indexers; if it needs an account, check the credentials or paste a session cookie."
 		}
 		return "indexer test failed: the configured URL is a website, not a Torznab or Newznab feed. Paste a Jackett or Prowlarr URL."
 	}
 	return "indexer test failed: " + msg
+}
+
+type flareSolverrTestRequest struct {
+	URL string `json:"url"`
+}
+
+// handleTestFlareSolverr pings a FlareSolverr endpoint. An empty URL tests the
+// saved one so the button works after a page reload.
+func (s *server) handleTestFlareSolverr(w http.ResponseWriter, r *http.Request) {
+	var body flareSolverrTestRequest
+	if r.ContentLength != 0 && !decodeJSON(w, r, &body) {
+		return
+	}
+	endpoint := strings.TrimSpace(body.URL)
+	if endpoint == "" {
+		saved, err := s.settingValue(r.Context(), store.SettingFlareSolverrURL)
+		if err != nil {
+			s.writeStoreError(w, "read settings", err)
+			return
+		}
+		endpoint = saved
+	}
+	if endpoint == "" {
+		writeError(w, http.StatusBadRequest, "enter the FlareSolverr URL first")
+		return
+	}
+	solver, err := cardigann.NewFlareSolverr(endpoint, &http.Client{Timeout: 15 * time.Second})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	probe, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	version, err := solver.Ping(probe)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "FlareSolverr test failed: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "version": version})
 }
 
 func redactIndexerMessage(cfg core.IndexerConfig, message string) string {

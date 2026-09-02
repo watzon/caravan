@@ -14,7 +14,7 @@ func TestClassifyCorpusDirectoryReportsExactInertAndRunnableTotals(t *testing.T)
 		"z-unsupported.yml": `id: unsupported
 name: Unsupported
 links: [https://tracker.example]
-login: {path: /login}
+login: {path: /login, method: oneurl}
 `,
 		"a-runnable.yml": `id: runnable
 name: Runnable

@@ -69,7 +69,7 @@ var registerDownloadClients = sync.OnceValue(func() error {
 // definitions use a separate restricted transport so tracker-controlled
 // redirects cannot reach private services on the Caravan host.
 func newIndexerFactory() (api.IndexerFactory, error) {
-	runtime, err := newIndexerRuntime("", slog.Default())
+	runtime, err := newIndexerRuntime("", slog.Default(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +83,32 @@ type indexerRuntime struct {
 	managedStatuses  []catalog.ExecutionStatus
 }
 
-func newIndexerRuntime(dataDir string, logger *slog.Logger, packStores ...definitionPackRuntimeStore) (*indexerRuntime, error) {
+// settingReader is the one store method the indexer factory needs at request time.
+type settingReader interface {
+	GetSetting(context.Context, string) (string, error)
+}
+
+// flareSolverrFromSettings builds the solver from the saved URL on each call so
+// a settings change applies to the next search without a restart.
+func flareSolverrFromSettings(settings settingReader, logger *slog.Logger) func(context.Context) *cardigann.FlareSolverr {
+	return func(ctx context.Context) *cardigann.FlareSolverr {
+		if settings == nil {
+			return nil
+		}
+		raw, err := settings.GetSetting(ctx, store.SettingFlareSolverrURL)
+		if err != nil || strings.TrimSpace(raw) == "" {
+			return nil
+		}
+		solver, err := cardigann.NewFlareSolverr(raw, nil)
+		if err != nil {
+			logger.Warn("ignoring invalid FlareSolverr URL", "error", err)
+			return nil
+		}
+		return solver
+	}
+}
+
+func newIndexerRuntime(dataDir string, logger *slog.Logger, settings settingReader, packStores ...definitionPackRuntimeStore) (*indexerRuntime, error) {
 	if len(packStores) > 1 {
 		return nil, fmt.Errorf("indexer runtime accepts at most one definition pack store")
 	}
@@ -184,7 +209,7 @@ func newIndexerRuntime(dataDir string, logger *slog.Logger, packStores ...defini
 		return api.LocalDefinitionSchema{Settings: settings, Fields: catalogSettingSchemas(fields), BaseURLs: baseURLs}, true
 	})
 	return &indexerRuntime{
-		factory:          configuredIndexerFactory(definitions, remoteHTTP, localHTTP),
+		factory:          configuredIndexerFactory(definitions, remoteHTTP, localHTTP, flareSolverrFromSettings(settings, logger)),
 		definitions:      lookup,
 		exactDefinitions: exactLookup,
 		managedStatuses:  managedStatuses,
@@ -255,6 +280,9 @@ func managedCatalogExecutionStatuses(descriptors []cardigann.DefinitionDescripto
 			status.State, status.Addable = catalog.InventoryStateVerified, true
 			status.BaseURLs = baseURLs
 			status.Settings = catalogSettingSchemas(fields)
+			if definition, ok := definitions.GetExact(status.DefinitionID, status.Source, status.Revision, status.Digest); ok {
+				status.RequiresFlareSolverr = definition.RequiresFlareSolverr()
+			}
 		}
 		statuses = append(statuses, status)
 	}
@@ -271,7 +299,10 @@ func countAddableStatuses(statuses []catalog.ExecutionStatus) int {
 	return count
 }
 
-func configuredIndexerFactory(definitions *cardigann.Registry, remoteHTTP, localHTTP *http.Client) api.IndexerFactory {
+func configuredIndexerFactory(definitions *cardigann.Registry, remoteHTTP, localHTTP *http.Client, solver func(context.Context) *cardigann.FlareSolverr) api.IndexerFactory {
+	if solver == nil {
+		solver = func(context.Context) *cardigann.FlareSolverr { return nil }
+	}
 	return func(cfg core.IndexerConfig) api.IndexerClient {
 		ref, refErr := cardigann.ParseDefinitionRef(cfg.DefinitionID)
 		exactNamespace := refErr == nil && ref.Source != cardigann.BuiltinSource && ref.Source != "user" && ref.Source != cardigann.ManagedSource
@@ -279,10 +310,10 @@ func configuredIndexerFactory(definitions *cardigann.Registry, remoteHTTP, local
 			if _, ok := definitions.GetExact(cfg.DefinitionID, cfg.DefinitionSource, cfg.DefinitionRevision, cfg.DefinitionDigest); !ok {
 				return unavailableIndexerClient{err: fmt.Errorf("definition %q exact pin is not active in this runtime", cfg.DefinitionID)}
 			}
-			return cardigann.NewClient(definitions, cfg, localHTTP)
+			return cardigann.NewClient(definitions, cfg, localHTTP, cardigann.WithFlareSolverr(solver(context.Background())))
 		}
 		if cfg.DefinitionID != "" {
-			return cardigann.NewClient(definitions, cfg, localHTTP)
+			return cardigann.NewClient(definitions, cfg, localHTTP, cardigann.WithFlareSolverr(solver(context.Background())))
 		}
 		return indexer.New(cfg, remoteHTTP)
 	}
