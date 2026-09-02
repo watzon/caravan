@@ -5,7 +5,7 @@ Target: `v0.1.0` — an early public release, not a production-readiness claim.
 ## Blocking the release
 
 - [x] Choose and add a top-level `LICENSE`. MIT was selected and added.
-- [ ] Create the `watzon/caravan` GitHub repository and add it as `origin`.
+- [x] Create the `watzon/caravan` GitHub repository and add it as `origin`.
 - [ ] Push `main`, enable Actions, and confirm every job in `CI` passes remotely.
 - [ ] Confirm a release tag outside `main` is rejected and archive builds wait
       for the release workflow's frontend, Go, race, and vulnerability gates.
@@ -15,7 +15,7 @@ Target: `v0.1.0` — an early public release, not a production-readiness claim.
       including embedded font files and binary release distribution.
 - [ ] Run a release candidate through the tag workflow without announcing it;
       verify all five archives, the checksum manifest, and embedded version.
-- [ ] Confirm `.env`, `config/`, and `data/` are excluded from Git and Docker
+- [x] Confirm `.env`, `config/`, and `data/` are excluded from Git and Docker
       build contexts.
 
 ## Strongly recommended before announcing
@@ -31,10 +31,10 @@ Target: `v0.1.0` — an early public release, not a production-readiness claim.
 - [x] Accept the trusted-LAN first-boot model. Compose still publishes port
       8677 on the LAN; first-run documentation requires immediate administrator
       setup, with loopback or reverse-proxy publishing for untrusted networks.
-- [ ] Choose whether Docker is checkout-only for `v0.1.0` or publish a versioned
+- [x] Choose whether Docker is checkout-only for `v0.1.0` or publish a versioned
       registry image; make the README and announcement explicit either way.
 - [ ] Capture two sanitized screenshots: first-run/discover and queue/library.
-- [ ] Replace `TBD` in `CHANGELOG.md` with the release date.
+- [x] Replace `TBD` in `CHANGELOG.md` with the release date.
 - [ ] Review `docs/SPEC.md` and `docs/PLAN.md` for internal/draft language; keep
       them as design history or move unfinished promises to issues.
 - [ ] Confirm the repository description, topics, issue tracker, and support
@@ -43,10 +43,10 @@ Target: `v0.1.0` — an early public release, not a production-readiness claim.
 ## Release-day verification
 
 - [ ] Start from a clean checkout.
-- [ ] Run `(cd web && npm ci && npm run check && npm test && npm run build)`.
-- [ ] Run `go test -count=1 ./...`, `go vet ./...`, and `go build ./...`.
-- [ ] Run `govulncheck ./...`, full `npm audit`, and `npm audit --omit=dev`.
-- [ ] Build the Docker image and run `caravan version` inside it.
+- [x] Run `(cd web && npm ci && npm run check && npm test && npm run build)`.
+- [x] Run `go test -count=1 ./...`, `go vet ./...`, and `go build ./...`.
+- [x] Run `govulncheck ./...`, full `npm audit`, and `npm audit --omit=dev`.
+- [x] Build the Docker image and run `caravan version` inside it.
 - [ ] Ensure `git status --short` contains only reviewed release-prep changes and
       the tag points at reviewed `main`.
 - [ ] Push `v0.1.0`; inspect the generated GitHub Release before sharing it.
