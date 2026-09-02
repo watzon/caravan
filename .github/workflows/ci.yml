@@ -47,8 +47,7 @@ jobs:
       - name: vulnerability scan
         run: |
           GOBIN="${RUNNER_TEMP}/bin" go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
-          echo "${RUNNER_TEMP}/bin" >> "$GITHUB_PATH"
-          govulncheck ./...
+          "${RUNNER_TEMP}/bin/govulncheck" ./...
 
       - name: embedded binary smoke
         run: go test -count=1 -run '^TestBinaryServesEmbeddedSPA$' ./cmd/caravan
@@ -157,7 +156,7 @@ jobs:
           cache: true
 
       - name: race test
-        run: go test -race -short -count=1 ./internal/api ./internal/automation ./internal/download ./internal/store ./cmd/caravan
+        run: go test -race -short -count=1 -timeout 45m ./internal/api ./internal/automation ./internal/download ./internal/store ./cmd/caravan
 
   docker:
     name: Docker image

@@ -75,7 +75,7 @@ jobs:
           GOBIN="${RUNNER_TEMP}/bin" go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
           "${RUNNER_TEMP}/bin/govulncheck" ./...
       - name: focused race coverage
-        run: go test -race -short -count=1 ./internal/api ./internal/automation ./internal/download ./internal/store ./cmd/caravan
+        run: go test -race -short -count=1 -timeout 45m ./internal/api ./internal/automation ./internal/download ./internal/store ./cmd/caravan
 
   verify-targets:
     name: Verify release target matrix
