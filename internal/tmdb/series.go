@@ -22,7 +22,7 @@ type tvResult struct {
 }
 
 // tvDetail is /tv/{id}. Its seasons list carries no episodes, only the season
-// numbers that exist — hence the per-season fetch in GetSeries.
+// numbers that exist: hence the per-season fetch in GetSeries.
 type tvDetail struct {
 	tvResult
 	Status  string `json:"status"`
@@ -76,10 +76,10 @@ func (c *Client) SearchSeries(ctx context.Context, q string) ([]core.SeriesMeta,
 	return out, nil
 }
 
-// GetSeries returns full details for one series, including every season and
-// its episodes. Episodes are not available on the series endpoint at any
-// append_to_response depth, so each season is fetched individually — one
-// request per season, sequentially, to stay well inside TMDB's rate limit.
+// GetSeries returns full details for one series, including every season and its
+// episodes. Episodes are not available on the series endpoint at any
+// append_to_response depth, so each season is fetched individually: one request
+// per season, sequentially, to stay well inside TMDB's rate limit.
 func (c *Client) GetSeries(ctx context.Context, ref string) (*core.SeriesMeta, error) {
 	tmdbID, err := parseRef(ref)
 	if err != nil {

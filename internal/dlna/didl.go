@@ -9,12 +9,11 @@ import (
 
 // UPnP object classes. Containers are storage folders rather than the
 // media-specific container classes (albumContainer, and so on) because those
-// carry semantics — an album has an artist — that a folder of videos does not.
+// carry semantics, an album has an artist, that a folder of videos does not.
 //
 // Items are the plain videoItem rather than videoItem.movie or
 // videoItem.videoBroadcast: the subclasses add nothing a client needs to play
-// the file, and every renderer understands the base class (PLAN phase 4 risk
-// note: implement the spec, do not chase per-client behaviour).
+// the file, and every renderer understands the base class.
 const (
 	classContainer = "object.container.storageFolder"
 	classVideoItem = "object.item.videoItem"
@@ -32,11 +31,11 @@ const (
 // DLNA.ORG_OP=01 is the one that matters: it says the server honours byte-range
 // requests, which is what lets a TV seek instead of only playing from the
 // start. CI=0 says the stream is not transcoded, which is true by construction
-// here. The FLAGS word is the conventional streaming set (DLNA v1.5,
-// background and streaming transfer modes, connection stall allowed).
+// here. The FLAGS word is the conventional streaming set (DLNA v1.5, background
+// and streaming transfer modes, connection stall allowed).
 //
 // There is deliberately no DLNA.ORG_PN. A PN is a claim that the file matches
-// one exact profile — bitrate, level, the lot — and a wrong PN makes clients
+// one exact profile, bitrate, level, the lot, and a wrong PN makes clients
 // refuse a file they could otherwise play. Omitting it means "work it out from
 // the stream", which is what a general-purpose library needs.
 const dlnaFlags = "DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=01700000000000000000000000000000"
@@ -140,14 +139,14 @@ func newDIDL() *didlLite {
 func (d *didlLite) count() int { return len(d.Containers) + len(d.Items) }
 
 // encode renders the document. The result is embedded, XML-escaped, inside the
-// SOAP response's Result element — DIDL-Lite travels as a string, not as
-// nested XML.
+// SOAP response's Result element: DIDL-Lite travels as a string, not as nested
+// XML.
 //
-// Go's marshaller writes quotes and apostrophes as numeric character
-// references (&#34;, &#39;). Legal XML — but the DIDL string is re-parsed by
-// whatever unescaper a TV app ships, and the hand-rolled ones only know the
-// five named entities. A title like "I'm Yani" must therefore travel as
-// &apos;, or that client reads garbage and renders an empty folder.
+// Go's marshaller writes quotes and apostrophes as numeric character references
+// (&#34;, &#39;). Legal XML: but the DIDL string is re-parsed by whatever
+// unescaper a TV app ships, and the hand-rolled ones only know the five named
+// entities. A title like "I'm Yani" must therefore travel as &apos;, or that
+// client reads garbage and renders an empty folder.
 var namedEntities = strings.NewReplacer("&#34;", "&quot;", "&#39;", "&apos;")
 
 func (d *didlLite) encode() (string, error) {
@@ -162,7 +161,7 @@ func (d *didlLite) encode() (string, error) {
 // which the spec orders as containers first and then items.
 //
 // A RequestedCount of 0 means "everything from here", per the ContentDirectory
-// specification — not "nothing".
+// specification: not "nothing".
 func (d *didlLite) slice(start, count int) *didlLite {
 	total := d.count()
 	if start < 0 {

@@ -12,7 +12,7 @@ import (
 	"github.com/watzon/caravan/internal/stashbox/stashboxtest"
 )
 
-// The scene filter surface on TPDB's REST dialect (PLAN phase 12 task 2).
+// The scene filter surface on TPDB's REST dialect.
 //
 // These assert the EXACT parameter set, not merely that the expected ones are
 // present: a filter this client misspells is one TPDB ignores, which answers a
@@ -131,8 +131,8 @@ func TestSearchScenesOnTPDBWithNoFiltersSendsOnlyTheDefaults(t *testing.T) {
 }
 
 // The widening ladder. Each step keeps the narrower one, and the narrow scope
-// sends nothing at all — Site is the endpoint's own default for a site_id, so
-// a catalogue walk's query stays what it was.
+// sends nothing at all: Site is the endpoint's own default for a site_id, so a
+// catalogue walk's query stays what it was.
 func TestSearchScenesOnTPDBWidensTheSiteScope(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -198,7 +198,7 @@ func TestSearchScenesOnTPDBMapsEveryOrdering(t *testing.T) {
 }
 
 // The any/all switch is the endpoint's own performer_and / tag_and, sent only
-// for the ALL reading — its absence is "any".
+// for the ALL reading: its absence is "any".
 func TestSearchScenesOnTPDBSendsTheAnyAllSwitchOnlyForAll(t *testing.T) {
 	c, srv := tpdbSceneStub(t, stashboxtest.Options{
 		SceneIndex: []stashboxtest.Response{sceneIndexResponse()},
@@ -221,8 +221,8 @@ func TestSearchScenesOnTPDBSendsTheAnyAllSwitchOnlyForAll(t *testing.T) {
 }
 
 // A filter ref carrying only a stash-box uuid is a URL copied from another
-// install. The REST index has no uuid filter, so the honest answer is a
-// failure rather than a page of everything — and the request is never made.
+// install. The REST index has no uuid filter, so the honest answer is a failure
+// rather than a page of everything: and the request is never made.
 func TestSearchScenesOnTPDBRefusesARefWithNoNumericID(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -298,9 +298,7 @@ func TestSearchScenesOnTPDBMapsEveryDateComparison(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // The GraphQL dialect: what it can express, and what it refuses.
-// ---------------------------------------------------------------------------
 
 func TestSearchScenesGraphQLSendsThePerformerAndTagCriteria(t *testing.T) {
 	c, srv := newStub(t, map[string][]stashboxtest.Response{
@@ -346,7 +344,7 @@ func TestSearchScenesGraphQLSendsThePerformerAndTagCriteria(t *testing.T) {
 
 // The seam this dialect sits on the wrong side of. Every one of these is a
 // control TPDB serves and stash-box has no field for, and each is refused by
-// name rather than dropped — a dropped filter answers the wider question.
+// name rather than dropped: a dropped filter answers the wider question.
 func TestSearchScenesGraphQLRefusesFiltersItCannotExpress(t *testing.T) {
 	site := "f1f1f1f1-1111-4111-8111-111111111111"
 	tests := []struct {
@@ -403,7 +401,7 @@ func TestSearchScenesGraphQLRefusesFiltersItCannotExpress(t *testing.T) {
 // asks BOTH questions of the same client and insists they match: a filter
 // advertised as available must not be refused, and one advertised as absent
 // must be. Adding a refusal to sceneQueryInput without withholding the
-// capability — or the reverse — fails here rather than on somebody's screen.
+// capability, or the reverse, fails here rather than on somebody's screen.
 func TestSceneFilterSupportAgreesWithWhatTheQueryRefuses(t *testing.T) {
 	site := "f1f1f1f1-1111-4111-8111-111111111111"
 	// Every capability, paired with a query that exercises exactly it.

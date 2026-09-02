@@ -14,9 +14,9 @@ import (
 // vols resolves which file holds which volume; rardecode follows the rest of a
 // multi-volume set itself from the first one, reading it as one continuous
 // stream, which is the only way a file split across volumes can come out whole.
-// Unlike zip there is no directory to vet up front — a rar is read start to
-// end — so an entry that turns out to be unsafe half way through is caught by
-// the caller discarding the staging tree.
+// Unlike zip there is no directory to vet up front, a rar is read start to end,
+// so an entry that turns out to be unsafe half way through is caught by the
+// caller discarding the staging tree.
 func extractRAR(ctx context.Context, archive, root string, vols volumeSet) ([]extracted, error) {
 	rc, err := rardecode.OpenReader(vols.first(), rardecode.FileSystem(vols))
 	if err != nil {

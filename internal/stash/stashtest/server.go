@@ -1,23 +1,22 @@
-// Package stashtest is an in-process Stash endpoint for testing Caravan's
-// Stash client and everything built on it (PLAN phase 11).
+// Package stashtest is an in-process Stash endpoint for testing Caravan's Stash
+// client and everything built on it.
 //
 // It is internal/stashbox/stashboxtest's twin and works the same way: it speaks
-// the slice of GraphQL-over-HTTP the client uses — a POST to /graphql carrying
+// the slice of GraphQL-over-HTTP the client uses, a POST to /graphql carrying
 // {query, variables, operationName}, answered from a per-operation queue of
-// canned replies — and nothing else. It does not parse GraphQL; a test
-// registers the reply it wants for an operation name, which keeps this package
-// free of a schema that would have to be kept in step with every Stash release.
+// canned replies, and nothing else. It does not parse GraphQL; a test registers
+// the reply it wants for an operation name, which keeps this package free of a
+// schema that would have to be kept in step with every Stash release.
 //
-// **It records every request it receives, before doing anything else with it.**
-// That is the assertion PLAN phase 11 is graded on: an adult import fires
-// exactly one scoped scan and a television import fires none, so Count() and
-// Operations("MetadataScan") have to see a request the endpoint could not answer
-// just as clearly as one it could. A malformed body, a missing credential and an
-// unstubbed operation are all still traffic.
+// It records every request it receives, before doing anything else with it. An
+// adult import must fire exactly one scoped scan and a television import none,
+// so Count() and Operations("MetadataScan") have to see a request the endpoint
+// could not answer just as clearly as one it could. A malformed body, a missing
+// credential and an unstubbed operation are all still traffic.
 //
-// It listens on 127.0.0.1 with a kernel-chosen port, and every test that uses it
-// is free of the network. It holds no Caravan types on purpose — it does not
-// import internal/stash — so the client's own in-package tests can use it
+// It listens on 127.0.0.1 with a kernel-chosen port, and every test that uses
+// it is free of the network. It holds no Caravan types on purpose, it does not
+// import internal/stash, so the client's own in-package tests can use it
 // without an import cycle.
 package stashtest
 
@@ -52,7 +51,7 @@ type Request struct {
 	// keyed on.
 	OperationName string
 	// Query is the GraphQL document. Tests assert on the fields a client asks
-	// for — a selection set that quietly grows is how compatibility with an
+	// for: a selection set that quietly grows is how compatibility with an
 	// older Stash is lost.
 	Query string
 	// Variables is the decoded variables object, nil when there was none. It is

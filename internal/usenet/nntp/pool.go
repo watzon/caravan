@@ -57,8 +57,7 @@ type idleConn struct {
 }
 
 // NewPool returns a pool for one server. The server does not have to be
-// reachable — connections are opened on demand — but it does have to be
-// valid.
+// reachable, connections are opened on demand, but it does have to be valid.
 func NewPool(cfg ServerConfig, opts Options) (*Pool, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err

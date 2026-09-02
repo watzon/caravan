@@ -38,11 +38,10 @@ const nzbTimeout = 30 * time.Second
 
 // metaDir holds one .nzb per added download, inside the incomplete directory.
 //
-// The NZB is the download's whole plan — every file, every segment, every
-// message-id — and none of it is in the database (the database is a disposable
-// cache, SPEC §1.2). Keeping the document beside the data is what lets a
-// restart resume a half-finished release instead of re-grabbing it, exactly as
-// the torrent engine keeps a metainfo sidecar.
+// The NZB is the download's whole plan (every file, segment and message-id) and
+// none of it is in the database, which is a disposable cache (SPEC §1.2).
+// Keeping the document beside the data is what lets a restart resume a
+// half-finished release instead of re-grabbing it.
 const metaDir = ".caravan"
 
 // defaultPollInterval is how often the engine samples its downloads: the
@@ -52,11 +51,9 @@ const defaultPollInterval = 2 * time.Second
 // handlePrefix marks this engine's download handles.
 //
 // Handles are stored bare in `downloads.engine_id` and the router probes every
-// un-namespaced engine for one, so a handle has to say which engine it belongs
-// to by itself. An info hash is 40 hex characters; prefixing these with a
-// letter that hex cannot produce means a Usenet handle can never be mistaken
-// for a torrent's, without the router's namespacing machinery (which exists for
-// external clients, whose small integer handles genuinely do collide).
+// un-namespaced engine for one, so a handle has to identify its own engine. An
+// info hash is 40 hex characters, so a prefix that hex cannot produce keeps a
+// Usenet handle from ever being mistaken for a torrent's.
 const handlePrefix = "u"
 
 // admissionRegistrar is the half of the concurrency coordinator this engine
@@ -69,9 +66,9 @@ type admissionRegistrar interface {
 // EngineOpts configures the embedded Usenet engine.
 type EngineOpts struct {
 	// Servers are the news servers to fetch from, in priority order. An empty
-	// list is a legal starting state — the engine builds, reports its
-	// downloads and refuses new ones with nntp.ErrNoServers until SetServers
-	// supplies one.
+	// list is a legal starting state: the engine builds, reports its downloads
+	// and refuses new ones with nntp.ErrNoServers until SetServers supplies
+	// one.
 	Servers []nntp.ServerConfig
 	// NNTP tunes the transport (timeouts, retry policy, TLS roots).
 	NNTP nntp.Options
@@ -99,24 +96,22 @@ type EngineOpts struct {
 	// releases on a full CI disk want it; production does not.
 	SkipSpaceCheck bool
 	// Admitter decides whether a download may run, so a ceiling across every
-	// engine can exist. Nil is unlimited and is the path that predates
-	// concurrency caps: nothing is asked and no download is held back.
+	// engine can exist. Nil is unlimited: nothing is asked and no download is
+	// held back.
 	//
 	// It matters more here than for torrents. Parallel NZBs share one pool of
-	// connections to the same news servers, so two at once do not go twice as
-	// fast — they halve each other and both take twice as long to become
-	// importable.
+	// connections to the same news servers, so two at once halve each other and
+	// both take twice as long to become importable.
 	Admitter core.Admitter
 }
 
 // Engine is the built-in Usenet engine: NZB in, imported media out, with no
-// external download client anywhere (SPEC §5.1, PLAN phase 7).
+// external download client anywhere (SPEC §5.1).
 //
-// It is the composition of the four packages below it — nntp fetches, yenc and
-// pipeline assemble, par2 repairs, extract unpacks — behind the same
-// core.Engine interface the torrent engine implements, so the router, the
-// queue API and the import watcher treat a Usenet download exactly like any
-// other.
+// It composes the four packages below it (nntp fetches, yenc and pipeline
+// assemble, par2 repairs, extract unpacks) behind the same core.Engine interface
+// the torrent engine implements, so the router, the queue API and the import
+// watcher treat a Usenet download like any other.
 //
 // Like internal/download it does not import internal/store: persistence is the
 // narrow callback seam in EngineOpts.Store.
@@ -160,9 +155,9 @@ type item struct {
 	phase   core.DownloadPhase
 	paused  bool
 	failure string
-	// admitted is whether the concurrency coordinator has given this download
-	// a slot. Without one no worker starts, which is already the engine's
-	// "queued" — see statusLocked.
+	// admitted is whether the concurrency coordinator has given this download a
+	// slot. Without one no worker starts, which is already the engine's
+	// "queued": see statusLocked.
 	admitted bool
 	// finished marks a download that has been through every stage. It is
 	// separate from the record's state so a completed download that the user
@@ -174,9 +169,9 @@ type item struct {
 	repaired bool
 
 	// track is the running download stage's progress, nil once that stage is
-	// over. Repair and extraction have no byte counter of their own, so the
-	// last download snapshot is frozen into bytesDone/size and shown for the
-	// rest of the run — progress must not rewind while par2 works.
+	// over. Repair and extraction have no byte counter of their own, so the last
+	// download snapshot is frozen into bytesDone/size and shown for the rest of
+	// the run. Progress must not rewind while par2 works.
 	track     *pipeline.Tracker
 	bytesDone int64
 	size      int64
@@ -240,8 +235,8 @@ func NewEngine(root string, opts EngineOpts) (*Engine, error) {
 	}
 
 	// No enabled server is a configuration state, not a failure: the engine
-	// still has to list, pause and remove the downloads it already holds, and
-	// the user is told to add a server when they try to grab (Track 1 note 5).
+	// still has to list, pause and remove the downloads it already holds. The
+	// user is told to add a server when they try to grab.
 	pool, err := newPool(opts.Servers, opts.NNTP)
 	if err != nil {
 		return nil, err
@@ -283,8 +278,8 @@ func NewEngine(root string, opts EngineOpts) (*Engine, error) {
 }
 
 // newPool builds the transport, treating "nothing configured" as a nil pool
-// rather than an error. Every other failure — an unreachable-looking config, a
-// server that does not validate — is real and stops construction.
+// rather than an error. Every other failure, such as a server that does not
+// validate, is real and stops construction.
 func newPool(servers []nntp.ServerConfig, opts nntp.Options) (*nntp.MultiPool, error) {
 	pool, err := nntp.NewMultiPool(servers, opts)
 	if errors.Is(err, nntp.ErrNoServers) {
@@ -296,13 +291,11 @@ func newPool(servers []nntp.ServerConfig, opts nntp.Options) (*nntp.MultiPool, e
 	return pool, nil
 }
 
-// SetServers re-points the engine at a new set of news servers.
-//
-// It is how a settings change reaches a running engine without a restart, and
-// it is a no-op when nothing about the configuration changed — the fingerprint
-// covers credentials too, so an edited password rebuilds the pool while a
-// save that only touched an unrelated setting does not drop a single
-// connection. Downloads in flight keep fetching; see fetcher.swap.
+// SetServers re-points the engine at a new set of news servers without a
+// restart. It is a no-op when nothing about the configuration changed. The
+// fingerprint covers credentials, so an edited password rebuilds the pool while
+// an unrelated save does not drop a connection. Downloads in flight keep
+// fetching; see fetcher.swap.
 func (e *Engine) SetServers(servers []nntp.ServerConfig) error {
 	fingerprint := fingerprintServers(servers)
 
@@ -346,8 +339,8 @@ func fingerprintServers(servers []nntp.ServerConfig) string {
 //
 // A row this engine cannot make sense of is skipped rather than fatal: one
 // unreadable download must not keep Caravan from starting (SPEC §13). The NZB
-// comes from the sidecar, so a download whose sidecar is gone is dropped from
-// the engine's view — its row and its data stay, and the user can re-grab.
+// comes from the sidecar, so a download whose sidecar is gone drops out of the
+// engine's view. Its row and its data stay, and the user can re-grab.
 func (e *Engine) restore(ctx context.Context) error {
 	if e.opts.Store == nil {
 		return nil
@@ -440,9 +433,9 @@ func (e *Engine) Add(ctx context.Context, r core.Release, opts core.AddOpts) (co
 		return "", download.ErrClosed
 	}
 	if it, existing := e.items[id]; existing {
-		// Already here. Make sure it is actually going: deliberately grabbing
-		// a release that is sitting paused, or that failed, is a request to
-		// have it — the same thing Resume means, and the only other way to ask.
+		// Already here, so make sure it is going. Grabbing a release that is
+		// paused or failed is a request to have it, the same thing Resume
+		// means.
 		it.paused = false
 		it.failure = ""
 		e.start(it)
@@ -560,14 +553,12 @@ func (e *Engine) ListPage(ctx context.Context, limit int, before core.DownloadID
 	return statuses[start:end], next, nil
 }
 
-// Insight returns the Usenet-shaped detail the queue drawer shows in place of
-// a torrent's peers and trackers: which files the NZB indexes, how much of each
-// one is on disk, and what the repair stage is working on when it is running.
-// See core.EngineInsight.
+// Insight returns the Usenet-shaped detail the queue drawer shows in place of a
+// torrent's peers and trackers: which files the NZB indexes, how much of each is
+// on disk, and what the repair stage is working on. See core.EngineInsight.
 //
-// The peer and tracker halves stay empty rather than absent: a Usenet download
-// has neither, and an empty list says so where a null would only look like a
-// bug.
+// The peer and tracker halves stay empty rather than absent, because a Usenet
+// download has neither and a null would look like a bug.
 func (e *Engine) Insight(ctx context.Context, id core.DownloadID) (*core.DownloadInsight, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -595,15 +586,13 @@ func (e *Engine) Insight(ctx context.Context, id core.DownloadID) (*core.Downloa
 }
 
 // filesLocked is the per-file breakdown from the best source available, which
-// changes as a download moves through its stages. It must be called with e.mu
-// held.
+// changes as a download moves through its stages. Call it with e.mu held.
 //
-// The live tracker while articles are being fetched; the snapshot frozen out of
-// it once that stage is over and par2 or the unpacker owns the download; and
-// failing both — a download restored from a previous process, which has no
-// counters at all — the NZB itself, where the only honest per-file answer is
-// "all of it" for a finished download and "none of it" for one that has not
-// started.
+// The sources, in order: the live tracker while articles are being fetched, the
+// snapshot frozen out of it once par2 or the unpacker owns the download, and the
+// NZB itself for a download restored from a previous process. The NZB can only
+// answer "all of it" for a finished download and "none of it" for one that has
+// not started.
 func (e *Engine) filesLocked(it *item) []core.UsenetFileInsight {
 	if live := it.track.Files(); len(live) > 0 {
 		out := make([]core.UsenetFileInsight, 0, len(live))
@@ -691,19 +680,15 @@ func (e *Engine) Resume(ctx context.Context, id core.DownloadID) error {
 
 // Retry puts a failed download back to work. See core.EngineRetry.
 //
-// It re-enters the stage machine from the top, which is what makes it pick up
-// where the failure left it rather than start over: every stage is written to
-// recognise work that is already done. The articles already fetched are in the
-// pipeline's resume sidecar and are not asked for a second time; a release
-// whose files are all on disk goes straight past the download stage; and one
-// that got as far as unpacking goes straight to unpacking, because that is the
-// first stage with anything left to do (see Engine.stages).
+// It re-enters the stage machine from the top and still picks up where the
+// failure left it, because every stage recognises work that is already done: the
+// articles already fetched are in the pipeline's resume sidecar, and a release
+// whose files are all on disk goes straight to unpacking.
 //
-// The repair budget is the one thing deliberately reset. Within a single run a
-// download spends its recovery volumes once, so a failed extraction does not
-// ask par2 about damage it has already been asked about; a user pressing Retry
-// is asking for a genuinely fresh attempt, and the volumes are on disk by then
-// so the second pass costs cpu rather than a provider's quota.
+// The repair budget is the one thing reset. Within a single run a download spends
+// its recovery volumes once; a user pressing Retry is asking for a fresh attempt,
+// and the volumes are on disk by then, so the second pass costs cpu rather than a
+// provider's quota.
 func (e *Engine) Retry(ctx context.Context, id core.DownloadID) error {
 	e.mu.Lock()
 	it, ok := e.items[id]
@@ -711,9 +696,9 @@ func (e *Engine) Retry(ctx context.Context, id core.DownloadID) error {
 		e.mu.Unlock()
 		return fmt.Errorf("usenet: retry %q: %w", id, download.ErrNotFound)
 	}
-	// Only a failure has something to retry. A running, paused or finished
-	// download reaching here means the caller acted on state it had misread,
-	// and quietly restarting one would be a worse answer than saying so.
+	// Only a failure has something to retry. Anything else reaching here means
+	// the caller acted on state it had misread, so say so rather than quietly
+	// restarting.
 	if it.failure == "" {
 		e.mu.Unlock()
 		return fmt.Errorf("usenet: retry %q: %w", id, download.ErrNotRetryable)
@@ -786,13 +771,10 @@ func (e *Engine) drop(id core.DownloadID) {
 	}
 }
 
-// removeData deletes one download's directory, refusing anything that would
-// land outside the incomplete directory.
-//
-// This is the guard on SPEC §13's promise that removing a download never costs
-// media. The directory name is derived from a release title, which is a
-// stranger's text, and "../../library" is a perfectly legal thing to put in
-// one.
+// removeData deletes one download's directory, refusing anything that would land
+// outside the incomplete directory. It guards SPEC §13's promise that removing a
+// download never costs media: the directory name comes from a release title,
+// which is a stranger's text, and "../../library" is legal in one.
 func (e *Engine) removeData(dir string) error {
 	rel, err := filepath.Rel(e.incomplete, dir)
 	if err != nil {
@@ -862,7 +844,7 @@ func (e *Engine) poll(ctx context.Context, interval time.Duration) {
 }
 
 // sample refreshes every item and returns the records whose durable fields
-// changed. Saving happens outside the lock: the store is a database.
+// changed. Saving happens outside the lock because the store is a database.
 func (e *Engine) sample() []core.Download {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -943,9 +925,8 @@ func (e *Engine) statusLocked(it *item) core.DownloadStatus {
 		Phase:      it.phase,
 	}
 
-	// The live tracker wins, but only once it has totals. A worker that has
-	// just started has an empty one for the moment it takes the pipeline to
-	// read the sidecar and count what is already on disk, and reporting 0%
+	// The live tracker wins, but only once it has totals. A just-started worker
+	// has an empty one while the pipeline reads the sidecar, and reporting 0%
 	// there would make every resume look like a restart.
 	if p := it.track.Snapshot(); it.track != nil && (p.TotalBytes > 0 || p.Segments > 0) {
 		st.BytesDone, st.Size = p.Bytes, p.TotalBytes
@@ -967,9 +948,8 @@ func (e *Engine) statusLocked(it *item) core.DownloadStatus {
 		st.State = core.DownloadFailed
 		st.Phase = ""
 	case it.finished:
-		// Complete, and there is nothing to seed: a Usenet download has no
-		// upload half, so "completed" is the honest end state and it is what
-		// the import watcher waits for.
+		// A Usenet download has no upload half, so "completed" is the end state
+		// and it is what the import watcher waits for.
 		st.State = core.DownloadCompleted
 		st.Progress, st.Phase = 1, ""
 		st.ETASeconds = 0

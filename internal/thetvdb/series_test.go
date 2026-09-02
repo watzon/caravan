@@ -117,7 +117,7 @@ func TestGetSeriesMapsTheExtendedRecord(t *testing.T) {
 }
 
 // Season 0 is kept, unlike internal/tvmaze's. TheTVDB numbers its specials
-// properly — a special carries seasonNumber 0 and a real number inside it — so
+// properly, a special carries seasonNumber 0 and a real number inside it, so
 // there is nothing to invent and nothing to drop.
 func TestGetSeriesBuildsSeasonsIncludingSpecials(t *testing.T) {
 	c, _ := newStub(t, "", seriesRoutes(t, 81189))
@@ -160,9 +160,9 @@ func TestGetSeriesBuildsSeasonsIncludingSpecials(t *testing.T) {
 			Episodes: []core.EpisodeMeta{
 				// Page 1 serves these out of order, and the overview is real
 				// markup: both are normalised here rather than downstream. The
-				// absolute numbers ride along per episode — 9 and 10 across a
-				// season boundary, which is the whole point of the order and the
-				// one thing counting seasons here could never reproduce.
+				// absolute numbers ride along per episode: 9 and 10 across a
+				// season boundary, which is the whole point of the order and
+				// the one thing counting seasons here could never reproduce.
 				{Season: 2, Number: 1, Absolute: 9, Title: "Seven Thirty-Seven",
 					Overview: "Walt and Jesse deal with the aftermath.",
 					AirDate:  day(2009, 3, 8)},
@@ -177,8 +177,8 @@ func TestGetSeriesBuildsSeasonsIncludingSpecials(t *testing.T) {
 }
 
 // The episode list is paged, and a series whose episodes stop at the first page
-// boundary is the most ordinary shape there is — a walk that read one page
-// would silently lose every later season.
+// boundary is the most ordinary shape there is: a walk that read one page would
+// silently lose every later season.
 func TestGetSeriesWalksEveryEpisodePage(t *testing.T) {
 	c, s := newStub(t, "", seriesRoutes(t, 81189))
 

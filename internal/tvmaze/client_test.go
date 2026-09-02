@@ -207,10 +207,11 @@ func TestNotFound(t *testing.T) {
 	}
 }
 
-// A rejected credential is not a condition this provider can be in — see the
-// package comment — so nothing here may claim it is: core.ErrMetadataUnauthorized
-// is what puts "your API key is wrong" on screen, and TVmaze has no key to fix.
-// A 401 from a keyless endpoint means it is refusing everyone.
+// A rejected credential is not a condition this provider can be in, see the
+// package comment, so nothing here may claim it is:
+// core.ErrMetadataUnauthorized is what puts "your API key is wrong" on screen,
+// and TVmaze has no key to fix. A 401 from a keyless endpoint means it is
+// refusing everyone.
 func TestNoUnauthorizedSentinel(t *testing.T) {
 	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
 		c, _ := newStub(t, map[string][]response{
@@ -256,9 +257,9 @@ func TestRateLimitRetriesOnceAndSucceeds(t *testing.T) {
 	//
 	// There are two of them because the stubbed sleep returns instantly: no
 	// real time passes, so the episode list runs into the same gate the retry
-	// did. That is the gate doing its job — it is what makes a concurrent
-	// caller honor a refusal it was never told about — and against a real clock
-	// the first wait satisfies it for both.
+	// did. That is the gate doing its job, it is what makes a concurrent caller
+	// honor a refusal it was never told about, and against a real clock the
+	// first wait satisfies it for both.
 	waits := s.waited()
 	if len(waits) != 2 {
 		t.Fatalf("waits = %v, want the back-off and the still-open gate behind it", waits)
@@ -314,8 +315,8 @@ func TestRateLimitRetryHonorsContext(t *testing.T) {
 	}
 }
 
-// The floor between sends is what keeps a refresh sweep — two requests per
-// series — inside TVmaze's published budget.
+// The floor between sends is what keeps a refresh sweep, two requests per
+// series, inside TVmaze's published budget.
 func TestMinIntervalSpacesConsecutiveRequests(t *testing.T) {
 	c, s := newStub(t, map[string][]response{
 		searchShowsPath: {okJSON(t, "search_shows.json")},
@@ -371,8 +372,8 @@ func TestMovieMethodsReportTheKindUnsupported(t *testing.T) {
 	}
 }
 
-// A ref this client cannot read is a wiring bug in Caravan — another provider's
-// ref reached a TVmaze client — not a title TVmaze is missing. It must NOT read
+// A ref this client cannot read is a wiring bug in Caravan, another provider's
+// ref reached a TVmaze client, not a title TVmaze is missing. It must NOT read
 // as ErrNotFound, which upstream parks a file as "unmatched" and moves on, and
 // it must not cost a rate-limit token to discover.
 func TestGetSeriesRejectsForeignRefsWithoutAsking(t *testing.T) {

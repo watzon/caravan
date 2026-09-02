@@ -160,7 +160,7 @@ func joinChunks(chunks []chunk) string {
 
 // splitField reports the field term a token spells, if it spells one.
 //
-// It fails — leaving the caller with a literal keyword — for three separate
+// It fails, leaving the caller with a literal keyword, for three separate
 // reasons, and all three are ordinary input rather than mistakes: there is no
 // colon outside quotes, the name before the colon is not a field this language
 // knows ("Re:Zero"), or the value is empty ("title:"). Each of those is

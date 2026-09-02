@@ -1,10 +1,10 @@
 package dlna
 
-// Request tracing for TV debugging. DLNA clients fail silently — a TV or an
-// app that dislikes one response just renders an empty shelf — and the only
-// way to tell "it never asked" from "it asked and hated the answer" is a
-// record of what it asked. The ring is small, in memory only, and surfaced
-// through GET /api/v1/dlna, so "what did the TV actually do" is a curl away.
+// Request tracing for TV debugging. DLNA clients fail silently, a TV or an app
+// that dislikes one response just renders an empty shelf, and the only way to
+// tell "it never asked" from "it asked and hated the answer" is a record of
+// what it asked. The ring is small, in memory only, and surfaced through GET
+// /api/v1/dlna, so "what did the TV actually do" is a curl away.
 
 import (
 	"bytes"
@@ -80,8 +80,8 @@ func (s *Service) traceRing() *trace {
 	return s.tr
 }
 
-// statusWriter captures the response code — and, when capture is set, the
-// head of the body — for the trace.
+// statusWriter captures the response code, and, when capture is set, the head
+// of the body, for the trace.
 type statusWriter struct {
 	http.ResponseWriter
 	code    int

@@ -29,10 +29,10 @@ func tpdbFacetStub(t *testing.T, opts stashboxtest.Options) (*Client, *stashboxt
 }
 
 // The wire format the scene filter rides on: TPDB's performer index answers
-// `id` as the UUID and `_id` as the numeric id — the opposite way round from
-// its site and tag rows — and the numeric one is what the scene index filters
-// by. Getting these two the wrong way round produces a typeahead that looks
-// perfect and a filter that matches nothing.
+// `id` as the UUID and `_id` as the numeric id, the opposite way round from its
+// site and tag rows, and the numeric one is what the scene index filters by.
+// Getting these two the wrong way round produces a typeahead that looks perfect
+// and a filter that matches nothing.
 func TestSearchPerformersOnTPDBReadsTheRESTIndex(t *testing.T) {
 	c, srv := tpdbFacetStub(t, stashboxtest.Options{
 		PerformerIndex: []stashboxtest.Response{okFixture(t, "tpdb_performers.json")},
@@ -132,7 +132,7 @@ func TestTPDBTypeaheadsDropRowsWithNoNumericID(t *testing.T) {
 }
 
 // Off TPDB there is no REST side at all, and the typeaheads are GraphQL like
-// everything else — the dialect must be unreachable, not merely unused.
+// everything else: the dialect must be unreachable, not merely unused.
 func TestSearchPerformersSpeaksGraphQLOffTPDB(t *testing.T) {
 	c, srv := newStub(t, map[string][]stashboxtest.Response{
 		opSearchPerformers: {okFixture(t, "query_performers.json")},
@@ -155,7 +155,7 @@ func TestSearchPerformersSpeaksGraphQLOffTPDB(t *testing.T) {
 		t.Errorf("SearchPerformers:\n got %+v\nwant %+v", got, want)
 	}
 	// A stash-box performer has no numeric id, so the ref carries only the
-	// uuid — the seam the scene filter's two dialects sit either side of.
+	// uuid: the seam the scene filter's two dialects sit either side of.
 	for _, p := range got {
 		if p.ID != 0 {
 			t.Errorf("performer %q carries a numeric id stash-box never served", p.Name)

@@ -94,8 +94,8 @@ func TestDialSurfacesARefusedGreeting(t *testing.T) {
 }
 
 // The dot is NNTP's escape and its terminator at once. Getting this wrong
-// corrupts an article silently, which is the one failure mode phase 7 must not
-// have: yEnc would decode the damage into the file.
+// corrupts an article silently, and yEnc would decode the damage into the
+// file.
 func TestBodyUnstuffsDots(t *testing.T) {
 	s, cfg, opts := newFake(t, nntptest.Options{})
 	s.Add(testMessageID, sampleBody)

@@ -1,9 +1,9 @@
 // Package nzbget talks to NZBGet's JSON-RPC API and adapts it to core.Engine.
 // It is the second of the two backends that open the Usenet half of
-// acquisition (SPEC §5.1, PLAN phase 6).
+// acquisition (SPEC §5.1).
 //
-// It follows internal/clients/qbittorrent's shape — a thin wire client under a
-// stateless core.Engine adapter — with three differences that are NZBGet's
+// It follows internal/clients/qbittorrent's shape, a thin wire client under a
+// stateless core.Engine adapter, with three differences that are NZBGet's
 // rather than choices:
 //
 //   - A download lives in two lists. NZBGet moves a group out of the queue and
@@ -12,7 +12,7 @@
 //     only its DestDir/FinalDir say where the payload landed.
 //   - The NZB is uploaded, not linked. NZBGet's `append` accepts a URL, but it
 //     files a URL under a placeholder id and mints a *different* one once the
-//     NZB has been fetched — the handle Caravan was given would stop naming
+//     NZB has been fetched, so the handle Caravan was given would stop naming
 //     anything. Uploading the NZB bytes gets the real id back immediately, and
 //     it keeps the indexer's API key out of NZBGet's queue and logs.
 //   - There is no seeding. Usenet has no swarm, so a download is never
@@ -91,8 +91,8 @@ func (e *RPCError) Error() string {
 	return fmt.Sprintf("nzbget: %s: rpc error %d: %s", e.Method, e.Code, e.Message)
 }
 
-// Client is a thin NZBGet JSON-RPC client. It holds no session — NZBGet
-// authenticates every request with HTTP basic auth — so it is safe for
+// Client is a thin NZBGet JSON-RPC client. It holds no session, NZBGet
+// authenticates every request with HTTP basic auth, so it is safe for
 // concurrent use and free to build and throw away.
 type Client struct {
 	// endpoint is the configured URL with any trailing slash removed plus the
@@ -136,8 +136,8 @@ func (c *Client) Version(ctx context.Context) (string, error) {
 }
 
 // ServerStatus is the subset of `status` Caravan reads. NZBGet reports no
-// per-group rate — it downloads one group at a time — so the server-wide rate
-// is the rate of whichever group is actually transferring.
+// per-group rate, it downloads one group at a time, so the server-wide rate is
+// the rate of whichever group is actually transferring.
 type ServerStatus struct {
 	// DownloadRate is the current rate in bytes per second.
 	DownloadRate int64 `json:"DownloadRate"`
@@ -155,8 +155,8 @@ func (c *Client) Status(ctx context.Context) (*ServerStatus, error) {
 	return &out, nil
 }
 
-// ListGroups returns the downloads NZBGet is still working on — transferring
-// or post-processing.
+// ListGroups returns the downloads NZBGet is still working on: transferring or
+// post-processing.
 func (c *Client) ListGroups(ctx context.Context) ([]Group, error) {
 	var out []Group
 	// The parameter is how many log entries to include per group; none.
@@ -202,10 +202,10 @@ const dupeModeScore = "score"
 
 // Append uploads an NZB and returns the NZBID NZBGet filed it under.
 //
-// The positional parameter list is NZBGet's whole calling convention — names
-// are ignored and order is everything — so it is spelled out here rather than
-// built from a struct. The two trailing optional parameters (AutoCategory and
-// the post-processing parameters) are omitted, which NZBGet reads as their
+// The positional parameter list is NZBGet's whole calling convention, names are
+// ignored and order is everything, so it is spelled out here rather than built
+// from a struct. The two trailing optional parameters (AutoCategory and the
+// post-processing parameters) are omitted, which NZBGet reads as their
 // defaults.
 func (c *Client) Append(ctx context.Context, req AppendRequest) (int64, error) {
 	params := []any{

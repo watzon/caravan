@@ -52,9 +52,9 @@ func TestConfigReadsSettings(t *testing.T) {
 	}
 }
 
-// A value the settings table cannot parse must read as off. The alternative —
-// a typo meaning "on" — is the wrong failure direction for the one setting
-// whose job is to stop broadcasting.
+// A value the settings table cannot parse must read as off. The alternative, a
+// typo meaning "on", is the wrong failure direction for the one setting whose
+// job is to stop broadcasting.
 func TestConfigTreatsUnparseableEnabledAsOff(t *testing.T) {
 	svc, st, _ := newTestService(t)
 	if err := st.SetSetting(t.Context(), store.SettingDLNAEnabled, "sure"); err != nil {
@@ -88,7 +88,7 @@ func TestDeviceUUIDIsStableAndPersisted(t *testing.T) {
 		t.Fatalf("stored uuid %q != reported %q", stored, first.UUID)
 	}
 
-	// A second service over the same store — a restart — reports the same one.
+	// A second service over the same store, a restart, reports the same one.
 	restarted := New(st, svc.root, 8677, quietLogger())
 	second, err := restarted.Config(ctx)
 	if err != nil {
@@ -248,7 +248,7 @@ func TestAdvertiserLifecycle(t *testing.T) {
 //
 // This is the only test that puts real datagrams on a real socket. Everything
 // about the message contents is asserted by the pure tests above; what this one
-// proves is that the sockets are wired together at all — the reply reaches the
+// proves is that the sockets are wired together at all: the reply reaches the
 // searcher, and its LOCATION points at this host and this port.
 func TestAdvertiserAnswersMSearch(t *testing.T) {
 	requireMulticast(t)
@@ -281,7 +281,7 @@ func TestAdvertiserAnswersMSearch(t *testing.T) {
 		t.Fatalf("resolve group: %v", err)
 	}
 	// Searching for this device's own uuid keeps other media servers on the
-	// LAN — a developer's Jellyfin, say — out of the assertion.
+	// LAN, a developer's Jellyfin, say, out of the assertion.
 	search := "M-SEARCH * HTTP/1.1\r\nHOST: " + ssdpAddr +
 		"\r\nMAN: \"ssdp:discover\"\r\nMX: 1\r\nST: uuid:" + cfg.UUID + "\r\n\r\n"
 	if _, err := client.WriteToUDP([]byte(search), group); err != nil {

@@ -23,18 +23,17 @@ const (
 	DefaultMaxConnections = 8
 )
 
-// ServerConfig is one news server the embedded Usenet engine may fetch from
-// (PLAN phase 7 task 1, `usenet_servers`).
+// ServerConfig is one news server the embedded Usenet engine may fetch from.
 //
-// It is a plain struct on purpose. Like internal/download and
-// internal/clients, this package does not import internal/store: the row is
-// mapped into this by whoever owns the database, so the transport is testable
-// with a literal and nothing else.
+// It is a plain struct on purpose. Like internal/download and internal/clients,
+// this package does not import internal/store: the row is mapped into this by
+// whoever owns the database, so the transport is testable with a literal and
+// nothing else.
 //
 // Username and Password are credentials: they live in the database, never in
-// the bootstrap YAML, never in a log line, and never in an error string
-// (SPEC §12). Nothing in this package formats them into a message — Label is
-// what error text uses to name a server.
+// the bootstrap YAML, never in a log line, and never in an error string (SPEC
+// §12). Nothing in this package formats them into a message: Label is what
+// error text uses to name a server.
 type ServerConfig struct {
 	// ID is the `usenet_servers.id` row this came from, 0 when unsaved. It is
 	// carried so callers can attribute a failure to a row.

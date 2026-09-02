@@ -21,8 +21,8 @@ func post(t *testing.T, s *Server, body string) *http.Response {
 }
 
 func TestFreshServerHasSeenNothing(t *testing.T) {
-	// This is the shape of the phase 9 acceptance assertion: with the adult
-	// module disabled, a full job cycle leaves Count at zero.
+	// The shape of the zero-traffic assertion: with the adult module disabled, a
+	// full job cycle leaves Count at zero.
 	s := New(Options{})
 	t.Cleanup(s.Close)
 
@@ -130,7 +130,7 @@ func TestRequireAPIKeyRejectsAnonymousButStillRecords(t *testing.T) {
 		t.Errorf("Count = %d, want 1: a rejected request is still traffic", n)
 	}
 
-	// A bearer token satisfies it too — the client sends both headers, and an
+	// A bearer token satisfies it too: the client sends both headers, and an
 	// endpoint that reads either must be representable.
 	req, err := http.NewRequest(http.MethodPost, s.URL(), strings.NewReader(`{"operationName":"Op"}`))
 	if err != nil {
@@ -181,8 +181,8 @@ func TestSetOperationReplacesAndRemoves(t *testing.T) {
 
 func TestConcurrentRequestsAreAllRecordedExactlyOnce(t *testing.T) {
 	// The runner fans out across workers, so the zero-traffic assertion has to
-	// hold under concurrency — a dropped or double-counted request would make
-	// it lie in either direction.
+	// hold under concurrency: a dropped or double-counted request would make it
+	// lie in either direction.
 	s := New(Options{Operations: map[string][]Response{"Op": {Raw([]byte(`{"data":{}}`))}}})
 	t.Cleanup(s.Close)
 

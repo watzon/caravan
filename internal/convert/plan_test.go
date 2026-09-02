@@ -125,7 +125,7 @@ func TestDTSAudioOnlyReEncodesTheAudio(t *testing.T) {
 
 // A stream copy may only map audio the target container can hold. An MP4 muxer
 // has no tag for TrueHD, so copying a TrueHD commentary track alongside an
-// acceptable first track fails the whole command — a conversion the UI called a
+// acceptable first track fails the whole command: a conversion the UI called a
 // container swap, failing forever with nothing the user can do about it.
 func TestRemuxDropsAudioTheContainerCannotHold(t *testing.T) {
 	profile := core.ResolveTVProfile(core.TVProfileSafe)
@@ -344,8 +344,8 @@ func TestParseProbeReadsFFprobeJSON(t *testing.T) {
 		t.Errorf("video = %+v", p)
 	}
 	// The first audio track is the one a set plays, and therefore the one the
-	// profile judges — but every track is kept, because a stream copy has to
-	// mux all the ones it maps.
+	// profile judges: but every track is kept, because a stream copy has to mux
+	// all the ones it maps.
 	if p.AudioCodec() != "dts" {
 		t.Errorf("audio codec = %q, want dts", p.AudioCodec())
 	}

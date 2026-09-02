@@ -25,19 +25,18 @@ import (
 // start launches the worker for one download. It must be called with e.mu
 // held.
 //
-// It is a no-op when the download should not be running — paused, finished, or
-// on a closing engine — and also when a worker is still unwinding from the
-// last cancellation. That last case is not a refusal: run re-checks the same
-// condition as it exits and relaunches, which is what makes Resume immediately
-// after Pause work rather than silently do nothing.
+// It is a no-op when the download should not be running (paused, finished, or on
+// a closing engine) and also when a worker is still unwinding from the last
+// cancellation. That last case is not a refusal: run re-checks the same condition
+// as it exits and relaunches, which is what makes Resume immediately after Pause
+// work.
 func (e *Engine) start(it *item) {
 	if !e.shouldRunLocked(it) || it.cancel != nil {
 		return
 	}
 	// The concurrency cap is the last gate before a worker exists. A download
-	// that cannot have a slot simply has no worker, which is already what this
-	// engine reports as "queued" — see statusLocked — so being over the cap
-	// needs no state of its own.
+	// that cannot have a slot has no worker, which is what statusLocked already
+	// reports as "queued", so being over the cap needs no state of its own.
 	if !e.admitLocked(it) {
 		return
 	}
@@ -57,10 +56,10 @@ func (e *Engine) start(it *item) {
 
 // run drives one download through every stage and records how it ended.
 //
-// A cancelled context is not a failure. It means one of two things — the user
-// paused, or the engine is shutting down — and both must leave the download
-// resumable: the pipeline has already flushed its sidecar, so the articles on
-// disk stay on disk and the next start continues from them.
+// A cancelled context is not a failure. It means the user paused or the engine
+// is shutting down, and both must leave the download resumable: the pipeline has
+// already flushed its sidecar, so the next start continues from the articles on
+// disk.
 func (e *Engine) run(ctx context.Context, it *item, cancel context.CancelFunc, stopped chan struct{}) {
 	defer e.workers.Done()
 	defer close(stopped)
@@ -100,9 +99,8 @@ func (e *Engine) run(ctx context.Context, it *item, cancel context.CancelFunc, s
 	}
 	// Pause and Resume can both land while this worker was on its way out, in
 	// which case start() saw a live cancel and deferred to here. Re-reading the
-	// item now — under the lock, with the worker slot free — is what closes
-	// that window: a download the user has asked for goes back to running
-	// instead of stalling until something else pokes it.
+	// item under the lock with the worker slot free closes that window, so a
+	// download the user asked for goes back to running instead of stalling.
 	e.start(it)
 	snapshot := e.refreshLocked(it)
 	e.mu.Unlock()
@@ -114,11 +112,9 @@ func (e *Engine) run(ctx context.Context, it *item, cancel context.CancelFunc, s
 	}
 }
 
-// admitLocked asks the coordinator for a slot and records the answer. It must
-// be called with e.mu held.
-//
-// No coordinator means no caps, which is what every Caravan did before this
-// existed: nothing is asked and nothing waits.
+// admitLocked asks the coordinator for a slot and records the answer. Call it
+// with e.mu held. No coordinator means no caps: nothing is asked and nothing
+// waits.
 func (e *Engine) admitLocked(it *item) bool {
 	if e.opts.Admitter == nil || e.opts.Admitter.Request(EngineName, it.rec.EngineID) {
 		it.admitted = true
@@ -141,9 +137,9 @@ func (e *Engine) release(it *item) {
 
 // wake re-asks for every download this engine is holding back, oldest first.
 //
-// The coordinator calls it when a slot frees anywhere, the other engine
-// included — that is the whole point of a ceiling that spans both. FIFO by
-// creation time, so the queue is a line rather than a lottery.
+// The coordinator calls it when a slot frees anywhere, the other engine included,
+// which is the point of a ceiling that spans both. FIFO by creation time, so the
+// queue is a line rather than a lottery.
 func (e *Engine) wake() {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -171,9 +167,8 @@ func (e *Engine) wake() {
 // must be called with e.mu held.
 //
 // The registration check matters: Remove drops the item and then waits for the
-// worker to stop, and without it that worker's exit could relaunch itself onto
-// a download that no longer exists — and into a directory Remove is about to
-// delete.
+// worker to stop, and without it that worker's exit could relaunch onto a
+// download that no longer exists, into a directory Remove is about to delete.
 func (e *Engine) shouldRunLocked(it *item) bool {
 	if e.closed || it.paused || it.finished || it.failure != "" {
 		return false
@@ -187,11 +182,10 @@ func (e *Engine) shouldRunLocked(it *item) bool {
 // Every error it returns is written verbatim onto the queue item, so each one
 // is phrased for the person reading it rather than for a log.
 func (e *Engine) stages(ctx context.Context, it *item) error {
-	// A download that already made it through every stage is done, whatever
-	// the database says. The window this closes is the one between extraction
-	// finishing and the completed row being written: without the marker, a
-	// crash in there re-fetches every article of the release from the provider
-	// and then fails on the files extraction already put in place.
+	// A download that already made it through every stage is done, whatever the
+	// database says. Without the marker, a crash between extraction finishing
+	// and the completed row being written re-fetches every article and then
+	// fails on the files extraction already put in place.
 	if e.assembled(it) {
 		// Drop the tracker this stage never fed: run() reads whatever is left
 		// in it as the download's final byte count, and a fresh one would
@@ -234,13 +228,12 @@ func (e *Engine) stages(ctx context.Context, it *item) error {
 // verify decides whether the assembled files can be trusted, and spends the
 // release's recovery blocks when they cannot.
 //
-// "Every article arrived" is not the same as "every file is right". A poster
-// who omits pcrc32 on some parts, or who posted from an already-corrupt
-// source, produces a download with no failures at all — and for a release
-// posted as plain files there is no archive CRC downstream to catch it either,
-// so the whole-file crc32 the yEnc trailer carries is the last check there is.
-// The pipeline recorded it precisely so this stage could read it without
-// decoding an article again.
+// "Every article arrived" is not the same as "every file is right". A poster who
+// omits pcrc32 on some parts, or who posted from an already-corrupt source,
+// produces a download with no failures at all. A release posted as plain files
+// has no archive CRC downstream either, so the whole-file crc32 in the yEnc
+// trailer is the last check there is. The pipeline recorded it so this stage
+// could read it without decoding an article again.
 func (e *Engine) verify(ctx context.Context, it *item, res *pipeline.Result) error {
 	if holes := res.Count(pipeline.ReasonMissing) + res.Count(pipeline.ReasonCorrupt); holes > 0 {
 		damage := fmt.Sprintf("%d article(s) are missing or damaged", holes)
@@ -285,9 +278,8 @@ func insightFiles(files []pipeline.FileResult) []core.UsenetFileInsight {
 			Name:         f.Name,
 			Segments:     f.Segments,
 			SegmentsDone: f.SegmentsDone,
-			// The failure count is not carried on a FileResult: it is
-			// Segments - SegmentsDone by construction once the stage is over,
-			// with nothing still in flight to confuse the two.
+			// A FileResult carries no failure count: once the stage is over it
+			// is Segments - SegmentsDone, with nothing still in flight.
 			SegmentsFailed: f.Segments - f.SegmentsDone,
 			Complete:       f.Complete(),
 			Par2:           f.IsPar2,
@@ -387,10 +379,9 @@ func (e *Engine) repair(ctx context.Context, it *item, damage string, files []st
 	rep, err := e.runPar2(ctx, it)
 	if err == nil {
 		// A clean par2 pass only vouches for the files the set describes. A
-		// poster who par2'd only the rars, or an NZB carrying two sets (of
-		// which par2.OpenFiles keeps one), leaves the rest uncovered — and
-		// "verification found nothing wrong" over a file it never looked at is
-		// exactly how a hole reaches the library unreported.
+		// poster who par2'd only the rars, or an NZB carrying two sets (of which
+		// par2.OpenFiles keeps one), leaves the rest uncovered, and reporting
+		// them clean is how a hole reaches the library unreported.
 		if uncovered := notCovered(rep, files); len(uncovered) > 0 {
 			return fmt.Errorf("%s in %s, which the release's par2 set does not cover, so there is nothing to repair it with",
 				damage, strings.Join(uncovered, ", "))
@@ -436,13 +427,13 @@ func notCovered(rep *par2.Report, files []string) []string {
 	return out
 }
 
-// runPar2 fetches the release's recovery volumes and repairs the directory
-// with them.
+// runPar2 fetches the release's recovery volumes and repairs the directory with
+// them.
 //
-// The volumes are downloaded here rather than with the content because par2 is
-// a repair budget, not payload (SPEC §5.1): a release that arrived intact never
-// pays for them. It reports the pre-repair damage alongside the outcome, so the
-// queue can say how bad it was whether or not the repair worked.
+// The volumes are downloaded here rather than with the content because par2 is a
+// repair budget, not payload, so a release that arrived intact never pays for
+// them. It reports the pre-repair damage alongside the outcome, so the queue can
+// say how bad it was whether or not the repair worked.
 func (e *Engine) runPar2(ctx context.Context, it *item) (*par2.Report, error) {
 	e.setPhase(it, core.PhaseRepairing)
 
@@ -457,8 +448,8 @@ func (e *Engine) runPar2(ctx context.Context, it *item) (*par2.Report, error) {
 	var paths []string
 	for _, f := range vols.Files {
 		// A half-fetched volume is worse than an absent one: par2.OpenFiles
-		// checks each recovery slice's own MD5, but handing it a file with a
-		// hole only wastes the read.
+		// checks each recovery slice's MD5, so a file with a hole wastes the
+		// read.
 		if f.Complete() {
 			paths = append(paths, f.Path)
 		}
@@ -479,8 +470,8 @@ func (e *Engine) runPar2(ctx context.Context, it *item) (*par2.Report, error) {
 // unpack extracts the release's archives, if it has any.
 //
 // A release posted as plain files is the common obfuscated case and is not an
-// error: there is simply nothing to unpack, and the files are already where the
-// import expects them.
+// error: there is nothing to unpack, and the files are already where the import
+// expects them.
 func (e *Engine) unpack(ctx context.Context, it *item) error {
 	sets, err := extract.Detect(it.dir)
 	if err != nil {
@@ -501,8 +492,7 @@ func (e *Engine) unpack(ctx context.Context, it *item) error {
 		}
 		if res != nil {
 			// The files are extracted and in place; only removing the debris
-			// failed. That is worth a log and not worth failing a download
-			// whose media is sitting right there.
+			// failed, which is not worth failing the download for.
 			e.logger.Warn("cleaning up after extraction",
 				"download", it.rec.EngineID, "err", err)
 			return e.tidy(it)
@@ -511,10 +501,10 @@ func (e *Engine) unpack(ctx context.Context, it *item) error {
 			return e.extractError(err)
 		}
 		// The archives are damaged in a way yEnc's per-article CRC did not
-		// catch — a poster's own bad bytes, or a truncated final part. That is
-		// exactly what the recovery volumes are for, so spend them now and try
-		// once more. Extract left the directory untouched, so the retry starts
-		// from the same place this attempt did.
+		// catch: a poster's own bad bytes, or a truncated final part. That is
+		// what the recovery volumes are for, so spend them and try once more.
+		// Extract left the directory untouched, so the retry starts from the
+		// same place.
 		if _, rerr := e.runPar2(ctx, it); rerr != nil {
 			return e.extractError(err)
 		}
@@ -524,17 +514,16 @@ func (e *Engine) unpack(ctx context.Context, it *item) error {
 // checkExtractionSpace refuses an unpack that the filesystem cannot hold.
 //
 // The download preflight budgets the articles and nothing else, but extraction
-// needs roughly a second copy of the payload: extract.Extract writes every
-// entry into a staging directory beside the archives and only deletes the
-// volumes once the whole set is in place. Discovering that with ENOSPC after
-// twenty gigabytes have come over a metered account wastes the entire
-// transfer, and Resume repeats it.
+// needs roughly a second copy of the payload: extract.Extract writes every entry
+// into a staging directory beside the archives and only deletes the volumes once
+// the whole set is in place. Hitting ENOSPC there wastes the entire transfer, and
+// Resume repeats it.
 //
-// The archives' own size is the budget, which is the only figure available
-// without opening them and is exact for the stored (uncompressed) archives
-// Usenet posters overwhelmingly use. A genuinely compressed set extracts to
-// more than this asks for, so the check catches the obvious refusal rather
-// than every one — the same direction the download preflight errs in.
+// The archives' own size is the budget. It is the only figure available without
+// opening them and is exact for the stored archives Usenet posters overwhelmingly
+// use. A genuinely compressed set extracts to more, so this catches the obvious
+// refusal rather than every one, erring the same way the download preflight
+// does.
 func (e *Engine) checkExtractionSpace(it *item, sets []extract.Set) error {
 	if e.opts.SkipSpaceCheck {
 		return nil
@@ -549,8 +538,8 @@ func (e *Engine) checkExtractionSpace(it *item, sets []extract.Set) error {
 		for _, v := range s.Volumes {
 			info, err := os.Stat(filepath.Join(it.dir, v))
 			if err != nil {
-				// Gone or unreadable: extraction is about to say so properly,
-				// and guessing a size here would only obscure that.
+				// Gone or unreadable: extraction is about to say so, and
+				// guessing a size here would obscure it.
 				continue
 			}
 			need += info.Size()
@@ -573,9 +562,9 @@ func (e *Engine) checkExtractionSpace(it *item, sets []extract.Set) error {
 // canRepairExtraction reports whether a failed extraction is worth spending
 // recovery blocks on.
 //
-// Only once, only when the release actually carries par2, and never for an
-// encrypted archive: there is no password to try, so repair would rebuild
-// bytes nobody can read (the extract package calls this terminal, and it is).
+// Only once, only when the release carries par2, and never for an encrypted
+// archive: there is no password to try, so repair would rebuild bytes nobody can
+// read.
 func (e *Engine) canRepairExtraction(ctx context.Context, it *item, err error) bool {
 	return ctx.Err() == nil &&
 		!it.repaired &&
@@ -592,18 +581,16 @@ func (e *Engine) extractError(err error) error {
 }
 
 // tidy marks a download as having been through every stage and removes the
-// resume sidecar, which has done its job: leaving it behind puts a stray JSON
-// file in the directory the import is about to read.
+// resume sidecar, which would otherwise leave a stray JSON file in the directory
+// the import is about to read.
 //
-// The marker goes down first and outside the download's own directory, beside
-// the NZB. Order matters — between removing the sidecar and persisting the
-// completed row there is a window where a crash would otherwise leave a
-// download that looks half-finished with nothing on disk to say the archives
-// were already unpacked and deleted.
+// The marker goes down first and outside the download's own directory, beside the
+// NZB. Order matters: between removing the sidecar and persisting the completed
+// row, a crash would otherwise leave a download that looks half-finished with
+// nothing on disk to say the archives were already unpacked and deleted.
 func (e *Engine) tidy(it *item) error {
 	if err := os.WriteFile(e.donePath(it.rec.EngineID), nil, 0o644); err != nil {
-		// Not fatal: the cost is a re-run of the stages after a crash, which
-		// is what happened before the marker existed.
+		// Not fatal: the cost is a re-run of the stages after a crash.
 		e.logger.Warn("marking the download assembled", "download", it.rec.EngineID, "err", err)
 	}
 	if err := os.Remove(filepath.Join(it.dir, pipeline.StateFile)); err != nil && !os.IsNotExist(err) {
@@ -648,10 +635,6 @@ func (e *Engine) pipelineOpts(track *pipeline.Tracker) pipeline.Options {
 		SkipSpaceCheck: e.opts.SkipSpaceCheck,
 	}
 }
-
-// ---------------------------------------------------------------------------
-// The NZB sidecar and the download directory
-// ---------------------------------------------------------------------------
 
 // nzbPath is where one download's plan lives. The id is a hex handle, so it is
 // always a safe filename.
@@ -713,10 +696,9 @@ func (e *Engine) dirFor(rec core.Download) string {
 // dirNameLocked picks the directory a new download assembles into. It must be
 // called with e.mu held.
 //
-// The release title is used because a user looking in `incomplete/` should be
-// able to tell what is in there. Two live downloads may genuinely share a
-// title — the same release from two indexers, a re-grab of something already
-// running — and one directory for both would mix their files and their resume
+// The release title is used so a user looking in `incomplete/` can tell what is
+// in there. Two live downloads may share a title, such as the same release from
+// two indexers, and one directory for both would mix their files and their resume
 // state, so a colliding name gains the handle's first bytes. The result is
 // persisted in SavePath and read back from there, so it never changes under a
 // download once chosen.
@@ -740,10 +722,9 @@ func (e *Engine) dirNameLocked(title string, id core.DownloadID) string {
 
 // safeDirName reduces a release title to one path element.
 //
-// A title is a stranger's text off an indexer. Separators, traversal and
-// control characters are removed rather than escaped, and the result is capped:
-// the point is a name that is obviously derived from the release, not one that
-// round-trips.
+// A title is a stranger's text off an indexer. Separators, traversal and control
+// characters are removed rather than escaped, and the result is capped. The goal
+// is a name obviously derived from the release, not one that round-trips.
 func safeDirName(title string) string {
 	cleaned := strings.Map(func(r rune) rune {
 		switch {

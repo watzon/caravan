@@ -32,7 +32,7 @@ type fakeTorznab struct {
 	requests []torznabRequest
 	// items answers one exact query with these releases. A query with no entry
 	// answers an empty channel, which is what a real indexer with no match
-	// does — and what every test that only cares about categories wants.
+	// does: and what every test that only cares about categories wants.
 	items map[string][]torznabItem
 }
 
@@ -181,8 +181,8 @@ func overrideLibraryIndexer(t *testing.T, ctx context.Context, st *store.Store, 
 }
 
 // defaultLibraryID is the shelf a fixture row of this kind is filed on. Every
-// item row names its library — the RSS matcher, the wanted list and the search
-// jobs all resolve ownership by id alone — so a fixture that left library_id at
+// item row names its library, the RSS matcher, the wanted list and the search
+// jobs all resolve ownership by id alone, so a fixture that left library_id at
 // zero would belong to no shelf and take part in nothing.
 func defaultLibraryID(t *testing.T, ctx context.Context, st *store.Store, kind string) int64 {
 	t.Helper()
@@ -303,10 +303,10 @@ func TestPerLibraryIndexerDisableLeavesOtherLibrariesUnaffected(t *testing.T) {
 }
 
 // An RSS feed is a firehose of everything new, so it is fetched once per
-// indexer per cycle no matter how many libraries subscribe to it — asking
-// twice fetches the same document twice and spends a rate limit for nothing.
-// The one request carries the union of what the libraries asked for, because
-// narrowing it to either would drop releases the other is entitled to see.
+// indexer per cycle no matter how many libraries subscribe to it: asking twice
+// fetches the same document twice and spends a rate limit for nothing. The one
+// request carries the union of what the libraries asked for, because narrowing
+// it to either would drop releases the other is entitled to see.
 func TestRSSSyncFetchesEachIndexerOncePerCycleWithTheCategoryUnion(t *testing.T) {
 	ctx := context.Background()
 	st := openStore(t)
@@ -494,7 +494,7 @@ func TestRSSSyncDropsReleasesOutsideALibrarysCategories(t *testing.T) {
 
 // The filter can only reject what it can see. An indexer that publishes no
 // category on an item leaves nothing to match against, and dropping the item
-// would silently narrow every such indexer down to nothing — which is how it
+// would silently narrow every such indexer down to nothing: which is how it
 // behaved before there were per-library categories at all.
 func TestRSSSyncKeepsReleasesTheIndexerPublishedNoCategoryFor(t *testing.T) {
 	ctx := context.Background()
@@ -591,7 +591,7 @@ func setLibraryActive(t *testing.T, ctx context.Context, st *store.Store, kind s
 // The adult module's RSS rule, generalized: an inactive library's categories
 // leave the per-indexer union. Switching a library off deliberately deletes
 // nothing, so without this its categories stay in the query string of every RSS
-// poll forever — a durable trace, in the indexer's own request log, of a shelf
+// poll forever: a durable trace, in the indexer's own request log, of a shelf
 // the owner turned off, and a wider fetch than the active libraries asked for.
 //
 // A television library is the fixture: this is the capability the switch gained

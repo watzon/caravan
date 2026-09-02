@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-// Regression: deeply nested input must be rejected, not recursed into — a
-// 4 MiB manifest of '[' bytes previously overflowed the stack and killed
-// the process before any signature check ran.
+// Regression: deeply nested input must be rejected, not recursed into, a 4 MiB
+// manifest of '[' bytes previously overflowed the stack and killed the process
+// before any signature check ran.
 func TestValidateNoDuplicateKeysBoundsNestingDepth(t *testing.T) {
 	deep := strings.Repeat("[", 4<<20)
 	if err := ValidateNoDuplicateKeys([]byte(deep)); err == nil || !strings.Contains(err.Error(), "nesting exceeds") {

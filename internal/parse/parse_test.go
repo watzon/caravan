@@ -13,8 +13,8 @@ import (
 	"github.com/watzon/caravan/internal/core"
 )
 
-// minCorpusEntries pins PLAN.md's "the parser corpus only ever grows" rule:
-// deleting cases to make a change pass has to fail the build.
+// minCorpusEntries pins the "the parser corpus only ever grows" rule: deleting
+// cases to make a change pass has to fail the build.
 const minCorpusEntries = 60
 
 // expectation is one corpus line: the fields a name must parse into, plus an
@@ -381,9 +381,9 @@ func TestParseAbsoluteEpisode(t *testing.T) {
 		// dash form is a number the name offers as an episode: bare 1080 is not
 		// a resolution (the resolution rules all require the trailing p or i,
 		// and "[1080p]" is where this name states its resolution), so reading
-		// it as episode 1080 is reading the name as written. The alternative —
-		// suppressing any number that looks like a resolution — would lose
-		// One Piece's genuine four-digit episodes to a coincidence.
+		// it as episode 1080 is reading the name as written. The alternative,
+		// suppressing any number that looks like a resolution, would lose One
+		// Piece's genuine four-digit episodes to a coincidence.
 		name: "[Erai-raws] Show - 1080 [1080p]",
 		want: core.ParsedRelease{Title: "Show", Absolute: 1080, Quality: core.Quality1080p, Group: "Erai-raws"},
 	}}
@@ -418,8 +418,8 @@ func TestParseAbsoluteEpisode(t *testing.T) {
 
 // The important half. Every row asserts the number is refused AND that Title
 // and Year are byte-for-byte what the parser produced before the recognizer
-// existed — a false positive here does not merely miss a number, it cuts a
-// movie title in half and sends the wrong search query to the provider.
+// existed: a false positive here does not merely miss a number, it cuts a movie
+// title in half and sends the wrong search query to the provider.
 //
 // The wanted values were captured from the pre-change parser, not written from
 // memory.
@@ -509,8 +509,8 @@ func FuzzParse(f *testing.F) {
 		if got.Absolute < 0 {
 			t.Fatalf("Parse(%q).Absolute = %d, want >= 0", name, got.Absolute)
 		}
-		// The two numbering claims are exclusive by construction. Phase 12's
-		// resolver reads one or the other and never has to reconcile both.
+		// The two numbering claims are exclusive by construction: the resolver
+		// reads one or the other and never has to reconcile both.
 		if got.Absolute > 0 && len(got.Episodes) > 0 {
 			t.Fatalf("Parse(%q) = absolute %d with episodes %v, want at most one of the two", name, got.Absolute, got.Episodes)
 		}

@@ -162,7 +162,7 @@ func TestDecodeMultipartAssembles(t *testing.T) {
 // and the generated multipart fixtures would all still agree with each other.
 // These three articles are committed text produced by testdata/reference.py's
 // own reading of the yEnc 1.3 draft (`=ypart begin=201 end=400` for part 2 of a
-// 200-byte-part posting), and `go test -update` never rewrites them — so a
+// 200-byte-part posting), and `go test -update` never rewrites them: so a
 // decoder that changed its mind about the convention fails here.
 func TestDecodeReferenceMultipartAssembles(t *testing.T) {
 	whole := readFixture(t, "reference-multi.bin")
@@ -216,10 +216,9 @@ func TestDecodeReferenceMultipartAssembles(t *testing.T) {
 }
 
 // TestReferenceImplementationVerifiesTheCorpus runs testdata/reference.py over
-// every fixture, which is what proves Caravan's *encoder* emits articles a
-// foreign decoder accepts. It used to be documented as "run by hand when the
-// corpus changes", which meant encoder drift shared by both halves was only
-// caught if a human remembered.
+// every fixture, which is what proves Caravan's encoder emits articles a foreign
+// decoder accepts. It runs in the suite rather than by hand, so encoder drift
+// shared by both halves cannot go unnoticed.
 func TestReferenceImplementationVerifiesTheCorpus(t *testing.T) {
 	python, err := exec.LookPath("python3")
 	if err != nil {
@@ -325,8 +324,8 @@ func TestDecodeRejectsDamage(t *testing.T) {
 	})
 
 	t.Run("ypart range lies outside the declared file", func(t *testing.T) {
-		// The article is self-consistent — end-begin matches the payload, the
-		// trailer size matches, pcrc32 matches — and the offset is still a
+		// The article is self-consistent, end-begin matches the payload, the
+		// trailer size matches, pcrc32 matches, and the offset is still a
 		// terabyte past the end of a 603-byte file. Accepting it makes the
 		// pipeline write a multi-terabyte sparse file par2 cannot recognise.
 		part, err := yenc.DecodeBytes(readFixture(t, "ypart-out-of-range.yenc"))

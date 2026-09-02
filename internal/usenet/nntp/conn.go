@@ -1,8 +1,8 @@
 // Package nntp is Caravan's news-server client: the transport half of the
-// embedded Usenet engine (SPEC §5.1, PLAN phase 7 task 2).
+// embedded Usenet engine (SPEC §5.1).
 //
-// It does one useful thing — hand back the body of an article named by
-// message-id — and does it against a set of servers rather than one, because
+// It does one useful thing, hand back the body of an article named by
+// message-id, and does it against a set of servers rather than one, because
 // that is what Usenet reliability is made of: an article missing from your
 // main provider is usually present on a cheap block account, and asking the
 // backup is the difference between a download that repairs and one that fails.
@@ -69,8 +69,8 @@ var (
 // ProtocolError is a response code the client could not use.
 //
 // Command is the command that produced it with any credential argument
-// stripped — "AUTHINFO PASS" never carries the password (SPEC §12) — and
-// Message is the server's own text.
+// stripped, "AUTHINFO PASS" never carries the password (SPEC §12), and Message
+// is the server's own text.
 type ProtocolError struct {
 	// Server is the server's Label, never its credentials.
 	Server string
@@ -101,13 +101,12 @@ func (e *ProtocolError) Unwrap() error {
 	return nil
 }
 
-// Retryable reports whether trying the same server again could plausibly
-// work.
+// Retryable reports whether trying the same server again could plausibly work.
 //
 // The rule is the shape of NNTP's numbering: 4xx is "temporarily cannot", 5xx
-// is "will not". The exceptions are the codes that mean something specific —
-// a missing article and a refused login are both 4xx and neither improves by
-// asking twice — and a cancelled context, which is the caller leaving.
+// is "will not". The exceptions are the codes that mean something specific, a
+// missing article and a refused login are both 4xx and neither improves by
+// asking twice, and a cancelled context, which is the caller leaving.
 func Retryable(err error) bool {
 	switch {
 	case err == nil:
@@ -203,9 +202,9 @@ type Conn struct {
 	maxArticle int64
 
 	authed bool
-	// broken records that the stream can no longer be trusted — a read error,
-	// a write error, a response that did not parse, or a body that stopped
-	// early. A broken connection is closed rather than pooled.
+	// broken records that the stream can no longer be trusted: a read error, a
+	// write error, a response that did not parse, or a body that stopped early.
+	// A broken connection is closed rather than pooled.
 	broken bool
 }
 

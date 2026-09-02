@@ -1,11 +1,11 @@
 package stashbox
 
-// The scene filter rail's typeaheads (PLAN phase 12 task 2): the performers and
-// tags a scene query narrows by.
+// The scene filter rail's typeaheads: the performers and tags a scene query
+// narrows by.
 //
 // They are a file of their own rather than part of scenes.go because they
-// answer a different question — "who and what can I filter by", not "which
-// scenes" — and because each has two dialects behind it: the GraphQL road here
+// answer a different question, "who and what can I filter by", not "which
+// scenes", and because each has two dialects behind it: the GraphQL road here
 // and TPDB's REST twin in tpdb.go. The dispatch is the same one SearchScenes
 // makes and for the same reason: on TPDB the ids that the scene index filters
 // on are its own numeric ones, which GraphQL never serves.
@@ -46,10 +46,10 @@ const searchTagsQuery = `query ` + opSearchTags + `($input: TagQueryInput!) {
 
 // SearchPerformers returns performer candidates for a free-text query.
 //
-// The result carries whichever id the configured endpoint filters scenes by —
-// TPDB's numeric one, a stash-box's uuid — and core.SceneFilterRef holds both,
-// so a caller hands back what it was given without learning which dialect it
-// is talking to.
+// The result carries whichever id the configured endpoint filters scenes by,
+// TPDB's numeric one, a stash-box's uuid, and core.SceneFilterRef holds both,
+// so a caller hands back what it was given without learning which dialect it is
+// talking to.
 func (c *Client) SearchPerformers(ctx context.Context, query string) ([]core.ScenePerformerMeta, error) {
 	query = strings.TrimSpace(query)
 	if c.restPerformers != "" {

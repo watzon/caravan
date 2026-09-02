@@ -144,9 +144,9 @@ func TestListReturnsOnlyCaravansTorrents(t *testing.T) {
 	}
 }
 
-// A qBittorrent older than WebAPI 2.8.3 ignores the tag filter and answers
-// with the whole queue. Without the second pass, the user's own torrents would
-// appear in Caravan's queue — and be removable from it.
+// A qBittorrent older than WebAPI 2.8.3 ignores the tag filter and answers with
+// the whole queue. Without the second pass, the user's own torrents would
+// appear in Caravan's queue: and be removable from it.
 func TestListReFiltersWhenTheServerIgnoresTheTagParameter(t *testing.T) {
 	e, f := newEngine(t)
 	f.ignoresTagFilter = true
@@ -265,7 +265,7 @@ func TestAddDiscoversTheHashOfATorrentFile(t *testing.T) {
 // The magnet path is where this bites: the info hash comes from the magnet, so
 // Add returns immediately without ever confirming the torrent exists. Trusting
 // the 200 records the grab as succeeded and writes a `downloads` row for a
-// handle qBittorrent rejected — a queue row that never progresses, never
+// handle qBittorrent rejected: a queue row that never progresses, never
 // imports, and is never retried, because a grab that is not failed is not
 // retried.
 func TestAddFailsWhenQBittorrentRejectsItWithHTTP200(t *testing.T) {

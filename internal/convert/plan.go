@@ -12,7 +12,7 @@ import (
 // Probe is what ffprobe reports about one file: the technical claims the
 // container itself makes, as opposed to the ones a release name makes.
 //
-// Every field is optional in the same way core.MediaTags' are — a stream ffprobe
+// Every field is optional in the same way core.MediaTags' are: a stream ffprobe
 // could not describe is unstated, not wrong.
 type Probe struct {
 	// Duration is the container duration in seconds, 0 when unstated.
@@ -27,7 +27,7 @@ type Probe struct {
 	// AudioCodecs are the ffprobe codec names of every audio stream in order
 	// ("aac", "ac3", "dts"…), empty when there is no audio stream.
 	//
-	// The first one is what the profile judges — it is the track a set plays —
+	// The first one is what the profile judges, it is the track a set plays,
 	// but the rest are kept because they are the streams the mux has to accept:
 	// copying a TrueHD commentary track into MP4 fails outright, and a plan
 	// that never looked at it could not know that.
@@ -61,7 +61,7 @@ type Plan struct {
 	// the audio is copied. nil means "every audio stream", which is what a
 	// re-encode wants: everything it maps comes out as AAC and muxes.
 	AudioStreams []int
-	// Reasons are the profile's complaints, worst first — the same strings the
+	// Reasons are the profile's complaints, worst first: the same strings the
 	// compatibility badge shows, so the queue and the badge never disagree.
 	Reasons []string
 }
@@ -122,8 +122,8 @@ func rejects(profile core.TVProfile, tags core.MediaTags) bool {
 // muxableAudio is the audio stream indices a stream copy may keep: the ones the
 // profile accepts.
 //
-// Everything else is dropped for the same reason subtitles are — the target
-// container has no tag for it and the mux would fail — and dropping a track the
+// Everything else is dropped for the same reason subtitles are, the target
+// container has no tag for it and the mux would fail, and dropping a track the
 // set could not have decoded costs the user nothing. A probe that reported no
 // audio at all yields nil, which Args reads as "whatever is there".
 func muxableAudio(profile core.TVProfile, p Probe) []int {

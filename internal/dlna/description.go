@@ -24,8 +24,8 @@ const (
 //
 // The eventSubURL elements point at the GENA endpoints in events.go. Both
 // services carry evented state variables, and clients exist that SUBSCRIBE
-// before browsing and treat a failed subscription as a dead service — an
-// empty eventSubURL rendered exactly as "device found, library empty".
+// before browsing and treat a failed subscription as a dead service: an empty
+// eventSubURL rendered exactly as "device found, library empty".
 func deviceDescription(friendlyName, uuid string) string {
 	var b strings.Builder
 	b.WriteString(xml.Header)
@@ -65,8 +65,8 @@ func service(serviceType, serviceID, scpdURL, controlURL, eventSubURL string) st
 }
 
 // contentDirectorySCPD describes the ContentDirectory actions this server
-// implements — including Search (search.go), which library-style clients use
-// to enumerate a server in one sweep instead of walking Browse.
+// implements: including Search (search.go), which library-style clients use to
+// enumerate a server in one sweep instead of walking Browse.
 const contentDirectorySCPD = xml.Header + `<scpd xmlns="urn:schemas-upnp-org:service-1-0">
 <specVersion><major>1</major><minor>0</minor></specVersion>
 <actionList>

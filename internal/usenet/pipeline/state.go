@@ -12,7 +12,7 @@ import (
 // StateFile is the resume sidecar's name inside a download's directory.
 //
 // It lives with the data rather than in the database on purpose. Caravan's
-// database is a disposable cache — delete it, rescan, the library comes back —
+// database is a disposable cache, delete it, rescan, the library comes back,
 // but a half-finished download is not something a rescan can rebuild, and
 // refetching thirty gigabytes because a cache was thrown away is exactly the
 // kind of expensive surprise a paid Usenet account should never spring. Keeping
@@ -54,10 +54,10 @@ type state struct {
 // fileState is one target's progress.
 type fileState struct {
 	Name string `json:"name"`
-	// Fingerprint is the file's name and segment list hashed, so an entry
-	// left by a different release — or by the same release re-grabbed with
-	// different segments — is discarded instead of being used to skip
-	// articles that were never fetched.
+	// Fingerprint is the file's name and segment list hashed, so an entry left
+	// by a different release, or by the same release re-grabbed with different
+	// segments, is discarded instead of being used to skip articles that were
+	// never fetched.
 	Fingerprint string         `json:"fingerprint"`
 	Size        int64          `json:"size,omitempty"`
 	End         int64          `json:"end,omitempty"`
@@ -119,8 +119,8 @@ func (s *state) attach(targets []*target) []map[int]segmentState {
 		// The sidecar is a claim about a file on disk, and the file is the
 		// authority. Nothing else checks: open() creates without truncating and
 		// finish() only ever grows, so a target that was deleted or truncated
-		// between runs would come back as a full-length hole of zeros that every
-		// recorded segment claims to have filled — a download that reports
+		// between runs would come back as a full-length hole of zeros that
+		// every recorded segment claims to have filled, a download that reports
 		// itself complete with no failures, which is exactly the state that
 		// makes the engine skip par2 and hand a zero-filled file to the import.
 		s.Files[slot] = trimToDisk(t.path, s.Files[slot])

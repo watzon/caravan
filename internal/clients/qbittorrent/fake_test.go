@@ -66,8 +66,8 @@ type fakeQB struct {
 	onAdd func(f *fakeQB, form url.Values)
 	// rejectsAdd makes torrents/add add nothing and say so the way qBittorrent
 	// 5.0 and older do: HTTP 200 with the body "Fails.". That is what a
-	// malformed magnet, an unreachable .torrent URL or a duplicate really
-	// looks like — not the 400 a wholly missing `urls` parameter gets.
+	// malformed magnet, an unreachable .torrent URL or a duplicate really looks
+	// like: not the 400 a wholly missing `urls` parameter gets.
 	rejectsAdd bool
 }
 

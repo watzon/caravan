@@ -15,8 +15,8 @@ import (
 )
 
 // enableAdultLibrary makes adult content reachable: the Adult library exists
-// and is switched on. An adult library IS the module — there is no server-wide
-// switch above it — so a test that needs scenes to be visible creates one.
+// and is switched on. An adult library IS the module, there is no server-wide
+// switch above it, so a test that needs scenes to be visible creates one.
 //
 // It is idempotent, because the enable it stands for was: a library that is
 // already there is switched back on rather than duplicated, keeping whatever
@@ -68,7 +68,7 @@ func enableAdultLibrary(t *testing.T, st *store.Store) core.Library {
 // switched off only the default would be asserting against a server that still
 // serves scenes.
 //
-// Switching off deletes nothing — not the row, not the series, not the files.
+// Switching off deletes nothing: not the row, not the series, not the files.
 // Off is a visibility promise, not a retention policy, so each library keeps
 // the dlna_visible its owner last chose and finds it again when it comes back.
 func setAdultLibrariesActive(t *testing.T, st *store.Store, active bool) {
@@ -86,9 +86,9 @@ func setAdultLibrariesActive(t *testing.T, st *store.Store, active bool) {
 	}
 }
 
-// seedSite puts a site in the library the way library.AddSite does — a series
-// of kind adult with a release year for a season and one scene with a file on
-// disk — plus the Adult library row it hangs under.
+// seedSite puts a site in the library the way library.AddSite does, a series of
+// kind adult with a release year for a season and one scene with a file on
+// disk, plus the Adult library row it hangs under.
 func seedSite(t *testing.T, st *store.Store) *core.MediaFile {
 	t.Helper()
 	ctx := context.Background()
@@ -127,7 +127,7 @@ func seedSite(t *testing.T, st *store.Store) *core.MediaFile {
 }
 
 // A site is stored as a series row, so an unfiltered series listing would hang
-// the adult library inside the TELEVISION container — where the adult library's
+// the adult library inside the TELEVISION container: where the adult library's
 // own dlna_visible flag has no say, because it is not that library's container.
 // DLNA has no accounts: anything in that tree is readable by every device on
 // the network.
@@ -315,7 +315,7 @@ func containerTitles(doc *didlLite) []string {
 }
 
 // The phase acceptance, both halves in one test: the Adult shelf is absent from
-// a freshly enabled server, and it appears when — and only when — its own
+// a freshly enabled server, and it appears when, and only when, its own
 // dlna_visible is turned on. Nothing here is adult-specific machinery: the same
 // libraries row and the same flag decide the Movies and TV shelves.
 func TestAdultShelfAppearsOnlyWhenItsLibraryIsVisible(t *testing.T) {
@@ -404,10 +404,10 @@ func TestAdultShelfAppearsOnlyWhenItsLibraryIsVisible(t *testing.T) {
 // Switching the module off has to take the shelf off the LAN too.
 //
 // Disabling deliberately deletes nothing, so the Adult library row keeps
-// whatever dlna_visible the owner last set — and DLNA is the one surface with
-// no accounts on it. An owner who shares the shelf, then decides the module
-// should be gone, sees the API, the SPA, the calendar and the wanted list all
-// go quiet; if the tree kept advertising "Adult", every television in the house
+// whatever dlna_visible the owner last set: and DLNA is the one surface with no
+// accounts on it. An owner who shares the shelf, then decides the module should
+// be gone, sees the API, the SPA, the calendar and the wanted list all go
+// quiet; if the tree kept advertising "Adult", every television in the house
 // would still list it. The sharing decision has to be REMEMBERED (turning the
 // module back on must not silently unshare it) but must not APPLY while the
 // module is off.
@@ -485,8 +485,8 @@ func TestDisablingTheModuleTakesTheAdultShelfOffTheLAN(t *testing.T) {
 
 // A site and a television series are rows in one table, so "s:12" and "as:12"
 // address the same id. Each shelf must refuse the other's rows, or the
-// television shelf's dlna_visible — which says nothing about the adult library
-// — would become a way to reach it.
+// television shelf's dlna_visible, which says nothing about the adult library,
+// would become a way to reach it.
 func TestTheTwoShelvesRefuseEachOthersRows(t *testing.T) {
 	svc, st, _ := newTestService(t)
 	seedLibrary(t, st)

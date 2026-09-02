@@ -11,11 +11,11 @@ import (
 	"strings"
 )
 
-// FFmpeg is the pair of binaries a conversion drives. It is an interface so
-// the queue's decisions — which strategy, and whether the output is good
-// enough to replace the original — are testable without either binary
-// installed, which is the difference between a test suite that runs in CI and
-// one that gets skipped there (SPEC §8: ffmpeg is optional).
+// FFmpeg is the pair of binaries a conversion drives. It is an interface so the
+// queue's decisions, which strategy, and whether the output is good enough to
+// replace the original, are testable without either binary installed, which is
+// the difference between a test suite that runs in CI and one that gets skipped
+// there (SPEC §8: ffmpeg is optional).
 type FFmpeg interface {
 	// Probe reads what the container claims about itself.
 	Probe(ctx context.Context, path string) (Probe, error)
@@ -37,7 +37,7 @@ type RunProgress struct {
 // Both are required: without ffprobe there is no way to choose between a remux
 // and a transcode, and guessing is exactly the thing that turns a two-second
 // container swap into a two-hour re-encode. A nil result is the whole of the
-// graceful degradation SPEC §8 asks for — the queue reports itself unavailable
+// graceful degradation SPEC §8 asks for: the queue reports itself unavailable
 // and the UI hides the affordance.
 func Detect() FFmpeg {
 	ffmpeg, err := exec.LookPath("ffmpeg")
@@ -152,9 +152,9 @@ type probeJSON struct {
 //
 // Only the first *video* stream is read: the profiles describe what a set
 // decodes for the stream it will actually play. Every audio stream is kept,
-// because a stream copy has to mux all of the ones it maps — the first one
-// still decides the verdict (see Probe.AudioCodec), the rest decide what is
-// safe to copy.
+// because a stream copy has to mux all of the ones it maps: the first one still
+// decides the verdict (see Probe.AudioCodec), the rest decide what is safe to
+// copy.
 func ParseProbe(data []byte) (Probe, error) {
 	var doc probeJSON
 	if err := json.Unmarshal(data, &doc); err != nil {

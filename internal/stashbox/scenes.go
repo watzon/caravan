@@ -19,7 +19,7 @@ const (
 //
 // The scene's own `urls`/`images` are selected the same narrow way sites are
 // (see siteFields), and the studio is one level deep: a scene needs the site it
-// belongs to, not that site's whole record — GetSite is how a site is fetched.
+// belongs to, not that site's whole record, GetSite is how a site is fetched.
 const sceneFields = `
     id
     title
@@ -112,8 +112,8 @@ func (c *Client) SearchScenes(ctx context.Context, q core.SceneQuery) (*core.Sce
 }
 
 // SceneFilterSupport reports which scene filters this endpoint can express, so
-// the filter rail can leave out a control the answer would only refuse (PLAN
-// phase 12, acceptance criterion 1). It is core.SceneFilterReporter.
+// the filter rail can leave out a control the answer would only refuse. It is
+// core.SceneFilterReporter.
 //
 // The dialect decides it and nothing else, the same single fact SearchScenes
 // branches on: the TPDB REST index serves every one of these, and the generic
@@ -131,8 +131,8 @@ func (c *Client) SceneFilterSupport() core.SceneFilterSupport {
 }
 
 // sceneQueryInput builds stash-box's SceneQueryInput from a SceneQuery, and
-// REFUSES — with a *core.SceneFilterUnsupportedError — anything this protocol
-// has no field for.
+// REFUSES, with a *core.SceneFilterUnsupportedError, anything this protocol has
+// no field for.
 //
 // The refusal is the whole point. stash-box's scene query answers text,
 // studios, performers, tags and an exact date; it has no release year, no
@@ -231,10 +231,10 @@ func sceneSortEnum(sort core.SceneSort) (string, error) {
 // sceneCriterion builds a MultiIDCriterionInput for a performer or tag filter,
 // or nil when there is nothing to filter on.
 //
-// INCLUDES is "carries all of these" — the same reading the studio filter
-// documents — so the ALL half of the any/all switch is exactly this modifier
-// and the ANY half has no spelling at all. With a single id the two questions
-// are identical, which is why one chip works either way and two do not.
+// INCLUDES is "carries all of these", the same reading the studio filter
+// documents, so the ALL half of the any/all switch is exactly this modifier and
+// the ANY half has no spelling at all. With a single id the two questions are
+// identical, which is why one chip works either way and two do not.
 func sceneCriterion(what string, refs []core.SceneFilterRef, all bool) (map[string]any, error) {
 	if len(refs) == 0 {
 		return nil, nil
@@ -244,11 +244,10 @@ func sceneCriterion(what string, refs []core.SceneFilterRef, all bool) (map[stri
 	}
 	value := make([]string, 0, len(refs))
 	for _, ref := range refs {
-		// A ref carrying only a numeric id came from TPDB's typeahead — a
-		// filter URL copied between installs. See tpdbRefFilter for the
-		// mirror image, for why the id is not in the message, and for why a
-		// caller-side filter problem is unsupported-filter rather than an
-		// upstream failure.
+		// A ref carrying only a numeric id came from TPDB's typeahead: a filter
+		// URL copied between installs. See tpdbRefFilter for the mirror image,
+		// for why the id is not in the message, and for why a caller-side
+		// filter problem is unsupported-filter rather than an upstream failure.
 		if strings.TrimSpace(ref.StashID) == "" {
 			return nil, &core.SceneFilterUnsupportedError{Filter: what + " by numeric id"}
 		}
@@ -280,8 +279,8 @@ func (c *Client) GetScene(ctx context.Context, stashID string) (*core.SceneMeta,
 }
 
 // clampPaging turns a caller's paging request into values the endpoint accepts.
-// It is forgiving rather than strict — a zero Page is "the first page", not a
-// bad request — and returns what it used so ScenePage can report it.
+// It is forgiving rather than strict, a zero Page is "the first page", not a
+// bad request, and returns what it used so ScenePage can report it.
 func clampPaging(page, perPage int) (int, int) {
 	if page < 1 {
 		page = 1
@@ -328,11 +327,11 @@ func sceneMeta(r sceneResult) core.SceneMeta {
 }
 
 // SceneWebURL is where a human can read about this scene on the endpoint's own
-// website — the destination behind a scene's title on a site's page. It is
+// website: the destination behind a scene's title on a site's page. It is
 // derived rather than stored for the reason SiteWebURL is: the page moves when
 // the endpoint setting does.
 //
-// Every stash-box files a scene under /scenes/{id}, and TPDB happens to agree —
+// Every stash-box files a scene under /scenes/{id}, and TPDB happens to agree:
 // but its configured endpoint is the api. host, which serves JSON, so the web
 // host still has to be special-cased.
 func SceneWebURL(endpoint, stashID string) string {

@@ -91,7 +91,7 @@ func TestSearchSitesBlankQueryOmitsTheNameFilter(t *testing.T) {
 func TestSearchSitesSelectsTheNarrowFieldSet(t *testing.T) {
 	// The selection set is the compatibility surface: every field asked for is
 	// a field a thinner dialect can reject. `type`/`site` on a URL is the known
-	// split — older boxes have one, newer ones the other — so neither is asked
+	// split, older boxes have one, newer ones the other, so neither is asked
 	// for.
 	c, s := newStub(t, map[string][]stashboxtest.Response{
 		opSearchSites: {okFixture(t, "query_studios.json")},
@@ -186,7 +186,7 @@ const (
 )
 
 // newTPDBStub returns a client pointed at a fake endpoint with no queryStudios,
-// which is what TPDB — the default endpoint — actually is.
+// which is what TPDB, the default endpoint, actually is.
 func newTPDBStub(t *testing.T, ops map[string][]stashboxtest.Response) (*Client, *stashboxtest.Server) {
 	t.Helper()
 
@@ -199,7 +199,7 @@ func newTPDBStub(t *testing.T, ops map[string][]stashboxtest.Response) (*Client,
 }
 
 // siteReply is a findStudio answer for one site. The fallback looks a candidate
-// up per id, so the interesting part of each reply is only which site it is —
+// up per id, so the interesting part of each reply is only which site it is:
 // and its aliases, which are the names only the full record carries.
 func siteReply(id, name string, aliases ...string) stashboxtest.Response {
 	encoded := []byte("[]")
@@ -288,7 +288,7 @@ func TestSearchSitesFallsBackToScenesWhenQueryStudiosIsMissing(t *testing.T) {
 
 // The relevance bug: a studio with five scenes but a name nobody typed used to
 // bury the one whose name is exactly what was typed. Frequency is a tiebreak,
-// not the question — the queryStudios path this stands in for ranks by name.
+// not the question: the queryStudios path this stands in for ranks by name.
 func TestSearchSitesFallbackRanksNameMatchesAboveBusierStudios(t *testing.T) {
 	c, s := newTPDBStub(t, map[string][]stashboxtest.Response{
 		opSearchSitesByScene: {okFixture(t, "search_scene_studios_ranking.json")},
@@ -317,7 +317,7 @@ func TestSearchSitesFallbackRanksNameMatchesAboveBusierStudios(t *testing.T) {
 
 // The aliases only arrive with the full record, which is why the shortlist is
 // ranked twice. A site whose alias is what was typed has to climb once that is
-// known — a release names a site by whichever alias its packager saw.
+// known: a release names a site by whichever alias its packager saw.
 func TestSearchSitesFallbackPromotesAnAliasMatchOnceResolved(t *testing.T) {
 	c, s := newTPDBStub(t, map[string][]stashboxtest.Response{
 		opSearchSitesByScene: {okFixture(t, "search_scene_studios_alias.json")},

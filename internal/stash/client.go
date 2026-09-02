@@ -1,30 +1,30 @@
 // Package stash is Caravan's client for the Stash GraphQL API and the adult
-// library handoff built on it (PLAN phase 11).
+// library handoff built on it.
 //
 // Stash is the adult counterpart of Jellyfin, and this package is deliberately
 // internal/jellyfin's adult twin: a thin client with no retry of its own, plus
 // a service that turns "the adult library changed" into durable jobs. What
 // makes it the *adult* twin rather than a copy is scope and identity. The scan
-// it triggers names one path — the adult library root — because a Caravan that
+// it triggers names one path, the adult library root, because a Caravan that
 // asked Stash to rescan everything would have it walk a television library it
-// has no business seeing (SPEC §1.2, the exposure rule). And because phase 9
-// already sources scene metadata from a stash-box, Caravan holds the same
-// vocabulary Stash's own identify step uses, so the scene can be handed over
-// already identified instead of arriving as an untagged file.
+// has no business seeing (SPEC §1.2, the exposure rule). Because scene metadata
+// already comes from a stash-box, Caravan holds the same vocabulary Stash's own
+// identify step uses, so the scene can be handed over already identified
+// instead of arriving as an untagged file.
 //
 // Nothing in *this file* retries. A scan or a push that does not land is not
 // lost: the caller is a durable job (SPEC §7). What owns the waiting is the
-// handoff, not the queue's default backoff — the queue spends its five attempts
+// handoff, not the queue's default backoff: the queue spends its five attempts
 // inside nine minutes, and the two things being waited on (a metadataScan of a
 // real library, a Stash host coming back from a reboot) are routinely slower
-// than that. So the one answer that is expected to repeat — looking for a scene
-// Stash has not finished indexing yet — is reported as ErrSceneNotFound, and
+// than that. So the one answer that is expected to repeat, looking for a scene
+// Stash has not finished indexing yet, is reported as ErrSceneNotFound, and
 // handoff.go re-arms the job on it rather than failing it.
 //
 // Schema note: every field selected here was read off stashapp/stash's own
 // `graphql/schema` on the develop branch. Deprecated fields are avoided, and so
-// are the newest ones where an older equivalent exists — `studio_filter.name`
-// rather than `stash_ids_endpoint`, for instance — because a household's Stash
+// are the newest ones where an older equivalent exists, `studio_filter.name`
+// rather than `stash_ids_endpoint`, for instance, because a household's Stash
 // is whatever version it last updated to.
 //
 // Path note: the paths Caravan sends are Caravan's own absolute paths. A Stash
@@ -86,13 +86,13 @@ var (
 	ErrAmbiguousScene = errors.New("stash: more than one scene at that path")
 )
 
-// APIError is a failed Stash operation. StatusCode is the HTTP status;
-// Message is the first GraphQL error's message, or the HTTP status text when
-// the reply carried no errors array.
+// APIError is a failed Stash operation. StatusCode is the HTTP status; Message
+// is the first GraphQL error's message, or the HTTP status text when the reply
+// carried no errors array.
 //
 // Operation is the GraphQL operation name that failed ("SceneUpdate"). It is
-// the GraphQL equivalent of a request path, and — unlike a URL — it can carry
-// no credential, so it is safe to log.
+// the GraphQL equivalent of a request path, and, unlike a URL, it can carry no
+// credential, so it is safe to log.
 type APIError struct {
 	Operation  string
 	StatusCode int
@@ -174,7 +174,7 @@ const metadataScanDoc = `mutation MetadataScan($input: ScanMetadataInput!) { met
 // background, so a nil error means "the scan was accepted", never "the scan
 // finished". Nothing is generated: covers, previews, sprites and phashes are
 // Stash's own decisions to make on its own schedule, and phash in particular
-// stays Stash's job permanently — Caravan never decodes video frames.
+// stays Stash's job permanently, Caravan never decodes video frames.
 func (c *Client) Scan(ctx context.Context, paths []string) (string, error) {
 	clean := make([]string, 0, len(paths))
 	for _, p := range paths {
@@ -243,8 +243,8 @@ func (c *Client) SceneByPath(ctx context.Context, path string) (*Scene, error) {
 }
 
 // StashID is one stash-box identity: which box, and the record's id there. It
-// is the shared vocabulary that makes an identity push possible at all — the
-// same endpoint and UUID phase 9 read the scene's metadata from.
+// is the shared vocabulary that makes an identity push possible: the same
+// endpoint and UUID the scene's metadata was read from.
 type StashID struct {
 	Endpoint string `json:"endpoint"`
 	StashID  string `json:"stash_id"`
@@ -254,9 +254,9 @@ type StashID struct {
 //
 // Every field is optional on the wire except ID: a nil StudioID or empty
 // PerformerIDs leaves what Stash already has alone, rather than clearing it.
-// That is deliberate — the studio and performer halves of the push are
-// best effort (see handoff.go), and a failed lookup must not erase a value a
-// user set by hand.
+// That is deliberate: the studio and performer halves of the push are best
+// effort (see handoff.go), and a failed lookup must not erase a value a user
+// set by hand.
 type SceneUpdate struct {
 	ID           string
 	Title        string
@@ -323,7 +323,7 @@ const findStudioDoc = `query FindStudioByName($name: String!) {
 // By name rather than by stash-box id on purpose. `stash_ids_endpoint` is a
 // recent filter and its older spelling is deprecated, so keying on it would
 // make this work on some households' Stash and not others; a name is a field
-// every version has had. The stash-box id still travels — it goes *onto* the
+// every version has had. The stash-box id still travels: it goes *onto* the
 // studio at creation (see CreateStudio), which is what makes the next lookup
 // unambiguous to a human even though this one was not.
 func (c *Client) StudioByName(ctx context.Context, name string) (string, error) {
@@ -411,7 +411,7 @@ const performerCreateDoc = `mutation PerformerCreate($input: PerformerCreateInpu
 // on a scene is the credited *names* (core.SceneInfo.Performers), because that
 // is what a scene row renders and what a release filename contains. The
 // provider's performer ids are not carried into the library, so there is
-// nothing truthful to attach here — inventing one would be worse than omitting
+// nothing truthful to attach here: inventing one would be worse than omitting
 // it.
 func (c *Client) CreatePerformer(ctx context.Context, name string) (string, error) {
 	name = strings.TrimSpace(name)
@@ -461,7 +461,7 @@ type gqlResponse struct {
 // out.
 //
 // op is passed separately from doc so errors name something short and stable,
-// and so a fake endpoint can route on the same name a real one logs — the same
+// and so a fake endpoint can route on the same name a real one logs: the same
 // arrangement internal/stashbox uses.
 func (c *Client) query(ctx context.Context, op, doc string, vars map[string]any, out any) error {
 	if c.BaseURL == "" {

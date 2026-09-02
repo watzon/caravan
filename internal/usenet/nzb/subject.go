@@ -24,7 +24,7 @@ var leadingCounter = regexp.MustCompile(`^\s*[\[(]\s*\d+\s*/\s*\d+\s*[\])]\s*-?\
 //     and the last whitespace-separated token that looks like a filename
 //     (it has a dot with something after it) is taken.
 //  3. Otherwise the trimmed subject itself, because a wrong-looking name is
-//     more useful downstream than an empty one — an obfuscated release is
+//     more useful downstream than an empty one: an obfuscated release is
 //     the stuck-import queue's problem (SPEC §5.4), not the parser's.
 //
 // Filename never returns a path: any directory separators a poster smuggled

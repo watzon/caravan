@@ -84,8 +84,8 @@ func seedSecondTVLibrary(t *testing.T, st *store.Store, root string) (core.Libra
 	return *lib, series, file
 }
 
-// The acceptance for PLAN phase A8: a second library of a kind that already
-// has one gets a container of its own, holding its own rows and nobody else's.
+// A second library of a kind that already has one gets a container of its own,
+// holding its own rows and nobody else's.
 func TestSecondLibraryGetsItsOwnContainer(t *testing.T) {
 	svc, st, root := newTestService(t)
 	seedLibrary(t, st)
@@ -162,7 +162,7 @@ func TestSecondLibraryGetsItsOwnContainer(t *testing.T) {
 }
 
 // Hiding one library of a kind must take its whole subtree off the LAN while
-// its sibling stays browsable — the thing a tree keyed by kind could not do.
+// its sibling stays browsable: the thing a tree keyed by kind could not do.
 func TestHidingOneLibraryLeavesItsSiblingBrowsable(t *testing.T) {
 	svc, st, root := newTestService(t)
 	seedLibrary(t, st)
@@ -279,8 +279,8 @@ func TestModuleOffHidesEveryAdultLibrary(t *testing.T) {
 	}
 }
 
-// The acceptance for PLAN phase 8 task 6: a library the owner stopped sharing
-// leaves the content tree, and every other library is untouched.
+// A library the owner stopped sharing leaves the content tree, and every other
+// library is untouched.
 func TestBrowseRootDropsHiddenLibrary(t *testing.T) {
 	svc, st, _ := newTestService(t)
 	seedLibrary(t, st)

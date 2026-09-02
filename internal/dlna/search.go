@@ -1,18 +1,18 @@
 package dlna
 
 // ContentDirectory Search (service spec §2.7.5). Optional on paper, mandatory
-// in the field: library-style clients — Infuse among them — enumerate a
-// server with one recursive Search instead of walking Browse, and a server
-// that faults the action renders as a device whose library is empty. This is
-// the smallest Search that satisfies them: flatten the subtree under
-// ContainerID, then keep what the criteria's class and title terms accept.
+// in the field: library-style clients, Infuse among them, enumerate a server
+// with one recursive Search instead of walking Browse, and a server that faults
+// the action renders as a device whose library is empty. This is the smallest
+// Search that satisfies them: flatten the subtree under ContainerID, then keep
+// what the criteria's class and title terms accept.
 //
-// The criteria language is scoped on purpose. Real clients send conjunctions
-// of `upnp:class derivedfrom "…"` and `dc:title contains "…"`; those terms
-// are honored and everything else in the expression is ignored, which errs
-// toward showing content. A criteria whose class terms name only things this
-// server does not have (music, images) matches nothing — that is the honest
-// answer to "list your albums".
+// The criteria language is scoped on purpose. Real clients send conjunctions of
+// `upnp:class derivedfrom "…"` and `dc:title contains "…"`; those terms are
+// honored and everything else in the expression is ignored, which errs toward
+// showing content. A criteria whose class terms name only things this server
+// does not have (music, images) matches nothing: that is the honest answer to
+// "list your albums".
 
 import (
 	"context"
@@ -115,11 +115,11 @@ func (s *Service) search(ctx context.Context, u urls, containerID, criteria stri
 	return out, nil
 }
 
-// searchScope flattens everything beneath containerID — containers and items,
-// the container itself excluded — in browse order.
+// searchScope flattens everything beneath containerID, containers and items,
+// the container itself excluded, in browse order.
 func (s *Service) searchScope(ctx context.Context, u urls, containerID string) (*didlLite, error) {
 	// Search is a second way to reach the same tree, so it answers the same
-	// question about visibility Browse does — otherwise a library the owner
+	// question about visibility Browse does: otherwise a library the owner
 	// stopped advertising would still be enumerable by the clients that prefer
 	// Search over walking Browse, which is most of them.
 	if hidden, err := s.hidden(ctx, containerID); err != nil {
@@ -231,8 +231,8 @@ func (s *Service) shelfScope(ctx context.Context, u urls, sh shelf, out *didlLit
 	}
 	out.Containers = append(out.Containers, series.Containers...)
 	// The same list seriesChildren walked, for the reason it gives: a site is a
-	// series row, and a search that walked every kind — or every library of one
-	// kind — would answer this shelf with somebody else's rows.
+	// series row, and a search that walked every kind, or every library of one
+	// kind, would answer this shelf with somebody else's rows.
 	all, err := s.shelfSeries(ctx, sh)
 	if err != nil {
 		return err

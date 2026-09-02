@@ -1,8 +1,8 @@
 // Package tvmaze is Caravan's client for the TVmaze API, a metadata provider
 // for television libraries.
 //
-// *Client implements core.MetadataProvider, so everything above it — the
-// scanner, the organizer, the add-series screen — talks to an interface and
+// *Client implements core.MetadataProvider, so everything above it, the
+// scanner, the organizer, the add-series screen, talks to an interface and
 // tests without a network. The client itself is deliberately thin, mirroring
 // internal/tmdb and internal/anilist: no caching, one retry. TVmaze responses
 // are cached in sqlite by the library layer, which is where "rebuildable cache"
@@ -13,7 +13,7 @@
 //
 // There is no credential. TVmaze's read API is public and takes none, so
 // nothing here authenticates and nothing here can be "unauthorized" in the
-// sense core.ErrMetadataUnauthorized means — that sentinel drives the "enter
+// sense core.ErrMetadataUnauthorized means: that sentinel drives the "enter
 // your API key" UI, and offering it for a provider with no key to enter would
 // send people to fix something that does not exist. A 401 from this endpoint
 // means TVmaze is refusing everyone, which is an outage. A rejected request is
@@ -22,7 +22,7 @@
 //
 // There is a throttle. TVmaze publishes a budget of at least 20 requests per 10
 // seconds and documents that leaving 500ms between calls never trips it. One
-// logical lookup is not one request here either — GetSeries costs two — so a
+// logical lookup is not one request here either, GetSeries costs two, so a
 // refresh sweep over a few hundred series would find the limit the expensive
 // way without a floor between sends. See defaultMinInterval.
 package tvmaze
@@ -51,8 +51,8 @@ const (
 	ProviderID = "tvmaze"
 
 	// DefaultBaseURL is TVmaze's API root. Like AniList and unlike stash-box,
-	// TVmaze is a service rather than a protocol — there is one host and no
-	// dialects — so this is a default rather than a preset, overridden only by
+	// TVmaze is a service rather than a protocol, there is one host and no
+	// dialects, so this is a default rather than a preset, overridden only by
 	// tests.
 	DefaultBaseURL = "https://api.tvmaze.com"
 )
@@ -64,10 +64,10 @@ const (
 
 	// defaultMinInterval is the floor between two sends. TVmaze's documented
 	// budget is at least 20 requests per 10 seconds, and its own guidance is
-	// that 500ms of spacing never fails — so this is the published answer
-	// rather than a guess tuned against the limit. It is what keeps a refresh
-	// sweep, two requests per series, inside the budget without any
-	// coordination above this client.
+	// that 500ms of spacing never fails: so this is the published answer rather
+	// than a guess tuned against the limit. It is what keeps a refresh sweep,
+	// two requests per series, inside the budget without any coordination above
+	// this client.
 	defaultMinInterval = 500 * time.Millisecond
 
 	// fallbackRetryAfter is how long to wait on a 429 that carries no usable
@@ -79,8 +79,8 @@ const (
 	maxRetryAfter = 60 * time.Second
 
 	// maxResponseBody bounds how much of a response is read. The largest thing
-	// TVmaze serves here is one show's whole episode list — a long-runner is
-	// under a megabyte — so a body past this size is a malfunctioning endpoint
+	// TVmaze serves here is one show's whole episode list, a long-runner is
+	// under a megabyte, so a body past this size is a malfunctioning endpoint
 	// rather than a large series.
 	maxResponseBody = 8 << 20
 	// maxErrorBody bounds how much of an error response is read before giving
@@ -133,7 +133,7 @@ func (e *APIError) Error() string {
 // with errors.Is without knowing about APIError.
 //
 // Neither 401 nor 403 maps anywhere. This client sends no credential, so a
-// rejected request means the endpoint is refusing everyone — an outage, not a
+// rejected request means the endpoint is refusing everyone: an outage, not a
 // key to go and fix.
 func (e *APIError) Unwrap() error {
 	switch e.StatusCode {
@@ -152,7 +152,7 @@ type Client struct {
 	BaseURL string
 
 	hc *http.Client
-	// sleep is how every wait in this client is taken — the throttle floor and
+	// sleep is how every wait in this client is taken: the throttle floor and
 	// the back-off after a 429. It is a field so tests can observe a wait
 	// without taking it.
 	sleep func(ctx context.Context, d time.Duration) error
@@ -167,15 +167,15 @@ type Client struct {
 	// floor means nothing.
 	mu sync.Mutex
 	// lastSend is the instant the most recently reserved request is allowed to
-	// go out — a reservation, not a record of the past, so concurrent callers
+	// go out: a reservation, not a record of the past, so concurrent callers
 	// queue behind each other instead of all waking at the same moment.
 	lastSend time.Time
 	// notBefore holds a refusal TVmaze asked us to wait out. Unlike AniList,
-	// TVmaze publishes no rate-limit headers, so nothing here reads a window:
-	// a 429's Retry-After is the only signal, and it is recorded as a gate on
-	// the next send rather than slept on inline. That way the caller that was
-	// refused and every other caller sharing this client back off together,
-	// and the wait is taken exactly once — by reserve, like every other wait.
+	// TVmaze publishes no rate-limit headers, so nothing here reads a window: a
+	// 429's Retry-After is the only signal, and it is recorded as a gate on the
+	// next send rather than slept on inline. That way the caller that was
+	// refused and every other caller sharing this client back off together, and
+	// the wait is taken exactly once: by reserve, like every other wait.
 	notBefore time.Time
 }
 

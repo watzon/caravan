@@ -20,11 +20,11 @@ const (
 	opSeriesSchedule = "SeriesSchedule"
 )
 
-// maxAiringPages bounds the airing-schedule walk at four pages of 50 — 200
-// episodes. Long-runners (One Piece, Detective Conan) have thousands of schedule
-// nodes, and paging all of them would spend a whole rate-limit window on one
-// series. Past the bound the episodes still exist — their numbers come from
-// `episodes` — they simply keep a zero AirDate, which is the same thing an
+// maxAiringPages bounds the airing-schedule walk at four pages of 50: 200
+// episodes. Long-runners (One Piece, Detective Conan) have thousands of
+// schedule nodes, and paging all of them would spend a whole rate-limit window
+// on one series. Past the bound the episodes still exist, their numbers come
+// from `episodes`, they simply keep a zero AirDate, which is the same thing an
 // unaired episode carries and which the NFO writer and the calendar already
 // handle.
 //
@@ -34,7 +34,7 @@ const maxAiringPages = 4
 
 // mediaFields is the selection set shared by search and lookup, so the two can
 // never drift into decoding different shapes into the same struct. The fields
-// only a lookup can afford — synonyms, the schedule, the streaming list — are
+// only a lookup can afford, synonyms, the schedule, the streaming list, are
 // appended by the detail query rather than paid for on every keystroke.
 const mediaFields = `
     id
@@ -151,7 +151,7 @@ type mediaResult struct {
 }
 
 // statuses maps AniList's MediaStatus enum onto the vocabulary the rest of
-// Caravan uses — the same strings TMDB serves, because the library, the NFO
+// Caravan uses: the same strings TMDB serves, because the library, the NFO
 // writer and the UI all branch on those and a second spelling of "Ended" would
 // have to be taught to every one of them.
 var statuses = map[string]string{
@@ -197,7 +197,7 @@ func (c *Client) SearchSeries(ctx context.Context, q string) ([]core.SeriesMeta,
 //
 //	Provider          ProviderID ("anilist")
 //	ProviderRef       Media.id, decimal
-//	TMDBID/TVDBID     0, IMDBID "" — AniList knows none of them
+//	TMDBID/TVDBID     0, IMDBID "": AniList knows none of them
 //	Title             title.english, else romaji, else native
 //	OriginalTitle     romaji when it differs from Title, else native. Release
 //	                  filenames carry romaji far more often than English, and the
@@ -206,14 +206,14 @@ func (c *Client) SearchSeries(ctx context.Context, q string) ([]core.SeriesMeta,
 //	                  file to match at all.
 //	Year              startDate.year
 //	FirstAirDate      startDate, widened to the 1st of the period when the month
-//	                  or day is unknown — Caravan's convention everywhere
+//	                  or day is unknown, Caravan's convention everywhere
 //	Overview          description run through htmltext.Strip: AniList emits <br>
 //	                  and <i>, and this string is written into tvshow.nfo as XML
 //	Status            FINISHED→Ended, RELEASING→Continuing,
 //	                  NOT_YET_RELEASED→Planned, CANCELLED→Canceled,
 //	                  HIATUS→Hiatus
 //	PosterURL         coverImage.extraLarge, else large
-//	VoteAverage       averageScore/10 — AniList rates 0-100, core is 0-10
+//	VoteAverage       averageScore/10: AniList rates 0-100, core is 0-10
 //	VoteCount         sum of stats.scoreDistribution[].amount. AniList serves no
 //	                  vote total, and a 0 there renders as "Not yet rated" in the
 //	                  UI for a title thousands of people have scored
@@ -316,7 +316,7 @@ func season(m mediaResult, airDates map[int]time.Time) core.SeasonMeta {
 			Number: n,
 			// The episode number IS the absolute number here. AniList models
 			// each cour as its own single-season Media record, so nothing this
-			// record describes ever precedes episode 1 of it — that is a
+			// record describes ever precedes episode 1 of it: that is a
 			// statement about AniList's data model, not an assumption about
 			// anime.
 			Absolute: n,
@@ -331,9 +331,9 @@ func season(m mediaResult, airDates map[int]time.Time) core.SeasonMeta {
 
 // episodeCount decides how many episodes the season has, best evidence first: a
 // confirmed count, then "everything before the next one to air", then the
-// schedule itself. A show that answers none of the three gets no episodes rather
-// than a guess — an invented episode list would have the organizer file real
-// files against numbers that do not exist.
+// schedule itself. A show that answers none of the three gets no episodes
+// rather than a guess: an invented episode list would have the organizer file
+// real files against numbers that do not exist.
 func episodeCount(m mediaResult, airDates map[int]time.Time) int {
 	if m.Episodes > 0 {
 		return m.Episodes

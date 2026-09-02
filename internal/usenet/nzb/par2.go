@@ -11,7 +11,7 @@ import (
 // is what ties a volume to the index file it repairs with.
 var par2Volume = regexp.MustCompile(`(?i)^(.*)\.vol(\d+)\+(\d+)\.par2$`)
 
-// IsPar2 reports whether name is any member of a par2 set — the index file
+// IsPar2 reports whether name is any member of a par2 set: the index file
 // ("release.par2") or a recovery volume ("release.vol000+01.par2").
 //
 // This is the split the pipeline is built on: content files are assembled and
@@ -24,10 +24,10 @@ func IsPar2(name string) bool {
 // Par2Volume reports whether name is a recovery volume, and if so the block
 // offset and block count its name advertises.
 //
-// The count is what a "needs N more blocks" failure is measured against
-// (PLAN phase 7 task 4): a set whose volumes total fewer blocks than the
-// damage cannot be repaired, and saying so before downloading them is the
-// difference between a fast honest failure and a slow one.
+// The count is what a "needs N more blocks" failure is measured against: a set
+// whose volumes total fewer blocks than the damage cannot be repaired, and saying
+// so before downloading them is the difference between a fast honest failure and
+// a slow one.
 func Par2Volume(name string) (offset, count int, ok bool) {
 	m := par2Volume.FindStringSubmatch(strings.TrimSpace(name))
 	if m == nil {

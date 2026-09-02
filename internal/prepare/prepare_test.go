@@ -103,8 +103,8 @@ func TestConfigIsDriveRelative(t *testing.T) {
 		}
 	}
 	// An absolute path in a *setting* pins the drive to one computer. The
-	// comments name mount points on purpose — that is what they are explaining
-	// — so only the settings are checked.
+	// comments name mount points on purpose, that is what they are explaining,
+	// so only the settings are checked.
 	for _, line := range strings.Split(cfg, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {

@@ -38,8 +38,8 @@ type showResult struct {
 	// Premiered is the first air date as a plain day, empty for a show that has
 	// not been scheduled yet.
 	Premiered string `json:"premiered"`
-	// Summary is genuine HTML — TVmaze documents it as such — so it goes
-	// through htmltext.Strip before it reaches an NFO.
+	// Summary is genuine HTML, TVmaze documents it as such, so it goes through
+	// htmltext.Strip before it reaches an NFO.
 	Summary string `json:"summary"`
 	Rating  struct {
 		// Average is already a 0-10 mean, which is core's scale. It is null
@@ -59,10 +59,9 @@ type showResult struct {
 }
 
 // searchResult is one entry of TVmaze's search reply: a relevance score and the
-// whole show document. The score is not carried onto core.SeriesMeta — the
-// order is the answer, and a second provider's score would not be comparable
-// with it — but the field is decoded so the shape is stated rather than
-// guessed.
+// whole show document. The score is not carried onto core.SeriesMeta, the order
+// is the answer, and a second provider's score would not be comparable with it,
+// but the field is decoded so the shape is stated rather than guessed.
 type searchResult struct {
 	Score float64    `json:"score"`
 	Show  showResult `json:"show"`
@@ -80,7 +79,7 @@ type episodeResult struct {
 }
 
 // statuses maps TVmaze's show status onto the vocabulary the rest of Caravan
-// uses — the same strings TMDB serves, because the library, the NFO writer and
+// uses: the same strings TMDB serves, because the library, the NFO writer and
 // the UI all branch on those and a second spelling of "Ended" would have to be
 // taught to every one of them.
 //
@@ -126,9 +125,9 @@ func (c *Client) SearchSeries(ctx context.Context, q string) ([]core.SeriesMeta,
 //	ProviderRef       show.id, decimal
 //	TVDBID            externals.thetvdb
 //	IMDBID            externals.imdb
-//	TMDBID            0 — TVmaze does not carry it
+//	TMDBID            0: TVmaze does not carry it
 //	Title             name
-//	OriginalTitle     "" — TVmaze serves one name per show, and repeating it
+//	OriginalTitle     "": TVmaze serves one name per show, and repeating it
 //	                  into OriginalTitle would tell the library's matcher it
 //	                  had two pieces of evidence when it has one
 //	Year              the year of premiered
@@ -194,7 +193,7 @@ func seriesMeta(show showResult) core.SeriesMeta {
 // from TVmaze's own pair, Title from name, Overview from summary through
 // htmltext.Strip, and AirDate from airdate.
 //
-// Episodes TVmaze numbers as null — specials — are dropped. Numbering them
+// Episodes TVmaze numbers as null, specials, are dropped. Numbering them
 // ourselves would invent facts: the number chosen depends on how many specials
 // have been catalogued so far, so an upstream edit renumbers the ones already
 // filed and moves real files off the episodes they were matched to. This is the

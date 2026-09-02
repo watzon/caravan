@@ -12,7 +12,7 @@ import (
 // It exists because the two lifetimes underneath it do not line up. A
 // *nntp.MultiPool is built from configuration and has to be rebuilt when the
 // user edits a server, but a download holds its fetcher for however long the
-// release takes — hours, for a big one. Handing the pipeline the pool directly
+// release takes: hours, for a big one. Handing the pipeline the pool directly
 // would mean either freezing configuration for the life of a download or
 // closing sockets out from under an in-flight article.
 //

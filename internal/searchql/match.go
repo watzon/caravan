@@ -23,9 +23,9 @@ var dateLayouts = []string{isoDateLayout, core.SceneDateLayout}
 // positive keyword is true here regardless of the release name.
 func (q *Query) Matches(rel core.Release) bool { return eval(q.root, rel, false) }
 
-// eval walks the tree. negated says whether an odd number of NOTs stand
-// between this node and the root, which only bare keywords care about — they
-// are the one term whose meaning differs by direction.
+// eval walks the tree. negated says whether an odd number of NOTs stand between
+// this node and the root, which only bare keywords care about: they are the one
+// term whose meaning differs by direction.
 func eval(n node, rel core.Release, negated bool) bool {
 	switch t := n.(type) {
 	case *termNode:
@@ -55,10 +55,10 @@ func eval(n node, rel core.Release, negated bool) bool {
 
 // matchKeyword is where the honest split lives.
 //
-// A positive keyword was sent upstream, and an indexer matches on more than
-// the release name — a description, a tag, an alternate title Caravan has
-// never heard of. Re-testing it against the name here would silently drop
-// results the user did ask for, so it passes.
+// A positive keyword was sent upstream, and an indexer matches on more than the
+// release name: a description, a tag, an alternate title Caravan has never
+// heard of. Re-testing it against the name here would silently drop results the
+// user did ask for, so it passes.
 //
 // A negated keyword is the opposite case: nothing was sent upstream for it, so
 // the local test is the only one there will ever be. It runs against the
@@ -75,11 +75,10 @@ func matchKeyword(text string, rel core.Release, negated bool) bool {
 	return slugContains(rel.Title, text)
 }
 
-// slugContains compares two pieces of text the way the rest of Caravan
-// compares titles: as slugs, so "Marvel's S.H.I.E.L.D." and "Marvels SHIELD"
-// agree. A needle that slugs to nothing — punctuation only — carries no
-// constraint and matches, rather than matching everything or nothing by
-// accident.
+// slugContains compares two pieces of text the way the rest of Caravan compares
+// titles: as slugs, so "Marvel's S.H.I.E.L.D." and "Marvels SHIELD" agree. A
+// needle that slugs to nothing, punctuation only, carries no constraint and
+// matches, rather than matching everything or nothing by accident.
 func slugContains(haystack, needle string) bool {
 	wanted := parse.TitleSlug(needle)
 	if wanted == "" {
@@ -92,10 +91,10 @@ func slugContains(haystack, needle string) bool {
 //
 // It is looser than the title comparison on purpose, and that looseness is the
 // reason site: exists as its own field. A site writes itself run-together in
-// the release name it publishes — "CreampieThais.26.01.19", "BangBros18" —
-// and with spaces everywhere else, including in the seed expression a scene
-// page produces. Compared as titles the two never agree, so every scene search
-// would return nothing.
+// the release name it publishes, "CreampieThais.26.01.19", "BangBros18", and
+// with spaces everywhere else, including in the seed expression a scene page
+// produces. Compared as titles the two never agree, so every scene search would
+// return nothing.
 func siteContains(haystack, needle string) bool {
 	wanted := strings.ReplaceAll(parse.TitleSlug(needle), " ", "")
 	if wanted == "" {
@@ -106,10 +105,10 @@ func siteContains(haystack, needle string) bool {
 
 // matchField evaluates one field term.
 //
-// A value that cannot be read as what the field wants — year:abc — makes the
-// term false rather than an error. The user sees an empty result list, which
-// says "that filter found nothing" on its own; refusing the search would
-// instead throw away every result for one mistyped character.
+// A value that cannot be read as what the field wants, year:abc, makes the term
+// false rather than an error. The user sees an empty result list, which says
+// "that filter found nothing" on its own; refusing the search would instead
+// throw away every result for one mistyped character.
 func matchField(field, value string, rel core.Release) bool {
 	parsed := rel.Parsed
 	switch field {
@@ -122,9 +121,9 @@ func matchField(field, value string, rel core.Release) bool {
 		}
 		return slugContains(target, value)
 	case fieldSite:
-		// A scene release leads with its site, so the site is the parsed title
-		// — except when the name did not parse, where it is still the first
-		// thing in the raw name.
+		// A scene release leads with its site, so the site is the parsed title:
+		// except when the name did not parse, where it is still the first thing
+		// in the raw name.
 		return siteContains(parsed.Title, value) || siteContains(rel.Title, value)
 	case fieldYear:
 		want, err := strconv.Atoi(value)

@@ -15,8 +15,8 @@ import (
 //
 // The add callback is the shape of internal/usenet/nntptest.Server.Add, taken
 // as a function rather than an interface so that neither the codec nor the
-// fake server has to import the other — the fake stays a package about NNTP
-// and knows nothing about yEnc (PLAN phase 7 task 7).
+// fake server has to import the other: the fake stays a package about NNTP and
+// knows nothing about yEnc.
 //
 // Message-ids are derived from name and part number, so the same call in two
 // tests produces the same ids and an NZB fixture can name them ahead of time.

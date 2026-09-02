@@ -20,8 +20,8 @@ const ssdpAddr = "239.255.255.250:1900"
 const ssdpMaxAge = 1800
 
 // ssdpInterval is how often alive notifications are re-sent. Half of max-age
-// means a client has to miss two consecutive announcements — on a protocol with
-// no delivery guarantee — before it drops the device.
+// means a client has to miss two consecutive announcements, on a protocol with
+// no delivery guarantee, before it drops the device.
 const ssdpInterval = ssdpMaxAge / 2 * time.Second
 
 // ssdpMaxMX caps how long a search response may be delayed. Clients ask for a
@@ -38,7 +38,7 @@ var ssdpServer = runtime.GOOS + "/1.0 UPnP/1.0 Caravan/1.0"
 // announces and answers searches for.
 type ssdpTarget struct {
 	// nt is the notification type in an advertisement and the search target in
-	// a search response — the same string, named twice by the spec.
+	// a search response: the same string, named twice by the spec.
 	nt string
 	// usn uniquely names this (device, target) pair.
 	usn string
@@ -113,7 +113,7 @@ func notifyByeBye(t ssdpTarget) []byte {
 }
 
 // searchResponse answers an M-SEARCH. It is sent unicast to the searcher, and
-// its ST echoes the specific target that matched — even when the search was
+// its ST echoes the specific target that matched, even when the search was
 // "ssdp:all", which is why one search can produce several responses.
 //
 // EXT is an empty header, not a missing one: its presence is how a client knows
@@ -156,7 +156,7 @@ type searchRequest struct {
 }
 
 // parseSearch reads an M-SEARCH datagram. It returns false for anything else on
-// the group — other devices' advertisements, other clients' searches, and
+// the group: other devices' advertisements, other clients' searches, and
 // malformed packets all land on the same socket.
 //
 // It is hand-parsed rather than handed to http.ReadRequest because "M-SEARCH *"

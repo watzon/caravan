@@ -36,8 +36,8 @@ type Episode struct {
 	// on a wanted episode has to know it: the indexer fan-out, the quality
 	// profile, and whether the item may be shown to a given caller at all.
 	SeriesKind string
-	// SeriesLibraryID is the series' own library, for SeriesKind's reason —
-	// two libraries of one kind may search different indexers and default to
+	// SeriesLibraryID is the series' own library, for SeriesKind's reason: two
+	// libraries of one kind may search different indexers and default to
 	// different profiles. Zero resolves through the kind's default library.
 	SeriesLibraryID int64
 	// Reason is one of the Reason* constants. An unaired episode is never
@@ -49,7 +49,7 @@ type Episode struct {
 }
 
 // Lists is the wanted list: everything monitored that is missing or below
-// its profile's cutoff (PLAN phase 3, task 2).
+// its profile's cutoff.
 type Lists struct {
 	Movies   []Movie
 	Episodes []Episode
@@ -68,10 +68,10 @@ func Compute(ctx context.Context, st *store.Store) (*Lists, error) {
 		return nil, err
 	}
 	// An item under an inactive library is not wanted: it must not reach the
-	// backlog sweep, the RSS matcher or the wanted screen. This is where that is
-	// enforced rather than at each of those three, because the wanted list is
-	// what all three read — and an item that never enters it cannot leak out of
-	// any of them.
+	// backlog sweep, the RSS matcher or the wanted screen. This is where that
+	// is enforced rather than at each of those three, because the wanted list
+	// is what all three read: and an item that never enters it cannot leak out
+	// of any of them.
 	libraries, err := st.ListLibraries(ctx)
 	if err != nil {
 		return nil, err
@@ -81,8 +81,8 @@ func Compute(ctx context.Context, st *store.Store) (*Lists, error) {
 	// Profiles are resolved once and cached: a library shares a handful of
 	// profiles across thousands of items. The LIBRARY is part of the key
 	// because an item naming no profile of its own resolves to its own
-	// library's default, and two libraries — even of one kind — may have
-	// picked different ones.
+	// library's default, and two libraries, even of one kind, may have picked
+	// different ones.
 	type profileKey struct {
 		libraryID int64
 		kind      string
@@ -110,9 +110,9 @@ func Compute(ctx context.Context, st *store.Store) (*Lists, error) {
 			continue
 		}
 		// A movie that has not reached its minimum availability is never
-		// wanted, the way an unaired episode never is: there is nothing real
-		// to find yet. A file on disk overrides the calendar — whatever
-		// exists is graded against the profile, not against release dates.
+		// wanted, the way an unaired episode never is: there is nothing real to
+		// find yet. A file on disk overrides the calendar: whatever exists is
+		// graded against the profile, not against release dates.
 		if !ms.HasFile && !Available(ms.Movie, today) {
 			continue
 		}
@@ -213,7 +213,7 @@ func ComputeSearchable(ctx context.Context, st *store.Store) (*Lists, error) {
 // three months out, a movie that is going to get a home release has had it.
 const cinemaWindow = 90 * 24 * time.Hour
 
-// Available reports whether a movie has reached its minimum availability —
+// Available reports whether a movie has reached its minimum availability:
 // whether a file for it can plausibly exist yet. The rules are Radarr's
 // (Movie.IsAvailable), so a library migrated from one behaves identically:
 //

@@ -15,10 +15,9 @@ import (
 )
 
 // wantQuery asserts the exact parameter set the client sent, api_key aside.
-// It is an equality check rather than a spot check on purpose: a filter that
-// leaks an extra parameter, or spells one TMDB ignores, is exactly the failure
-// these tests exist to catch (PLAN phase 12: "every filter the UI offers
-// round-trips to a provider query proven by fixture tests").
+// An equality check rather than a spot check: a filter that leaks an extra
+// parameter, or spells one TMDB ignores, is the failure these tests exist to
+// catch.
 func wantQuery(t *testing.T, got url.Values, want map[string]string) {
 	t.Helper()
 
@@ -107,7 +106,7 @@ func TestDiscoverMoviesSendsEveryFilter(t *testing.T) {
 }
 
 // TestDiscoverSeriesSendsEveryFilter is the series half. The date parameter
-// changes name, networks appear, and there is no person parameter to send —
+// changes name, networks appear, and there is no person parameter to send:
 // SeriesFilter has nowhere to put one.
 func TestDiscoverSeriesSendsEveryFilter(t *testing.T) {
 	c, s := newStub(t, map[string][]response{

@@ -43,7 +43,7 @@ type Part struct {
 	Size int64
 	// Body is the decoded payload.
 	Body []byte
-	// CRC32 is the CRC32 that was verified — the part CRC for a multipart
+	// CRC32 is the CRC32 that was verified: the part CRC for a multipart
 	// article, the file CRC for a single-part one. It is 0 when the article
 	// declared none (Verified is false).
 	CRC32 uint32
@@ -66,18 +66,18 @@ func DecodeBytes(article []byte) (*Part, error) {
 	return Decode(bytes.NewReader(article))
 }
 
-// Decode reads one yEnc article body — what NNTP's BODY command returns, with
-// dot-stuffing already undone — and returns its decoded payload.
+// Decode reads one yEnc article body, what NNTP's BODY command returns, with
+// dot-stuffing already undone, and returns its decoded payload.
 //
 // Lines before "=ybegin" are skipped: posters put announcements above the
 // header, and a decoder that insisted on the first line would reject real
 // articles. Everything after "=yend" is ignored for the same reason.
 //
-// Decode never returns a payload alongside an error. A CRC mismatch, a
-// payload that is not the declared length, or an article that ends before
-// "=yend" returns a *CRCError or *SizeError — both unwrapping to ErrCorrupt —
-// with expected and actual values, because a segment that is silently wrong
-// is worse than one that is loudly missing.
+// Decode never returns a payload alongside an error. A CRC mismatch, a payload
+// that is not the declared length, or an article that ends before "=yend"
+// returns a *CRCError or *SizeError, both unwrapping to ErrCorrupt, with
+// expected and actual values, because a segment that is silently wrong is worse
+// than one that is loudly missing.
 func Decode(r io.Reader) (*Part, error) {
 	// 16 KB is comfortably more than the longest control line, so line reads
 	// are single-shot, and small enough that decoding a few hundred articles
@@ -195,8 +195,8 @@ func verify(part *Part, declared int64, trailer keywords) error {
 			ErrMalformed, part.Begin+1, part.End, part.Size)
 	}
 
-	// The =ypart range and the payload must agree, or assembly would write
-	// the wrong bytes at the right offset — the worst possible outcome.
+	// The =ypart range and the payload must agree, or assembly would write the
+	// wrong bytes at the right offset: the worst possible outcome.
 	if declared >= 0 && declared != actual {
 		return &SizeError{Name: part.Name, Part: part.Number, Expected: declared, Actual: actual}
 	}
@@ -273,9 +273,9 @@ func decodeBody(br *bufio.Reader, size int64) ([]byte, keywords, error) {
 	for {
 		if atLineStart {
 			// "=y" at the start of a line is a control line. This is the
-			// format's one genuine ambiguity — an escape happens to be able
-			// to spell it — but no encoder escapes the byte that would, and
-			// every decoder resolves it this way.
+			// format's one genuine ambiguity, an escape happens to be able to
+			// spell it, but no encoder escapes the byte that would, and every
+			// decoder resolves it this way.
 			if p, err := br.Peek(2); err == nil && p[0] == '=' && p[1] == 'y' {
 				line, err := readControlLine(br)
 				if err != nil {

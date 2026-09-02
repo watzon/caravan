@@ -1,10 +1,10 @@
 // Package sabnzbd talks to SABnzbd's HTTP API and adapts it to core.Engine.
 // It is one of the two backends that open the Usenet half of acquisition:
 // Caravan has no built-in NZB downloader, so a Usenet release is only grabbable
-// through a client configured here (SPEC §5.1, PLAN phase 6).
+// through a client configured here (SPEC §5.1).
 //
-// It follows internal/clients/qbittorrent's shape — a thin wire client under a
-// stateless core.Engine adapter — with three differences that are SABnzbd's
+// It follows internal/clients/qbittorrent's shape, a thin wire client under a
+// stateless core.Engine adapter, with three differences that are SABnzbd's
 // rather than choices:
 //
 //   - A job lives in two lists. SABnzbd moves a job out of the queue and into
@@ -14,7 +14,7 @@
 //     importable at all.
 //   - Numbers arrive as strings. Sizes are formatted with "%.2f" into JSON
 //     strings, percentages into decimal strings, and which fields are strings
-//     changes between versions — so every numeric field here decodes both.
+//     changes between versions, so every numeric field here decodes both.
 //   - There is no seeding and no per-job rate. Usenet has no swarm, so a
 //     download is never DownloadSeeding and Ratio is always zero; SABnzbd
 //     reports one queue-wide speed, which is attributed to the job that is
@@ -88,8 +88,8 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("sabnzbd: %s: http %d", e.Mode, e.Status)
 }
 
-// Client is a thin SABnzbd API client. It holds no session — SABnzbd
-// authenticates every request with the API key — so it is safe for concurrent
+// Client is a thin SABnzbd API client. It holds no session, SABnzbd
+// authenticates every request with the API key, so it is safe for concurrent
 // use and free to build and throw away.
 type Client struct {
 	// base is the configured URL with any trailing slash removed. It may carry
@@ -286,9 +286,9 @@ func (c *Client) DeleteQueue(ctx context.Context, id string, delFiles bool) erro
 // DeleteHistory drops a job from the history, and its downloaded data when
 // delFiles is set.
 //
-// `archive=0` is deliberate: SABnzbd's default is to move the row to an
-// archive rather than forget it, and an archived row still answers a lookup by
-// id — so the download would never actually leave Caravan's queue.
+// `archive=0` is deliberate: SABnzbd's default is to move the row to an archive
+// rather than forget it, and an archived row still answers a lookup by id, so
+// the download would never actually leave Caravan's queue.
 func (c *Client) DeleteHistory(ctx context.Context, id string, delFiles bool) error {
 	_, err := c.call(ctx, url.Values{
 		"mode":      {"history"},

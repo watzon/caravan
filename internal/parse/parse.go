@@ -2,13 +2,13 @@
 // core.ParsedRelease (SPEC §5.1, "Release Parser").
 //
 // Parse is pure: no I/O, no globals, no network. It is deliberately
-// conservative — anything it cannot recognize lowers Confidence rather than
+// conservative: anything it cannot recognize lowers Confidence rather than
 // producing an invented guess, because SPEC §13 requires low-confidence files
 // to park in the unmatched review queue instead of being imported silently.
 //
 // Anime-style absolute numbering ("[SubsPlease] Show - 105") is recognized as
 // far as the name goes: Parse reports the number in ParsedRelease.Absolute and
-// cuts it out of the title. It never turns it into a season and an episode —
+// cuts it out of the title. It never turns it into a season and an episode:
 // that mapping is a fact about the series, not about the name.
 //
 // Still out of scope (SPEC §16): absolute ranges ("Show - 105-106", refused on
@@ -122,23 +122,22 @@ var (
 	reEpisodeNum  = regexp.MustCompile(`(?i)e(\d{1,3})`)
 
 	// Absolute (series-wide) episode numbers, the anime shape. The dash form is
-	// the fansub convention — "Show - 105", "Show.-.105", "[Group] Show - 05v2"
-	// — and the separators on both sides of the dash are what tell it apart
-	// from a hyphenated title ("Spider-Man") and from a group suffix
-	// ("-SPARKS").
+	// the fansub convention, "Show - 105", "Show.-.105", "[Group] Show - 05v2",
+	// and the separators on both sides of the dash are what tell it apart from
+	// a hyphenated title ("Spider-Man") and from a group suffix ("-SPARKS").
 	reAbsoluteDash = regexp.MustCompile(`(?i)[\s._]-[\s._](\d{1,4})(?:v\d)?\b`)
 	// The bare form is deliberately narrower than the dash form, and this is
 	// THE load-bearing decision of the whole recognizer: the number must be
 	// zero-padded or at least 100. A movie title ending in a small number is
 	// common ("Ocean's 11", "Apollo 13", "Cars 3", "Rocky 4") and reading one
-	// as an episode number would cut the title in half — destroying the search
+	// as an episode number would cut the title in half: destroying the search
 	// query, not just inventing a number. "Show 105" and "Show 05" are the two
 	// shapes that survive that rule, and they are the two the convention uses.
 	reAbsoluteBare = regexp.MustCompile(`(?i)[\s._](0\d{1,3}|[1-9]\d{2,3})(?:v\d)?\b`)
 	// A second number joined to the first is a range ("Show - 105-106"), which
 	// is recognized only so it can be refused: taking the first number would
-	// import a two-episode file as one episode and supersede nothing, so SPEC
-	// §13 wants the visible question instead — the file parks unmatched.
+	// import a two-episode file as one episode and supersede nothing. SPEC §13
+	// wants the visible question instead, so the file parks unmatched.
 	reAbsoluteRange = regexp.MustCompile(`^[\s._]*[-~][\s._]*\d`)
 	// A bare absolute number, as a standalone token. Only isKnownToken uses it:
 	// "105" and "105v2" are metadata, never release groups.
@@ -186,12 +185,12 @@ var containers = map[string]bool{
 // misparse, not a release.
 const maxEpisodeSpan = 99
 
-// Container returns the lowercase media container extension of name without
-// the dot ("mkv"), or "" when name has no recognized container extension.
+// Container returns the lowercase media container extension of name without the
+// dot ("mkv"), or "" when name has no recognized container extension.
 //
-// core.ParsedRelease has no container field (SPEC §7 keeps it out of the
-// stored release shape), so the container hint is exposed here for callers
-// that need it — the scanner's file filter and the TV-compatibility check.
+// core.ParsedRelease has no container field (SPEC §7 keeps it out of the stored
+// release shape), so the container hint is exposed here for callers that need
+// it: the scanner's file filter and the TV-compatibility check.
 func Container(name string) string {
 	i := strings.LastIndexByte(name, '.')
 	if i < 0 {
@@ -255,8 +254,8 @@ func Parse(name string) core.ParsedRelease {
 	p.Proper, p.Repack = properIdx >= 0, repackIdx >= 0
 	noiseIdx := firstIndex(reNoise, scan)
 
-	// The year lives before the first "strong" marker — a season/episode tag,
-	// a quality tag or a source tag. Everything after one of those is release
+	// The year lives before the first "strong" marker: a season/episode tag, a
+	// quality tag or a source tag. Everything after one of those is release
 	// metadata, not a title year.
 	strong := minIndex(seLoc[0], qualityIdx, sourceIdx)
 	year, yearIdx := parseYear(scan, titleStart, strong)
@@ -273,8 +272,8 @@ func Parse(name string) core.ParsedRelease {
 	}
 
 	// An absolute number is a claim only a name that named no season and no
-	// episode can be making — S05E03 already answered the question — and only
-	// a name that named no year: "Ocean's 11 (2001)" is a movie, not episode 11
+	// episode can be making, S05E03 already answered the question, and only a
+	// name that named no year: "Ocean's 11 (2001)" is a movie, not episode 11
 	// of anything. The recognizer searches the title span alone, because that
 	// is the only place the number ever sits; past it every number belongs to a
 	// technical tag ("H.264", "DDP5.1") and would be read wrong.
@@ -406,7 +405,7 @@ func parseYear(scan string, titleStart, strong int) (year, idx int) {
 }
 
 // parseAbsolute recognizes an anime-style absolute episode number inside
-// [start, end) — the span that would otherwise become the title. It returns the
+// [start, end): the span that would otherwise become the title. It returns the
 // number and the byte index the title has to be cut at, or (0, -1) when the
 // name carries none.
 //
@@ -415,7 +414,7 @@ func parseYear(scan string, titleStart, strong int) (year, idx int) {
 // series that does not exist; and by the same token, cutting "Ocean's 11" down
 // to "Ocean's" asks about a series that does not exist either. Every refusal
 // below buys the second half of that trade, so the recognizer looks at one
-// candidate — the first the forms find, in order — and refuses outright rather
+// candidate, the first the forms find, in order, and refuses outright rather
 // than hunting the span for a number it likes better.
 func parseAbsolute(scan string, start, end int) (n, cut int) {
 	if start < 0 || end <= start || end > len(scan) {
@@ -580,8 +579,8 @@ func confidence(p core.ParsedRelease) float64 {
 	switch {
 	case len(p.Episodes) > 0:
 		score += 0.30
-	// An absolute number IS an episode identity — it names one episode of one
-	// series as precisely as S05E03 does — so it scores the same. The
+	// An absolute number is an episode identity: it names one episode of one
+	// series as precisely as S05E03 does, so it scores the same. The
 	// conservatism lives in the recognizer, which refuses everything it cannot
 	// vouch for; scoring a recognized number lower would only park files the
 	// parser was right about.

@@ -22,9 +22,9 @@ import (
 //
 // These tests never invoke the par2 binary. The point of the corpus is that
 // Caravan's answers are checked against a foreign implementation's answers, so
-// the reference has to be frozen rather than consulted — a test that shells
-// out to par2 would only prove that whatever par2 is installed today agrees
-// with itself.
+// the reference has to be frozen rather than consulted: a test that shells out
+// to par2 would only prove that whatever par2 is installed today agrees with
+// itself.
 
 type manifest struct {
 	GeneratedBy string       `json:"generated_by"`

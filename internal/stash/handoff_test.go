@@ -18,10 +18,9 @@ import (
 	"github.com/watzon/caravan/internal/store"
 )
 
-// storageRoot is the absolute root every fixture hangs off. It is a fixed
-// POSIX-shaped string rather than a temp dir because what is being asserted is
-// the path Caravan *sends*, and a path that changes per run cannot be asserted
-// against literally.
+// storageRoot is the absolute root every fixture hangs off. A fixed
+// POSIX-shaped string rather than a temp dir, because the assertion is about the
+// exact path Caravan sends.
 var storageRoot = filepath.Join(string(filepath.Separator), "srv", "media")
 
 // wantAdultRoot is the one path a scan may ever name.
@@ -45,16 +44,13 @@ func newTestService(t *testing.T, hc *http.Client) (*Service, *store.Store) {
 	svc := NewService(st, hc, discardLogger())
 	svc.window = 0
 	svc.identifyDelay = 0
-	// The re-arm curve is collapsed so a successor job is claimable at once; the
-	// ceiling stays generous, and the tests that want the give-up path shorten it
-	// themselves.
+	// The re-arm curve is collapsed so a successor job is claimable at once. The
+	// ceiling stays generous; tests that want the give-up path shorten it.
 	//
-	// Negative rather than zero, and deliberately a whole minute of it: the
-	// queue compares run_after as a string (store.timeFormat is RFC3339Nano,
-	// whose fractional part is variable-length), so two stamps inside the same
-	// second can order wrongly. Production never lands there — every real delay
-	// is tens of seconds — but a zero-delay successor claimed microseconds later
-	// does, and a flake here would look like the handoff failing to re-arm.
+	// Negative rather than zero, by a whole minute: the queue compares run_after
+	// as an RFC3339Nano string whose fractional part is variable-length, so two
+	// stamps inside the same second can order wrongly. Production never lands
+	// there because every real delay is tens of seconds.
 	svc.retryDelay = func(int) time.Duration { return -time.Minute }
 	svc.window = -time.Minute
 	svc.identifyDelay = 0
@@ -79,23 +75,18 @@ func configure(t *testing.T, st *store.Store, url, key string, enabled, adult bo
 	setAdultLibrariesActive(t, st, false)
 }
 
-// enableAdultLibrary says the adult half of that configuration directly: the
-// Adult library exists and is switched on. An adult library IS the module — the
-// handoff's own gate is AnyActiveLibraryOfKind, never a setting — so a fixture
-// that wants scenes handed over has to own a row rather than a flag.
+// enableAdultLibrary creates the Adult library and switches it on. The handoff's
+// gate is AnyActiveLibraryOfKind, never a setting, so a fixture that wants scenes
+// handed over has to own a row rather than a flag.
 //
-// The row it writes is the one an install carries, and each field is load
-// bearing. Restricted and NOT dlna_visible because the LAN tree has no accounts:
-// a shelf on it is readable by every device in the house, which is the one
-// mistake this module may not make. The legacy `stashbox` chain because that is
-// what a single-box install is named by, here and in every pre-instances client
-// for compatibility. IsDefault only where no adult library exists yet — the partial unique
-// index admits one default per kind — and Active is CreateLibrary's own doing,
-// so nothing here sets it.
+// Every field on the row is load bearing. Restricted and not dlna_visible,
+// because the LAN tree has no accounts and a shelf on it is readable by every
+// device in the house. The legacy stashbox chain, because that is what a
+// single-box install is named by. IsDefault only where no adult library exists
+// yet, since the partial unique index admits one default per kind.
 //
-// Idempotent, so a fixture may call it on a store some earlier step already
-// switched off: an existing row is switched back on rather than duplicated,
-// which would leave two shelves fighting over one root path.
+// Idempotent: an existing row is switched back on rather than duplicated, which
+// would leave two shelves fighting over one root path.
 func enableAdultLibrary(t *testing.T, st *store.Store) core.Library {
 	t.Helper()
 	ctx := context.Background()
@@ -121,14 +112,10 @@ func enableAdultLibrary(t *testing.T, st *store.Store) core.Library {
 	return *created
 }
 
-// setAdultLibrariesActive is the other half of the same switch, spelled per
-// library because that is where it lives now.
-//
-// It has to reach EVERY adult library or it says nothing: the handoff asks
-// whether any adult library is active, so an off that left a sibling on would
-// leave scenes flowing to Stash while the test believed it had shut the module.
-// Nothing is deleted by the flip — the rows and the queued jobs all wait — which
-// is what the tests below then check.
+// setAdultLibrariesActive flips every adult library at once. It has to reach all
+// of them: the handoff asks whether any adult library is active, so an off that
+// left a sibling on would leave scenes flowing to Stash. The flip deletes
+// nothing, so the rows and the queued jobs all wait.
 func setAdultLibrariesActive(t *testing.T, st *store.Store, active bool) {
 	t.Helper()
 	ctx := context.Background()
@@ -143,14 +130,11 @@ func setAdultLibrariesActive(t *testing.T, st *store.Store, active bool) {
 	}
 }
 
-// runOneJob claims the next eligible job of one kind and runs it through the
-// handler under the automation runner's contract — complete on nil, fail on an
-// error — reporting whether there was anything to claim.
-//
-// It exists so the retry assertions go through the queue instead of around it.
-// A handler called directly in a loop proves the handler returns what the loop
-// expects; only a claim proves the job the handoff left behind was still there
-// to be claimed.
+// runOneJob claims the next eligible job of one kind and runs it under the
+// automation runner's contract (complete on nil, fail on an error), reporting
+// whether there was anything to claim. The retry assertions go through the queue
+// rather than around it: only a claim proves the job the handoff left behind was
+// still there to be claimed.
 func runOneJob(t *testing.T, st *store.Store, kind string,
 	handler func(context.Context, *store.Store, json.RawMessage) error,
 ) bool {
@@ -201,10 +185,10 @@ func jobsOfKind(t *testing.T, st *store.Store, kind string) []core.Job {
 	return out
 }
 
-// seedScene inserts one adult site with one scene and one imported file, which
-// is the state an import leaves behind and the identity push reads. The site is
-// pinned to the legacy instance, which is what a single-box install and every
-// row written before 0026 carry; seedSceneOn pins it elsewhere.
+// seedScene inserts one adult site with one scene and one imported file, the
+// state an import leaves behind and the identity push reads. The site is pinned
+// to the legacy instance, which is what a single-box install carries;
+// seedSceneOn pins it elsewhere.
 func seedScene(t *testing.T, st *store.Store) core.Episode {
 	t.Helper()
 	return seedSceneOn(t, st, core.ProviderStashbox)
@@ -254,7 +238,7 @@ func seedSceneOn(t *testing.T, st *store.Store, providerID string) core.Episode 
 
 // seedInstance configures one stash-box endpoint. The endpoint is what a push
 // carries beside every UUID, so a fixture with no instance is a fixture whose
-// ids have no issuer — see TestIdentityPushOmitsIdsWhenTheInstanceIsGone.
+// ids have no issuer: see TestIdentityPushOmitsIdsWhenTheInstanceIsGone.
 func seedInstance(t *testing.T, st *store.Store, providerID, name, endpoint string) {
 	t.Helper()
 	in := &core.StashboxInstance{ProviderID: providerID, Name: name, Endpoint: endpoint}
@@ -292,8 +276,8 @@ func TestAdultLibraryChangedQueuesOneScanAndOnePushPerScene(t *testing.T) {
 		t.Fatalf("scan jobs = %d, want 1", len(scans))
 	}
 	// A fresh scan carries no arguments and no retry bookkeeping, so its payload
-	// is the empty object — the shape the activity feed renders and the shape a
-	// re-armed successor is distinguishable from.
+	// is the empty object. That is what distinguishes it from a re-armed
+	// successor.
 	if scans[0].Payload != "{}" {
 		t.Errorf("scan payload = %q, want %q", scans[0].Payload, "{}")
 	}
@@ -330,8 +314,8 @@ func TestAdultLibraryChangedCoalescesABurst(t *testing.T) {
 }
 
 // The module gate. With adult content off there is no adult library to hand
-// over, so a stored Stash address is not a reason to queue anything — and, at
-// the other end, not a reason to make a request.
+// over, so a stored Stash address is not a reason to queue anything or to make a
+// request.
 func TestModuleOffQueuesNothingAndTalksToNobody(t *testing.T) {
 	srv := stashtest.New(stashtest.Options{})
 	t.Cleanup(srv.Close)
@@ -347,8 +331,8 @@ func TestModuleOffQueuesNothingAndTalksToNobody(t *testing.T) {
 		t.Fatalf("jobs = %d, want 0 while the adult module is off", got)
 	}
 
-	// And a job that somehow survived the module being switched off — queued
-	// while it was on, run after it was not — must still make no request.
+	// A job queued while the module was on and run after it was off must still
+	// make no request.
 	if err := svc.HandleScan(ctx, st, nil); err != nil {
 		t.Fatalf("HandleScan: %v", err)
 	}
@@ -412,8 +396,8 @@ func TestHandleScanIsScopedToTheAdultRoot(t *testing.T) {
 		t.Errorf("scan paths = %v, want [%s]", input["paths"], wantAdultRoot)
 	}
 
-	// A successful handoff is a log line, not feed noise: the import that
-	// caused it already wrote an entry.
+	// A successful handoff is a log line, not a feed entry: the import that
+	// caused it already wrote one.
 	if events := listEvents(t, st); len(events) != 0 {
 		t.Errorf("events = %+v, want none on success", events)
 	}
@@ -422,9 +406,8 @@ func TestHandleScanIsScopedToTheAdultRoot(t *testing.T) {
 	}
 }
 
-// Stash being down is a banner and a retry, never a failed import. The import
-// already completed; what this proves is the other half — the work re-arms
-// itself on the queue and the outage is visible.
+// Stash being down is a banner and a retry, never a failed import: the work
+// re-arms itself on the queue and the outage is visible.
 func TestStashDownSurfacesHealthAndRetries(t *testing.T) {
 	srv := stashtest.New(stashtest.Options{
 		Fallback: &stashtest.Response{Status: http.StatusBadGateway, Body: []byte("<html>down</html>")},
@@ -433,8 +416,8 @@ func TestStashDownSurfacesHealthAndRetries(t *testing.T) {
 	svc, st := newTestService(t, srv.Client())
 	configure(t, st, srv.URL(), "secret", true, true)
 
-	// The run does not fail: it re-arms. Failing would spend one of the queue's
-	// five attempts on an outage that routinely outlasts all five.
+	// The run re-arms rather than failing. Failing would spend one of the
+	// queue's attempts on an outage that routinely outlasts all of them.
 	if err := svc.HandleScan(context.Background(), st, nil); err != nil {
 		t.Fatalf("HandleScan against a dead Stash = %v, want it re-armed rather than failed", err)
 	}
@@ -459,9 +442,8 @@ func TestStashDownSurfacesHealthAndRetries(t *testing.T) {
 		t.Errorf("event = %+v, want a warn in the %q category", events[0], EventCategory)
 	}
 
-	// A second failure keeps the original start time — "unreachable since" must
-	// mean since the outage began — and writes no second entry: one unplugged
-	// cable is one piece of news however many times it is retried.
+	// A second failure keeps the original start time, because "unreachable
+	// since" must mean since the outage began, and writes no second entry.
 	first := health.Since
 	if err := svc.HandleScan(context.Background(), st, json.RawMessage(successor[0].Payload)); err != nil {
 		t.Fatalf("second HandleScan = %v, want it re-armed", err)
@@ -473,8 +455,8 @@ func TestStashDownSurfacesHealthAndRetries(t *testing.T) {
 		t.Errorf("events after a second attempt = %d, want the outage reported once", got)
 	}
 
-	// And it clears when Stash comes back, which is what makes the banner go
-	// away without a restart.
+	// It clears when Stash comes back, so the banner goes away without a
+	// restart.
 	srv.SetOperation("MetadataScan", stashtest.Data(`{"metadataScan":"job-1"}`))
 	if err := svc.HandleScan(context.Background(), st, nil); err != nil {
 		t.Fatalf("HandleScan after recovery: %v", err)
@@ -484,15 +466,10 @@ func TestStashDownSurfacesHealthAndRetries(t *testing.T) {
 	}
 }
 
-// Acceptance criterion 3's third clause, driven through the real queue rather
-// than by hand: with Stash down for longer than the queue's own five-attempt
-// budget, the scan still delivers when Stash comes back.
-//
-// The old shape of this proof called HandleScan in a loop in-process, which
-// showed the handler returns an error and nothing about whether the *job*
-// survived to make a later call. Here the store owns the job and the runner's
-// contract owns the outcome, so a regression that put the handoff back on the
-// queue's budget shows up as a job in JobStateFailed and no MetadataScan.
+// With Stash down for longer than the queue's own attempt budget, the scan still
+// delivers when Stash comes back. Driven through the real queue, so a regression
+// that put the handoff back on the queue's budget shows up as a job in
+// JobStateFailed and no MetadataScan.
 func TestAQueuedScanSurvivesAnOutageLongerThanTheQueueBudget(t *testing.T) {
 	srv := stashtest.New(stashtest.Options{
 		Fallback: &stashtest.Response{Status: http.StatusBadGateway, Body: []byte("<html>down</html>")},
@@ -506,8 +483,8 @@ func TestAQueuedScanSurvivesAnOutageLongerThanTheQueueBudget(t *testing.T) {
 		t.Fatalf("AdultLibraryChanged: %v", err)
 	}
 
-	// More rounds than store.JobMaxAttempts: the point is that the work outlives
-	// the budget that used to end it.
+	// More rounds than store.JobMaxAttempts: the work has to outlive that
+	// budget.
 	rounds := store.JobMaxAttempts + 3
 	for range rounds {
 		if !runOneJob(t, st, ScanJobKind, svc.HandleScan) {
@@ -560,8 +537,7 @@ func TestIdentityPushPayload(t *testing.T) {
 		t.Fatalf("HandleIdentify: %v", err)
 	}
 
-	// The lookup addresses the file by its absolute path, which is the one
-	// address Caravan and Stash share.
+	// The absolute path is the one address Caravan and Stash share.
 	lookups := srv.Operations("FindSceneByPath")
 	if len(lookups) != 1 {
 		t.Fatalf("FindSceneByPath requests = %d, want 1", len(lookups))
@@ -594,16 +570,13 @@ func TestIdentityPushPayload(t *testing.T) {
 	}
 }
 
-// A site whose stash-box instance has been deleted is pushed WITHOUT stash ids
-// — not with a guess at which box issued them.
+// A site whose stash-box instance has been deleted is pushed without stash ids
+// rather than with a guess at which box issued them.
 //
-// The file still arrives, titled and dated and with its performers, because
-// those are facts Caravan owns whatever happened to the endpoint. What is
-// withheld is the attribution: a StashIDInput naming the wrong box writes into
-// the user's own Stash a claim that box never made, Stash's identify step then
-// trusts it, and undoing it means finding every scene the guess touched. An
-// absent id leaves the scene merely unidentified, which the next push repairs
-// the moment the instance is added back.
+// The title, date and performers still arrive: those are facts Caravan owns. Only
+// the attribution is withheld, because a StashIDInput naming the wrong box writes
+// a claim that box never made into the user's own Stash. An absent id only leaves
+// the scene unidentified, which the next push repairs.
 func TestIdentityPushOmitsIdsWhenTheInstanceIsGone(t *testing.T) {
 	srv := stashtest.New(stashtest.Options{
 		Operations: map[string][]stashtest.Response{
@@ -635,10 +608,10 @@ func TestIdentityPushOmitsIdsWhenTheInstanceIsGone(t *testing.T) {
 	}
 }
 
-// A scene under a site pinned to the SECOND instance carries that instance's
+// A scene under a site pinned to the second instance carries that instance's
 // endpoint, not the first one's. The endpoint is half the identity, and the
-// public boxes mint identical UUIDs — so the wrong one attributes the scene to
-// a record on a box that never held it.
+// public boxes mint identical UUIDs, so the wrong one attributes the scene to a
+// record on a box that never held it.
 func TestIdentityPushCarriesThePinnedInstancesEndpoint(t *testing.T) {
 	srv := stashtest.New(stashtest.Options{
 		Operations: map[string][]stashtest.Response{
@@ -669,8 +642,8 @@ func TestIdentityPushCarriesThePinnedInstancesEndpoint(t *testing.T) {
 }
 
 // Retry-then-succeed: a scan that has not indexed the file yet answers with no
-// match, the job is failed so the queue backs off, and the next attempt lands.
-// Nothing about that is a health problem — Stash answered.
+// match, the job backs off, and the next attempt lands. Not a health problem,
+// because Stash answered.
 func TestIdentityPushRetriesUntilTheScanCatchesUp(t *testing.T) {
 	srv := stashtest.New(stashtest.Options{
 		Operations: map[string][]stashtest.Response{
@@ -695,8 +668,8 @@ func TestIdentityPushRetriesUntilTheScanCatchesUp(t *testing.T) {
 	}
 
 	// Two claims find nothing and re-arm; the third finds the scene the scan has
-	// now indexed. Driven through the queue, so what is proved is that the job
-	// is still there to be claimed each time.
+	// now indexed. Driven through the queue, so the job has to still be there to
+	// be claimed each time.
 	for attempt := 1; attempt <= 2; attempt++ {
 		if !runOneJob(t, st, IdentifyJobKind, svc.HandleIdentify) {
 			t.Fatalf("attempt %d had nothing to claim; the push stopped re-arming", attempt)
@@ -720,15 +693,10 @@ func TestIdentityPushRetriesUntilTheScanCatchesUp(t *testing.T) {
 	}
 }
 
-// The retry is bounded, and by this package: the queue's five attempts are spent
-// in nine minutes, which is shorter than a real metadataScan, so the handoff
-// keeps its own wall clock and says so in the feed when it runs out.
-//
-// Every assertion here is about traffic the fake actually received and jobs the
-// store actually held, driven claim-by-claim. An earlier version of this test
-// looped over store.FailJob without ever invoking the handler, so it would have
-// passed just as happily against a HandleIdentify that swallowed the
-// not-indexed-yet answer and never asked Stash anything at all.
+// The retry is bounded by this package, not by the queue: the queue's attempts
+// are spent in nine minutes, which is shorter than a real metadataScan, so the
+// handoff keeps its own wall clock and says so in the feed when it runs out.
+// Every assertion is about traffic the fake received and jobs the store held.
 func TestIdentityPushRetryIsBoundedByItsOwnWindow(t *testing.T) {
 	srv := stashtest.New(stashtest.Options{
 		Operations: map[string][]stashtest.Response{
@@ -766,9 +734,8 @@ func TestIdentityPushRetryIsBoundedByItsOwnWindow(t *testing.T) {
 		t.Errorf("pending pushes after the window closed = %+v, want none", got)
 	}
 
-	// Giving up is news. The old shape of this failure was silent: the job
-	// parked in JobStateFailed, the scene stayed untitled in Stash, and nothing
-	// said so anywhere a user looks.
+	// Giving up has to be visible somewhere a user looks, or the scene stays
+	// untitled in Stash with nothing to say why.
 	events := listEvents(t, st)
 	if len(events) != 1 {
 		t.Fatalf("events = %+v, want exactly one 'gave up' warning", events)
@@ -776,7 +743,7 @@ func TestIdentityPushRetryIsBoundedByItsOwnWindow(t *testing.T) {
 	if events[0].Level != core.EventLevelWarn || events[0].Category != EventCategory {
 		t.Errorf("event = %+v, want a warn in the %q category", events[0], EventCategory)
 	}
-	// And it is not an outage: Stash answered every one of those lookups.
+	// Not an outage: Stash answered every one of those lookups.
 	if svc.Health().Unreachable() {
 		t.Errorf("health = %+v, want healthy — Stash answered every attempt", svc.Health())
 	}
@@ -850,9 +817,9 @@ func TestIdentityPushSurvivesStudioAndPerformerFailures(t *testing.T) {
 	t.Cleanup(srv.Close)
 	svc, st := newTestService(t, srv.Client())
 	configure(t, st, srv.URL(), "secret", true, true)
-	// The ids need an issuer to be pushed at all now (see
+	// The ids need an issuer to be pushed at all (see
 	// TestIdentityPushOmitsIdsWhenTheInstanceIsGone), so the fixture configures
-	// one. What is under test here is still the best-effort rule.
+	// one. The best-effort rule is what is under test.
 	seedInstance(t, st, core.ProviderStashbox, "ThePornDB", "https://tpdb.test/graphql")
 	episode := seedScene(t, st)
 
@@ -927,8 +894,7 @@ func TestIdentityPushDeduplicatesPerformersThatResolveToOneRow(t *testing.T) {
 
 // Two scenes at one path is an answer, not an outage. Stash's path filter is a
 // string match, so a release name containing a SQLite LIKE wildcard can match
-// twice — and the old code raised "Stash is unreachable" over a server that was
-// up and answering, then asked the same unanswerable question five times.
+// twice. The server is up, so there is no banner and no retry.
 func TestAnAmbiguousSceneIsAnAnswerNotAnOutage(t *testing.T) {
 	srv := stashtest.New(stashtest.Options{
 		Operations: map[string][]stashtest.Response{
@@ -968,9 +934,9 @@ func TestAnAmbiguousSceneIsAnAnswerNotAnOutage(t *testing.T) {
 	}
 }
 
-// A rejected API key is a server saying no, not a server that is gone. It gets
-// a feed entry and no outage banner — a user sent looking for a network problem
-// will not find the settings field that is actually wrong.
+// A rejected API key is a server saying no, not a server that is gone. It gets a
+// feed entry and no outage banner, because a user sent looking for a network
+// problem will not find the settings field that is actually wrong.
 func TestARejectedCredentialIsNotAnOutage(t *testing.T) {
 	srv := stashtest.New(stashtest.Options{
 		Fallback: &stashtest.Response{
@@ -991,7 +957,7 @@ func TestARejectedCredentialIsNotAnOutage(t *testing.T) {
 	if events := listEvents(t, st); len(events) != 1 {
 		t.Fatalf("events = %+v, want the refusal reported once", events)
 	}
-	// And no re-arm: the key will not become right on its own, and the settings
+	// No re-arm: the key will not become right on its own, and the settings
 	// screen re-queues when the user fixes it.
 	if got := pendingOnly(jobsOfKind(t, st, ScanJobKind)); len(got) != 0 {
 		t.Errorf("pending scans = %+v, want none after a refusal", got)
@@ -1023,9 +989,8 @@ func TestASceneNotFoundClearsAStaleOutage(t *testing.T) {
 }
 
 // Switching the handoff off answers the banner. Health is remembered rather than
-// probed, so a run that finds the handoff disabled is the moment the service
-// learns the outage it is reporting is about a server nobody is asking for any
-// more.
+// probed, so a run that finds the handoff disabled is the only moment the service
+// learns the outage is about a server nobody is asking for any more.
 func TestAHandoffThatIsOffIsNotUnreachable(t *testing.T) {
 	svc, st := newTestService(t, nil)
 	configure(t, st, "http://stash.lan:9999", "secret", false, true)
@@ -1051,8 +1016,7 @@ func TestAHandoffThatIsOffIsNotUnreachable(t *testing.T) {
 
 // A scan already in flight cannot cover a file that did not exist when it
 // started. Coalescing against it would leave the scene in Caravan's library and
-// permanently absent from Stash — the identity push finds nothing, and nothing
-// else ever asks Stash to look again.
+// permanently absent from Stash.
 func TestARunningScanDoesNotSuppressTheNextOne(t *testing.T) {
 	svc, st := newTestService(t, nil)
 	configure(t, st, "http://stash.lan:9999", "secret", true, true)
@@ -1075,8 +1039,8 @@ func TestARunningScanDoesNotSuppressTheNextOne(t *testing.T) {
 		t.Fatalf("pending scans = %d, want one queued behind the running scan", len(got))
 	}
 
-	// A scan that is merely *waiting* still coalesces: that is the debounce the
-	// burst case depends on, and it must survive the fix above.
+	// A scan that is only waiting still coalesces: that is the debounce the
+	// burst case depends on.
 	if err := svc.AdultLibraryChanged(ctx, nil); err != nil {
 		t.Fatalf("third AdultLibraryChanged: %v", err)
 	}
@@ -1122,13 +1086,10 @@ func TestRedactURLKeepsUserinfoOutOfLogs(t *testing.T) {
 	}
 }
 
-// The same gate reached the other way round: the adult library is there, with
-// its scenes and its Stash card intact, and only its `active` column is off.
-//
-// A library switched off is not a library removed, which is the case
-// TestModuleOffQueuesNothingAndTalksToNobody cannot reach: there the shelf never
-// existed, here every row the handoff reads is still in front of it and the
-// column alone has to be what stops it.
+// The same gate reached the other way round: the adult library is there, with its
+// scenes and its Stash card intact, and only its active column is off. In
+// TestModuleOffQueuesNothingAndTalksToNobody the shelf never existed; here every
+// row is still in front of the handoff and the column alone has to stop it.
 func TestInactiveAdultLibraryQueuesNothingAndTalksToNobody(t *testing.T) {
 	srv := stashtest.New(stashtest.Options{})
 	t.Cleanup(srv.Close)
@@ -1151,8 +1112,8 @@ func TestInactiveAdultLibraryQueuesNothingAndTalksToNobody(t *testing.T) {
 	if got := len(jobsOfKind(t, st, ScanJobKind)) + len(jobsOfKind(t, st, IdentifyJobKind)); got != 0 {
 		t.Fatalf("jobs = %d, want 0 while every adult library is off", got)
 	}
-	// And a job queued while the library was on, run after it was not, still
-	// makes no request.
+	// A job queued while the library was on, run after it was not, still makes
+	// no request.
 	if err := svc.HandleScan(ctx, st, nil); err != nil {
 		t.Fatalf("HandleScan: %v", err)
 	}

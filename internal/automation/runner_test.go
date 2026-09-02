@@ -12,9 +12,8 @@ import (
 )
 
 // TestWithHandlerDispatchesForeignKinds covers the extension point the
-// convert-for-TV queue rides on (PLAN phase 4, task 4): a job kind owned by
-// another package gets the same lease, retry and completion semantics as the
-// automation brain's own.
+// convert-for-TV queue rides on: a job kind owned by another package gets the
+// same lease, retry and completion semantics as the automation brain's own.
 func TestWithHandlerDispatchesForeignKinds(t *testing.T) {
 	ctx := context.Background()
 	st := openStore(t)
@@ -139,10 +138,10 @@ func TestWithHandlerDoesNotDisplaceTheBuiltIns(t *testing.T) {
 	}
 }
 
-// TestDedicatedWorkerDoesNotStarveTheGeneralQueue is PLAN phase 4's
-// convert-for-TV queue on the shared runner: a transcode blocks its handler for
-// hours, and on one goroutine that is hours in which the Jellyfin handoff, the
-// RSS sync and every monitored search do not run.
+// TestDedicatedWorkerDoesNotStarveTheGeneralQueue puts the convert-for-TV queue
+// on the shared runner: a transcode blocks its handler for hours, and on one
+// goroutine that is hours in which the Jellyfin handoff, the RSS sync and every
+// monitored search do not run.
 func TestDedicatedWorkerDoesNotStarveTheGeneralQueue(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -272,8 +271,8 @@ func TestBootstrapDefersTheFirstMetadataRefresh(t *testing.T) {
 }
 
 // The refresh handler lives in cmd/caravan, so the runner's completion hook is
-// the only thing that keeps the chain recurring — a completed sweep must leave
-// a successor on the queue.
+// the only thing that keeps the chain recurring: a completed sweep must leave a
+// successor on the queue.
 func TestMetadataRefreshReschedulesItself(t *testing.T) {
 	ctx := context.Background()
 	st := openStore(t)

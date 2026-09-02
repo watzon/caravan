@@ -21,8 +21,8 @@ const (
 	idTPDBNebraska      = "22222222-bbbb-4bbb-8bbb-222222222222"
 )
 
-// newTPDBRESTStub is a client that believes it is talking to TPDB — no
-// queryStudios, and a REST site index — pointed at one fake serving both.
+// newTPDBRESTStub is a client that believes it is talking to TPDB, no
+// queryStudios, and a REST site index, pointed at one fake serving both.
 //
 // The REST base is set directly because New derives it from the endpoint host,
 // and a fake cannot be both 127.0.0.1 and theporndb.net. The derivation itself
@@ -64,7 +64,7 @@ func operationNames(reqs []stashboxtest.Request) []string {
 }
 
 // The bug this dialect exists for: searchScene matches scene text, so a search
-// for a site by NAME could not find it — "br" answered with the studios behind
+// for a site by NAME could not find it, "br" answered with the studios behind
 // whichever scenes mentioned "br" and never offered Brazzers at all. The REST
 // index searches names, which is the question being asked.
 func TestSearchSitesUsesTheTPDBSiteIndexForATypedQuery(t *testing.T) {
@@ -153,7 +153,7 @@ func TestSearchSitesUsesTheTPDBSiteIndexForATypedQuery(t *testing.T) {
 }
 
 // A blank query is the picker opening, and the right answer there is "what this
-// endpoint is currently busy with" — the newest scenes' studios. The REST index
+// endpoint is currently busy with": the newest scenes' studios. The REST index
 // has no such ordering to offer, so the blank case is unchanged.
 func TestSearchSitesKeepsTheSceneDerivedListForABlankQueryOnTPDB(t *testing.T) {
 	c, s := newTPDBRESTStub(t, map[string][]stashboxtest.Response{
@@ -207,7 +207,7 @@ func TestSearchSitesFallsBackToScenesWhenTheSiteIndexFails(t *testing.T) {
 }
 
 // Every other stash-box has queryStudios and no REST side at all. The dialect
-// must be unreachable there — not merely unused.
+// must be unreachable there: not merely unused.
 func TestSearchSitesNeverTouchesTheSiteIndexOnAStashBox(t *testing.T) {
 	// The fake offers a REST index; the client, built for a non-TPDB endpoint,
 	// must have no way to ask for it.

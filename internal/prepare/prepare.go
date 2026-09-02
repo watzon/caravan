@@ -64,7 +64,7 @@ const (
 // another house and plugged into a television, and the layout it arrives with
 // is a statement about what is on it: a folder named Adult at the root of a
 // drive somebody borrowed is the disclosure this phase exists to prevent, even
-// empty. Opting in is layoutDirs' job (PLAN phase 9 task 6).
+// empty. Opting in is layoutDirs' job.
 var dirs = []string{
 	CaravanDir,
 	BinDir,
@@ -144,9 +144,9 @@ type Options struct {
 	// machine.
 	GOOS, GOARCH string
 
-	// IncludeAdult scaffolds library/Adult as well (PLAN phase 9 task 6). The
-	// default is off, and that is the whole point: a drive is a thing that
-	// leaves the house, so the adult library goes onto one only when somebody
+	// IncludeAdult scaffolds library/Adult as well. The default is off, and that
+	// is the point: a drive is a thing that leaves the house, so the adult
+	// library goes onto one only when somebody
 	// says so at the command line, every single time.
 	//
 	// It changes the layout and nothing else. prepare copies no media at all
@@ -238,8 +238,8 @@ func Run(opts Options) (*Result, error) {
 	}
 
 	// The config is written once and never again. It carries the drive's
-	// identity — its storage root and where its database lives — and a drive
-	// that has been used has a database that agrees with it.
+	// identity, its storage root and where its database lives, and a drive that
+	// has been used has a database that agrees with it.
 	if err := res.write(drive, ConfigFile, []byte(portableConfigYAML(dataDir, storageRoot)), 0o644, false); err != nil {
 		return nil, err
 	}
@@ -300,8 +300,8 @@ func (r *Result) write(root *os.Root, rel string, body []byte, mode fs.FileMode,
 //
 // The chmod is best effort on purpose: exFAT carries no permission bits, so on
 // the filesystem this command exists for the call is either a no-op or an
-// error, and neither is a reason to fail. Where the bit does matter — a drive
-// somebody formatted ext4 or APFS — it is set.
+// error, and neither is a reason to fail. Where the bit does matter, a drive
+// somebody formatted ext4 or APFS, it is set.
 func writeAtomic(root *os.Root, dst string, mode fs.FileMode, fill func(io.Writer) error) error {
 	var tmp *os.File
 	var name string

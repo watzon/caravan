@@ -16,7 +16,7 @@ import (
 
 // fakeFFmpeg stands in for the two binaries. Every conversion decision and the
 // verification that guards the library is exercised through it, so the suite
-// runs identically on a machine with no ffmpeg installed — which is the
+// runs identically on a machine with no ffmpeg installed: which is the
 // configuration SPEC §8 says must keep working.
 type fakeFFmpeg struct {
 	// probes answers Probe by absolute path; anything unlisted is an error,
@@ -118,9 +118,8 @@ func handle(t *testing.T, svc *Service, conv *core.Conversion) error {
 	return svc.Handle(context.Background(), nil, payload)
 }
 
-// TestRemuxReplacesTheLibraryFile is the acceptance criterion for PLAN phase 4
-// task 4: remuxing an incompatible file produces a TV-safe file and the
-// library record updates to it.
+// TestRemuxReplacesTheLibraryFile: remuxing an incompatible file produces a
+// TV-safe file, and the library record updates to it.
 func TestRemuxReplacesTheLibraryFile(t *testing.T) {
 	tools := &fakeFFmpeg{probes: map[string]Probe{}}
 	svc, st, root := newTestService(t, tools)
@@ -333,7 +332,7 @@ func TestTranscodeRewritesStreamTags(t *testing.T) {
 
 // os.Rename replaces its destination without a word. A movie directory that
 // holds both an .mkv and an .mp4 is ordinary (internal/dlna serves it), and
-// converting the .mkv must not silently destroy the .mp4 beside it — nor delete
+// converting the .mkv must not silently destroy the .mp4 beside it: nor delete
 // the row and the episode links behind it.
 func TestConversionRefusesToOverwriteAnotherLibraryFile(t *testing.T) {
 	tools := &fakeFFmpeg{probes: map[string]Probe{}}

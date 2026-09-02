@@ -4,10 +4,10 @@
 //
 // A portable install lives on a drive somebody can pull mid-write. Noticing
 // that on the next start needs a record kept outside sqlite, for two reasons.
-// The database is a disposable cache (SPEC §7) — "delete caravan.db, rescan,
-// the library comes back" has to keep working, and a flag inside the file that
-// was just deleted would go with it. And the check happens before the database
-// is opened at all, which is the moment the answer matters.
+// The database is a disposable cache (SPEC §7): "delete caravan.db, rescan, the
+// library comes back" has to keep working, and a flag inside the file that was
+// just deleted would go with it. And the check happens before the database is
+// opened at all, which is the moment the answer matters.
 //
 // So the marker is a sidecar file next to the database holding one word: it
 // says "running" for as long as a serving process owns that directory, and
@@ -35,8 +35,8 @@ const (
 
 // ErrLocked says another live process already owns this storage root. It is a
 // reason to refuse to start: a second server would open the same database, and
-// its own shutdown — including the one that follows immediately when it cannot
-// bind the listener — would write "clean" over a marker the first process is
+// its own shutdown, including the one that follows immediately when it cannot
+// bind the listener, would write "clean" over a marker the first process is
 // still relying on, disarming dirty-eject detection for the session that is
 // actually running.
 var ErrLocked = errors.New("integrity: another Caravan process is already using this storage root")
@@ -63,14 +63,13 @@ func (m *Marker) Path() string { return m.path }
 // State reports what the marker currently says.
 //
 // A missing file is StateClean: a first run, or a directory whose marker was
-// deleted along with the database, is not evidence of a crash and must not
-// send the user into a recovery flow they do not need.
+// deleted along with the database, is not evidence of a crash and must not send
+// the user into a recovery flow they do not need.
 //
-// Anything that is not exactly "clean" — a truncated write, a half-flushed
-// page of zeros, the word "running" — reads as StateRunning. That is the
-// conservative direction: the cost of a false dirty is one verify-and-rescan,
-// the cost of a false clean is resuming writes onto a filesystem nobody
-// checked.
+// Anything that is not exactly "clean", a truncated write, a half-flushed page
+// of zeros, the word "running", reads as StateRunning. That is the conservative
+// direction: the cost of a false dirty is one verify-and-rescan, the cost of a
+// false clean is resuming writes onto a filesystem nobody checked.
 func (m *Marker) State() (string, error) {
 	data, err := os.ReadFile(m.path)
 	switch {
@@ -90,8 +89,8 @@ func (m *Marker) State() (string, error) {
 // session left without releasing it.
 //
 // The read happens before the lock file is opened, so the answer describes the
-// session that came before this one and a first run — where opening the file is
-// what creates it — is not mistaken for a crash. On a read failure it reports
+// session that came before this one and a first run, where opening the file is
+// what creates it, is not mistaken for a crash. On a read failure it reports
 // dirty alongside the error: a marker that cannot be read cannot vouch for
 // anything.
 //
@@ -128,8 +127,8 @@ func (m *Marker) Begin() (bool, error) {
 }
 
 // Finish records that this process shut down cleanly. It is the last thing a
-// serving process does: everything it vouches for — flushed engines, a
-// checkpointed WAL, a closed database — has to have already happened.
+// serving process does: everything it vouches for, flushed engines, a
+// checkpointed WAL, a closed database, has to have already happened.
 //
 // A process that never took the lock refuses rather than writing: the marker it
 // would overwrite belongs to whoever is still running.

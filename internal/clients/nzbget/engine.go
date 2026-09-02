@@ -65,17 +65,16 @@ func (e *Engine) Client() *Client { return e.c }
 // The NZB is fetched here rather than handed to NZBGet as a link, which is the
 // one place this backend does more work than the others. NZBGet's `append`
 // takes a URL, but it files it as a placeholder with its own id and mints a
-// *different* id once the NZB has been fetched — so the handle returned to the
+// *different* id once the NZB has been fetched: so the handle returned to the
 // caller would name nothing a minute later, and the download would vanish from
 // the queue. Uploading the bytes gets the real id back straight away. It also
-// keeps the indexer's API key, which is in that URL, out of NZBGet's queue,
-// its web UI and its logs (SPEC §12).
+// keeps the indexer's API key, which is in that URL, out of NZBGet's queue, its
+// web UI and its logs (SPEC §12).
 //
-// opts is not used. Its Category is Caravan's internal routing label
-// ("movies", "tv"); the NZBGet category is the one on the client's own
-// configuration, because that is the label the user sorts their client by and
-// it decides where NZBGet writes. The rest of opts is recorded by the caller
-// in `grabs`.
+// opts is not used. Its Category is Caravan's internal routing label ("movies",
+// "tv"); the NZBGet category is the one on the client's own configuration,
+// because that is the label the user sorts their client by and it decides where
+// NZBGet writes. The rest of opts is recorded by the caller in `grabs`.
 func (e *Engine) Add(ctx context.Context, r core.Release, opts core.AddOpts) (core.DownloadID, error) {
 	if r.Protocol == core.ProtocolTorrent {
 		return "", fmt.Errorf("nzbget: release %q is a torrent: NZBGet only handles usenet", r.Title)
@@ -227,8 +226,8 @@ func (e *Engine) Status(ctx context.Context, downloadID core.DownloadID) (*core.
 // core.Engine.
 //
 // "Caravan's" means the configured category when there is one, and everything
-// otherwise. NZBGet has no tags — the qBittorrent backend's way of marking its
-// own downloads — so the category is the only marker available, and it is the
+// otherwise. NZBGet has no tags, the qBittorrent backend's way of marking its
+// own downloads, so the category is the only marker available, and it is the
 // field these clients are conventionally partitioned by. With no category
 // configured the queue shows the user's other Usenet downloads too; they are
 // surfaced as grab-less rows rather than hidden, and the fix is to set a
@@ -331,16 +330,15 @@ func (e *Engine) edit(ctx context.Context, command string, downloadID core.Downl
 // NZBGet answers an edit aimed at the wrong list with a plain false, which is
 // what picks the second call: a queued download is deleted from the queue, and
 // only a download the queue did not know is looked for in the history. Neither
-// finding it is success, not an error — removal is idempotent, and a download
+// finding it is success, not an error: removal is idempotent, and a download
 // that is already gone is the state the caller asked for.
 //
 // deleteData is honoured as far as NZBGet allows, which is not all the way.
-// NZBGet always removes a download's partial and failed data, and it has no
-// API at all for deleting a *completed* download's payload — that stays on
-// disk for the user's own retention settings to deal with. Nothing here
-// touches the library either way: an imported file is a hardlink or a move
-// away from the download data, and removing a download must not cost media
-// (SPEC §13).
+// NZBGet always removes a download's partial and failed data, and it has no API
+// at all for deleting a *completed* download's payload: that stays on disk for
+// the user's own retention settings to deal with. Nothing here touches the
+// library either way: an imported file is a hardlink or a move away from the
+// download data, and removing a download must not cost media (SPEC §13).
 func (e *Engine) Remove(ctx context.Context, downloadID core.DownloadID, deleteData bool) error {
 	nzbID, ok := parseID(downloadID)
 	if !ok {
@@ -362,11 +360,11 @@ func (e *Engine) Remove(ctx context.Context, downloadID core.DownloadID, deleteD
 func (e *Engine) Close() error { return e.c.Close() }
 
 // TestConnection is the registry probe: it asks for the version, which is the
-// cheapest call that proves both the URL and the control login — NZBGet
-// answers every RPC with a 401 until the credentials are right.
+// cheapest call that proves both the URL and the control login, NZBGet answers
+// every RPC with a 401 until the credentials are right.
 //
-// The error it returns is shown to the user, so it names what NZBGet
-// complained about and never the credential that was refused (SPEC §12).
+// The error it returns is shown to the user, so it names what NZBGet complained
+// about and never the credential that was refused (SPEC §12).
 func TestConnection(ctx context.Context, cfg core.DownloadClientConfig) error {
 	c, err := New(cfg, nil)
 	if err != nil {
@@ -380,7 +378,7 @@ func TestConnection(ctx context.Context, cfg core.DownloadClientConfig) error {
 	}
 	if version == "" {
 		// A well-formed answer with an empty version is something that is not
-		// NZBGet — usually a reverse proxy on the same port.
+		// NZBGet: usually a reverse proxy on the same port.
 		return errors.New("nzbget: the URL answered but did not report a version")
 	}
 	return nil

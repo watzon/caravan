@@ -194,8 +194,8 @@ func TestGraphQLErrorsMapToSentinels(t *testing.T) {
 		},
 		{
 			// An endpoint that rejects a field this client selects must surface
-			// as a readable error naming the field, not as a decode failure:
-			// dialect drift is the failure mode PLAN phase 9 calls out.
+			// as a readable error naming the field, not as a decode failure.
+			// Dialect drift is the failure mode.
 			name:     "schema mismatch",
 			status:   http.StatusOK,
 			fixture:  "error_validation.json",
@@ -421,8 +421,8 @@ func TestParseDate(t *testing.T) {
 		{name: "full date", in: "2023-11-04", want: time.Date(2023, 11, 4, 0, 0, 0, 0, time.UTC)},
 		{name: "padded", in: " 2023-11-04 ", want: time.Date(2023, 11, 4, 0, 0, 0, 0, time.UTC)},
 		// Community-edited records carry partial dates. They widen to the start
-		// of the period, which still files a scene under the right season —
-		// the season is the year.
+		// of the period, which still files a scene under the right season: the
+		// season is the year.
 		{name: "year and month", in: "2019-05", want: time.Date(2019, 5, 1, 0, 0, 0, 0, time.UTC)},
 		{name: "year only", in: "2019", want: time.Date(2019, 1, 1, 0, 0, 0, 0, time.UTC)},
 		{name: "empty", in: "", want: time.Time{}},
@@ -505,8 +505,8 @@ func TestFirstURL(t *testing.T) {
 	}
 }
 
-// TestTestProvesTheCredential covers the adult enable gate's live check (PLAN
-// phase 10 task 5): the module only turns on when the endpoint answers.
+// TestTestProvesTheCredential covers the adult enable gate's live check: the
+// module only turns on when the endpoint answers.
 func TestTestProvesTheCredential(t *testing.T) {
 	c, s := newStub(t, map[string][]stashboxtest.Response{
 		opSearchSites: {okFixture(t, "query_studios.json")},

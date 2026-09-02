@@ -82,7 +82,7 @@ func TestPopularMoviesAndSeries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PopularMovies: %v", err)
 	}
-	// The fixture reports many pages, so the shelf fetches two — and the stub
+	// The fixture reports many pages, so the shelf fetches two: and the stub
 	// answers page 2 with the same body, which is exactly what a popularity
 	// list that reordered under the client does. The rows must not double up.
 	if len(movies) != 2 {

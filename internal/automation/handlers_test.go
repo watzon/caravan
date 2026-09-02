@@ -472,10 +472,9 @@ func TestRunnerHandleSearchEpisodeDropsAQueuedJobAfterImport(t *testing.T) {
 	}
 }
 
-// routedRunner builds a runner whose engine is the real protocol router
-// (PLAN phase 6 task 3), so the automatic path is exercised through exactly
-// the dispatch the interactive one uses. A nil usenet engine is the
-// configuration a stock Caravan has.
+// routedRunner builds a runner whose engine is the real protocol router, so the
+// automatic path is exercised through exactly the dispatch the interactive one
+// uses. A nil usenet engine is the configuration a stock Caravan has.
 func routedRunner(st *store.Store, indexer *fakeIndexer, torrent, usenet *fakeEngine) *Runner {
 	routes := []download.Route{
 		{Name: download.EngineName, Protocol: core.ProtocolTorrent, Engine: torrent},

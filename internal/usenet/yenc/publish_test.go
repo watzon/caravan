@@ -28,9 +28,9 @@ func TestMessageIDIsStableAndLegal(t *testing.T) {
 
 // TestPublishThroughFakeServer is the end-to-end shape the pipeline track
 // builds on: articles staged on a fake news server, fetched by message-id
-// through the real NNTP client, decoded, and written at each part's offset.
-// It is also the proof that yEnc output survives the wire — dot-stuffing,
-// CRLF normalisation and all.
+// through the real NNTP client, decoded, and written at each part's offset. It
+// is also the proof that yEnc output survives the wire: dot-stuffing, CRLF
+// normalisation and all.
 func TestPublishThroughFakeServer(t *testing.T) {
 	server, err := nntptest.New(nntptest.Options{})
 	if err != nil {

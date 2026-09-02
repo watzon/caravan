@@ -26,7 +26,7 @@ func shareAnimeLibrary(t *testing.T, st *store.Store) core.Library {
 }
 
 // seedAnime puts one series with one playable episode and one film with one
-// file on the anime shelf — the two halves the container has to hold together.
+// file on the anime shelf: the two halves the container has to hold together.
 func seedAnime(t *testing.T, st *store.Store, lib core.Library) {
 	t.Helper()
 	ctx := context.Background()
@@ -102,7 +102,7 @@ func TestAnimeShelfHoldsSeriesAndFilms(t *testing.T) {
 	// The root advertises what the container actually answers with, and BOTH
 	// halves of the shelf are in that number: a remote control that saw 1 here
 	// would draw a folder claiming to hold the series alone. The literal is the
-	// assertion — comparing the root's count against the same call that produced
+	// assertion: comparing the root's count against the same call that produced
 	// it would hold however wrong both were.
 	if rootDoc.Containers[2].ChildCount != 2 {
 		t.Errorf("anime child count = %d, want 2 (one series container and one film)",
@@ -145,7 +145,7 @@ func TestAnimeSeriesCarriesItsOwnIDSpace(t *testing.T) {
 }
 
 // A dormant shelf is absent from the tree and every id beneath it answers "no
-// such object" — which is what a client holding a cached id must be told.
+// such object": which is what a client holding a cached id must be told.
 func TestDormantAnimeShelfIsAbsent(t *testing.T) {
 	svc, st, _ := newTestService(t)
 	seedLibrary(t, st)

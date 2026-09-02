@@ -64,9 +64,9 @@ type browseResponse struct {
 //
 // It cannot reuse didlLite. That type spells its elements "dc:title" and
 // "upnp:class" so the marshaller emits those prefixes verbatim, which is what
-// consumers expect on the wire — but encoding/xml's decoder matches tags
-// against local names, so it would never fill those fields back in. Decoding
-// through a separate shape is therefore the only honest round trip.
+// consumers expect on the wire, but encoding/xml's decoder matches tags against
+// local names, so it would never fill those fields back in. Decoding through a
+// separate shape is therefore the only honest round trip.
 type didlProbe struct {
 	XMLName    xml.Name `xml:"DIDL-Lite"`
 	Containers []struct {
@@ -248,8 +248,8 @@ func TestBrowseOverSOAP(t *testing.T) {
 	}
 
 	// The res URL has to be built on the Host the client used, not on anything
-	// captured at startup — that is what makes the same server work over the
-	// LAN IP, a hostname and a reverse proxy.
+	// captured at startup: that is what makes the same server work over the LAN
+	// IP, a hostname and a reverse proxy.
 	rec = soapPost(t, h, MountPath+"/control/cds", contentDirectoryType+"#Browse",
 		browseBody(moviesID, browseDirectChildren, 0, 0))
 	_, didl = decodeBrowseResponse(t, rec)
@@ -322,8 +322,8 @@ func TestBrowseUnknownObjectIsSOAPError701(t *testing.T) {
 // TestBrowseResponseUsesOnlyNamedEntities pins the wire format to what the
 // hand-rolled unescapers in TV apps can read: the five named XML entities and
 // nothing numeric. Infuse on tvOS rendered every listing as an empty folder
-// until the &#34;s were gone, while VLC's real parser never noticed — which
-// is exactly why this is a byte-level assertion and not a round-trip through
+// until the &#34;s were gone, while VLC's real parser never noticed: which is
+// exactly why this is a byte-level assertion and not a round-trip through
 // encoding/xml.
 func TestBrowseResponseUsesOnlyNamedEntities(t *testing.T) {
 	svc, st, _ := newTestService(t)
@@ -341,7 +341,7 @@ func TestBrowseResponseUsesOnlyNamedEntities(t *testing.T) {
 		}
 	}
 
-	// A five-entity unescaper — all a typical TV app ships — must recover a
+	// A five-entity unescaper, all a typical TV app ships, must recover a
 	// parseable DIDL document from the Result.
 	naive := strings.NewReplacer("&lt;", "<", "&gt;", ">", "&quot;", `"`, "&apos;", "'", "&amp;", "&")
 	var resp struct {

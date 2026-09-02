@@ -36,9 +36,9 @@ type Set struct {
 	// Kind is the format.
 	Kind Kind
 	// Volumes are the files the set is made of, relative to the download
-	// directory, in reading order. Volumes[0] is the one handed to the
-	// decoder — the decoder follows the rest itself — and the whole list is
-	// what gets deleted once the extract is verified.
+	// directory, in reading order. Volumes[0] is the one handed to the decoder,
+	// the decoder follows the rest itself, and the whole list is what gets
+	// deleted once the extract is verified.
 	Volumes []string
 }
 

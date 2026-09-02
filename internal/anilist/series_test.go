@@ -341,7 +341,7 @@ func TestParseStreamingTitle(t *testing.T) {
 		{in: "Episode 12", wantNum: 12, wantTitle: "", wantOK: true},
 		{in: "Episode 7 – Em dash separator", wantNum: 7, wantTitle: "Em dash separator", wantOK: true},
 		// Nothing ties these to an episode number, so they are dropped rather
-		// than guessed at — a special is not episode 1.
+		// than guessed at: a special is not episode 1.
 		{in: "Special - Room Camp", wantOK: false},
 		{in: "OVA", wantOK: false},
 		{in: "", wantOK: false},

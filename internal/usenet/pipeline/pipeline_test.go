@@ -180,11 +180,11 @@ func TestDownloadResumesWithoutRefetchingCompletedSegments(t *testing.T) {
 	}
 }
 
-// A resume must never trust the sidecar over the disk. If the assembled file
-// is gone, the sidecar's segments describe bytes that no longer exist, and
-// skipping them re-creates the file as a full-length hole of zeros that
-// reports itself complete with no failures — the one shape that makes the
-// engine skip par2 entirely and hand a zero-filled file to the import.
+// A resume must never trust the sidecar over the disk. If the assembled file is
+// gone, the sidecar's segments describe bytes that no longer exist, and
+// skipping them re-creates the file as a full-length hole of zeros that reports
+// itself complete with no failures: the one shape that makes the engine skip
+// par2 entirely and hand a zero-filled file to the import.
 func TestDownloadRefetchesWhenTheAssembledFileIsGone(t *testing.T) {
 	srv := newServer(t)
 	file := stage(t, "movie.rar", payload(9, 4096), 1024)

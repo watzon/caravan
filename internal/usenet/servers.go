@@ -1,8 +1,8 @@
 // Package usenet joins the stored news-server configuration to the transport
 // that dials it.
 //
-// internal/usenet/nntp holds no database knowledge on purpose — a server there
-// is a plain struct, so the whole transport is testable with a literal — and
+// internal/usenet/nntp holds no database knowledge on purpose, a server there
+// is a plain struct, so the whole transport is testable with a literal, and
 // internal/core imports nothing at all. This package is the one place the two
 // shapes meet, so the mapping exists once rather than in every caller that
 // wants to open a pool.

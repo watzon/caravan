@@ -1,5 +1,5 @@
-// Package wanted is Caravan's automation brain (PLAN phase 3): given a
-// quality profile and a set of candidate releases, it decides what to grab
+// Package wanted is Caravan's automation brain: given a quality profile and a
+// set of candidate releases, it decides what to grab
 // and records why everything else lost. It is pure logic over core types: no
 // I/O, no database, so the whole decision table is unit-testable.
 //
@@ -53,7 +53,7 @@ func (c ScoreContributions) Total() int {
 
 // Decision is the scored outcome for one candidate release. Reject is empty
 // when the candidate is acceptable; otherwise it is the user-facing reason the
-// candidate was skipped, recorded on the grab history (PLAN phase 3, task 3).
+// candidate was skipped, recorded on the grab history.
 type Decision struct {
 	Release core.Release
 	Score   int
@@ -142,7 +142,7 @@ func IsUpgrade(next, current string) bool {
 // SelectBest scores every candidate and returns the winner plus the full
 // decision table. A nil winner means nothing was acceptable; the rejected
 // slice then carries the explanation for every candidate, best-scoring first
-// so the top rows answer "why was this skipped" (PLAN phase 3, task 3).
+// so the top rows answer "why was this skipped".
 func SelectBest(candidates []core.Release, p *core.QualityProfile) (best *core.Release, rejected []Decision) {
 	bestScore := 0
 	for _, r := range candidates {

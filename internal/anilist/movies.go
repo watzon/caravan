@@ -12,7 +12,7 @@ import (
 //
 // AniList has no separate film document: a film is a MEDIA record of format
 // MOVIE sitting beside the series records, described by the same fields. So
-// this file is a second READING of one document rather than a second client —
+// this file is a second READING of one document rather than a second client:
 // the selection set is mediaFields, the mapping reuses fuzzyDate, voteCount and
 // originalTitle, and only the format filter and the target type differ.
 //
@@ -29,7 +29,7 @@ const (
 	opGetMovie     = "GetMovie"
 
 	// formatMovie is AniList's MediaFormat value for a film. Every other value
-	// of that enum — TV, TV_SHORT, OVA, ONA, SPECIAL, MUSIC — is a series in
+	// of that enum, TV, TV_SHORT, OVA, ONA, SPECIAL, MUSIC, is a series in
 	// Caravan's vocabulary and belongs to GetSeries.
 	formatMovie = "MOVIE"
 )
@@ -75,9 +75,9 @@ func (c *Client) SearchMovies(ctx context.Context, q string) ([]core.MovieMeta, 
 //
 //	Provider          ProviderID ("anilist")
 //	ProviderRef       Media.id, decimal
-//	TMDBID/IMDBID     0 and "" — AniList knows neither
+//	TMDBID/IMDBID     0 and "": AniList knows neither
 //	Title             title.english, else romaji, else native
-//	OriginalTitle     romaji when it differs from Title, else native — the same
+//	OriginalTitle     romaji when it differs from Title, else native, the same
 //	                  rule GetSeries uses, and for the same reason: a release
 //	                  filename carries romaji far more often than English
 //	Year              startDate.year
@@ -85,13 +85,13 @@ func (c *Client) SearchMovies(ctx context.Context, q string) ([]core.MovieMeta, 
 //	                  or day is unknown. It is the PREMIERE, which for a film is
 //	                  the theatrical release
 //	DigitalRelease/PhysicalRelease
-//	                  zero — AniList catalogues no home release. That is not the
+//	                  zero, because AniList catalogues no home release. That is not the
 //	                  gap it would be for a provider with no premiere either:
 //	                  wanted.homeRelease falls back to ReleaseDate plus the
 //	                  cinema window, so minimum availability still waits for a
 //	                  film that is currently in cinemas
 //	Overview          description run through htmltext.Strip, as GetSeries does
-//	VoteAverage       averageScore/10 — AniList rates 0-100, core is 0-10
+//	VoteAverage       averageScore/10: AniList rates 0-100, core is 0-10
 //	VoteCount         sum of stats.scoreDistribution[].amount
 //	PosterURL         coverImage.extraLarge, else large
 //

@@ -5,7 +5,8 @@ package stashbox
 //
 // It is a deliberate, fenced breach of the "one protocol, endpoints differ only
 // by URL" rule the rest of the package keeps, and it is here rather than spread
-// through sites.go and scenes.go so the whole of the exception fits in one file.
+// through sites.go and scenes.go so the whole of the exception fits in one
+// file.
 //
 // Why it exists, in two parts.
 //
@@ -13,29 +14,29 @@ package stashbox
 // site search there falls back to deriving studios from scene search. That
 // fallback answers the wrong question: searchScene matches scene *text*, so
 // searching "br" returns whichever scenes mention it and then offers their
-// studios — Manyvids, Nebraska Coeds, KinkBomb — while Brazzers, a site whose
+// studios, Manyvids, Nebraska Coeds, KinkBomb, while Brazzers, a site whose
 // NAME is what was typed, never appears at all. No amount of re-ranking fixes a
 // candidate pool that does not contain the answer.
 //
 // Scenes: TPDB's queryScenes is a stub. Its `scenes` field is always null and
-// its `count` merely echoes per_page — a garbage studio filter "matches" as
-// many rows as were asked for — and its SceneQueryInput disagrees with
-// stash-box anyway (`studios` is a String, not a MultiIDCriterionInput). So a
-// site's catalogue walk, the refresh that follows it, and the newest-scenes
-// shelf have no GraphQL road on TPDB at all; the REST scene index is the road.
-// All verified live, 2026-08-03.
+// its `count` merely echoes per_page, a garbage studio filter "matches" as many
+// rows as were asked for, and its SceneQueryInput disagrees with stash-box
+// anyway (`studios` is a String, not a MultiIDCriterionInput). So a site's
+// catalogue walk, the refresh that follows it, and the newest-scenes shelf have
+// no GraphQL road on TPDB at all; the REST scene index is the road. All
+// verified live, 2026-08-03.
 //
-// What makes the breach safe: TPDB's REST `uuid` fields ARE the GraphQL ids —
+// What makes the breach safe: TPDB's REST `uuid` fields ARE the GraphQL ids,
 // site uuid == studio id and scene id == stash-box scene id, verified in both
-// directions — so anything picked from REST remains addressable by every
-// GraphQL call that follows (findStudio, findScene), and nothing downstream
-// learns that this dialect exists.
+// directions, so anything picked from REST remains addressable by every GraphQL
+// call that follows (findStudio, findScene), and nothing downstream learns that
+// this dialect exists.
 //
 // The fence: this file is reached only when the configured endpoint is TPDB's.
 // For site search, only for a non-blank query and only after queryStudios has
 // been tried, with any failure falling through to the scene-derived path. For
-// scene listing there is nothing to fall through to — the GraphQL side is a
-// stub — so a REST failure there is a real error and surfaces as one.
+// scene listing there is nothing to fall through to, the GraphQL side is a
+// stub, so a REST failure there is a real error and surfaces as one.
 
 import (
 	"context"
@@ -51,12 +52,10 @@ import (
 	"github.com/watzon/caravan/internal/core"
 )
 
-// The dialect table. One host and two indexes. The scenes entry was added after
-// the "stop and reconsider" note that used to sit here fired: the alternative
-// to widening the breach was a provider whose site pages are permanently empty,
-// because queryScenes is a stub (see the file comment). If this table ever
-// needs an entry that is not "the REST twin of a broken GraphQL query", that is
-// the real signal to redesign.
+// The dialect table: one host and two indexes. The scenes entry is here because
+// the alternative was a provider whose site pages are permanently empty, since
+// TPDB's queryScenes is a stub (see the file comment). An entry that is not "the
+// REST twin of a broken GraphQL query" is the signal to redesign this.
 const (
 	// tpdbHost is the host whose GraphQL endpoint means "this is TPDB". It
 	// matches the host itself and anything under it (api.theporndb.net).
@@ -71,9 +70,9 @@ const (
 	// orderBy, and filtered by the performer and tag maps this file builds.
 	tpdbScenesURL = "https://api.theporndb.net/scenes"
 	// tpdbPerformersURL and tpdbTagsURL are the REST indexes the scene filter
-	// rail's typeaheads read (PLAN phase 12 task 2). They are here for the same
-	// reason the scene index is: the GraphQL side has no usable twin, and the
-	// numeric ids the scene index filters on are served nowhere else.
+	// rail's typeaheads read. They are here for the same reason the scene index
+	// is: the GraphQL side has no usable twin, and the numeric ids the scene
+	// index filters on are served nowhere else.
 	tpdbPerformersURL = "https://api.theporndb.net/performers"
 	tpdbTagsURL       = "https://api.theporndb.net/tags"
 
@@ -92,11 +91,11 @@ const (
 )
 
 // tpdbSitesURLFor returns the REST site index to use for a GraphQL endpoint, or
-// "" for an endpoint that is not TPDB's — which is every other stash-box, and
+// "" for an endpoint that is not TPDB's: which is every other stash-box, and
 // the reason this is a lookup rather than a flag.
 //
-// A blank endpoint is TPDB: DefaultEndpoint is TPDB, so "a key and nothing else"
-// gets the dialect it is actually talking to.
+// A blank endpoint is TPDB: DefaultEndpoint is TPDB, so "a key and nothing
+// else" gets the dialect it is actually talking to.
 func tpdbSitesURLFor(endpoint string) string {
 	if !isTPDBEndpoint(endpoint) {
 		return ""
@@ -228,8 +227,8 @@ func (c *Client) restGet(ctx context.Context, op, base string, params url.Values
 
 // rankTPDBSites converts and re-orders the index's answer.
 //
-// The index's own order is weak on short queries — "br" returns a page of
-// name-matches with no particular preference among them — so the same affinity
+// The index's own order is weak on short queries, "br" returns a page of
+// name-matches with no particular preference among them, so the same affinity
 // ranking the scene-derived path uses is applied on top. Rows carry no scene
 // counts, so within a tier the index's order is kept.
 func rankTPDBSites(rows []tpdbSiteRow, needle string) []core.SiteMeta {
@@ -238,7 +237,7 @@ func rankTPDBSites(rows []tpdbSiteRow, needle string) []core.SiteMeta {
 
 	for i, row := range rows {
 		// A row with no uuid is not addressable by anything downstream, so it
-		// is not a candidate — offering it would produce an add that fails.
+		// is not a candidate: offering it would produce an add that fails.
 		if row.UUID == "" {
 			continue
 		}
@@ -277,7 +276,7 @@ func tpdbSiteMeta(row tpdbSiteRow) core.SiteMeta {
 		ImageURL: firstNonEmpty(row.Logo, row.Poster),
 	}
 	// short_name is the provider's own other name for the site ("brazzers" for
-	// "Brazzers Network"), so it is an alias — which also lets the ranking match
+	// "Brazzers Network"), so it is an alias: which also lets the ranking match
 	// what a user types. It is dropped when it says nothing new.
 	if short := strings.TrimSpace(row.ShortName); short != "" && !strings.EqualFold(short, row.Name) {
 		m.Aliases = []string{short}
@@ -313,7 +312,7 @@ func firstRef(refs ...*tpdbSiteRef) *tpdbSiteRef {
 
 // tpdbSceneRow is one row of the REST scene index. Only what SceneMeta carries
 // is read; the REST `id` here IS the stash-box scene id (unlike a site row,
-// whose stash-box id is its `uuid`) — verified live via findScene.
+// whose stash-box id is its `uuid`): verified live via findScene.
 type tpdbSceneRow struct {
 	ID          string `json:"id"`
 	Title       string `json:"title"`
@@ -336,12 +335,12 @@ type tpdbSceneRow struct {
 // searchScenesByREST lists scenes from TPDB's REST index. It answers the same
 // contract SearchScenes documents: date order, newest first, honest paging.
 //
-// A network's site_id matches only scenes filed directly under the network,
-// not its child sites' (verified live: Brazzers itself carries 272, its
-// children thousands; TPDB's network_id parameter ignores its value and
-// returns everything, so it is no help). Adding the specific site is how a
-// child's catalogue arrives — the same one-site-one-series shape the library
-// models everywhere else.
+// A network's site_id matches only scenes filed directly under the network, not
+// its child sites' (verified live: Brazzers itself carries 272, its children
+// thousands; TPDB's network_id parameter ignores its value and returns
+// everything, so it is no help). Adding the specific site is how a child's
+// catalogue arrives: the same one-site-one-series shape the library models
+// everywhere else.
 func (c *Client) searchScenesByREST(ctx context.Context, q core.SceneQuery) (*core.ScenePage, error) {
 	page, perPage := clampPaging(q.Page, q.PerPage)
 
@@ -366,7 +365,7 @@ func (c *Client) searchScenesByREST(ctx context.Context, q core.SceneQuery) (*co
 		}
 	}
 	// A scope without a site widens nothing, and there is no parameter to send
-	// for it — the API refuses that combination before it gets here.
+	// for it: the API refuses that combination before it gets here.
 	if err := tpdbRefFilter(params, "performers", "performer_and", q.Performers, q.PerformersAll); err != nil {
 		return nil, err
 	}
@@ -406,13 +405,13 @@ func (c *Client) searchScenesByREST(ctx context.Context, q core.SceneQuery) (*co
 	return out, nil
 }
 
-// tpdbOrderBy maps Caravan's sort-and-direction pair onto TPDB's single
-// orderBy enum, which bakes the direction into the value.
+// tpdbOrderBy maps Caravan's sort-and-direction pair onto TPDB's single orderBy
+// enum, which bakes the direction into the value.
 //
 // The verified vocabulary is
 // ["duration_asc","duration_desc","former_created","former_released",
 // "former_updated","most_relevant","recently_created","recently_released",
-// "recently_updated"] — "former_" is oldest-first and "recently_" is
+// "recently_updated"]: "former_" is oldest-first and "recently_" is
 // newest-first. most_relevant has no direction, so Order is not consulted for
 // it; core.SceneSortRelevance documents that.
 //
@@ -451,8 +450,8 @@ func tpdbOrderBy(sort core.SceneSort, order core.DiscoverOrder) string {
 // whose verified values are ["Network","Parent","Site","Site/Network",
 // "Site/Parent","Site/Parent/Network"].
 //
-// Each widening step KEEPS the narrower one — "Site/Parent" is the site's own
-// scenes as well as its parent's — because a filter that swapped one for the
+// Each widening step KEEPS the narrower one, "Site/Parent" is the site's own
+// scenes as well as its parent's, because a filter that swapped one for the
 // other would make "widen" drop rows.
 //
 // The narrow scope returns "", meaning "send nothing": Site is the endpoint's
@@ -484,26 +483,26 @@ func tpdbDateOperation(op core.SceneDateOp) string {
 	return "="
 }
 
-// tpdbRefFilter writes a performer or tag filter in the wire form TPDB
-// insists on: a MAP of numeric id to name, `performers[84060]=Mia Malkova`.
-// The scalar spelling (`performers=84060`) is answered with a 422 "must be an
-// array", so this shape is load-bearing rather than stylistic.
+// tpdbRefFilter writes a performer or tag filter in the wire form TPDB insists
+// on: a MAP of numeric id to name, `performers[84060]=Mia Malkova`. The scalar
+// spelling (`performers=84060`) is answered with a 422 "must be an array", so
+// this shape is load-bearing rather than stylistic.
 //
 // The name is passed through because the map is what the endpoint reads; only
 // the key selects, so an id that names nothing simply matches nothing.
 //
 // allKey is the endpoint's any/all switch (performer_and, tag_and), sent only
-// for the ALL reading — its absence is "any", which is the endpoint's default.
+// for the ALL reading: its absence is "any", which is the endpoint's default.
 func tpdbRefFilter(params url.Values, key, allKey string, refs []core.SceneFilterRef, all bool) error {
 	if len(refs) == 0 {
 		return nil
 	}
 	for _, ref := range refs {
-		// A ref carrying only a uuid came from another dialect's typeahead —
-		// a filter URL copied from a stash-box install onto a TPDB one. The
-		// scene index has no uuid filter, so the honest answer is a failure
-		// rather than a page of everything. The id is not named in the
-		// message: a filter's value is not for a log.
+		// A ref carrying only a uuid came from another dialect's typeahead: a
+		// filter URL copied from a stash-box install onto a TPDB one. The scene
+		// index has no uuid filter, so the honest answer is a failure rather
+		// than a page of everything. The id is not named in the message: a
+		// filter's value is not for a log.
 		//
 		// It is a SceneFilterUnsupportedError like every other refusal here:
 		// the caller's filter is the problem, so this is the 400 that offers
@@ -522,9 +521,9 @@ func tpdbRefFilter(params url.Values, key, allKey string, refs []core.SceneFilte
 // tpdbPerformerRow is one row of the REST performer index.
 //
 // The id fields are the opposite way round from a site row and from a tag row,
-// which is exactly why they are pinned by a fixture test: `id` is the uuid —
-// the same id stash-box GraphQL uses — and `_id` is the numeric id the scene
-// index filters on.
+// which is exactly why they are pinned by a fixture test: `id` is the uuid, the
+// same id stash-box GraphQL uses, and `_id` is the numeric id the scene index
+// filters on.
 type tpdbPerformerRow struct {
 	ID        string `json:"id"`
 	NumericID int64  `json:"_id"`

@@ -70,7 +70,7 @@ type Queue struct {
 	// being paused: it stops everything at once.
 	Paused bool `json:"paused"`
 	// KBPerSec is the queue-wide download rate in KiB/s. SABnzbd reports no
-	// per-job rate — it downloads one job at a time — so this is the rate of
+	// per-job rate, it downloads one job at a time, so this is the rate of
 	// whichever job is currently transferring.
 	KBPerSec Number `json:"kbpersec"`
 	// Slots are the jobs still being transferred, in queue order.
@@ -98,7 +98,7 @@ type QueueSlot struct {
 	Priority string `json:"priority"`
 }
 
-// HistorySlot is one job whose transfer has ended — finished, failed, or still
+// HistorySlot is one job whose transfer has ended: finished, failed, or still
 // being post-processed.
 type HistorySlot struct {
 	NZOID string `json:"nzo_id"`
@@ -116,9 +116,8 @@ type HistorySlot struct {
 	Path string `json:"path"`
 	// FailMessage is SABnzbd's own explanation of a failure, empty otherwise.
 	FailMessage string `json:"fail_message"`
-	// Bytes is the job's size and Downloaded is how much was actually
-	// fetched — they differ on a failure, and on a success by the par2
-	// overhead.
+	// Bytes is the job's size and Downloaded is how much was actually fetched:
+	// they differ on a failure, and on a success by the par2 overhead.
 	Bytes      Number `json:"bytes"`
 	Downloaded Number `json:"downloaded"`
 	// Completed is a Unix timestamp.
@@ -127,7 +126,7 @@ type HistorySlot struct {
 
 // SABnzbd's job statuses, from sabnzbd/constants.py's Status class. The same
 // vocabulary is used for queue and history rows, but two words mean different
-// things depending on which list a row is in — see the two maps below.
+// things depending on which list a row is in: see the two maps below.
 const (
 	statusIdle        = "Idle"
 	statusQueued      = "Queued"
@@ -211,9 +210,9 @@ var historyStateMap = map[string]core.DownloadState{
 
 // mapQueueState and mapHistoryState translate one SABnzbd status.
 //
-// Anything unrecognised — a status a future SABnzbd invents — becomes queued:
-// it is the only state that claims nothing. Guessing failed would fail a
-// healthy download and guessing completed would import an unfinished one.
+// Anything unrecognised, a status a future SABnzbd invents, becomes queued: it
+// is the only state that claims nothing. Guessing failed would fail a healthy
+// download and guessing completed would import an unfinished one.
 func mapQueueState(s string) core.DownloadState { return lookupState(queueStateMap, s) }
 
 func mapHistoryState(s string) core.DownloadState { return lookupState(historyStateMap, s) }
@@ -268,12 +267,12 @@ func queueStatus(slot QueueSlot, rate int64) core.DownloadStatus {
 
 // historyStatus converts one history row.
 //
-// SavePath is SABnzbd's `storage` — an absolute path on SABnzbd's machine,
-// which is the documented exception to the root-relative rule for external
-// clients (docs/download-clients.md). It names the finished payload directly,
-// the way the embedded engine's SavePath does. A row that is still being
-// post-processed has no storage yet and falls back to its working directory,
-// which is where the files actually are at that moment.
+// SavePath is SABnzbd's `storage`: an absolute path on SABnzbd's machine, which
+// is the documented exception to the root-relative rule for external clients
+// (docs/download-clients.md). It names the finished payload directly, the way
+// the embedded engine's SavePath does. A row that is still being post-processed
+// has no storage yet and falls back to its working directory, which is where
+// the files actually are at that moment.
 func historyStatus(slot HistorySlot) core.DownloadStatus {
 	state := mapHistoryState(slot.Status)
 	size := slot.Bytes.Int()
@@ -317,12 +316,12 @@ func historyStatus(slot HistorySlot) core.DownloadStatus {
 	return s
 }
 
-// parseTimeLeft turns SABnzbd's "H:MM:SS" (or "D:HH:MM:SS" past a day)
-// estimate into seconds, normalized onto core.DownloadStatus's contract of -1
-// for unknown.
+// parseTimeLeft turns SABnzbd's "H:MM:SS" (or "D:HH:MM:SS" past a day) estimate
+// into seconds, normalized onto core.DownloadStatus's contract of -1 for
+// unknown.
 //
 // "0:00:00" is not "now": it is what SABnzbd prints for a paused job, a job it
-// has no rate for, and a job with nothing left — none of which is an estimate.
+// has no rate for, and a job with nothing left, none of which is an estimate.
 func parseTimeLeft(s string) int64 {
 	parts := strings.Split(strings.TrimSpace(s), ":")
 	if len(parts) < 3 || len(parts) > 4 {

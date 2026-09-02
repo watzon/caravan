@@ -386,7 +386,7 @@ func TestDecodeErrorIsReported(t *testing.T) {
 
 func TestTransportErrorDoesNotLeakAPIKey(t *testing.T) {
 	// A server that is already gone: c.hc.Do fails, and the *url.Error it
-	// returns would otherwise carry the full URL — api_key included.
+	// returns would otherwise carry the full URL, api_key included.
 	srv := httptest.NewServer(http.NotFoundHandler())
 	base := srv.URL
 	srv.Close()
@@ -407,7 +407,7 @@ func TestTransportErrorDoesNotLeakAPIKey(t *testing.T) {
 }
 
 // TestTestProvesTheKey covers the credential check behind Settings → Metadata
-// and the first-run wizard (PLAN phase 10 task 4).
+// and the first-run wizard.
 func TestTestProvesTheKey(t *testing.T) {
 	c, stub := newStub(t, map[string][]response{
 		"/configuration": {{status: http.StatusOK, body: []byte(`{"images":{}}`)}},
@@ -464,8 +464,8 @@ func TestTestDoesNotConfuseAnOutageWithABadKey(t *testing.T) {
 	}
 }
 
-// A ref this client cannot read is a wiring bug in Caravan — another provider's
-// ref reached a TMDB client — not a title TMDB is missing. It must NOT read as
+// A ref this client cannot read is a wiring bug in Caravan, another provider's
+// ref reached a TMDB client, not a title TMDB is missing. It must NOT read as
 // ErrNotFound, which upstream parks a file as "unmatched" and moves on, and it
 // must not cost a request to discover.
 func TestGetRejectsForeignRefsWithoutAsking(t *testing.T) {

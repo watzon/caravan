@@ -83,10 +83,10 @@ func pathRequests(reqs []stashboxtest.Request, prefix string) []stashboxtest.Req
 }
 
 // The regression for the reported bug: a site's catalogue walk on TPDB used to
-// POST queryScenes — which failed on the input type, and would have silently
+// POST queryScenes, which failed on the input type, and would have silently
 // returned zero scenes once that was "fixed", because TPDB's queryScenes never
-// returns scenes at all. On TPDB the walk must be REST, and GraphQL must not
-// be consulted for it.
+// returns scenes at all. On TPDB the walk must be REST, and GraphQL must not be
+// consulted for it.
 func TestSearchScenesOnTPDBWalksTheRESTSceneIndex(t *testing.T) {
 	c, srv := tpdbSceneStub(t, stashboxtest.Options{
 		SiteLookup: []stashboxtest.Response{siteLookupResponse()},
@@ -205,7 +205,7 @@ func TestSearchScenesSurfacesAnUnknownSiteAsNotFound(t *testing.T) {
 }
 
 // A stash-box that is not TPDB keeps the GraphQL road exactly as it was,
-// criterion input included — the dialect must be unreachable, not just unused.
+// criterion input included: the dialect must be unreachable, not just unused.
 func TestSearchScenesOnAStashBoxStillSpeaksGraphQL(t *testing.T) {
 	srv := stashboxtest.New(stashboxtest.Options{
 		Operations: map[string][]stashboxtest.Response{

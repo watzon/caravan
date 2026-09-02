@@ -341,7 +341,7 @@ func TestPauseResumeAndDeleteSendTheRightParameters(t *testing.T) {
 }
 
 // SABnzbd archives a deleted history row by default, and an archived row still
-// answers a lookup — so the download would never leave Caravan's queue.
+// answers a lookup: so the download would never leave Caravan's queue.
 func TestDeleteHistoryOptsOutOfArchiving(t *testing.T) {
 	c, f := newClient(t)
 

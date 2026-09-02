@@ -201,9 +201,9 @@ func (a *advertiser) send(msg []byte, to *net.UDPAddr) {
 //
 // It is resolved per message rather than once at startup: the kernel's routing
 // table is the only thing that knows the answer, and on a multi-homed host the
-// answer differs between the multicast group and a particular searcher. The
-// UDP "connection" is bookkeeping — nothing is sent — so this costs a syscall
-// and never blocks.
+// answer differs between the multicast group and a particular searcher. The UDP
+// "connection" is bookkeeping, nothing is sent, so this costs a syscall and
+// never blocks.
 func (a *advertiser) localIP(remote *net.UDPAddr) string {
 	c, err := net.DialUDP("udp4", nil, remote)
 	if err != nil {

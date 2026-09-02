@@ -1,6 +1,6 @@
 // Package qbittorrent talks to a qBittorrent WebUI (API v2) and adapts it to
 // core.Engine, so a user who already runs qBittorrent can keep it and let
-// Caravan drive it (SPEC §5.1, PLAN phase 6).
+// Caravan drive it (SPEC §5.1).
 //
 // Two things about this backend differ from the embedded engine, and both are
 // deliberate:
@@ -47,11 +47,11 @@ const (
 	// sessionCookie is the name qBittorrent gives its session cookie.
 	sessionCookie = "SID"
 	// loginOK is the body qBittorrent answers a successful login with. A
-	// *rejected* login is also HTTP 200 — with the body "Fails." — so the
-	// status alone cannot be trusted here.
+	// *rejected* login is also HTTP 200, with the body "Fails.", so the status
+	// alone cannot be trusted here.
 	loginOK = "Ok."
-	// addFailed is the body /torrents/add answers with when it added nothing —
-	// a malformed magnet, an unreachable .torrent URL, a duplicate — on
+	// addFailed is the body /torrents/add answers with when it added nothing, a
+	// malformed magnet, an unreachable .torrent URL, a duplicate, on
 	// qBittorrent 5.0 and older, which report that as HTTP 200. Newer servers
 	// answer the same case with 409 and a JSON body on success, so this is
 	// matched as the one known failure sentinel rather than by requiring a
@@ -106,9 +106,9 @@ type Client struct {
 	hc   *http.Client
 
 	mu sync.Mutex
-	// sid is the session cookie value. It is empty both before the first
-	// login and when qBittorrent bypasses authentication for our address —
-	// authed distinguishes the two.
+	// sid is the session cookie value. It is empty both before the first login
+	// and when qBittorrent bypasses authentication for our address: authed
+	// distinguishes the two.
 	authed bool
 	sid    string
 	// legacyActions records that this server predates WebAPI 2.11, where
@@ -177,10 +177,10 @@ type AddRequest struct {
 // nothing about the resulting torrent, which is why the engine has to look the
 // info hash up afterwards when the release did not carry one.
 //
-// Servers up to 5.0 also answer 200 for "added nothing" — a malformed magnet,
-// an unreachable .torrent URL, a duplicate — with the body "Fails.", so on
-// those the status alone cannot be trusted. Reading it alone would record the
-// grab as succeeded and write a `downloads` row for a handle qBittorrent never
+// Servers up to 5.0 also answer 200 for "added nothing", a malformed magnet, an
+// unreachable .torrent URL, a duplicate, with the body "Fails.", so on those
+// the status alone cannot be trusted. Reading it alone would record the grab as
+// succeeded and write a `downloads` row for a handle qBittorrent never
 // accepted: a queue row that never progresses, never imports, and never
 // retries, because a grab that is not failed is not retried.
 func (c *Client) Add(ctx context.Context, req AddRequest) error {
@@ -203,8 +203,8 @@ func (c *Client) Add(ctx context.Context, req AddRequest) error {
 	if req.Paused {
 		// "paused" is the long-standing WebAPI spelling. qBittorrent 5 renamed
 		// it to "stopped" and still accepts this one, and both are sent so a
-		// cap is honoured on either version rather than silently ignored on
-		// one of them — an unknown form field is discarded, not an error.
+		// cap is honoured on either version rather than silently ignored on one
+		// of them: an unknown form field is discarded, not an error.
 		form.Set("paused", "true")
 		form.Set("stopped", "true")
 	}

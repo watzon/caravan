@@ -1,10 +1,10 @@
 package automation
 
-// The adult library's own durable job: the deferred catalogue walk that
-// POST /adult/sites queues instead of doing inline (core.JobSyncSite).
+// The adult library's own durable job: the deferred catalogue walk that POST
+// /adult/sites queues instead of doing inline (core.JobSyncSite).
 //
 // The walk itself lives in internal/library, which this package deliberately
-// does not import — same arrangement as the metadata refresh and the Jellyfin
+// does not import, same arrangement as the metadata refresh and the Jellyfin
 // handoff, and for the same reason: the queue's semantics (leases, backoff,
 // at-least-once) belong here, and the filesystem-and-provider half belongs
 // there. cmd/caravan is where the two are joined.

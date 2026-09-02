@@ -8,10 +8,9 @@ import (
 	"github.com/watzon/caravan/internal/core"
 )
 
-// minSceneCorpusEntries is the scene corpus' floor, and it exists for the same
-// reason minCorpusEntries does. It starts lower because the corpus starts
-// near-empty (PLAN "risks and long poles": adult release naming is more
-// chaotic than TV naming), but it only ever moves up.
+// minSceneCorpusEntries is the scene corpus' floor, for the same reason
+// minCorpusEntries is. It starts lower because the corpus starts near-empty, but
+// it only ever moves up.
 const minSceneCorpusEntries = 24
 
 func TestSceneCorpus(t *testing.T) {
@@ -150,7 +149,7 @@ func TestSceneSharesTheTechnicalRulesWithParse(t *testing.T) {
 	}
 }
 
-// A name with no date must be handed to Parse untouched — including its
+// A name with no date must be handed to Parse untouched: including its
 // container extension, which Scene strips from its own working copy.
 func TestSceneFallsThroughToParse(t *testing.T) {
 	const name = "Some.Show.S01E02.1080p.WEB-DL.x264-GROUP.mkv"

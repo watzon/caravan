@@ -333,10 +333,10 @@ func TestExtractRARMultiVolume(t *testing.T) {
 }
 
 // TestExtractRARMixedWidthVolumeNames covers a real posting habit: volumes
-// named part01…part09, then part010 — the poster appended an unpadded counter
-// to "part0". The successor name rardecode infers ("part02.rar") does not
-// exist under that spelling, and the set must still extract, because the part
-// number is the volume's identity, not its width.
+// named part01…part09, then part010, the poster appended an unpadded counter to
+// "part0". The successor name rardecode infers ("part02.rar") does not exist
+// under that spelling, and the set must still extract, because the part number
+// is the volume's identity, not its width.
 func TestExtractRARMixedWidthVolumeNames(t *testing.T) {
 	dir, m := stageFixture(t, "multi-new")
 	fix := m["multi-new"]
@@ -370,15 +370,15 @@ func TestExtractRARMixedWidthVolumeNames(t *testing.T) {
 
 // TestExtractRARScrambledVolumeNames is the failure a real release hit: the
 // name a volume was posted under is not the volume it holds. The multi-mixed
-// fixture packs both defects into four volumes — part1 is a digit narrower than
+// fixture packs both defects into four volumes: part1 is a digit narrower than
 // the rest, and part03/part04 hold each other's volumes.
 //
 // Reading them in name order does not fail cleanly. Each file exists and is a
 // valid rar volume, so the decoder gets several megabytes into the payload
 // before the volume number in a header contradicts the one it asked for, and
 // what it has written by then is the wrong bytes. The hash check below is the
-// assertion that matters; without volume-number resolution this test fails
-// with rardecode's "bad volume number".
+// assertion that matters; without volume-number resolution this test fails with
+// rardecode's "bad volume number".
 func TestExtractRARScrambledVolumeNames(t *testing.T) {
 	dir, m := stageFixture(t, "multi-mixed")
 	fix := m["multi-mixed"]
@@ -478,7 +478,7 @@ func TestVolumeSetOpenRefusesANumberTheSetDoesNotHave(t *testing.T) {
 }
 
 // The header parser on its own: it answers for a rar5 volume that records a
-// number, and declines — rather than guessing — for everything else.
+// number, and declines, rather than guessing, for everything else.
 func TestRarVolumeNumber(t *testing.T) {
 	dir, _ := stageFixture(t, "multi-mixed")
 	for name, want := range map[string]int{

@@ -41,8 +41,8 @@ func newTestService(t *testing.T) (*Service, *store.Store, string) {
 }
 
 // The two libraries 0001_baseline seeds, which is where every fixture row below
-// is filed. Every item row names its shelf — the DLNA tree resolves ownership by
-// id alone — so a fixture that left library_id at zero would hang under no
+// is filed. Every item row names its shelf, the DLNA tree resolves ownership by
+// id alone, so a fixture that left library_id at zero would hang under no
 // container at all.
 const (
 	seededMovieLibrary = 1
@@ -50,7 +50,7 @@ const (
 )
 
 // seedLibrary writes the fixture every hierarchy test browses: one movie with
-// one file, and one series with two seasons where only season 1 has files —
+// one file, and one series with two seasons where only season 1 has files,
 // including a double-episode file, which is the case the object-id scheme has
 // to keep distinct.
 func seedLibrary(t *testing.T, st *store.Store) {

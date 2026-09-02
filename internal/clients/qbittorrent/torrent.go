@@ -88,8 +88,8 @@ const (
 	stateUnknown            = "unknown"
 )
 
-// etaInfinity is the sentinel qBittorrent reports (100 days in seconds) when
-// it has no estimate — for a seeding torrent, or one with no peers.
+// etaInfinity is the sentinel qBittorrent reports (100 days in seconds) when it
+// has no estimate: for a seeding torrent, or one with no peers.
 const etaInfinity = 8640000
 
 // stateMap collapses qBittorrent's twenty-odd states onto Caravan's six.
@@ -152,7 +152,7 @@ const (
 // status converts one torrent into the snapshot the queue and the import
 // watcher read.
 //
-// SavePath is qBittorrent's content path — an absolute path on qBittorrent's
+// SavePath is qBittorrent's content path: an absolute path on qBittorrent's
 // machine, which is the documented exception to the root-relative rule for
 // external clients (docs/download-clients.md). It is the torrent's own root
 // folder or file rather than the parent directory, so it names the payload

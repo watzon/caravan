@@ -187,7 +187,7 @@ func TestStateDiscardsAnEntryItCannotTrust(t *testing.T) {
 	})
 }
 
-// The second pass of a download — the par2 volumes verification asked for —
+// The second pass of a download, the par2 volumes verification asked for,
 // shares a directory with the first, and must not cost the first its progress.
 func TestStateKeepsFilesAnotherPassIsNotTouching(t *testing.T) {
 	dir := t.TempDir()

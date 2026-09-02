@@ -338,8 +338,8 @@ func readFixture(t *testing.T, name string) []byte {
 }
 
 // fixtureServer answers every RPC with one fixture, verbatim. It is how a test
-// proves the *real* payload decodes — split 64-bit sizes, unknown fields and
-// all — rather than the subset the fake re-encodes.
+// proves the *real* payload decodes, split 64-bit sizes, unknown fields and
+// all, rather than the subset the fake re-encodes.
 func fixtureServer(t *testing.T, name string) *httptest.Server {
 	t.Helper()
 	body := readFixture(t, name)

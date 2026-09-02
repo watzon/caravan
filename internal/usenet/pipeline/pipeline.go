@@ -1,41 +1,31 @@
 // Package pipeline downloads an NZB: the scheduler that turns a parsed NZB,
-// a set of news servers and a directory into files on disk (SPEC §5.1, PLAN
-// phase 7 task 3).
+// a set of news servers and a directory into files on disk (SPEC §5.1).
 //
-// It is the piece between the index (internal/usenet/nzb), the transport
+// It sits between the index (internal/usenet/nzb), the transport
 // (internal/usenet/nntp) and the codec (internal/usenet/yenc). Segments are
 // fetched by a bounded pool of workers, decoded, and written straight to their
-// offset in the target file — parts arrive in whatever order the servers
-// answer, and yEnc carries where each one goes precisely so assembly never has
-// to buffer a whole file in memory.
-//
-// # Holes are not failures
+// offset in the target file. Parts arrive in whatever order the servers answer,
+// and yEnc carries where each one goes, so assembly never buffers a whole file in
+// memory.
 //
 // A segment that cannot be had is written off and the download carries on.
-// Usenet articles rot, and par2 exists to fill exactly these holes (PLAN phase
-// 7 task 4); aborting a fifteen-gigabyte download over one dead article would
-// throw away the repairable case that Usenet is built around. Every write-off
-// is reported in Result.Failures with the reason it happened, so the stage
-// above can tell "par2 can fix this" from "the provider is down".
+// Usenet articles rot and par2 exists to fill exactly these holes, so aborting a
+// fifteen-gigabyte download over one dead article would throw away the repairable
+// case Usenet is built around. Every write-off is reported in Result.Failures
+// with its reason, so the stage above can tell "par2 can fix this" from "the
+// provider is down".
 //
-// One damaged article is worth one more ask, though, and only of a server that
-// has not already answered: a copy that failed its own yEnc CRC on the primary
-// is often clean on the backup, and finding it there is far cheaper than
-// spending recovery blocks.
-//
-// # Resume
+// One damaged article is worth one more ask, and only of a server that has not
+// already answered: a copy that failed its yEnc CRC on the primary is often clean
+// on the backup, and finding it there is cheaper than spending recovery blocks.
 //
 // Completed segments are recorded in a sidecar inside the download's own
-// directory (StateFile), not in the database. The database is a disposable
-// cache; a half-finished download is not, and refetching it because a cache
-// was deleted is a bill the user pays.
+// directory (StateFile), not in the database. The database is a disposable cache;
+// a half-finished download is not.
 //
-// # Boundaries
-//
-// Nothing here imports internal/store or touches the database, matching
-// internal/download: it is an NZB, a fetcher and a directory in, files and a
-// summary out, which is what makes the whole thing testable against
-// internal/usenet/nntptest with no network anywhere.
+// Nothing here imports internal/store or touches the database: it is an NZB, a
+// fetcher and a directory in, files and a summary out, which is what makes it
+// testable against internal/usenet/nntptest with no network anywhere.
 package pipeline
 
 import (
@@ -61,7 +51,7 @@ const (
 	DefaultConcurrency = 8
 	// DefaultHeadroom is the free space the preflight demands beyond the
 	// download's own size. It covers the sidecar, filesystem overhead and a
-	// little slack, and nothing else — in particular it does not budget for
+	// little slack, and nothing else: in particular it does not budget for
 	// extraction, which needs roughly a second copy of the payload. That is a
 	// separate preflight, run by the engine once it knows what the release was
 	// packed in (internal/usenet.Engine.checkExtractionSpace), because until
@@ -75,8 +65,8 @@ const (
 // *nntp.MultiPool is the implementation; the interface exists so this package
 // can be tested without one and so the engine can wrap it.
 type Fetcher interface {
-	// FetchBody returns one article body as the server sent it —
-	// dot-stuffing removed, CRLF endings intact. An error unwrapping to
+	// FetchBody returns one article body as the server sent it: dot-stuffing
+	// removed, CRLF endings intact. An error unwrapping to
 	// nntp.ErrArticleNotFound means every server agreed the article is gone;
 	// anything else means "unknown".
 	FetchBody(ctx context.Context, messageID string) ([]byte, error)
@@ -87,8 +77,8 @@ type Fetcher interface {
 //
 // It is what makes a CRC failure survivable without spending recovery blocks:
 // asking the same server for the same damaged article returns the same damaged
-// bytes, so the second try has to start below it. A plain Fetcher works
-// without this — the segment simply becomes a hole for par2 instead.
+// bytes, so the second try has to start below it. A plain Fetcher works without
+// this: the segment simply becomes a hole for par2 instead.
 type FailoverFetcher interface {
 	Fetcher
 	// FetchBodyFrom fetches considering only the servers from index from
@@ -154,9 +144,9 @@ const (
 	// exist. This is the clean par2 case: a hole of known size in a known
 	// place.
 	ReasonMissing Reason = "missing"
-	// ReasonCorrupt means an article arrived but could not be trusted — a
-	// CRC mismatch, a short payload, or bytes that are not yEnc at all — on
-	// every server that was asked. Also a hole for par2.
+	// ReasonCorrupt means an article arrived but could not be trusted, a CRC
+	// mismatch, a short payload, or bytes that are not yEnc at all, on every
+	// server that was asked. Also a hole for par2.
 	ReasonCorrupt Reason = "corrupt"
 	// ReasonUnavailable means no server could be reached or none gave a
 	// conclusive answer. The article may well still exist; this is a
@@ -268,7 +258,7 @@ func Download(ctx context.Context, doc *nzb.NZB, dir string, fetch Fetcher, opts
 //
 // The returned error is reserved for the things that stop a download: a
 // cancelled context, a failed disk preflight, or a filesystem that will not
-// accept the writes. Articles that could not be had are not errors — they are
+// accept the writes. Articles that could not be had are not errors: they are
 // Result.Failures, and par2's job.
 func DownloadFiles(ctx context.Context, files []nzb.File, dir string, fetch Fetcher, opts Options) (*Result, error) {
 	opts = opts.normalized()
@@ -465,7 +455,7 @@ func (d *download) article(ctx context.Context, messageID string) (*yenc.Part, R
 		return part, "", nil
 	}
 	if d.failover != nil {
-		// Not a retry — a different source. The bytes that failed came from
+		// Not a retry: a different source. The bytes that failed came from
 		// server, and asking it again produces the same bytes.
 		if retry, _, err := d.failover.FetchBodyFrom(ctx, messageID, server+1); err == nil {
 			if part, err := yenc.DecodeBytes(retry); err == nil {

@@ -7,7 +7,7 @@ import (
 
 // ErrInsufficientSpace is the sentinel a disk-space preflight failure unwraps
 // to. It is a distinct error because it is the one download failure with an
-// obvious user action attached — free some space — and the queue should say so
+// obvious user action attached, free some space, and the queue should say so
 // rather than reporting a generic write error thirty gigabytes in.
 var ErrInsufficientSpace = errors.New("pipeline: not enough free disk space")
 
@@ -35,8 +35,8 @@ func (e *SpaceError) Error() string {
 func (e *SpaceError) Unwrap() error { return ErrInsufficientSpace }
 
 // FreeSpace reports the bytes available to an unprivileged caller on the
-// filesystem holding path — space the process can actually use, quotas and
-// root reservations already subtracted.
+// filesystem holding path: space the process can actually use, quotas and root
+// reservations already subtracted.
 //
 // It is exported so that the engine can reuse the same measurement the
 // preflight uses, and so Options.FreeSpace has an obvious default to name.

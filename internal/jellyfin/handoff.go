@@ -94,9 +94,9 @@ func (s *Service) setting(ctx context.Context, key string) (string, error) {
 //
 // It never talks to Jellyfin. The HTTP call belongs to Handle, behind the job
 // queue, so an import cannot be slowed down by a media server that is asleep
-// and cannot be failed by one that is gone — and a Caravan that is killed
-// between the import and the scan still owes the scan when it comes back
-// (SPEC §7).
+// and cannot be failed by one that is gone: and a Caravan that is killed
+// between the import and the scan still owes the scan when it comes back (SPEC
+// §7).
 func (s *Service) LibraryChanged(ctx context.Context) error {
 	cfg, err := s.Config(ctx)
 	if err != nil {

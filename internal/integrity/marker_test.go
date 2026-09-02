@@ -125,9 +125,9 @@ func TestTruncatedMarkerIsDirty(t *testing.T) {
 
 // The regression this exists for: a second `caravan serve` on the same drive
 // used to claim the marker, and its own failed start then wrote "clean" over
-// the marker the still-running first instance was relying on — so a drive
-// yanked afterwards reported a clean shutdown, showed no recovery banner, and
-// let downloads resume onto an unchecked filesystem.
+// the marker the still-running first instance was relying on, so a drive yanked
+// afterwards reported a clean shutdown, showed no recovery banner, and let
+// downloads resume onto an unchecked filesystem.
 //
 // The realistic trigger is a launcher double-click: the first terminal window
 // went unnoticed, so the user starts Caravan twice.
@@ -146,7 +146,7 @@ func TestSecondInstanceCannotClaimOrCleanTheMarker(t *testing.T) {
 		t.Fatal("a start that could not claim the marker reported a clean session")
 	}
 
-	// The second instance now fails — "address already in use" — and runs its
+	// The second instance now fails, "address already in use", and runs its
 	// shutdown path. It must not be able to vouch for the first one's drive.
 	if err := second.Finish(); err == nil {
 		t.Fatal("a process that never owned the marker was allowed to mark it clean")

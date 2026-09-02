@@ -8,8 +8,8 @@ import (
 
 // Clamp01 bounds a completion fraction to [0,1].
 //
-// Download clients report progress in their own units — a fraction, a percent,
-// a byte pair — and a client that is still sizing a job can briefly report more
+// Download clients report progress in their own units, a fraction, a percent, a
+// byte pair, and a client that is still sizing a job can briefly report more
 // than it has. core.DownloadStatus.Progress promises a fraction, so every
 // backend narrows to one here rather than each inventing its own guard.
 func Clamp01(v float64) float64 {

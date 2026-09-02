@@ -32,10 +32,10 @@ type Handler func(ctx context.Context, st *store.Store, payload json.RawMessage)
 
 // EngineGetter waits for, or returns, the currently configured download engine
 // for grabs made on behalf of one library: the item's own library id, with a
-// core.LibraryKind* as the fallback for an item that names none — (0, "") for
-// an operation belonging to no library. The pair is what honours a library's
-// own download routing (PLAN phase 8 task 2). It may return nil when no
-// storage root has been configured yet.
+// core.LibraryKind* as the fallback for an item that names none, (0, "") for an
+// operation belonging to no library. The pair is what honours a library's own
+// download routing. It may return nil when no storage root has been configured
+// yet.
 type EngineGetter func(ctx context.Context, libraryID int64, kind string) core.Engine
 
 // Runner claims durable jobs and dispatches them to idempotent handlers.
@@ -55,12 +55,11 @@ type Option func(*Runner)
 
 // WithHandler registers a job kind owned by another package.
 //
-// The phase-3 handlers live here because they are the automation brain. The
-// convert-for-TV queue (PLAN phase 4, task 4) is not: it is ffmpeg work that
-// needs the storage root, which this package deliberately does not know about.
-// Registering it from outside keeps the durable-queue semantics — leases,
-// backoff, at-least-once — in exactly one place without dragging the
-// filesystem in with them.
+// The wanted-list handlers live here because they are the automation brain. The
+// convert-for-TV queue is not: it is ffmpeg work that needs the storage root,
+// which this package deliberately does not know about. Registering it from
+// outside keeps the durable-queue semantics, leases, backoff, at-least-once, in
+// exactly one place without dragging the filesystem in with them.
 func WithHandler(kind string, h Handler) Option {
 	return func(r *Runner) { r.handlers[kind] = h }
 }
@@ -70,7 +69,7 @@ func WithHandler(kind string, h Handler) Option {
 // The general worker is a single goroutine that blocks for as long as a handler
 // runs, and a convert job is an ffmpeg process that can run for hours. Left on
 // the shared worker it starves everything behind it: the Jellyfin handoff an
-// import just queued, the RSS sync, every monitored search — a release that
+// import just queued, the RSS sync, every monitored search, a release that
 // appears and expires inside a long transcode is simply missed. The dedicated
 // worker is also single-goroutine, so the one-conversion-at-a-time assumption
 // internal/convert is written against still holds.
@@ -108,7 +107,7 @@ func NewRunner(st *store.Store, indexers api.IndexerFactory, engine EngineGetter
 // happen here, once, at startup: the periodic sweep can only take leases that
 // have expired, and a dedicated worker's lease runs for twelve hours
 // (dedicatedJobLease), so a storage migration killed five minutes in would
-// otherwise be unclaimable for the rest of the day — with the library's files
+// otherwise be unclaimable for the rest of the day, with the library's files
 // half-moved and no way to fix it from the UI.
 func Bootstrap(ctx context.Context, st *store.Store) error {
 	if n, err := st.ReclaimRunning(ctx); err != nil {

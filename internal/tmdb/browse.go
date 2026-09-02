@@ -260,10 +260,10 @@ func (c *Client) SearchKeywords(ctx context.Context, query string) ([]core.Disco
 
 // genreCache memoises the two genre lists for the life of the client.
 //
-// TMDB's genre vocabulary is a fixed table — it gains an entry every few years
-// — so there is no TTL: an expiry would only add a way for the list to be
-// briefly wrong. A client is rebuilt whenever the API key changes, which is
-// the only event that could make a cached list unreachable.
+// TMDB's genre vocabulary is a fixed table, it gains an entry every few years,
+// so there is no TTL: an expiry would only add a way for the list to be briefly
+// wrong. A client is rebuilt whenever the API key changes, which is the only
+// event that could make a cached list unreachable.
 type genreCache struct {
 	mu          sync.Mutex
 	byMediaType map[string][]core.DiscoverGenre

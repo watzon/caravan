@@ -113,12 +113,11 @@ func (s *Set) checkReport(dir string, rep *Report) error {
 // checkRepairMemory refuses a repair whose linear system would not fit in
 // MaxRepairMemory, before a byte of it is allocated.
 //
-// solve holds two full sets of m slice buffers at the same time — the
-// right-hand side and the solved slices — and nothing chunks the slice
-// dimension, so the product is unbounded in the set's own terms. Saying so is
-// the honest answer: the alternative is an allocation the kernel kills in the
-// middle of a repair, which leaves the user with a failed download and no
-// explanation.
+// solve holds two full sets of m slice buffers at the same time, the right-hand
+// side and the solved slices, and nothing chunks the slice dimension, so the
+// product is unbounded in the set's own terms. Saying so is the honest answer:
+// the alternative is an allocation the kernel kills in the middle of a repair,
+// which leaves the user with a failed download and no explanation.
 func checkRepairMemory(missing int, sliceSize uint64) error {
 	const buffers = 2
 	need := uint64(missing) * sliceSize * buffers
@@ -341,8 +340,8 @@ func (s *Set) writeRepaired(ctx context.Context, dir string, rep *Report, rebuil
 // target, taking each slice from disk when it survived and from the solved
 // slices when it did not, and returns the temporary file's path. The file is
 // hashed as it is written and the temporary file is removed if the hash does
-// not match what the set declared — so a wrong answer never reaches the name
-// a media player would open.
+// not match what the set declared: so a wrong answer never reaches the name a
+// media player would open.
 func (s *Set) rebuildFile(ctx context.Context, dir string, f *File, st *FileStatus, rebuilt map[int][]byte) (string, error) {
 	target := f.path(dir)
 	tmp, err := os.CreateTemp(filepath.Dir(target), "."+filepath.Base(target)+".par2repair-*")

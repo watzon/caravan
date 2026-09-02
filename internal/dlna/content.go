@@ -16,29 +16,26 @@ import (
 // Well-known object ids. "0" is the root, fixed by the ContentDirectory
 // specification; "-1" is the parent every client expects the root to claim.
 //
-// moviesID, tvID, animeID and adultID name the DEFAULT library of their kind
+// moviesID, tvID, animeID and adultID name the default library of their kind
 // rather than the kind itself: an install may hold several libraries per kind,
-// and every one of them gets a container of its own. The default keeps the
-// legacy id because a television caches object ids for as long as it likes,
-// and an upgrade that renamed the containers everybody already has would empty
-// every cached library on the LAN.
+// each with its own container. The default keeps the legacy id because a
+// television caches object ids indefinitely, and renaming the containers
+// everybody already has would empty every cached library on the LAN.
 const (
 	rootID       = "0"
 	rootParentID = "-1"
 	moviesID     = "movies"
 	tvID         = "tv"
-	// animeID is the Anime shelf. It is the one container that holds two kinds
-	// of child at once — series containers and playable film items — because
-	// the library it stands for does (core.LibraryKindAnime).
+	// animeID is the Anime shelf, the one container that holds both series
+	// containers and playable film items, because core.LibraryKindAnime does.
 	animeID = "anime"
-	// adultID is the Adult shelf (PLAN phase 9 task 6). It reaches the tree
-	// through exactly the machinery the other two do — one row in `libraries`,
-	// one dlna_visible flag — and is absent from the tree for the ordinary
-	// reason that its flag is off, which is how the row is born.
+	// adultID is the Adult shelf. It reaches the tree through the same machinery
+	// the other shelves do: one row in `libraries`, one dlna_visible flag. The
+	// row is born with the flag off.
 	adultID = "adult"
-	// libraryPrefix spells the container id of every OTHER library:
-	// "lib:<libraries.id>". The row's id is the only stable name a library
-	// has — its kind is shared and its name is editable.
+	// libraryPrefix spells the container id of every other library,
+	// "lib:<libraries.id>". The row id is the only stable name a library has:
+	// its kind is shared and its name is editable.
 	libraryPrefix = "lib:"
 )
 
@@ -85,28 +82,24 @@ func libraryTitle(lib core.Library) string {
 	return lib.Name
 }
 
-// Object-id prefixes for the rows behind the tree. Ids are opaque strings to
-// the client, so they encode exactly what it takes to answer a BrowseMetadata
-// on them without a search: a movie item carries its file, an episode item
-// carries both the episode it appears under and the file that plays it,
-// because one file can appear under two episodes (S01E01E02, SPEC §7).
+// Object-id prefixes for the rows behind the tree. Ids are opaque strings to the
+// client, so they encode just enough to answer a BrowseMetadata without a
+// search: a movie item carries its file, an episode item carries both the
+// episode and the file that plays it, because one file can appear under two
+// episodes (S01E01E02, SPEC §7).
 //
-// They deliberately do NOT carry a library. An install may hold several
-// libraries of one kind, and an id that spelled out which one would break the
-// moment an item was moved between them — the row already knows its owner. So
-// the exposure promise is no longer "hidden() is a pure function of the
-// string": it is that every id under a hidden library answers 701, resolved
-// through the OWNING row (a movie item's movie, a series/season/episode
-// object's series). hidden() reads that row before it answers, which is what
-// keeps a client's cached id from outliving the owner's decision to stop
+// They do not carry a library. An id that spelled out which library would break
+// the moment an item moved between them, and the row already knows its owner. So
+// the exposure promise is that every id under a hidden library answers 701,
+// resolved through the owning row; hidden() reads that row before it answers,
+// which keeps a client's cached id from outliving the owner's decision to stop
 // sharing.
 //
-// The adult and anime shelves each carry prefixes of their own rather than
-// reusing "s:" and "e:". Both hold `series` rows, so one id space would make
-// "s:12" ambiguous between shelves whose sharing flags are separate, and the id
-// spaces are an exposure boundary in their own right (see insistShelfSeries).
-// No prefix is a prefix of another, which is what lets the switches below match
-// in any order.
+// The adult and anime shelves carry prefixes of their own rather than reusing
+// "s:" and "e:". Both hold `series` rows, so one id space would make "s:12"
+// ambiguous between shelves whose sharing flags are separate (see
+// insistShelfSeries). No prefix is a prefix of another, so the switches below
+// can match in any order.
 const (
 	movieItemPrefix    = "m:"
 	seriesPrefix       = "s:"
@@ -117,15 +110,14 @@ const (
 	animeEpisodePrefix = "ne:"
 )
 
-// shelf is one library's top-level container, holding series rows: a TV, an
-// Anime or an Adult library. Shelves differ in which library owns them, which
-// series kind they list, how their object ids are spelled, and how a season
-// and an episode are named — and in nothing else, which is why they are one
-// code path parameterised rather than two that would drift.
+// shelf is one library's top-level container, holding series rows: a TV, Anime
+// or Adult library. Shelves differ only in which library owns them, which series
+// kind they list, how their object ids are spelled, and how a season and an
+// episode are named, so they are one parameterised code path.
 type shelf struct {
 	containerID string
 	title       string
-	// library is the `libraries` row this shelf IS: its dlna_visible decides
+	// library is the `libraries` row this shelf is: its dlna_visible decides
 	// whether the shelf is advertised, and its id decides which series hang
 	// under it. There is no adult-specific visibility rule anywhere.
 	library    core.Library
@@ -134,17 +126,16 @@ type shelf struct {
 	seriesPrefix  string
 	episodePrefix string
 	// season names a season container. A television season is "Season 3"; a
-	// site's is its release year, because that is what the season number IS
-	// (PLAN phase 9 task 3).
+	// site's is its release year, because that is what the season number is.
 	season func(core.Season) string
 	// episode names a playable item.
 	episode func(*core.Series, core.Episode) string
 }
 
-// idSpaces are the shelf templates: everything about a shelf that depends
-// on the library's KIND rather than on which library it is. shelfFor stamps a
-// library onto one of them; shelfSpaceOf recovers one from an object id, which
-// is the only thing that can be read out of the string alone.
+// idSpaces are the shelf templates: everything about a shelf that depends on the
+// library's kind rather than on which library it is. shelfFor stamps a library
+// onto one; shelfSpaceOf recovers one from an object id, which is all that can be
+// read out of the string alone.
 var (
 	tvIDSpace = shelf{
 		seriesKind:    core.SeriesKindTV,
@@ -171,9 +162,9 @@ var (
 )
 
 // shelfFor builds the shelf a tv, anime or adult library is browsed through. A
-// movie library is not a shelf — it holds items directly, not series — so it is
-// the false return. An anime library is BOTH: it gets a shelf for its series
-// here, and its films are appended to the same container by libraryChildren.
+// movie library holds items directly rather than series, so it is the false
+// return. An anime library is both: it gets a shelf for its series here, and its
+// films are appended to the same container by libraryChildren.
 func shelfFor(lib core.Library) (shelf, bool) {
 	var sh shelf
 	switch lib.Kind {
@@ -224,10 +215,9 @@ var errNoObject = errors.New("dlna: no such object")
 // urls builds the absolute URLs a DIDL document hands the client.
 //
 // The origin comes from the request's Host header rather than from
-// configuration: the client reached us at some address that works for it — the
-// LAN IP from SSDP, a hostname, a reverse proxy — and every URL we hand back
-// has to be on that same address or the TV will fetch from somewhere it cannot
-// reach.
+// configuration. The client reached us at an address that works for it, and
+// every URL handed back has to be on that same address or the TV will fetch from
+// somewhere it cannot reach.
 type urls struct {
 	origin string
 }
@@ -255,14 +245,13 @@ func (u urls) art(rel string) string {
 }
 
 // visibility is the resolved answer to "may this library's content be
-// advertised", for every library at once (PLAN phase 8 task 6). A library with
-// dlna_visible off is not advertised at all: its container is absent from the
-// root and every id beneath it resolves to "no such object", so a client
-// cannot keep browsing a shelf the owner took down by holding on to a cached
-// id.
+// advertised", for every library at once. A library with dlna_visible off is not
+// advertised at all: its container is absent from the root and every id beneath
+// it resolves to "no such object", so a cached id cannot keep browsing a shelf
+// the owner took down.
 //
-// The same policy gates direct media URLs, so a renderer cannot keep playing
-// files from a shelf the owner has hidden by holding on to a cached URL.
+// The same policy gates direct media URLs, so a cached URL cannot keep playing
+// files from a hidden shelf.
 type visibility struct {
 	// libraries is every library in ListLibraries order, so the root advertises
 	// its containers in a stable, seeded-first order.
@@ -270,11 +259,10 @@ type visibility struct {
 	byID      map[int64]bool
 }
 
-// library answers for one item's owner, by id: since migration 0011 every movie
-// and every series names its shelf outright. A libID naming a row that is gone —
-// or the zero an unowned file resolves to — answers false, which is fail-closed
-// in the one direction that matters here: such an item hangs under no container,
-// so no id of it may be served either.
+// library answers for one item's owner, by id: every movie and every series
+// names its shelf outright. A libID naming a row that is gone, or the zero an
+// unowned file resolves to, answers false. That is fail-closed: such an item
+// hangs under no container, so no id of it may be served.
 func (v visibility) library(libID int64) bool {
 	return v.byID[libID]
 }
@@ -292,22 +280,18 @@ func (v visibility) visible() []core.Library {
 
 // visibility resolves every library's advertised state.
 //
-// The rule is `active && dlna_visible`, per library and for every kind. The two
-// flags answer different questions and both have to be yes: dlna_visible is the
-// owner's sharing decision, active is whether the library exists for anybody at
-// all. Switching a library off deletes nothing (store.SetLibraryActive), so a
-// dlna_visible survives it — and a flag left on would keep the shelf on every
-// television on the LAN while the API, the SPA, the calendar and the wanted list
-// had all gone quiet. "Off" has to mean off on the one surface with no accounts,
-// so the AND lives here rather than as a write to the row: the sharing decision
-// is remembered and simply does not apply while the library is dormant, which is
-// what lets switching it back on restore the shelf exactly as it was left.
+// The rule is `active && dlna_visible`, per library and for every kind.
+// dlna_visible is the owner's sharing decision; active is whether the library
+// exists for anybody at all. Switching a library off deletes nothing
+// (store.SetLibraryActive), so dlna_visible survives it, and a flag left on would
+// keep the shelf on every television on the LAN while every other surface had
+// gone quiet. Keeping the AND here rather than writing the row is what lets
+// switching the library back on restore the shelf exactly as it was left.
 //
-// `restricted` deliberately has NO say here. DLNA has no accounts, so "these two
-// people" is inexpressible on it; store.SetLibraryAccess resolves that by
-// clearing dlna_visible in the same write that restricts. Re-applying the
-// restriction as a condition would make re-sharing impossible instead of
-// deliberate.
+// `restricted` has no say here. DLNA has no accounts, so "these two people" is
+// inexpressible on it; store.SetLibraryAccess resolves that by clearing
+// dlna_visible in the same write that restricts. Re-applying the restriction as a
+// condition would make re-sharing impossible instead of deliberate.
 func (s *Service) visibility(ctx context.Context) (visibility, error) {
 	libraries, err := s.st.ListLibraries(ctx)
 	if err != nil {
@@ -329,10 +313,9 @@ func (s *Service) visibility(ctx context.Context) (visibility, error) {
 // that name nothing, neither of which belongs to a single library.
 func (s *Service) objectLibrary(ctx context.Context, objectID string) (libID int64, kind string, owned bool, err error) {
 	if kind, ok := legacyContainerKind[objectID]; ok {
-		// A legacy container id names a KIND rather than a row — "movies" is the
-		// id every client already has — so it is resolved to that kind's default
-		// library here. This is the one by-kind lookup the tree still makes, and
-		// it is about the ID SPACE rather than about any row: item rows all name
+		// A legacy container id names a kind rather than a row, so it resolves
+		// to that kind's default library here. This is the one by-kind lookup
+		// the tree still makes, and it is about the id space: item rows all name
 		// their shelf outright.
 		lib, err := s.st.GetDefaultLibrary(ctx, kind)
 		if err != nil {
@@ -405,11 +388,9 @@ func (s *Service) hidden(ctx context.Context, objectID string) (bool, error) {
 	return !v.library(libID), nil
 }
 
-// libraryOf resolves the library row an item names. Every movie and every
-// series names one since migration 0011, so this is a plain read: a library
-// that is gone — and the zero an item can no longer carry — is errNoObject,
-// because such an item hangs under no container and there is no container id to
-// give it.
+// libraryOf resolves the library row an item names. Every movie and every series
+// names one, so this is a plain read. A library that is gone is errNoObject,
+// because such an item hangs under no container.
 func (s *Service) libraryOf(ctx context.Context, libraryID int64) (*core.Library, error) {
 	lib, err := s.st.GetLibrary(ctx, libraryID)
 	if err != nil {
@@ -448,10 +429,10 @@ func (s *Service) containerLibrary(ctx context.Context, objectID string) (*core.
 	return lib, true, nil
 }
 
-// shelfOfSeries resolves the shelf one series row is browsed through: its OWN
-// library's. Computing it from the row rather than from the id is what keeps a
-// series container's parent id, and its episodes' parent ids, pointing at the
-// container the series actually hangs under.
+// shelfOfSeries resolves the shelf one series row is browsed through, its own
+// library's. Computing it from the row rather than from the id keeps a series
+// container's parent id, and its episodes' parent ids, pointing at the container
+// the series actually hangs under.
 func (s *Service) shelfOfSeries(ctx context.Context, space shelf, seriesID int64) (shelf, *core.Series, error) {
 	sr, err := s.insistShelfSeries(ctx, space, seriesID)
 	if err != nil {
@@ -479,8 +460,8 @@ func (s *Service) children(ctx context.Context, u urls, objectID string) (*didlL
 		return s.rootChildren(ctx, u)
 	}
 	if strings.HasPrefix(objectID, movieItemPrefix) {
-		// Items have no children. An empty document is the correct answer, not
-		// an error: clients probe leaves this way.
+		// Items have no children, and clients probe leaves this way, so an empty
+		// document is the correct answer.
 		return newDIDL(), nil
 	}
 	lib, isContainer, err := s.containerLibrary(ctx, objectID)
@@ -592,12 +573,10 @@ func (s *Service) friendlyName(ctx context.Context) (string, error) {
 
 // rootChildren advertises one container per visible library.
 //
-// One loop, so every library is advertised by the same rule and by nothing
-// else. There is no branch here that mentions the adult module: if a library
-// row is active and says dlna_visible, it is on the shelf; if it does not, it
-// is absent — and an adult row is created with the flag off, so creating one
-// changes nothing about what the LAN can see until the owner makes that second
-// decision.
+// One loop, so every library is advertised by the same rule. No branch here
+// mentions the adult module: a library row that is active and dlna_visible is on
+// the shelf, and one that is not is absent. An adult row is created with the flag
+// off, so creating one changes nothing about what the LAN can see.
 func (s *Service) rootChildren(ctx context.Context, u urls) (*didlLite, error) {
 	v, err := s.visibility(ctx)
 	if err != nil {
@@ -618,14 +597,14 @@ func (s *Service) rootChildren(ctx context.Context, u urls) (*didlLite, error) {
 	return out, nil
 }
 
-// libraryChildren is what one library's top-level container holds, whatever
-// kind it is. It is one function so the root's child COUNT and the container's
-// own listing can never disagree — they are the same call.
+// libraryChildren is what one library's top-level container holds, whatever kind
+// it is. One function, so the root's child count and the container's own listing
+// cannot disagree.
 //
-// A movie library holds items, a tv or adult library holds series containers,
-// and an anime library holds both: its series first, then its films, which is
-// the reading order a remote control walks. A library of a kind this package
-// does not browse answers nil, and the root skips it.
+// A movie library holds items, a tv or adult library holds series containers, and
+// an anime library holds both: series first, then films, which is the reading
+// order a remote control walks. A library of a kind this package does not browse
+// answers nil, and the root skips it.
 func (s *Service) libraryChildren(ctx context.Context, u urls, lib core.Library) (*didlLite, error) {
 	if lib.Kind == core.LibraryKindMovie {
 		return s.movieChildren(ctx, u, lib)
@@ -649,17 +628,15 @@ func (s *Service) libraryChildren(ctx context.Context, u urls, lib core.Library)
 	return out, nil
 }
 
-// movieChildren lists one item per movie file in ONE movie library.
+// movieChildren lists one item per movie file in one movie library.
 //
-// Movies with no file are absent: this is a playback surface, and a container
-// entry that cannot be played is a dead end on a remote control. A movie that
-// somehow has two files gets two entries, disambiguated by filename, rather
-// than one entry that silently picks a winner.
+// Movies with no file are absent, because a container entry that cannot be played
+// is a dead end on a remote control. A movie with two files gets two entries,
+// disambiguated by filename, rather than one entry that picks a winner.
 //
-// The ownership filter is an exposure boundary, not a tidy-up: a second movie
-// library carries its own dlna_visible, and an unfiltered listing would hang
-// its films under the default library's container — where that flag has no
-// say, because it is not that library's container.
+// The ownership filter is an exposure boundary: a second movie library carries its
+// own dlna_visible, and an unfiltered listing would hang its films under the
+// default library's container, where that flag has no say.
 func (s *Service) movieChildren(ctx context.Context, u urls, lib core.Library) (*didlLite, error) {
 	movies, err := s.st.ListMovies(ctx)
 	if err != nil {
@@ -700,17 +677,15 @@ func movieItem(u urls, parentID string, m core.Movie, f core.MediaFile, disambig
 
 // seriesChildren lists one shelf's series as containers of seasons.
 //
-// Unlike movies these are not filtered by file presence: a series is a shelf,
-// and answering the count with a query per series would make browsing the TV
-// folder cost a query per show. An empty season list is a visible, honest
-// "nothing here yet".
+// Unlike movies these are not filtered by file presence: answering the count
+// would cost a query per show, and an empty season list is an honest "nothing
+// here yet".
 //
-// Both filters shelfSeries applies are exposure boundaries, not tidy-ups. A
-// site is stored as a series (PLAN phase 9 task 3), so an unfiltered list would
-// hang the adult library inside the TELEVISION container — where the adult
-// library's own dlna_visible flag has no say, because it is not that library's
-// container — and a second television library's shows would ride the default
-// library's container under the default's flag for the same reason.
+// Both filters shelfSeries applies are exposure boundaries. A site is stored as a
+// series, so an unfiltered list would hang the adult library inside the
+// television container, where the adult library's own dlna_visible flag has no
+// say. A second television library's shows would ride the default library's flag
+// for the same reason.
 func (s *Service) seriesChildren(ctx context.Context, u urls, sh shelf) (*didlLite, error) {
 	all, err := s.shelfSeries(ctx, sh)
 	if err != nil {
@@ -817,11 +792,10 @@ func episodeItem(u urls, sh shelf, sr *core.Series, e core.Episode, f core.Media
 // insistShelfSeries reads a series and refuses one that belongs to a different
 // shelf.
 //
-// It is the id space's integrity check, and it is an exposure boundary rather
-// than tidiness: "s:12" and "as:12" address the SAME row, so without this a
-// client could reach a site through the television shelf's prefix — whose
-// dlna_visible flag says nothing about the adult library — and the visibility
-// decision the owner made would be bypassed by a two-character edit to a URL.
+// It is an exposure boundary, not tidiness: "s:12" and "as:12" address the same
+// row, so without this a client could reach a site through the television shelf's
+// prefix, whose dlna_visible flag says nothing about the adult library. The
+// owner's visibility decision would fall to a two-character edit of a URL.
 func (s *Service) insistShelfSeries(ctx context.Context, sh shelf, seriesID int64) (*core.Series, error) {
 	sr, err := s.st.GetSeries(ctx, seriesID)
 	if err != nil {
@@ -862,9 +836,9 @@ func (s *Service) seriesMetadata(ctx context.Context, u urls, space shelf, objec
 }
 
 // movieOfItem reads the file and the movie behind a "m:<fileID>" object id. A
-// file with no movie — an episode file reached through the movie prefix —
-// fails on the GetMovie(0) lookup, which is the movie id space's integrity
-// check, the counterpart of insistShelfSeries.
+// file with no movie, such as an episode file reached through the movie prefix,
+// fails on the GetMovie(0) lookup. That is the movie id space's integrity check,
+// the counterpart of insistShelfSeries.
 func (s *Service) movieOfItem(ctx context.Context, objectID string) (*core.Movie, *core.MediaFile, error) {
 	fileID, err := strconv.ParseInt(strings.TrimPrefix(objectID, movieItemPrefix), 10, 64)
 	if err != nil {
@@ -886,7 +860,7 @@ func (s *Service) movieItemMetadata(ctx context.Context, u urls, objectID string
 	if err != nil {
 		return nil, err
 	}
-	// The parent is the movie's OWN library's container, so a BrowseMetadata
+	// The parent is the movie's own library's container, so a BrowseMetadata
 	// answers with the container the item was actually browsed under.
 	lib, err := s.libraryOf(ctx, m.LibraryID)
 	if err != nil {
@@ -1003,12 +977,11 @@ func seasonTitle(season core.Season) string {
 	return fmt.Sprintf("Season %d", season.Number)
 }
 
-// episodeTitle names an episode item the way the library names its file:
-// series first, then the code, then the episode's own title. The series name
-// is not decoration — clients that fetch their own metadata (Infuse's folder
-// browsing, for one) parse the item title for it, and a bare "S01E01 - …" is
-// unmatchable. Within a season folder everything shares the prefix, so lists
-// still sort by the code.
+// episodeTitle names an episode item the way the library names its file: series
+// first, then the code, then the episode's own title. The series name is not
+// decoration: clients that fetch their own metadata parse the item title for it,
+// and a bare "S01E01 - ..." is unmatchable. Within a season folder everything
+// shares the prefix, so lists still sort by the code.
 func episodeTitle(sr *core.Series, e core.Episode) string {
 	label := fmt.Sprintf("%s - S%02dE%02d", titleWithYear(sr.Title, sr.Year), e.SeasonNumber, e.EpisodeNumber)
 	if e.Title != "" {
@@ -1017,18 +990,17 @@ func episodeTitle(sr *core.Series, e core.Episode) string {
 	return label
 }
 
-// yearTitle names a site's season container. A site's season number IS its
-// release year (PLAN phase 9 task 3), so "Season 2022" would be nonsense and
-// "Specials" — the number-zero case television has — cannot arise: a scene with
-// no release date is never filed at all.
+// yearTitle names a site's season container. A site's season number is its
+// release year, so "Season 2022" would be nonsense, and the number-zero
+// "Specials" case cannot arise because a scene with no release date is never
+// filed at all.
 func yearTitle(season core.Season) string {
 	return strconv.Itoa(season.Number)
 }
 
 // sceneTitle names a scene item after its release date rather than an SxxEyy
-// code, matching the filename the organizer writes (internal/library: a
-// "S2022E01" tag is unreadable by the release parser, whose season is one or
-// two digits). What a television shows and what is on disk therefore agree.
+// code, matching the filename the organizer writes. A "S2022E01" tag is
+// unreadable by the release parser, whose season is one or two digits.
 func sceneTitle(sr *core.Series, e core.Episode) string {
 	label := sr.Title
 	if !e.AirDate.IsZero() {

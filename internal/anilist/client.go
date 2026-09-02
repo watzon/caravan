@@ -1,8 +1,8 @@
 // Package anilist is Caravan's client for the AniList GraphQL API, the metadata
 // provider behind anime libraries.
 //
-// *Client implements core.MetadataProvider, so everything above it — the
-// scanner, the organizer, the add-series screen — talks to an interface and
+// *Client implements core.MetadataProvider, so everything above it, the
+// scanner, the organizer, the add-series screen, talks to an interface and
 // tests without a network. The client itself is deliberately thin, mirroring
 // internal/tmdb and internal/stashbox: no caching, one retry. AniList responses
 // are cached in sqlite by the library layer, which is where "rebuildable cache"
@@ -12,16 +12,17 @@
 //
 // There is no credential. AniList serves anonymous reads, so nothing here
 // authenticates and nothing here can be "unauthorized" in the sense
-// core.ErrMetadataUnauthorized means — that sentinel drives the "enter your API
-// key" UI, and offering it for a provider with no key to enter would send people
-// to fix something that does not exist. A rejected request is a plain APIError.
+// core.ErrMetadataUnauthorized means: that sentinel drives the "enter your API
+// key" UI, and offering it for a provider with no key to enter would send
+// people to fix something that does not exist. A rejected request is a plain
+// APIError.
 //
 // There is a throttle. AniList's budget is per-minute and small (roughly 30
 // requests/minute while degraded, 90 normally) and, unlike TMDB, one logical
 // lookup is not one request: GetSeries for a long-running show pages the airing
 // schedule, so a single series can cost several. A refresh sweep over a few
-// hundred anime would trip the limit on the first minute without a floor between
-// sends, so this client keeps one — see minInterval.
+// hundred anime would trip the limit on the first minute without a floor
+// between sends, so this client keeps one: see minInterval.
 package anilist
 
 import (
@@ -49,9 +50,10 @@ const (
 	// than a literal in one.
 	ProviderID = "anilist"
 
-	// DefaultEndpoint is AniList's GraphQL endpoint. Unlike stash-box, AniList is
-	// a service rather than a protocol — there is one endpoint and no dialects —
-	// so this is a default rather than a preset, overridden only by tests.
+	// DefaultEndpoint is AniList's GraphQL endpoint. Unlike stash-box, AniList
+	// is a service rather than a protocol, there is one endpoint and no
+	// dialects, so this is a default rather than a preset, overridden only by
+	// tests.
 	DefaultEndpoint = "https://graphql.anilist.co"
 )
 
@@ -67,8 +69,8 @@ const (
 	// defaultMinInterval is the floor between two sends. 750ms is ~80
 	// requests/minute: under AniList's healthy budget with room for the
 	// occasional burst, and comfortably under the degraded one once the
-	// pre-emptive wait below has kicked in. It is what keeps a refresh sweep —
-	// several requests per series — inside the budget without any coordination
+	// pre-emptive wait below has kicked in. It is what keeps a refresh sweep,
+	// several requests per series, inside the budget without any coordination
 	// above this client.
 	defaultMinInterval = 750 * time.Millisecond
 
@@ -154,7 +156,7 @@ func (e *APIError) Error() string {
 // errors array, and a reply that says nothing still has its status.
 //
 // Neither 401 nor 403 maps anywhere. This client sends no credential, so a
-// rejected request means the endpoint is refusing everyone — an outage, not a
+// rejected request means the endpoint is refusing everyone: an outage, not a
 // key to go and fix.
 func (e *APIError) Unwrap() error {
 	switch e.Status {
@@ -179,7 +181,7 @@ type Client struct {
 	Endpoint string
 
 	hc *http.Client
-	// sleep is how every wait in this client is taken — the throttle floor, the
+	// sleep is how every wait in this client is taken: the throttle floor, the
 	// pre-emptive rate-limit wait, and the retry after a 429. It is a field so
 	// tests can observe a wait without taking it.
 	sleep func(ctx context.Context, d time.Duration) error
@@ -194,7 +196,7 @@ type Client struct {
 	// floor means nothing.
 	mu sync.Mutex
 	// lastSend is the instant the most recently reserved request is allowed to
-	// go out — a reservation, not a record of the past, so concurrent callers
+	// go out: a reservation, not a record of the past, so concurrent callers
 	// queue behind each other instead of all waking at the same moment.
 	lastSend time.Time
 	// notBefore holds the window reset AniList asked us to wait for. It is a

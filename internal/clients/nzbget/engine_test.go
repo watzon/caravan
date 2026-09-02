@@ -32,9 +32,9 @@ func TestGroupStateMapping(t *testing.T) {
 		{statusDownload, core.DownloadDownloading},
 		{statusFetching, core.DownloadDownloading},
 
-		// Post-processing: NZBGet is still touching the files, so importing
-		// now would copy a moving target. A par repair that *fails* never
-		// appears here — it lands in the history as FAILURE/PAR.
+		// Post-processing: NZBGet is still touching the files, so importing now
+		// would copy a moving target. A par repair that *fails* never appears
+		// here: it lands in the history as FAILURE/PAR.
 		{statusPPQueued, core.DownloadDownloading},
 		{statusLoadingPars, core.DownloadDownloading},
 		{statusVerifyingSources, core.DownloadDownloading},
@@ -153,7 +153,7 @@ func TestGroupStatusConversion(t *testing.T) {
 	}
 
 	// A queued group is not the one transferring, so the server-wide rate is
-	// not its rate — otherwise a queue of ten all appear to move at once.
+	// not its rate: otherwise a queue of ten all appear to move at once.
 	queued := groupStatus(groups[1], 5242880)
 	if queued.DownRate != 0 || queued.ETASeconds != -1 {
 		t.Fatalf("queued = %+v, want no rate and no estimate", queued)

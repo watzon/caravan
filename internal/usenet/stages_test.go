@@ -94,9 +94,9 @@ func TestEngineAcceptsAFileThatMatchesThePostersChecksum(t *testing.T) {
 	waitForState(t, e, id, core.DownloadCompleted)
 }
 
-// stagePar2Corpus posts the par2 package's par2cmdline-generated set — its
-// three source files and its recovery volumes — plus whatever extra files the
-// caller wants, which the set deliberately says nothing about.
+// stagePar2Corpus posts the par2 package's par2cmdline-generated set, its three
+// source files and its recovery volumes, plus whatever extra files the caller
+// wants, which the set deliberately says nothing about.
 func stagePar2Corpus(t *testing.T, srv *nntptest.Server, extra map[string][]byte) release {
 	t.Helper()
 
@@ -163,8 +163,8 @@ func TestEngineRepairsAHolePar2Covers(t *testing.T) {
 	}
 }
 
-// A failed download is not a dead end. The failure here is at the last stage —
-// the release unpacks to a file that is already sitting in the directory — and
+// A failed download is not a dead end. The failure here is at the last stage,
+// the release unpacks to a file that is already sitting in the directory, and
 // retrying after clearing the obstacle has to finish the download without
 // asking the provider for a single article it already has.
 func TestEngineRetryResumesFromTheStageThatFailed(t *testing.T) {

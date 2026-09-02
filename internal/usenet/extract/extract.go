@@ -1,43 +1,33 @@
 // Package extract unpacks a completed Usenet download in place: it finds the
 // rar or zip set the release was posted as, writes the files out beside the
 // archives, and then sweeps the archives and par2 files away so nothing but
-// content reaches the import stage (SPEC §5.1, PLAN phase 7 task 5).
+// content reaches the import stage (SPEC §5.1).
 //
 // It runs after par2 verify/repair, on a directory that is believed to be
 // complete and correct. Everything it looks at is top level: releases are
 // posted flat, and an archive nested in a subdirectory is left alone rather
 // than guessed at.
 //
-// # Fail loudly
-//
 // Extraction is all-or-nothing. Entries are written into a staging directory
-// inside the download directory and only moved into place once every one of
-// them has been written and checked, so an archive that turns out to be
-// truncated, corrupt, or encrypted leaves the directory exactly as it was
-// found and returns a typed error. Nothing is ever half-unpacked and then
-// imported: a release that fails here should fail visibly in the queue, not
-// quietly produce a 40%-complete video file.
+// inside the download directory and only moved into place once every one has been
+// written and checked, so an archive that turns out to be truncated, corrupt, or
+// encrypted leaves the directory as it was found and returns a typed error.
+// Nothing is ever half-unpacked and then imported.
 //
-// The cleanup is the other half of that rule and runs in the other order: the
-// archive volumes and par2 files are deleted only after a verified extract.
-// If extraction fails the archives are still there, which is what a retry —
-// or a human — needs.
-//
-// # Hostile input
+// The cleanup runs in the other order: the archive volumes and par2 files are
+// deleted only after a verified extract, so a failed extraction leaves the
+// archives in place for a retry.
 //
 // An archive from a public news server is attacker-controlled. Entry names are
-// normalised and any that would escape the download directory (absolute paths,
-// "..", drive letters) are rejected outright rather than clamped, and so are
-// symlinks and other non-regular entries. Rejecting the archive rather than
-// skipping the entry is deliberate: an archive that tries this is not one to
-// extract the rest of.
-//
-// # Obfuscated names
+// normalised, and any that would escape the download directory (absolute paths,
+// "..", drive letters) are rejected outright rather than clamped, as are symlinks
+// and other non-regular entries. The whole archive is rejected rather than the
+// entry: an archive that tries this is not one to extract the rest of.
 //
 // Files come out under whatever name the archive gives them, however useless.
 // De-obfuscation is the release parser's job and the stuck-import queue is the
-// designed fallback (PLAN phase 7 task 5); this package does not rename, sort,
-// or second-guess anything it unpacks.
+// designed fallback. This package does not rename, sort, or second-guess
+// anything it unpacks.
 package extract
 
 import (
@@ -65,9 +55,9 @@ var (
 	// is produced and the archives are left in place.
 	ErrEncrypted = errors.New("extract: archive is encrypted")
 
-	// ErrIncomplete means a multi-volume set is missing volumes — a gap in
-	// the .partNN.rar numbering, or a .r00 with no .rar to start it. Better
-	// to say which volume is missing than to extract a prefix of the release.
+	// ErrIncomplete means a multi-volume set is missing volumes: a gap in the
+	// .partNN.rar numbering, or a .r00 with no .rar to start it. Better to say
+	// which volume is missing than to extract a prefix of the release.
 	ErrIncomplete = errors.New("extract: archive set is missing volumes")
 
 	// ErrExists means an extracted entry collides with a file already in the
@@ -240,7 +230,7 @@ func moveIntoPlace(staging, dir string) error {
 
 // cleanup deletes the archive volumes and every par2 file in dir. It runs only
 // after a verified extract; the par2 files go with the archives because their
-// only job — proving the archives arrived intact — is finished, and neither is
+// only job, proving the archives arrived intact, is finished, and neither is
 // something the library should ever see.
 func cleanup(dir string, archives []string) ([]string, error) {
 	var removed []string

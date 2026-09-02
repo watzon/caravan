@@ -11,7 +11,7 @@ import (
 // false when another process already holds it.
 //
 // flock is associated with the open file description, so the lock is released
-// by closing the handle and — crucially for a drive that was pulled — by the
+// by closing the handle and, crucially for a drive that was pulled, by the
 // kernel when the process dies. There is no stale lock to clean up, which is
 // exactly what a PID file could not promise.
 func lockFile(f *os.File) (bool, error) {

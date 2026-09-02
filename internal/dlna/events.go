@@ -1,14 +1,14 @@
 package dlna
 
-// GENA eventing (UPnP Device Architecture, chapter 4) — the minimum a
+// GENA eventing (UPnP Device Architecture, chapter 4): the minimum a
 // spec-correct MediaServer owes. ContentDirectory's SystemUpdateID and
-// ConnectionManager's connection ids are *evented* state variables, and
-// several client stacks SUBSCRIBE before they browse and treat a failed
-// subscription as a dead service: the symptom of an empty eventSubURL is a
-// device that is recognized on the network but whose library shows empty.
+// ConnectionManager's connection ids are *evented* state variables, and several
+// client stacks SUBSCRIBE before they browse and treat a failed subscription as
+// a dead service: the symptom of an empty eventSubURL is a device that is
+// recognized on the network but whose library shows empty.
 //
-// Caravan's evented state moves rarely — SystemUpdateID advances only when a
-// library is added to or removed from the advertised tree — so eventing here is
+// Caravan's evented state moves rarely, SystemUpdateID advances only when a
+// library is added to or removed from the advertised tree, so eventing here is
 // exactly: accept the subscription, deliver the initial NOTIFY the spec
 // requires with the current state, honor renewals and expiry, and send nothing
 // further. A client that wants the newer value polls GetSystemUpdateID, which
@@ -212,9 +212,9 @@ func callbackURL(header string) string {
 }
 
 // sendInitialEvent delivers the SEQ-0 NOTIFY that carries the current value of
-// every evented variable — the one event the spec requires. Failures are
-// logged and dropped: the subscription stands either way, and a client that
-// cannot receive its callback has a problem no retry of ours fixes.
+// every evented variable: the one event the spec requires. Failures are logged
+// and dropped: the subscription stands either way, and a client that cannot
+// receive its callback has a problem no retry of ours fixes.
 func (s *Service) sendInitialEvent(sub *subscription) {
 	// The subscription outlives the request that created it, so this runs on a
 	// background context rather than a cancelled one.

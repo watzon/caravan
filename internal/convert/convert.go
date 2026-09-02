@@ -3,19 +3,19 @@
 //
 // Two rules shape everything here.
 //
-// Remux first. A container swap is a stream copy — seconds, byte-identical
-// video — so it is what runs whenever the streams themselves are fine. A full
+// Remux first. A container swap is a stream copy, seconds, byte-identical
+// video, so it is what runs whenever the streams themselves are fine. A full
 // transcode is slow and lossy, so it is the explicit fallback and never the
 // first attempt. Which one applies is not a second opinion: it is the
 // needs-remux/incompatible split core.TVProfile.Check already draws.
 //
 // The original is the last thing to go. ffmpeg writes a temporary file beside
-// the original (same directory, therefore same filesystem, therefore the
-// rename is atomic-ish), the output is probed and measured against the source,
-// and only then does the library row move and the old file get removed. A
-// crash at any point leaves a stale temp file and a conversion still marked
-// running, which the next attempt cleans up and redoes — the same
-// at-least-once contract as every other job (SPEC §7).
+// the original (same directory, therefore same filesystem, therefore the rename
+// is atomic-ish), the output is probed and measured against the source, and
+// only then does the library row move and the old file get removed. A crash at
+// any point leaves a stale temp file and a conversion still marked running,
+// which the next attempt cleans up and redoes: the same at-least-once contract
+// as every other job (SPEC §7).
 package convert
 
 import (
@@ -355,8 +355,8 @@ func (s *Service) run(ctx context.Context, conv *core.Conversion, file *core.Med
 	targetAbs := abs(root, targetRel)
 	// A same-container transcode writes over its own source. Anything else must
 	// land on empty ground: os.Rename replaces its destination silently, so a
-	// second file that happens to sit at the target path — a movie with both an
-	// .mkv and an .mp4, which the library and the DLNA browse both support —
+	// second file that happens to sit at the target path, a movie with both an
+	// .mkv and an .mp4, which the library and the DLNA browse both support,
 	// would be destroyed, along with the row and the episode links behind it.
 	if targetRel != file.Path {
 		switch _, err := os.Stat(targetAbs); {
@@ -413,7 +413,7 @@ func (s *Service) run(ctx context.Context, conv *core.Conversion, file *core.Med
 // re-tagged from the output's own probe rather than from the plan's intent: the
 // file on disk is the truth, and a row that still claims the source's tags is a
 // row the compatibility badge keeps condemning. A downscale is the case that
-// makes this load-bearing — a 2160p row on a 1080p file would offer the Convert
+// makes this load-bearing: a 2160p row on a 1080p file would offer the Convert
 // button forever, on a file that is already compatible.
 func convertedTags(plan Plan, file *core.MediaFile, out Probe) (quality, codec, audio string) {
 	quality, codec, audio = file.Quality, file.Codec, file.Audio

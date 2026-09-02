@@ -179,9 +179,10 @@ func TestQuerySendsOperationAndVariables(t *testing.T) {
 	}
 }
 
-// A rejected credential is not a condition this provider can be in — see the
-// package comment — so nothing here may claim it is: core.ErrMetadataUnauthorized
-// is what puts "your API key is wrong" on screen, and AniList has no key to fix.
+// A rejected credential is not a condition this provider can be in, see the
+// package comment, so nothing here may claim it is:
+// core.ErrMetadataUnauthorized is what puts "your API key is wrong" on screen,
+// and AniList has no key to fix.
 func TestNoErrorClaimsARejectedCredential(t *testing.T) {
 	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
 		c, _ := newStub(t, map[string][]response{
@@ -325,8 +326,8 @@ func TestRateLimitRetryHonorsContext(t *testing.T) {
 	}
 }
 
-// The floor between sends is what keeps a refresh sweep — several requests per
-// series — inside AniList's per-minute budget.
+// The floor between sends is what keeps a refresh sweep, several requests per
+// series, inside AniList's per-minute budget.
 func TestMinIntervalSpacesConsecutiveRequests(t *testing.T) {
 	c, s := newStub(t, map[string][]response{
 		opSearchSeries: {okJSON(t, "search_anime.json")},
@@ -432,7 +433,7 @@ func TestSearchMoviesFiltersToFilmsAndMaps(t *testing.T) {
 		t.Fatalf("SearchMovies returned %d results, want 1", len(movies))
 	}
 	got := movies[0]
-	// English is null on this record, so the romaji is the title — and with the
+	// English is null on this record, so the romaji is the title: and with the
 	// title taken from romaji the original falls through to the native one.
 	want := core.MovieMeta{
 		Provider: ProviderID, ProviderRef: "21519",
@@ -490,7 +491,7 @@ func TestGetMovieRefusesANonFilmRecord(t *testing.T) {
 }
 
 // A foreign ref is a wiring bug, and it must not cost a rate-limit token to
-// discover — the same rule GetSeries follows.
+// discover: the same rule GetSeries follows.
 func TestGetMovieRejectsForeignRefsWithoutAsking(t *testing.T) {
 	c, s := newStub(t, nil)
 
@@ -502,8 +503,8 @@ func TestGetMovieRejectsForeignRefsWithoutAsking(t *testing.T) {
 	}
 }
 
-// A ref this client cannot read is a wiring bug in Caravan — another provider's
-// ref reached an AniList client — not a title AniList is missing. It must NOT
+// A ref this client cannot read is a wiring bug in Caravan, another provider's
+// ref reached an AniList client, not a title AniList is missing. It must NOT
 // read as ErrNotFound, which upstream parks a file as "unmatched" and moves on,
 // and it must not cost a rate-limit token to discover.
 func TestGetSeriesRejectsForeignRefsWithoutAsking(t *testing.T) {

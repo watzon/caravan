@@ -58,8 +58,8 @@ func stateOf(t *testing.T, e *Engine, id core.DownloadID) core.DownloadState {
 }
 
 // The complaint this feature answers: every added download used to start at
-// once and they starved each other. With a cap of two, the third add is a
-// queue entry — visible, ordered, and not touching the news server.
+// once and they starved each other. With a cap of two, the third add is a queue
+// entry: visible, ordered, and not touching the news server.
 func TestUsenetEngineHoldsAddsOverTheCap(t *testing.T) {
 	nntpSrv := startFakeNNTP(t)
 	newGate(t, nntpSrv)
@@ -81,7 +81,7 @@ func TestUsenetEngineHoldsAddsOverTheCap(t *testing.T) {
 	if got := stateOf(t, e, ids[2]); got != core.DownloadQueued {
 		t.Fatalf("third download is %s, want queued behind the cap", got)
 	}
-	// Not merely reported as queued — it has no worker and has asked the news
+	// Not merely reported as queued: it has no worker and has asked the news
 	// server for nothing. A "queue" that still downloads is the bug.
 	e.mu.Lock()
 	third := e.items[ids[2]]

@@ -1,11 +1,11 @@
-// Package tmdb is Caravan's client for The Movie Database v3 API, the
-// metadata provider behind library matching (SPEC §4).
+// Package tmdb is Caravan's client for The Movie Database v3 API, the metadata
+// provider behind library matching (SPEC §4).
 //
-// *Client implements core.MetadataProvider, so everything above it — the
-// scanner, the organizer, the add-movie screen — talks to an interface and
-// tests without a network. The client itself is deliberately thin: no caching,
-// no rate limiter, one retry. TMDB responses are cached in sqlite by the
-// library layer, which is where "rebuildable cache" lives (SPEC §1.2).
+// *Client implements core.MetadataProvider, so everything above it, the
+// scanner, the organizer, the add-movie screen, talks to an interface and tests
+// without a network. The client itself is deliberately thin: no caching, no
+// rate limiter, one retry. TMDB responses are cached in sqlite by the library
+// layer, which is where "rebuildable cache" lives (SPEC §1.2).
 package tmdb
 
 import (
@@ -55,8 +55,8 @@ const (
 var (
 	// ErrUnauthorized means the API key is missing, wrong, or suspended. It
 	// wraps core.ErrMetadataUnauthorized so a caller that only wants to know
-	// "the credential was rejected" — the credential-health model in
-	// internal/api — never has to import this package.
+	// "the credential was rejected", the credential-health model in
+	// internal/api, never has to import this package.
 	ErrUnauthorized = fmt.Errorf("tmdb: unauthorized: %w", core.ErrMetadataUnauthorized)
 	// ErrNotFound means TMDB has no record with that id.
 	ErrNotFound = errors.New("tmdb: not found")
@@ -150,11 +150,11 @@ func New(apiKey string, hc *http.Client) *Client {
 }
 
 // Test proves the API key against TMDB, mirroring the indexer and download
-// client "Test" buttons (PLAN phase 10 task 4).
+// client "Test" buttons.
 //
 // /configuration is the cheapest authenticated endpoint TMDB has: it takes no
 // parameters, returns a small fixed document, and answers 401 for a key it does
-// not like. Nothing in the reply is used — the question is only whether the
+// not like. Nothing in the reply is used: the question is only whether the
 // credential works, and a search would answer it with an unbounded body and a
 // dependency on whatever the query happened to match.
 func (c *Client) Test(ctx context.Context) error {

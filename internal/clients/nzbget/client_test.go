@@ -201,7 +201,7 @@ func TestNonRPCAnswerIsReportedAsSuch(t *testing.T) {
 }
 
 // NZBGet reads parameters positionally and ignores their names, so the exact
-// list — and its order — is the wire format.
+// list, and its order, is the wire format.
 func TestAppendSendsNZBGetsPositionalParameters(t *testing.T) {
 	c, f := newClient(t)
 

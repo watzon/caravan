@@ -23,7 +23,7 @@ var Targets = []Target{
 	// Both Mac architectures, because Start-Mac.command resolves `uname -m`
 	// itself (see assets.go): an Intel Mac execs caravan/bin/darwin-amd64, and
 	// leaving that target out of the matrix meant prepare never warned the slot
-	// was empty — the user found out by double-clicking the launcher on the
+	// was empty, the user found out by double-clicking the launcher on the
 	// other machine and reading "caravan/bin/darwin-amd64/caravan is missing".
 	{GOOS: "darwin", GOARCH: "amd64"},
 	{GOOS: "darwin", GOARCH: "arm64"},

@@ -26,8 +26,8 @@ const defaultSystemUpdateID = "1"
 // It does not track library contents: a counter that moved every time a file
 // landed would make polling clients re-browse all day for a library that
 // changes a few times an hour, and this server sends no event to carry the
-// change anyway. It tracks the shape of the tree instead — which libraries are
-// advertised (store.SettingDLNAUpdateID, bumped when dlna_visible flips) —
+// change anyway. It tracks the shape of the tree instead, which libraries are
+// advertised (store.SettingDLNAUpdateID, bumped when dlna_visible flips),
 // because that is the change a client's cache renders as a shelf that is gone
 // from the server but still on the television.
 func (s *Service) systemUpdateID(ctx context.Context) (string, error) {
@@ -86,7 +86,7 @@ func (s *Service) Handler() http.Handler {
 // with dlna_enabled=false they have said the library is not to be served to the
 // LAN, and without this check any device could still POST a ContentDirectory
 // Browse to /dlna/control/cds, walk the container tree and GET every media file
-// with no credential at all — past a password that was protecting only the JSON
+// with no credential at all, past a password that was protecting only the JSON
 // API.
 //
 // The settings are read per request rather than cached, so the toggle takes
@@ -158,8 +158,8 @@ func (s *Service) handleContentDirectory(w http.ResponseWriter, r *http.Request)
 		writeSOAPResponse(w, service, action, []soapArg{{Name: "SearchCaps", Value: searchCaps}})
 	case "GetSortCapabilities":
 		// Empty means "results come back in the server's order". Caravan's
-		// order — sort title, then season and episode — is already the one a
-		// user wants, and claiming sortability we do not implement would have
+		// order, sort title, then season and episode, is already the one a user
+		// wants, and claiming sortability we do not implement would have
 		// clients ask for orderings we would silently ignore.
 		writeSOAPResponse(w, service, action, []soapArg{{Name: "SortCaps", Value: ""}})
 	case "GetSystemUpdateID":

@@ -1,8 +1,8 @@
-// Package dlna is Caravan's built-in DLNA/UPnP-AV media server (SPEC §5.1,
-// PLAN phase 4 task 2): the thing that makes a smart TV on the LAN see the
-// library in its own "media servers" list without any client software.
+// Package dlna is Caravan's built-in DLNA/UPnP-AV media server (SPEC §5.1): the
+// thing that makes a smart TV on the LAN see the library in its own "media
+// servers" list without any client software.
 //
-// Scope is deliberately narrow — browse and serve, nothing else. The library is
+// Scope is deliberately narrow: browse and serve, nothing else. The library is
 // exposed as a container tree (root → Movies / TV → series → seasons → items)
 // and every item points at the file on disk, served over plain HTTP with byte
 // ranges. There is no transcoding: Caravan's answer to "my TV cannot play this"
@@ -16,9 +16,9 @@
 // three SOAP actions, so the wire format is written out here where it can be
 // asserted on directly instead of being assembled through a generic SOAP stack.
 //
-// Client variance is unbounded, so this implements the spec and stops there:
-// no per-TV workarounds (PLAN phase 4 risk note). Reference clients that are
-// known to work are listed in docs/dlna.md.
+// Client variance is unbounded, so this implements the spec and stops there: no
+// per-TV workarounds. Reference clients that are known to work are listed in
+// docs/dlna.md.
 package dlna
 
 import (

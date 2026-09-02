@@ -17,7 +17,7 @@ const (
 
 // The state table is the contract between SABnzbd's vocabulary and Caravan's,
 // and the import watcher fires on one of the six values, so every status
-// SABnzbd can report is pinned here — twice, because the same word means
+// SABnzbd can report is pinned here: twice, because the same word means
 // different things in the queue and in the history.
 func TestQueueStateMapping(t *testing.T) {
 	tests := []struct {
@@ -119,7 +119,7 @@ func TestQueueStatusConversion(t *testing.T) {
 	}
 
 	// A queued job is not the one transferring, so the queue-wide rate is not
-	// its rate — otherwise a queue of ten all appear to move at full speed.
+	// its rate: otherwise a queue of ten all appear to move at full speed.
 	queued := queueStatus(slots[1], 5120*1024)
 	if queued.DownRate != 0 {
 		t.Fatalf("down rate = %d, want 0 for a job that is not transferring", queued.DownRate)
@@ -199,8 +199,8 @@ func TestParseTimeLeft(t *testing.T) {
 		{"0:13:39", 13*60 + 39},
 		{"1:00:00", 3600},
 		{"2:03:04:05", 2*86400 + 3*3600 + 4*60 + 5},
-		// SABnzbd prints this for a paused job and for one it has no rate
-		// for — neither is an estimate.
+		// SABnzbd prints this for a paused job and for one it has no rate for:
+		// neither is an estimate.
 		{"0:00:00", -1},
 		{"", -1},
 		{"soon", -1},

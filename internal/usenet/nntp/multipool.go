@@ -11,11 +11,11 @@ import (
 
 // Defaults for Retry.
 const (
-	// DefaultRetryAttempts is how many times one server is asked for an
-	// article before the next server is tried. Three, because the failure it
-	// exists for — a connection the provider recycled, a momentary refusal —
-	// is over by the second try, and a server that fails three times in a row
-	// is a server the backup should be answering for.
+	// DefaultRetryAttempts is how many times one server is asked for an article
+	// before the next server is tried. Three, because the failure it exists
+	// for, a connection the provider recycled, a momentary refusal, is over by
+	// the second try, and a server that fails three times in a row is a server
+	// the backup should be answering for.
 	DefaultRetryAttempts = 3
 	// DefaultRetryBase is the first backoff delay.
 	DefaultRetryBase = 250 * time.Millisecond
@@ -199,9 +199,9 @@ func NewMultiPool(servers []ServerConfig, opts Options) (*MultiPool, error) {
 // removed, terminator dropped, CRLF endings intact.
 //
 // On failure the error is a *FetchError carrying what each server said. Use
-// errors.Is(err, ErrArticleNotFound) to ask the only question that changes
-// what a caller does — whether the article is gone everywhere, and therefore
-// a hole for par2 rather than a transport failure to retry later.
+// errors.Is(err, ErrArticleNotFound) to ask the only question that changes what
+// a caller does: whether the article is gone everywhere, and therefore a hole
+// for par2 rather than a transport failure to retry later.
 func (m *MultiPool) FetchBody(ctx context.Context, messageID string) ([]byte, error) {
 	body, _, err := m.FetchBodyFrom(ctx, messageID, 0)
 	return body, err
@@ -215,8 +215,8 @@ func (m *MultiPool) FetchBody(ctx context.Context, messageID string) ([]byte, er
 // an article that arrived complete and then failed its own yEnc CRC. Asking
 // the same server again returns the same damaged bytes, but a backup
 // provider's copy of that article is frequently clean, so the pipeline retries
-// from answered+1 before writing the segment off as a hole for par2 (PLAN
-// phase 7 task 3). Index 0 is FetchBody.
+// from answered+1 before writing the segment off as a hole for par2. Index 0 is
+// FetchBody.
 //
 // A from past the last server is a *FetchError unwrapping to ErrNoServers:
 // there was no backup left to ask, which is a different answer from "the

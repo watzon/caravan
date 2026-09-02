@@ -57,7 +57,7 @@ const findSiteQuery = `query ` + opFindSite + `($id: ID!) {
 }`
 
 // sceneStudioFields is all the fallback needs off a scene: the site it belongs
-// to and the network above that site. It is deliberately not sceneFields — the
+// to and the network above that site. It is deliberately not sceneFields: the
 // fallback is already paying for an extra round trip per candidate, and asking
 // for scene metadata nobody reads would widen the compatibility surface of the
 // one path that exists because an endpoint is narrow.
@@ -104,11 +104,11 @@ type sceneStudioResult struct {
 }
 
 // SearchSites returns site candidates for q, in the endpoint's own relevance
-// order. A blank q returns the endpoint's first page rather than an error, which
-// is what an "add a site" screen wants before anything is typed.
+// order. A blank q returns the endpoint's first page rather than an error,
+// which is what an "add a site" screen wants before anything is typed.
 //
 // queryStudios is the right query and StashDB serves it, so it is always tried
-// first. TPDB — the default endpoint — does not implement it at all and answers
+// first. TPDB, the default endpoint, does not implement it at all and answers
 // with a bare HTTP 500, which is why there is a second path at all: see
 // searchSitesByScenes. Any other failure (auth, throttling, a network error) is
 // the caller's, because falling back on those would turn a fixable error into a
@@ -132,9 +132,9 @@ func (c *Client) SearchSites(ctx context.Context, q string) ([]core.SiteMeta, er
 
 	// TPDB's REST site index searches names, which is the question the user is
 	// asking; the scene-derived path searches scene text, which is a different
-	// question that happens to return studios. A failure here is not shown —
-	// the scene-derived path below is a worse answer but still an answer, and
-	// if it fails too its error is the one the user sees.
+	// question that happens to return studios. A failure here is not shown: the
+	// scene-derived path below is a worse answer but still an answer, and if it
+	// fails too its error is the one the user sees.
 	if needle := strings.TrimSpace(q); needle != "" && c.restSites != "" {
 		if out, err := c.searchSitesByREST(ctx, needle); err == nil {
 			return out, nil
@@ -174,7 +174,7 @@ func (c *Client) searchSitesByStudios(ctx context.Context, q string) ([]core.Sit
 }
 
 // searchSitesByScenes finds sites on an endpoint that cannot search studios, by
-// searching the thing it can search — scenes — and keeping the studios they name.
+// searching the thing it can search, scenes, and keeping the studios they name.
 //
 // It is strictly worse than queryStudios and only runs when that query is
 // missing: it sees the sites that have scenes matching q rather than the sites
@@ -188,7 +188,7 @@ func (c *Client) searchSitesByStudios(ctx context.Context, q string) ([]core.Sit
 //
 // Ranking happens twice, and deliberately. The shortlist is chosen on the names
 // the scene payload already carries, because that is the only ordering that can
-// exist before anything is fetched — and the cap has to be applied to *ranked*
+// exist before anything is fetched: and the cap has to be applied to *ranked*
 // candidates or it is the frequency-only bug again with an extra step. The
 // shortlist is then re-ranked once the full records arrive, because those carry
 // the aliases, and an alias is how a release names a site. The consequence is
@@ -234,8 +234,8 @@ func (c *Client) searchSitesByScenes(ctx context.Context, q string) ([]core.Site
 
 // sceneStudios fetches the page of scenes the candidates are derived from.
 //
-// searchScene needs a term, so a blank q — the add-a-site screen before anything
-// is typed — asks for the newest scenes instead, the same page-1 DATE/DESC shape
+// searchScene needs a term, so a blank q, the add-a-site screen before anything
+// is typed, asks for the newest scenes instead, the same page-1 DATE/DESC shape
 // SearchScenes uses. That gives the screen the sites the endpoint is currently
 // busy with, which is a better empty state than nothing.
 func (c *Client) sceneStudios(ctx context.Context, q string) ([]sceneStudioResult, error) {
@@ -275,8 +275,8 @@ type siteAffinity int
 const (
 	// affinityNone is no textual match at all. Such a candidate is kept, not
 	// dropped: a search for a scene title legitimately surfaces the studio that
-	// made it, and that studio is a real answer — just a worse one than
-	// anything whose name matches.
+	// made it, and that studio is a real answer, just a worse one than anything
+	// whose name matches.
 	affinityNone siteAffinity = iota
 	// affinitySubstring is the query appearing inside a word.
 	affinitySubstring
@@ -298,7 +298,7 @@ type siteCandidate struct {
 	name string
 	// affinity is how well this candidate's names answer the query. Blank
 	// queries leave it at affinityNone for everyone, which sorts on frequency
-	// alone — the recent-scenes list the picker opens on.
+	// alone: the recent-scenes list the picker opens on.
 	affinity siteAffinity
 	// count is how many scenes named this studio. A parent counts once per
 	// scene naming any of its children, so a network outranks each of its sites
@@ -418,7 +418,7 @@ func nameAffinity(needle string, names ...string) siteAffinity {
 
 // hasWordPrefix reports whether any word of name starts with needle. Words are
 // split on anything that is not a letter or a digit, so "Brazzers-Live" and
-// "Brazzers Live" answer the same — a site's punctuation is its own business.
+// "Brazzers Live" answer the same: a site's punctuation is its own business.
 func hasWordPrefix(name, needle string) bool {
 	for _, word := range strings.FieldsFunc(name, isNameSeparator) {
 		if strings.HasPrefix(word, needle) {
@@ -432,16 +432,16 @@ func isNameSeparator(r rune) bool {
 	return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 }
 
-// isQueryStudiosUnsupported reports whether err is the endpoint saying it has no
-// usable queryStudios, as opposed to a failure worth surfacing.
+// isQueryStudiosUnsupported reports whether err is the endpoint saying it has
+// no usable queryStudios, as opposed to a failure worth surfacing.
 //
 // Two shapes count. TPDB answers the query with an HTTP 500 whose body is the
-// plain text "Server Error" — not a GraphQL error, which is why any 5xx counts
+// plain text "Server Error": not a GraphQL error, which is why any 5xx counts
 // rather than a specific code. A stricter endpoint would instead reject the
 // document at validation time and name the field it does not have.
 //
-// A 5xx is not proof the query is missing forever — a box having a bad minute
-// reads the same — so the memo this drives is per-process and re-checked on
+// A 5xx is not proof the query is missing forever, a box having a bad minute
+// reads the same, so the memo this drives is per-process and re-checked on
 // restart. Degrading to a working search for the life of a process beats a
 // search box that 502s on every keystroke.
 func isQueryStudiosUnsupported(err error) bool {
@@ -481,14 +481,14 @@ func (c *Client) GetSite(ctx context.Context, stashID string) (*core.SiteMeta, e
 }
 
 // SiteWebURL is where a human can read about this site on the endpoint's own
-// website — the destination behind the provider id on a site's page.
+// website: the destination behind the provider id on a site's page.
 //
 // It is derived rather than stored because it is a fact about the endpoint, not
 // about the site: re-pointing Caravan at a different box has to move the links
 // with it, and a URL saved next to each site would not move.
 //
 // Every stash-box files a studio under /studios/{id}. TPDB, which is not a
-// stash-box behind the protocol, files the same record under /sites/{id} — the
+// stash-box behind the protocol, files the same record under /sites/{id}: the
 // same exception the REST index is, and it lives beside it in tpdb.go.
 //
 // An unknown endpoint or a blank id has no page, and says so with "" rather

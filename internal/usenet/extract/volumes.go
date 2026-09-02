@@ -26,12 +26,12 @@ import (
 //     volume it holds. A release seen in the wild had part06 holding volume 7
 //     and part07 holding volume 6, with the same swap again at 15/16. Opening
 //     them in name order gets a file that exists, is a valid rar volume, and is
-//     the wrong one — which surfaces as rardecode's "bad volume number" a few
+//     the wrong one, which surfaces as rardecode's "bad volume number" a few
 //     megabytes into the payload.
 //
 // The archive is the authority on which volume it is: a RAR5 volume records its
 // own number in its main header, and that number is what this maps on. The
-// filename is only a fallback, for the volumes that carry no such record —
+// filename is only a fallback, for the volumes that carry no such record:
 // volume one of a RAR5 set, and every RAR4 volume, which has no field for it.
 //
 // Nothing here renames or moves anything on disk. The set is read through this
@@ -98,12 +98,12 @@ func (v volumeSet) first() string {
 // Open implements fs.FS for rardecode.
 //
 // The name it is given is one rardecode composed by incrementing the previous
-// volume's, so the part number in it is the volume number wanted — that is the
-// only thing read out of it. A number this set does not have is reported as
-// not existing rather than as whatever file happens to bear the name, because
-// "the volume after this one is missing" is an answer rardecode already knows
-// how to end an archive on, and handing it the wrong volume instead is how a
-// misnamed set produces a corrupt file rather than an error.
+// volume's, so the part number in it is the volume number wanted: that is the
+// only thing read out of it. A number this set does not have is reported as not
+// existing rather than as whatever file happens to bear the name, because "the
+// volume after this one is missing" is an answer rardecode already knows how to
+// end an archive on, and handing it the wrong volume instead is how a misnamed
+// set produces a corrupt file rather than an error.
 func (v volumeSet) Open(name string) (fs.File, error) {
 	if n, ok := partNumber(filepath.Base(name)); ok && len(v.byNum) > 0 {
 		if real, hit := v.byNum[n]; hit {
@@ -145,9 +145,9 @@ const volumeHeaderBytes = 512
 //
 // Only the main header is parsed, and only far enough to reach the number: the
 // signature, one block header, and the archive block's flags. Anything it does
-// not understand is errNoVolumeNumber, never a decoding attempt — this runs
-// over attacker-supplied files, and the caller's fallback is the behaviour that
-// was there before it.
+// not understand is errNoVolumeNumber, never a decoding attempt: this runs over
+// attacker-supplied files, and the caller's fallback is the behaviour that was
+// there before it.
 func rarVolumeNumber(path string) (int, error) {
 	f, err := os.Open(path)
 	if err != nil {

@@ -23,10 +23,6 @@ import (
 	"github.com/watzon/caravan/internal/usenet/yenc"
 )
 
-// ---------------------------------------------------------------------------
-// scaffolding
-// ---------------------------------------------------------------------------
-
 // release is one staged posting: the files, the fake news server holding their
 // articles, and the NZB that indexes them.
 type release struct {
@@ -230,10 +226,6 @@ func addRelease(t *testing.T, e *Engine, rel release, title string) core.Downloa
 	return id
 }
 
-// ---------------------------------------------------------------------------
-// tests
-// ---------------------------------------------------------------------------
-
 // The whole point of the engine: an NZB URL in, assembled files on disk, a
 // completed download the import watcher will pick up.
 func TestEngineDownloadsAnNZBToCompletion(t *testing.T) {
@@ -319,9 +311,9 @@ func TestEngineDistinguishesAnUnreachableProviderFromMissingArticles(t *testing.
 
 	e, _ := newTestEngine(t, nntpSrv, newMemStore())
 
-	// The provider stops answering the moment the download starts. The count
-	// is far above the article count, so every attempt of every segment fails
-	// — a provider that is simply down, not one that is flaky.
+	// The provider stops answering the moment the download starts. The count is
+	// far above the article count, so every attempt of every segment fails: a
+	// provider that is simply down, not one that is flaky.
 	nntpSrv.SetFault(nntptest.Fault{Bodies: 10000, Mode: nntptest.FaultDropBeforeStatus})
 
 	id := addRelease(t, e, rel, "Provider.Down.Release")

@@ -25,18 +25,18 @@ const EngineName = core.DownloadClientQBittorrent
 // A tag rather than a category, because the category is the user's: it is a
 // configurable field they may already sort their client by, and it may be
 // shared with whatever else feeds that client. The tag is Caravan's, is added
-// on top of whatever category is configured, and is what makes "the queue"
-// mean "the torrents Caravan added" instead of "everything in qBittorrent".
+// on top of whatever category is configured, and is what makes "the queue" mean
+// "the torrents Caravan added" instead of "everything in qBittorrent".
 //
-// A torrent the user untags leaves Caravan's queue and keeps seeding — which
-// is the right escape hatch, and the reason removal is never implicit.
+// A torrent the user untags leaves Caravan's queue and keeps seeding: which is
+// the right escape hatch, and the reason removal is never implicit.
 const Tag = "caravan"
 
-// Add has to wait when a release carries no info hash — a .torrent URL rather
-// than a magnet link — because qBittorrent's add endpoint answers "queued",
-// not "added", and cannot say what it produced. These bound that wait: a
-// couple of seconds in total, which is well inside a grab's patience and far
-// past a local client's parse time.
+// Add has to wait when a release carries no info hash, a .torrent URL rather
+// than a magnet link, because qBittorrent's add endpoint answers "queued", not
+// "added", and cannot say what it produced. These bound that wait: a couple of
+// seconds in total, which is well inside a grab's patience and far past a local
+// client's parse time.
 const (
 	defaultAddPollInterval = 100 * time.Millisecond
 	defaultAddPollAttempts = 20
@@ -115,9 +115,9 @@ func (e *Engine) Add(ctx context.Context, r core.Release, opts core.AddOpts) (co
 	}
 
 	// The info hash is the download id, and it is knowable up front for a
-	// magnet link or an indexer that reported one. When it is not — a
-	// .torrent URL qBittorrent has to fetch and parse — the only honest answer
-	// is to watch our tag for the torrent that appears.
+	// magnet link or an indexer that reported one. When it is not, a .torrent
+	// URL qBittorrent has to fetch and parse, the only honest answer is to
+	// watch our tag for the torrent that appears.
 	want := payloadHash
 	if want == "" {
 		want = normalizeHash(r.InfoHash)
@@ -285,7 +285,7 @@ func (e *Engine) Resume(ctx context.Context, id core.DownloadID) error {
 // Remove drops a torrent, and its data when deleteData is set. See core.Engine.
 //
 // An imported file is a hardlink or a move away from the download data, so
-// deleting here must not cost media (SPEC §13) — which is the import track's
+// deleting here must not cost media (SPEC §13): which is the import track's
 // contract to keep, not something this call can check.
 func (e *Engine) Remove(ctx context.Context, id core.DownloadID, deleteData bool) error {
 	return e.c.Delete(ctx, deleteData, string(id))
@@ -324,7 +324,7 @@ func TestConnection(ctx context.Context, cfg core.DownloadClientConfig) error {
 		return err
 	}
 	if version == "" {
-		// A 200 with an empty body is something that is not qBittorrent —
+		// A 200 with an empty body is something that is not qBittorrent:
 		// usually a reverse proxy or a router's login page on the same port.
 		return errors.New("qbittorrent: the URL answered but did not report a Web API version")
 	}
@@ -349,8 +349,8 @@ func hasTag(tags, tag string) bool {
 }
 
 // normalizeHash lowercases a v1 info hash, or returns "" when the value is not
-// one. Anything else — a base32 magnet, a full v2 hash, junk from an indexer —
-// is reported as unknown so the caller falls back to watching the queue rather
+// one. Anything else, a base32 magnet, a full v2 hash, junk from an indexer, is
+// reported as unknown so the caller falls back to watching the queue rather
 // than inventing a download id that names nothing.
 func normalizeHash(s string) string {
 	s = strings.ToLower(strings.TrimSpace(s))

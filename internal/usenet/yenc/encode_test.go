@@ -363,9 +363,9 @@ func TestCorruptionIsAlwaysCaught(t *testing.T) {
 		if err != nil {
 			continue // caught, which is the point
 		}
-		// A flip that lands on a byte the decoder ignores (the trailing
-		// junk after =yend, say) is allowed to decode — but only if the
-		// payload is still exactly right.
+		// A flip that lands on a byte the decoder ignores (the trailing junk
+		// after =yend, say) is allowed to decode: but only if the payload is
+		// still exactly right.
 		if !bytes.Equal(part.Body, body) {
 			t.Fatalf("iteration %d: a bit flip at offset %d decoded to the wrong payload with no error", i, pos)
 		}
@@ -380,7 +380,7 @@ func TestCorruptionIsAlwaysCaught(t *testing.T) {
 //
 // Only the *values* are damaged. A flip in a keyword's name ("pcrc32=" ->
 // "pcrq32=") turns the field into one this decoder has never heard of, which is
-// indistinguishable from the poster who simply omitted pcrc32 — a posting the
+// indistinguishable from the poster who simply omitted pcrc32: a posting the
 // package deliberately accepts (testdata/no-crc.yenc). Catching that would mean
 // rejecting every article carrying a keyword this decoder does not know, which
 // fails loudly on healthy releases to defend against damage that needs two

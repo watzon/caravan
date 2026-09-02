@@ -35,8 +35,8 @@ func addSite(t *testing.T, ctx context.Context, st *store.Store, title string, r
 }
 
 // enableAdultLibrary makes adult content reachable: the Adult library exists
-// and is switched on. An adult library IS the module — there is no server-wide
-// switch above it — so a test that needs scenes searched for creates one.
+// and is switched on. An adult library IS the module, there is no server-wide
+// switch above it, so a test that needs scenes searched for creates one.
 //
 // It is idempotent, because the enable it stands for was: a library that is
 // already there is switched back on rather than duplicated, keeping whatever
@@ -87,9 +87,9 @@ func enableAdultLibrary(t *testing.T, st *store.Store) core.Library {
 // indexer, and a test that switched off only the default would be asserting
 // against a server that still searches for scenes.
 //
-// Switching off deletes nothing — not the row, not the series, not the
-// episodes. Off is a reachability promise, not a retention policy, so a library
-// that comes back finds its indexer overrides exactly as they were left.
+// Switching off deletes nothing: not the row, not the series, not the episodes.
+// Off is a reachability promise, not a retention policy, so a library that
+// comes back finds its indexer overrides exactly as they were left.
 func setAdultLibrariesActive(t *testing.T, st *store.Store, active bool) {
 	t.Helper()
 	ctx := context.Background()
@@ -125,9 +125,9 @@ func TestSceneSearchSendsOnlyTheAdultLibrarysCategories(t *testing.T) {
 
 	searchEpisodeJob(t, ctx, runner, st, scene.ID)
 	got := fake.recorded()
-	// A scene search asks twice — by date, then by title — and the categories
-	// are the point here: every one of them carries the adult library's and
-	// only those.
+	// A scene search asks twice, by date, then by title, and the categories are
+	// the point here: every one of them carries the adult library's and only
+	// those.
 	if len(got) == 0 {
 		t.Fatal("scene search made no request")
 	}
@@ -151,7 +151,7 @@ func TestSceneSearchSendsOnlyTheAdultLibrarysCategories(t *testing.T) {
 
 // With the module off, a queued scene search is dropped rather than run. That
 // is the one path that can reach an indexer for a scene on a server whose owner
-// has switched adult content off — a job enqueued before the switch was flipped.
+// has switched adult content off: a job enqueued before the switch was flipped.
 func TestSceneSearchIsDroppedWhenTheModuleIsDisabled(t *testing.T) {
 	ctx := context.Background()
 	st := openStore(t)
@@ -253,9 +253,9 @@ func TestRSSMatchesScenesByReleaseDate(t *testing.T) {
 		t.Error("a scene released on the target's date did not match")
 	}
 
-	// A one-day drift is the usual timezone split and still matches. Two
-	// days is a different scene, even though the site and the year — and
-	// therefore the season — are identical.
+	// A one-day drift is the usual timezone split and still matches. Two days
+	// is a different scene, even though the site and the year, and therefore
+	// the season, are identical.
 	nextDay := core.Release{Parsed: core.ParsedRelease{
 		Title: "Brazzers", Year: 2022, Season: 2022,
 		SceneDate: released.AddDate(0, 0, 1),
@@ -301,7 +301,7 @@ func TestRSSDoesNotOfferASceneReleaseToATelevisionEpisode(t *testing.T) {
 // Out of the box there is no per-library category override: enabling the module
 // creates the Adult library row and nothing else. The search must still send
 // 6000, because inheriting the indexer's own categories would send the movie
-// and television ones — and that fails SILENTLY. indexer.parseTitle picks the
+// and television ones: and that fails SILENTLY. indexer.parseTitle picks the
 // date-based scene parser only for a 6000-series result, so everything a
 // 5000/2000 search returns parses with a zero scene date and is dropped by
 // searchScene's date match: the job records "no release found" forever, on an
@@ -358,7 +358,7 @@ func TestSceneSearchKeepsTheIndexersOwnAdultSubcategories(t *testing.T) {
 	}
 }
 
-// Disabling the module does not delete the Adult library row — that is
+// Disabling the module does not delete the Adult library row: that is
 // deliberate, so re-enabling finds the library as it was left. What it must not
 // leave behind is 6000 in the query string of every RSS poll, once per sync
 // interval, forever: that is a durable trace of a module the phase promises is
@@ -505,7 +505,7 @@ func TestSceneSearchFallsBackToTheTitleVariant(t *testing.T) {
 }
 
 // A scene nobody released is still two searches, and the record says which were
-// tried — "no release" means something different depending on the question.
+// tried: "no release" means something different depending on the question.
 func TestSceneSearchRecordsWhichVariantsItTried(t *testing.T) {
 	ctx := context.Background()
 	st := openStore(t)
@@ -542,7 +542,7 @@ func TestSceneSearchRecordsWhichVariantsItTried(t *testing.T) {
 	}
 }
 
-// A scene with no date is still searchable by title — and a scene with neither
+// A scene with no date is still searchable by title: and a scene with neither
 // is not searchable at all, which stays a silent no-op rather than a query for
 // the whole site.
 func TestSceneSearchWithoutADateUsesTheTitleAlone(t *testing.T) {

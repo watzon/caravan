@@ -88,24 +88,22 @@ type rssFeed struct {
 
 // rssSubscriber is one library's subscription to a shared feed.
 type rssSubscriber struct {
-	// libraryID is the subscribing library's row id — the id, not its kind,
-	// because two libraries of one kind may subscribe with different
-	// categories and the decision below is per library.
+	// libraryID is the subscribing library's row id, not its kind, because two
+	// libraries of one kind may subscribe with different categories.
 	libraryID int64
 	// categories are the categories this library asked this indexer for, empty
 	// when it asked unfiltered.
 	categories []int
 }
 
-// libsFor is the per-library half of a shared fetch: the libraries that may
-// act on this release.
+// libsFor is the per-library half of a shared fetch: the libraries that may act
+// on this release.
 //
-// The union that made one fetch out of many is exactly what makes this
-// necessary. A library that narrowed an indexer to its own categories still
-// receives every other library's categories in the shared response, and
-// offering those to its wanted items would grab releases the interactive and
-// backlog searches for the same item would never have seen (PLAN phase 8 task
-// 5).
+// The union that made one fetch out of many is what makes this necessary. A
+// library that narrowed an indexer to its own categories still receives every
+// other library's categories in the shared response, and offering those to its
+// wanted items would grab releases the interactive and backlog searches for the
+// same item would never have seen.
 func (f rssFeed) libsFor(release core.Release) map[int64]bool {
 	libs := map[int64]bool{}
 	for _, sub := range f.subscribers {
@@ -118,20 +116,16 @@ func (f rssFeed) libsFor(release core.Release) map[int64]bool {
 
 // rssFeeds groups the libraries' resolved indexer sets by indexer.
 //
-// The grouping is the point: a feed is a firehose of everything new, so asking
-// the same indexer once per library would fetch the same document twice, and
-// indexers rate-limit. One fetch per indexer per cycle answers for every
-// library that enabled it, and the per-library decision moves to matching
-// (PLAN phase 8 task 5).
+// A feed is a firehose of everything new, so asking the same indexer once per
+// library would fetch the same document twice against a rate limit. One fetch per
+// indexer per cycle answers for every library that enabled it, and the
+// per-library decision moves to matching.
 //
-// A library that is switched off contributes nothing. Deactivating deliberately
-// does not delete the row (store.SetLibraryActive), so without this a dormant
-// library's categories stay in the union forever and every RSS poll keeps
-// asking each indexer for them, once per sync interval, on an install whose
-// owner turned that shelf off. Nothing would be grabbed — wanted.Compute drops
-// an inactive library's items — but the request itself is a durable trace of a
-// shelf that is meant to be absent, visible in the indexer's own request log,
-// and it is a wider fetch than the active libraries asked for. Scan skips
+// A library that is switched off contributes nothing. Deactivating does not
+// delete the row (store.SetLibraryActive), so without this a dormant library's
+// categories stay in the union forever and every RSS poll keeps asking for them.
+// Nothing would be grabbed, but the request is a durable trace of a shelf that is
+// meant to be absent, visible in the indexer's own request log. Scan skips
 // inactive roots and refreshSites no-ops for the same reason.
 func rssFeeds(ctx context.Context, st *store.Store) ([]rssFeed, error) {
 	libraries, err := st.ListLibraries(ctx)
@@ -197,12 +191,11 @@ func unionCategories(feed *rssFeed) []int {
 	return cats
 }
 
-// matchRSSRelease offers one release to the wanted items of every LIBRARY the
-// feed it came from answers for with this release. A library that disabled
-// the indexer, or that narrowed it to categories this release is not in, is
-// not among them — so its items never see the release even though the fetch
-// was shared. Every item names its library outright since migration 0011, so
-// the subscription is matched on that id alone.
+// matchRSSRelease offers one release to the wanted items of every library the
+// feed answers for with this release. A library that disabled the indexer, or
+// narrowed it to categories this release is not in, is not among them, so its
+// items never see the release even though the fetch was shared. Every item names
+// its library outright, so the subscription is matched on that id alone.
 func (r *Runner) matchRSSRelease(ctx context.Context, st *store.Store, release core.Release, lists *wanted.Lists, libs map[int64]bool) error {
 	for _, target := range lists.Movies {
 		if !libs[target.Movie.LibraryID] || !matchesMovie(release, target.Movie) {
@@ -223,10 +216,9 @@ func (r *Runner) matchRSSRelease(ctx context.Context, st *store.Store, release c
 	scenes := []wanted.Episode{}
 	for _, target := range lists.Episodes {
 		// The library an episode belongs to is its series' library, so a scene
-		// is only offered releases from a feed its OWN adult library
-		// subscribed to with categories this release is in. Another library
-		// that shares the indexer — of the other kind or of the same one —
-		// sees the same fetch and never these releases.
+		// is only offered releases from a feed its own adult library subscribed
+		// to with categories this release is in. Another library sharing the
+		// indexer sees the same fetch and never these releases.
 		if !libs[target.SeriesLibraryID] {
 			continue
 		}
@@ -380,9 +372,8 @@ func (r *Runner) handleSearchEpisode(ctx context.Context, st *store.Store, paylo
 	kind := core.LibraryKindForSeries(series.Kind)
 	// A job queued before the series' library was switched off is the one path
 	// that can reach an indexer on a dormant library's behalf, so the switch is
-	// re-read here rather than trusted from when the job was made. Dropping the
-	// job is the right answer: the item is not wanted any more (wanted.Compute
-	// agrees), so there is nothing to retry.
+	// re-read here rather than trusted from when the job was made. The item is
+	// not wanted any more, so dropping the job leaves nothing to retry.
 	libraries, err := st.ListLibraries(ctx)
 	if err != nil {
 		return fmt.Errorf("store: list libraries: %w", err)
@@ -443,32 +434,29 @@ func (r *Runner) handleSearchEpisode(ctx context.Context, st *store.Store, paylo
 	return r.grabSearchedEpisode(ctx, st, series.LibraryID, kind, *episode, *best, score)
 }
 
-// searchScene is handleSearchEpisode's adult branch (PLAN phase 9 task 3).
+// searchScene is handleSearchEpisode's adult branch.
 //
-// Two things differ from a television search and nothing else does. The queries
-// are built from the site and the scene rather than from a SxxEyy, because a
-// scene has no season/episode an indexer could filter on — Caravan's own are a
-// mapping (release year, sequence within that year) that no indexer has heard
-// of. And the candidate filter matches on the release DATE, or on a much
-// stricter title test for the fallback query. The scoring, the rejection record
-// and the grab are the shared ones.
+// Two things differ from a television search. The queries are built from the site
+// and the scene rather than from a SxxEyy, because a scene has no season or
+// episode an indexer could filter on: Caravan's own are a mapping of release year
+// and sequence within that year. And the candidate filter matches on the release
+// date, or on a much stricter title test for the fallback query. The scoring, the
+// rejection record and the grab are shared.
 //
-// The exact date is asked first. When it yields nothing grabbable, the day
-// before and the day after follow — a timezone split names the file with
-// those digits, and an exact-date query will not see it. "Site Scene Title"
-// is last: the releases named after their title or their performers, which
-// no date query can see. That last query is where Whisparr stops (its issue
-// #115 asks for exactly this), and it is only safe because what comes back
-// is held to matchesSceneTitle rather than to the date.
+// The exact date is asked first. When it yields nothing grabbable, the day before
+// and the day after follow, because a timezone split names the file with those
+// digits. "Site Scene Title" is last, for releases named after their title or
+// performers, which no date query can see. That last query is only safe because
+// what comes back is held to matchesSceneTitle rather than to the date.
 //
-// The fan-out itself is the adult library's: searchIndexers resolves that
-// library's indexers and the categories it asked each of them for, so a scene
-// search sends 6000-series categories and nothing else (PLAN phase 8 task 4).
+// The fan-out is the adult library's: searchIndexers resolves that library's
+// indexers and the categories it asked each of them for, so a scene search sends
+// 6000-series categories and nothing else.
 func (r *Runner) searchScene(ctx context.Context, st *store.Store, series core.Series, episode core.Episode, profile *core.QualityProfile) error {
 	searches := core.NearbySceneSearches(series.Title, episode.AirDate, episode.Title)
 	if len(searches) == 0 {
 		// No date and no title is no query to make and no candidate to
-		// recognize. Nothing is wrong; there is simply nothing to search for.
+		// recognize.
 		return nil
 	}
 
@@ -532,12 +520,10 @@ func (r *Runner) searchScene(ctx context.Context, st *store.Store, series core.S
 
 // matchesScene reports whether a candidate is the scene that was searched for.
 //
-// The date query's answers are matched on the date and nothing else: a scene
-// release named the standard way carries it. The day may be one off when no
-// sibling scene owns that nearby day (timezone split). The title query's
-// answers cannot rely on the date — a release named after its title has none
-// to compare — so they go through matchesSceneTitle, which is strict on
-// purpose.
+// The date query's answers are matched on the date alone, since a scene release
+// named the standard way carries it. The day may be one off when no sibling scene
+// owns that nearby day. A release named after its title has no date to compare,
+// so those answers go through matchesSceneTitle instead.
 func matchesScene(release core.Release, variant core.SceneSearchVariant, series core.Series, episode core.Episode, siblings []time.Time) bool {
 	if variant == core.SceneSearchByTitle {
 		return matchesSceneTitle(release, series, episode, siblings)
@@ -547,28 +533,22 @@ func matchesScene(release core.Release, variant core.SceneSearchVariant, series 
 
 // matchesSceneTitle is the conservative test a title-named release has to pass.
 //
-// The rule it is written to: a false grab is worse than a miss. A wrong scene
-// downloaded under a right scene's name is a file somebody has to find and
-// delete, and the library will believe it is complete; a miss just leaves the
-// scene wanted, and the interactive picker is one click away.
+// A false grab is worse than a miss: a wrong scene under a right scene's name is
+// a file somebody has to find and delete, while a miss leaves the scene wanted
+// and the interactive picker one click away. So all of the following must hold:
 //
-// So all of the following must hold:
+//   - The release does not contradict the date. A name that carries a scene date
+//     is a date-named release, and a different date means a different scene.
+//   - The site's name appears in the release name, compared with separators
+//     removed, because release names weld words together
+//     ("RealityKings.Deep.Impact").
+//   - The scene's title appears the same way and is substantial: two words or
+//     more, or one long word plus a performer also named in the release. A
+//     one-word title would otherwise match half a site's catalogue.
 //
-//   - The release does not CONTRADICT the date. A name that carries a scene
-//     date is a date-named release, and if that date is not the scene's then
-//     the release is a different scene however well its words line up.
-//   - The site's name appears in the release name. Compared with the
-//     separators removed, because release names weld words together
-//     ("RealityKings.Deep.Impact"), which no token comparison would match.
-//   - The scene's title appears the same way, and is substantial enough to
-//     mean something: two words or more, or one long word plus a performer
-//     also named in the release. A one-word title is the case that would
-//     otherwise match half a site's catalogue.
-//
-// The known miss is a sub-studio whose releases are named after the network
-// above it ("Brazzers.…" for a Brazzers Exxtra scene). Loosening the site test
-// to a partial match would take it, and would also take every other scene the
-// network released that day, so it stays strict.
+// The known miss is a sub-studio whose releases are named after the network above
+// it. Loosening the site test to a partial match would take it, and would also
+// take every other scene the network released that day.
 func matchesSceneTitle(release core.Release, series core.Series, episode core.Episode, siblings []time.Time) bool {
 	if !release.Parsed.SceneDate.IsZero() && !sceneDateFits(release.Parsed.SceneDate, episode.AirDate, siblings) {
 		return false
@@ -590,14 +570,13 @@ func matchesSceneTitle(release core.Release, series core.Series, episode core.Ep
 	if len(significantWords(episode.Title)) >= minSceneTitleWords {
 		return true
 	}
-	// One word carries too little on its own: "Impact" matches anything with
-	// that word in it. A performer named in the release is the second signal
-	// that makes it a scene rather than a coincidence.
+	// One word carries too little on its own. A performer named in the release
+	// is the second signal that makes it a scene rather than a coincidence.
 	return len(title) >= minSceneTitleRunes && hasScenePerformer(name, episode)
 }
 
-// The thresholds matchesSceneTitle uses. Both are deliberately blunt: they are
-// there to refuse a match, not to grade one.
+// The thresholds matchesSceneTitle uses. Both are blunt on purpose: they refuse
+// a match rather than grade one.
 const (
 	// minSceneTitleWords is how many words a title needs before it can carry a
 	// match on its own.
@@ -631,9 +610,8 @@ func hasScenePerformer(compactRelease string, episode core.Episode) bool {
 const minPerformerRunes = 6
 
 // compactName lowercases a name and drops everything that is not a letter or a
-// digit, so "Reality Kings" and "RealityKings" and "Reality.Kings" are one
-// string. It is the comparison release names force: they weld words together
-// as often as they separate them.
+// digit, so "Reality Kings", "RealityKings" and "Reality.Kings" are one string.
+// Release names weld words together as often as they separate them.
 func compactName(value string) string {
 	var b strings.Builder
 	for _, r := range strings.ToLower(value) {
@@ -666,10 +644,9 @@ var sceneTitleStopWords = map[string]bool{
 
 // sceneDateFits reports whether a parsed release date is this scene's date.
 //
-// The exact stored day always fits. A date one day away also fits when no
-// other scene from the same site owns that day: that is the timezone split
-// (studio local time vs a UTC calendar day) that would otherwise leave a
-// monitored scene wanted forever. A sibling on the adjacent day means the
+// The exact stored day always fits. A date one day away also fits when no other
+// scene from the same site owns that day, which covers the split between studio
+// local time and a UTC calendar day. A sibling on the adjacent day means the
 // release is that other scene, so it is refused.
 func sceneDateFits(parsed, air time.Time, siblings []time.Time) bool {
 	days, ok := core.SceneDayDelta(parsed, air)
@@ -753,10 +730,10 @@ type indexerResult struct {
 	releases []core.Release
 }
 
-// searchIndexers fans one search out over the indexers the ITEM'S library
-// searches, each already carrying the categories that search must send (PLAN
-// phase 8 task 4). libraryID 0 resolves through the kind's default library,
-// which is the fallback for a library that has vanished — every item names one.
+// searchIndexers fans one search out over the indexers the item's library
+// searches, each already carrying the categories that search must send.
+// libraryID 0 resolves through the kind's default library, the fallback for a
+// library that has vanished.
 func (r *Runner) searchIndexers(ctx context.Context, st *store.Store, libraryID int64, kind string, search indexerSearch) ([]core.Release, error) {
 	settings, err := st.ResolveLibrarySettingsForItem(ctx, libraryID, kind)
 	if err != nil {
@@ -885,14 +862,12 @@ func (r *Runner) grabMovie(ctx context.Context, st *store.Store, movie core.Movi
 		return nil
 	}
 	// The shelf the film sits on decides the download route and the client-side
-	// label, exactly as grabEpisode's does — and a film is the case where the
-	// two can differ, because a movie row carries no kind of its own. An anime
-	// library's film sorts under "anime" beside that library's episodes rather
-	// than into the Movies library's download folder.
+	// label. A film is where the two can differ, because a movie row carries no
+	// kind of its own: an anime library's film sorts under "anime" beside that
+	// library's episodes rather than into the Movies download folder.
 	//
-	// The movie kind is the one library kind whose label is not its own name:
-	// "movies" is the folder every download client has always sorted, so it is
-	// spelled out where every other kind is already its own label.
+	// The movie kind is the one library kind whose label is not its own name,
+	// because "movies" is the folder every download client has always sorted.
 	kind := core.LibraryKindMovie
 	if lib, err := st.GetLibrary(ctx, movie.LibraryID); err == nil {
 		kind = lib.Kind
@@ -906,12 +881,10 @@ func (r *Runner) grabMovie(ctx context.Context, st *store.Store, movie core.Movi
 	})
 }
 
-// grabEpisode hands a release to the engine the episode's own library routes
-// to. libraryID is the series' library and kind is one of the
-// core.LibraryKind* constants — the television kind for a television episode,
-// the adult kind for a scene — deciding the download route and the
-// client-side category, so a scene never lands in the television library's
-// download folder.
+// grabEpisode hands a release to the engine the episode's own library routes to.
+// libraryID is the series' library and kind is one of the core.LibraryKind*
+// constants, together deciding the download route and the client-side category,
+// so a scene never lands in the television library's download folder.
 func (r *Runner) grabEpisode(ctx context.Context, st *store.Store, libraryID int64, kind string, episode core.Episode, release core.Release, score int, source string) error {
 	if _, active, err := st.ActiveGrabForEpisode(ctx, episode.ID); err != nil {
 		return fmt.Errorf("store: find active episode grab: %w", err)
@@ -954,12 +927,11 @@ func (r *Runner) grab(ctx context.Context, st *store.Store, libraryID int64, kin
 	}
 	downloadID, err := engine.Add(ctx, release, opts)
 	if err != nil {
-		// The automatic path routes by protocol exactly like the interactive
-		// one (PLAN phase 6 task 3), so it meets the same wall: a usenet
-		// release with no usenet client configured. That is a recorded
-		// rejection, not a job failure — retrying it every sweep would never
-		// succeed and would bury the real reason under transport errors — so
-		// the reason is written to the grab and the job completes.
+		// The automatic path routes by protocol like the interactive one, so it
+		// meets the same wall: a usenet release with no usenet client
+		// configured. That is a recorded rejection rather than a job failure,
+		// because retrying it every sweep would never succeed and would bury the
+		// real reason under transport errors.
 		if errors.Is(err, download.ErrNoEngine) {
 			if statusErr := st.SetGrabStatus(ctx, grab.GrabID, core.GrabStatusRejected, err.Error()); statusErr != nil {
 				return fmt.Errorf("store: mark rejected grab: %w", statusErr)
@@ -979,9 +951,9 @@ func (r *Runner) grab(ctx context.Context, st *store.Store, libraryID int64, kin
 		return fmt.Errorf("engine: add download: %w", err)
 	}
 	// The interactive grab writes this row. Without it the engine's own
-	// persistence lands first with grab_id 0, and the watcher treats the
-	// finished download as unowned — it stays in incomplete and the item
-	// stays wanted.
+	// persistence lands first with grab_id 0 and the watcher treats the finished
+	// download as unowned, so it stays in incomplete and the item stays
+	// wanted.
 	if err := st.UpsertDownload(ctx, &core.Download{
 		GrabID:   grab.GrabID,
 		Engine:   engineNameFor(ctx, engine, release.Protocol),
@@ -1004,10 +976,9 @@ func (r *Runner) grab(ctx context.Context, st *store.Store, libraryID int64, kin
 	return nil
 }
 
-// engineNameFor is the backend name recorded on a download row. A routing
-// engine is several backends behind one interface, so the row has to name
-// the one that actually took the release — the same rule the interactive
-// grab uses.
+// engineNameFor is the backend name recorded on a download row. A routing engine
+// is several backends behind one interface, so the row has to name the one that
+// actually took the release.
 func engineNameFor(ctx context.Context, engine core.Engine, protocol string) string {
 	if router, ok := engine.(core.EngineRouting); ok {
 		if name := router.EngineNameFor(ctx, protocol); name != "" {
@@ -1147,11 +1118,9 @@ func recordRejections(ctx context.Context, st *store.Store, decisions []wanted.D
 }
 
 // recordNoRelease writes the "searched, found nothing worth grabbing" event.
-//
 // tried names the search variants that were run, and is empty for the searches
-// that only have one. It is recorded because a scene search now asks two
-// different questions, and "no release" means something different depending on
-// which of them were asked.
+// that only have one: a scene search asks two different questions, and "no
+// release" means something different depending on which were asked.
 func recordNoRelease(ctx context.Context, st *store.Store, title string, candidates int, movieID, seriesID int64, tried ...string) error {
 	message := fmt.Sprintf("no acceptable release found for %s (%d candidates)", title, candidates)
 	if len(tried) > 0 {
@@ -1189,11 +1158,10 @@ func matchesMovie(release core.Release, movie core.Movie) bool {
 
 // matchesRSSEpisode reports whether a feed release is the episode Caravan is
 // looking for. The title test is shared; the identity test is not, because a
-// scene's season and episode numbers are Caravan's own mapping (release year,
-// sequence within that year) and no indexer publishes them. The release date is
-// what a scene name actually carries and what identifies it. A scene date may
-// be one day off; matchRSSRelease then picks the closest wanted scene so a
-// daily studio does not have one release claimed by two days.
+// scene's season and episode numbers are Caravan's own mapping and no indexer
+// publishes them. The release date is what a scene name carries. A scene date may
+// be one day off, so matchRSSRelease picks the closest wanted scene and a daily
+// studio does not have one release claimed by two days.
 func matchesRSSEpisode(release core.Release, episode wanted.Episode) bool {
 	if normalizeTitle(release.Parsed.Title) != normalizeTitle(episode.SeriesTitle) {
 		return false
@@ -1208,9 +1176,8 @@ func matchesRSSEpisode(release core.Release, episode wanted.Episode) bool {
 		contains(release.Parsed.Episodes, episode.EpisodeNumber)
 }
 
-// bestRSSScene picks the unique closest wanted scene for a dated release.
-// An exact day wins. Two scenes the same distance away (the day before and
-// the day after, with nothing on the release's own day) are left unmatched:
+// bestRSSScene picks the unique closest wanted scene for a dated release. An
+// exact day wins. Two scenes the same distance away are left unmatched, because
 // guessing would grab the wrong scene.
 func bestRSSScene(release core.Release, episodes []wanted.Episode) *wanted.Episode {
 	var best *wanted.Episode

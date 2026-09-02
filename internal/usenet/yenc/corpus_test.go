@@ -15,18 +15,18 @@ import (
 	"github.com/watzon/caravan/internal/usenet/yenc"
 )
 
-// The corpus in testdata is checked in, and this file is how it is
-// reproduced: `go test ./internal/usenet/yenc -run Corpus -update` rewrites
-// every generated fixture, and a normal run fails if a checked-in fixture no
-// longer matches what the generator produces. That turns "the corpus is
-// stale" into a test failure instead of a mystery.
+// The corpus in testdata is checked in, and this file is how it is reproduced:
+// `go test ./internal/usenet/yenc -run Corpus -update` rewrites every generated
+// fixture, and a normal run fails if a checked-in fixture no longer matches
+// what the generator produces. That turns "the corpus is stale" into a test
+// failure instead of a mystery.
 //
-// The generated corpus is encoder output, so on its own it would only prove
-// the encoder and decoder agree with each other. Two things break that
-// circle: testdata/reference-single.yenc and testdata/reference-multi.part*.yenc
-// are yEnc articles produced by an independent implementation
-// (testdata/reference.py, which also decodes and checks every generated fixture
-// — TestReferenceImplementationVerifiesTheCorpus runs that pass, and
+// The generated corpus is encoder output, so on its own it would only prove the
+// encoder and decoder agree with each other. Two things break that circle:
+// testdata/reference-single.yenc and testdata/reference-multi.part*.yenc are
+// yEnc articles produced by an independent implementation
+// (testdata/reference.py, which also decodes and checks every generated
+// fixture, TestReferenceImplementationVerifiesTheCorpus runs that pass, and
 // `python3 reference.py emit` regenerates the reference articles), and
 // TestDecodeEncodeRoundTrip drives random payloads through both halves.
 //
@@ -84,10 +84,10 @@ func corpus(t *testing.T) map[string][]byte {
 		fmt.Sprintf("=yend size=%d", multiPart), fmt.Sprintf("=yend size=%d", multiPart-1))
 	out["ypart-mismatch.yenc"] = replaceOnce(t, out["multi.part2.yenc"],
 		fmt.Sprintf("end=%d", multiPart*2), fmt.Sprintf("end=%d", multiPart*2-1))
-	// A =ypart range that is internally consistent — end-begin still matches
-	// the payload, so pcrc32 and the trailer size both pass — but points a
-	// terabyte past the file =ybegin describes. This is what a flipped bit in
-	// begin= produces, and the only thing left to catch it is the file size.
+	// A =ypart range that is internally consistent, end-begin still matches the
+	// payload, so pcrc32 and the trailer size both pass, but points a terabyte
+	// past the file =ybegin describes. This is what a flipped bit in begin=
+	// produces, and the only thing left to catch it is the file size.
 	out["ypart-out-of-range.yenc"] = replaceOnce(t, out["multi.part2.yenc"],
 		fmt.Sprintf("=ypart begin=%d end=%d", multiPart+1, multiPart*2),
 		fmt.Sprintf("=ypart begin=%d end=%d", 1<<40+1, 1<<40+multiPart))
@@ -227,9 +227,9 @@ func mustEncode(t *testing.T, a yenc.Article, body []byte) []byte {
 }
 
 // flipPayloadByte changes one payload character to another letter, so the
-// article stays structurally valid — same length, no new escape, no new line
-// start — and only its CRC is wrong. That is exactly what a flipped bit on
-// the wire looks like, and the case a decoder must never wave through.
+// article stays structurally valid, same length, no new escape, no new line
+// start, and only its CRC is wrong. That is exactly what a flipped bit on the
+// wire looks like, and the case a decoder must never wave through.
 func flipPayloadByte(t *testing.T, article []byte) []byte {
 	t.Helper()
 	out := bytes.Clone(article)
@@ -240,9 +240,9 @@ func flipPayloadByte(t *testing.T, article []byte) []byte {
 		if bytes.HasPrefix(line, []byte("=y")) {
 			continue
 		}
-		// Start at 1: the first byte of a line is the one position where a
-		// new value could change how the line is framed. Skip the byte after
-		// an '=' for the same reason — it is half of an escape.
+		// Start at 1: the first byte of a line is the one position where a new
+		// value could change how the line is framed. Skip the byte after an '='
+		// for the same reason: it is half of an escape.
 		for i := 1; i < len(line); i++ {
 			if line[i-1] == '=' {
 				continue

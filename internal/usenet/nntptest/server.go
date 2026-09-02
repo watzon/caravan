@@ -1,8 +1,8 @@
 // Package nntptest is an in-process news server for testing Caravan's NNTP
-// client and everything built on it (PLAN phase 7 task 7).
+// client and everything built on it.
 //
-// It speaks the slice of RFC 3977/4643 that the embedded Usenet engine uses —
-// a greeting, AUTHINFO USER/PASS, BODY by message-id, QUIT — and nothing else.
+// It speaks the slice of RFC 3977/4643 that the embedded Usenet engine uses, a
+// greeting, AUTHINFO USER/PASS, BODY by message-id, QUIT, and nothing else.
 // Articles are registered as raw bytes and written dot-stuffed on the wire, so
 // a later track can register yEnc payloads without this package knowing what
 // yEnc is.
@@ -11,11 +11,10 @@
 // port, and every test that uses it is free of the network (no live calls, no
 // fixtures downloaded at test time).
 //
-// The reason it is a package rather than a _test.go file is that four tracks
-// of phase 7 need the same fake: the client, the NZB pipeline, par2 repair and
-// the end-to-end suite. It holds no Caravan types on purpose — it does not
-// import internal/usenet/nntp — so the client's own in-package tests can use
-// it without an import cycle.
+// It is a package rather than a _test.go file because four suites need the same
+// fake: the client, the NZB pipeline, par2 repair and the end-to-end suite. It
+// holds no Caravan types and does not import internal/usenet/nntp, so the
+// client's own in-package tests can use it without an import cycle.
 package nntptest
 
 import (
@@ -38,7 +37,7 @@ const (
 	// FaultNone answers normally. It is the zero value, so a zero Fault
 	// injects nothing.
 	FaultNone FaultMode = iota
-	// FaultDropBeforeStatus closes the connection without answering at all —
+	// FaultDropBeforeStatus closes the connection without answering at all:
 	// what a news server that recycled the connection under you looks like.
 	FaultDropBeforeStatus
 	// FaultDropMidBody sends the 222 status line and part of the body, then
@@ -64,7 +63,7 @@ type Fault struct {
 	// (service temporarily unavailable), the generic transient answer.
 	Code int
 	// Delay is slept before answering every BODY command, faulty or not. It is
-	// for testing timeouts and cancellation, never for synchronising a test —
+	// for testing timeouts and cancellation, never for synchronising a test:
 	// use SetBodyHook for that.
 	Delay time.Duration
 }

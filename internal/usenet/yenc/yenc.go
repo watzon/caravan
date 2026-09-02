@@ -1,5 +1,5 @@
 // Package yenc encodes and decodes yEnc articles: the codec half of the
-// embedded Usenet engine (SPEC §5.1, PLAN phase 7 task 3).
+// embedded Usenet engine (SPEC §5.1).
 //
 // yEnc is how binaries travel over a text protocol. Each byte is shifted by
 // 42, the four values that would confuse a news server (NUL, CR, LF and '=')
@@ -8,31 +8,22 @@
 // articles, each carrying "=ypart begin=/end=" so the decoder knows where its
 // payload belongs in the finished file.
 //
-// # Fail loudly
+// Every article carries a CRC32 of its own payload, and this package treats that
+// as the point of the format: a mismatched CRC, a payload that is not the length
+// the trailer claims, or an article that stops before "=yend" all return a typed
+// error carrying expected and actual values, never a partial payload with a nil
+// error. Callers match on ErrCorrupt to hand the segment to par2 instead.
 //
-// Every article carries a CRC32 of its own payload, and this package treats
-// that as the point of the format rather than a formality: a mismatched CRC,
-// a payload that is not the length the trailer claims, or an article that
-// stops before "=yend" all return a typed error carrying expected and actual
-// values, and never a partial payload with a nil error. Silently accepting a
-// damaged segment is how a repair pipeline produces a media file that plays
-// for forty minutes and then does not (PLAN phase 7 risks). Callers match on
-// ErrCorrupt to hand the segment to par2 instead.
+// Part.Begin is the 0-based offset of Part.Body in the finished file, so assembly
+// is a WriteAt at that offset and never a sequential append. Parts arrive out of
+// order from a pool of connections, and buffering them to reorder would cost the
+// memory the pipeline is trying not to spend.
 //
-// # Assembly
-//
-// Part.Begin is the 0-based offset of Part.Body in the finished file, so
-// assembly is a WriteAt at that offset and never a sequential append; parts
-// arrive out of order from a pool of connections, and buffering them to
-// reorder would cost the memory the pipeline is trying not to spend.
-//
-// # Encoding
-//
-// The encoder exists so the test corpus, the fake news server and the
-// pipeline's fixtures can produce articles a real client would accept; it is
-// not used to post. It is deliberately conservative about escaping — leading
-// '.', TAB and space are escaped too — so its output survives dot-stuffing
-// and whitespace-trimming middleboxes.
+// The encoder exists so the test corpus, the fake news server and the pipeline's
+// fixtures can produce articles a real client would accept; it is not used to
+// post. It is conservative about escaping (leading '.', TAB and space are escaped
+// too) so its output survives dot-stuffing and whitespace-trimming
+// middleboxes.
 package yenc
 
 import (
@@ -51,19 +42,19 @@ var (
 	// trailer. It is the signal to treat the segment as a hole and let par2
 	// fill it, rather than to retry or to accept what arrived.
 	ErrCorrupt = errors.New("yenc: article failed its own integrity check")
-	// ErrNotYenc means the article contains no "=ybegin" line at all — it is
-	// not a damaged yEnc article, it is not one. A poster's plain-text
-	// announcement article looks like this.
+	// ErrNotYenc means the article contains no "=ybegin" line at all: it is not
+	// a damaged yEnc article, it is not one. A poster's plain-text announcement
+	// article looks like this.
 	ErrNotYenc = errors.New("yenc: article has no =ybegin header")
 	// ErrMalformed means a yEnc control line could not be understood: a
 	// missing name, an unreadable size, a multipart article with no =ypart.
 	ErrMalformed = errors.New("yenc: malformed yEnc article")
 )
 
-// CRCError is a decoded payload whose CRC32 does not match the one the
-// article declared. It carries both values because the pair is what makes a
-// bug report actionable — a mismatch on every segment is a decoder bug, a
-// mismatch on one is a damaged article.
+// CRCError is a decoded payload whose CRC32 does not match the one the article
+// declared. It carries both values because the pair is what makes a bug report
+// actionable: a mismatch on every segment is a decoder bug, a mismatch on one
+// is a damaged article.
 type CRCError struct {
 	// Name is the filename from the =ybegin header.
 	Name string

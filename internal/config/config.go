@@ -23,7 +23,7 @@ import (
 // Precedence, highest first: command-line flag, environment, config file,
 // built-in default. Environment beating the file is what lets one image ship
 // the /config + /data conventions while still honouring a file an operator
-// bind-mounts in — the flag stays above both so `-listen` always wins.
+// bind-mounts in: the flag stays above both so `-listen` always wins.
 const (
 	// EnvDataDir overrides DataDir.
 	EnvDataDir = "CARAVAN_DATA_DIR"
@@ -44,9 +44,9 @@ const DefaultListen = ":8677"
 
 // DefaultPortableListen is what portable mode binds when the config file names
 // no address (SPEC §11). A portable install follows its owner onto whatever
-// network the laptop is on — a coffee shop, a hotel — so it must not be
-// reachable from that network by default. Server mode keeps DefaultListen: it
-// is a box other machines are meant to reach.
+// network the laptop is on, a coffee shop, a hotel, so it must not be reachable
+// from that network by default. Server mode keeps DefaultListen: it is a box
+// other machines are meant to reach.
 //
 // An address in the config file (or -listen) always wins, in both modes.
 const DefaultPortableListen = "127.0.0.1:8677"
@@ -163,7 +163,7 @@ func Default() Config {
 // Load reads the YAML config at path.
 //
 // A missing file is not an error: Caravan is expected to run with zero
-// configuration (SPEC §10.1 — "everything else ships with defaults"), so the
+// configuration (SPEC §10.1, "everything else ships with defaults"), so the
 // defaults are returned instead. Any other read, parse, or validation failure
 // is reported.
 //

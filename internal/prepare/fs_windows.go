@@ -7,8 +7,8 @@ import "golang.org/x/sys/windows"
 // filesystemName reports the filesystem type of the volume holding path,
 // lowercased ("exfat", "ntfs", "fat32", ...).
 //
-// GetVolumeInformation wants the volume's own root — "D:\", not
-// "D:\Media\Caravan" — so the mount point is resolved first.
+// GetVolumeInformation wants the volume's own root, "D:\", not
+// "D:\Media\Caravan", so the mount point is resolved first.
 func filesystemName(path string) (string, error) {
 	p, err := windows.UTF16PtrFromString(path)
 	if err != nil {

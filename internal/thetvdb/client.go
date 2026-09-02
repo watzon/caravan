@@ -1,8 +1,8 @@
 // Package thetvdb is Caravan's client for TheTVDB v4, a metadata provider for
 // television libraries.
 //
-// *Client implements core.MetadataProvider, so everything above it — the
-// scanner, the organizer, the add-series screen — talks to an interface and
+// *Client implements core.MetadataProvider, so everything above it, the
+// scanner, the organizer, the add-series screen, talks to an interface and
 // tests without a network. The client itself is as thin as internal/tmdb and
 // internal/tvmaze: no record caching, one retry. Responses are cached in sqlite
 // by the library layer, which is where "rebuildable cache" lives (SPEC §1.2).
@@ -10,8 +10,8 @@
 // It holds exactly one piece of state, and the two decisions about that state
 // are the interesting part of this file.
 //
-// TheTVDB v4 does not accept a credential on an ordinary request. A key — and,
-// for a user-supported subscription, a PIN — is posted to /login, which answers
+// TheTVDB v4 does not accept a credential on an ordinary request. A key, and,
+// for a user-supported subscription, a PIN, is posted to /login, which answers
 // with a JWT good for about a month; every other request carries that JWT as a
 // bearer token. So a client that logged in per lookup would spend a login on
 // every search keystroke, which is why the token is held here and why
@@ -21,14 +21,16 @@
 // login body carries "pin": "", and a user-supported key is refused when the
 // field is absent, so the body is assembled rather than marshalled from a
 // struct: an `omitempty` tag is one edit away from breaking one of the two, and
-// neither failure is visible until somebody with the other kind of key tries it.
+// neither failure is visible until somebody with the other kind of key tries
+// it.
 //
 // The token is refreshed by a 401 and never by a clock. Expiry is the only
 // thing a timer could anticipate, and it is the least likely reason a token
 // stops working: a revoked key, a rotated subscription and a skewed clock all
-// present as a 401, and none of them moves the expiry a timer would be watching.
-// So nothing here tracks expiry. A 401 invalidates the token that earned it,
-// one re-login is attempted, and a second 401 is the credential's own answer.
+// present as a 401, and none of them moves the expiry a timer would be
+// watching. So nothing here tracks expiry. A 401 invalidates the token that
+// earned it, one re-login is attempted, and a second 401 is the credential's
+// own answer.
 package thetvdb
 
 import (
@@ -56,7 +58,7 @@ const (
 	ProviderID = "thetvdb"
 
 	// DefaultBaseURL is TheTVDB's v4 API root. Like TMDB and unlike stash-box,
-	// TheTVDB is a service rather than a protocol — one host, no dialects — so
+	// TheTVDB is a service rather than a protocol, one host, no dialects, so
 	// this is a default rather than a preset, overridden only by tests.
 	DefaultBaseURL = "https://api4.thetvdb.com/v4"
 
@@ -91,11 +93,11 @@ const (
 // Errors returned for the conditions callers act on. They are matched with
 // errors.Is; use errors.As with *APIError for TheTVDB's own status and message.
 var (
-	// ErrUnauthorized means the API key — or the key and PIN together — was
+	// ErrUnauthorized means the API key, or the key and PIN together, was
 	// refused, either at login or by a request whose token the server no longer
 	// honors. It wraps core.ErrMetadataUnauthorized so a caller that only wants
-	// to know "the credential was rejected" — the credential-health model in
-	// internal/api — never has to import this package.
+	// to know "the credential was rejected", the credential-health model in
+	// internal/api, never has to import this package.
 	ErrUnauthorized = fmt.Errorf("thetvdb: unauthorized: %w", core.ErrMetadataUnauthorized)
 	// ErrNotFound means TheTVDB has no record with that id.
 	ErrNotFound = errors.New("thetvdb: not found")
@@ -165,8 +167,8 @@ type Client struct {
 	sleep func(ctx context.Context, d time.Duration) error
 
 	// tokenMu guards token. The login itself happens under this lock, which is
-	// what collapses a burst of concurrent callers — or a burst of concurrent
-	// 401s — into a single login: everyone else waits and then finds the token
+	// what collapses a burst of concurrent callers, or a burst of concurrent
+	// 401s, into a single login: everyone else waits and then finds the token
 	// the first one obtained.
 	tokenMu sync.Mutex
 	// token is the bearer token in force, empty when there is none yet or the
@@ -200,7 +202,7 @@ func New(apiKey, pin string, hc *http.Client) *Client {
 // A login is the cheapest authenticated exchange TheTVDB has, and it is the
 // exact question the Test button asks: the key and the PIN are what /login
 // consumes, and everything else this client does is a bearer token away from
-// them. Nothing in the reply is used — a search would answer the same question
+// them. Nothing in the reply is used: a search would answer the same question
 // with an unbounded body and a dependency on whatever the query happened to
 // match.
 //
@@ -214,7 +216,7 @@ func (c *Client) Test(ctx context.Context) error {
 
 // SearchMovies reports that TheTVDB does not serve films here. TheTVDB has a
 // movie catalogue, but its movie record carries no typed release list, and
-// core.MovieMeta.DigitalRelease is what gates minimum availability — see the
+// core.MovieMeta.DigitalRelease is what gates minimum availability: see the
 // descriptor comment in internal/core/provider.go. A chain walker skips this
 // rung rather than failing on it (see core.ErrProviderKindUnsupported).
 func (c *Client) SearchMovies(ctx context.Context, q string) ([]core.MovieMeta, error) {
@@ -226,8 +228,7 @@ func (c *Client) GetMovie(ctx context.Context, ref string) (*core.MovieMeta, err
 	return nil, core.ErrProviderKindUnsupported
 }
 
-// login exchanges the key — and the PIN, when there is one — for a bearer
-// token.
+// login exchanges the key, and the PIN, when there is one, for a bearer token.
 //
 // The body is a map rather than a struct because the PIN's presence is the
 // whole point: a licensed key is refused when "pin" arrives empty, and a
@@ -253,8 +254,8 @@ func (c *Client) login(ctx context.Context) (string, error) {
 
 	resp, err := c.hc.Do(req)
 	if err != nil {
-		// *url.Error stringifies the URL. Nothing secret travels in it here —
-		// the credential is in the body — but unwrapping keeps the message about
+		// *url.Error stringifies the URL. Nothing secret travels in it here,
+		// the credential is in the body, but unwrapping keeps the message about
 		// the failure rather than the address, and keeps the habit uniform with
 		// internal/tmdb.
 		var uerr *url.Error
@@ -289,8 +290,8 @@ func (c *Client) login(ctx context.Context) (string, error) {
 // authToken returns the bearer token in force, logging in when there is none.
 //
 // The login runs under the lock deliberately. A burst of callers arriving at an
-// empty token — the first search after a restart, or every goroutine that just
-// had its token refused — would otherwise each log in, and a subscription's
+// empty token, the first search after a restart, or every goroutine that just
+// had its token refused, would otherwise each log in, and a subscription's
 // login budget is not a place to spend N calls to learn one answer.
 func (c *Client) authToken(ctx context.Context) (string, error) {
 	c.tokenMu.Lock()

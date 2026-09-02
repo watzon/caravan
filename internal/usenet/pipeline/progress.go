@@ -60,7 +60,7 @@ func (p Progress) Fraction() float64 {
 // rather than inside it because the aggregate is read on every engine poll and
 // this slice is read only when someone has the drawer open.
 type FileProgress struct {
-	// Name is the file's name inside the download directory — the same name
+	// Name is the file's name inside the download directory: the same name
 	// FileResult reports once the download is over.
 	Name string
 	// Segments is how many segments the file was posted in.

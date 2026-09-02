@@ -1,28 +1,26 @@
 // Package nzb parses NZB documents: the index half of the embedded Usenet
-// engine (SPEC §5.1, PLAN phase 7 task 3).
+// engine (SPEC §5.1).
 //
 // An NZB is a shopping list. It names the files a release is made of and, for
-// each one, the articles those files were split into, so a downloader never
-// has to search a news server — it fetches message-ids and reassembles. This
-// package turns that XML into Files and Segments and refuses anything it
-// cannot fetch from later, because a download that starts against a half-read
-// NZB fails slowly and confusingly instead of immediately and clearly.
+// each one, the articles those files were split into, so a downloader never has
+// to search a news server: it fetches message-ids and reassembles. This package
+// turns that XML into Files and Segments and refuses anything it cannot fetch
+// from later, because a download that starts against a half-read NZB fails
+// slowly and confusingly instead of immediately and clearly.
 //
 // It also knows which files are par2, because that distinction decides the
-// pipeline's shape: content files are assembled and extracted, par2 files are
-// the repair budget and are fetched lazily (SPEC §5.1) — downloading every
-// recovery volume of a release that needed no repair is the single easiest
-// way to waste a paid Usenet account.
+// pipeline's shape: content files are assembled and extracted, while par2 files
+// are the repair budget and are fetched lazily (SPEC §5.1). Downloading every
+// recovery volume of a release that needed no repair is the easiest way to
+// waste a paid Usenet account.
 //
 // The parser holds no Caravan types and touches no database: it is bytes in,
-// values out, which is what makes the pipeline above it testable against
+// values out, which makes the pipeline above it testable against
 // internal/usenet/nntptest with no network anywhere.
 //
-// # Untrusted input
-//
-// NZBs arrive from indexers, so the document is untrusted. Parse caps the
-// document at MaxDocumentBytes, and encoding/xml resolves no external
-// entities, so there is no XXE surface here.
+// NZBs arrive from indexers, so the document is untrusted. Parse caps it at
+// MaxDocumentBytes, and encoding/xml resolves no external entities, so there is
+// no XXE surface here.
 package nzb
 
 import (
@@ -82,7 +80,7 @@ type Segment struct {
 // File is one file of a release, split across Segments.
 type File struct {
 	// Subject is the article subject the poster used. The filename usually
-	// lives inside it — see Filename.
+	// lives inside it: see Filename.
 	Subject string
 	// Poster is the From header of the posting.
 	Poster string
@@ -118,7 +116,7 @@ type NZB struct {
 // so a quoted run is the name when there is one. Unquoted subjects are
 // handled by stripping the yEnc counter and taking the last token that looks
 // like a filename. When nothing looks like a name the whole subject is
-// returned, because an odd name is more useful downstream than an empty one —
+// returned, because an odd name is more useful downstream than an empty one:
 // obfuscated releases are the stuck-import queue's job (SPEC §5.4), not the
 // parser's.
 func (f File) Filename() string { return Filename(f.Subject) }
@@ -171,9 +169,8 @@ func (n *NZB) Par2Files() []File {
 
 // RecoveryBlocks is the total number of recovery blocks the NZB's par2
 // volumes advertise in their names. It is the ceiling on what repair can fix
-// and the number a "needs N more blocks" failure is measured against
-// (PLAN phase 7 task 4); the par2 files themselves are authoritative once
-// downloaded.
+// and the number a "needs N more blocks" failure is measured against. The par2
+// files themselves are authoritative once downloaded.
 func (n *NZB) RecoveryBlocks() int {
 	var total int
 	for _, f := range n.Files {
@@ -186,12 +183,12 @@ func (n *NZB) RecoveryBlocks() int {
 
 // Parse reads an NZB document.
 //
-// Every failure unwraps to ErrMalformed (or ErrTooLarge / ErrUnsupportedCharset)
-// and names the file and segment at fault. The parser is strict about what it
-// will have to act on later — a segment with no message-id, a non-positive
-// part number, two segments claiming the same number, a file with no segments
-// at all — and lenient about everything else, because an unreadable posting
-// date has never broken a download.
+// Every failure unwraps to ErrMalformed (or ErrTooLarge /
+// ErrUnsupportedCharset) and names the file and segment at fault. The parser is
+// strict about what it will have to act on later, a segment with no message-id,
+// a non-positive part number, two segments claiming the same number, a file
+// with no segments at all, and lenient about everything else, because an
+// unreadable posting date has never broken a download.
 func Parse(r io.Reader) (*NZB, error) {
 	dec := xml.NewDecoder(&limitReader{r: r, left: docLimit})
 	dec.Strict = true
@@ -390,7 +387,7 @@ func charsetReader(charset string, input io.Reader) (io.Reader, error) {
 	case "", "utf-8", "utf8", "us-ascii", "ascii":
 		return input, nil
 	case "iso-8859-1", "iso8859-1", "latin1", "latin-1", "windows-1252", "cp1252":
-		// Not a faithful windows-1252 decode (0x80–0x9F differ), but those
+		// Not a faithful windows-1252 decode (0x80: 0x9F differ), but those
 		// bytes do not appear in release names, and mapping them to their
 		// latin-1 equivalents beats failing the download.
 		return &latin1Reader{r: bufio.NewReader(input)}, nil

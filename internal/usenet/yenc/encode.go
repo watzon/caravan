@@ -103,11 +103,10 @@ func EncodeTo(w io.Writer, a Article, body []byte) error {
 
 // encodeBody writes the escaped, line-wrapped payload.
 //
-// The escaping is deliberately wider than the four bytes the format requires:
-// a leading '.', TAB or space is escaped too, so an article survives
-// dot-stuffing and any middlebox that trims trailing whitespace. A decoder
-// cannot tell the difference — an escape is an escape — so the extra safety
-// is free.
+// The escaping is deliberately wider than the four bytes the format requires: a
+// leading '.', TAB or space is escaped too, so an article survives dot-stuffing
+// and any middlebox that trims trailing whitespace. A decoder cannot tell the
+// difference, an escape is an escape, so the extra safety is free.
 func encodeBody(bw *bufio.Writer, body []byte, lineLen int) {
 	line := make([]byte, 0, lineLen+8)
 

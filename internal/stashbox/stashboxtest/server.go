@@ -1,29 +1,27 @@
 // Package stashboxtest is an in-process stash-box endpoint for testing
-// Caravan's stash-box client and everything built on it (PLAN phase 9 task 1).
+// Caravan's stash-box client and everything built on it.
 //
-// It speaks the slice of GraphQL-over-HTTP that the client uses — a POST
+// It speaks the slice of GraphQL-over-HTTP that the client uses, a POST
 // carrying {query, variables, operationName}, answered from a per-operation
-// queue of canned replies — and nothing else. It does not parse GraphQL: a test
+// queue of canned replies, and nothing else. It does not parse GraphQL: a test
 // registers the reply it wants for an operation name, which keeps this package
 // free of a schema that would have to be kept in step with three dialects.
 //
-// **It records every request it receives, before doing anything else with it.**
-// That is not a convenience: PLAN phase 9's acceptance criterion is that a full
-// job cycle with the adult module disabled makes *zero* requests to the
+// It records every request it receives, before doing anything else with it. A
+// full job cycle with the adult module disabled must make zero requests to the
 // stash-box endpoint, and Count() is the assertion that proves it. A request
 // that is malformed, unauthenticated, sent with the wrong method, or for an
-// operation with no stub is still recorded — an unanswerable request is still
-// traffic, and traffic is the thing being measured.
+// operation with no stub is still recorded: an unanswerable request is still
+// traffic.
 //
 // It listens on 127.0.0.1 with a kernel-chosen port, never on Caravan's own
 // port, and every test that uses it is free of the network (no live calls, no
 // fixtures downloaded at test time).
 //
-// The reason it is a package rather than a _test.go file is that several tracks
-// of phase 9 need the same fake: the client, the gating tests, the refresh job
-// and the end-to-end suite. It holds no Caravan types on purpose — it does not
-// import internal/stashbox — so the client's own in-package tests can use it
-// without an import cycle.
+// It is a package rather than a _test.go file because several suites need the
+// same fake: the client, the gating tests, the refresh job and the end-to-end
+// suite. It holds no Caravan types and does not import internal/stashbox, so
+// the client's own in-package tests can use it without an import cycle.
 package stashboxtest
 
 import (
@@ -74,7 +72,7 @@ type Request struct {
 	// keyed on.
 	OperationName string
 	// Query is the GraphQL document. Tests assert on the fields a client asks
-	// for — a selection set that quietly grows is how dialect compatibility is
+	// for: a selection set that quietly grows is how dialect compatibility is
 	// lost.
 	Query string
 	// Variables is the decoded variables object, nil when there was none.
@@ -113,7 +111,7 @@ type Options struct {
 	RequireAPIKey bool
 	// WithoutQueryStudios makes the endpoint behave like TPDB, whose schema has
 	// no queryStudios at all: any document mentioning that field is answered
-	// with a bare HTTP 500 and the plain-text body "Server Error" — not a
+	// with a bare HTTP 500 and the plain-text body "Server Error", not a
 	// GraphQL validation error, and not JSON of any kind. Every other operation
 	// is served normally, which is the point: TPDB answers searchScene,
 	// queryScenes and findStudio perfectly well.
@@ -124,15 +122,15 @@ type Options struct {
 	WithoutQueryStudios bool
 	// SiteIndex answers TPDB's REST site index at GET /sites, from a queue
 	// consumed exactly as Operations is (the last response repeats). Leaving it
-	// empty is an endpoint with no REST side at all, which answers 404 — that is
+	// empty is an endpoint with no REST side at all, which answers 404: that is
 	// every stash-box but TPDB's, and it is the default so a test has to opt in
 	// to the dialect the same way it opts in to a missing queryStudios.
 	SiteIndex []Response
 	// SceneIndex answers TPDB's REST scene index at GET /scenes, with the same
 	// queue-and-404 semantics SiteIndex has.
 	SceneIndex []Response
-	// SiteLookup answers GET /sites/{anything} — the uuid-to-numeric-id
-	// resolution the REST scene index needs — with the same queue-and-404
+	// SiteLookup answers GET /sites/{anything}, the uuid-to-numeric-id
+	// resolution the REST scene index needs, with the same queue-and-404
 	// semantics. It is separate from SiteIndex because a test asserting "one
 	// lookup, then cached" must tell the two apart.
 	SiteLookup []Response
@@ -242,7 +240,7 @@ func (s *Server) SetTagIndex(responses ...Response) {
 }
 
 // serveQueue pops the next response from a queue, repeating its last entry, or
-// answers 404 for an empty queue — an endpoint that does not have that route.
+// answers 404 for an empty queue: an endpoint that does not have that route.
 // Called under s.mu via record.
 func serveQueue(queue *[]Response, what string) Response {
 	q := *queue
@@ -385,9 +383,9 @@ func (s *Server) record(req Request) Response {
 	return GraphQLError(fmt.Sprintf("no stub for operation %q", req.OperationName), "INTERNAL_SERVER_ERROR")
 }
 
-// Data wraps a `data` object in the GraphQL envelope and serves it with 200. The
-// argument is the raw JSON of the data object — typically a recorded fixture's
-// inner payload.
+// Data wraps a `data` object in the GraphQL envelope and serves it with 200.
+// The argument is the raw JSON of the data object: typically a recorded
+// fixture's inner payload.
 func Data(raw []byte) Response {
 	return Response{Body: []byte(`{"data":` + string(raw) + `}`)}
 }
@@ -442,7 +440,7 @@ func Unauthorized() Response {
 
 // ServerError is TPDB's answer to a query for a field its schema does not have:
 // HTTP 500 with the plain-text body "Server Error". It is not a GraphQL error
-// and not JSON, which is exactly what makes it worth having a constructor for —
+// and not JSON, which is exactly what makes it worth having a constructor for:
 // a client that assumes every reply decodes reports this as a decode failure
 // instead of as the endpoint failing.
 func ServerError() Response {

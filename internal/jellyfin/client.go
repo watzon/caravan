@@ -1,12 +1,12 @@
 // Package jellyfin is Caravan's client for the Jellyfin server API and the
-// playback handoff built on it (SPEC §5.2, PLAN phase 4 task 1).
+// playback handoff built on it (SPEC §5.2).
 //
 // The surface is deliberately two calls wide. Caravan does not manage a
 // Jellyfin library, it only tells one that something changed: GET /System/Info
-// answers "are these credentials any good", POST /Library/Refresh answers
-// "go and look again". Everything else about the library — layout, NFOs,
-// artwork — is already on disk in the conventions Jellyfin reads (SPEC §6), so
-// there is nothing to synchronize over an API.
+// answers "are these credentials any good", POST /Library/Refresh answers "go
+// and look again". Everything else about the library, layout, NFOs, artwork, is
+// already on disk in the conventions Jellyfin reads (SPEC §6), so there is
+// nothing to synchronize over an API.
 //
 // Nothing here retries. A refresh that does not land is not lost: the caller is
 // a durable job whose own backoff owns that decision (SPEC §7).

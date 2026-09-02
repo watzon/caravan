@@ -7,8 +7,8 @@ import (
 )
 
 // The size cap is 64 MB, which is not a size a test should build. These tests
-// lower docLimit instead, so the boundary — the one place an off-by-one would
-// reject legitimate NZBs — is exercised on documents measured in bytes.
+// lower docLimit instead, so the boundary, the one place an off-by-one would
+// reject legitimate NZBs, is exercised on documents measured in bytes.
 func withLimit(t *testing.T, limit int64) {
 	t.Helper()
 	previous := docLimit

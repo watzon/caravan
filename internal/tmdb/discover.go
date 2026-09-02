@@ -30,7 +30,7 @@ const (
 	maxPage = 500
 
 	// homePages is how many pages each home shelf merges. One TMDB page is 20
-	// rows and trending drops its people, so one page cannot promise the 20–30
+	// rows and trending drops its people, so one page cannot promise the 20: 30
 	// cards a carousel wants; two always can.
 	homePages = 2
 
@@ -70,10 +70,10 @@ type discoverResponse struct {
 }
 
 // detailResponse is /movie/{id} and /tv/{id} with detailAppend. The two
-// endpoints disagree on where a few fields live — imdb_id is top level on a
-// movie and inside external_ids on a series, runtime is a number on a movie
-// and a list on a series — so both spellings are decoded and the method that
-// knows which endpoint it called picks.
+// endpoints disagree on where a few fields live, imdb_id is top level on a
+// movie and inside external_ids on a series, runtime is a number on a movie and
+// a list on a series, so both spellings are decoded and the method that knows
+// which endpoint it called picks.
 type detailResponse struct {
 	discoverResult
 	Status         string `json:"status"`
@@ -142,8 +142,8 @@ func (c *Client) NowPlayingMovies(ctx context.Context) ([]core.DiscoverItem, err
 
 // UpcomingSeries returns series whose first air date is today or later.
 //
-// TMDB has no /tv/upcoming sibling of /movie/upcoming — theatrical windows
-// are a movie idea — so this is /discover/tv bounded on first_air_date.
+// TMDB has no /tv/upcoming sibling of /movie/upcoming, theatrical windows are a
+// movie idea, so this is /discover/tv bounded on first_air_date.
 func (c *Client) UpcomingSeries(ctx context.Context) ([]core.DiscoverItem, error) {
 	q := commonQuery(core.DiscoverFilter{ReleasedFrom: startOfUTCDay(time.Now())}, paramSeriesDate, seriesSortBy)
 	return c.list(ctx, "/discover/tv", q, core.MediaTypeSeries)
@@ -178,9 +178,9 @@ func (c *Client) MovieDetail(ctx context.Context, tmdbID int64) (*core.TitleDeta
 }
 
 // SeriesDetail is MovieDetail's series twin. The season list comes from the
-// details response — TMDB describes every season there, so no per-season
-// request is needed to render the detail screen. (GetSeries still fetches each
-// season: it needs the episodes, which only the season endpoint has.)
+// details response: TMDB describes every season there, so no per-season request
+// is needed to render the detail screen. (GetSeries still fetches each season:
+// it needs the episodes, which only the season endpoint has.)
 func (c *Client) SeriesDetail(ctx context.Context, tmdbID int64) (*core.TitleDetail, error) {
 	d, err := c.detail(ctx, fmt.Sprintf("/tv/%d", tmdbID))
 	if err != nil {
@@ -343,9 +343,9 @@ func (c *Client) items(results []discoverResult, fallbackType string) []core.Dis
 	return out
 }
 
-// mediaTypeOf resolves a result's media type, preferring the provider's own
-// tag over what the endpoint implies. It reports false for anything that is
-// not a movie or a series — /trending/all also returns people.
+// mediaTypeOf resolves a result's media type, preferring the provider's own tag
+// over what the endpoint implies. It reports false for anything that is not a
+// movie or a series: /trending/all also returns people.
 func mediaTypeOf(tag, fallback string) (string, bool) {
 	if tag == "" {
 		tag = fallback

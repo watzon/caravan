@@ -16,7 +16,7 @@ import (
 	"github.com/watzon/caravan/internal/store"
 )
 
-// syncSitePayload encodes the job body the way the API does — through the
+// syncSitePayload encodes the job body the way the API does: through the
 // struct, because the encoded string is also the queue's dedupe key.
 func syncSitePayload(t *testing.T, seriesID int64, searchNow bool) json.RawMessage {
 	t.Helper()
@@ -123,7 +123,7 @@ func TestSyncSiteJobQueuesNoSearchWithoutTheFlag(t *testing.T) {
 
 // An unmonitored site has no wanted scenes, so search_now on it queues nothing.
 // The UI does not offer the combination, but the queue must not treat it as an
-// error — a job that failed here would retry forever against a site nobody is
+// error: a job that failed here would retry forever against a site nobody is
 // following.
 func TestSyncSiteSearchOnAnUnmonitoredSiteQueuesNothing(t *testing.T) {
 	ctx := context.Background()
@@ -132,8 +132,8 @@ func TestSyncSiteSearchOnAnUnmonitoredSiteQueuesNothing(t *testing.T) {
 
 	// What an unmonitored add leaves behind: the site AND the scenes the walk
 	// filed under it are unmonitored, because library.writeScenes gives a new
-	// scene its site's flag. The scene's own flag is the one that matters —
-	// that is what the wanted list reads.
+	// scene its site's flag. The scene's own flag is the one that matters: that
+	// is what the wanted list reads.
 	site, scene := addSite(t, ctx, st, "Brazzers", time.Date(2022, time.March, 14, 0, 0, 0, 0, time.UTC))
 	site.Monitored = false
 	if err := st.UpsertSeries(ctx, &site); err != nil {

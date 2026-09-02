@@ -432,8 +432,8 @@ func writeSyntheticSet(t *testing.T, dir, setName, fileName string, data []byte,
 // TestRepairAbortsWhenRebuiltFileFailsItsOwnMD5 drives the defensive path that
 // should be unreachable: a set whose slice checksums all pass but whose
 // whole-file MD5 does not. Rebuilding from those slices can only reproduce the
-// same bytes, so the repair must abort with a typed error and leave the file
-// on disk exactly as it found it — never rename a file it could not vouch for.
+// same bytes, so the repair must abort with a typed error and leave the file on
+// disk exactly as it found it: never rename a file it could not vouch for.
 func TestRepairAbortsWhenRebuiltFileFailsItsOwnMD5(t *testing.T) {
 	dir := t.TempDir()
 	data := bytes.Repeat([]byte("caravan"), 900) // 6300 bytes, not a whole number of slices
@@ -520,11 +520,11 @@ func TestErrorMessages(t *testing.T) {
 	}
 }
 
-// writeBrokenForeignSet writes a par2 index for an unrelated recovery set
-// whose file description packet passes its own MD5 — so scanPackets hands it
-// over — but whose file ID does not match the description it carries. That is
-// what a bit-rotted or oddly-generated set from another release in the same
-// download directory looks like.
+// writeBrokenForeignSet writes a par2 index for an unrelated recovery set whose
+// file description packet passes its own MD5, so scanPackets hands it over, but
+// whose file ID does not match the description it carries. That is what a
+// bit-rotted or oddly-generated set from another release in the same download
+// directory looks like.
 func writeBrokenForeignSet(t *testing.T, dir, name string) {
 	t.Helper()
 
@@ -547,10 +547,10 @@ func writeBrokenForeignSet(t *testing.T, dir, name string) {
 	writeTemp(t, dir, name, blob)
 }
 
-// A Usenet download directory routinely holds several releases' par2 files.
-// One broken foreign set must not take a healthy release's recovery budget
-// down with it — Open pulls in every *.par2 sibling, so before this the whole
-// repair became impossible because of a set nobody asked about.
+// A Usenet download directory routinely holds several releases' par2 files. One
+// broken foreign set must not take a healthy release's recovery budget down
+// with it: Open pulls in every *.par2 sibling, so before this the whole repair
+// became impossible because of a set nobody asked about.
 func TestOpenIgnoresADamagedSetItWasNotAskedFor(t *testing.T) {
 	dir := t.TempDir()
 	for _, name := range []string{"alpha.bin", "beta.bin", "gamma.bin"} {

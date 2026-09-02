@@ -47,10 +47,10 @@ func SeriesExpression(title string, season, episode int) string {
 }
 
 // SceneExpression seeds an adult scene search with everything the page will
-// actually run: the site-and-date form, and — when the scene has a usable
-// title — the site-and-title form the search also falls back to. The seed is
-// the whole truth of the fan-out; a seed that named only one variant would sit
-// above a "Searched indexers for" line listing two.
+// actually run: the site-and-date form, and, when the scene has a usable title,
+// the site-and-title form the search also falls back to. The seed is the whole
+// truth of the fan-out; a seed that named only one variant would sit above a
+// "Searched indexers for" line listing two.
 func SceneExpression(site string, date time.Time, title string) string {
 	siteTerm := fieldSite + ":" + quote(strings.TrimSpace(site))
 	dated, titled := "", ""

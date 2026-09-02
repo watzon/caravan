@@ -50,7 +50,7 @@ func TestComputeSkipsKnownFutureEpisodesAndKeepsUnknownDates(t *testing.T) {
 
 // The wanted list is what the backlog sweep, the RSS matcher and the wanted
 // screen all read, so an item that never enters it cannot leak out of any of
-// them. That is where a dormant library's items have to be dropped — and it
+// them. That is where a dormant library's items have to be dropped, and it
 // applies to movies as well as episodes, which is new: the switch this
 // generalizes could only ever be off for adult series.
 func TestComputeDropsAnInactiveLibrarysItems(t *testing.T) {
@@ -143,9 +143,9 @@ func TestComputeDropsAnInactiveLibrarysItems(t *testing.T) {
 
 // An anime episode reaches the wanted list on the same terms a television one
 // does. Nothing here knows the anime kind exists: the rows are gated per row
-// through core.LibraryKindForSeries, so the mapping is what makes an anime shelf
-// searchable at all — and it is what makes switching that shelf off stop the
-// searching, which is the other half of the same promise.
+// through core.LibraryKindForSeries, so the mapping is what makes an anime
+// shelf searchable at all, and it is what makes switching that shelf off stop
+// the searching, which is the other half of the same promise.
 func TestComputeCarriesAnimeEpisodes(t *testing.T) {
 	ctx := context.Background()
 	st, err := store.Open(filepath.Join(t.TempDir(), "caravan.db"))

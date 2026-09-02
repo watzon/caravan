@@ -10,7 +10,7 @@ import (
 // ContentDirectory error codes used here (UPnP AV ContentDirectory:1, §2.5).
 const (
 	// errNoSuchObject is the answer to a browse of an object id that no longer
-	// resolves — a client's cached id after a rescan, typically.
+	// resolves: a client's cached id after a rescan, typically.
 	errNoSuchObject = "701"
 	// errInvalidArgs is the generic SOAP argument fault.
 	errInvalidArgs = "402"
@@ -28,12 +28,14 @@ const (
 // contentTypeSOAP is what both requests and responses carry.
 const contentTypeSOAP = `text/xml; charset="utf-8"`
 
-// parseSOAPAction splits a SOAPACTION header — `"urn:…:ContentDirectory:1#Browse"`
-// — into the service type and the action name.
+// parseSOAPAction splits a SOAPACTION header,
+// `"urn:…:ContentDirectory:1#Browse"`, into the service type and the action
+// name.
 //
 // The header is the authority on which action was invoked, not the body's
 // element name: it is the one part of the request a client cannot get subtly
-// wrong through namespace handling, and it is what the spec says to dispatch on.
+// wrong through namespace handling, and it is what the spec says to dispatch
+// on.
 func parseSOAPAction(header string) (service, action string, ok bool) {
 	raw := strings.Trim(strings.TrimSpace(header), `"`)
 	service, action, ok = strings.Cut(raw, "#")
@@ -60,7 +62,7 @@ const (
 // decodeBrowse reads a Browse request body.
 //
 // The element paths are matched on local names only, so the request parses
-// whichever namespace prefix the client happens to use for the service — which
+// whichever namespace prefix the client happens to use for the service: which
 // varies, and is not something a server gets to be strict about.
 func decodeBrowse(body []byte) (browseArgs, error) {
 	var envelope struct {
@@ -144,8 +146,8 @@ type soapArg struct {
 // server on the wire does: the three characters that need it, nothing else.
 // xml.EscapeText would also turn quotes into numeric character references
 // (&#34;), which is legal XML that the hand-rolled unescapers embedded in TV
-// apps do not know — they read the whole Result as garbage and render an
-// empty folder. Infuse on tvOS is a documented-by-experiment example.
+// apps do not know: they read the whole Result as garbage and render an empty
+// folder. Infuse on tvOS is a documented-by-experiment example.
 var elementContent = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
 
 // writeSOAPResponse writes a successful action response.

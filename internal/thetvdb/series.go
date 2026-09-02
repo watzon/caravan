@@ -35,11 +35,11 @@ func seriesEpisodesPath(id int64) string {
 const searchLimit = 25
 
 // maxEpisodePages bounds the episode walk. TheTVDB pages this endpoint, and a
-// long-runner (One Piece, Detective Conan) has thousands of episodes; paging all
-// of them would spend a whole lookup on one series. Twenty pages is more
+// long-runner (One Piece, Detective Conan) has thousands of episodes; paging
+// all of them would spend a whole lookup on one series. Twenty pages is more
 // episodes than any catalogued series has, so the bound is a runaway guard
-// rather than a truncation anyone will meet — the same role anilist.maxAiringPages
-// plays for the airing schedule.
+// rather than a truncation anyone will meet: the same role
+// anilist.maxAiringPages plays for the airing schedule.
 const maxEpisodePages = 20
 
 // searchRecord is one entry of TheTVDB's search reply.
@@ -59,8 +59,8 @@ type searchRecord struct {
 	RemoteIDs    []remoteID `json:"remote_ids"`
 }
 
-// remoteID is one cross-provider id. TheTVDB carries several kinds — IMDB,
-// TMDB, EIDR, official sites — distinguished only by sourceName, so the list is
+// remoteID is one cross-provider id. TheTVDB carries several kinds, IMDB, TMDB,
+// EIDR, official sites, distinguished only by sourceName, so the list is
 // searched rather than indexed.
 type remoteID struct {
 	ID         string `json:"id"`
@@ -110,7 +110,7 @@ type episodesPage struct {
 }
 
 // statuses maps TheTVDB's series status onto the vocabulary the rest of Caravan
-// uses — the same strings TMDB serves, because the library, the NFO writer and
+// uses: the same strings TMDB serves, because the library, the NFO writer and
 // the UI all branch on those and a second spelling of "Ended" would have to be
 // taught to every one of them.
 //
@@ -152,8 +152,8 @@ func (c *Client) SearchSeries(ctx context.Context, q string) ([]core.SeriesMeta,
 //
 // It costs at least two requests: the extended series document, then the
 // episode pages. The episodes are a separate walk because TheTVDB serves no
-// season documents worth having — the season records carry an id and a number
-// and nothing an NFO wants — so the seasons below are grouped from the episodes
+// season documents worth having (the season records carry an id and a number and
+// nothing an NFO wants) so the seasons below are grouped from the episodes
 // themselves, exactly as internal/tvmaze does it.
 //
 // The full mapping onto core.SeriesMeta, which is the contract this function
@@ -163,11 +163,11 @@ func (c *Client) SearchSeries(ctx context.Context, q string) ([]core.SeriesMeta,
 //	ProviderRef       the TheTVDB series id, decimal
 //	TVDBID            the same id as an int64
 //	IMDBID            remoteIds, the entry whose sourceName is "IMDB"
-//	TMDBID            0 — TheTVDB serves a TMDB remote id for some records, but
+//	TMDBID            0. TheTVDB serves a TMDB remote id for some records, but
 //	                  a TMDB id Caravan did not get from TMDB would let the
 //	                  library's TMDB rung collapse a TheTVDB row onto a TMDB one
 //	Title             name
-//	OriginalTitle     "" — TheTVDB's alternate names are a translation list, not
+//	OriginalTitle     "". TheTVDB's alternate names are a translation list, not
 //	                  an original title, and picking one would tell the matcher
 //	                  it had two pieces of evidence when it has one
 //	Year              year
@@ -210,9 +210,9 @@ func (c *Client) GetSeries(ctx context.Context, ref string) (*core.SeriesMeta, e
 // episodes walks the paged default-order episode list.
 //
 // `links.next` is read as "there is more" rather than followed as a URL. The
-// page number is this client's own, so a cursor pointing at another host — or
-// at a query this client never composed — cannot redirect the walk, and the
-// page cap stays a cap rather than a suggestion the server can extend.
+// page number is this client's own, so a cursor pointing at another host, or at
+// a query this client never composed, cannot redirect the walk, and the page
+// cap stays a cap rather than a suggestion the server can extend.
 func (c *Client) episodes(ctx context.Context, id int64) ([]episodeRecord, error) {
 	var out []episodeRecord
 	path := seriesEpisodesPath(id)
@@ -269,8 +269,8 @@ func seriesMeta(d seriesExtended) core.SeriesMeta {
 // seasons groups an episode list into the seasons TheTVDB numbers, ascending,
 // each with its episodes in order.
 //
-// Season 0 is kept. TheTVDB numbers its specials properly — a special carries
-// seasonNumber 0 and a real episode number within it — so a specials file lands
+// Season 0 is kept. TheTVDB numbers its specials properly, a special carries
+// seasonNumber 0 and a real episode number within it, so a specials file lands
 // on the episode it belongs to. That is the difference from internal/tvmaze,
 // which drops its specials because TVmaze leaves them unnumbered and any number
 // Caravan chose would be renumbered by the next upstream edit. There is nothing

@@ -94,9 +94,9 @@ func TestEngineInsightReportsPerFileSegmentsMidDownload(t *testing.T) {
 	}
 }
 
-// What the repairing phase is working on. par2 reports no live progress, so
-// "N segments to reconstruct, in these files" is the whole of the honest answer
-// — and the drawer shows an indeterminate stage rather than a fabricated
+// What the repairing phase is working on. par2 reports no live progress, so "N
+// segments to reconstruct, in these files" is the whole of the honest answer:
+// and the drawer shows an indeterminate stage rather than a fabricated
 // percentage.
 func TestEngineInsightReportsWhatTheRepairStageIsWorkingOn(t *testing.T) {
 	nntpSrv := startFakeNNTP(t)
@@ -147,8 +147,8 @@ func TestEngineInsightReportsWhatTheRepairStageIsWorkingOn(t *testing.T) {
 	}
 }
 
-// Once every stage is done the drawer still has a file list — from the frozen
-// results while the process lives, and from the NZB after a restart — and every
+// Once every stage is done the drawer still has a file list, from the frozen
+// results while the process lives, and from the NZB after a restart, and every
 // file reads as whole.
 func TestEngineInsightReportsEveryFileCompleteOnceTheDownloadFinishes(t *testing.T) {
 	nntpSrv := startFakeNNTP(t)

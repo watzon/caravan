@@ -68,7 +68,7 @@ func (e *Engine) Add(ctx context.Context, r core.Release, opts core.AddOpts) (co
 	}
 
 	// The release title is sent as the job name so SABnzbd's queue, its
-	// directory names and Caravan's grab all say the same thing — an indexer's
+	// directory names and Caravan's grab all say the same thing: an indexer's
 	// download link is usually named after a numeric id.
 	id, err := e.c.AddURL(ctx, AddRequest{
 		URL: link, Name: r.Title, Category: e.cfg.Category,
@@ -125,9 +125,9 @@ func (e *Engine) Status(ctx context.Context, id core.DownloadID) (*core.Download
 // core.Engine.
 //
 // "Caravan's" means the configured category when there is one, and everything
-// otherwise. SABnzbd has no tags — the qBittorrent backend's way of marking
-// its own downloads — so the category is the only marker available, and it is
-// the field these clients are conventionally partitioned by. With no category
+// otherwise. SABnzbd has no tags, the qBittorrent backend's way of marking its
+// own downloads, so the category is the only marker available, and it is the
+// field these clients are conventionally partitioned by. With no category
 // configured the queue shows the user's other Usenet downloads too; they are
 // surfaced as grab-less rows rather than hidden, and the fix is to set a
 // category.
@@ -203,8 +203,8 @@ func (e *Engine) Resume(ctx context.Context, id core.DownloadID) error {
 // than a lookup and a race.
 //
 // An imported file is a hardlink or a move away from the download data, so
-// deleting here must not cost media (SPEC §13) — the import track's contract
-// to keep, not something this call can check.
+// deleting here must not cost media (SPEC §13): the import track's contract to
+// keep, not something this call can check.
 func (e *Engine) Remove(ctx context.Context, id core.DownloadID, deleteData bool) error {
 	queueErr := e.c.DeleteQueue(ctx, string(id), deleteData)
 	historyErr := e.c.DeleteHistory(ctx, string(id), deleteData)
@@ -219,7 +219,7 @@ func (e *Engine) Close() error { return e.c.Close() }
 //
 // It asks two questions because they fail differently: `version` proves
 // something that talks like SABnzbd is at the URL, and `queue` proves the API
-// key is accepted — SABnzbd answers `version` without checking the key, so
+// key is accepted, SABnzbd answers `version` without checking the key, so
 // stopping there would call a wrong key reachable.
 //
 // The error it returns is shown to the user, so it names what SABnzbd
@@ -236,7 +236,7 @@ func TestConnection(ctx context.Context, cfg core.DownloadClientConfig) error {
 		return err
 	}
 	if version == "" {
-		// A 200 with no version is something that is not SABnzbd — usually a
+		// A 200 with no version is something that is not SABnzbd: usually a
 		// reverse proxy or a router's login page on the same port.
 		return errors.New("sabnzbd: the URL answered but did not report a version")
 	}

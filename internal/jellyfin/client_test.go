@@ -140,7 +140,7 @@ func TestClientWithoutURLDoesNotDial(t *testing.T) {
 }
 
 // A 500 carries no sentinel: it is a server problem, and the job queue's
-// backoff — not a special case here — decides what to do about it.
+// backoff, not a special case here, decides what to do about it.
 func TestServerErrorHasNoSentinel(t *testing.T) {
 	srv := newRecordingServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)

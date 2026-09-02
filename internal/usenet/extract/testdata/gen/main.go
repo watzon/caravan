@@ -3,8 +3,8 @@
 // Rar is a proprietary format with no pure-Go writer, and the rardecode module
 // ships no testdata in its module zip, so there is nothing to copy: the
 // fixtures have to be built by hand. That is only tractable because RAR 1.5
-// (the "rar4" format) is documented and its *stored* method — method byte
-// 0x30, no compression — needs no encoder at all. Every fixture here is a
+// (the "rar4" format) is documented and its stored method (method byte 0x30, no
+// compression) needs no encoder at all. Every fixture here is a
 // hand-assembled rar4 archive holding stored files, which is exactly what
 // rardecode's archive15 reader parses.
 //
@@ -154,7 +154,7 @@ func main() {
 		write(dir, names[i], v)
 	}
 	// Detect reports a set in part-number order, which for this fixture is not
-	// the order the volumes were written in — that is the whole point of it.
+	// the order the volumes were written in: that is the whole point of it.
 	manifest["multi-mixed"] = fixture{
 		Volumes: []string{"mixed.part1.rar", "mixed.part02.rar", "mixed.part03.rar", "mixed.part04.rar"},
 		Files:   files(mixed),
@@ -235,7 +235,7 @@ func buildSingle(entries []entry, arcFlags uint16) []byte {
 // buildMulti assembles a multi-volume archive. Entries before splitIdx are
 // stored whole in volume zero; entries[splitIdx] is split across the volumes
 // using chunks, which must sum to its length. Entries after it are not
-// supported — the fixtures do not need them.
+// supported: the fixtures do not need them.
 func buildMulti(entries []entry, splitIdx int, chunks []int, extraArcFlags uint16) [][]byte {
 	split := entries[splitIdx]
 	total := 0
@@ -280,18 +280,14 @@ func buildMulti(entries []entry, splitIdx int, chunks []int, extraArcFlags uint1
 	return vols
 }
 
-// ---------------------------------------------------------------------------
-// RAR 5 ("rar5")
-//
-// A second, unrelated block layout, needed for one property RAR4 cannot carry:
-// a volume's own number. Every block is
+// RAR 5 is a second, unrelated block layout, needed for one property RAR4 cannot
+// carry: a volume's own number. Every block is
 //
 //	crc32(sizeVarint || body) uint32le, sizeVarint, body, [data]
 //
-// where size is the length of body and every number inside it is a
-// little-endian base-128 varint. Stored files need no encoder here either — the
-// compression method lives in three bits of one varint and zero means stored.
-// ---------------------------------------------------------------------------
+// where size is the length of body and every number inside it is a little-endian
+// base-128 varint. Stored files need no encoder here either: the compression
+// method lives in three bits of one varint, and zero means stored.
 
 // signature5 is the RAR 5 marker block.
 var signature5 = []byte{'R', 'a', 'r', '!', 0x1a, 0x07, 0x01, 0x00}

@@ -199,7 +199,7 @@ func loginBody(t *testing.T, req recordedRequest) map[string]any {
 	return out
 }
 
-// The PIN has to be absent, not empty, for a licensed key — and present for a
+// The PIN has to be absent, not empty, for a licensed key: and present for a
 // user-supported one. Both directions are pinned because each failure is
 // invisible to anybody holding the other kind of key.
 func TestLoginSendsThePINOnlyWhenThereIsOne(t *testing.T) {
@@ -483,8 +483,8 @@ func TestRateLimitRetryHonorsContext(t *testing.T) {
 
 // TheTVDB's movie catalogue is deliberately not served here (see the descriptor
 // comment in internal/core/provider.go), so a chain walker has to be able to
-// skip this rung rather than fail on it — and it must cost neither a login nor
-// a request to find out.
+// skip this rung rather than fail on it: and it must cost neither a login nor a
+// request to find out.
 func TestMovieMethodsReportTheKindUnsupported(t *testing.T) {
 	c, s := newStub(t, "", nil)
 
@@ -509,8 +509,8 @@ func TestMovieMethodsReportTheKindUnsupported(t *testing.T) {
 	}
 }
 
-// A ref this client cannot read is a wiring bug in Caravan — another provider's
-// ref reached a TheTVDB client — not a title TheTVDB is missing. It must NOT
+// A ref this client cannot read is a wiring bug in Caravan, another provider's
+// ref reached a TheTVDB client, not a title TheTVDB is missing. It must NOT
 // read as ErrNotFound, which upstream parks a file as "unmatched" and moves on,
 // and it must not cost a login to discover.
 func TestGetSeriesRejectsForeignRefsWithoutAsking(t *testing.T) {

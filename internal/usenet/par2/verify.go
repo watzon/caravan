@@ -91,7 +91,7 @@ func (r *Report) Complete() bool {
 }
 
 // Repairable reports whether a repair would succeed. A complete set is not
-// "repairable" — there is nothing to repair — so callers branch on Complete
+// "repairable", there is nothing to repair, so callers branch on Complete
 // first.
 func (r *Report) Repairable() bool {
 	return !r.Complete() && r.MissingSlices <= r.RecoverySlices
@@ -214,10 +214,10 @@ func (s *Set) verifyFile(ctx context.Context, dir string, f *File) (FileStatus, 
 	case st.BadSlices > 0:
 		st.State = FileDamaged
 	case uint64(st.ActualLength) != f.Length:
-		// Every slice matched but the file is the wrong size — trailing
-		// garbage, or a shorter file whose missing tail happens to be inside
-		// the padding of its final slice. It still has to be rewritten, but
-		// it needs no recovery blocks to do it.
+		// Every slice matched but the file is the wrong size: trailing garbage,
+		// or a shorter file whose missing tail happens to be inside the padding
+		// of its final slice. It still has to be rewritten, but it needs no
+		// recovery blocks to do it.
 		st.State = FileDamaged
 	case !bytes.Equal(fileHash.Sum(nil), f.MD5[:]):
 		// Unreachable for a well-formed set: the slice checksums cover every

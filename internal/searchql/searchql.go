@@ -1,7 +1,7 @@
 // Package searchql is the query language the release search box speaks.
 //
-// A query is free text with optional field terms — `title:"Dune" year:2021
-// -cam` — and it compiles into two different things, because the two halves of
+// A query is free text with optional field terms (`title:"Dune" year:2021
+// -cam`) and it compiles into two different things, because the two halves of
 // a search cannot be made to agree. An indexer takes one string of free text
 // and answers with whatever it thinks matches; there is no protocol for "not a
 // cam" or "1080p only". So the language sends upstream what an indexer can act
@@ -10,7 +10,7 @@
 // That split is the whole design, and it is visible in the API:
 // UpstreamQueries reports what goes out, Matches decides what stays. A term
 // that only narrows results never widens the fan-out, and a term the indexer
-// already handled is not re-enforced locally — an indexer legitimately matches
+// already handled is not re-enforced locally: an indexer legitimately matches
 // on more than the release title, and re-checking free text here would throw
 // away results the user asked for.
 package searchql
@@ -20,10 +20,10 @@ import (
 	"strings"
 )
 
-// Field names the language knows. Anything else is not an error: "Re:Zero" is
-// a title, not a malformed field term, and there is no way to tell the two
-// apart except by knowing the field list — so an unrecognized name leaves the
-// whole token a literal keyword (see lexer.term).
+// Field names the language knows. Anything else is not an error: "Re:Zero" is a
+// title, not a malformed field term, and there is no way to tell the two apart
+// except by knowing the field list, so an unrecognized name leaves the whole
+// token a literal keyword (see lexer.term).
 const (
 	fieldTitle    = "title"
 	fieldSite     = "site"
@@ -92,10 +92,10 @@ type Query struct{ root node }
 //
 // It fails only on input that has no reading at all: an unclosed quote or
 // parenthesis, an operator with nothing to operate on, or empty parentheses.
-// Everything else parses, including tokens that look like mistakes — an
-// unknown field name, a colon with no value, a lowercase "or" — because each
-// of those is also a legitimate thing to search for. The messages are written
-// for the search box, not for a log.
+// Everything else parses, including tokens that look like mistakes, an unknown
+// field name, a colon with no value, a lowercase "or", because each of those is
+// also a legitimate thing to search for. The messages are written for the
+// search box, not for a log.
 func Parse(input string) (*Query, error) {
 	tokens, err := lex(input)
 	if err != nil {

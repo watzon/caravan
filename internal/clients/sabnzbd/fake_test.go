@@ -30,8 +30,8 @@ type call struct {
 //
 // It reproduces the two behaviours that shape the client: the API key is
 // checked per request rather than exchanged for a session, and `mode=version`
-// is answered *without* checking it — which is why a connection probe that
-// only asks for the version cannot tell a good key from a bad one.
+// is answered *without* checking it, which is why a connection probe that only
+// asks for the version cannot tell a good key from a bad one.
 type fakeSAB struct {
 	t *testing.T
 
@@ -358,8 +358,8 @@ func readFixture(t *testing.T, name string) []byte {
 }
 
 // fixtureServer answers every request with one fixture, verbatim. It is how a
-// test proves the *real* payload decodes — unknown fields, string-typed
-// numbers and all — rather than the subset the fake re-encodes.
+// test proves the *real* payload decodes, unknown fields, string-typed numbers
+// and all, rather than the subset the fake re-encodes.
 func fixtureServer(t *testing.T, name string) *httptest.Server {
 	t.Helper()
 	body := readFixture(t, name)

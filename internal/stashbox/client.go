@@ -1,11 +1,11 @@
 // Package stashbox is Caravan's client for the stash-box GraphQL protocol, the
-// metadata provider behind the adult library (PLAN phase 9 task 1).
+// metadata provider behind the adult library.
 //
-// *Client implements core.AdultMetadataProvider, so everything above it — the
-// site-as-series mapping, the refresh job, the discover screens — talks to an
-// interface and tests without a network. The client itself is deliberately thin,
-// mirroring internal/tmdb: no caching, no rate limiter, one retry. Provider
-// responses are cached in sqlite by the library layer, which is where
+// *Client implements core.AdultMetadataProvider, so everything above it, the
+// site-as-series mapping, the refresh job, the discover screens, talks to an
+// interface and tests without a network. The client itself is deliberately
+// thin, mirroring internal/tmdb: no caching, no rate limiter, one retry.
+// Provider responses are cached in sqlite by the library layer, which is where
 // "rebuildable cache" lives (SPEC §1.2).
 //
 // "stash-box" is a protocol, not a service. TPDB is the default endpoint and
@@ -37,8 +37,7 @@ import (
 const (
 	// DefaultEndpoint is the TPDB preset: the endpoint a user who has entered
 	// nothing but an API key talks to. It is a preset rather than a hardcoded
-	// destination — StashDB et al. are config values, not new code (PLAN phase
-	// 9 task 1).
+	// destination: StashDB and the rest are config values, not new code.
 	DefaultEndpoint = "https://theporndb.net/graphql"
 
 	// APIKeyHeader is stash-box's own credential header. It is exported because
@@ -152,10 +151,10 @@ type Client struct {
 	sleep func(ctx context.Context, d time.Duration) error
 
 	// restSites is the TPDB REST site index for this endpoint, or "" for an
-	// endpoint that has none — which is every stash-box but TPDB's. It is a
-	// field rather than a check at the call site so the dialect is decided once,
-	// at construction, from the one thing that decides it: the endpoint. See
-	// tpdb.go for what it is and why it is allowed to exist.
+	// endpoint that has none: which is every stash-box but TPDB's. It is a
+	// field rather than a check at the call site so the dialect is decided
+	// once, at construction, from the one thing that decides it: the endpoint.
+	// See tpdb.go for what it is and why it is allowed to exist.
 	restSites string
 
 	// restScenes is the TPDB REST scene index, set exactly when restSites is:
@@ -173,17 +172,17 @@ type Client struct {
 
 	// siteIDs caches TPDB's numeric site id per stash-box uuid. The REST scene
 	// index filters by the numeric id, a site's catalogue walk pages the same
-	// site many times, and the mapping never changes — one lookup per site per
+	// site many times, and the mapping never changes: one lookup per site per
 	// process is the right number.
 	siteIDMu sync.Mutex
 	siteIDs  map[string]int
 
 	// noQueryStudios records that this endpoint has no usable queryStudios, so
-	// SearchSites stops asking. TPDB answers that query with a bare HTTP 500 —
-	// one doomed request per keystroke otherwise. It is a per-Client memo rather
-	// than a stored setting on purpose: it is a fact about the endpoint that a
-	// restart is free to re-check, and an endpoint that gains the query back
-	// should not need a config edit to be believed.
+	// SearchSites stops asking. TPDB answers that query with a bare HTTP 500:
+	// one doomed request per keystroke otherwise. It is a per-Client memo
+	// rather than a stored setting on purpose: it is a fact about the endpoint
+	// that a restart is free to re-check, and an endpoint that gains the query
+	// back should not need a config edit to be believed.
 	noQueryStudios atomic.Bool
 }
 
@@ -224,7 +223,7 @@ func New(apiKey, endpoint string, hc *http.Client) *Client {
 
 // Test proves the endpoint answers with this credential, mirroring the indexer
 // and download-client "Test" buttons. It is what the adult enable gate runs
-// before it commits anything (PLAN phase 10 task 5).
+// before it commits anything.
 //
 // It asks for the site list rather than issuing a bespoke ping, for the reason
 // SearchSites has a fallback chain at all: "stash-box" is a protocol with
@@ -353,9 +352,9 @@ func (c *Client) do(ctx context.Context, op string, payload []byte) (*http.Respo
 //
 // stash-box reads its own ApiKey header; TPDB, which speaks the same protocol,
 // reads a bearer Authorization. Sending both is what lets one client serve every
-// endpoint in the preset list without a per-dialect branch — the PLAN phase 9
-// rule that endpoint quirks live in config, not code. Both go to the same host
-// the request was already addressed to, so this widens no exposure.
+// endpoint in the preset list without a per-dialect branch: endpoint quirks live
+// in config, not code. Both go to the same host the request was already addressed
+// to, so this widens no exposure.
 //
 // An empty key sends neither header: some endpoints allow anonymous reads and
 // reject a blank credential outright.
@@ -419,7 +418,7 @@ var dateLayouts = []string{"2006-01-02", "2006-01", "2006"}
 // zero time: one sloppy record must not fail a whole page of scenes.
 //
 // A partial date is widened to the first of the period, which is the same
-// convention "released in 2019" gets everywhere else in Caravan — and, because
+// convention "released in 2019" gets everywhere else in Caravan: and, because
 // the season a scene lands in is its year, a year-only date still files the
 // scene under the right season.
 func parseDate(s string) time.Time {
@@ -461,10 +460,10 @@ func firstURL(urls []urlResult) string {
 }
 
 // coverURL picks the cover from a stash-box image list: the widest image, which
-// is the full-size art rather than one of the thumbnails alongside it. Ties keep
-// the first, so the choice is stable across calls for a record whose images have
-// not changed — a cover that shuffles between refreshes would re-download art
-// forever.
+// is the full-size art rather than one of the thumbnails alongside it. Ties
+// keep the first, so the choice is stable across calls for a record whose
+// images have not changed: a cover that shuffles between refreshes would
+// re-download art forever.
 //
 // An empty result means "no artwork", the same way a blank PosterURL does.
 func coverURL(images []imageResult) string {

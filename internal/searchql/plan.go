@@ -15,8 +15,8 @@ import (
 // The caps exist because the cost of a query is not Caravan's to pay: every
 // branch is a request to every enabled indexer, and a user who types five ORs
 // has not asked for that. Beyond the cap the first branches in written order
-// win, so the query stays predictable — the user reads their own expression
-// left to right and sees which parts were used.
+// win, so the query stays predictable: the user reads their own expression left
+// to right and sees which parts were used.
 const (
 	maxBranches = 4
 	maxQueries  = 6
@@ -25,14 +25,14 @@ const (
 // UpstreamQueries is the free text to send to the indexers, most specific
 // first.
 //
-// Only positive terms appear. A negation narrows results and there is no way
-// to spell it in a Torznab search, so it stays local; sending its text would
-// ask for exactly what the user rejected.
+// Only positive terms appear. A negation narrows results and there is no way to
+// spell it in a Torznab search, so it stays local; sending its text would ask
+// for exactly what the user rejected.
 //
-// Inside each branch the fan-out is the one the rest of Caravan already does —
+// Inside each branch the fan-out is the one the rest of Caravan already does,
 // core.MovieSearches, core.SeriesSearches and the dated form of
-// core.SceneSearches — because an item page and a typed query that mean the
-// same thing have to ask the indexers the same questions. If they did not, the
+// core.SceneSearches, because an item page and a typed query that mean the same
+// thing have to ask the indexers the same questions. If they did not, the
 // search box would find releases the item page never sees.
 func (q *Query) UpstreamQueries() []string {
 	var out []string
@@ -161,8 +161,8 @@ func collect(terms []*termNode) branch {
 //
 // The three expansions are mutually exclusive because the identifiers are: a
 // scene is named by its date, a television episode by SxxEyy, a movie by its
-// year. An episode number with no season is dropped — there is no way to write
-// it in a release name — but it still filters the results locally.
+// year. An episode number with no season is dropped, there is no way to write
+// it in a release name, but it still filters the results locally.
 func (b branch) queries() []string {
 	parts := make([]string, 0, len(b.words)+2)
 	for _, value := range append(append([]string{}, b.words...), b.title, b.site) {

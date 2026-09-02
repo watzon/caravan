@@ -45,7 +45,7 @@ type HistoryItem struct {
 	Name string `json:"Name"`
 	// Kind is "NZB", "URL" or "DUP".
 	Kind string `json:"Kind"`
-	// Status is a "CATEGORY/DETAIL" pair — see mapHistoryState.
+	// Status is a "CATEGORY/DETAIL" pair: see mapHistoryState.
 	Status   string `json:"Status"`
 	Category string `json:"Category"`
 	// DestDir is where the download was assembled; FinalDir is where
@@ -106,9 +106,9 @@ const (
 //
 // The judgement call is the whole post-processing block. Repairing, unpacking,
 // moving and running a script are all *downloading*, because NZBGet is still
-// touching the files — importing from underneath a running unpack is how a
-// library gets a half-copied file. A PAR repair that fails does not appear
-// here at all; it lands in the history as FAILURE/PAR.
+// touching the files: importing from underneath a running unpack is how a
+// library gets a half-copied file. A PAR repair that fails does not appear here
+// at all; it lands in the history as FAILURE/PAR.
 var groupStateMap = map[string]core.DownloadState{
 	statusQueued:   core.DownloadQueued,
 	statusPaused:   core.DownloadPaused,
@@ -132,10 +132,10 @@ var groupStateMap = map[string]core.DownloadState{
 
 // mapGroupState translates one queue status.
 //
-// Anything unrecognised — a post-processing stage a future NZBGet invents —
+// Anything unrecognised, a post-processing stage a future NZBGet invents,
 // becomes queued: it is the only state that claims nothing. Guessing failed
-// would fail a healthy download and guessing completed would import one that
-// is still being unpacked.
+// would fail a healthy download and guessing completed would import one that is
+// still being unpacked.
 func mapGroupState(s string) core.DownloadState {
 	if got, ok := groupStateMap[s]; ok {
 		return got
@@ -145,8 +145,8 @@ func mapGroupState(s string) core.DownloadState {
 
 // mapHistoryState translates one history status.
 //
-// NZBGet spells these as "CATEGORY/DETAIL" — SUCCESS/ALL, FAILURE/PAR,
-// DELETED/MANUAL — and it has added details in most releases. Only the
+// NZBGet spells these as "CATEGORY/DETAIL" (SUCCESS/ALL, FAILURE/PAR,
+// DELETED/MANUAL) and it has added details in most releases. Only the
 // category is read, so a detail nobody has seen yet still maps correctly.
 //
 // The two decisions:
@@ -197,9 +197,9 @@ func parseID(v core.DownloadID) (int64, bool) {
 // and reports no per-group speed, so the rate belongs to whichever group is
 // actually downloading and is zero for the rest.
 //
-// SavePath is NZBGet's FinalDir, falling back to DestDir — an absolute path on
-// NZBGet's machine, which is the documented exception to the root-relative
-// rule for external clients (docs/download-clients.md).
+// SavePath is NZBGet's FinalDir, falling back to DestDir: an absolute path on
+// NZBGet's machine, which is the documented exception to the root-relative rule
+// for external clients (docs/download-clients.md).
 func groupStatus(g Group, rate int64) core.DownloadStatus {
 	total := size(g.FileSizeHi, g.FileSizeLo)
 	left := size(g.RemainingSizeHi, g.RemainingSizeLo)

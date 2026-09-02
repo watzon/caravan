@@ -37,7 +37,7 @@ func walkRelPaths(t *testing.T, root string) []string {
 // The phase-9 acceptance: a prepared drive has ZERO adult paths unless the flag
 // was passed. The assertion is over the whole tree and over the file CONTENTS
 // as well, because a README or a config that named the adult library would
-// disclose it just as loudly as a folder would — the drive is a thing somebody
+// disclose it just as loudly as a folder would: the drive is a thing somebody
 // else plugs in.
 func TestPrepareLeavesNoAdultTraceByDefault(t *testing.T) {
 	root := t.TempDir()
@@ -66,7 +66,7 @@ func TestPrepareLeavesNoAdultTraceByDefault(t *testing.T) {
 	}
 }
 
-// With the flag, the folder is there — and it is the one the organizer writes
+// With the flag, the folder is there: and it is the one the organizer writes
 // under, so a drive prepared this way is a drive the scanner recognises.
 func TestPrepareIncludeAdultCreatesTheAdultRoot(t *testing.T) {
 	root := t.TempDir()

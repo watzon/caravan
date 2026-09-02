@@ -1,5 +1,5 @@
 // Package clients is the registry of external download-client backends
-// (SPEC §5.1, §7 `download_clients`; PLAN phase 6).
+// (SPEC §5.1, §7 `download_clients`).
 //
 // It owns two halves that change at different rates:
 //
@@ -29,11 +29,11 @@ import (
 	"github.com/watzon/caravan/internal/core"
 )
 
-// ErrNotSupported is returned when a client type is known — the user could
-// pick it, and the row is storable — but nothing has registered an
-// implementation for it yet. It is distinct from "unknown type" because the
-// two need different answers: one is a build that does not include the
-// backend, the other is a bad request.
+// ErrNotSupported is returned when a client type is known, the user could pick
+// it, and the row is storable, but nothing has registered an implementation for
+// it yet. It is distinct from "unknown type" because the two need different
+// answers: one is a build that does not include the backend, the other is a bad
+// request.
 var ErrNotSupported = errors.New("clients: download client type not supported yet")
 
 // TestFunc probes a configured client and reports whether it answered. The
@@ -90,7 +90,7 @@ var types = []Type{
 // The `downloads.engine` values of the two built-in engines.
 //
 // They are spelled out here rather than imported from internal/download and
-// internal/usenet because those packages sit *above* this one — internal/usenet
+// internal/usenet because those packages sit *above* this one: internal/usenet
 // reaches this registry through its nntp package, so importing them back would
 // close a cycle. The strings are pinned to the constants they mirror by
 // TestEmbeddedEngineNamesMatchTheEngines in internal/api, which is the one
@@ -103,10 +103,10 @@ const (
 // ProtocolForEngine reports which protocol a `downloads.engine` value speaks:
 // core.ProtocolTorrent or core.ProtocolUsenet.
 //
-// It is the single authority on that mapping — the queue tags every row with
-// it so the UI can tell a torrent's chrome (peers, trackers, ratio) from a
-// Usenet download's (files, repair, unpack), and nothing else may re-derive it
-// from an engine name.
+// It is the single authority on that mapping: the queue tags every row with it
+// so the UI can tell a torrent's chrome (peers, trackers, ratio) from a Usenet
+// download's (files, repair, unpack), and nothing else may re-derive it from an
+// engine name.
 //
 // An empty or unrecognised engine reads as a torrent, which is what the queue
 // has assumed since before this column existed: the built-in torrent engine is
@@ -143,8 +143,8 @@ func Lookup(name string) (Type, bool) {
 }
 
 // Validate reports why cfg cannot be used, or nil when it can. It checks the
-// shape every backend shares — a name, a reachable-looking base URL, the
-// credentials this type needs — and nothing backend-specific: whether the
+// shape every backend shares, a name, a reachable-looking base URL, the
+// credentials this type needs, and nothing backend-specific: whether the
 // credentials are *right* is what TestConnection is for.
 func (t Type) Validate(cfg core.DownloadClientConfig) error {
 	if strings.TrimSpace(cfg.Name) == "" {
@@ -175,8 +175,8 @@ func (t Type) Validate(cfg core.DownloadClientConfig) error {
 
 // Registry holds the connection probes registered for each type.
 //
-// It is a value rather than only a package global so tests — and a serving
-// process that wants to run without a backend — can build their own instead of
+// It is a value rather than only a package global so tests, and a serving
+// process that wants to run without a backend, can build their own instead of
 // mutating shared state.
 type Registry struct {
 	mu    sync.RWMutex
