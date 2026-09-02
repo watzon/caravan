@@ -23,6 +23,9 @@ type fakeEngine struct {
 	holds map[core.DownloadID]bool
 	// listErr makes List fail, standing in for an unreachable client.
 	listErr error
+	// states is the state List reports per download, "" when unset. It is what
+	// tells the migration barrier whether a backend of its own is idle.
+	states  map[core.DownloadID]core.DownloadState
 	paused  []core.DownloadID
 	removed []core.DownloadID
 }
@@ -55,7 +58,7 @@ func (e *fakeEngine) List(context.Context) ([]core.DownloadStatus, error) {
 	}
 	out := []core.DownloadStatus{}
 	for id := range e.holds {
-		out = append(out, core.DownloadStatus{ID: id, Name: e.name})
+		out = append(out, core.DownloadStatus{ID: id, Name: e.name, State: e.states[id]})
 	}
 	return out, nil
 }
@@ -896,4 +899,71 @@ func equalDownloadIDs(a, b []core.DownloadID) bool {
 		}
 	}
 	return true
+}
+
+// quiescingEngine is a backend that carries the migration barrier. fakeEngine
+// carries none, which is what every external download client looks like.
+type quiescingEngine struct {
+	*fakeEngine
+	quiesced bool
+}
+
+func (e *quiescingEngine) Quiesce(context.Context) error {
+	e.quiesced = true
+	return nil
+}
+
+func (e *quiescingEngine) ResumeQuiesced(context.Context) error {
+	e.quiesced = false
+	return nil
+}
+
+// A backend with no barrier must not veto every storage migration on the
+// install. Idle, it has no writer to stop, so the migration keeps its
+// guarantee and the barriers that do exist still go up.
+func TestQuiesceToleratesAnIdleBackendWithoutABarrier(t *testing.T) {
+	barrier := &quiescingEngine{fakeEngine: newFakeEngine("embedded")}
+	client := newFakeEngine("sabnzbd")
+	r := NewRouter(func(context.Context) ([]Route, error) {
+		return []Route{
+			{Name: "embedded", Protocol: core.ProtocolTorrent, Engine: barrier},
+			{Name: "sabnzbd", Protocol: core.ProtocolUsenet, Engine: client},
+		}, nil
+	})
+	ctx := context.Background()
+
+	if err := r.Quiesce(ctx); err != nil {
+		t.Fatalf("Quiesce with an idle barrierless backend: %v", err)
+	}
+	if !barrier.quiesced {
+		t.Fatal("the backend that can quiesce was not quiesced")
+	}
+	if err := r.ResumeQuiesced(ctx); err != nil {
+		t.Fatalf("ResumeQuiesced: %v", err)
+	}
+	if barrier.quiesced {
+		t.Fatal("ResumeQuiesced left the barrier up")
+	}
+}
+
+// Transferring, the same backend is refused: nothing can stop it writing into
+// the tree the migration is about to move.
+func TestQuiesceRefusesABusyBackendWithoutABarrier(t *testing.T) {
+	barrier := &quiescingEngine{fakeEngine: newFakeEngine("embedded")}
+	client := newFakeEngine("sabnzbd", "in-flight")
+	client.states = map[core.DownloadID]core.DownloadState{"in-flight": core.DownloadDownloading}
+	r := NewRouter(func(context.Context) ([]Route, error) {
+		return []Route{
+			{Name: "embedded", Protocol: core.ProtocolTorrent, Engine: barrier},
+			{Name: "sabnzbd", Protocol: core.ProtocolUsenet, Engine: client},
+		}, nil
+	})
+
+	err := r.Quiesce(context.Background())
+	if !errors.Is(err, ErrUnsupported) || !strings.Contains(err.Error(), "sabnzbd") {
+		t.Fatalf("Quiesce error = %v, want the busy backend refused", err)
+	}
+	if barrier.quiesced {
+		t.Fatal("a backend was quiesced before every capability was checked")
+	}
 }

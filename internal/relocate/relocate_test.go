@@ -409,7 +409,12 @@ func (e *stubEngine) ResumeQuiesced(ctx context.Context) error {
 	return nil
 }
 
-func TestMigrateQuiescesTheQueueAndReleasesItOnSuccess(t *testing.T) {
+// A successful migration leaves the queue quiesced on purpose. The engine was
+// bound to the old root when the process started and cannot be re-pointed under
+// a running Caravan, so a resume here would write the next block of every
+// download into the root the library has just left. The completion event says
+// to restart instead.
+func TestMigrateKeepsTheQueueQuiescedOnSuccess(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	engine := &stubEngine{list: []core.DownloadStatus{
@@ -423,8 +428,11 @@ func TestMigrateQuiescesTheQueueAndReleasesItOnSuccess(t *testing.T) {
 	m := h.queue(h.src, h.dst)
 	h.run(m)
 
-	if engine.quiesced {
-		t.Fatal("queue is still quiesced after a completed migration")
+	if got := h.reload(m.ID); got.Status != core.StorageMigrationDone {
+		t.Fatalf("status = %q, want done", got.Status)
+	}
+	if !engine.quiesced {
+		t.Fatal("queue was resumed into the old root after a completed migration")
 	}
 }
 
@@ -450,6 +458,9 @@ func TestMigrateResumesTheQueueAfterARollback(t *testing.T) {
 	}
 }
 
+// A queue that will not quiesce ends the migration on the row. Returning the
+// error instead would retry the same refusal until the job died and leave the
+// row running with nothing on it for the user to read.
 func TestMigrateAbortsWhenTheQueueCannotQuiesce(t *testing.T) {
 	h := newHarness(t)
 	files := h.seed()
@@ -457,9 +468,16 @@ func TestMigrateAbortsWhenTheQueueCannotQuiesce(t *testing.T) {
 	h.svc = New(h.st, func() core.Engine { return engine }, discardLogger())
 
 	m := h.queue(h.src, h.dst)
-	err := h.svc.Handle(context.Background(), nil, mustPayload(t, m.ID))
-	if err == nil || !strings.Contains(err.Error(), "quiesce the download queue") {
-		t.Fatalf("Handle error = %v, want queue-quiesce failure", err)
+	if err := h.svc.Handle(context.Background(), nil, mustPayload(t, m.ID)); err != nil {
+		t.Fatalf("Handle error = %v, want the row to carry the refusal", err)
+	}
+	got := h.reload(m.ID)
+	if got.Status != core.StorageMigrationFailed {
+		t.Fatalf("status = %q, want failed", got.Status)
+	}
+	if !strings.Contains(got.Error, "quiesce the download queue") ||
+		!strings.Contains(got.Error, "engine is unavailable") {
+		t.Fatalf("error = %q, want it to name the queue-quiesce failure", got.Error)
 	}
 	for rel, content := range files {
 		wantOnlyAt(t, h.src, h.dst, rel, content)
@@ -473,9 +491,15 @@ func TestMigrateAbortsWhenTheQueueBarrierRejectsANewTransfer(t *testing.T) {
 	h.svc = New(h.st, func() core.Engine { return engine }, discardLogger())
 
 	m := h.queue(h.src, h.dst)
-	err := h.svc.Handle(context.Background(), nil, mustPayload(t, m.ID))
-	if err == nil || !strings.Contains(err.Error(), "new transfer attempted") {
-		t.Fatalf("Handle error = %v, want the barrier to reject the new transfer", err)
+	if err := h.svc.Handle(context.Background(), nil, mustPayload(t, m.ID)); err != nil {
+		t.Fatalf("Handle error = %v, want the row to carry the refusal", err)
+	}
+	got := h.reload(m.ID)
+	if got.Status != core.StorageMigrationFailed {
+		t.Fatalf("status = %q, want failed", got.Status)
+	}
+	if !strings.Contains(got.Error, "new transfer attempted") {
+		t.Fatalf("error = %q, want the barrier's own reason", got.Error)
 	}
 	for rel, content := range files {
 		wantOnlyAt(t, h.src, h.dst, rel, content)
@@ -496,11 +520,19 @@ func TestResumeQueueIgnoresTheJobCancellation(t *testing.T) {
 	}
 }
 
+// A rollback that cannot release the queue leaves the row open, so the next
+// delivery finishes the release instead of closing the migration over downloads
+// that are still stopped.
 func TestHandleRetriesWhenQueueReleaseFails(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	engine := &stubEngine{resumeErr: errors.New("client is unavailable")}
 	h.svc = New(h.st, func() core.Engine { return engine }, discardLogger())
+
+	blocked := filepath.Join(h.dst, filepath.FromSlash("library/Movies/Zed (2001)/Zed (2001).mkv"))
+	if err := os.MkdirAll(blocked, 0o755); err != nil {
+		t.Fatalf("place the blocking directory: %v", err)
+	}
 	m := h.queue(h.src, h.dst)
 	payload := mustPayload(t, m.ID)
 
@@ -514,9 +546,47 @@ func TestHandleRetriesWhenQueueReleaseFails(t *testing.T) {
 	if err := h.svc.Handle(context.Background(), nil, payload); err != nil {
 		t.Fatalf("retry Handle: %v", err)
 	}
-	if got := h.reload(m.ID); got.Status != core.StorageMigrationDone {
-		t.Fatalf("status = %q, want done after queue release", got.Status)
+	if got := h.reload(m.ID); got.Status != core.StorageMigrationRolledBack {
+		t.Fatalf("status = %q, want rolled_back after queue release", got.Status)
 	}
+	if engine.quiesced {
+		t.Fatal("queue is still quiesced after the rollback finished")
+	}
+}
+
+// Every way out of a rollback releases the queue. A run of job attempts that
+// ends without one leaves every download stopped with nobody left to start
+// them, and only a restart of Caravan recovers from that.
+func TestRollbackReleasesTheQueueWhenTheRowWillNotTakeTheFailure(t *testing.T) {
+	h := newHarness(t)
+	h.seed()
+	engine := &stubEngine{quiesced: true}
+	svc := &Service{
+		st:     unwritableStore{updateErr: errors.New("database is read-only")},
+		engine: func() core.Engine { return engine },
+		log:    discardLogger(),
+	}
+	m := &core.StorageMigration{ID: 1, SourceRoot: h.src, TargetRoot: h.dst,
+		Status: core.StorageMigrationRunning}
+
+	if err := svc.unwind(context.Background(), m, engine, errors.New("disk gave up")); err == nil {
+		t.Fatal("unwind returned nil despite an unwritable row")
+	}
+	if engine.quiesced {
+		t.Fatal("queue is still quiesced after the rollback gave up")
+	}
+}
+
+// unwritableStore refuses every migration write. The embedded nil interface
+// supplies the methods this test never reaches, so an unexpected call is a
+// panic rather than a silent no-op.
+type unwritableStore struct {
+	relocationStore
+	updateErr error
+}
+
+func (s unwritableStore) UpdateStorageMigration(context.Context, *core.StorageMigration) error {
+	return s.updateErr
 }
 
 // failingStore wraps the real store so these tests fail one durable operation

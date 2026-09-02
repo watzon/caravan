@@ -187,6 +187,11 @@ type item struct {
 	// but one was asked for by the user and reads as "paused", and the other is
 	// the queue doing its job and reads as "queued".
 	admitted bool
+	// heldByQuiesce is the storage migration's hold. It is a third reason,
+	// separate from paused, because it must not be persisted as a pause: a
+	// restart mid-migration would restore the download stopped with nothing
+	// left in memory to release it. statusLocked reports it as queued.
+	heldByQuiesce bool
 	// stopped mirrors what was actually done to the torrent, so the two reasons
 	// above can be set independently without double-applying to anacrolix.
 	stopped bool
@@ -713,7 +718,7 @@ func (e *Embedded) setPaused(ctx context.Context, id core.DownloadID, paused boo
 
 // Quiesce stops every active transfer after closing the admission gate. Both
 // steps share e.mu, so a new Add, Resume, wake, or metadata arrival cannot
-// become a writer between the snapshot and the pauses.
+// become a writer between the snapshot and the holds.
 func (e *Embedded) Quiesce(ctx context.Context) error {
 	e.mu.Lock()
 	if e.quiescing {
@@ -726,7 +731,7 @@ func (e *Embedded) Quiesce(ctx context.Context) error {
 		if it.paused || it.failure != "" || it.t.Complete().Bool() {
 			continue
 		}
-		pauseItem(it)
+		holdQuiesceItem(it)
 		e.release(it)
 		e.quiesced[id] = struct{}{}
 	}
@@ -747,7 +752,7 @@ func (e *Embedded) ResumeQuiesced(ctx context.Context) error {
 	e.quiescing = false
 	for id := range ids {
 		if it, ok := e.items[id]; ok {
-			resumeItem(it)
+			releaseQuiesceItem(it)
 			e.admitLocked(it)
 		}
 	}
@@ -837,6 +842,20 @@ func admitItem(it *item) {
 	applyTransfer(it)
 }
 
+// holdQuiesceItem and releaseQuiesceItem are the storage migration's half of
+// the same switch. A migration hold stops the transfer exactly as a pause does,
+// but it is nobody's pause: it is never persisted as one, so a restart taken
+// mid-migration brings the download back queued rather than stopped forever.
+func holdQuiesceItem(it *item) {
+	it.heldByQuiesce = true
+	applyTransfer(it)
+}
+
+func releaseQuiesceItem(it *item) {
+	it.heldByQuiesce = false
+	applyTransfer(it)
+}
+
 // applyTransfer makes the torrent match the two reasons it might be stopped.
 //
 // The mechanism is deliberate. Dropping the torrent (Torrent.Drop) would also
@@ -848,7 +867,7 @@ func admitItem(it *item) {
 // connection cap is remembered so starting restores the configured value rather
 // than a hardcoded one.
 func applyTransfer(it *item) {
-	want := !it.paused && it.admitted
+	want := !it.paused && it.admitted && !it.heldByQuiesce
 	if want == !it.stopped {
 		// Already in the right state, but a torrent whose metadata arrived
 		// while it was stopped was never told to download anything.
@@ -1195,6 +1214,11 @@ func (e *Embedded) statusLocked(it *item) core.DownloadStatus {
 		// honest state.
 		st.State = core.DownloadSeeding
 		st.ETASeconds = 0
+	case it.heldByQuiesce:
+		// Held by a storage migration, which is the queue's own doing rather
+		// than the user's. Reporting it as paused would persist it as one, and
+		// a restart would then restore it stopped with no one to release it.
+		st.State = core.DownloadQueued
 	case !it.admitted:
 		// Over the concurrency cap: registered, waiting its turn, and not
 		// transferring a byte. "Queued" is exactly what that is, and it is a

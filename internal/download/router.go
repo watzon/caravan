@@ -200,6 +200,12 @@ func (r *Router) Add(ctx context.Context, rel core.Release, opts core.AddOpts) (
 // Quiesce closes every configured backend before the migration moves the
 // shared incomplete tree. Checking every capability first avoids pausing one
 // backend when another cannot provide the same no-new-writer guarantee.
+//
+// A backend with no barrier of its own is tolerated only while it is idle. An
+// external client holding nothing has no writer to stop, so the migration keeps
+// its guarantee; one that is transferring does not, and refusing is the only
+// honest answer. Without this rule a single unconfigured client would make
+// every storage migration on every install impossible.
 func (r *Router) Quiesce(ctx context.Context) error {
 	routes, err := r.table(ctx)
 	if err != nil {
@@ -209,7 +215,15 @@ func (r *Router) Quiesce(ctx context.Context) error {
 	for _, route := range routes {
 		quiescer, ok := route.Engine.(core.EngineQuiescer)
 		if !ok {
-			return fmt.Errorf("%w: %s cannot quiesce transfers", ErrUnsupported, route.Name)
+			active, err := activeTransfers(ctx, route.Engine)
+			if err != nil {
+				return fmt.Errorf("%w: %s cannot quiesce transfers: %w", ErrUnsupported, route.Name, err)
+			}
+			if active > 0 {
+				return fmt.Errorf("%w: %s cannot quiesce %d transfer(s) still in flight",
+					ErrUnsupported, route.Name, active)
+			}
+			continue
 		}
 		quiescers = append(quiescers, quiescer)
 	}
@@ -232,13 +246,34 @@ func (r *Router) ResumeQuiesced(ctx context.Context) error {
 	for _, route := range routes {
 		quiescer, ok := route.Engine.(core.EngineQuiescer)
 		if !ok {
-			return fmt.Errorf("%w: %s cannot resume quiesced transfers", ErrUnsupported, route.Name)
+			// Quiesce let this backend through because it was idle, so there
+			// is nothing of its own for it to release.
+			continue
 		}
 		if err := quiescer.ResumeQuiesced(ctx); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// activeTransfers counts the downloads on an engine that are still moving
+// bytes. Paused, failed, seeding and completed downloads are not: they are the
+// same states the built-in engines' own barriers skip, so a backend with no
+// barrier is measured by the rule the ones with a barrier already follow.
+func activeTransfers(ctx context.Context, engine core.Engine) (int, error) {
+	statuses, err := engine.List(ctx)
+	if err != nil {
+		return 0, err
+	}
+	active := 0
+	for _, st := range statuses {
+		switch st.State {
+		case core.DownloadQueued, core.DownloadDownloading:
+			active++
+		}
+	}
+	return active, nil
 }
 
 // Status returns the snapshot from whichever engine holds id.

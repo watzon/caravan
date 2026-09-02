@@ -139,6 +139,11 @@ type Engine struct {
 	// servers fingerprints the configuration the current pool was built from,
 	// so a settings save that changed nothing does not churn connections.
 	servers string
+	// quiescing closes the gate on new workers while a storage migration owns
+	// the incomplete tree. quiesced remembers only the downloads this gate
+	// stopped, so releasing it cannot restart one the user had paused.
+	quiescing bool
+	quiesced  map[core.DownloadID]struct{}
 }
 
 // item is one download: its durable record, the plan it is working through,
@@ -197,14 +202,17 @@ type item struct {
 	downRate  int64
 }
 
-// Engine implements the interface every download backend speaks, plus two
+// Engine implements the interface every download backend speaks, plus three
 // optional extensions: insight, because a Usenet download's detail is its file
-// list and its repair state where a torrent's is peers and trackers, and retry,
-// because it is several stages and a failure belongs to one of them.
+// list and its repair state where a torrent's is peers and trackers; retry,
+// because it is several stages and a failure belongs to one of them; and the
+// migration barrier, because it writes into the same incomplete tree a storage
+// migration moves.
 var (
-	_ core.Engine        = (*Engine)(nil)
-	_ core.EngineInsight = (*Engine)(nil)
-	_ core.EngineRetry   = (*Engine)(nil)
+	_ core.Engine         = (*Engine)(nil)
+	_ core.EngineInsight  = (*Engine)(nil)
+	_ core.EngineRetry    = (*Engine)(nil)
+	_ core.EngineQuiescer = (*Engine)(nil)
 )
 
 // NewEngine starts the embedded Usenet engine, writing in-progress data under
@@ -403,6 +411,15 @@ func (e *Engine) Add(ctx context.Context, r core.Release, opts core.AddOpts) (co
 	// has burned an indexer hit for nothing.
 	if !e.fetch.configured() {
 		return "", fmt.Errorf("usenet: %w: add one under Settings → Usenet servers", nntp.ErrNoServers)
+	}
+
+	// Refused rather than merely held: Add writes the NZB sidecar into the
+	// incomplete tree, and a storage migration owns that tree while it runs.
+	e.mu.Lock()
+	quiescing := e.quiescing
+	e.mu.Unlock()
+	if quiescing {
+		return "", errors.New("usenet: storage migration is quiescing transfers")
 	}
 
 	url := strings.TrimSpace(r.DownloadURL)
@@ -676,6 +693,63 @@ func (e *Engine) Resume(ctx context.Context, id core.DownloadID) error {
 	e.mu.Unlock()
 
 	return e.save(ctx, snapshot)
+}
+
+// Quiesce closes the gate on new workers and stops every running one, so a
+// storage migration owns the incomplete tree alone. See core.EngineQuiescer.
+//
+// A stage that is mid-write is still a writer, so the barrier is not up until
+// every worker has returned. Cancelling a stage is not a failure and not a
+// pause: the pipeline flushes its resume sidecar on the way out, and the
+// downloads come back queued rather than paused, so a restart taken while the
+// migration runs cannot strand them.
+func (e *Engine) Quiesce(ctx context.Context) error {
+	e.mu.Lock()
+	if e.quiescing {
+		e.mu.Unlock()
+		return nil
+	}
+	e.quiescing = true
+	e.quiesced = make(map[core.DownloadID]struct{})
+	stopping := make([]chan struct{}, 0, len(e.items))
+	for id, it := range e.items {
+		if it.paused || it.finished || it.failure != "" {
+			continue
+		}
+		e.quiesced[id] = struct{}{}
+		if it.cancel != nil {
+			it.cancel()
+			stopping = append(stopping, it.stopped)
+		}
+	}
+	e.mu.Unlock()
+
+	for _, stopped := range stopping {
+		select {
+		case <-stopped:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
+}
+
+// ResumeQuiesced opens the gate and restarts only the downloads Quiesce
+// stopped. It is idempotent so a retried migration can finish the release.
+func (e *Engine) ResumeQuiesced(ctx context.Context) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if !e.quiescing {
+		return nil
+	}
+	ids := e.quiesced
+	e.quiesced, e.quiescing = nil, false
+	for id := range ids {
+		if it, ok := e.items[id]; ok {
+			e.start(it)
+		}
+	}
+	return nil
 }
 
 // Retry puts a failed download back to work. See core.EngineRetry.

@@ -880,3 +880,55 @@ func waitForFile(t *testing.T, path string) {
 	}
 	t.Fatalf("%s never appeared", path)
 }
+
+// A quiesce hold is the queue's doing, not the user's. Persisting it as a pause
+// would have a restart taken mid-migration bring every download back paused,
+// with the in-memory quiesced set gone and nothing left to release them.
+func TestQuiesceHoldDoesNotSurviveARestartAsAPause(t *testing.T) {
+	mi, _, _ := buildTorrent(t, "payload.bin", 64<<10)
+	root := t.TempDir()
+	store := newMemStore()
+	ctx := context.Background()
+
+	first, err := NewEmbedded(root, testOpts(store))
+	if err != nil {
+		t.Fatalf("NewEmbedded: %v", err)
+	}
+	id, err := first.Add(ctx, core.Release{
+		Title:       "Mid migration",
+		Protocol:    core.ProtocolTorrent,
+		DownloadURL: serveTorrent(t, mi),
+	}, core.AddOpts{})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	waitForFile(t, first.metainfoPath(id))
+
+	if err := first.Quiesce(ctx); err != nil {
+		t.Fatalf("Quiesce: %v", err)
+	}
+	st, err := first.Status(ctx, id)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if st.State != core.DownloadQueued {
+		t.Fatalf("quiesced state = %q, want %q", st.State, core.DownloadQueued)
+	}
+	// Close flushes the same records the poll loop writes, which is the
+	// persistence a crash-free restart sees.
+	if err := first.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if rec, ok := store.get(id); !ok || rec.State == core.DownloadPaused {
+		t.Fatalf("persisted state = %q, want anything but paused", rec.State)
+	}
+
+	second := newTestEngine(t, root, testOpts(store))
+	restored, err := second.Status(ctx, id)
+	if err != nil {
+		t.Fatalf("Status after restart: %v", err)
+	}
+	if restored.State == core.DownloadPaused {
+		t.Fatal("the restart restored a quiesce hold as a user pause")
+	}
+}

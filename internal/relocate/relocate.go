@@ -139,24 +139,24 @@ func (s *Service) Handle(ctx context.Context, _ *store.Store, payload json.RawMe
 	// download from writing into incomplete while the mover copies and deletes.
 	quiescer, err := s.quiesceQueue(ctx)
 	if err != nil {
-		return err
+		// Nothing has moved, so there is nothing to put back. What must not
+		// happen is the row saying "running" with no reason on it while the
+		// queue quietly retries the job to death.
+		return s.abort(ctx, m, err)
 	}
 
-	moved, terminal, err := s.run(ctx, m)
-	if err != nil {
-		if !moved && !terminal {
-			return errors.Join(err, s.resumeQueue(ctx, quiescer))
-		}
+	if err := s.run(ctx, m); err != nil {
+		// Every failure ends on the row, whether or not a file moved: unwind is
+		// a no-op when the target is empty, and a retry that cannot say why it
+		// failed leaves a migration running forever.
 		return s.unwind(ctx, m, quiescer, err)
 	}
-	if err := s.resumeQueue(ctx, quiescer); err != nil {
-		return err
-	}
+	// The queue stays quiesced on success. See finish.
 	return s.finish(ctx, m)
 }
 
 // run does the move, leaving every status decision to its caller.
-func (s *Service) run(ctx context.Context, m *core.StorageMigration) (moved, terminal bool, err error) {
+func (s *Service) run(ctx context.Context, m *core.StorageMigration) error {
 	// Re-validated rather than trusted from the enqueue: hours can pass in
 	// between, and every rule it enforces describes a way to lose a library.
 	// The empty-target rule is deliberately not re-checked — a resumed
@@ -164,19 +164,19 @@ func (s *Service) run(ctx context.Context, m *core.StorageMigration) (moved, ter
 	if err := ValidateMove(m.SourceRoot, m.TargetRoot); err != nil {
 		// Invalid roots cannot recover on a queue retry. Recording the rejected
 		// request ends the job without moving any files.
-		return false, true, err
+		return err
 	}
 
 	entries, err := plan(m.SourceRoot, m.TargetRoot)
 	if err != nil {
-		return false, false, err
+		return err
 	}
 	m.FilesTotal, m.FilesDone, m.BytesTotal, m.BytesDone = int64(len(entries)), 0, 0, 0
 	for _, e := range entries {
 		m.BytesTotal += e.size
 	}
 	if err := s.st.UpdateStorageMigration(ctx, m); err != nil {
-		return false, false, err
+		return err
 	}
 
 	flushed := time.Now()
@@ -196,19 +196,40 @@ func (s *Service) run(ctx context.Context, m *core.StorageMigration) (moved, ter
 
 	mv := &mover{from: m.SourceRoot, to: m.TargetRoot, log: s.log, step: s.step}
 	if err := mv.move(ctx, entries, done, false); err != nil {
-		return true, true, err
+		return err
 	}
 	if err := verify(m.SourceRoot, m.TargetRoot, entries); err != nil {
-		return true, true, err
+		return err
 	}
 
 	// Everything has arrived and been measured. Only now does the database stop
 	// describing the old root.
 	if err := s.st.SetSetting(ctx, store.SettingStorageRoot, m.TargetRoot); err != nil {
-		return true, true, err
+		return err
 	}
 	pruneEmptyDirs(m.SourceRoot)
-	return true, false, nil
+	return nil
+}
+
+// abort records a migration that could not safely start. Nothing has moved, so
+// there is nothing to put back; what matters is that the row stops saying
+// "running" with no reason on it.
+//
+// It returns nil once the row is written, so the queue acknowledges the job
+// instead of retrying a start that has already been ruled out. A row that will
+// not take the failure is the one case worth retrying, because until it does
+// the migration is invisible.
+func (s *Service) abort(ctx context.Context, m *core.StorageMigration, cause error) error {
+	ctx = context.WithoutCancel(ctx)
+	m.Status = core.StorageMigrationFailed
+	m.Error = cause.Error()
+	if err := s.st.UpdateStorageMigration(ctx, m); err != nil {
+		s.log.Error("storage migration: record the refusal", "id", m.ID, "error", err)
+		return errors.Join(cause, err)
+	}
+	s.log.Error("storage migration could not start", "id", m.ID, "error", cause)
+	s.event(ctx, core.EventLevelError, "Storage migration could not start", m.Error)
+	return nil
 }
 
 // finish records a completed migration.
@@ -251,7 +272,10 @@ func (s *Service) unwind(ctx context.Context, m *core.StorageMigration, quiescer
 	m.Error = cause.Error()
 	if err := s.st.UpdateStorageMigration(ctx, m); err != nil {
 		s.log.Error("storage migration: mark rollback", "id", m.ID, "error", err)
-		return err
+		// The queue is released on every way out of here. A rollback that has
+		// run out of job attempts must not leave downloads stopped with no one
+		// left to start them; the next delivery quiesces again for itself.
+		return errors.Join(err, s.resumeQueue(ctx, quiescer))
 	}
 
 	// The plan is rebuilt from the filesystem rather than reused: after a crash
@@ -269,9 +293,16 @@ func (s *Service) unwind(ctx context.Context, m *core.StorageMigration, quiescer
 	// files have just been taken out of.
 	if err := s.st.SetSetting(ctx, store.SettingStorageRoot, m.SourceRoot); err != nil {
 		s.log.Error("storage migration: restore the storage root setting", "id", m.ID, "error", err)
-		return err
+		return errors.Join(err, s.resumeQueue(ctx, quiescer))
 	}
 	pruneEmptyDirs(m.TargetRoot)
+
+	// Safe now: the files are back where this engine already expects them. The
+	// row is still open, so a failed release is retried by the next delivery
+	// instead of closing the migration over a queue that is still stopped.
+	if err := s.resumeQueue(ctx, quiescer); err != nil {
+		return err
+	}
 
 	m.Status = core.StorageMigrationRolledBack
 	if stranded := leftAt(m.TargetRoot); stranded > 0 {
@@ -284,13 +315,6 @@ func (s *Service) unwind(ctx context.Context, m *core.StorageMigration, quiescer
 	m.Error = cause.Error()
 	if err := s.st.UpdateStorageMigration(ctx, m); err != nil {
 		s.log.Error("storage migration: record the failure", "id", m.ID, "error", err)
-		return err
-	}
-
-	// Safe now: the files are back where this engine already expects them. The
-	// row stays open when release fails, which preserves the engine's quiesced
-	// set for the next delivery instead of leaving downloads paused in silence.
-	if err := s.resumeQueue(ctx, quiescer); err != nil {
 		return err
 	}
 

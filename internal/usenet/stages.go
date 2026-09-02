@@ -170,7 +170,7 @@ func (e *Engine) wake() {
 // worker to stop, and without it that worker's exit could relaunch onto a
 // download that no longer exists, into a directory Remove is about to delete.
 func (e *Engine) shouldRunLocked(it *item) bool {
-	if e.closed || it.paused || it.finished || it.failure != "" {
+	if e.closed || e.quiescing || it.paused || it.finished || it.failure != "" {
 		return false
 	}
 	return e.items[it.rec.EngineID] == it

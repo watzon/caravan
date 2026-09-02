@@ -640,3 +640,100 @@ func TestEngineHandlesCannotBeMistakenForInfoHashes(t *testing.T) {
 		}
 	}
 }
+
+// The built-in Usenet engine is a route on every install with a storage root,
+// so without a barrier of its own no storage migration could ever start. The
+// barrier stops the running worker, refuses a new grab while it is up, and
+// leaves the download queued rather than paused so a restart taken mid-migration
+// does not strand it.
+func TestEngineQuiesceStopsWorkersAndResumeRestartsThem(t *testing.T) {
+	nntpSrv := startFakeNNTP(t)
+	payload := []byte(strings.Repeat("q", 20000))
+	rel := stage(t, nntpSrv, map[string][]byte{"movie.mkv": payload}, 500)
+
+	gate := make(chan struct{})
+	fetching := make(chan struct{})
+	var reached, released sync.Once
+	nntpSrv.SetBodyHook(func(string) {
+		reached.Do(func() { close(fetching) })
+		<-gate
+	})
+
+	e, _ := newTestEngine(t, nntpSrv, newMemStore())
+	id := addRelease(t, e, rel, "Quiescable.Release")
+
+	<-fetching
+	waitForState(t, e, id, core.DownloadDownloading)
+
+	// The worker is blocked in the body hook, so release it as soon as the
+	// barrier has asked it to stop: Quiesce waits for the worker to return.
+	done := make(chan error, 1)
+	go func() { done <- e.Quiesce(context.Background()) }()
+	released.Do(func() { close(gate) })
+	nntpSrv.SetBodyHook(nil)
+	if err := <-done; err != nil {
+		t.Fatalf("Quiesce: %v", err)
+	}
+
+	st, err := e.Status(context.Background(), id)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if st.State != core.DownloadQueued {
+		t.Fatalf("quiesced state = %q, want %q", st.State, core.DownloadQueued)
+	}
+
+	_, addErr := e.Add(context.Background(), core.Release{
+		Title:       "Blocked.While.Relocating",
+		Protocol:    core.ProtocolUsenet,
+		DownloadURL: serveNZB(t, rel.nzb),
+	}, core.AddOpts{})
+	if addErr == nil || !strings.Contains(addErr.Error(), "quiescing transfers") {
+		t.Fatalf("Add error = %v, want the barrier to refuse it", addErr)
+	}
+
+	if err := e.ResumeQuiesced(context.Background()); err != nil {
+		t.Fatalf("ResumeQuiesced: %v", err)
+	}
+	waitForState(t, e, id, core.DownloadCompleted)
+}
+
+// A download the user paused is not the migration's to restart.
+func TestEngineResumeQuiescedLeavesAUserPauseAlone(t *testing.T) {
+	nntpSrv := startFakeNNTP(t)
+	rel := stage(t, nntpSrv, map[string][]byte{"movie.mkv": []byte(strings.Repeat("p", 4000))}, 500)
+
+	gate := make(chan struct{})
+	fetching := make(chan struct{})
+	var reached, released sync.Once
+	nntpSrv.SetBodyHook(func(string) {
+		reached.Do(func() { close(fetching) })
+		<-gate
+	})
+
+	e, _ := newTestEngine(t, nntpSrv, newMemStore())
+	id := addRelease(t, e, rel, "Paused.Release")
+
+	<-fetching
+	waitForState(t, e, id, core.DownloadDownloading)
+	if err := e.Pause(context.Background(), id); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+	released.Do(func() { close(gate) })
+	nntpSrv.SetBodyHook(nil)
+	waitForState(t, e, id, core.DownloadPaused)
+
+	if err := e.Quiesce(context.Background()); err != nil {
+		t.Fatalf("Quiesce: %v", err)
+	}
+	if err := e.ResumeQuiesced(context.Background()); err != nil {
+		t.Fatalf("ResumeQuiesced: %v", err)
+	}
+	st, err := e.Status(context.Background(), id)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if st.State != core.DownloadPaused {
+		t.Fatalf("state = %q, want the user's pause untouched", st.State)
+	}
+}

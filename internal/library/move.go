@@ -192,8 +192,15 @@ func (m *Manager) MoveSeries(ctx context.Context, seriesID, targetLibraryID int6
 // earlier move.
 func (m *Manager) moveItemFile(file core.MediaFile, oldDir, newDir string) (string, error) {
 	suffix := path.Base(file.Path)
-	if oldDir != "" && strings.HasPrefix(file.Path, oldDir+"/") {
+	switch {
+	case oldDir != "" && strings.HasPrefix(file.Path, oldDir+"/"):
 		suffix = strings.TrimPrefix(file.Path, oldDir+"/")
+	case newDir != "" && strings.HasPrefix(file.Path, newDir+"/"):
+		// A retry reads the path the previous attempt already wrote, so the
+		// layout to keep is the one below the NEW directory. Without this the
+		// suffix collapses to the base name and the retry flattens every
+		// episode out of its season folder.
+		suffix = strings.TrimPrefix(file.Path, newDir+"/")
 	}
 	dst := path.Join(newDir, suffix)
 	root, err := os.OpenRoot(m.root)
@@ -300,11 +307,22 @@ func (m *Manager) placeLibraryFile(root *os.Root, srcRel, dstRel string) (string
 	if same {
 		return finalRel, nil
 	}
-	if err := root.Rename(filepath.FromSlash(srcRel), filepath.FromSlash(finalRel)); err != nil {
-		return "", fmt.Errorf("library: move %s to %s: %w", srcRel, finalRel, err)
+	if err := rootRename(root, filepath.FromSlash(srcRel), filepath.FromSlash(finalRel)); err != nil {
+		// Two libraries may sit on two filesystems, and a rename across them
+		// cannot work. Copy-then-replace consumes the source exactly as the
+		// rename would have, which is what the organizer already falls back to.
+		if copyErr := copyThenReplaceRoot(root, m.abs(srcRel), srcRel, finalRel, consumeSource); copyErr != nil {
+			return "", fmt.Errorf("library: move %s to %s: %w",
+				srcRel, finalRel, errors.Join(err, copyErr))
+		}
 	}
 	return finalRel, nil
 }
+
+// rootRename is the move primitive placeLibraryFile tries first. It is a
+// variable so a test can force the cross-device failure a single-filesystem
+// test machine cannot produce.
+var rootRename = func(root *os.Root, from, to string) error { return root.Rename(from, to) }
 
 func uniqueRootDest(root *os.Root, dst string, src fs.FileInfo) (string, bool, error) {
 	ext := path.Ext(dst)
