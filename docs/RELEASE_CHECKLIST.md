@@ -9,8 +9,8 @@ Target: `v0.1.0` — an early public release, not a production-readiness claim.
 - [x] Push `main`, enable Actions, and confirm every job in `CI` passes remotely.
 - [ ] Confirm a release tag outside `main` is rejected and archive builds wait
       for the release workflow's frontend, Go, race, and vulnerability gates.
-- [ ] Enable GitHub private vulnerability reporting so `SECURITY.md` has a live
-      contact path.
+- [x] Enable GitHub private vulnerability reporting so `SECURITY.md` has a live
+      contact path. Enabled on 2026-09-02.
 - [ ] Review bundled dependency licenses and any attribution/NOTICE duties,
       including embedded font files and binary release distribution.
 - [ ] Run a release candidate through the tag workflow without announcing it;
@@ -33,12 +33,15 @@ Target: `v0.1.0` — an early public release, not a production-readiness claim.
       setup, with loopback or reverse-proxy publishing for untrusted networks.
 - [x] Choose whether Docker is checkout-only for `v0.1.0` or publish a versioned
       registry image; make the README and announcement explicit either way.
-- [ ] Capture two sanitized screenshots: first-run/discover and queue/library.
+- [x] Capture two sanitized screenshots: first-run/discover and queue/library.
+      `docs/screenshots/discover.png` and `docs/screenshots/library.png`, linked
+      from the README.
 - [x] Replace `TBD` in `CHANGELOG.md` with the release date.
 - [ ] Review `docs/SPEC.md` and `docs/PLAN.md` for internal/draft language; keep
       them as design history or move unfinished promises to issues.
-- [ ] Confirm the repository description, topics, issue tracker, and support
-      expectations on GitHub.
+- [x] Confirm the repository description, topics, issue tracker, and support
+      expectations on GitHub. Description and topics set on 2026-09-02; issues
+      are enabled.
 
 ## Release-day verification
 

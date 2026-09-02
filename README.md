@@ -8,6 +8,10 @@ library to Jellyfin, a DLNA television, or Stash.
 One process. One SQLite database. One storage root. No separate indexer
 manager, download client, or per-library app to keep in sync.
 
+![Discover page with trending and popular shelves](docs/screenshots/discover.png)
+
+![Movies library with poster grid and status filters](docs/screenshots/library.png)
+
 > [!IMPORTANT]
 > Caravan is pre-1.0 software for people who already run their own servers.
 > Back up the application data directory before upgrades, and read the
