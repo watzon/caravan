@@ -271,7 +271,7 @@ not replace them with an Actions result.
 
 | Date | Caravan version and checksum | Drive and filesystem | Host and launcher | TV make, model and firmware | Result |
 |---|---|---|---|---|---|
-| NOT RUN | NOT RUN | USB drive, exFAT on GPT | Apple Silicon Mac, `Start-Mac.command` | NOT RUN | NOT RUN |
+| 2026-09-02 | v0.1.0 (`d0685d9`), local build of the release archives | 248 GB USB flash drive, exFAT on GPT (`diskutil eraseDisk ExFAT CARAVAN GPT`) | Apple Silicon Mac, `caravan/bin/darwin-arm64/caravan` started the way `Start-Mac.command` does | not tested | Pass for steps 1, 2 (APFS warning fires), 3 (`mode: portable`, root `.`), 5, 8, and 9. No media imported, so step 4 was not run. |
 | NOT RUN | NOT RUN | USB drive, exFAT on GPT | Windows 11 x64, `Start-Windows.bat` | NOT RUN | NOT RUN |
 | NOT RUN | NOT RUN | USB drive, exFAT on GPT | Intel Mac or x64 Linux, matching launcher | NOT RUN | NOT RUN |
-| NOT RUN | NOT RUN | USB drive, exFAT on GPT | Safe shutdown and eject on a named host | Smart TV USB browser | NOT RUN |
+| 2026-09-02 | v0.1.0 (`d0685d9`) | 248 GB USB flash drive, exFAT on GPT | Safe shutdown through `POST /system/shutdown` on the Apple Silicon Mac: process exited in 2 s, marker read `clean`. A `kill -9` left the marker at `running`; the next start reported a dirty session, `Verify & rescan` returned `integrity: ok`, and a second launch during the run refused to start. | NOT RUN | Pass for the host half; TV playback not run. |

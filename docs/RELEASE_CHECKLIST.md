@@ -13,8 +13,10 @@ Target: `v0.1.0` — an early public release, not a production-readiness claim.
       contact path. Enabled on 2026-09-02.
 - [ ] Review bundled dependency licenses and any attribution/NOTICE duties,
       including embedded font files and binary release distribution.
-- [ ] Run a release candidate through the tag workflow without announcing it;
+- [x] Run a release candidate through the tag workflow without announcing it;
       verify all five archives, the checksum manifest, and embedded version.
+      The `v0.1.0` run published all five archives and the manifest on
+      2026-09-02; every archive lists one binary and reports `caravan v0.1.0`.
 - [x] Confirm `.env`, `config/`, and `data/` are excluded from Git and Docker
       build contexts.
 
@@ -22,7 +24,8 @@ Target: `v0.1.0` — an early public release, not a production-readiness claim.
 
 - [ ] Record the real exFAT portable-drive matrix in `docs/portable.md`: macOS,
       Windows, a second architecture where available, safe/dirty eject, and TV
-      USB playback.
+      USB playback. macOS, safe and dirty eject, and double launch recorded on
+      2026-09-02; Windows, a second architecture, and TV playback still open.
 - [ ] Complete the real qBittorrent and SABnzbd verification procedure in
       `docs/external-clients.md`; test NZBGet too if it is advertised equally,
       including one completed import through a remote path mapping.
@@ -45,16 +48,19 @@ Target: `v0.1.0` — an early public release, not a production-readiness claim.
 
 ## Release-day verification
 
-- [ ] Start from a clean checkout.
+- [x] Start from a clean checkout. The release workflow builds from a clean
+      checkout of the tag.
 - [x] Run `(cd web && npm ci && npm run check && npm test && npm run build)`.
 - [x] Run `go test -count=1 ./...`, `go vet ./...`, and `go build ./...`.
 - [x] Run `govulncheck ./...`, full `npm audit`, and `npm audit --omit=dev`.
 - [x] Build the Docker image and run `caravan version` inside it.
-- [ ] Ensure `git status --short` contains only reviewed release-prep changes and
-      the tag points at reviewed `main`.
-- [ ] Push `v0.1.0`; inspect the generated GitHub Release before sharing it.
-- [ ] Download one published archive on a clean host, verify the SHA-256
-      manifest, run `caravan version`, and complete first-run setup.
+- [x] Ensure `git status --short` contains only reviewed release-prep changes and
+      the tag points at reviewed `main`. `v0.1.0` points at `d0685d9` on `main`.
+- [x] Push `v0.1.0`; inspect the generated GitHub Release before sharing it.
+      https://github.com/watzon/caravan/releases/tag/v0.1.0
+- [x] Download one published archive on a clean host, verify the SHA-256
+      manifest, run `caravan version`, and complete first-run setup. Done on
+      2026-09-02 with the linux-arm64 archive in a fresh Debian container.
 - [ ] Publish the announcement only after the clean-host smoke test passes.
 
 ## Explicitly after the first release
