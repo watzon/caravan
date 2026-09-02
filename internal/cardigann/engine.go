@@ -227,10 +227,19 @@ func New(def *Definition, cfg Config, hc *http.Client) (*Engine, error) {
 			return nil, fmt.Errorf("configured tracker base is not one of this indexer's supported tracker URLs")
 		}
 	} else {
-		origins[requestOrigin(u)] = struct{}{}
+		// Sites redirect between schemes on the same host (an empty search that
+		// bounces to http://…/), so both schemes of every declared host are approved.
+		approveBothSchemes := func(parsed *url.URL) {
+			for _, scheme := range []string{"http", "https"} {
+				alternate := *parsed
+				alternate.Scheme = scheme
+				origins[requestOrigin(&alternate)] = struct{}{}
+			}
+		}
+		approveBothSchemes(u)
 		for _, link := range def.Links {
 			if parsed, parseErr := url.Parse(strings.TrimSpace(link)); parseErr == nil && parsed.Host != "" {
-				origins[requestOrigin(parsed)] = struct{}{}
+				approveBothSchemes(parsed)
 			}
 		}
 	}
@@ -277,7 +286,7 @@ func New(def *Definition, cfg Config, hc *http.Client) (*Engine, error) {
 	return &Engine{
 		def: def, base: u, hc: &client, origins: origins,
 		catBySite: def.categoryMap(), settings: settings, templateSettings: templateSettings,
-		secrets: configuredSecretValues(base, settings),
+		secrets: configuredSecretValues(base, settings, settingTypes),
 		waf:     cfg.FlareSolverr, wafRequired: def.RequiresFlareSolverr(),
 	}, nil
 }
@@ -309,7 +318,11 @@ func (e *Engine) templateConfig() map[string]any {
 	return out
 }
 
-func configuredSecretValues(base string, settings map[string]string) []string {
+// configuredSecretValues lists the strings that must never appear in an error:
+// the tracker base URL and every credential-like setting. Ordinary settings
+// such as a sort order stay visible, otherwise a default like "time" shreds
+// the word "timeout" out of unrelated messages.
+func configuredSecretValues(base string, settings, settingTypes map[string]string) []string {
 	values := make([]string, 0, len(settings)*3+4)
 	collect := func(value string) {
 		value = strings.TrimSpace(value)
@@ -343,8 +356,10 @@ func configuredSecretValues(base string, settings map[string]string) []string {
 		collect(parsed.Fragment)
 	}
 	collectURL(base)
-	for _, value := range settings {
-		collectURL(value)
+	for name, value := range settings {
+		if _, isURL := urlSettingOrigin(name, value); isURL || name == "sitelink" || secretSetting(name, settingTypes[name]) {
+			collectURL(value)
+		}
 	}
 	sort.SliceStable(values, func(i, j int) bool { return len(values[i]) > len(values[j]) })
 	deduplicated := values[:0]

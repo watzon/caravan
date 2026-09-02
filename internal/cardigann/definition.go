@@ -821,7 +821,7 @@ func secretSetting(name, settingType string) bool {
 		return true
 	}
 	name = strings.ToLower(strings.TrimSpace(name))
-	for _, marker := range []string{"password", "passwd", "cookie", "token", "secret", "apikey", "api_key"} {
+	for _, marker := range []string{"password", "passwd", "passkey", "pass", "cookie", "token", "secret", "apikey", "api_key", "auth", "session", "pin", "hash", "uid"} {
 		if strings.Contains(name, marker) {
 			return true
 		}

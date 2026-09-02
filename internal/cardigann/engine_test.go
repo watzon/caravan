@@ -2028,3 +2028,18 @@ search:%s
 		})
 	}
 }
+
+func TestConfiguredSecretValuesKeepOrdinarySettingsVisible(t *testing.T) {
+	settings := map[string]string{"sort": "time", "passkey": "abcd1234efgh", "cookie": "uid=1; pass=xyz1", "sitelink": "https://tracker.example/"}
+	types := map[string]string{"sort": "select", "passkey": "text", "cookie": "text"}
+	secrets := configuredSecretValues("https://tracker.example/", settings, types)
+	joined := strings.Join(secrets, "\n")
+	for _, want := range []string{"abcd1234efgh", "uid=1; pass=xyz1", "tracker.example"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("secrets %q should include %q", secrets, want)
+		}
+	}
+	if strings.Contains(joined, "time") {
+		t.Fatalf("secrets %q should not include the sort order", secrets)
+	}
+}

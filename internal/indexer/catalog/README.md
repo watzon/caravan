@@ -10,11 +10,11 @@ homepage is known. Inventory origins are named `metadata_urls`, not feed URLs.
 Content tags are derived from advertised category labels (Movies, TV,
 TV/Anime, Audio, Books, XXX, PC).
 
-Caravan now has a clean local definition engine in `internal/cardigann`.
-Definitions supported by that engine are marked with `definition_id`; their
-site URL is a scraper base and is never treated as a Torznab endpoint. Direct
-Torznab/Newznab presets keep an empty `definition_id` and continue through the
-remote feed client.
+Definitions that `internal/cardigann` can run are marked with
+`definition_id`; their site URL is a scraper base and is never treated as a
+Torznab endpoint. Direct Torznab/Newznab presets keep an empty `definition_id`
+and go through the remote feed client. At runtime the managed Prowlarr
+snapshot supplies the executable definition for most inventory rows.
 
 Executable local presets, Usenet presets, and generic
 Jackett/Prowlarr/Newznab/Torznab rows live in `presets.go`. The executable YAML
