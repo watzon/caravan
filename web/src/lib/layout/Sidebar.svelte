@@ -384,10 +384,14 @@
     onclick={onclose}></button>
 {/if}
 
+<!-- The drawer slides on `left`, not `translate`. A non-none translate makes
+     the aside the containing block for every `position: fixed` descendant, so
+     the modals opened from in here (SafeShutdown) would be boxed into the
+     240px column instead of covering the viewport. -->
 <aside
   id="primary-navigation-drawer"
   data-sidebar-mode={settingsMode ? 'settings' : 'primary'}
-  class="fixed inset-y-0 left-0 z-50 flex w-60 shrink-0 {open ? 'translate-x-0' : '-translate-x-full'} flex-col border-r border-border bg-surface transition-transform duration-150 ease-out md:static md:z-auto md:translate-x-0 md:transition-none"
+  class="fixed inset-y-0 z-50 flex w-60 shrink-0 {open ? 'left-0' : '-left-60'} flex-col border-r border-border bg-surface transition-[left] duration-150 ease-out md:static md:z-auto md:transition-none"
   aria-label={settingsMode ? t('sidebar.aria.settingsNavigation') : t('sidebar.aria.primaryNavigation')}
   aria-hidden={narrow && !open ? 'true' : undefined}
   inert={narrow && !open}>

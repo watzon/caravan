@@ -414,6 +414,21 @@ describe('App shell', () => {
     expect(menu.classList).toContain('md:hidden');
   });
 
+  it('keeps the drawer free of transform utilities so fixed modals inside it cover the viewport', async () => {
+    // A non-none transform, translate, scale, or rotate turns the aside into the
+    // containing block for `position: fixed` descendants. The shutdown confirm
+    // is rendered from inside the drawer and must not be boxed into its column.
+    app = mount(App, { target: host });
+    await settle();
+
+    const navigation = host.querySelector<HTMLElement>('#primary-navigation-drawer')!;
+    const transforming = [...navigation.classList].filter((name) =>
+      /(^|:)-?(translate|scale|rotate|transform)(-|$)/.test(name),
+    );
+
+    expect(transforming).toEqual([]);
+  });
+
   it('opens from the menu button and closes on its close button or overlay', async () => {
     stubViewport(true);
     app = mount(App, { target: host });
@@ -424,8 +439,7 @@ describe('App shell', () => {
 
     expect(navigation.getAttribute('aria-hidden')).toBe('true');
     expect(navigation.inert).toBe(true);
-    expect(navigation.classList).toContain('-translate-x-full');
-    expect(navigation.classList).toContain('md:translate-x-0');
+    expect(navigation.classList).toContain('-left-60');
 
     menu.click();
     flushSync();
