@@ -81,7 +81,7 @@ func TestRoutePolicyMemberAndExemptionMatching(t *testing.T) {
 	if !ok || episodeSearch.Access != routeAdmin || episodeSearch.Member {
 		t.Fatalf("episode search policy = %+v, %v; want registered admin-only policy", episodeSearch, ok)
 	}
-	for _, path := range []string{"/auth/login", "/auth/logout", "/calendar.ics", "/images/poster.jpg"} {
+	for _, path := range []string{"/health", "/auth/login", "/auth/logout", "/calendar.ics", "/images/poster.jpg"} {
 		if !authExempt(path) {
 			t.Errorf("authExempt(%q) = false, want true", path)
 		}

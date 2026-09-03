@@ -212,13 +212,11 @@ of the checkpoint.
 
 ## Health
 
-The container's `HEALTHCHECK` fetches `/` — the SPA index — every 30s.
+The container's `HEALTHCHECK` fetches `/api/v1/health` every 30s.
 
-It deliberately does not use `/api/v1/system/status`: that endpoint is inside
-the auth gate and starts answering 401 the moment you set a password, which
-would flip a healthy container to unhealthy for doing exactly what this page
-told you to do. `/` is outside the gate in every configuration and still proves
-the process is listening and its handler tree is built.
+The endpoint is unauthenticated and checks the SQLite-backed API. It returns
+HTTP 200 with `{"status":"ok"}` when Caravan is ready. It returns HTTP 503 if
+the database is unavailable.
 
 ---
 
@@ -251,7 +249,7 @@ mkdir -p config data
 docker compose up -d --build
 
 # 2. It is listening and healthy.
-curl -fsS http://localhost:8677/ >/dev/null && echo "spa ok"
+curl -fsS http://localhost:8677/api/v1/health && echo
 docker compose ps          # STATUS should reach "healthy"
 
 # 3. The storage root seeded itself, and the nag fires: public bind, no

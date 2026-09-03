@@ -95,13 +95,10 @@ EXPOSE 8677
 
 USER caravan
 
-# The SPA index, not /api/v1/system/status: status sits inside the auth gate
-# and starts answering 401 the moment a password is set, which would flip a
-# healthy container to unhealthy for doing exactly what SPEC §11 asks. "/" is
-# outside the gate in every configuration and still proves the process is
-# listening and its handler tree is built.
+# The health endpoint is exempt from the API auth gate and checks the SQLite
+# connection, so it remains useful after a password is set.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD wget -q -O /dev/null http://127.0.0.1:8677/ || exit 1
+    CMD wget -q -O /dev/null http://127.0.0.1:8677/api/v1/health || exit 1
 
 ENTRYPOINT ["/usr/local/bin/caravan"]
 CMD ["serve", "-config", "/config/caravan.yaml"]
