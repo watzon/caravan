@@ -7,6 +7,12 @@ and Caravan uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- A data race between the automation runner's first job claim and the API
+  server installing the store's change hook at startup. It was harmless in
+  practice but failed the race-detector job in CI intermittently.
+
 ## [0.1.1] - 2026-09-02
 
 ### Fixed
