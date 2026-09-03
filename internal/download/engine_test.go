@@ -850,6 +850,44 @@ func TestShouldStopSeeding(t *testing.T) {
 	}
 }
 
+func TestSeedTargetCompletionSurvivesRestartUntilCleanup(t *testing.T) {
+	mi, _, seedDir := buildTorrent(t, "payload.bin", 64<<10)
+	root := t.TempDir()
+	store := newMemStore()
+	ctx := context.Background()
+	engine := newTestEngine(t, root, testOpts(store))
+	id, err := engine.Add(ctx, core.Release{
+		Title:       "Target reached",
+		Protocol:    core.ProtocolTorrent,
+		DownloadURL: startSeeder(t, mi, seedDir),
+	}, core.AddOpts{})
+	if err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	waitState(t, engine, id, core.DownloadSeeding)
+
+	engine.mu.Lock()
+	engine.seedDays = 1
+	engine.items[id].seedingStarted = time.Now().Add(-48 * time.Hour)
+	engine.mu.Unlock()
+	for _, rec := range engine.sample() {
+		if err := engine.save(ctx, rec); err != nil {
+			t.Fatalf("save completed state: %v", err)
+		}
+	}
+	waitState(t, engine, id, core.DownloadCompleted)
+	if err := engine.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	restarted := newTestEngine(t, root, testOpts(store))
+	waitState(t, restarted, id, core.DownloadCompleted)
+	if err := restarted.Resume(ctx, id); !errors.Is(err, ErrNotResumable) {
+		t.Fatalf("Resume error = %v, want ErrNotResumable", err)
+	}
+	waitState(t, restarted, id, core.DownloadCompleted)
+}
+
 func TestSetGlobalRatesUpdatesLiveLimiters(t *testing.T) {
 	engine := newTestEngine(t, t.TempDir(), testOpts(newMemStore()))
 	if err := engine.SetGlobalRates(context.Background(), 2048, 512); err != nil {

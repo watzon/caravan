@@ -100,7 +100,7 @@ func (s *server) writeDownloadEngineError(w http.ResponseWriter, msg string, err
 	// "This download has nothing to retry" is a different mistake: the engine
 	// can do it, the caller acted on state it had misread, and the answer is
 	// the conflict the queue's own next poll will explain.
-	if errors.Is(err, download.ErrNotRetryable) {
+	if errors.Is(err, download.ErrNotRetryable) || errors.Is(err, download.ErrNotResumable) {
 		writeError(w, http.StatusConflict, err.Error())
 		return
 	}

@@ -476,6 +476,55 @@ func TestEngineProviderIsLazyUntilTheStorageRootExists(t *testing.T) {
 	}
 }
 
+func TestEngineProviderSweepsSettledIncompleteDataBeforeRestore(t *testing.T) {
+	ctx := context.Background()
+	adapter, st := testAdapter(t)
+	root := t.TempDir()
+	if err := st.SetSetting(ctx, store.SettingStorageRoot, root); err != nil {
+		t.Fatalf("set storage root: %v", err)
+	}
+
+	grab := &core.Grab{
+		GrabInfo: core.GrabInfo{ReleaseTitle: "settled"},
+		Status:   core.GrabStatusImported,
+	}
+	if err := st.InsertGrab(ctx, grab); err != nil {
+		t.Fatalf("InsertGrab: %v", err)
+	}
+	downloadID := core.DownloadID("settled")
+	if err := st.UpsertDownload(ctx, &core.Download{
+		GrabID:   grab.GrabID,
+		EngineID: downloadID,
+		State:    core.DownloadCompleted,
+		SavePath: "incomplete/settled",
+	}); err != nil {
+		t.Fatalf("UpsertDownload: %v", err)
+	}
+	payload := filepath.Join(root, "incomplete", "settled", "release.mkv")
+	if err := os.MkdirAll(filepath.Dir(payload), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(payload, []byte("settled"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	provider := newEngineProvider(adapter, false, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	t.Cleanup(func() {
+		if err := provider.Close(); err != nil {
+			t.Errorf("close engine: %v", err)
+		}
+	})
+	if engine := provider.Engine(); engine == nil {
+		t.Fatal("Engine() = nil with a configured storage root")
+	}
+	if _, err := os.Stat(payload); !os.IsNotExist(err) {
+		t.Fatalf("settled payload remains after engine startup: %v", err)
+	}
+	if _, err := st.GetDownloadByEngineID(ctx, downloadID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("settled download row remains after engine startup: %v", err)
+	}
+}
+
 // Closing without ever building an engine is what a shutdown before setup
 // looks like.
 func TestEngineProviderCloseWithoutEngine(t *testing.T) {

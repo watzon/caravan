@@ -7,8 +7,18 @@ and Caravan uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- An unauthenticated `/api/v1/health` readiness endpoint checks that the
+  migrated SQLite database is available. The Docker health check now uses it.
+
 ### Fixed
 
+- Completed built-in downloads release their source data after import and, for
+  torrents, after the configured seeding target. Startup finishes any cleanup
+  that was interrupted.
+- Portable-drive preparation on macOS removes AppleDouble sidecar files when
+  their corresponding files are present.
 - A data race between the automation runner's first job claim and the API
   server installing the store's change hook at startup. It was harmless in
   practice but failed the race-detector job in CI intermittently.

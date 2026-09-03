@@ -32,6 +32,11 @@ var ErrUnsupported = errors.New("download: engine does not support this operatio
 // and the API answers 409 rather than 400.
 var ErrNotRetryable = errors.New("download: only a failed download can be retried")
 
+// ErrNotResumable is returned when a completed download has reached its
+// terminal policy and cannot become a writer again. The API answers 409 so a
+// stale queue action does not look like an engine outage.
+var ErrNotResumable = errors.New("download: completed download cannot be resumed")
+
 // ErrClientUnreachable is returned by Add when the engine a release would go
 // to is an external download client the poller currently cannot reach
 // (PLAN phase 6 task 4).

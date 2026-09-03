@@ -15,11 +15,14 @@ import (
 // watcher's job is what it does with an engine's answers, not how a torrent
 // client produces them.
 type fakeEngine struct {
-	mu        sync.Mutex
-	statuses  []core.DownloadStatus
-	listErr   error
-	statusErr error
-	listCalls int
+	mu         sync.Mutex
+	statuses   []core.DownloadStatus
+	listErr    error
+	statusErr  error
+	listCalls  int
+	removed    []core.DownloadID
+	deleteData []bool
+	removeErr  error
 }
 
 func (e *fakeEngine) List(context.Context) ([]core.DownloadStatus, error) {
@@ -58,8 +61,12 @@ func (e *fakeEngine) Add(context.Context, core.Release, core.AddOpts) (core.Down
 }
 func (e *fakeEngine) Pause(context.Context, core.DownloadID) error  { return nil }
 func (e *fakeEngine) Resume(context.Context, core.DownloadID) error { return nil }
-func (e *fakeEngine) Remove(context.Context, core.DownloadID, bool) error {
-	return nil
+func (e *fakeEngine) Remove(_ context.Context, id core.DownloadID, deleteData bool) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.removed = append(e.removed, id)
+	e.deleteData = append(e.deleteData, deleteData)
+	return e.removeErr
 }
 func (e *fakeEngine) Close() error { return nil }
 
@@ -158,6 +165,95 @@ func TestWatcherImportsACompletedDownloadExactlyOnce(t *testing.T) {
 	collision := "library/Movies/Big Buck Bunny (2008)/Big Buck Bunny (2008) (1).mkv"
 	if h.exists(collision) {
 		t.Errorf("the second tick imported the download again, at %s", collision)
+	}
+}
+
+func TestWatcherRemovesACompletedDownloadAfterImport(t *testing.T) {
+	h := newHarness(t)
+	mv := addMovieItem(h)
+	dl := movieDownload(h, "movie bytes")
+	dl.State = core.DownloadCompleted
+	grab := h.grabFor(core.GrabInfo{MovieID: mv.ID, ReleaseTitle: "Big.Buck.Bunny.2008"})
+	linkDownloadToGrab(h, dl.ID, grab)
+
+	engine := &fakeEngine{statuses: []core.DownloadStatus{dl}}
+	if err := newWatcher(h, engine).tick(context.Background()); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if len(engine.removed) != 1 || engine.removed[0] != dl.ID {
+		t.Fatalf("removed = %v, want %q", engine.removed, dl.ID)
+	}
+	if len(engine.deleteData) != 1 || !engine.deleteData[0] {
+		t.Fatalf("deleteData = %v, want true", engine.deleteData)
+	}
+	if got := h.read(organizedRel); got != "movie bytes" {
+		t.Fatalf("imported content = %q, want the download's bytes", got)
+	}
+}
+
+func TestWatcherKeepsACompletedDownloadWithAParkedFile(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	dl := movieDownload(h, "movie bytes")
+	dl.State = core.DownloadCompleted
+	grab := h.grabFor(core.GrabInfo{MovieID: 1, ReleaseTitle: "mixed pack"})
+	linkDownloadToGrab(h, dl.ID, grab)
+	if err := h.st.SetGrabStatus(ctx, grab.GrabID, core.GrabStatusImported, "imported 1 file(s)"); err != nil {
+		t.Fatalf("SetGrabStatus: %v", err)
+	}
+	if err := h.st.UpsertUnmatchedFile(ctx, &core.UnmatchedFile{Path: movieDownloadFile, Size: 1}); err != nil {
+		t.Fatalf("UpsertUnmatchedFile: %v", err)
+	}
+
+	engine := &fakeEngine{statuses: []core.DownloadStatus{dl}}
+	if err := newWatcher(h, engine).tick(ctx); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if len(engine.removed) != 0 {
+		t.Fatalf("removed = %v, want the parked source kept", engine.removed)
+	}
+}
+
+func TestWatcherKeepsACompletedFailedGrabAfterReviewDismissal(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	dl := movieDownload(h, "movie bytes")
+	dl.State = core.DownloadCompleted
+	grab := h.grabFor(core.GrabInfo{MovieID: 1, ReleaseTitle: "dismissed"})
+	linkDownloadToGrab(h, dl.ID, grab)
+	if err := h.st.SetGrabStatus(ctx, grab.GrabID, core.GrabStatusFailed, "parked for manual match"); err != nil {
+		t.Fatalf("SetGrabStatus: %v", err)
+	}
+
+	engine := &fakeEngine{statuses: []core.DownloadStatus{dl}}
+	if err := newWatcher(h, engine).tick(ctx); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if len(engine.removed) != 0 {
+		t.Fatalf("removed = %v, want dismissed source kept", engine.removed)
+	}
+}
+
+func TestWatcherKeepsSharedSourceDataWhileAnotherDownloadIsActive(t *testing.T) {
+	h := newHarness(t)
+	ctx := context.Background()
+	dl := movieDownload(h, "movie bytes")
+	dl.State = core.DownloadCompleted
+	grab := h.grabFor(core.GrabInfo{MovieID: 1, ReleaseTitle: "shared source"})
+	linkDownloadToGrab(h, dl.ID, grab)
+	if err := h.st.SetGrabStatus(ctx, grab.GrabID, core.GrabStatusImported, "imported 1 file(s)"); err != nil {
+		t.Fatalf("SetGrabStatus: %v", err)
+	}
+	active := dl
+	active.ID = "active-shared-source"
+	active.State = core.DownloadDownloading
+
+	engine := &fakeEngine{statuses: []core.DownloadStatus{dl, active}}
+	if err := newWatcher(h, engine).tick(ctx); err != nil {
+		t.Fatalf("tick: %v", err)
+	}
+	if len(engine.removed) != 0 {
+		t.Fatalf("removed = %v, want shared source data kept", engine.removed)
 	}
 }
 

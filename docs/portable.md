@@ -80,8 +80,10 @@ can tell you have not:
   for are larger than that.
 
 exFAT has no hardlinks, so imports on a portable drive copy rather than link.
-That is expected: a completed download occupies its bytes twice until seeding
-finishes and the incomplete copy is removed.
+That is expected. Usenet source data is removed after a successful import.
+Torrent source data stays available while seeding and is removed after Caravan
+reaches the configured ratio or time target. If cleanup is interrupted,
+Caravan finishes it during the next start.
 
 ---
 

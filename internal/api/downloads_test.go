@@ -670,6 +670,15 @@ func TestPauseDownloadFailures(t *testing.T) {
 		wantErrorBody(t, rec)
 	})
 
+	t.Run("completed download cannot resume", func(t *testing.T) {
+		h, _, engine, _ := newAcquisitionServer(t)
+		engine.controlErr = download.ErrNotResumable
+
+		rec := do(t, h, http.MethodPost, "/api/v1/downloads/abc/resume", "")
+		wantStatus(t, rec, http.StatusConflict)
+		wantErrorBody(t, rec)
+	})
+
 	t.Run("no engine configured", func(t *testing.T) {
 		h, _, _ := newTestServer(t)
 

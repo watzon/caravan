@@ -568,7 +568,7 @@ func (s *server) controlDownload(w http.ResponseWriter, r *http.Request, msg str
 		return
 	}
 	if err := do(engine, id); err != nil {
-		s.writeEngineError(w, msg, err)
+		s.writeDownloadEngineError(w, msg, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

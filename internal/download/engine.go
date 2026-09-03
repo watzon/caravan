@@ -213,6 +213,10 @@ type item struct {
 	// session-scoped too, so neither target can be faithfully continued after a
 	// restart.
 	seedingStarted time.Time
+	// seedComplete distinguishes an automatic seeding-target stop from a pause
+	// the user can resume. It is persisted as DownloadCompleted, so a restart
+	// cannot start uploading again before cleanup removes the duplicate source.
+	seedComplete bool
 }
 
 // Embedded implements the engine interface every download backend speaks.
@@ -349,7 +353,7 @@ func (e *Embedded) restore(ctx context.Context) error {
 			e.logger.Warn("skipping unrestorable download", "download", rec.EngineID, "err", err)
 			continue
 		}
-		paused := e.opts.Paused || rec.State == core.DownloadPaused
+		paused := e.opts.Paused || rec.State == core.DownloadPaused || rec.State == core.DownloadCompleted
 		if _, err := e.add(ctx, spec, rec, paused); err != nil {
 			e.logger.Warn("skipping unrestorable download", "download", rec.EngineID, "err", err)
 		}
@@ -412,7 +416,12 @@ func (e *Embedded) add(ctx context.Context, spec *torrent.TorrentSpec, rec core.
 			// has to order downloads it has not persisted yet.
 			rec.CreatedAt = time.Now()
 		}
-		it = &item{t: t, rec: rec, maxConns: e.connectionLimit(rec)}
+		it = &item{
+			t:            t,
+			rec:          rec,
+			maxConns:     e.connectionLimit(rec),
+			seedComplete: rec.State == core.DownloadCompleted,
+		}
 		t.SetMaxEstablishedConns(it.maxConns)
 		e.items[id] = it
 		t.SetOnWriteChunkError(func(err error) { e.fail(id, err) })
@@ -698,6 +707,10 @@ func (e *Embedded) setPaused(ctx context.Context, id core.DownloadID, paused boo
 		e.mu.Unlock()
 		return errors.New("download: storage migration is quiescing transfers")
 	}
+	if !paused && it.seedComplete {
+		e.mu.Unlock()
+		return fmt.Errorf("download: resume %q after the seeding target: %w", id, ErrNotResumable)
+	}
 	if paused {
 		// A paused download does not hold a slot. That is the whole reason
 		// pausing one thing starts the next: the queue is about what is
@@ -901,6 +914,7 @@ func applyTransfer(it *item) {
 // the coordinator, because resuming into a full queue means queued, not
 // running.
 func resumeItem(it *item) {
+	it.seedComplete = false
 	it.paused = false
 	applyTransfer(it)
 }
@@ -1074,6 +1088,7 @@ func (e *Embedded) sample() []core.Download {
 				it.seedingStarted = now
 			}
 			if shouldStopSeeding(e.statusLocked(it).Ratio, it.seedingStarted, now, e.seedRatio, e.seedDays) {
+				it.seedComplete = true
 				pauseItem(it)
 				after = e.refreshLocked(it)
 			}
@@ -1203,6 +1218,11 @@ func (e *Embedded) statusLocked(it *item) core.DownloadStatus {
 		// A failure outranks everything else: a download that died mid-transfer
 		// must not read as merely paused.
 		st.State = core.DownloadFailed
+	case it.seedComplete:
+		// A configured target is terminal. The watcher can now reclaim the
+		// source data without treating a user pause as finished seeding.
+		st.State = core.DownloadCompleted
+		st.ETASeconds = 0
 	case it.paused:
 		// Paused is always resumable, seeding included: a paused seeder must
 		// not collapse into "completed", a state the queue cannot unpause

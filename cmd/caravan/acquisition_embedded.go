@@ -36,6 +36,12 @@ func (p *engineProvider) embedded() core.Engine {
 	if root == "" {
 		return nil
 	}
+	removed, cleanupErr := p.adapter.watcherManager(root).SweepIncomplete(ctx)
+	if cleanupErr != nil {
+		p.log.Warn("incomplete cleanup did not finish", "error", cleanupErr)
+	} else if len(removed) > 0 {
+		p.log.Info("removed stale incomplete data", "entries", len(removed))
+	}
 	settings, err := p.adapter.st.AllSettings(ctx)
 	if err != nil {
 		p.reportLocked("read engine settings", err)

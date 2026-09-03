@@ -104,7 +104,66 @@ func (w *watcher) tick(ctx context.Context) error {
 			return err
 		}
 	}
-	return w.runImportJobs(ctx)
+	if err := w.runImportJobs(ctx); err != nil {
+		return err
+	}
+	return w.cleanupCompleted(ctx, statuses)
+}
+
+// cleanupCompleted removes a local download only after its import is settled
+// and no file below its source directory is waiting in Scan Review. Torrents
+// reach this state when a seeding target stops them. Usenet reaches it as soon
+// as the import finishes. Both built-in engines make completion terminal, so
+// the source cannot become an active writer between this snapshot and Remove.
+func (w *watcher) cleanupCompleted(ctx context.Context, statuses []core.DownloadStatus) error {
+	candidates := make([]core.DownloadStatus, 0)
+	owners := make(map[string]int)
+	for _, status := range statuses {
+		entry, local := incompleteEntry(status.SavePath)
+		if !local || !ownedIncompleteEngine(status.Engine) {
+			continue
+		}
+		owners[entry]++
+		if status.State == core.DownloadCompleted {
+			candidates = append(candidates, status)
+		}
+	}
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	unmatched, err := w.mgr.store.ListUnmatchedFiles(ctx)
+	if err != nil {
+		return err
+	}
+	parked := make(map[string]bool)
+	for _, file := range unmatched {
+		if entry, ok := incompleteEntry(file.Path); ok {
+			parked[entry] = true
+		}
+	}
+
+	for _, status := range candidates {
+		entry, _ := incompleteEntry(status.SavePath)
+		if owners[entry] != 1 || parked[entry] {
+			continue
+		}
+		grab, err := w.mgr.store.GetGrabByDownloadID(ctx, status.ID)
+		if errors.Is(err, store.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if !reclaimableGrab(grab.Status) {
+			continue
+		}
+		if err := w.engine.Remove(ctx, status.ID, true); err != nil {
+			return fmt.Errorf("library: remove completed download %q: %w", status.ID, err)
+		}
+		delete(w.queued, status.ID)
+	}
+	return nil
 }
 
 // report puts a watcher problem in the activity feed, skipping the repeat of
