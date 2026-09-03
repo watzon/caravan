@@ -16,6 +16,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/uptrace/bun"
@@ -47,19 +48,30 @@ type Store struct {
 	// two uncoordinated staged restores in one process.
 	restoreMu sync.Mutex
 
-	changeHook ChangeHook
+	// changeHook is read by every goroutine that writes through this handle
+	// and installed once the API server exists, which is after the automation
+	// runner and download engines have started writing. An atomic keeps that
+	// install from racing the readers, and its happens-before edge is what
+	// makes the hub behind the hook safe to call the moment it is visible.
+	changeHook atomic.Pointer[ChangeHook]
 }
 
 // SetChangeHook installs the live-update hint. Nil disables it.
 func (s *Store) SetChangeHook(hook ChangeHook) {
-	s.changeHook = hook
+	if hook == nil {
+		s.changeHook.Store(nil)
+		return
+	}
+	s.changeHook.Store(&hook)
 }
 
 func (s *Store) note(resource string) {
-	if s == nil || s.changeHook == nil || resource == "" {
+	if s == nil || resource == "" {
 		return
 	}
-	s.changeHook(resource)
+	if hook := s.changeHook.Load(); hook != nil {
+		(*hook)(resource)
+	}
 }
 
 // Open opens (creating if needed) the sqlite database at path and runs every
