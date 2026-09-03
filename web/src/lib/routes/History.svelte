@@ -1,17 +1,17 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api, errorText } from '../api/client';
-  import type { ActivityEvent, EventLevel, Job, JobState } from '../api/types';
+  import type { ActivityEvent, EventLevel, Job } from '../api/types';
   import Badge from '../components/Badge.svelte';
   import Button from '../components/Button.svelte';
   import EmptyState from '../components/EmptyState.svelte';
+  import JobRow from '../components/JobRow.svelte';
   import LoadError from '../components/LoadError.svelte';
   import PageTabs from '../components/PageTabs.svelte';
   import Skeleton from '../components/Skeleton.svelte';
   import { useI18n } from '../i18n.svelte';
   import { formatAge } from '../format';
   import { TONE_DOT, type Tone } from '../status';
-  import { jobKindLabel } from '../tasks';
 
   const { t, tp } = useI18n();
 
@@ -27,14 +27,6 @@
     warn: 'warning',
     error: 'danger',
   };
-  const JOB_META: Record<JobState, { label: string; tone: Tone }> = {
-    pending: { label: t('route.history.jobPending'), tone: 'neutral' },
-    running: { label: t('route.history.jobRunning'), tone: 'info' },
-    done: { label: t('route.history.jobDone'), tone: 'success' },
-    failed: { label: t('route.history.jobFailed'), tone: 'danger' },
-    cancelled: { label: t('route.history.jobCancelled'), tone: 'neutral' },
-  };
-
   const POLL_MS = 10_000;
   const RECOVERY_MESSAGE = 'Database verified after an unclean shutdown';
 
@@ -77,6 +69,13 @@
   let eventsLoadingOlder = $state(false);
   let jobsLoadingOlder = $state(false);
   let eventRows = $derived(coalesceRecoveryEvents(events ?? []));
+  // Keyed by job id rather than index so a poll that inserts newer rows on
+  // top does not shift an open panel onto a different job.
+  let expandedJobs = $state<Record<number, boolean>>({});
+
+  function toggleJob(id: number) {
+    expandedJobs[id] = !expandedJobs[id];
+  }
 
   function mergeByID<T extends { id: number }>(current: T[], incoming: T[]): T[] {
     const seen = new Set<number>();
@@ -225,17 +224,7 @@
   {:else}
     <ul class="overflow-hidden rounded-md border border-border bg-surface" aria-label={t('route.history.jobsLabel')}>
       {#each jobs ?? [] as job (job.id)}
-        {@const meta = JOB_META[job.state]}
-        <li class="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-3 py-3 last:border-b-0">
-          <span class="size-2 shrink-0 rounded-full {TONE_DOT[meta.tone]}" aria-hidden="true"></span>
-          <p class="min-w-36 font-medium text-ink">{jobKindLabel(job.kind)}</p>
-          <Badge tone={meta.tone}>{meta.label}</Badge>
-          <span class="font-mono text-xs text-ink-secondary">{job.attempts}/5</span>
-          <time class="ml-auto text-sm text-ink-muted" datetime={job.updated_at || job.created_at} title={job.updated_at || job.created_at}>{t('route.history.ago', { time: formatAge(job.updated_at || job.created_at) })}</time>
-          {#if job.state === 'failed' && job.last_error}
-            <p class="w-full pl-5 text-sm text-danger">{job.last_error}</p>
-          {/if}
-        </li>
+        <JobRow {job} expanded={expandedJobs[job.id] === true} ontoggle={() => toggleJob(job.id)} />
       {/each}
     </ul>
     {#if jobsNextCursor || jobsLoadingOlder}

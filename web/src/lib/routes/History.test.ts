@@ -120,7 +120,7 @@ describe('History', () => {
 
     expect(host.textContent).toContain('Movie search');
     expect(host.textContent).toContain('Failed');
-    expect(host.textContent).toContain('3/5');
+    expect(host.textContent).toContain('3 of 5 tries failed');
     expect(host.textContent).toContain('Indexer timed out');
     const jobDot = host.querySelector('[aria-label="Acquisition jobs"] .rounded-full');
     expect(jobDot?.getAttribute('aria-hidden')).toBe('true');
@@ -134,5 +134,41 @@ describe('History', () => {
     await settle();
     expect(host.textContent).toContain('RSS sync');
     expect(host.querySelectorAll('[aria-label="Acquisition jobs"] li')).toHaveLength(2);
+  });
+
+  it('opens a job row into its details and closes it again', async () => {
+    app = mount(History, { target: host });
+    await settle();
+
+    const jobsTab = [...host.querySelectorAll('[role="group"][aria-label="Activity feed"] button')].find(
+      (button) => button.textContent?.trim() === 'Jobs',
+    ) as HTMLButtonElement;
+    jobsTab.click();
+    await settle();
+
+    const row = host.querySelector<HTMLButtonElement>('[aria-label="Acquisition jobs"] button[aria-expanded]')!;
+    expect(row.getAttribute('aria-expanded')).toBe('false');
+    expect(host.textContent).not.toContain('Job id');
+
+    row.click();
+    await settle();
+
+    expect(row.getAttribute('aria-expanded')).toBe('true');
+    const panel = document.getElementById(row.getAttribute('aria-controls')!)!;
+    expect(panel).not.toBeNull();
+    expect(panel.textContent).toContain('Job id');
+    expect(panel.textContent).toContain('#9');
+    expect(panel.textContent).toContain('Failed tries');
+    expect(panel.textContent).toContain('3 of 5');
+    expect(panel.textContent).toContain('Indexer timed out');
+    expect(panel.textContent).toContain('movie id:');
+    expect(panel.textContent).toContain('3');
+    expect(panel.textContent).toContain('Created');
+
+    row.click();
+    await settle();
+
+    expect(row.getAttribute('aria-expanded')).toBe('false');
+    expect(document.getElementById(row.getAttribute('aria-controls')!)).toBeNull();
   });
 });

@@ -280,7 +280,8 @@ interface NamedGroup {
   count: number;
 }
 
-function subjectHref(kind: string | undefined, id: number | undefined): string | null {
+/** Where a job's subject lives in the app, or null when there is no row to open. */
+export function subjectHref(kind: string | undefined, id: number | undefined): string | null {
   if (!id) return null;
   if (kind === 'movie') return `/movies/${id}`;
   if (kind === 'series') return `/series/${id}`;

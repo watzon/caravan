@@ -6,9 +6,56 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/watzon/caravan/internal/core"
 )
+
+// A finished job keeps its name in the feed: the History page shows what a
+// done or failed search was about, not just its kind.
+func TestHandleListJobsNamesFinishedSubjects(t *testing.T) {
+	h, st, _ := newTestServer(t)
+	ctx := context.Background()
+
+	movie := &core.Movie{TMDBID: 329865, Title: "Arrival", SortTitle: "arrival"}
+	if err := st.UpsertMovie(ctx, movie); err != nil {
+		t.Fatalf("UpsertMovie: %v", err)
+	}
+	payload, err := json.Marshal(core.JobSearchMoviePayload{MovieID: movie.ID})
+	if err != nil {
+		t.Fatalf("encode movie payload: %v", err)
+	}
+	if err := st.EnqueueJob(ctx, &core.Job{Kind: core.JobSearchMovie, Payload: string(payload)}); err != nil {
+		t.Fatalf("EnqueueJob: %v", err)
+	}
+	claimed, err := st.ClaimJob(ctx, []string{core.JobSearchMovie}, time.Minute)
+	if err != nil || claimed == nil {
+		t.Fatalf("ClaimJob: %v (job=%v)", err, claimed)
+	}
+	if err := st.CompleteJob(ctx, claimed.ID); err != nil {
+		t.Fatalf("CompleteJob: %v", err)
+	}
+
+	rec := do(t, h, http.MethodGet, "/api/v1/jobs?limit=10", "")
+	wantStatus(t, rec, http.StatusOK)
+	var body struct {
+		Jobs []jobJSON `json:"jobs"`
+	}
+	decodeBody(t, rec, &body)
+	for _, job := range body.Jobs {
+		if job.ID != claimed.ID {
+			continue
+		}
+		if job.State != core.JobStateDone {
+			t.Fatalf("state = %q, want %q", job.State, core.JobStateDone)
+		}
+		if job.Subject != "Arrival" || job.SubjectKind != "movie" || job.SubjectID != movie.ID {
+			t.Fatalf("finished job subject = %q/%q/%d, want Arrival/movie/%d", job.Subject, job.SubjectKind, job.SubjectID, movie.ID)
+		}
+		return
+	}
+	t.Fatalf("job %d missing from the feed: %+v", claimed.ID, body.Jobs)
+}
 
 func TestHandleListJobsReturnsNewestFeed(t *testing.T) {
 	h, st, _ := newTestServer(t)

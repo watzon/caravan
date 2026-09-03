@@ -47,6 +47,27 @@ export function formatDate(value: string | null | undefined): string {
   }).format(d);
 }
 
+/**
+ * RFC3339 string to "6 Nov 2016, 21:15". Unlike formatDate this renders in the
+ * viewer's zone by default: a job timestamp answers "when did this happen to
+ * me", where an air date is a calendar fact that must not shift overnight.
+ * timeZone exists so tests can pin the output.
+ */
+export function formatDateTime(value: string | null | undefined, timeZone?: string): string {
+  if (!value) return UNKNOWN;
+  const ms = Date.parse(value);
+  if (Number.isNaN(ms)) return UNKNOWN;
+  return new Intl.DateTimeFormat(currentLocale(), {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+    timeZone,
+  }).format(new Date(ms));
+}
+
 /** True when the date is in the future (an unaired episode). */
 export function isFuture(value: string | null | undefined, now: number = Date.now()): boolean {
   if (!value) return false;

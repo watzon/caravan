@@ -91,5 +91,17 @@
   "route.history.loadOlder": "Load older",
   "route.history.emptyJobsTitle": "No jobs yet",
   "route.history.emptyJobsMessage": "Scheduled acquisition work appears here.",
-  "route.history.jobsLabel": "Acquisition jobs"
+  "route.history.jobsLabel": "Acquisition jobs",
+  "route.history.triesFailed": "{count} of {max} tries failed",
+  "route.history.detailStatus": "Status",
+  "route.history.detailSubject": "About",
+  "route.history.detailCreated": "Created",
+  "route.history.detailUpdated": "Last update",
+  "route.history.detailNextTry": "Next try",
+  "route.history.detailLease": "Lease expires",
+  "route.history.detailTries": "Failed tries",
+  "route.history.detailTriesValue": "{count} of {max}",
+  "route.history.detailError": "Last error",
+  "route.history.detailArguments": "Arguments",
+  "route.history.detailID": "Job id"
 }

@@ -6,6 +6,7 @@ import {
   formatBytes,
   formatConfidence,
   formatDate,
+  formatDateTime,
   formatDuration,
   formatInterval,
   formatRate,
@@ -33,6 +34,19 @@ describe('formatBytes', () => {
       expect(formatBytes(input)).toBe(want);
     });
   }
+});
+
+describe('formatDateTime', () => {
+  it('renders the date with a 24-hour clock in the given zone', () => {
+    expect(formatDateTime('2016-11-06T21:15:00Z', 'UTC')).toBe('6 Nov 2016, 21:15');
+    expect(formatDateTime('2016-11-06T21:15:00Z', 'America/Denver')).toBe('6 Nov 2016, 14:15');
+  });
+
+  it('shows the unknown placeholder for empty or unparseable input', () => {
+    expect(formatDateTime('')).toBe(UNKNOWN);
+    expect(formatDateTime(null)).toBe(UNKNOWN);
+    expect(formatDateTime('soon')).toBe(UNKNOWN);
+  });
 });
 
 describe('formatDate', () => {

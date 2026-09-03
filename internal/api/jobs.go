@@ -183,17 +183,15 @@ func (s *server) jobJSONs(ctx context.Context, jobs []core.Job) []jobJSON {
 	return out
 }
 
-// decorateJobSubjects fills Subject for live search and catalogue jobs. A
-// missing library row is not an error: the footer then falls back to an
-// un-named count.
+// decorateJobSubjects fills Subject for search, catalogue and move jobs in
+// every state: the footer groups live ones by it, and the History page names
+// finished ones by it. A missing library row is not an error: the footer then
+// falls back to an un-named count, and History shows the kind alone.
 func (s *server) decorateJobSubjects(ctx context.Context, jobs []jobJSON) {
 	movies := map[int64]*core.Movie{}
 	series := map[int64]*core.Series{}
 	for i := range jobs {
 		job := &jobs[i]
-		if job.State != core.JobStatePending && job.State != core.JobStateRunning {
-			continue
-		}
 		switch job.Kind {
 		case core.JobSearchMovie:
 			var payload core.JobSearchMoviePayload
