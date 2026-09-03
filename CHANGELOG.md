@@ -7,6 +7,25 @@ and Caravan uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-02
+
+### Fixed
+
+- Dialogs opened from the sidebar, such as the portable drive's "Shut down
+  safely" confirmation, were boxed into the sidebar column instead of covering
+  the page. The drawer no longer uses a CSS transform, which had made it the
+  containing block for fixed-position dialogs.
+
+### Changed
+
+- The History page's Jobs tab no longer shows `0/5` on every row. Tries appear
+  only after a run has failed, as "N of 5 tries failed".
+- Each job row opens into a details panel: status, subject, created and
+  last-update times, the next try or lease expiry, failed tries, the full
+  error, the job's arguments, and its id.
+- The jobs API names the subject of finished search, catalogue, and move jobs,
+  not only live ones.
+
 ## [0.1.0] - 2026-09-03
 
 ### Added
@@ -170,5 +189,6 @@ and Caravan uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Docker image is built from a checkout; no registry image is published by
   the initial release workflow.
 
-[Unreleased]: https://github.com/watzon/caravan/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/watzon/caravan/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/watzon/caravan/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/watzon/caravan/releases/tag/v0.1.0
