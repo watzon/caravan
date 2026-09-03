@@ -167,6 +167,9 @@ type Result struct {
 	Skipped []string
 	// Placed is one line per binary installed, drive-relative.
 	Placed []string
+	// Removed is one line per AppleDouble sidecar removed after a successful
+	// prepare on macOS, drive-relative.
+	Removed []string
 	// Missing is the targets no binary could be found for. Never an error: a
 	// drive with one OS's binary on it is a working drive for that OS.
 	Missing []Target
@@ -264,6 +267,13 @@ func Run(opts Options) (*Result, error) {
 	if err := placeBinaries(res, drive, opts); err != nil {
 		return nil, err
 	}
+	if runtime.GOOS == "darwin" {
+		removed, err := removeAppleDoubleSidecars(drive)
+		if err != nil {
+			return nil, fmt.Errorf("prepare: remove AppleDouble sidecars: %w", err)
+		}
+		res.Removed = removed
+	}
 	return res, nil
 }
 
@@ -350,7 +360,7 @@ func advise(root string) (warnings, notes []string) {
 		"Drives larger than 2 TiB have to be GPT-partitioned. Some older televisions " +
 			"only read MBR, so check the TV's manual before repartitioning.",
 		"Caravan never formats a drive. If this one is not exFAT, reformat it yourself " +
-			"— that erases it — and run prepare again.",
+			"(that erases it) and run prepare again.",
 	}
 
 	name, err := filesystemName(root)
@@ -374,6 +384,9 @@ func (r *Result) Report(w io.Writer) {
 	}
 	for _, p := range r.Placed {
 		fmt.Fprintf(w, "  binary   %s\n", p)
+	}
+	for _, p := range r.Removed {
+		fmt.Fprintf(w, "  removed  %s\n", p)
 	}
 	for _, p := range r.Skipped {
 		fmt.Fprintf(w, "  kept     %s\n", p)
